@@ -46,6 +46,7 @@ import { buildPlacementPreflight } from "./core/execution/placement-preflight.js
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { ModelService } from "./core/model/model-service.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
+import { KnowledgeExtractionService } from "./core/knowledge/knowledge-extraction-service.js";
 import { SkillGenerator } from "./core/skill/skill-generator.js";
 import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
@@ -455,6 +456,18 @@ async function main(): Promise<void> {
         cipher,
       })
     : undefined;
+  // Knowledge extraction — mine a discussion thread for proposed entries (the accumulation loop's extraction leg).
+  // Same model plumbing as skill-generate: registered model + workspace/personal key, provider-native completion.
+  const knowledgeExtraction = new KnowledgeExtractionService({
+    models: modelRegistry,
+    scopedSecretsFor,
+    entries: knowledgeEntryService,
+    comments: commentStore,
+    ...(process.env.EVERDICT_JUDGE_OPENAI_BASE_URL
+      ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL }
+      : {}),
+  });
+
   const app = buildServer({
     terminalTickets,
     ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
@@ -564,6 +577,7 @@ async function main(): Promise<void> {
     commentService, // resource comments route + MCP
     knowledgeService, // workspace knowledge graph route + MCP
     knowledgeEntryService, // knowledge entries (reified claims) CRUD + verify — route + MCP
+    knowledgeExtraction, // thread → proposed-entry mining — route + MCP
     runnerHub,
     authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),
     keyStore,

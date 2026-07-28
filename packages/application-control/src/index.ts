@@ -336,7 +336,9 @@ export {
 export {
   type CreateKnowledgeEntryInput,
   type KnowledgeEntryActor,
+  KNOWLEDGE_EXTRACTION_AUTHOR,
   KnowledgeEntryService,
+  type ProposeKnowledgeEntryInput,
   type KnowledgeEntryServiceDeps,
   type KnowledgeEntryWithCoverage,
   type UpdateKnowledgeEntryInput,

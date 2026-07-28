@@ -1,10 +1,13 @@
 import { z } from "zod";
 import { KnowledgePinSchema, NodeRefSchema } from "../knowledge/knowledge-node.js";
+import { SourceKindSchema } from "../knowledge/source-kind.js";
 
-// A knowledge entry's lifecycle status. Knowledge has revision lineage like every versioned entity: a re-decision or a
-// refuting observation does not delete the old claim — a new entry `supersedes` it (the audit trail survives), and a
-// claim that stopped being useful is `deprecated` in place.
-export const KNOWLEDGE_ENTRY_STATUSES = ["active", "superseded", "deprecated"] as const;
+// A knowledge entry's lifecycle status. `proposed` = an extraction CANDIDATE (drawn from a text surface by the
+// extractor, confidence < 1) awaiting human review — approval promotes it to `active` and transfers authorship to the
+// approver ("promoted to authored on approval"); rejection deletes it. Knowledge has revision lineage like every
+// versioned entity: a re-decision or a refuting observation does not delete the old claim — a new entry `supersedes`
+// it (the audit trail survives), and a claim that stopped being useful is `deprecated` in place.
+export const KNOWLEDGE_ENTRY_STATUSES = ["proposed", "active", "superseded", "deprecated"] as const;
 export const KnowledgeEntryStatusSchema = z.enum(KNOWLEDGE_ENTRY_STATUSES);
 export type KnowledgeEntryStatus = z.infer<typeof KnowledgeEntryStatusSchema>;
 
@@ -23,6 +26,17 @@ export type KnowledgeEntryVisibility = z.infer<typeof KnowledgeEntryVisibilitySc
 // Bounds: enough anchors/evidence for a real claim, small enough that an entry stays an atomic assertion (a claim that
 // concerns 30 entities is a document, not an entry — split it).
 export const KNOWLEDGE_ENTRY_MAX_REFS = 16;
+
+// Extraction provenance — the audit lock for a PROPOSED entry (and, after approval, the retained record of where the
+// claim was drawn from): the text surface it came out of (`(sourceKind, sourceId)`, the same audit tuple the mention
+// spine uses), the extractor version, and the extractor's confidence (< 1 — extraction is fuzzy by definition).
+export const KnowledgeEntryExtractionSchema = z.object({
+  sourceKind: SourceKindSchema,
+  sourceId: z.string().min(1),
+  extractor: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+});
+export type KnowledgeEntryExtraction = z.infer<typeof KnowledgeEntryExtractionSchema>;
 
 // KnowledgeEntryRecord — a reified claim: workspace-general, high-level knowledge that is ABOUT domain entities rather
 // than a relationship between them ("harness web-agent@2.x is flaky on login cases when run on k8s"). The task-oriented
@@ -47,6 +61,8 @@ export const KnowledgeEntryRecordSchema = z.object({
   evidence: z.array(NodeRefSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).default([]),
   status: KnowledgeEntryStatusSchema.default("active"),
   supersedes: z.string().optional(), // the entry id this one revises — the graph gets a `supersedes` edge
+  // Present on extraction-born entries (proposed AND approved — the origin survives approval for audit).
+  extraction: KnowledgeEntryExtractionSchema.optional(),
   visibility: KnowledgeEntryVisibilitySchema,
   createdBy: z.string(),
   createdAt: z.string(),

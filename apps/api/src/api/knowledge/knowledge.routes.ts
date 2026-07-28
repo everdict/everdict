@@ -5,6 +5,7 @@ import {
   CreateKnowledgeEntryBodySchema,
   UpdateKnowledgeEntryBodySchema,
 } from "./request/knowledge-entry-write.js";
+import { ExtractKnowledgeBodySchema } from "./request/knowledge-extract.js";
 import {
   KnowledgeGraphQuerySchema,
   KnowledgeRelatedQuerySchema,
@@ -288,6 +289,62 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: ServerDeps):
       );
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // Mine a discussion thread for knowledge-entry candidates → `proposed` entries awaiting review. member+ (a real
+  // billable model call, like skill-generate).
+  app.post("/knowledge/extract", async (req, reply) => {
+    if (!deps.knowledgeExtraction)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge extraction not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "comments:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = ExtractKnowledgeBodySchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+    try {
+      return reply.send(await deps.knowledgeExtraction.extract(principal.workspace, principal.subject, parsed.data));
+    } catch (err) {
+      return sendError(reply, err); // unknown thread/model 404 · missing key 400 · upstream 502
+    }
+  });
+
+  // Approve a proposal — the HITL promotion: proposed → active, authorship transfers to the approver. member+.
+  app.post<{ Params: { id: string } }>("/knowledge/entries/:id/approve", async (req, reply) => {
+    if (!deps.knowledgeEntryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge entries not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "comments:write");
+      return reply.send(
+        await deps.knowledgeEntryService.approve(principal.workspace, req.params.id, {
+          subject: principal.subject,
+          isAdmin: principal.roles.includes("admin"),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // non-proposed → 409
+    }
+  });
+
+  // Reject a proposal — deletes it (only `proposed` entries; an active claim goes through the gated DELETE). member+.
+  app.post<{ Params: { id: string } }>("/knowledge/entries/:id/reject", async (req, reply) => {
+    if (!deps.knowledgeEntryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge entries not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "comments:write");
+      await deps.knowledgeEntryService.reject(principal.workspace, req.params.id);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err); // non-proposed → 409
     }
   });
 }

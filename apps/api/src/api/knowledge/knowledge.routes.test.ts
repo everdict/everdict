@@ -3,6 +3,7 @@ import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { Dataset, NodeRef, ScorecardRecord } from "@everdict/contracts";
 import {
+  InMemoryCommentStore,
   InMemoryKnowledgeEntryStore,
   InMemoryKnowledgeStore,
   InMemoryRunStore,
@@ -11,6 +12,7 @@ import {
 import { harvestScorecard, nodeId } from "@everdict/domain";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
+import { KnowledgeExtractionService } from "../../core/knowledge/knowledge-extraction-service.js";
 import { buildServer } from "../../server.js";
 
 const unusedDispatcher: Dispatcher = {
@@ -51,6 +53,29 @@ async function build(withKnowledge: boolean) {
   // Fake registry-latest: the harness family moved on to 2.3.0 (so a 2.1.0-pinned ref reads superseded).
   const latestVersionOf = async (_tenant: string, ref: NodeRef) =>
     ref.type === "harness" && ref.key === "web-agent" ? "2.3.0" : undefined;
+  const knowledgeEntryService = new KnowledgeEntryService({ store: knowledgeEntryStore, latestVersionOf });
+  // 추출 라우트: 코멘트 1 스레드 + 캔드 완성(candidate 1개) — 라우트/게이트/왕복 검증용 (모델 호출 없음)
+  const comments = new InMemoryCommentStore();
+  await comments.add({
+    id: "root",
+    tenant: "acme",
+    resourceType: "scorecard",
+    resourceId: "sc1",
+    author: "user-alice",
+    body: "login flakiness discussion",
+    createdAt: "2026-07-28T00:00:00Z",
+    updatedAt: "2026-07-28T00:00:00Z",
+  });
+  const knowledgeExtraction = new KnowledgeExtractionService({
+    models: { get: async () => ({ id: "m", version: "1", provider: "anthropic", model: "x" }) } as never,
+    scopedSecretsFor: async () => ({ workspace: {}, user: {} }),
+    entries: knowledgeEntryService,
+    comments,
+    completionFor: async () => async () =>
+      JSON.stringify([
+        { kind: "finding", title: "Login cases are flaky on k8s", body: "…", refs: [], confidence: 0.7 },
+      ]),
+  });
   return buildServer({
     service,
     knowledgeService: new KnowledgeService({
@@ -58,7 +83,8 @@ async function build(withKnowledge: boolean) {
       reindexSources: { scorecards, datasets },
       contextSources: { knowledgeEntries: knowledgeEntryStore, latestVersionOf },
     }),
-    knowledgeEntryService: new KnowledgeEntryService({ store: knowledgeEntryStore, latestVersionOf }),
+    knowledgeEntryService,
+    knowledgeExtraction,
   });
 }
 
@@ -348,5 +374,82 @@ describe("knowledge entries — reified claims", () => {
       payload: { refs: [] },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("knowledge extraction — thread → proposed → approve/reject", () => {
+  it("extracts proposals from a thread, review-approves one (authorship transfer), and rejects on re-extract dupes", async () => {
+    const app = await build(true);
+    const extracted = await app.inject({
+      method: "POST",
+      url: "/knowledge/extract",
+      headers: H,
+      payload: { source: { kind: "comment", id: "root" }, model: "m" },
+    });
+    expect(extracted.statusCode).toBe(200);
+    const { proposals } = extracted.json() as { proposals: Array<{ id: string; status: string; createdBy: string }> };
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.status).toBe("proposed");
+    expect(proposals[0]?.createdBy).toBe("everdict:extractor");
+    const id = proposals[0]?.id ?? "";
+
+    // re-extract: the same claim is skipped, not duplicated
+    const again = await app.inject({
+      method: "POST",
+      url: "/knowledge/extract",
+      headers: H,
+      payload: { source: { kind: "comment", id: "root" }, model: "m" },
+    });
+    expect((again.json() as { skippedDuplicates: number }).skippedDuplicates).toBe(1);
+
+    // approve → active + the approver owns it
+    const approved = await app.inject({ method: "POST", url: `/knowledge/entries/${id}/approve`, headers: H });
+    expect(approved.statusCode).toBe(200);
+    const body = approved.json() as { status: string; createdBy: string; extraction?: { sourceId: string } };
+    expect(body.status).toBe("active");
+    expect(body.createdBy).not.toBe("everdict:extractor");
+    expect(body.extraction?.sourceId).toBe("root"); // provenance survives approval
+
+    // a second approve is a 409 (already active), reject likewise
+    expect((await app.inject({ method: "POST", url: `/knowledge/entries/${id}/approve`, headers: H })).statusCode).toBe(
+      409,
+    );
+    expect((await app.inject({ method: "POST", url: `/knowledge/entries/${id}/reject`, headers: H })).statusCode).toBe(
+      409,
+    );
+  });
+
+  it("reject deletes a proposal (204 → 404)", async () => {
+    const app = await build(true);
+    const { proposals } = (
+      await app.inject({
+        method: "POST",
+        url: "/knowledge/extract",
+        headers: H,
+        payload: { source: { kind: "comment", id: "root" }, model: "m" },
+      })
+    ).json() as { proposals: Array<{ id: string }> };
+    const id = proposals[0]?.id ?? "";
+    expect((await app.inject({ method: "POST", url: `/knowledge/entries/${id}/reject`, headers: H })).statusCode).toBe(
+      204,
+    );
+    expect((await app.inject({ method: "GET", url: `/knowledge/entries/${id}`, headers: H })).statusCode).toBe(404);
+  });
+
+  it("400s an unsupported source kind and 404s when extraction is not configured", async () => {
+    const bad = await (await build(true)).inject({
+      method: "POST",
+      url: "/knowledge/extract",
+      headers: H,
+      payload: { source: { kind: "agent_session", id: "s1" }, model: "m" },
+    });
+    expect(bad.statusCode).toBe(400);
+    const off = await (await build(false)).inject({
+      method: "POST",
+      url: "/knowledge/extract",
+      headers: H,
+      payload: { source: { kind: "comment", id: "root" }, model: "m" },
+    });
+    expect(off.statusCode).toBe(404);
   });
 });

@@ -252,8 +252,9 @@ export class KnowledgeService {
       for (const s of await src.skills.list(tenant, "")) if (s.visibility === "workspace") await apply(harvestSkill(s));
     }
     if (src?.knowledgeEntries) {
+      // Proposed entries stay OUT of the graph — an unreviewed extraction candidate is not workspace knowledge yet.
       for (const e of await src.knowledgeEntries.list(tenant, ""))
-        if (e.visibility === "workspace") await apply(harvestKnowledgeEntry(e));
+        if (e.visibility === "workspace" && e.status !== "proposed") await apply(harvestKnowledgeEntry(e));
     }
     return acc;
   }
@@ -306,7 +307,10 @@ export class KnowledgeService {
 
     let knowledge: TaskContext["knowledge"] = [];
     if (ctxSrc?.knowledgeEntries) {
-      const matched = (await ctxSrc.knowledgeEntries.list(tenant, subject)).filter((e) => matches(e.refs));
+      // Proposed (unreviewed) candidates never feed agent context — review first, then they count as knowledge.
+      const matched = (await ctxSrc.knowledgeEntries.list(tenant, subject)).filter(
+        (e) => e.status !== "proposed" && matches(e.refs),
+      );
       const withRelation = matched.map((e) => ({ entry: e, relation: relationFor(e.refs) }));
       // relation > status > recency: a superseded claim that COVERS the anchor coordinate is that coordinate's
       // truth — it outranks an active claim from the coordinate's future. Status only breaks ties within a tier.

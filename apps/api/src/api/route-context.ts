@@ -111,6 +111,7 @@ import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
 import type { SkillGenerator } from "../core/skill/skill-generator.js";
+import type { KnowledgeExtractionService } from "../core/knowledge/knowledge-extraction-service.js";
 import type { McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
 import { buildMcpServer } from "../mcp.js";
 
@@ -174,6 +175,7 @@ export interface ServerDeps {
   commentService?: CommentService; // resource comments (datasets, etc.) — collaborative discussion (route disabled if absent)
   knowledgeService?: KnowledgeService; // workspace knowledge graph — node/related/subgraph queries + reindex (route disabled if absent)
   knowledgeEntryService?: KnowledgeEntryService; // knowledge entries (reified claims) CRUD + verify (routes disabled if absent)
+  knowledgeExtraction?: KnowledgeExtractionService; // thread → proposed-entry mining (route disabled if absent)
   runnerHub?: RunnerHubLike; // self-hosted runner lease hub — used by the MCP lease/result/heartbeat tools (disabled if absent)
   settingsStore?: WorkspaceSettingsStore; // workspace settings (metering policy, etc.) (route disabled if absent)
   workspaceStore?: WorkspaceStore; // workspace membership — active-workspace resolution/bootstrap (single-workspace behavior if absent)

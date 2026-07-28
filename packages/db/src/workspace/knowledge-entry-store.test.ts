@@ -89,7 +89,8 @@ describe("PgKnowledgeEntryStore", () => {
     const insert = query.mock.calls[0];
     expect(insert?.[0]).toContain("INSERT INTO everdict_knowledge_entries");
     expect(insert?.[1]?.[5]).toBe(JSON.stringify(record.refs)); // refs as jsonb text
-    expect(insert?.[1]?.[13]).toBeNull(); // verified_at
+    expect(insert?.[1]?.[9]).toBeNull(); // extraction (none on a plain entry)
+    expect(insert?.[1]?.[14]).toBeNull(); // verified_at
 
     const loaded = await store.get("acme", "kn1");
     expect(loaded?.supersedes).toBe("kn0");

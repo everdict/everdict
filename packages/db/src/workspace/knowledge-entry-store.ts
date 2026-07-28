@@ -53,6 +53,7 @@ interface KnowledgeEntryRow {
   evidence: unknown;
   status: string;
   supersedes: string | null;
+  extraction: unknown;
   visibility: string;
   created_by: string;
   created_at: string | Date;
@@ -73,6 +74,7 @@ function rowToRecord(row: KnowledgeEntryRow): KnowledgeEntryRecord {
     evidence: row.evidence ?? [],
     status: row.status,
     ...(row.supersedes !== null && row.supersedes !== "" ? { supersedes: row.supersedes } : {}),
+    ...(row.extraction !== null && row.extraction !== undefined ? { extraction: row.extraction } : {}),
     visibility: row.visibility,
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
@@ -87,8 +89,8 @@ export class PgKnowledgeEntryStore implements KnowledgeEntryStore {
 
   async create(record: KnowledgeEntryRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_knowledge_entries (id, tenant, kind, title, body, refs, evidence, status, supersedes, visibility, created_by, created_at, updated_at, verified_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      `INSERT INTO everdict_knowledge_entries (id, tenant, kind, title, body, refs, evidence, status, supersedes, extraction, visibility, created_by, created_at, updated_at, verified_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         record.id,
         record.tenant,
@@ -99,6 +101,7 @@ export class PgKnowledgeEntryStore implements KnowledgeEntryStore {
         JSON.stringify(record.evidence),
         record.status,
         record.supersedes ?? null,
+        record.extraction !== undefined ? JSON.stringify(record.extraction) : null,
         record.visibility,
         record.createdBy,
         record.createdAt,
@@ -136,7 +139,7 @@ export class PgKnowledgeEntryStore implements KnowledgeEntryStore {
     const next: KnowledgeEntryRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
     await this.client.query(
       `UPDATE everdict_knowledge_entries
-       SET kind=$3, title=$4, body=$5, refs=$6, evidence=$7, status=$8, supersedes=$9, visibility=$10, updated_at=$11, verified_at=$12
+       SET kind=$3, title=$4, body=$5, refs=$6, evidence=$7, status=$8, supersedes=$9, extraction=$10, visibility=$11, created_by=$12, updated_at=$13, verified_at=$14
        WHERE tenant=$1 AND id=$2`,
       [
         tenant,
@@ -148,7 +151,9 @@ export class PgKnowledgeEntryStore implements KnowledgeEntryStore {
         JSON.stringify(next.evidence),
         next.status,
         next.supersedes ?? null,
+        next.extraction !== undefined ? JSON.stringify(next.extraction) : null,
         next.visibility,
+        next.createdBy,
         next.updatedAt,
         next.verifiedAt ?? null,
       ],

@@ -298,4 +298,50 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
         ok(await entries.verify(ws, id, { subject: principal.subject, isAdmin: principal.roles.includes("admin") })),
       ),
   );
+
+  server.registerTool(
+    "approve_knowledge_entry",
+    {
+      description:
+        "Approve a PROPOSED knowledge entry (an extraction candidate awaiting review): status proposed → active, and authorship transfers to you — you now assert the claim and own its management (the extraction provenance stays for audit). Only proposed entries can be approved (409 otherwise).",
+      inputSchema: { id: z.string().min(1) },
+    },
+    ({ id }) =>
+      run(principal, "comments:write", async () =>
+        ok(await entries.approve(ws, id, { subject: principal.subject, isAdmin: principal.roles.includes("admin") })),
+      ),
+  );
+
+  server.registerTool(
+    "reject_knowledge_entry",
+    {
+      description:
+        "Reject a PROPOSED knowledge entry — deletes the candidate. Only proposed entries can be rejected (an active claim is removed via delete_knowledge_entry, creator-or-admin).",
+      inputSchema: { id: z.string().min(1) },
+    },
+    ({ id }) =>
+      run(principal, "comments:write", async () => {
+        await entries.reject(ws, id);
+        return ok({ rejected: true });
+      }),
+  );
+
+  const extraction = deps.knowledgeExtraction;
+  if (!extraction) return;
+
+  server.registerTool(
+    "extract_knowledge",
+    {
+      description:
+        "Mine a discussion thread for durable, evidence-backed conclusions and store them as PROPOSED knowledge entries awaiting review (the accumulation loop's extraction leg). `source.id` may be any comment in the thread; `model` is a registered workspace model (a real billable call). Returns the created proposals plus dedupe stats — re-running on the same thread skips already-proposed claims. Review with list_knowledge_entries (status 'proposed') → approve_knowledge_entry / reject_knowledge_entry.",
+      inputSchema: {
+        source: z.object({ kind: z.literal("comment"), id: z.string().min(1) }),
+        model: z.string().min(1),
+      },
+    },
+    ({ source, model }) =>
+      run(principal, "comments:write", async () =>
+        ok(await extraction.extract(ws, principal.subject, { source, model })),
+      ),
+  );
 }

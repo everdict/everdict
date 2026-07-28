@@ -1,7 +1,7 @@
 import { ForbiddenError, type KnowledgeEntryRecord, NotFoundError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
-import { KnowledgeEntryService } from "./knowledge-entry-service.js";
+import { KNOWLEDGE_EXTRACTION_AUTHOR, KnowledgeEntryService } from "./knowledge-entry-service.js";
 
 // Minimal in-memory store (mirrors @everdict/db InMemoryKnowledgeEntryStore).
 function fakeStore(): KnowledgeEntryStore {
@@ -143,5 +143,48 @@ describe("KnowledgeEntryService", () => {
       { subject: "alice", isAdmin: false },
     );
     expect(repinned.refs[0]?.verifiedVersion).toBeUndefined();
+  });
+});
+
+describe("extraction proposals — the HITL promotion", () => {
+  const extraction = {
+    sourceKind: "comment" as const,
+    sourceId: "root",
+    extractor: "knowledge_extractor_v1",
+    confidence: 0.8,
+  };
+
+  it("propose stores a workspace-visible proposed entry authored by the extractor sentinel", async () => {
+    const svc = service();
+    const p = await svc.propose({ ...base, extraction });
+    expect(p.status).toBe("proposed");
+    expect(p.visibility).toBe("workspace");
+    expect(p.createdBy).toBe(KNOWLEDGE_EXTRACTION_AUTHOR);
+    expect(p.extraction).toEqual(extraction);
+  });
+
+  it("approve promotes proposed → active AND transfers authorship to the approver (extraction provenance retained)", async () => {
+    const svc = service();
+    const p = await svc.propose({ ...base, extraction });
+    const approved = await svc.approve("acme", p.id, { subject: "alice", isAdmin: false });
+    expect(approved.status).toBe("active");
+    expect(approved.createdBy).toBe("alice"); // the approver now asserts and manages the claim
+    expect(approved.extraction).toEqual(extraction); // the origin survives for audit
+    // and the new owner passes the manage gate
+    const edited = await svc.update("acme", p.id, { body: "refined" }, { subject: "alice", isAdmin: false });
+    expect(edited.body).toBe("refined");
+  });
+
+  it("approve/reject 409 on a non-proposed entry; reject deletes a proposal", async () => {
+    const svc = service();
+    const active = await svc.create({ ...base, createdBy: "alice", visibility: "workspace" });
+    await expect(svc.approve("acme", active.id, { subject: "bob", isAdmin: false })).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(svc.reject("acme", active.id)).rejects.toMatchObject({ status: 409 });
+
+    const p = await svc.propose({ ...base, extraction });
+    await svc.reject("acme", p.id);
+    await expect(svc.get("acme", p.id, "alice")).rejects.toMatchObject({ status: 404 });
   });
 });

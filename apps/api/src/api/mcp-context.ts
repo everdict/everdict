@@ -50,6 +50,7 @@ import type { BrowserSessionService } from "../core/browser-session/browser-sess
 import type { BundleService } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { ModelService } from "../core/model/model-service.js";
+import type { KnowledgeExtractionService } from "../core/knowledge/knowledge-extraction-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
 import type { McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
@@ -101,6 +102,7 @@ export interface McpDeps {
   commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
   knowledgeService?: KnowledgeService; // workspace knowledge graph — get_knowledge_node/knowledge_related/knowledge_subgraph/reindex_knowledge
   knowledgeEntryService?: KnowledgeEntryService; // knowledge entries (reified claims) — create/list/get/update/delete/verify_knowledge_entry
+  knowledgeExtraction?: KnowledgeExtractionService; // extract_knowledge — thread → proposed entries
   runnerHub?: RunnerHubLike; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
   liveFrames?: LiveFrameStore; // latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen)
   liveLogs?: LiveLogStore; // accumulated live execution log per run, pushed by a self-hosted runner (report_case_log)
