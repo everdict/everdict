@@ -4,6 +4,7 @@ import { collectAuthEnv } from "@everdict/job-runner";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { createActivities } from "./activities.js";
 import { TASK_QUEUE } from "./constants.js";
+import { installProxyDispatcher } from "./proxy-dispatcher.js";
 
 export interface WorkerOptions {
   address?: string; // Temporal address (default localhost:7233)
@@ -16,6 +17,12 @@ export interface WorkerOptions {
 // poll the task queue. The scheduler places jobs based on backend availability and queues them when there's no room.
 // A long-running process. (Launched with `everdict worker`)
 export async function runWorker(opts: WorkerOptions = {}): Promise<void> {
+  // Proxy-aware outbound: install a global dispatcher FIRST (before any client fetches) so the activities' external
+  // calls (trace pull from tenant observability platforms, tenant-registered cluster APIs) honor HTTP(S)_PROXY /
+  // NO_PROXY behind a corporate proxy. No-op when no proxy env is set.
+  const proxy = installProxyDispatcher();
+  if (proxy) console.log(`[everdict-worker] outbound proxy: ${proxy.httpsProxy ?? proxy.httpProxy} (NO_PROXY honored)`);
+
   const { registry } = opts.config
     ? buildRegistry(opts.config, { secretEnv: collectAuthEnv() })
     : { registry: new BackendRegistry().register("local", new LocalBackend()) };
