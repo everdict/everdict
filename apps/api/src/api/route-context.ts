@@ -7,7 +7,7 @@ import { deleteDatasetVersion } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
 import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
-import type { ImageRegistryService } from "@everdict/application-control";
+import type { EnvironmentAdoptionService, ImageRegistryService } from "@everdict/application-control";
 import type { ProxyService } from "@everdict/application-control";
 import type { MattermostCommandService } from "@everdict/application-control";
 import type { MattermostService } from "@everdict/application-control";
@@ -165,6 +165,7 @@ export interface ServerDeps {
   traceSourceService?: TraceSourceService; // workspace trace sources (register + pull/export selection + browse) (route disabled if absent)
   spanAttrMappingService?: SpanAttrMappingService; // per-harness span-attr mapping overlay (the conversion layer between a harness and a judge) (route disabled if absent)
   imageRegistryService?: ImageRegistryService; // workspace image registries (classification baseline + push mint) (route disabled if absent)
+  environmentAdoptionService?: EnvironmentAdoptionService; // workspace environment-image adoption inventory + pull verify (route disabled if absent)
   ciLinkService?: CiLinkService; // CI repo links (repo↔harness slot + OIDC trust) + picker/setup-PR (route disabled if absent)
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) (route disabled if absent)
   notificationService?: NotificationService; // personal notification feed (bell inbox) — self-scoped (route disabled if absent)

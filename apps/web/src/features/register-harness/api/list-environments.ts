@@ -5,6 +5,7 @@ import {
   type CapabilityImageClass,
   type CapabilitySpec,
 } from '@/entities/capability'
+import { adoptedEnvironmentsResponseSchema } from '@/entities/environment-adoption'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -27,6 +28,8 @@ export interface StoreEnvironment {
   benchmark?: string
   preset?: StoreEnvironmentPreset // 구성 프리셋(서비스 조각·의존 스토어·프런트도어) — 저작 프리필 소스
   instructions: string // 환경 구성 설명(md) — 프리필 시 참고 표시용
+  adopted?: boolean // 내 워크스페이스가 이미 가져온(import) 환경인가 — 피커에 "가져옴" 표시
+  pullable?: boolean // 가져온 것의 pull 검증 결과(false=이 워크스페이스가 이미지를 못 당김); undefined=미가져옴/미검증
 }
 
 export interface ListStoreEnvironmentsResult {
@@ -38,10 +41,17 @@ export interface ListStoreEnvironmentsResult {
 export async function listStoreEnvironmentsAction(): Promise<ListStoreEnvironmentsResult> {
   const ctx = await authContext()
   try {
-    const [mine, pub] = await Promise.all([
+    const [mine, pub, adoptedRaw] = await Promise.all([
       controlPlane.listCapabilities<unknown>(ctx),
       controlPlane.listPublicCapabilities<unknown>(ctx),
+      controlPlane.listAdoptedEnvironments<unknown>(ctx).catch(() => ({ environments: [] })),
     ])
+    // 내 워크스페이스 인벤토리 — source/id 로 "가져옴 + pull 검증" 상태를 각 항목에 표시.
+    const adopted = new Map(
+      adoptedEnvironmentsResponseSchema
+        .parse(adoptedRaw)
+        .environments.map((e) => [`${e.source}/${e.id}`, e])
+    )
     const seen = new Set<string>()
     const environments = [
       ...capabilitiesSchema.parse(mine),
@@ -51,6 +61,7 @@ export async function listStoreEnvironmentsAction(): Promise<ListStoreEnvironmen
       const key = `${c.tenant}/${c.id}`
       if (seen.has(key)) return []
       seen.add(key)
+      const inv = adopted.get(key)
       return [
         {
           key,
@@ -64,6 +75,8 @@ export async function listStoreEnvironmentsAction(): Promise<ListStoreEnvironmen
           ...(c.spec.contents?.benchmark ? { benchmark: c.spec.contents.benchmark } : {}),
           ...(c.spec.preset ? { preset: c.spec.preset } : {}),
           instructions: c.spec.instructions,
+          ...(inv ? { adopted: true } : {}),
+          ...(inv?.verify ? { pullable: inv.verify.pullable } : {}),
         },
       ]
     })

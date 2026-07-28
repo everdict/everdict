@@ -83,6 +83,16 @@ export function EnvironmentPicker({ onPick }: { onPick: (env: StoreEnvironment) 
                     {env.imageClass}
                   </Badge>
                 )}
+                {env.adopted &&
+                  (env.pullable === false ? (
+                    <Badge tone="warning" className="shrink-0">
+                      {t('envNotPullable')}
+                    </Badge>
+                  ) : (
+                    <Badge tone="success" className="shrink-0">
+                      {t('envAdopted')}
+                    </Badge>
+                  ))}
               </span>
               <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
                 {env.image}

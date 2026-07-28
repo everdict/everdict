@@ -3,6 +3,10 @@ import { getTranslations } from 'next-intl/server'
 import { CapabilityStore } from '@/features/publish-capability'
 import { agentSpecSchema } from '@/entities/agent-spec'
 import { capabilitiesSchema, type Capability } from '@/entities/capability'
+import {
+  adoptedEnvironmentsResponseSchema,
+  type AdoptedEnvironment,
+} from '@/entities/environment-adoption'
 import { imageRegistriesResponseSchema } from '@/entities/image-registry'
 import { membersSchema } from '@/entities/member'
 import { secretsSchema } from '@/entities/secret'
@@ -24,6 +28,7 @@ export default async function StorePage() {
   const canRead = can(principal?.roles, 'capabilities:read')
   const canWrite = can(principal?.roles, 'capabilities:write')
   const canAdopt = can(principal?.roles, 'agents:write') // 채택 = 내 에이전트 설정 편집
+  const canImportEnvironment = can(principal?.roles, 'settings:write') // 환경 가져오기 = 워크스페이스 인벤토리(설정)
   const isAdmin = (principal?.roles ?? []).includes('admin')
   // 인스턴스 정책(operator env) — 멤버도 public 발행 가능? admin 은 항상 가능. UX 게이팅용(서버가 최종 강제).
   const allowMemberPublicPublish = principal?.config?.allowMemberPublicPublish === true
@@ -91,9 +96,18 @@ export default async function StorePage() {
   const imageRegistries = await controlPlane
     .listImageRegistries(ctx)
     .then((r) =>
-      imageRegistriesResponseSchema.parse(r).registries.map((reg) => ({ name: reg.name, host: reg.host }))
+      imageRegistriesResponseSchema
+        .parse(r)
+        .registries.map((reg) => ({ name: reg.name, host: reg.host }))
     )
     .catch(() => [] as { name: string; host: string }[])
+
+  // 내 워크스페이스가 가져온(import) 환경 이미지 인벤토리 — environment 카드에 "가져옴 + 사용가능(pull) 검증" 표시용.
+  // 소프트: capabilities:read 만 있으면 조회 가능(가져오기 자체는 settings:write). 실패 시 빈 목록.
+  const adoptedEnvironments = await controlPlane
+    .listAdoptedEnvironments(ctx)
+    .then((r) => adoptedEnvironmentsResponseSchema.parse(r).environments)
+    .catch(() => [] as AdoptedEnvironment[])
 
   return (
     <div className="space-y-6">
@@ -107,7 +121,9 @@ export default async function StorePage() {
           authors={authors}
           canWrite={canWrite}
           canAdopt={canAdopt}
+          canImportEnvironment={canImportEnvironment}
           adoptedKeys={adoptedKeys}
+          adoptedEnvironments={adoptedEnvironments}
           secretNames={secretNames}
           myWorkspaces={myWorkspaces}
           imageRegistries={imageRegistries}

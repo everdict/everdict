@@ -57,6 +57,7 @@ export * from "./harness/resolved-harness.js";
 export * from "./harness/portability-issue.js";
 export * from "./harness/validate-harness-result.js";
 export * from "./harness/validate-harness-template-result.js";
+export * from "./environment-adoption/adopted-environment-view.js";
 export * from "./image-registry/image-push-credentials.js";
 export * from "./image-registry/image-registry-probe-result.js";
 export * from "./image-registry/image-registry-roster.js";

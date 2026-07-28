@@ -94,6 +94,7 @@ import { registerCapabilityRoutes } from "./api/capability/capability.routes.js"
 import { registerCiLinkRoutes } from "./api/ci-link/ci-link.routes.js";
 import { registerCommentRoutes } from "./api/comment/comment.routes.js";
 import { registerDatasetRoutes } from "./api/dataset/dataset.routes.js";
+import { registerEnvironmentAdoptionRoutes } from "./api/environment-adoption/environment-adoption.routes.js";
 import { registerFrontdoorCallbackRoutes } from "./api/execution/frontdoor-callback.routes.js";
 import { registerGithubAppRoutes } from "./api/github-app/github-app.routes.js";
 import { registerHarnessTemplateRoutes } from "./api/harness/harness-template.routes.js";
@@ -232,6 +233,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerMattermostRoutes(routes, deps);
     registerTraceSourceRoutes(routes, deps);
     registerImageRegistryRoutes(routes, deps);
+    registerEnvironmentAdoptionRoutes(routes, deps);
     registerCiLinkRoutes(routes, deps);
     registerRunnerRoutes(routes, deps);
     registerWorkspaceRunnerRoutes(routes, deps);

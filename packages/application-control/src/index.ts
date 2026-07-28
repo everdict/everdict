@@ -101,6 +101,13 @@ export {
   repinHarnessImages,
 } from "./harness/harness-pin-service.js";
 export {
+  type AdoptedEnvironmentVerify,
+  type AdoptedEnvironmentView,
+  EnvironmentAdoptionService,
+  type EnvironmentAdoptionServiceDeps,
+  type EnvironmentRef,
+} from "./environment-adoption/environment-adoption-service.js";
+export {
   type ImagePushCredentials,
   ImageRegistryService,
   type ImageRegistryServiceDeps,

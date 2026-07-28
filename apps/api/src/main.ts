@@ -1,7 +1,12 @@
 import { KnowledgeService } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { SkillService } from "@everdict/application-control";
-import { CapabilityService, firstPartyCatalogExtras, firstPartyDefaults } from "@everdict/application-control";
+import {
+  CapabilityService,
+  EnvironmentAdoptionService,
+  firstPartyCatalogExtras,
+  firstPartyDefaults,
+} from "@everdict/application-control";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseRecorder } from "./common/case-recorder.js";
@@ -498,6 +503,14 @@ async function main(): Promise<void> {
     traceSourceService,
     spanAttrMappingService,
     imageRegistryService,
+    // Workspace environment-image adoption (import) — inventory of adopted environments + pull-usability verification
+    // (warn-not-block). Composes the capability store (resolve + visibility) + image registry (pull auth + verify).
+    environmentAdoptionService: new EnvironmentAdoptionService({
+      settings: settingsStore,
+      capabilityStore,
+      verifyImage: (ws, ref) => imageRegistryService.verifyImage(ws, ref),
+      registryCoordinates: (ws) => imageRegistryService.coordinates(ws),
+    }),
     ciLinkService,
     runnerService,
     notificationService, // notification feed (bell inbox) route — self-scoped

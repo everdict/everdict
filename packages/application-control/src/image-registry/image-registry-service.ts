@@ -4,9 +4,10 @@ import {
   type ImageRegistryProbeResult,
   NotFoundError,
   type RegistryAuth,
+  UpstreamError,
 } from "@everdict/contracts";
 import type { WorkspaceSettings } from "@everdict/contracts";
-import { imageRegistryPrefix } from "@everdict/domain";
+import { imageRegistryPrefix, parseImageRef } from "@everdict/domain";
 import type { ImageManifestInfo, RegistryReader } from "../ports/registry-reader.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
@@ -229,6 +230,36 @@ export class ImageRegistryService {
       reference,
     );
     return { registry: reg.name, repository, ...info };
+  }
+
+  // Active pull-usability check for a FULL image ref — can THIS workspace pull it? Parses the ref, resolves the
+  // matching registered registry's pull auth (anonymous when the host isn't a registered registry), and does a Docker
+  // Registry v2 manifest fetch. Classified (never throws): a reachable manifest → pullable; 401/403 → "auth" (e.g. a
+  // publisher's PRIVATE registry not registered here — the cross-tenant "can't pull" signal); 404 → "not-found";
+  // transport/other → "unreachable". Powers environment-adoption verification (warn-not-block).
+  async verifyImage(
+    workspace: string,
+    imageRef: string,
+  ): Promise<{ pullable: boolean; reason: "ok" | "auth" | "not-found" | "unreachable"; digest?: string }> {
+    let parsed: ReturnType<typeof parseImageRef>;
+    try {
+      parsed = parseImageRef(imageRef);
+    } catch {
+      return { pullable: false, reason: "not-found" };
+    }
+    const host = parsed.host ?? "registry-1.docker.io"; // no host → a docker.io shorthand
+    const repository = parsed.host || parsed.path.includes("/") ? parsed.path : `library/${parsed.path}`;
+    const reference = parsed.digest ?? parsed.tag ?? "latest";
+    const entry = (await this.entries(workspace)).find((r) => r.host === host);
+    const auth = entry ? await this.pullAuthFor(workspace, entry) : undefined; // anonymous when not a registered host
+    try {
+      const info = await this.deps.reader.inspectManifest({ host }, auth, repository, reference);
+      return { pullable: true, reason: "ok", ...(info.digest ? { digest: info.digest } : {}) };
+    } catch (e) {
+      const status = e instanceof UpstreamError && typeof e.extra?.status === "number" ? e.extra.status : undefined;
+      const reason = status === 401 || status === 403 ? "auth" : status === 404 ? "not-found" : "unreachable";
+      return { pullable: false, reason };
+    }
   }
 
   // Mint push credentials (member+, images:push) — select by name; omission is allowed only when there's exactly one registry.

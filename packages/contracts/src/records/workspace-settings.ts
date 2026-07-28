@@ -87,6 +87,29 @@ export const WorkspaceSettingsSchema = z.object({
       }),
     )
     .optional(),
+  // Environment images the workspace has ADOPTED (imported) from the Capability Store — a WORKSPACE-LEVEL inventory
+  // (not agent-scoped: environments feed harnesses workspace-wide). Each entry is the immutable-version REF plus a
+  // pull-usability verification snapshot taken at adopt / re-verify time (warn-not-block: adoption is recorded even
+  // when the image can't be pulled). image/name/contents are NOT duplicated here — they resolve live from the
+  // capability record. Design: docs/architecture/environment-image-store.md.
+  adoptedEnvironments: z
+    .array(
+      z.object({
+        source: z.string().min(1), // the OWNER workspace (publisher) of the environment capability
+        id: z.string().min(1),
+        version: z.string().min(1), // the pinned immutable version
+        adoptedAt: z.string(), // ISO timestamp
+        verify: z
+          .object({
+            pullable: z.boolean(), // can THIS workspace pull the image (Docker Registry v2 manifest reachable)?
+            reason: z.enum(["ok", "auth", "not-found", "unreachable"]).optional(),
+            digest: z.string().optional(), // the resolved manifest digest when pullable
+            at: z.string(), // ISO timestamp of the check
+          })
+          .optional(),
+      }),
+    )
+    .optional(),
   // (legacy, read-only compat) workspace trace sinks — superseded by traceSources (unified "Trace Source" pool).
   // Registration is now ONE pool: a trace source is used to pull (traceSourceByHarness) OR to export
   // (traceSinkByHarness) at the per-harness use-site. On read, a legacy sink is merged into the source pool by name
@@ -127,6 +150,9 @@ export const WorkspaceSettingsSchema = z.object({
         service: z.string().min(1).optional(), // otel/jaeger tag-search scope (the agent's service.name) — required for otel correlate:"tag"
         project: z.string().min(1).optional(), // scope per kind: mlflow experiment_id · phoenix/langfuse/langsmith project — required for mlflow/phoenix
         webUrl: z.string().url().optional(), // export deep-link base when it differs from the API endpoint (used when the source is an export target)
+        // Base URL for ROOT-RELATIVE artifact refs inside pulled traces (evidence slots) — without it the judge
+        // receives the raw path string instead of the resolved bytes/text. Pull-only detail.
+        artifactBaseUrl: z.string().url().optional(),
       }),
     )
     .optional(),

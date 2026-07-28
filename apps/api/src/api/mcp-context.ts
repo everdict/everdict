@@ -2,7 +2,7 @@ import type { CiLinkService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
 import type { KnowledgeService } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
-import type { ImageRegistryService } from "@everdict/application-control";
+import type { EnvironmentAdoptionService, ImageRegistryService } from "@everdict/application-control";
 import type { ProxyService } from "@everdict/application-control";
 import type { CapabilityService } from "@everdict/application-control";
 import type { MattermostService } from "@everdict/application-control";
@@ -92,6 +92,7 @@ export interface McpDeps {
   traceSourceService?: TraceSourceService; // workspace trace sources (register + pull/export selection + list/inspect browser)
   spanAttrMappingService?: SpanAttrMappingService; // per-harness span-attr mapping overlay (the conversion layer between a harness and a judge)
   imageRegistryService?: ImageRegistryService; // workspace image registry (classification baseline + push publishing)
+  environmentAdoptionService?: EnvironmentAdoptionService; // workspace environment-image adoption inventory + pull verify
   ciLinkService?: CiLinkService; // CI repo link (repo↔harness slot + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster
   notificationService?: NotificationService; // personal notification feed (bell inbox) — list/read (self-scoped)

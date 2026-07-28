@@ -106,6 +106,7 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
           traceSourceService: deps.traceSourceService,
           spanAttrMappingService: deps.spanAttrMappingService,
           imageRegistryService: deps.imageRegistryService,
+          environmentAdoptionService: deps.environmentAdoptionService,
           ciLinkService: deps.ciLinkService,
           runnerService: deps.runnerService,
           notificationService: deps.notificationService,

@@ -694,6 +694,23 @@ export const controlPlane = {
     callVoid(auth, `/workspace/image-registries/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+  // Workspace environment-image adoption (import) — the inventory of adopted environments + pull-usability verify.
+  // Read = capabilities:read (viewer+); adopt/unadopt/verify = settings:write (admin, workspace-level config).
+  listAdoptedEnvironments: <T>(auth: AuthContext) =>
+    call<T>(auth, '/workspace/adopted-environments'),
+  adoptEnvironment: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/adopted-environments', { method: 'PUT', body: JSON.stringify(body) }),
+  verifyAdoptedEnvironment: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/adopted-environments/verify', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  unadoptEnvironment: (auth: AuthContext, source: string, id: string) =>
+    callVoid(
+      auth,
+      `/workspace/adopted-environments/${encodeURIComponent(source)}/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    ),
   // CI repo link (repo ↔ harness slot = GitHub Actions OIDC trust). Read=harnesses:read (viewer+), create/delete=settings:write (admin).
   // A link's existence grants that repo's keyless CI trust. All three routes return the full current link set ({links}) (not 204).
   listCiLinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/ci/links'),

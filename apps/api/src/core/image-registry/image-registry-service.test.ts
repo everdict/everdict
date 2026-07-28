@@ -1,7 +1,20 @@
 import { ImageRegistryService } from "@everdict/application-control";
-import { BadRequestError, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it, vi } from "vitest";
+
+// A service whose reader's inspectManifest throws — for the verifyImage failure-classification cases.
+function throwingSvc(err: unknown) {
+  const settings = new InMemoryWorkspaceSettingsStore();
+  const reader = {
+    checkConnection: vi.fn(async () => ({ reachable: true, detail: "ok" })),
+    listTags: vi.fn(async () => [] as string[]),
+    inspectManifest: vi.fn(async () => {
+      throw err;
+    }),
+  };
+  return new ImageRegistryService({ settings, secretsFor: async () => ({}), reader });
+}
 
 function svc(secrets: Record<string, string> = {}) {
   const settings = new InMemoryWorkspaceSettingsStore();
@@ -160,5 +173,58 @@ describe("ImageRegistryService — registry reads (agent list_image_tags / inspe
     await service.upsert("acme", { name: "ghcr", host: "ghcr.io" });
     await service.upsert("acme", { name: "harbor", host: "harbor.acme.io" });
     await expect(service.listTags("acme", "acme/api")).rejects.toBeInstanceOf(BadRequestError);
+  });
+});
+
+describe("ImageRegistryService — verifyImage (pull-usability check)", () => {
+  it("pullable via the matching workspace registry's pull auth — parses host/repo/tag", async () => {
+    const { service, reader } = svc({ PULL: "pw" });
+    await service.upsert("acme", { name: "ghcr", host: "ghcr.io", username: "u", pullSecretName: "PULL" });
+    const r = await service.verifyImage("acme", "ghcr.io/acme/env:v1");
+    expect(r).toEqual({ pullable: true, reason: "ok", digest: "sha256:abc" });
+    expect(reader.inspectManifest).toHaveBeenCalledWith(
+      { host: "ghcr.io" },
+      { host: "ghcr.io", username: "u", password: "pw" },
+      "acme/env",
+      "v1",
+    );
+  });
+
+  it("probes anonymously when the image host is not a registered registry (external/public)", async () => {
+    const { service, reader } = svc();
+    const r = await service.verifyImage("acme", "public.example.com/org/img@sha256:deadbeef");
+    expect(r.pullable).toBe(true);
+    expect(reader.inspectManifest).toHaveBeenCalledWith(
+      { host: "public.example.com" },
+      undefined,
+      "org/img",
+      "sha256:deadbeef",
+    );
+  });
+
+  it("normalizes a docker.io shorthand (postgres:16 → registry-1.docker.io/library/postgres)", async () => {
+    const { service, reader } = svc();
+    await service.verifyImage("acme", "postgres:16");
+    expect(reader.inspectManifest).toHaveBeenCalledWith(
+      { host: "registry-1.docker.io" },
+      undefined,
+      "library/postgres",
+      "16",
+    );
+  });
+
+  it("classifies a 401/403 as reason=auth (a publisher's private registry not registered here)", async () => {
+    const service = throwingSvc(new UpstreamError("UPSTREAM_ERROR", { status: 401, host: "ghcr.io" }, "denied"));
+    expect(await service.verifyImage("acme", "ghcr.io/acme/env:v1")).toEqual({ pullable: false, reason: "auth" });
+  });
+
+  it("classifies a 404 as reason=not-found and a transport failure as reason=unreachable", async () => {
+    const notFound = throwingSvc(new UpstreamError("UPSTREAM_ERROR", { status: 404, host: "ghcr.io" }, "no tag"));
+    expect(await notFound.verifyImage("acme", "ghcr.io/acme/env:v1")).toEqual({ pullable: false, reason: "not-found" });
+    const transport = throwingSvc(new UpstreamError("UPSTREAM_ERROR", { detail: "ENOTFOUND" }, "unreachable"));
+    expect(await transport.verifyImage("acme", "ghcr.io/acme/env:v1")).toEqual({
+      pullable: false,
+      reason: "unreachable",
+    });
   });
 });
