@@ -59,7 +59,7 @@ export function RunnersManager({
   workspace,
 }: {
   runners: RunnerMeta[]
-  downloadHref: string // /{workspace}/download — desktop download page for browser users
+  downloadHref: string // /{workspace}/connect/desktop — desktop download tab of the connect hub, for browser users
   workspace: string // active workspace slug — for the per-runner detail link (/{workspace}/runtimes/self/{id})
 }) {
   const t = useTranslations('manageRunners')

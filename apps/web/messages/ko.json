@@ -1545,7 +1545,12 @@
     "runtimes": "런타임",
     "runs": "실행",
     "usage": "사용량",
-    "store": "스토어"
+    "store": "스토어",
+    "resources": "리소스",
+    "guide": "가이드",
+    "connectDesktop": "데스크탑 앱",
+    "connectClaude": "Claude Code",
+    "connectCodex": "Codex"
   },
   "usagePage": {
     "title": "사용량",
@@ -1612,7 +1617,8 @@
     "newDataset": "데이터셋 등록",
     "newJudge": "평가자 등록",
     "newRubric": "루브릭 등록",
-    "toggleTheme": "테마 바꾸기"
+    "toggleTheme": "테마 바꾸기",
+    "takeTour": "둘러보기"
   },
   "pickSecret": {
     "selectSecret": "시크릿 선택",
@@ -3538,5 +3544,114 @@
     "bindSecretsHint": "필요 시크릿을 내 워크스페이스 시크릿 이름에 매핑하세요.",
     "enableWrite": "이 도구의 변경(write) 허용",
     "sharedWithEmpty": "이 워크스페이스에만 속해 있어 공유할 대상이 없습니다."
+  },
+  "guidePage": {
+    "title": "시작하기",
+    "description": "Everdict가 에이전트를 평가하는 흐름을 빠르게 둘러보세요 — 각 요소를 준비한 뒤 실행하고 비교합니다.",
+    "open": "열기",
+    "takeTour": "둘러보기",
+    "steps": {
+      "harness": {
+        "title": "평가할 에이전트 등록",
+        "body": "하니스를 등록하세요 — Claude Code, Codex 등 평가하려는 어떤 CLI 에이전트든 가능합니다."
+      },
+      "dataset": {
+        "title": "벤치마크 데이터셋 준비",
+        "body": "에이전트가 풀어야 할 평가 케이스(과제)를 모읍니다. 데이터셋은 하니스에 종속되지 않습니다."
+      },
+      "scorecard": {
+        "title": "스코어카드 실행",
+        "body": "데이터셋 × 하니스를 평가해 집계된 하나의 비교 가능한 결과를 얻습니다 — 회귀·추세 포함."
+      },
+      "judge": {
+        "title": "평가자로 채점",
+        "body": "통과/실패를 넘어, 코드·모델·하니스 평가자로 각 트레이스를 채점할 수 있습니다(선택)."
+      }
+    },
+    "connect": {
+      "title": "코딩 에이전트 연결",
+      "body": "작업하는 곳에서 평가를 구동하세요 — 데스크탑 앱, 또는 MCP로 연결하는 Claude Code / Codex 플러그인.",
+      "cta": "연결하기"
+    }
+  },
+  "connectPage": {
+    "title": "연결하기",
+    "description": "코딩 에이전트에 Everdict를 연결하세요 — 데스크탑 앱을 받거나, MCP로 Claude Code / Codex 플러그인을 설치합니다.",
+    "copy": "복사",
+    "tabs": {
+      "desktop": "데스크탑 앱",
+      "claudeCode": "Claude Code",
+      "codex": "Codex"
+    },
+    "desktop": {
+      "intro": "데스크탑 앱을 설치하면 이 컴퓨터를 러너로 추가할 수 있어요 — 웹의 모든 기능에 로컬 실행까지."
+    },
+    "claude": {
+      "intro": "어떤 Claude Code 세션에서도 Everdict 도구와 평가 워크플로를 쓸 수 있게 합니다.",
+      "step1Title": "플러그인 설치",
+      "step1Body": "Everdict 공개 저장소가 플러그인 마켓플레이스를 겸합니다.",
+      "step2Title": "컨트롤 플레인 주소 지정",
+      "step2Body": "Claude Code를 실행하기 전에 MCP 엔드포인트를 설정하세요.",
+      "step3Title": "인증",
+      "step3Body": "대화형 세션은 첫 도구 사용 시 브라우저로 로그인합니다. CI나 헤드리스 에이전트는 <link>API 키를 만들어</link> Bearer 헤더로 전달하세요.",
+      "step4Title": "평가 실행",
+      "step4Body": "한 번에 연결·인증을 마친 뒤 현재 프로젝트를 평가합니다.",
+      "authNote": "브라우저 로그인은 'Linear처럼 로그인'하는 OAuth 방식이라 대화형 사용에는 API 키가 필요 없습니다."
+    },
+    "codex": {
+      "intro": "MCP(mcp-remote)를 통해 Codex에서 Everdict 도구를 사용합니다.",
+      "step1Title": "MCP 서버 추가",
+      "step1Body": "<code>~/.codex/config.toml</code>에 다음을 추가하세요.",
+      "step2Title": "API 키로 헤드리스 실행 (선택)",
+      "step2Body": "CI나 비대화형 환경에서는 브라우저 로그인 대신 <link>API 키를 만들어</link> 헤더로 전달하세요.",
+      "authNote": "mcp-remote가 첫 사용 시 OAuth/PKCE 브라우저 로그인을 수행하며, API 키 헤더를 주면 헤드리스로 건너뜁니다."
+    }
+  },
+  "tour": {
+    "welcome": {
+      "title": "Everdict에 오신 걸 환영해요",
+      "body": "Everdict는 에이전트를 실행하고 반복 가능하게 채점합니다. 30초 둘러보기로 주요 위치를 익혀보세요."
+    },
+    "start": "둘러보기 시작",
+    "skip": "건너뛰기",
+    "next": "다음",
+    "back": "이전",
+    "done": "완료",
+    "workspace": {
+      "title": "워크스페이스",
+      "body": "여기서 워크스페이스를 전환하거나 새로 만들어요. 각 워크스페이스는 격리된 테넌트입니다."
+    },
+    "search": {
+      "title": "무엇이든 찾기",
+      "body": "⌘K / Ctrl+K로 하니스·데이터셋·스코어카드 어디로든, 또는 액션으로 바로 이동해요."
+    },
+    "harnesses": {
+      "title": "하니스",
+      "body": "평가 대상 에이전트예요. Claude Code, Codex 등 어떤 CLI 에이전트든 등록하세요."
+    },
+    "datasets": {
+      "title": "데이터셋",
+      "body": "벤치마크 — 에이전트가 풀어볼 평가 케이스 모음이에요."
+    },
+    "scorecards": {
+      "title": "스코어카드",
+      "body": "데이터셋 × 하니스를 실행해 비교 가능한 하나의 결과를 얻어요. 차이 비교·리더보드까지."
+    },
+    "judges": {
+      "title": "평가자",
+      "body": "통과/실패를 넘어 코드·모델·하니스 평가자로 각 트레이스를 채점해요."
+    },
+    "store": {
+      "title": "스토어",
+      "body": "도구·스킬·환경을 도입하거나 직접 게시하세요."
+    },
+    "guide": {
+      "title": "가이드 & 설정",
+      "body": "전체 시작 가이드와 Claude Code·Codex·데스크탑 앱 연결 방법이 여기에 있어요."
+    },
+    "account": {
+      "title": "계정 & 설정",
+      "body": "프로필, API 키, 워크스페이스 멤버, 시크릿, 통합이 여기 있어요."
+    }
   }
 }

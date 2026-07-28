@@ -1545,7 +1545,12 @@
     "runtimes": "Runtimes",
     "runs": "Runs",
     "usage": "Usage",
-    "store": "Store"
+    "store": "Store",
+    "resources": "Resources",
+    "guide": "Guide",
+    "connectDesktop": "Desktop app",
+    "connectClaude": "Claude Code",
+    "connectCodex": "Codex"
   },
   "usagePage": {
     "title": "Usage",
@@ -1612,7 +1617,8 @@
     "newDataset": "Register dataset",
     "newJudge": "Register judge",
     "newRubric": "Register rubric",
-    "toggleTheme": "Toggle theme"
+    "toggleTheme": "Toggle theme",
+    "takeTour": "Take a tour"
   },
   "pickSecret": {
     "selectSecret": "Select a secret",
@@ -3538,5 +3544,114 @@
     "bindSecretsHint": "Map each required secret to one of your workspace secret names.",
     "enableWrite": "Allow this tool to make changes (write)",
     "sharedWithEmpty": "You're only in this workspace — nowhere else to share to yet."
+  },
+  "guidePage": {
+    "title": "Get started",
+    "description": "A quick tour of how Everdict evaluates your agent — set up each piece, then run and compare.",
+    "open": "Open",
+    "takeTour": "Take a tour",
+    "steps": {
+      "harness": {
+        "title": "Add the agent under test",
+        "body": "Register a harness — Claude Code, Codex, or any CLI agent you want to evaluate."
+      },
+      "dataset": {
+        "title": "Bring a benchmark dataset",
+        "body": "Add the eval cases (tasks) your agent should solve. Datasets are harness-agnostic."
+      },
+      "scorecard": {
+        "title": "Run a scorecard",
+        "body": "Evaluate a dataset × harness and get one aggregated, comparable result — with regressions and trends."
+      },
+      "judge": {
+        "title": "Score with a judge",
+        "body": "Optionally add a code, model, or harness judge to grade each trace beyond pass/fail."
+      }
+    },
+    "connect": {
+      "title": "Connect your coding agent",
+      "body": "Drive evals from where you work — the desktop app, or the Claude Code / Codex plugins over MCP.",
+      "cta": "Connect"
+    }
+  },
+  "connectPage": {
+    "title": "Connect",
+    "description": "Bring Everdict into your coding agent — download the desktop app, or install the Claude Code / Codex plugin over MCP.",
+    "copy": "Copy",
+    "tabs": {
+      "desktop": "Desktop app",
+      "claudeCode": "Claude Code",
+      "codex": "Codex"
+    },
+    "desktop": {
+      "intro": "Install the desktop app to add this computer as a runner — everything the web does, plus local execution."
+    },
+    "claude": {
+      "intro": "Bring the Everdict tools and eval workflows into any Claude Code session.",
+      "step1Title": "Install the plugin",
+      "step1Body": "Everdict's public repo doubles as a plugin marketplace.",
+      "step2Title": "Point it at your control plane",
+      "step2Body": "Set the MCP endpoint before launching Claude Code.",
+      "step3Title": "Authenticate",
+      "step3Body": "Interactive sessions log in via your browser on first tool use. For CI or headless agents, <link>create an API key</link> and pass it as a Bearer header instead.",
+      "step4Title": "Run an evaluation",
+      "step4Body": "Connect and authenticate in one guided step, then evaluate the current project.",
+      "authNote": "The browser login is the 'log in like Linear' OAuth flow — no API key needed for interactive use."
+    },
+    "codex": {
+      "intro": "Use the Everdict tools from Codex over MCP (via mcp-remote).",
+      "step1Title": "Add the MCP server",
+      "step1Body": "Add this to <code>~/.codex/config.toml</code>.",
+      "step2Title": "Go headless with an API key (optional)",
+      "step2Body": "For CI or non-interactive use, <link>create an API key</link> and pass it as a header instead of the browser login.",
+      "authNote": "mcp-remote runs the OAuth/PKCE browser login on first use; the API-key header skips it for headless runs."
+    }
+  },
+  "tour": {
+    "welcome": {
+      "title": "Welcome to Everdict",
+      "body": "Everdict runs your agent and scores it — repeatably. Take a 30-second tour to see where everything lives."
+    },
+    "start": "Start tour",
+    "skip": "Skip",
+    "next": "Next",
+    "back": "Back",
+    "done": "Done",
+    "workspace": {
+      "title": "Your workspace",
+      "body": "Switch or create workspaces here. Each one is its own isolated tenant."
+    },
+    "search": {
+      "title": "Find anything",
+      "body": "Press ⌘K / Ctrl+K to jump to any harness, dataset, or scorecard — or an action."
+    },
+    "harnesses": {
+      "title": "Harnesses",
+      "body": "The agents under test. Register Claude Code, Codex, or any CLI agent here."
+    },
+    "datasets": {
+      "title": "Datasets",
+      "body": "The benchmarks — the eval cases your agents run against."
+    },
+    "scorecards": {
+      "title": "Scorecards",
+      "body": "Run a dataset × harness and get one comparable result, with diffs and leaderboards."
+    },
+    "judges": {
+      "title": "Judges",
+      "body": "Score each trace beyond pass/fail — with a code, model, or harness judge."
+    },
+    "store": {
+      "title": "Store",
+      "body": "Adopt tools, skills, and environments — or publish your own."
+    },
+    "guide": {
+      "title": "Guide & setup",
+      "body": "The full getting-started guide, plus how to connect Claude Code, Codex, or the desktop app."
+    },
+    "account": {
+      "title": "Account & settings",
+      "body": "Your profile, API keys, workspace members, secrets, and integrations live here."
+    }
   }
 }

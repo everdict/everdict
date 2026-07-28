@@ -12,17 +12,19 @@ import {
   Plus,
   Search,
   Server,
+  Sparkles,
   SunMoon,
   type LucideIcon,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { useInfraPanel, type InfraTab } from '@/widgets/infra-panel'
+import { startProductTour } from '@/shared/lib/tour'
 import { cn } from '@/shared/lib/utils'
 import { Dialog } from '@/shared/ui/dialog'
 import { Kbd } from '@/shared/ui/kbd'
 
-import { ALL_NAV_ITEMS } from './nav-config'
+import { ALL_NAV_ITEMS, RESOURCES_SECTION } from './nav-config'
 
 interface Command {
   id: string
@@ -115,6 +117,14 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
       keywords: 'theme dark light',
       perform: () => toggleTheme(),
     },
+    {
+      id: 'take-tour',
+      label: t('palette.takeTour'),
+      icon: Sparkles,
+      group,
+      keywords: 'tour onboarding walkthrough guide help 둘러보기 투어 가이드',
+      perform: () => startProductTour(),
+    },
   ]
 }
 
@@ -135,6 +145,15 @@ export function CommandPalette({ workspace }: { workspace: string }) {
         label: t(`nav.${item.labelKey}`),
         icon: item.icon,
         group: t('palette.groupNav'),
+        keywords: item.keywords,
+        perform: (r) => r.push(`/${workspace}${item.href}`),
+      })),
+      // Resources (guide + agent-connect) — kept out of the sidebar's eval nav feed, but surfaced in the palette for discovery.
+      ...RESOURCES_SECTION.items.map<Command>((item) => ({
+        id: `resource:${item.href}`,
+        label: t(`nav.${item.labelKey}`),
+        icon: item.icon,
+        group: t('nav.resources'),
         keywords: item.keywords,
         perform: (r) => r.push(`/${workspace}${item.href}`),
       })),

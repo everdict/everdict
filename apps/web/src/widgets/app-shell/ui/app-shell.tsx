@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { InfraPanel, InfraPanelProvider, InfraRail } from '@/widgets/infra-panel'
+import { ProductTour } from '@/widgets/product-tour'
 import type { Workspace } from '@/entities/workspace'
 
 import { CommandPalette } from './command-palette'
@@ -70,6 +71,8 @@ export function AppShell({
       </div>
       <CommandPalette workspace={workspace} />
       <TopControls workspace={workspace} />
+      {/* 신규 유저 온보딩 투어 — 사이드바 크롬을 짚어가며 안내. AppShell 에 마운트되어 라우트 전환에도 상태 유지(비-embed 셸에서만). */}
+      <ProductTour workspace={workspace} />
     </InfraPanelProvider>
   )
 }

@@ -1,24 +1,9 @@
-import { getTranslations } from 'next-intl/server'
-
-import { DownloadPanel } from '@/features/download-desktop'
-import { fetchDesktopRelease } from '@/features/download-desktop/api/releases'
-import { env } from '@/shared/config/env'
-import { PageHeader } from '@/shared/ui/page-header'
+import { redirect } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
 
-// Desktop app download — a page for getting private releases behind web login (members) (design D7 follow-up).
-// The server reads release metadata from GitHub (5-min cache); the actual download is handed off with a 302 by /api/desktop/download.
-export default async function DownloadPage() {
-  const t = await getTranslations('downloadPage')
-  const release = await fetchDesktopRelease()
-  return (
-    <div className="space-y-6">
-      <PageHeader title={t('title')} description={t('description')} />
-      <DownloadPanel
-        release={release}
-        {...(env.DESKTOP_DOWNLOAD_URL ? { fallbackUrl: env.DESKTOP_DOWNLOAD_URL } : {})}
-      />
-    </div>
-  )
+// 데스크탑 다운로드는 연결 허브의 한 탭으로 통합됨(/connect/desktop). 북마크·기존 딥링크 보존을 위해 리다이렉트만 남긴다.
+export default async function DownloadPage({ params }: { params: Promise<{ workspace: string }> }) {
+  const { workspace } = await params
+  redirect(`/${workspace}/connect/desktop`)
 }

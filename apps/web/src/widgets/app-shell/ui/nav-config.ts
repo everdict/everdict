@@ -1,11 +1,15 @@
 import {
   BarChart3,
+  BookOpen,
   Bookmark,
   Boxes,
   Database,
   Gavel,
   LayoutDashboard,
+  MonitorDown,
+  Puzzle,
   Store,
+  Terminal,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -21,6 +25,7 @@ export interface NavItem {
 
 export interface NavSection {
   heading?: string
+  headingKey?: string // nav.* key — preferred over `heading` (raw) so section titles are localized
   items: NavItem[]
 }
 
@@ -79,5 +84,38 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
 ]
+
+// Resources group — onboarding entry points, pinned below the eval nav. The guide walks new users through the eval
+// flow; the three connect entries deep-link to the tabbed /connect hub (desktop download + Claude Code / Codex MCP
+// install). Kept OUT of ALL_NAV_ITEMS so the command palette stays eval-focused.
+export const RESOURCES_SECTION: NavSection = {
+  headingKey: 'resources',
+  items: [
+    {
+      href: '/guide',
+      labelKey: 'guide',
+      icon: BookOpen,
+      keywords: 'guide getting started onboarding tour help 가이드 시작',
+    },
+    {
+      href: '/connect/desktop',
+      labelKey: 'connectDesktop',
+      icon: MonitorDown,
+      keywords: 'desktop app download runner 데스크탑 다운로드',
+    },
+    {
+      href: '/connect/claude-code',
+      labelKey: 'connectClaude',
+      icon: Puzzle,
+      keywords: 'claude code plugin mcp install 플러그인',
+    },
+    {
+      href: '/connect/codex',
+      labelKey: 'connectCodex',
+      icon: Terminal,
+      keywords: 'codex plugin mcp install 플러그인',
+    },
+  ],
+}
 
 export const ALL_NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items)

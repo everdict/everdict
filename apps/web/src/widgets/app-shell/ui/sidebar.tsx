@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { ArrowLeft, LogIn, LogOut, Menu, MonitorDown, Search, Settings, X } from 'lucide-react'
+import { ArrowLeft, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
@@ -14,7 +14,7 @@ import { Avatar } from '@/shared/ui/avatar'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Kbd } from '@/shared/ui/kbd'
 
-import { NAV_SECTIONS } from './nav-config'
+import { NAV_SECTIONS, RESOURCES_SECTION } from './nav-config'
 import { SETTINGS_NAV_GROUPS } from './settings-nav-config'
 
 export interface SidebarProps {
@@ -55,13 +55,15 @@ function navRowClass(active: boolean) {
 function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: () => void }) {
   const pathname = usePathname()
   const t = useTranslations('nav')
+  // Eval nav + the pinned Resources group (guide + agent-connect entry points) render as one sectioned list.
+  const sections = [...NAV_SECTIONS, RESOURCES_SECTION]
   return (
     <nav className="flex flex-col gap-4">
-      {NAV_SECTIONS.map((section, i) => (
-        <div key={section.heading ?? `s-${i}`} className="flex flex-col gap-0.5">
-          {section.heading && (
+      {sections.map((section, i) => (
+        <div key={section.headingKey ?? section.heading ?? `s-${i}`} className="flex flex-col gap-0.5">
+          {(section.headingKey || section.heading) && (
             <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">
-              {section.heading}
+              {section.headingKey ? t(section.headingKey) : section.heading}
             </p>
           )}
           {section.items.map((item) => {
@@ -76,6 +78,8 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
                 href={href}
                 onClick={onNavigate}
                 aria-current={active ? 'page' : undefined}
+                // data-tour: 온보딩 투어의 스포트라이트 앵커(nav-harnesses 등). 사이드바에 항상 존재해 라우트 전환에도 안정적.
+                data-tour={`nav-${item.labelKey}`}
                 className={navRowClass(active)}
               >
                 <span
@@ -223,7 +227,12 @@ function SidebarFooter({
         className="w-full"
         contentClassName="w-[204px]"
         trigger={({ toggle }) => (
-          <button type="button" onClick={toggle} className={cn(rowClass, 'w-full text-left')}>
+          <button
+            type="button"
+            data-tour="user-menu"
+            onClick={toggle}
+            className={cn(rowClass, 'w-full text-left')}
+          >
             <Avatar
               name={displayName}
               {...(profile?.avatarUrl !== undefined ? { url: profile.avatarUrl } : {})}
@@ -259,44 +268,6 @@ function SidebarFooter({
   )
 }
 
-// Pinned bottom entry to the desktop-app download page (/{workspace}/download) — the page existed but had no nav entry,
-// so a browser user had no way to find "get the desktop app". Sits just above the user footer so it's always visible.
-function DesktopDownloadLink({
-  workspace,
-  onNavigate,
-}: {
-  workspace: string
-  onNavigate?: () => void
-}) {
-  const pathname = usePathname()
-  const t = useTranslations('shell')
-  const href = `/${workspace}/download`
-  const active = pathname === href || pathname.startsWith(`${href}/`)
-  return (
-    <Link
-      href={href}
-      onClick={onNavigate}
-      aria-current={active ? 'page' : undefined}
-      className={navRowClass(active)}
-    >
-      <span
-        className={cn(
-          'absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
-          active ? 'opacity-100' : 'opacity-0'
-        )}
-      />
-      <MonitorDown
-        className={cn(
-          'size-[17px] shrink-0 transition-colors',
-          active ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'
-        )}
-        strokeWidth={1.75}
-      />
-      {t('downloadDesktop')}
-    </Link>
-  )
-}
-
 function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () => void }) {
   const pathname = usePathname()
   const inSettings =
@@ -316,10 +287,13 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
 
   return (
     <div className="flex h-full flex-col gap-3 px-3 py-3.5">
-      <WorkspaceSwitcher current={props.workspace} workspaces={props.workspaces} />
+      <div data-tour="workspace-switcher">
+        <WorkspaceSwitcher current={props.workspace} workspaces={props.workspaces} />
+      </div>
 
       <button
         type="button"
+        data-tour="search"
         onClick={openCommandPalette}
         className="flex items-center gap-2 rounded-md border border-border bg-card/50 px-2 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
@@ -331,8 +305,6 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
       <div className="-mr-1 flex-1 overflow-y-auto pr-1">
         <NavLinks workspace={props.workspace} onNavigate={onNavigate} />
       </div>
-
-      <DesktopDownloadLink workspace={props.workspace} onNavigate={onNavigate} />
 
       <SidebarFooter
         workspace={props.workspace}

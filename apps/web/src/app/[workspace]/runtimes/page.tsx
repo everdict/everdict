@@ -132,7 +132,7 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
       <Section title={t('myMachine')} description={t('myMachineDescription')}>
         <RunnersManager
           runners={runners}
-          downloadHref={`/${workspace}/download`}
+          downloadHref={`/${workspace}/connect/desktop`}
           workspace={workspace}
         />
       </Section>

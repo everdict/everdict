@@ -64,7 +64,7 @@ export default async function RunnerDetailPage({
         scope={scope}
         target={target}
         workspace={workspace}
-        downloadHref={`/${workspace}/download`}
+        downloadHref={`/${workspace}/connect/desktop`}
       />
     </div>
   )
