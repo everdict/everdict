@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Loader2, RotateCcw, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { JudgePicker, type JudgePickerChoice, type JudgeRef } from '@/entities/judge'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -36,9 +37,9 @@ export function RerunScorecardButton({
   id: string
   workspace: string
   failedCount: number // number of failed cases in the source batch — gates the "failed only" scope
-  originalJudges?: { id: string; version: string }[] // the batch's selected judges (prefill + version map)
+  originalJudges?: JudgeRef[] // the batch's selected judges (prefill, versions pinned as they scored)
   originalRuntime?: string // the batch's execution target (prefill)
-  judges?: { id: string }[] // registered Agent Judges available to pick
+  judges?: JudgePickerChoice[] // registered Agent Judges available to pick, with their versions
   runtimes?: { id: string }[] // registered runtimes
   runners?: { id: string; label: string }[] // my personal runners
   hasWorkspaceRunners?: boolean // team shared runner pool available (self:ws)
@@ -49,16 +50,12 @@ export function RerunScorecardButton({
   const [open, setOpen] = useState(false)
   const [pending, start] = useTransition()
   const [scope, setScope] = useState<'all' | 'failed'>('all')
-  const [judgeIds, setJudgeIds] = useState<string[]>(originalJudges.map((j) => j.id))
+  // Prefilled with the batch's judges at their PINNED versions — an unchanged judge re-runs on the exact version
+  // that scored; the picker lets each be re-versioned, and a newly-added judge defaults to latest.
+  const [judgeRefs, setJudgeRefs] = useState<JudgeRef[]>(originalJudges)
   const [runtime, setRuntime] = useState(originalRuntime ?? '')
   const [error, setError] = useState<string>()
   const titleId = 'rerun-scorecard'
-
-  // Original judge → pinned version, so an unchanged judge re-runs on the exact version that scored (a newly-added one gets latest).
-  const versionByJudge = useMemo(
-    () => new Map(originalJudges.map((j) => [j.id, j.version])),
-    [originalJudges]
-  )
   // Runtime choices — registered runtimes + runner pools, same as the creation form. The original runtime is always
   // an option (even if it's since been removed) so the pre-filled value renders.
   const runtimeOptions = useMemo<ComboboxOption[]>(() => {
@@ -85,26 +82,14 @@ export function RerunScorecardButton({
   function submit() {
     setError(undefined)
     // Run-config edits apply to the full re-run only; a failed-only recovery reproduces the original config as-is.
-    const overrides =
-      scope === 'all'
-        ? {
-            // Always send the (possibly-edited) list — an empty list re-runs with no judges. Unchanged judges keep
-            // their original pinned version; a newly-added judge resolves to latest server-side.
-            judges: judgeIds.map((jid) => ({
-              id: jid,
-              version: versionByJudge.get(jid) ?? 'latest',
-            })),
-            ...(runtime ? { runtime } : {}),
-          }
-        : {}
+    // Always send the (possibly-edited) list — an empty list re-runs with no judges.
+    const overrides = scope === 'all' ? { judges: judgeRefs, ...(runtime ? { runtime } : {}) } : {}
     start(async () => {
       const res = await rerunScorecardAction({ id, scope, ...overrides })
       if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
       else setError(res.error ?? t('error'))
     })
   }
-
-  const availableJudges = judges.filter((j) => !judgeIds.includes(j.id))
 
   return (
     <>
@@ -162,42 +147,19 @@ export function RerunScorecardButton({
                 <InfoTip content={t('configNote')} />
               </div>
 
-              {/* Selected judges — pre-filled from the original batch; edit the set to score the re-run differently. */}
+              {/* Selected judges — pre-filled from the original batch at their pinned versions; edit the set (or a
+                  version) to score the re-run differently. */}
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1">
                   <Label htmlFor="rerun-judges">{tr('judgesLabel')}</Label>
                   <InfoTip content={tr('judgesTip')} />
                 </div>
-                <Combobox
+                <JudgePicker
                   id="rerun-judges"
-                  options={availableJudges.map((j) => ({ value: j.id }))}
-                  value=""
-                  onChange={(v) => {
-                    if (v && !judgeIds.includes(v)) setJudgeIds([...judgeIds, v])
-                  }}
-                  placeholder={tr('judgesPlaceholder')}
-                  emptyText={tr('judgesEmpty')}
+                  judges={judges}
+                  value={judgeRefs}
+                  onChange={setJudgeRefs}
                 />
-                {judgeIds.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-0.5">
-                    {judgeIds.map((jid) => (
-                      <span
-                        key={jid}
-                        className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-0.5 font-mono text-[12px] font-[510] text-secondary-foreground ring-1 ring-inset ring-border"
-                      >
-                        {jid}
-                        <button
-                          type="button"
-                          aria-label={tr('judgesRemove', { id: jid })}
-                          onClick={() => setJudgeIds(judgeIds.filter((x) => x !== jid))}
-                          className="text-faint transition-colors hover:text-destructive"
-                        >
-                          <X className="size-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
 
               {/* Execution runtime — pre-filled from the original batch; change where the re-run executes. */}

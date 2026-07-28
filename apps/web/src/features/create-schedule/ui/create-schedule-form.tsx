@@ -2,10 +2,11 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Play, Telescope, X } from 'lucide-react'
+import { Play, Telescope } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { Controller, useForm } from 'react-hook-form'
 
+import { JudgePicker, type JudgePickerChoice, type JudgeRef } from '@/entities/judge'
 import { CapabilityBadge, capabilityFit, CapabilityFitNote } from '@/entities/runtime'
 import type { TraceSourceConfig } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
@@ -40,7 +41,7 @@ interface Values {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
-  judgeIds: string[] // Agent Judges to score each fire's traces → judge:<id> metrics (empty = control-plane default scoring).
+  judges: JudgeRef[] // Agent Judges (id + version) to score each fire's traces → judge:<id> metrics (empty = control-plane default scoring).
   runtime: string
   concurrency: string
   trials: string // pass@k / flakiness — run each case N times per fire (empty = 1). Parsed on submit.
@@ -75,7 +76,7 @@ export function CreateScheduleForm({
     kind?: string
   }[]
   runtimes: { id: string; capabilities?: string[] }[]
-  judges?: { id: string }[]
+  judges?: JudgePickerChoice[]
   runners?: { id: string; label: string }[]
   hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
   traceSources?: TraceSourceConfig[] // registered observability sources — enable the "evaluate traces" (pull) mode
@@ -105,7 +106,8 @@ export function CreateScheduleForm({
       datasetVersion: 'latest',
       harnessId: harnesses[0]?.id ?? 'scripted',
       harnessVersion: 'latest',
-      judgeIds: initialJudges.map((j) => j.id),
+      // Edit mode prefill keeps each judge's PINNED version (previously reset to latest on every save).
+      judges: initialJudges,
       runtime: '',
       concurrency: '',
       trials: '',
@@ -145,14 +147,13 @@ export function CreateScheduleForm({
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    // Selected judges → the API's judges:[{id,version}] (version latest). Shared by both modes.
-    const judges = values.judgeIds.map((id) => ({ id, version: 'latest' }))
+    // Selected judges (id + chosen version) → the API's judges:[{id,version}]. Shared by both modes.
     const shared = {
       name: values.name,
       cron: values.cron,
       timezone: values.timezone,
       overlapPolicy: values.overlapPolicy,
-      judges,
+      judges: values.judges,
     }
     let input: CreateScheduleInput
     if (values.mode === 'pull') {
@@ -197,7 +198,8 @@ export function CreateScheduleForm({
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-4">
+    // Width is owned by the page's Card (the wrapper) — the form fills it; grids stack below sm.
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <div className="space-y-1.5">
         <Label htmlFor="name">{t('nameLabel')}</Label>
         <Input
@@ -263,7 +265,7 @@ export function CreateScheduleForm({
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="cron">{t('cronLabel')}</Label>
           <Input
@@ -291,8 +293,8 @@ export function CreateScheduleForm({
 
       {mode === 'batch' ? (
         <>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2 space-y-1.5">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="datasetId">{t('datasetLabel')}</Label>
               <Controller
                 control={control}
@@ -332,8 +334,8 @@ export function CreateScheduleForm({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2 space-y-1.5">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="harnessId">{t('harnessLabel')}</Label>
               <Controller
                 control={control}
@@ -376,8 +378,8 @@ export function CreateScheduleForm({
       ) : (
         <>
           {/* Trace evaluation — pick a registered source + a rolling window; each fire judges that window's traces. */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2 space-y-1.5">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="pullSource">{t('pullSourceLabel')}</Label>
               <Controller
                 control={control}
@@ -429,7 +431,8 @@ export function CreateScheduleForm({
         </>
       )}
 
-      {/* Agent Judges (optional) — model/harness judges that score each fire's traces; each pick aggregates as a judge:<id> metric. */}
+      {/* Agent Judges (optional) — model/harness judges that score each fire's traces; each pick aggregates as a
+          judge:<id> metric and carries its own version (default latest, pinned versions preserved on edit). */}
       <div className="space-y-1.5">
         <div className="flex items-center gap-1">
           <Label htmlFor="judges">{t('judgesLabel')}</Label>
@@ -437,50 +440,19 @@ export function CreateScheduleForm({
         </div>
         <Controller
           control={control}
-          name="judgeIds"
-          render={({ field }) => {
-            const available = judges
-              .filter((j) => !field.value.includes(j.id))
-              .map((j) => ({ value: j.id }))
-            return (
-              <div className="space-y-2">
-                <Combobox
-                  id="judges"
-                  options={available}
-                  value=""
-                  onChange={(v) => {
-                    if (v && !field.value.includes(v)) field.onChange([...field.value, v])
-                  }}
-                  placeholder={t('judgesPlaceholder')}
-                  emptyText={t('judgesEmpty')}
-                />
-                {field.value.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {field.value.map((id) => (
-                      <span
-                        key={id}
-                        className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-0.5 font-mono text-[12px] font-[510] text-secondary-foreground ring-1 ring-inset ring-border"
-                      >
-                        {id}
-                        <button
-                          type="button"
-                          aria-label={t('judgesRemove', { id })}
-                          onClick={() => field.onChange(field.value.filter((x) => x !== id))}
-                          className="text-faint transition-colors hover:text-destructive"
-                        >
-                          <X className="size-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          }}
+          name="judges"
+          render={({ field }) => (
+            <JudgePicker
+              id="judges"
+              judges={judges}
+              value={field.value}
+              onChange={field.onChange}
+            />
+          )}
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="overlapPolicy">{t('overlapLabel')}</Label>
           <Controller
@@ -518,7 +490,7 @@ export function CreateScheduleForm({
       {mode === 'batch' && (
         <>
           {/* Trials + partial run — same knobs as a one-off scorecard, so a nightly regression can pass@k / smoke-run a subset. */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <div className="flex items-center gap-1">
                 <Label htmlFor="trials">{t('trialsLabel')}</Label>

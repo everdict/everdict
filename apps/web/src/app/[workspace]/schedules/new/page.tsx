@@ -5,7 +5,7 @@ import { getTranslations } from 'next-intl/server'
 import { CreateScheduleForm } from '@/features/create-schedule'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
-import { judgesSchema } from '@/entities/judge'
+import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
 import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
@@ -36,7 +36,7 @@ export default async function NewSchedulePage({
     kind?: string
   }[] = []
   let runtimes: { id: string; capabilities?: string[] }[] = []
-  let judges: { id: string }[] = []
+  let judges: JudgePickerChoice[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
   let traceSources: TraceSourceConfig[] = []
@@ -88,7 +88,7 @@ export default async function NewSchedulePage({
       </Link>
       <PageHeader title={t('create')} description={t('createDescription')} />
       {allowed ? (
-        <Card className="p-5">
+        <Card className="max-w-2xl p-5">
           <CreateScheduleForm
             datasets={datasets}
             harnesses={harnesses}

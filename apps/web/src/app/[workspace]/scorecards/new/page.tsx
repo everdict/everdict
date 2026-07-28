@@ -5,7 +5,7 @@ import { getTranslations } from 'next-intl/server'
 import { ScorecardCreate } from '@/widgets/scorecard-create'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
-import { judgesSchema } from '@/entities/judge'
+import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
 import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
@@ -34,7 +34,7 @@ export default async function NewScorecardPage({
     versionTags?: Record<string, string[]>
     kind?: string
   }[] = []
-  let judges: { id: string }[] = []
+  let judges: JudgePickerChoice[] = []
   let runtimes: { id: string; capabilities?: string[] }[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false

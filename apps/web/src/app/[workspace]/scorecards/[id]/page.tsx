@@ -7,7 +7,7 @@ import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
 import { RerunScorecardButton } from '@/features/rerun-scorecard'
 import { StopScorecardButton } from '@/features/stop-scorecard'
-import { judgesSchema } from '@/entities/judge'
+import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
 import { membersSchema } from '@/entities/member'
 import { runsSchema, type RunStatus } from '@/entities/run'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
@@ -37,6 +37,7 @@ import { resolveTemporalUiBase } from '@/shared/lib/temporal-ui'
 import { cn } from '@/shared/lib/utils'
 import { AutoRefresh } from '@/shared/ui/auto-refresh'
 import { Badge } from '@/shared/ui/badge'
+import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
@@ -44,7 +45,6 @@ import { DistributionBar } from '@/shared/ui/distribution-bar'
 import { ExpandableText } from '@/shared/ui/expandable-text'
 import { CriterionBadge, MetricLabel } from '@/shared/ui/metric-label'
 import { OriginInline, OriginPins } from '@/shared/ui/origin'
-import { buttonVariants } from '@/shared/ui/button'
 import { PageHeader } from '@/shared/ui/page-header'
 import { ScoreDetail } from '@/shared/ui/score-detail'
 import { SectionHeader } from '@/shared/ui/section-header'
@@ -357,7 +357,7 @@ export default async function ScorecardDetailPage({
   // only for a terminal batch the viewer can re-run (all optional — a failed fetch just narrows the picker, the
   // original selection is still reproduced).
   const canRun = !live && can(principal?.roles, 'scorecards:run')
-  let judgeChoices: { id: string }[] = []
+  let judgeChoices: JudgePickerChoice[] = []
   let runtimeChoices: { id: string }[] = []
   let myRunners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false

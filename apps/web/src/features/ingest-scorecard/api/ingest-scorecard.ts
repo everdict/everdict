@@ -95,7 +95,7 @@ export async function pullScorecardAction(
 export interface EvaluateTracesInput {
   sourceName: string // a REGISTERED workspace trace source (Settings › Observability) — pull by name (credential from the pool)
   traceIds: string[] // the selected trace ids to evaluate; each becomes one case (caseId = trace id)
-  judgeIds: string[] // Agent Judges to score each pulled trace (empty = control-plane default scoring)
+  judges: { id: string; version: string }[] // Agent Judges (id + version) to score each pulled trace (empty = control-plane default scoring)
 }
 
 // Server action: the "evaluate existing traces" scorecard — pull a chosen SET of traces from a registered source and
@@ -114,9 +114,7 @@ export async function evaluateTracesAction(
     // is registered for "tag" (everdict.run_id) correlation.
     source: { name: input.sourceName, correlate: 'id' as const },
     runs: input.traceIds.map((id) => ({ caseId: id, runId: id })),
-    ...(input.judgeIds.length > 0
-      ? { judges: input.judgeIds.map((id) => ({ id, version: 'latest' })) }
-      : {}),
+    ...(input.judges.length > 0 ? { judges: input.judges } : {}),
   }
   try {
     const rec = await controlPlane.ingestScorecardPull<{ id: string }>(ctx, body)

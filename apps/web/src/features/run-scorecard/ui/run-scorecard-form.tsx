@@ -2,10 +2,10 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { Controller, useForm } from 'react-hook-form'
 
+import { JudgePicker, type JudgePickerChoice, type JudgeRef } from '@/entities/judge'
 import { CapabilityBadge, capabilityFit, CapabilityFitNote } from '@/entities/runtime'
 import { versionOptions } from '@/shared/lib/version-options'
 import { Button } from '@/shared/ui/button'
@@ -21,7 +21,7 @@ interface Values {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
-  judgeIds: string[] // Optional Agent Judges to score each case's trace → judge:<id> metrics (empty = control-plane default scoring).
+  judges: JudgeRef[] // Optional Agent Judges (id + version) to score each case's trace → judge:<id> metrics (empty = control-plane default scoring).
   runtime: string // Execution location (registered runtime id or self runner target). The control plane 400s an unspecified placement — required.
   concurrency: string // Parallelism (empty = control plane default). Parsed to a number on submit.
   trials: string // Run each case N times for pass@k / flakiness (empty = 1). Parsed to a number on submit.
@@ -48,7 +48,7 @@ export function RunScorecardForm({
     versionTags?: Record<string, string[]>
     kind?: string
   }[]
-  judges?: { id: string }[] // Registered Agent Judges (model|harness) selectable to score each case
+  judges?: JudgePickerChoice[] // Registered Agent Judges (model|harness) selectable to score each case, with their versions
   runtimes?: { id: string; capabilities?: string[] }[] // capabilities = latest version's declared caps (for fit preview)
   runners?: { id: string; label: string }[]
   hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
@@ -70,7 +70,7 @@ export function RunScorecardForm({
       datasetVersion: 'latest',
       harnessId: harnesses[0]?.id ?? 'scripted',
       harnessVersion: 'latest',
-      judgeIds: [],
+      judges: [],
       runtime: '',
       concurrency: '',
       trials: '',
@@ -106,9 +106,7 @@ export function RunScorecardForm({
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const { concurrency, trials, caseIds, caseLimit, caseTags, judgeIds, ...rest } = values
-    // Selected judges → the API's judges:[{id,version}] (version latest); omitted when none picked.
-    const judgeRefs = judgeIds.map((id) => ({ id, version: 'latest' }))
+    const { concurrency, trials, caseIds, caseLimit, caseTags, judges: judgeRefs, ...rest } = values
     const n = Number.parseInt(concurrency, 10) // empty/invalid → omit (use control plane default)
     const tn = Number.parseInt(trials, 10) // empty/invalid → omit (1 trial)
     // Partial run — ids (explicit, split on comma/space) → tags (any-match) → limit (first N). All empty = run all (omit cases).
@@ -135,9 +133,10 @@ export function RunScorecardForm({
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        <div className="col-span-2 space-y-1.5">
+    // Width is owned by the wizard's Card (the wrapper) — the form fills it; grids stack below sm.
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor="datasetId">{t('datasetLabel')}</Label>
           <Controller
             control={control}
@@ -177,8 +176,8 @@ export function RunScorecardForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <div className="col-span-2 space-y-1.5">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor="harnessId">{t('harnessLabel')}</Label>
           <Controller
             control={control}
@@ -218,7 +217,8 @@ export function RunScorecardForm({
         </div>
       </div>
 
-      {/* Agent Judges (optional) — model/harness judges that score each case's trace; each pick aggregates as a judge:<id> metric. */}
+      {/* Agent Judges (optional) — model/harness judges that score each case's trace; each pick aggregates as a
+          judge:<id> metric and carries its own version (default latest). */}
       <div className="space-y-1.5">
         <div className="flex items-center gap-1">
           <Label htmlFor="judges">{t('judgesLabel')}</Label>
@@ -226,46 +226,15 @@ export function RunScorecardForm({
         </div>
         <Controller
           control={control}
-          name="judgeIds"
-          render={({ field }) => {
-            const available = judges
-              .filter((j) => !field.value.includes(j.id))
-              .map((j) => ({ value: j.id }))
-            return (
-              <div className="space-y-2">
-                <Combobox
-                  id="judges"
-                  options={available}
-                  value=""
-                  onChange={(v) => {
-                    if (v && !field.value.includes(v)) field.onChange([...field.value, v])
-                  }}
-                  placeholder={t('judgesPlaceholder')}
-                  emptyText={t('judgesEmpty')}
-                />
-                {field.value.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {field.value.map((id) => (
-                      <span
-                        key={id}
-                        className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-0.5 font-mono text-[12px] font-[510] text-secondary-foreground ring-1 ring-inset ring-border"
-                      >
-                        {id}
-                        <button
-                          type="button"
-                          aria-label={t('judgesRemove', { id })}
-                          onClick={() => field.onChange(field.value.filter((x) => x !== id))}
-                          className="text-faint transition-colors hover:text-destructive"
-                        >
-                          <X className="size-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          }}
+          name="judges"
+          render={({ field }) => (
+            <JudgePicker
+              id="judges"
+              judges={judges}
+              value={field.value}
+              onChange={field.onChange}
+            />
+          )}
         />
         <p className="text-[12px] text-muted-foreground">{t('judgesHelp')}</p>
       </div>
@@ -373,7 +342,7 @@ export function RunScorecardForm({
           </div>
           <Input id="caseIds" placeholder={t('caseIdsPlaceholder')} {...register('caseIds')} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <div className="flex items-center gap-1">
               <Label htmlFor="caseLimit">{t('caseLimitLabel')}</Label>

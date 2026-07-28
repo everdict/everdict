@@ -20,3 +20,4 @@ export {
   type JudgeFieldChange,
   type JudgeSpecDiff,
 } from './model/schema'
+export { JudgePicker, type JudgeRef, type JudgePickerChoice } from './ui/judge-picker'

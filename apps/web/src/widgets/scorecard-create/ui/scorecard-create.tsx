@@ -5,6 +5,7 @@ import { Play, Telescope } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { RunScorecardForm } from '@/features/run-scorecard'
+import type { JudgePickerChoice } from '@/entities/judge'
 import type { TraceSourceConfig } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
 import { Card } from '@/shared/ui/card'
@@ -32,7 +33,7 @@ export function ScorecardCreate({
     versionTags?: Record<string, string[]>
     kind?: string
   }[]
-  judges: { id: string }[]
+  judges: JudgePickerChoice[]
   runtimes: { id: string; capabilities?: string[] }[]
   runners: { id: string; label: string }[]
   hasWorkspaceRunners: boolean
@@ -71,7 +72,9 @@ export function ScorecardCreate({
       </p>
 
       {mode === 'run' ? (
-        <Card className="p-5">
+        // The card owns the form's width (the form fills it) — a full-width card would leave the fields hugging
+        // the left edge on wide screens. The traces mode keeps the full width for its trace-browser table.
+        <Card className="max-w-2xl p-5">
           <RunScorecardForm
             datasets={datasets}
             harnesses={harnesses}
