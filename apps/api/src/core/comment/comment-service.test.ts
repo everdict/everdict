@@ -224,9 +224,11 @@ describe("CommentService", () => {
 // @everdict in the thread — the discussion-agent bridge (placeholder comment + detached turn trigger).
 describe("CommentService discussion agent (askAgent)", () => {
   type RunnerInput = Parameters<DiscussionTurnRunner["run"]>[0];
+  type AnswerPing = { recipient: string; commentId: string; preview: string; ok: boolean };
   function agentSvc(opts: { failRunner?: boolean } = {}) {
     const store = new InMemoryCommentStore();
     const calls: RunnerInput[] = [];
+    const pings: AnswerPing[] = [];
     const runner: DiscussionTurnRunner = {
       run: async (input) => {
         calls.push(input);
@@ -234,14 +236,18 @@ describe("CommentService discussion agent (askAgent)", () => {
       },
     };
     let n = 0;
+    let clock = 0; // now()를 명시적으로 진행시켜 sweep의 staleness 판정을 검증한다
     const service = new CommentService({
       store,
       discussionRunner: runner,
       memberNames: async () => ({ "u-a": "Alice", "u-b": "Bob" }),
+      notifyAgentAnswer: async ({ recipient, commentId, preview, ok }) => {
+        pings.push({ recipient, commentId, preview, ok });
+      },
       newId: () => `c${++n}`,
-      now: () => `2026-07-04T00:00:${String(n).padStart(2, "0")}.000Z`,
+      now: () => new Date(Date.parse("2026-07-04T00:00:00.000Z") + clock).toISOString(),
     });
-    return { service, store, calls };
+    return { service, store, calls, pings, advance: (ms: number) => (clock += ms) };
   }
 
   it("askAgent posts the member comment, creates a running agent placeholder in the same thread, and fires the runner with the thread snapshot", async () => {
@@ -388,5 +394,70 @@ describe("CommentService discussion agent (askAgent)", () => {
     await expect(service.applyProgress("acme", "nope", { status: "complete" })).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
+  });
+
+  it("the placeholder remembers the asker and reaching complete pings exactly them (once — a re-report does not re-ping)", async () => {
+    const { service, pings } = agentSvc();
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-b",
+      body: "@everdict q",
+      askAgent: true,
+    });
+    const placeholder = (await service.list("acme", "harness", "h")).find((c) => c.authorKind === "agent");
+    if (!placeholder) throw new Error("placeholder missing");
+    expect(placeholder.agentAskedBy).toBe("u-b");
+    await service.applyProgress("acme", placeholder.id, { status: "complete", body: "**answer**" });
+    expect(pings).toEqual([{ recipient: "u-b", commentId: placeholder.id, preview: "**answer**", ok: true }]);
+    // the agent re-reports the same terminal state (retry) — no duplicate ping
+    await service.applyProgress("acme", placeholder.id, { status: "complete", body: "**answer**" });
+    expect(pings).toHaveLength(1);
+  });
+
+  it("a failed answer pings the asker with ok:false and no preview", async () => {
+    const { service, pings } = agentSvc();
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-a",
+      body: "@everdict q",
+      askAgent: true,
+    });
+    const placeholder = (await service.list("acme", "harness", "h")).find((c) => c.authorKind === "agent");
+    if (!placeholder) throw new Error("placeholder missing");
+    await service.applyProgress("acme", placeholder.id, { status: "failed" });
+    expect(pings).toEqual([{ recipient: "u-a", commentId: placeholder.id, preview: "", ok: false }]);
+  });
+
+  it("sweepStuckAgentAnswers fails only answers stale beyond the window, pinging their askers", async () => {
+    const { service, pings, advance } = agentSvc();
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-a",
+      body: "@everdict q1",
+      askAgent: true,
+    });
+    // 20 min pass — the first turn's callbacks are dead. A fresh ask on another resource starts now.
+    advance(20 * 60_000);
+    await service.create({
+      tenant: "acme",
+      resourceType: "dataset",
+      resourceId: "d",
+      author: "u-b",
+      body: "@everdict q2",
+      askAgent: true,
+    });
+    const swept = await service.sweepStuckAgentAnswers(15 * 60_000);
+    expect(swept).toBe(1);
+    const stale = (await service.list("acme", "harness", "h")).find((c) => c.authorKind === "agent");
+    const fresh = (await service.list("acme", "dataset", "d")).find((c) => c.authorKind === "agent");
+    expect(stale?.agentStatus).toBe("failed");
+    expect(fresh?.agentStatus).toBe("running"); // untouched — still within the window
+    expect(pings).toEqual([{ recipient: "u-a", commentId: stale?.id, preview: "", ok: false }]);
   });
 });

@@ -128,6 +128,8 @@ export function buildIntegrations(deps: {
         members.map((m) => [m.subject, m.name ?? m.email?.split("@")[0] ?? m.subject] as const),
       );
     },
+    // The agent's answer landed/failed → ping the asker's bell (they may have left the page while the turn ran).
+    notifyAgentAnswer: async ({ tenant, ...input }) => notificationService.notifyAgentAnswer(tenant, input),
     notifyMention: async ({ tenant, comment, recipients }) => {
       // listMembers already merges in profile names — the mentioner's display name (name > email local-part > default).
       const member = await membershipService

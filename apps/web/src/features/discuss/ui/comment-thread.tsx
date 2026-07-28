@@ -311,9 +311,9 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
   )
 }
 
-// An agent answer renders compactly by lifecycle: a live "doing now" line while it works, an approval nudge while
-// parked, then ONLY the final markdown — the full reasoning/tool transcript lives behind "view details" (the
-// right panel opens the backing discussion session).
+// An agent answer renders compactly by lifecycle: a live "doing now" line while it works, an inline approval
+// strip while parked, then ONLY the final markdown — the full reasoning/tool transcript lives behind "view
+// details" (the right panel opens the backing discussion session).
 function AgentCommentBody({ item }: { item: ThreadComment }) {
   const t = useTranslations('discuss')
   if (item.agentStatus === 'complete')
@@ -324,16 +324,14 @@ function AgentCommentBody({ item }: { item: ThreadComment }) {
         {t('agentFailed')}
       </Callout>
     )
+  if (item.agentStatus === 'awaiting_approval' && item.agentSessionId)
+    return <ApprovalStrip sessionId={item.agentSessionId} />
   if (item.agentStatus === 'awaiting_approval')
     return (
-      <button
-        type="button"
-        onClick={() => item.agentSessionId && openAgentSessionInShell(item.agentSessionId)}
-        className="inline-flex items-center gap-1.5 text-[12.5px] font-[510] text-amber-600 transition-colors hover:text-amber-500 dark:text-amber-400"
-      >
+      <span className="inline-flex items-center gap-1.5 text-[12.5px] font-[510] text-amber-600 dark:text-amber-400">
         <ShieldAlert className="size-3.5" />
         {t('awaitingApproval', { name: item.agentActivity?.replace(/^tool:/, '') ?? '' })}
-      </button>
+      </span>
     )
   // running (or a not-yet-reported placeholder)
   return (
@@ -341,6 +339,88 @@ function AgentCommentBody({ item }: { item: ThreadComment }) {
       <Loader2 className="size-3.5 animate-spin" />
       {activityLabel(t, item.agentActivity)}
     </span>
+  )
+}
+
+// Inline HITL: the parked write-tool asks, decidable RIGHT IN the comment (any member — the discussion session
+// is workspace-visible and the permission route accepts it). Polls the session's /pending while parked; a
+// decision posts to the normal /permission route and the thread's own polling reflects the resumed turn.
+function ApprovalStrip({ sessionId }: { sessionId: string }) {
+  const t = useTranslations('discuss')
+  const [asks, setAsks] = useState<{ requestId: string; name: string }[]>([])
+  useEffect(() => {
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/pending`, {
+          cache: 'no-store',
+        })
+        if (!res.ok) return
+        const data = (await res.json()) as {
+          pending?: { requestId?: unknown; name?: unknown }[]
+        }
+        if (!cancelled && Array.isArray(data.pending))
+          setAsks(
+            data.pending
+              .filter(
+                (p): p is { requestId: string; name: string } =>
+                  typeof p.requestId === 'string' && typeof p.name === 'string'
+              )
+              .map((p) => ({ requestId: p.requestId, name: p.name }))
+          )
+      } catch {
+        // silent — retried on the next tick
+      }
+    }
+    void tick()
+    const interval = setInterval(() => void tick(), 2500)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [sessionId])
+  function decide(requestId: string, decision: 'allow' | 'deny') {
+    setAsks((prev) => prev.filter((a) => a.requestId !== requestId))
+    // Fire-and-forget: a failure falls back to the server-side deny-on-timeout, so the UI never blocks on it.
+    void fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/permission`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requestId, decision }),
+    }).catch(() => undefined)
+  }
+  if (asks.length === 0)
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[12.5px] font-[510] text-amber-600 dark:text-amber-400">
+        <ShieldAlert className="size-3.5" />
+        {t('awaitingApproval', { name: '…' })}
+      </span>
+    )
+  return (
+    <div className="space-y-1.5">
+      {asks.map((ask) => (
+        <div key={ask.requestId} className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-[510] text-amber-600 dark:text-amber-400">
+            <ShieldAlert className="size-3.5" />
+            {t('awaitingApproval', { name: ask.name })}
+          </span>
+          <Button
+            size="sm"
+            className="h-6 px-2 text-[11.5px]"
+            onClick={() => decide(ask.requestId, 'allow')}
+          >
+            {t('approve')}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 px-2 text-[11.5px]"
+            onClick={() => decide(ask.requestId, 'deny')}
+          >
+            {t('deny')}
+          </Button>
+        </div>
+      ))}
+    </div>
   )
 }
 

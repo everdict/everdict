@@ -17,6 +17,7 @@ export const commentSchema = z.object({
   agentStatus: z.enum(['running', 'awaiting_approval', 'complete', 'failed']).optional(),
   agentActivity: z.string().optional(), // machine token ("thinking"|"writing"|"tool:<name>") — localized at render
   agentSessionId: z.string().optional(), // the backing workspace-visible agent conversation
+  agentAskedBy: z.string().optional(), // the asking member — the completion notification's recipient
   createdAt: z.string(),
   updatedAt: z.string(),
 })

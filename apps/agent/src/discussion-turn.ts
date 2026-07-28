@@ -38,6 +38,9 @@ export function buildDiscussionPrompt(input: DiscussionTurnInput): string {
     ...input.thread.map((c) => `[${c.at}] ${c.authorName}: ${c.body}`),
     "",
     "Respond to the newest @everdict request, using the discussion and the referenced entity as context.",
+    "You have your normal workspace tools INCLUDING mutating actions — when the request asks you to DO",
+    "something (tag, retry, register, …), do it with the right tool; each mutation pauses for a member's",
+    "approval, so never refuse an action just because it writes.",
     "Your reply is posted into the thread as a comment: write a self-contained markdown answer and keep it",
     "concise — this is a discussion, not a report. Prefer reasonable assumptions over asking questions back.",
   ];

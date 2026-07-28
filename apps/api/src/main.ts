@@ -267,6 +267,10 @@ async function main(): Promise<void> {
     membershipService,
     runtimeSecretsFor,
   });
+  // Stranded discussion answers (@everdict comments whose agent-side callbacks died — crash / severed detached
+  // turn) → failed + asker ping. 15 min staleness safely exceeds the activity-tick cadence AND the approval-park
+  // window (10 min, deny-on-expiry then resumes), so anything older is dead. Same sweep idiom as browser sessions.
+  setInterval(() => void commentService.sweepStuckAgentAnswers(15 * 60_000).catch(() => {}), 60_000).unref();
 
   // Per-runtime backend access for already-dispatched cases (adoption/kill + live-observability lane reads). Built
   // before run/scorecard because their live-observability + supersede-kill wiring closes over these functions.

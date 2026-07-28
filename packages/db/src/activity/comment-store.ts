@@ -36,6 +36,12 @@ export class InMemoryCommentStore implements CommentStore {
     };
   }
 
+  async listStuckAgentAnswers(updatedBefore: string): Promise<CommentRecord[]> {
+    return this.rows.filter(
+      (r) => (r.agentStatus === "running" || r.agentStatus === "awaiting_approval") && r.updatedAt < updatedBefore,
+    );
+  }
+
   async remove(tenant: string, id: string): Promise<void> {
     // Delete itself + the replies (children) on this comment together (prevents orphaned replies).
     for (let i = this.rows.length - 1; i >= 0; i--) {
@@ -57,12 +63,13 @@ interface CommentRow {
   agent_status: string | null;
   agent_activity: string | null;
   agent_session_id: string | null;
+  agent_asked_by: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
 
 const COMMENT_COLUMNS =
-  "id, tenant, resource_type, resource_id, parent_id, author, body, author_kind, agent_status, agent_activity, agent_session_id, created_at, updated_at";
+  "id, tenant, resource_type, resource_id, parent_id, author, body, author_kind, agent_status, agent_activity, agent_session_id, agent_asked_by, created_at, updated_at";
 
 function rowToRecord(row: CommentRow): CommentRecord {
   return CommentRecordSchema.parse({
@@ -77,6 +84,7 @@ function rowToRecord(row: CommentRow): CommentRecord {
     ...(row.agent_status !== null ? { agentStatus: row.agent_status } : {}),
     ...(row.agent_activity !== null ? { agentActivity: row.agent_activity } : {}),
     ...(row.agent_session_id !== null ? { agentSessionId: row.agent_session_id } : {}),
+    ...(row.agent_asked_by !== null ? { agentAskedBy: row.agent_asked_by } : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
@@ -87,8 +95,8 @@ export class PgCommentStore implements CommentStore {
 
   async add(record: CommentRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_comments (id, tenant, resource_type, resource_id, parent_id, author, body, author_kind, agent_status, agent_activity, agent_session_id, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      `INSERT INTO everdict_comments (id, tenant, resource_type, resource_id, parent_id, author, body, author_kind, agent_status, agent_activity, agent_session_id, agent_asked_by, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         record.id,
         record.tenant,
@@ -101,6 +109,7 @@ export class PgCommentStore implements CommentStore {
         record.agentStatus ?? null,
         record.agentActivity ?? null,
         record.agentSessionId ?? null,
+        record.agentAskedBy ?? null,
         record.createdAt,
         record.updatedAt,
       ],
@@ -139,6 +148,17 @@ export class PgCommentStore implements CommentStore {
     if (patch.agentActivity !== undefined) push("agent_activity", patch.agentActivity); // null clears
     push("updated_at", updatedAt);
     await this.client.query(`UPDATE everdict_comments SET ${sets.join(", ")} WHERE tenant = $1 AND id = $2`, params);
+  }
+
+  async listStuckAgentAnswers(updatedBefore: string): Promise<CommentRecord[]> {
+    const res = await this.client.query<CommentRow>(
+      `SELECT ${COMMENT_COLUMNS}
+       FROM everdict_comments
+       WHERE agent_status IN ('running', 'awaiting_approval') AND updated_at < $1
+       ORDER BY updated_at ASC`,
+      [updatedBefore],
+    );
+    return res.rows.map(rowToRecord);
   }
 
   async remove(tenant: string, id: string): Promise<void> {

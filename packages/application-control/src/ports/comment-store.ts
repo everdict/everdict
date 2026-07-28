@@ -15,5 +15,8 @@ export interface CommentStore {
   get(tenant: string, id: string): Promise<CommentRecord | undefined>;
   // Patch an agent comment's lifecycle fields (only agent comments are ever updated — member comments are immutable).
   update(tenant: string, id: string, patch: CommentUpdatePatch, updatedAt: string): Promise<void>;
+  // Cross-tenant sweep input: agent comments still running/awaiting_approval whose updatedAt is older than the
+  // cutoff — their lifecycle callbacks died (agent crash / severed trigger). The service marks them failed.
+  listStuckAgentAnswers(updatedBefore: string): Promise<CommentRecord[]>;
   remove(tenant: string, id: string): Promise<void>;
 }

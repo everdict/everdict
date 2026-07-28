@@ -183,6 +183,31 @@ export class NotificationService {
     }
   }
 
+  // The discussion agent's answer landed on (or fell off) a comment thread — tell the asker, who may have left the
+  // page while the turn ran. Reuses the comment_mention kind so the bell's resource-link + anchor machinery applies
+  // unchanged. Feed-only (low-noise), best-effort like every notification.
+  async notifyAgentAnswer(
+    tenant: string,
+    input: {
+      recipient: string; // the asking member (the agent comment's agentAskedBy)
+      resourceType: string;
+      resourceId: string;
+      commentId: string; // the agent comment — the bell jumps to its anchor
+      preview: string; // final answer preview (empty on failure)
+      ok: boolean; // complete vs failed
+    },
+  ): Promise<void> {
+    const preview = input.preview.trim().replace(/\s+/g, " ").slice(0, 140);
+    await this.pushFeed({
+      workspace: tenant,
+      recipient: input.recipient,
+      kind: "comment_mention",
+      title: input.ok ? "Everdict answered in the discussion" : "Everdict couldn't answer your question",
+      ...(preview.length > 0 ? { body: preview } : {}),
+      link: { resourceType: input.resourceType, resourceId: input.resourceId, commentId: input.commentId },
+    });
+  }
+
   // Feed write — swallows failures independently of Mattermost (so one channel's outage doesn't block the other).
   private async pushFeed(row: Omit<NotificationRecord, "id" | "createdAt">): Promise<void> {
     if (!this.deps.feed) return;

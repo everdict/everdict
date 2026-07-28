@@ -37,6 +37,16 @@ export interface CommentServiceDeps {
   discussionRunner?: DiscussionTurnRunner;
   // subject → display name for the thread snapshot the agent reads. Unset → raw subjects.
   memberNames?: (tenant: string) => Promise<Record<string, string>>;
+  // Tell the asker the agent's answer landed/failed (they may have left the page). Best-effort; unset = no ping.
+  notifyAgentAnswer?: (input: {
+    tenant: string;
+    recipient: string;
+    resourceType: string;
+    resourceId: string;
+    commentId: string;
+    preview: string;
+    ok: boolean;
+  }) => Promise<void>;
   newId?: () => string;
   now?: () => string;
 }
@@ -150,6 +160,7 @@ export class CommentService {
       agentStatus: "running",
       agentActivity: "thinking",
       agentSessionId: sessionId,
+      agentAskedBy: trigger.author, // the completion notification's recipient (survives restarts)
       createdAt: ts,
       updatedAt: ts,
     };
@@ -203,6 +214,36 @@ export class CommentService {
       },
       this.now(),
     );
+    // Reaching a terminal state pings the asker (they may have left the page while the turn ran). Best-effort —
+    // a notification failure never fails the lifecycle write; re-reports of the same terminal state don't re-ping.
+    if (terminal && existing.agentStatus !== patch.status && existing.agentAskedBy && this.deps.notifyAgentAnswer) {
+      try {
+        await this.deps.notifyAgentAnswer({
+          tenant,
+          recipient: existing.agentAskedBy,
+          resourceType: existing.resourceType,
+          resourceId: existing.resourceId,
+          commentId,
+          preview: patch.status === "complete" ? (patch.body ?? "") : "",
+          ok: patch.status === "complete",
+        });
+      } catch {
+        // Ignore notification failure (the lifecycle is already persisted).
+      }
+    }
+  }
+
+  // Sweep for stranded agent answers: the lifecycle is driven by the agent service's callbacks, which die with it
+  // (a crash / severed detached turn) — a comment then shows "running"/"승인 대기" forever. Anything non-terminal
+  // that has not been touched for `staleMs` is dead (activity ticks land far more often; an approval park times out
+  // and resumes within the discussion window) → mark failed and ping the asker. Returns how many were swept.
+  async sweepStuckAgentAnswers(staleMs: number): Promise<number> {
+    const cutoff = new Date(Date.parse(this.now()) - staleMs).toISOString();
+    const stuck = await this.deps.store.listStuckAgentAnswers(cutoff);
+    for (const comment of stuck) {
+      await this.applyProgress(comment.tenant, comment.id, { status: "failed" });
+    }
+    return stuck.length;
   }
 
   // Delete — the author or a workspace admin only. Missing → 404, unauthorized → 403.

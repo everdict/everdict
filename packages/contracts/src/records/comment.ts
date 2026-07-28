@@ -21,6 +21,7 @@ export const CommentRecordSchema = z.object({
   // Machine-readable "doing now" token while running: "thinking" | "writing" | "tool:<name>". The web localizes it.
   agentActivity: z.string().optional(),
   agentSessionId: z.string().optional(), // the backing agent conversation (workspace-visible) — the detail/continue surface
+  agentAskedBy: z.string().optional(), // the asking member's subject — the completion notification's recipient
   createdAt: z.string(),
   updatedAt: z.string(),
 });
