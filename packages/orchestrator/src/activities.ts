@@ -1,17 +1,31 @@
 import type { Dispatcher } from "@everdict/backends";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
+import { Agent, fetch as undiciFetch } from "undici";
 import type { Activities } from "./types.js";
 
 // Config for the scheduled-fire activities to call the control-plane internal routes (worker→API HTTP bridge). Without it, the fire activities are disabled.
 export interface ScheduleActivityConfig {
   apiUrl: string; // control-plane base URL (e.g. http://localhost:8787)
   internalToken: string; // /internal/** x-internal-token
+  // Ceiling for the control plane to ANSWER one internal call (ms; 0 disables — the Temporal activity timeout is
+  // then the only bound). The batch-case bridge holds ONE request open while the control plane executes AND
+  // SETTLES a whole eval case; on the DEFAULT global fetch, undici's 300s headersTimeout cut that socket, the
+  // activity retry re-fired the same >5-minute case, and every long case failed identically → empty scorecards.
+  headersTimeoutMs?: number;
 }
+
+// Default = the batch-case activity's startToCloseTimeout (1 hour, workflows.ts) — the REAL budget for one case.
+const DEFAULT_HEADERS_TIMEOUT_MS = 60 * 60_000;
 
 // Activities are the non-deterministic, I/O-allowed zone — route/dispatch to the real backend here, and bridge scheduled fires via the internal routes.
 // Takes the worker's Dispatcher (Router or a capacity-aware Scheduler) as a closure. If schedule is unset, the fire activities throw
 // (scheduled workflows only start when Temporal+API are configured, so they aren't called on the normal path).
 export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActivityConfig): Activities {
+  // The worker owns its OWN undici dispatcher with the header/body timeouts lifted to the activity budget —
+  // never the global fetch defaults (see ScheduleActivityConfig.headersTimeoutMs).
+  const timeoutMs = schedule?.headersTimeoutMs ?? DEFAULT_HEADERS_TIMEOUT_MS;
+  const agent = schedule ? new Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs }) : undefined;
+  const fetch: typeof undiciFetch = (url, init) => undiciFetch(url, { ...init, dispatcher: agent });
   return {
     dispatchCase(job: CaseJob): Promise<CaseResult> {
       return dispatcher.dispatch(job);

@@ -24,7 +24,14 @@ export async function runWorker(opts: WorkerOptions = {}): Promise<void> {
   // Scheduled-fire activities — bridge to the control-plane internal routes (active only when both are set; for scheduledScorecardWorkflow only).
   const apiUrl = process.env.EVERDICT_API_URL;
   const internalToken = process.env.EVERDICT_INTERNAL_TOKEN;
-  const scheduleApi = apiUrl && internalToken ? { apiUrl, internalToken } : undefined;
+  // Internal-bridge response ceiling (ms; 0 disables) — the batch-case call holds the response for a WHOLE eval
+  // case, so this must never fall back to undici's 300s default (see ScheduleActivityConfig.headersTimeoutMs).
+  const timeoutRaw = Number(process.env.EVERDICT_INTERNAL_HTTP_TIMEOUT_MS ?? "");
+  const headersTimeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw >= 0 ? timeoutRaw : undefined;
+  const scheduleApi =
+    apiUrl && internalToken
+      ? { apiUrl, internalToken, ...(headersTimeoutMs !== undefined ? { headersTimeoutMs } : {}) }
+      : undefined;
 
   const connection = await NativeConnection.connect({ address: opts.address ?? "localhost:7233" });
   try {
