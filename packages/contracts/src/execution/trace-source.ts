@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { EnvSnapshot } from "./environment.js";
 import { type TraceEvent, TraceEventSchema } from "./trace.js";
 
+// The run's trace state on the platform — the completion signal of the front-door "trace" completion mode.
+// "absent" = not arrived yet · "running" = the platform reports it in progress · "ok"/"error" = terminal.
+export type TraceRunStatus = "absent" | "running" | "ok" | "error";
+
 // Pull one run's trace that the harness exported to an observability platform and return it as
 // normalized TraceEvent[] — the inbound mirror of TraceSink. Adapter interfaces live in the contract
 // root (the repo's deliberate inversion); the per-platform fetch impls stay in @everdict/trace.
@@ -11,6 +15,10 @@ export interface TraceSource {
   // kinds; screenshot refs resolved to bytes best-effort). Optional: kinds/fakes without evidence extraction fall
   // back to fetch() (events only). The pull-ingest path synthesizes a judge snapshot from the evidence.
   fetchDetailed?(runId: string): Promise<FetchedTrace>;
+  // Terminal-state probe for the run's trace — polled by the front-door "trace" completion mode until the platform
+  // reports the trace terminal. Optional: a source without a state concept is probed presence-based by the caller
+  // (any events = done), so only state-aware platforms (MLflow TraceInfo.state) need to implement it.
+  status?(runId: string): Promise<TraceRunStatus>;
 }
 
 // Options for enumerating a platform's recent traces (the browser/wizard list surface).

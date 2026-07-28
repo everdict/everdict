@@ -5,6 +5,7 @@ import {
   type SpanAttrMapping,
   type TraceEvent,
   type TraceInspectResult,
+  type TraceRunStatus,
   type TraceSummary,
   UpstreamError,
 } from "@everdict/contracts";
@@ -48,6 +49,7 @@ interface MlflowSpan {
 }
 interface MlflowTrace {
   spans?: MlflowSpan[];
+  trace_info?: MlflowTraceInfo; // 3.x traces/get also carries the TraceInfo (state etc.) beside the spans
 }
 
 function anyValue(v: MlflowAnyValue | undefined): unknown {
@@ -296,6 +298,45 @@ export class MlflowTraceSource implements BrowsableTraceSource {
 
   async fetch(runId: string): Promise<TraceEvent[]> {
     return (await this.fetchDetailed(runId)).events;
+  }
+
+  // Terminal-state probe (front-door "trace" completion): resolve the trace (id or tag correlation), then read the
+  // TraceInfo state from traces/get. IN_PROGRESS → running (the agent is still working); a server that reports no
+  // state degrades to presence ("ok" when the trace exists — such servers don't track progress, so presence is the
+  // best available signal and waiting longer would only burn the completion budget).
+  async status(runId: string): Promise<TraceRunStatus> {
+    let traceId = runId;
+    if (this.opts.correlate === "tag") {
+      const found = await this.traceIdByTag(runId);
+      if (!found) return "absent";
+      traceId = found;
+    }
+    const f = this.opts.fetchImpl ?? fetch;
+    const base = this.opts.endpoint.replace(/\/$/, "");
+    const res = await f(`${base}/api/3.0/mlflow/traces/get?trace_id=${encodeURIComponent(traceId)}`, {
+      ...(this.opts.headers ? { headers: this.opts.headers } : {}),
+    });
+    if (res.status === 404) return "absent";
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: res.status },
+        `MLflow trace status ${res.status}: ${text.slice(0, 200)}`,
+      );
+    }
+    let body: { trace?: MlflowTrace };
+    try {
+      body = (await res.json()) as { trace?: MlflowTrace };
+    } catch {
+      return "absent";
+    }
+    if (!body.trace) return "absent";
+    const s = (body.trace.trace_info?.state ?? body.trace.trace_info?.status ?? "").toUpperCase();
+    if (s === "OK") return "ok";
+    if (s === "ERROR") return "error";
+    if (s === "IN_PROGRESS" || s === "PENDING") return "running";
+    return "ok"; // no/unspecified state — presence-based degrade (see above)
   }
 
   // fetch + the evidence slots extracted via the configured mapping (screenshot refs resolved best-effort with the

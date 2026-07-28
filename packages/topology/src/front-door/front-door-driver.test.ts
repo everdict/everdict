@@ -1,5 +1,5 @@
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import type { FrontDoorCompletion } from "@everdict/contracts";
+import { type FrontDoorCompletion, UpstreamError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   type CallbackRendezvous,
@@ -526,6 +526,23 @@ describe("HttpFrontDoorDriver default submit (node http)", () => {
       await srv.close();
     }
   });
+
+  it("rejects a non-2xx submit response with the status + body (a failed submit must not flow downstream)", async () => {
+    const srv = await listen((_req, res) => {
+      res.writeHead(422, { "content-type": "application/json" });
+      res.end(JSON.stringify({ detail: "unprocessable" }));
+    });
+    try {
+      const err = await new HttpFrontDoorDriver()
+        .drive(baseReq({ base: `http://127.0.0.1:${srv.port}` }))
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as { code?: string }).code).toBe("UPSTREAM_ERROR");
+      expect((err as Error).message).toMatch(/HTTP 422[\s\S]*unprocessable/);
+    } finally {
+      await srv.close();
+    }
+  });
 });
 
 // Cancellation — a user stops the scorecard mid-run; the drive aborts promptly (CANCELLED) instead of draining the
@@ -601,6 +618,164 @@ describe("HttpFrontDoorDriver.drive — cancellation (user stop)", () => {
       now: steppingClock(10),
     });
     const p = driver.drive(baseReq({ completion, signal: controller.signal }));
+    controller.abort();
+    await expect(p).rejects.toMatchObject({ code: "CANCELLED" });
+  });
+});
+
+describe("HttpFrontDoorDriver.drive — submit path interpolation", () => {
+  it("interpolates {var} in the submit path with wiring (a session-coordinate path reaches the agent, not %7B…%7D)", async () => {
+    const urls: string[] = [];
+    const driver = new HttpFrontDoorDriver({
+      submit: async (url) => {
+        urls.push(url);
+      },
+    });
+    await driver.drive(
+      baseReq({ submit: "POST /sessions/{session_id}/command", wiring: { run_id: "fixed", session_id: "s-1" } }),
+    );
+    expect(urls[0]).toBe("http://agent:8000/sessions/s-1/command");
+  });
+
+  it("poll: a 4xx status GET fails the drive with the real cause; a 5xx is transient and polling continues", async () => {
+    const completion: FrontDoorCompletion = {
+      mode: "poll",
+      statusPath: "GET /s",
+      done: { field: "s", equals: "d" },
+      intervalMs: 10,
+      timeoutMs: 100,
+    };
+    // Given the status endpoint 422s (wrong statusPath/id — permanent) → the drive fails NOW with the real cause
+    const driver4 = new HttpFrontDoorDriver({
+      submit: async () => {},
+      getJson: async () => {
+        throw new UpstreamError("UPSTREAM_ERROR", { status: 422 }, "front-door GET failed: HTTP 422");
+      },
+      sleep: async () => {},
+      now: steppingClock(10),
+    });
+    await expect(driver4.drive(baseReq({ completion }))).rejects.toThrow(/HTTP 422/);
+    // Given a transient 502 on the first poll → polling continues and completes
+    let polls = 0;
+    const driver5 = new HttpFrontDoorDriver({
+      submit: async () => {},
+      getJson: async () => {
+        polls++;
+        if (polls === 1) throw new UpstreamError("UPSTREAM_ERROR", { status: 502 }, "bad gateway");
+        return { s: "d" };
+      },
+      sleep: async () => {},
+      now: steppingClock(10),
+    });
+    const outcome = await driver5.drive(baseReq({ completion }));
+    expect(outcome.status).toBe("done");
+  });
+});
+
+describe("HttpFrontDoorDriver.drive — trace completion", () => {
+  const completion: FrontDoorCompletion = { mode: "trace", intervalMs: 5, timeoutMs: 50 };
+
+  it("trace: fires the submit without awaiting its (run-long) response and completes when the probe reports done", async () => {
+    const driver = new HttpFrontDoorDriver({
+      submit: () => new Promise(() => {}), // the agent holds the submit response for the whole run — never resolves
+      sleep: async () => {},
+      now: steppingClock(10),
+    });
+    let calls = 0;
+    const outcome = await driver.drive(
+      baseReq({ completion, traceReady: async () => (++calls >= 2 ? "done" : "pending") }),
+    );
+    expect(outcome).toEqual({ traceRef: "fixed", status: "done" });
+  });
+
+  it("trace: a submit failure fails the drive on the next probe tick instead of burning the completion budget", async () => {
+    // Given a dead front door (conn refused) and a probe that would stay pending for a long deadline
+    let probes = 0;
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => {
+        throw new Error("connect ECONNREFUSED");
+      },
+      sleep: async () => {},
+      now: steppingClock(1),
+    });
+    // When driven with trace completion — Then the submit failure surfaces promptly ("never started" is not
+    // reported as "still working" until the case budget elapses)
+    const err = await driver
+      .drive(
+        baseReq({
+          completion: { mode: "trace", intervalMs: 5, timeoutMs: 10_000 },
+          traceReady: async () => {
+            probes++;
+            return "pending";
+          },
+        }),
+      )
+      .catch((e: unknown) => e);
+    expect((err as { code?: string }).code).toBe("UPSTREAM_ERROR");
+    expect((err as Error).message).toMatch(/ECONNREFUSED/);
+    expect(probes).toBeLessThanOrEqual(2); // failed fast — did not poll to the deadline
+  });
+
+  it("trace: a probe throw is treated as not-ready and retried (a transient platform read must not kill a live run)", async () => {
+    let calls = 0;
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => ({}),
+      sleep: async () => {},
+      now: steppingClock(10),
+    });
+    const outcome = await driver.drive(
+      baseReq({
+        completion,
+        traceReady: async () => {
+          calls++;
+          if (calls === 1) throw new Error("mlflow 502");
+          return "done";
+        },
+      }),
+    );
+    expect(outcome.status).toBe("done");
+  });
+
+  it("trace: the probe's failed state ends the drive as failed (the errored trace still reaches grading)", async () => {
+    const driver = new HttpFrontDoorDriver({ submit: async () => ({}), sleep: async () => {}, now: steppingClock(10) });
+    const outcome = await driver.drive(baseReq({ completion, traceReady: async () => "failed" }));
+    expect(outcome.status).toBe("failed");
+  });
+
+  it("trace: timeout when the trace never reaches a terminal state within the deadline", async () => {
+    const driver = new HttpFrontDoorDriver({ submit: async () => ({}), sleep: async () => {}, now: steppingClock(20) });
+    const outcome = await driver.drive(baseReq({ completion, traceReady: async () => "pending" }));
+    expect(outcome.status).toBe("timeout");
+  });
+
+  it("trace: fails explicitly when no trace-readiness probe is wired", async () => {
+    const driver = new HttpFrontDoorDriver({ submit: async () => ({}) });
+    await expect(driver.drive(baseReq({ completion }))).rejects.toThrow(/trace-readiness probe/);
+  });
+
+  it('trace: rejects correlate "returned" — the submit response is never awaited, so there is nothing to extract', async () => {
+    const driver = new HttpFrontDoorDriver({ submit: async () => ({}) });
+    await expect(
+      driver.drive(
+        baseReq({ completion, correlate: { mode: "returned", path: "id" }, traceReady: async () => "done" }),
+      ),
+    ).rejects.toThrow(/cannot use correlate "returned"/);
+  });
+
+  it("trace: a user stop wins over the monitored submit — CANCELLED, not the cancel-induced submit failure", async () => {
+    const controller = new AbortController();
+    const driver = new HttpFrontDoorDriver({
+      submit: () => new Promise(() => {}),
+      sleep: async () => {},
+      now: steppingClock(1),
+    });
+    const p = driver.drive(
+      baseReq({
+        completion: { mode: "trace", intervalMs: 5, timeoutMs: 10_000 },
+        signal: controller.signal,
+        traceReady: async () => "pending",
+      }),
+    );
     controller.abort();
     await expect(p).rejects.toMatchObject({ code: "CANCELLED" });
   });

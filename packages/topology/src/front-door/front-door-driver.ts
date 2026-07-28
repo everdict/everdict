@@ -85,6 +85,10 @@ export type SubmitFn = (
 ) => Promise<unknown>;
 // GET for status polling — returns the JSON response as-is.
 export type GetJsonFn = (url: string) => Promise<unknown>;
+// Trace-readiness probe for the "trace" completion model — answers whether the run's trace has reached a terminal
+// state on the observability platform. Injected by the backend (which owns trace-source resolution + the correlation
+// key), so the driver stays platform-free. "pending" = not arrived / still in progress.
+export type TraceReadyFn = () => Promise<"pending" | "done" | "failed">;
 // Streaming submit (stream completion model) — returns the POST response (SSE/JSON-lines) as an async sequence of parsed events.
 // timeoutMs is for a socket hard-abort (the logical timeout is checked separately by the driver via now() per event). Tests inject a fake async iterable.
 export type OpenStreamFn = (
@@ -113,6 +117,19 @@ const fetchSubmit: SubmitFn = (url, payload, opts) =>
       res.on("data", (chunk: Buffer) => chunks.push(chunk));
       res.on("end", () => {
         const text = Buffer.concat(chunks).toString("utf8");
+        // A non-2xx submit is a FAILED submit — reject with the real cause (status + body) instead of letting the
+        // error body flow downstream as a bogus correlation/result payload ("never started" must fail, not grade).
+        const status = res.statusCode ?? 0;
+        if (status < 200 || status >= 300) {
+          reject(
+            new UpstreamError(
+              "UPSTREAM_ERROR",
+              { url, status },
+              `front-door submit failed: HTTP ${status}${text ? ` — ${text.slice(0, 300)}` : ""}`,
+            ),
+          );
+          return;
+        }
         // Even if the response isn't JSON or is empty, injected mode doesn't need the body → parse leniently.
         try {
           resolve(text ? JSON.parse(text) : undefined);
@@ -161,8 +178,18 @@ const fetchSubmit: SubmitFn = (url, payload, opts) =>
     req.end(body);
   });
 // Default JSON GET — the base primitive for poll completion + egress sink retrieval (used unless injected).
+// Non-2xx throws with the status so the caller can tell a permanent contract error (4xx) from a transient one (5xx)
+// — pre-fix a 4xx error body silently failed the StatusMatch and burned the whole poll budget to "timeout".
 export const fetchJson: GetJsonFn = async (url) => {
   const res = await fetch(url, { headers: { accept: "application/json" } });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { url, status: res.status },
+      `front-door GET failed: HTTP ${res.status}${text ? ` — ${text.slice(0, 300)}` : ""}`,
+    );
+  }
   return res.json();
 };
 
@@ -182,6 +209,15 @@ export const fetchStream: OpenStreamFn = async function* (url, payload, opts) {
       body,
       signal: ctrl.signal,
     });
+    // A non-2xx stream submit is a FAILED submit — surface the status instead of "ended with no terminal event" (timeout).
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { url, status: res.status },
+        `front-door stream submit failed: HTTP ${res.status}${text ? ` — ${text.slice(0, 300)}` : ""}`,
+      );
+    }
     if (!res.body) return;
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -321,6 +357,7 @@ export interface FrontDoorDriveRequest {
   headers?: Record<string, string>; // submit/stream/callback request headers (interpolated; unset = none)
   encoding?: "json" | "form"; // body encoding (G2) — "form" = multipart/form-data (for attachment submits)
   files?: FrontDoorFilePart[]; // resolved attachments (from the case env) for the multipart submit (G2)
+  traceReady?: TraceReadyFn; // the terminal-trace probe for the "trace" completion model (a trace model with none fails explicitly)
   // Cancellation — aborts the in-flight submit/poll/stream/callback so a user stop ends the drive mid-flight
   // (throws CANCELLED, freeing the socket where the primitive supports it). Threaded from the dispatch signal.
   signal?: AbortSignal;
@@ -371,10 +408,12 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     if (req.completion?.mode === "stream") return this.driveStream(req, req.completion);
     // callback: fire-and-forget submit, then wait for the agent's inbound POST at the rendezvous.
     if (req.completion?.mode === "callback") return this.driveCallback(req, req.completion);
+    // trace: the submit response is not the signal — fire it (monitored, never discarded) and poll the trace's terminal state.
+    if (req.completion?.mode === "trace") return this.driveTrace(req, req.completion);
     const mp = methodPath(req.submit); // verb + path — method from submit ("POST /runs"), headers from req
     // Pass the completion model's timeoutMs as the submit socket idle timeout — for sync (unset) there's none (holding the response is normal).
     const timeoutMs = completionTimeoutMs(req.completion);
-    const response = await this.submit(joinUrl(req.base, mp.path), req.payload, {
+    const response = await this.submit(joinUrl(req.base, interpolatePath(mp.path, req.wiring)), req.payload, {
       method: mp.method,
       headers: req.headers,
       ...(req.encoding ? { encoding: req.encoding } : {}),
@@ -399,7 +438,7 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     completion: Extract<FrontDoorCompletion, { mode: "stream" }>,
   ): Promise<DriveOutcome> {
     const mp = methodPath(req.submit);
-    const url = joinUrl(req.base, mp.path);
+    const url = joinUrl(req.base, interpolatePath(mp.path, req.wiring));
     const start = this.now();
     let traceRef = req.traceRef;
     let correlated = false;
@@ -450,7 +489,7 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     }
     const runKey = req.traceRef; // the key embedded in callback_url (= the injected runId)
     const mp = methodPath(req.submit);
-    const response = await this.submit(joinUrl(req.base, mp.path), req.payload, {
+    const response = await this.submit(joinUrl(req.base, interpolatePath(mp.path, req.wiring)), req.payload, {
       method: mp.method,
       headers: req.headers,
       ...(req.encoding ? { encoding: req.encoding } : {}),
@@ -477,6 +516,87 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     return { traceRef, status: "timeout", response: undefined };
   }
 
+  // trace: for agents whose submit BLOCKS (holds the response for the whole run) or returns nothing useful — the
+  // result arrives only as the run's trace on the observability platform. The submit is fired WITHOUT blocking on
+  // its (possibly run-long) response, but its failure is MONITORED, never discarded: a dead front door
+  // (conn refused / non-2xx) fails the drive on the next probe tick instead of burning the whole case budget while
+  // "never started" is indistinguishable from "still working". Completion = the injected traceReady probe reporting
+  // the trace terminal (done/failed). No response ever feeds the result channel (sentinel observation doesn't apply).
+  private async driveTrace(
+    req: FrontDoorDriveRequest,
+    completion: Extract<FrontDoorCompletion, { mode: "trace" }>,
+  ): Promise<DriveOutcome> {
+    const probe = req.traceReady;
+    if (!probe) {
+      throw new InternalError(
+        "HARNESS_RUN_FAILED",
+        { mode: "trace" },
+        "Missing the trace-readiness probe required for the trace completion model.",
+      );
+    }
+    if (req.correlate?.mode === "returned") {
+      // Defensive twin of the schema refine — the submit response is never awaited here, so there is nothing to extract from.
+      throw new InternalError(
+        "HARNESS_RUN_FAILED",
+        { mode: "trace" },
+        'The trace completion model cannot use correlate "returned" — use injected correlation or contextId.',
+      );
+    }
+    const mp = methodPath(req.submit);
+    // Own abort chained to the drive signal: on return we abort it so a submit socket the agent is still holding
+    // open (its response was never the signal) is released instead of lingering past the run.
+    const ctrl = new AbortController();
+    const onOuterAbort = (): void => ctrl.abort();
+    if (req.signal) {
+      if (req.signal.aborted) ctrl.abort();
+      else req.signal.addEventListener("abort", onOuterAbort, { once: true });
+    }
+    let submitFailure: AppError | undefined;
+    void this.submit(joinUrl(req.base, interpolatePath(mp.path, req.wiring)), req.payload, {
+      method: mp.method,
+      headers: req.headers,
+      ...(req.encoding ? { encoding: req.encoding } : {}),
+      ...(req.files ? { files: req.files } : {}),
+      signal: ctrl.signal,
+    }).then(
+      () => undefined, // a response arriving (whenever) is fine — the trace is the signal
+      (err: unknown) => {
+        submitFailure =
+          err instanceof AppError
+            ? err
+            : new UpstreamError(
+                "UPSTREAM_ERROR",
+                {},
+                `front-door submit failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+      },
+    );
+    try {
+      const start = this.now();
+      while (this.now() - start < completion.timeoutMs) {
+        throwIfAborted(req.signal); // a user stop wins over a (cancel-induced) submit failure
+        if (submitFailure) throw submitFailure;
+        let state: "pending" | "done" | "failed" | undefined;
+        try {
+          state = await probe();
+        } catch {
+          // A transient platform read must not kill a live agent run — treat as not-ready and retry
+          // (a persistent failure surfaces as the completion timeout).
+          state = undefined;
+        }
+        if (state === "done") return { traceRef: req.traceRef, status: "done" };
+        if (state === "failed") return { traceRef: req.traceRef, status: "failed" };
+        await this.sleep(completion.intervalMs);
+      }
+      throwIfAborted(req.signal);
+      if (submitFailure) throw submitFailure;
+      return { traceRef: req.traceRef, status: "timeout" };
+    } finally {
+      ctrl.abort(); // release the held submit socket — its late failure after this point is irrelevant
+      if (req.signal) req.signal.removeEventListener("abort", onOuterAbort);
+    }
+  }
+
   private async awaitCompletion(
     completion: FrontDoorCompletion | undefined,
     base: string,
@@ -491,7 +611,17 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     const start = this.now();
     while (this.now() - start < completion.timeoutMs) {
       throwIfAborted(signal); // cancelled between polls → stop promptly (the status GET is short-lived)
-      const body = await this.getJson(statusUrl);
+      let body: unknown;
+      try {
+        body = await this.getJson(statusUrl);
+      } catch (err) {
+        // 4xx = a permanent contract/config error (wrong statusPath, bad id) → fail the drive with the real cause NOW.
+        // Anything else (5xx / network blip) is transient → keep polling within the completion budget.
+        const status = err instanceof AppError ? err.extra?.status : undefined;
+        if (typeof status === "number" && status >= 400 && status < 500) throw err;
+        await this.sleep(completion.intervalMs);
+        continue;
+      }
       if (statusMatches(completion.done, body)) return { status: "done", body };
       if (completion.failed && statusMatches(completion.failed, body)) return { status: "failed", body };
       await this.sleep(completion.intervalMs);

@@ -314,6 +314,17 @@ export const FrontDoorCompletionSchema = z.discriminatedUnion("mode", [
     failed: StatusMatchSchema.optional(),
     timeoutMs: z.number().int().positive().default(120000),
   }),
+  // trace — the submit response is NOT the completion signal (the agent may hold it open for the whole run, or return
+  // nothing useful); completion is the run's TRACE reaching a terminal state on the traceSource (MLflow TraceInfo.state
+  // etc.; a source without a state concept degrades to presence). For agents whose only reliable output channel is
+  // their observability trace. The driver fires the submit WITHOUT blocking on its response but NEVER discards its
+  // failure — a dead front door (conn refused / 4xx) fails the drive on the next probe tick instead of burning the
+  // whole case budget while "never started" masquerades as "still working".
+  z.object({
+    mode: z.literal("trace"),
+    intervalMs: z.number().int().positive().default(2000), // trace-terminal probe interval
+    timeoutMs: z.number().int().positive().default(120000),
+  }),
 ]);
 export type FrontDoorCompletion = z.infer<typeof FrontDoorCompletionSchema>;
 
@@ -358,22 +369,45 @@ export const FrontDoorTraceInlineSchema = z.object({ path: z.string().optional()
 export type FrontDoorTraceInline = z.infer<typeof FrontDoorTraceInlineSchema>;
 
 // Front-door contract — the task submit entry point (service/submit) + (optional) request body + completion-wait model + trace correlation + trace path.
-export const FrontDoorSpecSchema = z.object({
-  service: z.string(),
-  submit: z.string(),
-  trace: z.string().optional(),
-  request: FrontDoorRequestSchema.optional(), // unset = current 5-field body
-  completion: FrontDoorCompletionSchema.optional(), // unset = sync (current)
-  correlate: FrontDoorCorrelateSchema.optional(), // unset = injected (current)
-  // Controlled-coordinate trace key — a stable session/target id everdict injects into the agent (its thread/session
-  // identity) and the agent CANNOT overwrite, unlike the passive `everdict.run_id` tag it may replace with its own id.
-  // A `{{var}}`-interpolated template over the per-run vocabulary (e.g. "{{thread_id}}", "run-{{run_id}}"). When set, the
-  // trace is PULLED by this coordinate instead of the run id — pair it with `traceSource.correlate:"tag"` +
-  // `traceSource.correlateTag` (the session tag the agent writes) so a run whose agent overwrote `everdict.run_id` is
-  // still found. It only names an existing injected coordinate; it does not add a new body field. Design: docs/service-harness.md.
-  contextId: z.string().optional(),
-  traceInline: FrontDoorTraceInlineSchema.optional(), // unset = pull from traceSource; set = extract TraceEvent[] from the response
-});
+export const FrontDoorSpecSchema = z
+  .object({
+    service: z.string(),
+    submit: z.string(),
+    trace: z.string().optional(),
+    request: FrontDoorRequestSchema.optional(), // unset = current 5-field body
+    completion: FrontDoorCompletionSchema.optional(), // unset = sync (current)
+    correlate: FrontDoorCorrelateSchema.optional(), // unset = injected (current)
+    // Controlled-coordinate trace key — a stable session/target id everdict injects into the agent (its thread/session
+    // identity) and the agent CANNOT overwrite, unlike the passive `everdict.run_id` tag it may replace with its own id.
+    // A `{{var}}`-interpolated template over the per-run vocabulary (e.g. "{{thread_id}}", "run-{{run_id}}"). When set, the
+    // trace is PULLED by this coordinate instead of the run id — pair it with `traceSource.correlate:"tag"` +
+    // `traceSource.correlateTag` (the session tag the agent writes) so a run whose agent overwrote `everdict.run_id` is
+    // still found. It only names an existing injected coordinate; it does not add a new body field. Design: docs/service-harness.md.
+    contextId: z.string().optional(),
+    traceInline: FrontDoorTraceInlineSchema.optional(), // unset = pull from traceSource; set = extract TraceEvent[] from the response
+  })
+  // trace completion never awaits the submit response, so nothing exists to extract a `returned` id from, and an
+  // inline trace (which lives IN the response) can never arrive. Reject the contradictions at registration —
+  // failing here beats a run-time drive error 17 cases into a batch.
+  .superRefine((fd, ctx) => {
+    if (fd.completion?.mode !== "trace") return;
+    if (fd.correlate?.mode === "returned") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["correlate"],
+        message:
+          'completion "trace" cannot use correlate "returned" (the submit response is not awaited) — use injected correlation or contextId.',
+      });
+    }
+    if (fd.traceInline) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["traceInline"],
+        message:
+          'completion "trace" cannot use traceInline (the trace is pulled from the traceSource, not the response).',
+      });
+    }
+  });
 export type FrontDoorSpec = z.infer<typeof FrontDoorSpecSchema>;
 
 // process harness: a single process (one sandbox). Claude Code/Codex.

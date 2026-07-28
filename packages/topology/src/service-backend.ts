@@ -38,6 +38,7 @@ import {
   HttpFrontDoorDriver,
   type OpenStreamFn,
   type SubmitFn,
+  type TraceReadyFn,
   fetchJson,
   interpolateHeaders,
   interpolateString,
@@ -280,6 +281,35 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       const files = spec.frontDoor.request?.files?.length
         ? resolveFrontDoorFiles(spec.frontDoor.request.files, job.evalCase)
         : undefined;
+      // Controlled-coordinate correlate (gap 2): when frontDoor.contextId is set, the trace is keyed by that stable
+      // session/target coordinate (interpolated from the per-run vocabulary everdict injected — the agent can't
+      // overwrite it) instead of the run/correlate id. Computed BEFORE the drive because the trace completion model
+      // probes by the same key the post-drive pull will use.
+      const contextId = spec.frontDoor.contextId
+        ? interpolateString(spec.frontDoor.contextId, perRunVocabulary(keys, wiring))
+        : undefined;
+      // trace completion: the completion signal IS the run's trace reaching a terminal state, so the trace source is
+      // resolved BEFORE the drive (every other mode keeps the lazy post-drive resolution, whose failure degrades to an
+      // error event). A resolution failure here fails the run — without a source there is no completion signal at all.
+      let resolvedSource: TraceSource | undefined;
+      let traceReady: TraceReadyFn | undefined;
+      if (spec.frontDoor.completion?.mode === "trace") {
+        const selected = this.opts.traceSourceFor
+          ? await this.opts.traceSourceFor(job.tenant ?? "default", job.harness.id)
+          : undefined;
+        const source = selected ?? this.opts.traceSource;
+        resolvedSource = source;
+        const probeKey = contextId ?? runId;
+        // State-aware platforms report terminal per se (MLflow TraceInfo.state); a source without status() is probed
+        // presence-based (any events = done — the platform has no in-progress concept to wait on).
+        traceReady = async () => {
+          if (source.status) {
+            const s = await source.status(probeKey);
+            return s === "ok" ? "done" : s === "error" ? "failed" : "pending";
+          }
+          return (await source.fetch(probeKey)).length > 0 ? "done" : "pending";
+        };
+      }
       // Per-case wall-clock (completion liveness). The declared per-case budget (EvalCase.timeoutSec) bounds the WHOLE
       // drive so a dead/hung front-door — e.g. a sync-completion agent whose command stream died with the socket held
       // open — fails explicitly with a completion-timeout instead of hanging in `running` until an external cancel.
@@ -316,6 +346,7 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
           ...(headers ? { headers } : {}),
           ...(encoding ? { encoding } : {}),
           ...(files ? { files } : {}),
+          ...(traceReady ? { traceReady } : {}),
           // Cancellation + deadline — a user stop OR the per-case budget aborts the drive mid-flight (frees the socket +
           // the per-case browser is torn down by the finally below). Without this the topology run would drain forever.
           signal: driveAbort.signal,
@@ -355,13 +386,8 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
       // failure (auth / transient down / not emitted / malformed inline / unresolved source secret) does NOT kill the run
       // — record it as an error event and proceed with snapshot + grading (the browser snapshot is the primary signal).
       //
-      // Controlled-coordinate correlate (gap 2): when frontDoor.contextId is set, the trace is pulled by that stable
-      // session/target coordinate (interpolated from the per-run vocabulary everdict injected — the agent can't overwrite
-      // it) instead of outcome.traceRef, so a run whose agent replaced `everdict.run_id` with its own id is still found
-      // (pairs with traceSource.correlate:"tag" + correlateTag = the session tag). Absent = the run/correlate id (today).
-      const contextId = spec.frontDoor.contextId
-        ? interpolateString(spec.frontDoor.contextId, perRunVocabulary(keys, wiring))
-        : undefined;
+      // The pull key: the controlled coordinate when declared (see above — a run whose agent replaced
+      // `everdict.run_id` with its own id is still found), else the run/correlate id.
       const traceKey = contextId ?? outcome.traceRef;
       const inline = spec.frontDoor.traceInline;
       // trace-delivery (gap 3): a containerless service target where the agent offloaded its observation (screenshot/DOM)
@@ -374,10 +400,12 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable {
         if (inline) {
           trace = extractInlineTrace(outcome.response, inline.path);
         } else {
-          const selected = this.opts.traceSourceFor
-            ? await this.opts.traceSourceFor(job.tenant ?? "default", job.harness.id)
-            : undefined;
-          const source = selected ?? this.opts.traceSource;
+          // The trace-completion path already resolved the source (and probed by the same key) — reuse it.
+          const selected =
+            !resolvedSource && this.opts.traceSourceFor
+              ? await this.opts.traceSourceFor(job.tenant ?? "default", job.harness.id)
+              : undefined;
+          const source = resolvedSource ?? selected ?? this.opts.traceSource;
           if (wantsTraceEvidence && source.fetchDetailed) {
             const detailed = await source.fetchDetailed(traceKey);
             trace = detailed.events;

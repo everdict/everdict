@@ -2181,3 +2181,90 @@ describe("ServiceTopologyBackend.captureScreen (observability ⑦)", () => {
     expect(await backend.captureScreen("evd-run-1")).toBeUndefined();
   });
 });
+
+// trace completion — the run's trace reaching a terminal state on the platform IS the completion signal;
+// the submit response (which the agent may hold for the whole run) never gates it.
+describe("ServiceTopologyBackend — trace completion", () => {
+  const TRACE_SPEC: ServiceHarnessSpec = {
+    ...SPEC,
+    frontDoor: { ...SPEC.frontDoor, completion: { mode: "trace", intervalMs: 1, timeoutMs: 5000 } },
+  };
+  const mockRuntime = (): TopologyRuntime => ({
+    id: "mock",
+    async ensureTopology() {
+      return { endpoints: { "agent-server": "http://agent-server:8000" } };
+    },
+    async provisionBrowserEnv() {
+      return {
+        wiring: { target_cdp_url: "ws://browser/ctx" },
+        async snapshot(): Promise<BrowserSnapshot> {
+          return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+        },
+        async dispose() {},
+      };
+    },
+  });
+  const job: CaseJob = {
+    harness: { id: "browser-use-langgraph", version: "1.0.0" },
+    evalCase: {
+      id: "c1",
+      env: { kind: "browser", startUrl: "https://x" },
+      task: "go",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    },
+  };
+
+  it("probes the source's terminal state (by the injected runId) before pulling — a held submit response never gates completion", async () => {
+    const statusCalls: string[] = [];
+    let state: "running" | "ok" = "running";
+    const events: TraceEvent[] = [{ t: 0, kind: "message", role: "assistant", text: "done" }];
+    const traceSource: TraceSource = {
+      async fetch() {
+        return events;
+      },
+      async status(key: string) {
+        statusCalls.push(key);
+        const s = state;
+        state = "ok";
+        return s;
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(),
+      traceSource,
+      specFor: () => TRACE_SPEC,
+      submit: () => new Promise(() => {}), // the agent holds the submit response for the whole run
+      newRunId: () => "fixed",
+    });
+
+    const result = await backend.dispatch(job);
+
+    expect(result.trace).toEqual(events);
+    expect(statusCalls.length).toBeGreaterThanOrEqual(2); // running → ok
+    expect(statusCalls[0]).toBe("fixed"); // probed by the injected runId (injected correlation)
+  });
+
+  it("a source without status() is probed presence-based — any events = done", async () => {
+    let fetches = 0;
+    const traceSource: TraceSource = {
+      async fetch() {
+        fetches++;
+        return fetches < 2 ? [] : [{ t: 0, kind: "message", role: "assistant", text: "ok" }];
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(),
+      traceSource,
+      specFor: () => TRACE_SPEC,
+      submit: () => new Promise(() => {}),
+      newRunId: () => "fixed",
+    });
+
+    const result = await backend.dispatch(job);
+
+    expect(result.trace).toHaveLength(1);
+    expect(fetches).toBeGreaterThanOrEqual(3); // 2 probe fetches (empty → present) + the final pull
+  });
+});

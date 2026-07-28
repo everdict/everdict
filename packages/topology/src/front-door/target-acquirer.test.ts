@@ -151,12 +151,12 @@ describe("fetchAcquire", () => {
     vi.unstubAllGlobals();
   });
 
-  // A fetch stub that records method+init and returns empty JSON.
+  // A fetch stub that records method+init and returns empty JSON (2xx).
   function stubFetch(): { calls: Array<{ url: string; init: RequestInit }> } {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
       calls.push({ url, init });
-      return { json: async () => ({}) } as Response;
+      return { ok: true, status: 200, text: async () => "{}" } as Response;
     });
     return { calls };
   }
@@ -187,6 +187,34 @@ describe("fetchAcquire", () => {
     const { calls } = stubFetch();
     await fetchAcquire("POST", "http://s/sessions", { task: "t" });
     expect(calls[0]?.init.body).toBe(JSON.stringify({ task: "t" }));
+  });
+
+  it("a non-2xx session-open surfaces the HTTP status + body instead of flowing into coordinate mapping", async () => {
+    // Given the session service rejects the open with a 422 validation body
+    vi.stubGlobal("fetch", async () => {
+      return {
+        ok: false,
+        status: 422,
+        text: async () => JSON.stringify({ detail: [{ loc: ["body", "session_ids"], msg: "field required" }] }),
+      } as Response;
+    });
+    // When/Then the request fails with the real cause (HTTP 422 + body) — pre-fix the error body was returned
+    // as a normal value and the caller misreported it as "no value at session_ids.0".
+    await expect(fetchAcquire("POST", "http://s/sessions")).rejects.toThrow(/HTTP 422.*field required/s);
+  });
+
+  it("a network failure opening the session is remapped to UpstreamError (no raw fetch error across the boundary)", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("fetch failed: ECONNREFUSED");
+    });
+    await expect(fetchAcquire("POST", "http://s/sessions")).rejects.toThrow(/session request failed: .*ECONNREFUSED/);
+  });
+
+  it("a non-JSON 2xx body degrades to undefined (a missing coordinate then fails at the mapping step)", async () => {
+    vi.stubGlobal("fetch", async () => {
+      return { ok: true, status: 204, text: async () => "" } as Response;
+    });
+    await expect(fetchAcquire("DELETE", "http://s/sessions/1")).resolves.toBeUndefined();
   });
 });
 

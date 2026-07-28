@@ -186,11 +186,19 @@ touching `service-backend.ts`'s driving logic.
   an explicit `HARNESS_RUN_FAILED`/`completion-timeout` instead of hanging in `running` forever. Every other execution
   path already honors `timeoutSec`; this brings the topology drive to parity. Timer injectable via
   `startDriveDeadline` (test determinism). Follow-up: heartbeat-based *earlier* (sub-budget) stream-death detection.
-- **#2 completion — DONE (4 modes).** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit +
+- **#2 completion — DONE (5 modes).** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit +
   await; `frontDoor.completion` in `@everdict/contracts`: `sync` (default) | `poll` (`StatusMatch` done/failed) | `stream`
   (SSE submit; `OpenStreamFn`/`fetchStream`; terminal event via `StatusMatch`; first-event correlate) | `callback`
   (fire-and-forget → `CallbackRendezvous` awaits the agent's POST to `{{callback_url}}`; in-process rendezvous +
-  control-plane `POST /frontdoor-callback/:runId`). dispatch fails a run on completion timeout. See
+  control-plane `POST /frontdoor-callback/:runId`) | `trace` (the submit BLOCKS/returns nothing useful — completion =
+  the run's trace reaching a terminal state; the driver fires the submit monitored-but-not-awaited [a rejection fails
+  the drive on the next probe tick, never a silent budget burn] and polls an injected `TraceReadyFn` the backend builds
+  from the pre-drive-resolved trace source [`TraceSource.status?` = MLflow `TraceInfo.state`, else presence]; `returned`
+  correlate + `traceInline` are schema-rejected). dispatch fails a run on completion timeout.
+  **Front-door failure truthfulness:** the submit PATH `{var}`-interpolates with wiring in every mode (a
+  `{session_id}` path no longer reaches the agent as `%7B…%7D`); a non-2xx submit/stream rejects with status+body
+  (never flows downstream as a bogus result); the poll GET fails fast on 4xx but keeps polling through 5xx; the
+  session-open `fetchAcquire` surfaces HTTP failures instead of feeding the error body into coordinate mapping. See
   `docs/architecture/completion-stream-callback.md`.
 - **#3 correlate — DONE.** `frontDoor.correlate` (`injected` default = Everdict runId | `returned` = extract the
   agent's own id from the submit response via `correlate.path` dot-path, used for both trace fetch and the poll

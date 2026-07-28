@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TopologyDependencySchema, injectTemplateFields } from "./harness-spec.js";
+import { FrontDoorSpecSchema, TopologyDependencySchema, injectTemplateFields } from "./harness-spec.js";
 
 const base = { store: "redis", role: "queue", purpose: "plumbing", isolateBy: "key-prefix" };
 
@@ -53,5 +53,33 @@ describe("injectTemplateFields", () => {
 
   it("returns nothing for a literal template", () => {
     expect(injectTemplateFields("redis://fixed:6379")).toEqual([]);
+  });
+});
+
+describe('FrontDoorSpecSchema — the "trace" completion model', () => {
+  const fd = { service: "agent-server", submit: "POST /runs" };
+
+  it("accepts trace completion and applies the probe defaults (2s interval / 120s timeout)", () => {
+    const parsed = FrontDoorSpecSchema.parse({ ...fd, completion: { mode: "trace" } });
+    expect(parsed.completion).toEqual({ mode: "trace", intervalMs: 2000, timeoutMs: 120000 });
+  });
+
+  it('rejects correlate "returned" with trace completion — the submit response is never awaited', () => {
+    const res = FrontDoorSpecSchema.safeParse({
+      ...fd,
+      completion: { mode: "trace" },
+      correlate: { mode: "returned", path: "run_id" },
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it("rejects traceInline with trace completion — the trace is pulled from the traceSource, not the response", () => {
+    const res = FrontDoorSpecSchema.safeParse({ ...fd, completion: { mode: "trace" }, traceInline: {} });
+    expect(res.success).toBe(false);
+  });
+
+  it("keeps allowing returned correlation for the response-bearing models (no regression)", () => {
+    const res = FrontDoorSpecSchema.safeParse({ ...fd, correlate: { mode: "returned", path: "run_id" } });
+    expect(res.success).toBe(true);
   });
 });

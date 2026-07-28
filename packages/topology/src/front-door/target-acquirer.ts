@@ -55,18 +55,39 @@ export const fetchAcquire: AcquireRequestFn = async (method, url, body) => {
   // A bodyless POST (e.g. a parameterless session open) sends an empty {} — prevents a server that requires a JSON body
   // from rejecting a bodyless POST with 422. GET/DELETE stay bodyless (if someone passes an explicit body, honor it).
   const sendBody = body === undefined && method.toUpperCase() === "POST" ? {} : body;
-  const res = await fetch(url, {
-    method,
-    headers:
-      sendBody !== undefined
-        ? { "content-type": "application/json", accept: "application/json" }
-        : { accept: "application/json" },
-    ...(sendBody !== undefined ? { body: JSON.stringify(sendBody) } : {}),
-  });
+  let res: Response;
   try {
-    return await res.json();
+    res = await fetch(url, {
+      method,
+      headers:
+        sendBody !== undefined
+          ? { "content-type": "application/json", accept: "application/json" }
+          : { accept: "application/json" },
+      ...(sendBody !== undefined ? { body: JSON.stringify(sendBody) } : {}),
+    });
+  } catch (err) {
+    // Network failure (connection refused etc.) — remap; a raw fetch error never crosses the boundary.
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { method, url },
+      `session request failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const text = await res.text().catch(() => "");
+  // A failed request must surface the HTTP failure ITSELF. Without this check a 4xx error body flowed into
+  // coordinate mapping, which then misreported e.g. a real 422 as "no value at session_ids.0" — the actual
+  // cause (status + body) was erased and an entire batch was misdiagnosed as a coordinate-path error.
+  if (!res.ok) {
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { method, url, status: res.status },
+      `session request failed: HTTP ${res.status}${text ? ` — ${text.slice(0, 300)}` : ""}`,
+    );
+  }
+  try {
+    return text ? JSON.parse(text) : undefined;
   } catch {
-    return undefined;
+    return undefined; // non-JSON 2xx body — a missing coordinate then fails explicitly at the mapping step
   }
 };
 

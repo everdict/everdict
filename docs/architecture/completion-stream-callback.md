@@ -130,3 +130,37 @@ in-memory store otherwise (single-process dev — equivalent to the old in-proce
 topology backend are unchanged: the same object implements both the sink (`deliver`) and the outbound
 rendezvous (`url`/`wait`). Consumed/stale rows are swept opportunistically on deliver (callbacks are plumbing,
 not history).
+
+## `trace` completion (round 4) — the trace IS the terminal signal
+
+For agents whose submit **blocks for the whole run** (or returns nothing useful) and whose only reliable output
+channel is their observability trace: `completion: { mode: "trace", intervalMs?, timeoutMs? }`.
+
+- **Submit is fired, monitored, never awaited as the signal.** `driveTrace` starts the submit without blocking on its
+  (possibly run-long) response, but its rejection is NEVER discarded: a dead front door (conn refused / non-2xx) fails
+  the drive on the next probe tick. This is the contract-level fix for the downstream defect where a
+  `void submit().catch(() => {})` burned the entire case budget while "never started" was indistinguishable from
+  "still working". On drive end the held submit socket is aborted (released), win or lose.
+- **Completion = the run's trace reaching a terminal state.** The driver polls an injected `TraceReadyFn`
+  (`() => "pending" | "done" | "failed"`) — the backend builds it from the resolved trace source *before* the drive
+  (per-dispatch workspace source > fixed runtime source; resolution failure here fails the run — no probe, no signal).
+  State-aware platforms implement the optional `TraceSource.status(ref) → "absent"|"running"|"ok"|"error"`
+  (MLflow reads `TraceInfo.state`; a stateless server degrades to presence); a source without `status` is probed
+  presence-based (`fetch(ref).length > 0` = done). Probe key = `frontDoor.contextId ?? runId` — the same key the
+  post-drive pull uses. A transient probe throw is treated as not-ready (retried); persistent failure surfaces as the
+  completion timeout.
+- **Correlation restrictions (registration-time `superRefine`):** `correlate: "returned"` and `traceInline` are
+  rejected with trace completion — the submit response is never awaited, so there is nothing to extract from it.
+  Use injected correlation or `contextId`.
+- **Result channel:** none (`DriveOutcome.response` is undefined) — `sentinel` observation does not apply; pair with
+  `reference`, `trace`, or `egress` delivery.
+
+Also landed with this round (front-door failure truthfulness):
+- `{var}` tokens in the **submit path** are now interpolated with the per-run wiring in all drive paths (sync/poll/
+  stream/callback/trace) — previously only `statusPath`/session paths interpolated, so a `POST
+  /sessions/{session_id}/command` submit reached the agent percent-encoded (`%7Bsession_id%7D` → 422).
+- A **non-2xx submit** (node-http and stream) rejects with the status + body excerpt instead of flowing the error body
+  downstream as a bogus correlation/result payload; the poll status GET distinguishes a permanent 4xx (fail now, real
+  cause) from a transient 5xx/network error (keep polling within the budget).
+- The **session-open** primitive (`fetchAcquire`, target acquisition) surfaces HTTP failures the same way — a 422 open
+  no longer masquerades as "no value at session_ids.0" in coordinate mapping.

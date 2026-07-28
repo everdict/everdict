@@ -150,3 +150,48 @@ describe("MlflowTraceSource — tag correlation", () => {
     await expect(none.fetch("x")).rejects.toThrow("experiment");
   });
 });
+
+// status() — the trace-completion probe (front-door completion mode "trace").
+describe("MlflowTraceSource.status", () => {
+  const infoResponse = (state?: string) =>
+    JSON.stringify({ trace: { ...(state ? { trace_info: { state } } : {}), spans: [] } });
+
+  it("maps TraceInfo.state to the run status (OK→ok, ERROR→error, IN_PROGRESS→running)", async () => {
+    for (const [state, want] of [
+      ["OK", "ok"],
+      ["ERROR", "error"],
+      ["IN_PROGRESS", "running"],
+    ] as const) {
+      const fetchImpl = vi.fn(() => Promise.resolve(new Response(infoResponse(state), { status: 200 })));
+      const src = new MlflowTraceSource({ endpoint: "http://m", fetchImpl: fetchImpl as typeof fetch });
+      expect(await src.status("tr-1")).toBe(want);
+    }
+  });
+
+  it("404 → absent (not arrived yet); a stateless server degrades to presence (ok)", async () => {
+    const notFound = vi.fn(() => Promise.resolve(new Response("nope", { status: 404 })));
+    expect(
+      await new MlflowTraceSource({ endpoint: "http://m", fetchImpl: notFound as typeof fetch }).status("tr"),
+    ).toBe("absent");
+    const stateless = vi.fn(() => Promise.resolve(new Response(infoResponse(), { status: 200 })));
+    expect(
+      await new MlflowTraceSource({ endpoint: "http://m", fetchImpl: stateless as typeof fetch }).status("tr"),
+    ).toBe("ok");
+  });
+
+  it("with tag correlation, a tag miss reports absent (not yet tagged/arrived)", async () => {
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
+      if (url.includes("/traces/search"))
+        return Promise.resolve(new Response(JSON.stringify({ traces: [] }), { status: 200 }));
+      return Promise.resolve(new Response(infoResponse("OK"), { status: 200 }));
+    });
+    const src = new MlflowTraceSource({
+      endpoint: "http://m",
+      correlate: "tag",
+      experimentIds: ["7"],
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    expect(await src.status("run-9")).toBe("absent");
+  });
+});
