@@ -8,6 +8,26 @@ export const AGENT_PERMISSION_MODES = ["default", "auto", "bypass", "plan"] as c
 export const AgentPermissionModeSchema = z.enum(AGENT_PERMISSION_MODES);
 export type AgentPermissionMode = z.infer<typeof AgentPermissionModeSchema>;
 
+// What started a session — chat (a member typed), discussion (@everdict in a comment thread), teammate (a
+// spawned standing agent), trigger (a platform event matched a crafted agent's trigger — agent-automation A3),
+// schedule, or api. Trigger runs pin the crafted agent's id@version + the waking event, which is ALSO the
+// durable activation dedup key (one run per (agent, event), at-least-once delivery collapses here).
+export const AGENT_SESSION_ORIGIN_TYPES = ["chat", "discussion", "teammate", "trigger", "schedule", "api"] as const;
+export const AgentSessionOriginSchema = z.object({
+  type: z.enum(AGENT_SESSION_ORIGIN_TYPES),
+  agentId: z.string().optional(),
+  agentVersion: z.string().optional(),
+  eventId: z.string().optional(),
+  eventKind: z.string().optional(),
+});
+export type AgentSessionOrigin = z.infer<typeof AgentSessionOriginSchema>;
+
+// A headless run's lifecycle (the observability anchor — agent-automation A4). Chat sessions have no status
+// (a conversation is not a run); the agent service's activation wrapper owns the transitions.
+export const AGENT_RUN_STATUSES = ["running", "awaiting_approval", "completed", "failed"] as const;
+export const AgentRunStatusSchema = z.enum(AGENT_RUN_STATUSES);
+export type AgentRunStatus = z.infer<typeof AgentRunStatusSchema>;
+
 // A conversation between a workspace member and Everdict's own agent. Personal to its owner (the creator's
 // subject) but workspace-scoped for data access — the agent reads that workspace's eval data on the owner's
 // behalf. See docs/architecture/agent-conversations.md.
@@ -24,6 +44,10 @@ export const AgentSessionRecordSchema = z.object({
   // Who may read/continue the conversation: unset|"private" = the owner only (personal chat history);
   // "workspace" = any workspace member (e.g. a comment-thread discussion session — the shared detail surface).
   visibility: z.enum(["private", "workspace"]).optional(),
+  // What started this session (unset = legacy/chat). Trigger runs carry agentId@version + the waking event.
+  origin: AgentSessionOriginSchema.optional(),
+  // Headless-run lifecycle status (unset for plain conversations). See AgentRunStatusSchema.
+  status: AgentRunStatusSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { VersionSchema } from "../version.js";
 
+import { AgentPermissionModeSchema } from "../records/agent-session.js";
 import { CapabilityRefSchema } from "../records/capability.js";
+import type { PlatformEventKind } from "../records/platform-event.js";
 
 // A workspace-registered MCP tool server the Everdict agent connects to IN ADDITION to the built-in read-only
 // control-plane tools. The workspace owns this server, so — unlike the built-in tools, which stay read-only — its
@@ -9,6 +11,45 @@ import { CapabilityRefSchema } from "../records/capability.js";
 // does. ⚠️ NO plaintext secret here — authSecret names a workspace SecretStore key; the VALUE is resolved just before
 // the agent connects and sent verbatim as the `Authorization` header (same discipline as ModelSpec.apiKeySecret /
 // runtime authSecret).
+// The platform-event kinds an agent trigger may subscribe to — the platform vocabulary MINUS the agent-run
+// lifecycle facts (v1 guardrail: agents watching agents is a runaway vector; see agent-automation.md).
+export const TRIGGERABLE_EVENT_KINDS = [
+  "run.submitted",
+  "run.completed",
+  "run.failed",
+  "scorecard.submitted",
+  "scorecard.case.completed",
+  "scorecard.completed",
+  "scorecard.failed",
+  "scorecard.cancelled",
+  "report.completed",
+  "comment.created",
+] as const;
+// Compile-time subset guarantee: every triggerable kind is a real platform-event kind.
+const _triggerableAreKinds: readonly PlatformEventKind[] = TRIGGERABLE_EVENT_KINDS;
+void _triggerableAreKinds;
+
+// One declarative payload predicate — filters AND together against the event's pointer payload
+// (e.g. { field: "passRate", op: "lt", value: 1 } = "the batch had failing cases").
+export const AgentTriggerFilterSchema = z
+  .object({
+    field: z.string().min(1),
+    op: z.enum(["eq", "neq", "lt", "lte", "gt", "gte", "exists"]),
+    value: z.union([z.string(), z.number(), z.boolean()]).optional(), // required for every op except "exists"
+  })
+  .strict();
+export type AgentTriggerFilter = z.infer<typeof AgentTriggerFilterSchema>;
+
+// A trigger — the declarative subscription that lets a platform event activate this agent headlessly
+// (docs/architecture/agent-automation.md A3). Matching + activation live in the agent service.
+export const AgentTriggerSchema = z
+  .object({
+    kinds: z.array(z.enum(TRIGGERABLE_EVENT_KINDS)).min(1),
+    filters: z.array(AgentTriggerFilterSchema).default([]),
+  })
+  .strict();
+export type AgentTrigger = z.infer<typeof AgentTriggerSchema>;
+
 export const AgentMcpServerSchema = z
   .object({
     name: z.string().min(1), // stable label (shown in tool activity; unique within one agent)
@@ -45,6 +86,18 @@ export const AgentSpecSchema = z.object({
   disabledDefaults: z.array(z.string()).default([]),
   // Registered model id (this workspace's model registry) powering the agent; unset → the agent server's default model.
   model: z.string().optional(),
+  // Standing instructions rendered as the FIRST message of a triggered activation ("when you are woken, do
+  // this") — distinct from `instructions`, which shape every turn of every conversation. Unset → the rendered
+  // event alone seeds the run.
+  task: z.string().optional(),
+  // Declarative platform-event subscriptions (agent-automation A3). Non-empty + enabled → the agent service
+  // activates a headless run per matching event.
+  triggers: z.array(AgentTriggerSchema).default([]),
+  // Default permission mode for this agent's headless runs (default = ask → parked approvals; auto/bypass for
+  // trusted automation). A chat session's own mode still overrides per conversation.
+  permissionMode: AgentPermissionModeSchema.optional(),
+  // Activation opt-in: only an enabled agent is trigger-matched. The chat "default" config never needs this.
+  enabled: z.boolean().default(false),
   tags: z.array(z.string()).default([]),
 });
 export type AgentSpec = z.infer<typeof AgentSpecSchema>;

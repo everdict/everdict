@@ -16,6 +16,9 @@ function memoryStore(): PlatformEventStore & { rows: PlatformEventRecord[] } {
     async list(tenant, opts) {
       return rows.filter((r) => r.tenant === tenant && (opts?.afterSeq === undefined || r.seq > opts.afterSeq));
     },
+    async listAll(opts) {
+      return rows.filter((r) => opts?.afterSeq === undefined || r.seq > opts.afterSeq);
+    },
     async get(tenant, id) {
       return rows.find((r) => r.tenant === tenant && r.id === id);
     },
@@ -71,6 +74,7 @@ describe("PlatformEventService", () => {
           throw new Error("db down");
         },
         list: async () => [],
+        listAll: async () => [],
         get: async () => undefined,
       },
       agentEvents: {

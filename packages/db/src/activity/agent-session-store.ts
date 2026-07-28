@@ -3,6 +3,7 @@ import {
   type AgentMessageRecord,
   AgentMessageRecordSchema,
   type AgentPermissionMode,
+  type AgentRunStatus,
   type AgentSessionRecord,
   AgentSessionRecordSchema,
 } from "@everdict/contracts";
@@ -58,6 +59,19 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     s.permissionMode = mode ?? undefined; // null clears the standing mode → "default" (ask)
   }
 
+  async setSessionStatus(tenant: string, id: string, status: AgentRunStatus, updatedAt: string): Promise<void> {
+    const s = this.sessions.find((r) => r.tenant === tenant && r.id === id);
+    if (!s) return;
+    s.updatedAt = updatedAt;
+    s.status = status;
+  }
+
+  async hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean> {
+    return this.sessions.some(
+      (s) => s.tenant === tenant && s.origin?.agentId === agentId && s.origin?.eventId === eventId,
+    );
+  }
+
   async deleteSession(tenant: string, owner: string, id: string): Promise<void> {
     for (let i = this.sessions.length - 1; i >= 0; i--) {
       const s = this.sessions[i];
@@ -88,11 +102,14 @@ interface SessionRow {
   model: string | null;
   permission_mode: string | null;
   visibility: string | null;
+  origin: unknown;
+  status: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
 
-const SESSION_COLUMNS = "id, tenant, owner, title, model, permission_mode, visibility, created_at, updated_at";
+const SESSION_COLUMNS =
+  "id, tenant, owner, title, model, permission_mode, visibility, origin, status, created_at, updated_at";
 
 function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
   return AgentSessionRecordSchema.parse({
@@ -103,6 +120,8 @@ function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
     ...(row.model !== null ? { model: row.model } : {}),
     ...(row.permission_mode !== null ? { permissionMode: row.permission_mode } : {}),
     ...(row.visibility !== null ? { visibility: row.visibility } : {}),
+    ...(row.origin !== null && row.origin !== undefined ? { origin: row.origin } : {}),
+    ...(row.status !== null ? { status: row.status } : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
@@ -147,8 +166,8 @@ export class PgAgentSessionStore implements AgentSessionStore {
 
   async createSession(record: AgentSessionRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_agent_sessions (id, tenant, owner, title, model, permission_mode, visibility, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      `INSERT INTO everdict_agent_sessions (id, tenant, owner, title, model, permission_mode, visibility, origin, status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [
         record.id,
         record.tenant,
@@ -157,6 +176,8 @@ export class PgAgentSessionStore implements AgentSessionStore {
         record.model ?? null,
         record.permissionMode ?? null,
         record.visibility ?? null,
+        record.origin !== undefined ? JSON.stringify(record.origin) : null,
+        record.status ?? null,
         record.createdAt,
         record.updatedAt,
       ],
@@ -223,6 +244,22 @@ export class PgAgentSessionStore implements AgentSessionStore {
       "UPDATE everdict_agent_sessions SET permission_mode = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
       [tenant, id, mode, updatedAt],
     );
+  }
+
+  async setSessionStatus(tenant: string, id: string, status: AgentRunStatus, updatedAt: string): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_agent_sessions SET status = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
+      [tenant, id, status, updatedAt],
+    );
+  }
+
+  async hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean> {
+    const res = await this.client.query<{ id: string }>(
+      `SELECT id FROM everdict_agent_sessions
+       WHERE tenant = $1 AND origin->>'agentId' = $2 AND origin->>'eventId' = $3 LIMIT 1`,
+      [tenant, agentId, eventId],
+    );
+    return res.rows.length > 0;
   }
 
   async deleteSession(tenant: string, owner: string, id: string): Promise<void> {

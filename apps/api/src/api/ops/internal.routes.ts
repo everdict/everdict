@@ -118,7 +118,8 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
     const query = z
       .object({
-        workspace: z.string().min(1),
+        // Omitted → the deployment-wide cursor (the agent service's ONE reconcile loop walks all workspaces).
+        workspace: z.string().min(1).optional(),
         after: z.coerce.number().int().nonnegative().optional(),
         kinds: z.string().optional(), // comma-separated kind filter
         limit: z.coerce.number().int().positive().max(500).optional(),
@@ -126,11 +127,15 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       .safeParse(req.query ?? {});
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
     const { workspace, after, kinds, limit } = query.data;
-    const events = await deps.platformEvents.list(workspace, {
+    const opts = {
       ...(after !== undefined ? { afterSeq: after } : {}),
       ...(kinds !== undefined ? { kinds: kinds.split(",").filter((k) => k.length > 0) } : {}),
       ...(limit !== undefined ? { limit } : {}),
-    });
+    };
+    const events =
+      workspace !== undefined
+        ? await deps.platformEvents.list(workspace, opts)
+        : await deps.platformEvents.listAll(opts);
     return reply.send({ events });
   });
 

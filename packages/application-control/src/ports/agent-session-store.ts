@@ -1,4 +1,4 @@
-import type { AgentMessageRecord, AgentPermissionMode, AgentSessionRecord } from "@everdict/contracts";
+import type { AgentMessageRecord, AgentPermissionMode, AgentRunStatus, AgentSessionRecord } from "@everdict/contracts";
 
 // Persistence for Everdict's own agent conversations. Sessions are owner-scoped (a member's own chat history)
 // within a workspace; messages form an append-only, seq-ordered transcript per session. async — Postgres honors
@@ -23,6 +23,11 @@ export interface AgentSessionStore {
     mode: AgentPermissionMode | null,
     updatedAt: string,
   ): Promise<void>;
+  // Headless-run lifecycle transition (agent-automation A4) — owned by the agent service's activation wrapper.
+  setSessionStatus(tenant: string, id: string, status: AgentRunStatus, updatedAt: string): Promise<void>;
+  // Durable activation dedup (agent-automation A3): has this crafted agent already run for this platform event?
+  // At-least-once delivery (push + reconcile) collapses here, surviving agent-service restarts.
+  hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean>;
   deleteSession(tenant: string, owner: string, id: string): Promise<void>;
   appendMessages(records: AgentMessageRecord[]): Promise<void>;
   // Oldest first (seq ascending). With sinceSeq, only messages whose seq is strictly greater (polling).

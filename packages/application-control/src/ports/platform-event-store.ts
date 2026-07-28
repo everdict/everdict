@@ -12,5 +12,8 @@ export interface PlatformEventListOptions {
 export interface PlatformEventStore {
   append(record: Omit<PlatformEventRecord, "seq">): Promise<PlatformEventRecord>;
   list(tenant: string, opts?: PlatformEventListOptions): Promise<PlatformEventRecord[]>;
+  // Cross-tenant cursor walk — the agent service's ONE global reconcile loop (it can't know which workspaces
+  // have enabled agents without reading every registry, so it walks one deployment-wide cursor instead).
+  listAll(opts?: PlatformEventListOptions): Promise<PlatformEventRecord[]>;
   get(tenant: string, id: string): Promise<PlatformEventRecord | undefined>;
 }

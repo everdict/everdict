@@ -105,7 +105,17 @@ function resolver(
 }
 
 function spec(over: Partial<AgentSpec> = {}): AgentSpec {
-  return { id: "default", version: "1.0.0", mcpServers: [], capabilities: [], disabledDefaults: [], tags: [], ...over };
+  return {
+    id: "default",
+    version: "1.0.0",
+    mcpServers: [],
+    capabilities: [],
+    disabledDefaults: [],
+    triggers: [],
+    enabled: false,
+    tags: [],
+    ...over,
+  };
 }
 
 describe("registryProfileResolver", () => {

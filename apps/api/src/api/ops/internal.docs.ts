@@ -123,7 +123,7 @@ const internal = {
     tags: ["internal"],
     querystring: toJsonSchema(
       z.object({
-        workspace: z.string().min(1),
+        workspace: z.string().min(1).optional().describe("omit for the deployment-wide cursor (one reconcile loop)"),
         after: z.coerce.number().int().nonnegative().optional().describe("reconcile cursor — events with seq > after"),
         kinds: z.string().optional().describe("comma-separated kind filter"),
         limit: z.coerce.number().int().positive().max(500).optional(),

@@ -70,6 +70,11 @@ export class PlatformEventService implements PlatformEventEmitter {
     return this.deps.store?.list(workspace, opts) ?? Promise.resolve([]);
   }
 
+  // Deployment-wide cursor walk (no tenant filter) — the agent service's single global reconcile loop.
+  listAll(opts?: PlatformEventListOptions): Promise<PlatformEventRecord[]> {
+    return this.deps.store?.listAll(opts) ?? Promise.resolve([]);
+  }
+
   get(workspace: string, id: string): Promise<PlatformEventRecord | undefined> {
     return this.deps.store?.get(workspace, id) ?? Promise.resolve(undefined);
   }

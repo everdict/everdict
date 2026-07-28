@@ -17,10 +17,21 @@ export class InMemoryPlatformEventStore implements PlatformEventStore {
   }
 
   async list(tenant: string, opts?: PlatformEventListOptions): Promise<PlatformEventRecord[]> {
+    return this.filtered(opts, (r) => r.tenant === tenant);
+  }
+
+  async listAll(opts?: PlatformEventListOptions): Promise<PlatformEventRecord[]> {
+    return this.filtered(opts, () => true);
+  }
+
+  private filtered(
+    opts: PlatformEventListOptions | undefined,
+    scope: (r: PlatformEventRecord) => boolean,
+  ): PlatformEventRecord[] {
     return this.rows
       .filter(
         (r) =>
-          r.tenant === tenant &&
+          scope(r) &&
           (opts?.afterSeq === undefined || r.seq > opts.afterSeq) &&
           (opts?.kinds === undefined || (opts.kinds as readonly string[]).includes(r.kind)),
       )
@@ -91,20 +102,33 @@ export class PgPlatformEventStore implements PlatformEventStore {
   }
 
   async list(tenant: string, opts?: PlatformEventListOptions): Promise<PlatformEventRecord[]> {
-    const params: unknown[] = [tenant];
-    let where = "tenant = $1";
+    return this.query(opts, tenant);
+  }
+
+  async listAll(opts?: PlatformEventListOptions): Promise<PlatformEventRecord[]> {
+    return this.query(opts, undefined);
+  }
+
+  private async query(opts: PlatformEventListOptions | undefined, tenant: string | undefined) {
+    const params: unknown[] = [];
+    const clauses: string[] = [];
+    if (tenant !== undefined) {
+      params.push(tenant);
+      clauses.push(`tenant = $${params.length}`);
+    }
     if (opts?.afterSeq !== undefined) {
       params.push(opts.afterSeq);
-      where += ` AND seq > $${params.length}`;
+      clauses.push(`seq > $${params.length}`);
     }
     if (opts?.kinds !== undefined) {
       params.push(opts.kinds);
-      where += ` AND kind = ANY($${params.length})`;
+      clauses.push(`kind = ANY($${params.length})`);
     }
     params.push(opts?.limit ?? DEFAULT_LIMIT);
+    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
     const res = await this.client.query<PlatformEventRow>(
       `SELECT seq, id, tenant, kind, subject_type, subject_id, actor, payload, caused_by, message, created_at
-       FROM everdict_platform_events WHERE ${where}
+       FROM everdict_platform_events${where}
        ORDER BY seq ASC LIMIT $${params.length}`,
       params,
     );
