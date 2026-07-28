@@ -39,7 +39,7 @@ export default async function ViewsPage({ params }: { params: Promise<{ workspac
         description={t('description')}
         actions={
           <Link
-            href={`/${workspace}/scorecards/analyze?mode=custom`}
+            href={`/${workspace}/scorecards/analyze?mode=custom&chat=1`}
             className={buttonVariants({ size: 'sm' })}
           >
             {t('newAnalysis')}
@@ -54,7 +54,7 @@ export default async function ViewsPage({ params }: { params: Promise<{ workspac
           hint={t('emptyHint')}
           action={
             <Link
-              href={`/${workspace}/scorecards/analyze?mode=custom`}
+              href={`/${workspace}/scorecards/analyze?mode=custom&chat=1`}
               className={buttonVariants({ size: 'sm' })}
             >
               {t('createAnalysis')}

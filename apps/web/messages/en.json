@@ -2554,6 +2554,8 @@
     "analyzeEasyDesc": "Pick a performance trend, model comparison, or harness comparison and view it instantly.",
     "analyzeEasy": "Easy analysis",
     "analyzeCustom": "Custom analysis",
+    "analyzeWithAgent": "Analyze with agent",
+    "analyzeAgentPrompt": "Let's build this analysis together on the open canvas. Suggest a useful breakdown (e.g. pass rate by harness, a recent trend), apply it live with apply_view_config, and refine it as I tell you what I want. Pin anything worth keeping as an artifact.",
     "analyzeEmptyHint": "Run a scorecard to analyze it here.",
     "byHarnessTitle": "By harness",
     "byHarnessDescription": "See the scores and models a harness produced on each benchmark.",

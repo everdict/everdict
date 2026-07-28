@@ -2554,6 +2554,8 @@
     "analyzeEasyDesc": "성능 추이·모델 비교·하니스 비교를 골라 바로 봐요.",
     "analyzeEasy": "쉬운 분석",
     "analyzeCustom": "커스텀 분석",
+    "analyzeWithAgent": "에이전트와 분석",
+    "analyzeAgentPrompt": "열려 있는 분석 캔버스를 함께 구성하고 싶어. 유용한 분석 축(예: 하니스별 합격률, 최근 추이)을 제안하고 apply_view_config 로 캔버스에 바로 적용해줘. 내가 원하는 방향을 말하면 이어서 다듬고, 남길 만한 결과는 아티팩트로 핀해줘.",
     "analyzeEmptyHint": "스코어카드를 실행하면 여기서 분석할 수 있어요.",
     "byHarnessTitle": "하니스별",
     "byHarnessDescription": "하니스가 벤치마크마다 낸 점수와 사용한 모델을 봐요.",

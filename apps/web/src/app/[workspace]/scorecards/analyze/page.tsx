@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { getTranslations } from 'next-intl/server'
 
+import { AgentChatOpener, AskAgentButton } from '@/widgets/infra-panel'
 import {
   CustomAnalyzer,
   loadAnalysisData,
@@ -43,6 +44,14 @@ export default async function AnalyzePage({
   const linkedView = flat.view ? savedViews.find((v) => v.id === flat.view) : undefined
   const mode = flat.mode === 'custom' || linkedView ? 'custom' : 'easy'
 
+  // Studio split — the canvas is the left half, the conversation is the right panel. The agent drives the
+  // SAME canvas via apply_view_config, so NL analysis and the manual pickers converge on one model
+  // (docs/architecture/analysis-studio.md). ?chat=1 entries ("New analysis") land with the chat revealed.
+  const agentReference = linkedView
+    ? { type: 'view' as const, id: linkedView.id, label: linkedView.name }
+    : undefined
+  const agentPrompt = t('analyzeAgentPrompt')
+
   const seg = (active: boolean) =>
     cn(
       'px-3 py-1.5 text-[12px] font-[510] transition-colors',
@@ -55,22 +64,31 @@ export default async function AnalyzePage({
         title={t('analyze')}
         description={mode === 'custom' ? t('analyzeCustomDesc') : t('analyzeEasyDesc')}
         actions={
-          <div className="inline-flex overflow-hidden rounded-lg border bg-card shadow-raise">
-            <Link
-              href={`/${workspace}/scorecards/analyze?mode=easy`}
-              className={seg(mode === 'easy')}
-            >
-              {t('analyzeEasy')}
-            </Link>
-            <Link
-              href={`/${workspace}/scorecards/analyze?mode=custom`}
-              className={cn(seg(mode === 'custom'), 'border-l border-border')}
-            >
-              {t('analyzeCustom')}
-            </Link>
+          <div className="flex items-center gap-2">
+            <AskAgentButton
+              variant="primary"
+              label={t('analyzeWithAgent')}
+              prompt={agentPrompt}
+              reference={agentReference}
+            />
+            <div className="inline-flex overflow-hidden rounded-lg border bg-card shadow-raise">
+              <Link
+                href={`/${workspace}/scorecards/analyze?mode=easy`}
+                className={seg(mode === 'easy')}
+              >
+                {t('analyzeEasy')}
+              </Link>
+              <Link
+                href={`/${workspace}/scorecards/analyze?mode=custom`}
+                className={cn(seg(mode === 'custom'), 'border-l border-border')}
+              >
+                {t('analyzeCustom')}
+              </Link>
+            </div>
           </div>
         }
       />
+      {flat.chat === '1' && <AgentChatOpener prompt={agentPrompt} reference={agentReference} />}
       {error ? (
         <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : scorecards.length === 0 ? (
