@@ -30,6 +30,7 @@ export type { SecretStore } from "./ports/secret-store.js";
 export type { OfflineTokenMinter } from "./ports/offline-token-minter.js";
 export type { TenantKeyStore } from "./ports/tenant-key-store.js";
 export type { UserProfileStore } from "./ports/user-profile-store.js";
+export type { FsFile, WorkspaceFs } from "./ports/workspace-fs.js";
 export type { WorkspaceInviteStore } from "./ports/workspace-invite-store.js";
 export type { WorkspaceSettingsStore } from "./ports/workspace-settings-store.js";
 export type { WorkspaceStore } from "./ports/workspace-store.js";

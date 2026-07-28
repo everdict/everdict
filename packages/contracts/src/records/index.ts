@@ -21,5 +21,6 @@ export * from "./usage.js";
 export * from "./user-profile.js";
 export * from "./view.js";
 export * from "./workspace.js";
+export * from "./workspace-file.js";
 export * from "./workspace-invite.js";
 export * from "./workspace-settings.js";
