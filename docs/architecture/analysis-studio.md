@@ -133,7 +133,14 @@ verbs → no HITL. This slice is valuable standalone (big-workspace dashboard pe
 
 `/views/[id]` becomes the **Analysis Studio**: the pivot canvas (existing `CustomAnalyzer`, live) + an
 embedded agent conversation (reusing `features/agent-chat` components — transcript, composer, SSE,
-HITL dialogs) + the artifact rail (pinned gallery; click → preview dialog with download). New FSD slices:
+HITL dialogs) + the artifact rail (pinned gallery; click → preview dialog with download).
+*(Delta 2026-07-28, maintainer decision: the conversation is NOT embedded in the page — the studio
+extends the existing RIGHT panel (`widgets/infra-panel` agent tab), keeping the left/right split:
+left = routed content canvas, right = the one persistent agent conversation. Landed as the studio
+entry: "New analysis" (`/views`) → `/scorecards/analyze?mode=custom&chat=1` — the canvas on the left
+with the chat revealed on the right via `AgentChatOpener` (askAgent draft prefilled, nothing
+auto-sends), plus a persistent "Analyze with agent" header button on the analyze page,
+view-referenced when a saved View is linked.)* New FSD slices:
 `entities/analysis-artifact`, `features/analysis-studio`; `features/agent-chat` gains artifact rendering in
 the transcript (chart/table/markdown cards) and an embed mode. Sessions opened from a view carry
 `viewId` (new nullable column on `everdict_agent_sessions`), and the turn's context preamble injects the
