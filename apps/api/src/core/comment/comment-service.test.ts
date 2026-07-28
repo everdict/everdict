@@ -1,4 +1,4 @@
-import { CommentService } from "@everdict/application-control";
+import { COMMENT_AGENT_AUTHOR, CommentService, type DiscussionTurnRunner } from "@everdict/application-control";
 import { InMemoryCommentStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 
@@ -218,5 +218,175 @@ describe("CommentService", () => {
     });
     await service.delete({ tenant: "acme", id: c.id, subject: "u-me", isAdmin: false });
     expect(await service.list("acme", "dataset", "d")).toHaveLength(0);
+  });
+});
+
+// @everdict in the thread — the discussion-agent bridge (placeholder comment + detached turn trigger).
+describe("CommentService discussion agent (askAgent)", () => {
+  type RunnerInput = Parameters<DiscussionTurnRunner["run"]>[0];
+  function agentSvc(opts: { failRunner?: boolean } = {}) {
+    const store = new InMemoryCommentStore();
+    const calls: RunnerInput[] = [];
+    const runner: DiscussionTurnRunner = {
+      run: async (input) => {
+        calls.push(input);
+        if (opts.failRunner) throw new Error("agent unreachable");
+      },
+    };
+    let n = 0;
+    const service = new CommentService({
+      store,
+      discussionRunner: runner,
+      memberNames: async () => ({ "u-a": "Alice", "u-b": "Bob" }),
+      newId: () => `c${++n}`,
+      now: () => `2026-07-04T00:00:${String(n).padStart(2, "0")}.000Z`,
+    });
+    return { service, store, calls };
+  }
+
+  it("askAgent posts the member comment, creates a running agent placeholder in the same thread, and fires the runner with the thread snapshot", async () => {
+    const { service, calls } = agentSvc();
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-a",
+      body: "context note",
+    });
+    const trigger = await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-b",
+      body: "@everdict summarize this harness",
+      askAgent: true,
+    });
+
+    const list = await service.list("acme", "harness", "h");
+    const placeholder = list.find((c) => c.authorKind === "agent");
+    expect(placeholder).toBeDefined();
+    expect(placeholder?.author).toBe(COMMENT_AGENT_AUTHOR);
+    expect(placeholder?.agentStatus).toBe("running");
+    expect(placeholder?.parentId).toBe(trigger.id); // nested under the asking comment
+    expect(placeholder?.agentSessionId).toBeTruthy();
+
+    expect(calls).toHaveLength(1);
+    const input = calls[0];
+    expect(input?.askedBy).toBe("u-b");
+    expect(input?.commentId).toBe(placeholder?.id);
+    expect(input?.sessionId).toBe(placeholder?.agentSessionId);
+    // snapshot: both member comments, display names resolved, oldest→newest
+    expect(input?.thread.map((t) => [t.authorName, t.body])).toEqual([
+      ["Alice", "context note"],
+      ["Bob", "@everdict summarize this harness"],
+    ]);
+  });
+
+  it("a later ask in the same thread REUSES the previous agent session id", async () => {
+    const { service, store, calls } = agentSvc();
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-a",
+      body: "@everdict q1",
+      askAgent: true,
+    });
+    const first = calls[0];
+    // finish the first answer so the busy-guard clears; the completed answer joins the next snapshot
+    const firstPlaceholder = (await service.list("acme", "harness", "h")).find((c) => c.authorKind === "agent");
+    if (!firstPlaceholder) throw new Error("placeholder missing");
+    await service.applyProgress("acme", firstPlaceholder.id, { status: "complete", body: "answer one" });
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-b",
+      body: "@everdict q2",
+      askAgent: true,
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.sessionId).toBe(first?.sessionId);
+    expect(calls[1]?.thread.some((t) => t.authorName === "Everdict" && t.body === "answer one")).toBe(true);
+    void store;
+  });
+
+  it("askAgent while a previous ask is still running → 409, nothing persisted", async () => {
+    const { service } = agentSvc();
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-a",
+      body: "@everdict q1",
+      askAgent: true,
+    });
+    await expect(
+      service.create({
+        tenant: "acme",
+        resourceType: "harness",
+        resourceId: "h",
+        author: "u-b",
+        body: "@everdict q2",
+        askAgent: true,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    // the rejected member comment was NOT persisted
+    const list = await service.list("acme", "harness", "h");
+    expect(list.filter((c) => c.authorKind !== "agent")).toHaveLength(1);
+  });
+
+  it("a runner failure marks the placeholder failed (the member comment survives)", async () => {
+    const { service } = agentSvc({ failRunner: true });
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-a",
+      body: "@everdict q",
+      askAgent: true,
+    });
+    const list = await service.list("acme", "harness", "h");
+    expect(list.find((c) => c.authorKind === "agent")?.agentStatus).toBe("failed");
+    expect(list.find((c) => c.authorKind !== "agent")?.body).toBe("@everdict q");
+  });
+
+  it("applyProgress patches activity, then the terminal patch sets the final body and clears the activity line", async () => {
+    const { service } = agentSvc();
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-a",
+      body: "@everdict q",
+      askAgent: true,
+    });
+    const placeholder = (await service.list("acme", "harness", "h")).find((c) => c.authorKind === "agent");
+    if (!placeholder) throw new Error("placeholder missing");
+    await service.applyProgress("acme", placeholder.id, { activity: "tool:get_harness_instance" });
+    let c = (await service.list("acme", "harness", "h")).find((x) => x.id === placeholder.id);
+    expect(c?.agentActivity).toBe("tool:get_harness_instance");
+    await service.applyProgress("acme", placeholder.id, { status: "complete", body: "**done**" });
+    c = (await service.list("acme", "harness", "h")).find((x) => x.id === placeholder.id);
+    expect(c?.agentStatus).toBe("complete");
+    expect(c?.body).toBe("**done**");
+    expect(c?.agentActivity).toBeUndefined();
+  });
+
+  it("applyProgress on a member comment or unknown id → 404", async () => {
+    const { service } = agentSvc();
+    const member = await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-a",
+      body: "note",
+    });
+    await expect(service.applyProgress("acme", member.id, { status: "complete" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(service.applyProgress("acme", "nope", { status: "complete" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
   });
 });

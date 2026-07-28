@@ -13,7 +13,8 @@ export type { SkillStore } from "./ports/skill-store.js";
 export type { KnowledgeEntryStore } from "./ports/knowledge-entry-store.js";
 export type { CapabilityStore } from "./ports/capability-store.js";
 export type { CallbackStore } from "./ports/callback-store.js";
-export type { CommentStore } from "./ports/comment-store.js";
+export type { CommentStore, CommentUpdatePatch } from "./ports/comment-store.js";
+export type { DiscussionTurnRunner } from "./ports/discussion-turn-runner.js";
 export type { NotificationListOptions, NotificationStore } from "./ports/notification-store.js";
 export type { AgentEventSink } from "./ports/agent-event-sink.js";
 export type { BudgetStore } from "./ports/budget-store.js";
@@ -76,6 +77,7 @@ export {
 } from "./capability/first-party.js";
 export { ProxyService, type ProxyServiceDeps, type ProxyView } from "./proxy/proxy-service.js";
 export {
+  COMMENT_AGENT_AUTHOR,
   COMMENT_RESOURCE_TYPES,
   type CommentResourceType,
   CommentService,

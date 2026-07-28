@@ -20,6 +20,12 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     return this.sessions.find((s) => s.tenant === tenant && s.owner === owner && s.id === id);
   }
 
+  async getVisibleSession(tenant: string, subject: string, id: string): Promise<AgentSessionRecord | undefined> {
+    return this.sessions.find(
+      (s) => s.tenant === tenant && s.id === id && (s.owner === subject || s.visibility === "workspace"),
+    );
+  }
+
   async listSessions(tenant: string, owner: string): Promise<AgentSessionRecord[]> {
     return this.sessions
       .filter((s) => s.tenant === tenant && s.owner === owner)
@@ -81,9 +87,12 @@ interface SessionRow {
   title: string;
   model: string | null;
   permission_mode: string | null;
+  visibility: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
+
+const SESSION_COLUMNS = "id, tenant, owner, title, model, permission_mode, visibility, created_at, updated_at";
 
 function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
   return AgentSessionRecordSchema.parse({
@@ -93,6 +102,7 @@ function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
     title: row.title,
     ...(row.model !== null ? { model: row.model } : {}),
     ...(row.permission_mode !== null ? { permissionMode: row.permission_mode } : {}),
+    ...(row.visibility !== null ? { visibility: row.visibility } : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
@@ -137,8 +147,8 @@ export class PgAgentSessionStore implements AgentSessionStore {
 
   async createSession(record: AgentSessionRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_agent_sessions (id, tenant, owner, title, model, permission_mode, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO everdict_agent_sessions (id, tenant, owner, title, model, permission_mode, visibility, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
         record.id,
         record.tenant,
@@ -146,6 +156,7 @@ export class PgAgentSessionStore implements AgentSessionStore {
         record.title,
         record.model ?? null,
         record.permissionMode ?? null,
+        record.visibility ?? null,
         record.createdAt,
         record.updatedAt,
       ],
@@ -154,16 +165,25 @@ export class PgAgentSessionStore implements AgentSessionStore {
 
   async getSession(tenant: string, owner: string, id: string): Promise<AgentSessionRecord | undefined> {
     const res = await this.client.query<SessionRow>(
-      `SELECT id, tenant, owner, title, model, permission_mode, created_at, updated_at
+      `SELECT ${SESSION_COLUMNS}
        FROM everdict_agent_sessions WHERE tenant = $1 AND owner = $2 AND id = $3`,
       [tenant, owner, id],
     );
     return res.rows[0] ? sessionRowToRecord(res.rows[0]) : undefined;
   }
 
+  async getVisibleSession(tenant: string, subject: string, id: string): Promise<AgentSessionRecord | undefined> {
+    const res = await this.client.query<SessionRow>(
+      `SELECT ${SESSION_COLUMNS}
+       FROM everdict_agent_sessions WHERE tenant = $1 AND id = $2 AND (owner = $3 OR visibility = 'workspace')`,
+      [tenant, id, subject],
+    );
+    return res.rows[0] ? sessionRowToRecord(res.rows[0]) : undefined;
+  }
+
   async listSessions(tenant: string, owner: string): Promise<AgentSessionRecord[]> {
     const res = await this.client.query<SessionRow>(
-      `SELECT id, tenant, owner, title, model, permission_mode, created_at, updated_at
+      `SELECT ${SESSION_COLUMNS}
        FROM everdict_agent_sessions WHERE tenant = $1 AND owner = $2
        ORDER BY updated_at DESC, id DESC`,
       [tenant, owner],

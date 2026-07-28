@@ -27,16 +27,18 @@ export function registerCommentTools(server: McpServer, ctx: McpToolContext): vo
       "create_comment",
       {
         description:
-          "Post a comment on a resource. Author = me (subject). Reply via parent_id; @-mentioning member subjects via mentions notifies them.",
+          "Post a comment on a resource. Author = me (subject). Reply via parent_id; @-mentioning member subjects via mentions notifies them. " +
+          "ask_agent=true hands the thread to the Everdict discussion agent — it answers in-thread as an agent comment (409 while a previous ask is still working).",
         inputSchema: {
           resource_type: z.enum(COMMENT_RESOURCE_TYPES),
           resource_id: z.string(),
           parent_id: z.string().optional().describe("parent comment id if this is a reply (single-level thread)"),
           body: z.string().min(1),
           mentions: z.array(z.string()).optional().describe("member subjects to @-mention (notification targets)"),
+          ask_agent: z.boolean().optional().describe("hand the thread to the discussion agent (@everdict answer)"),
         },
       },
-      ({ resource_type, resource_id, parent_id, body, mentions }) =>
+      ({ resource_type, resource_id, parent_id, body, mentions, ask_agent }) =>
         run(principal, "comments:write", async () =>
           ok(
             await comments.create({
@@ -47,6 +49,7 @@ export function registerCommentTools(server: McpServer, ctx: McpToolContext): vo
               body,
               ...(parent_id ? { parentId: parent_id } : {}),
               ...(mentions ? { mentions } : {}),
+              ...(ask_agent ? { askAgent: true } : {}),
             }),
           ),
         ),

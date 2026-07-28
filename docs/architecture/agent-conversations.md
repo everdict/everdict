@@ -220,6 +220,41 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
 - **Later** — executable (scripted) skills; autonomous scheduled sweeps (runtime monitor → propose/trigger evals);
   findings → comments + Mattermost; a fallback model + prompt caching; parallel independent tool calls.
 
+## Discussion bridge — @everdict inside a comment thread
+
+Every entity detail screen's comment thread (`features/discuss`) doubles as a **multi-party chat room with the
+agent**: a member mentions `@everdict` in a comment and the agent answers **in the thread**, reading the whole
+discussion as context. The raw transcript would swamp a discussion, so the agent comment renders compactly —
+a live "doing now" line while it works, then only the final markdown answer — and the full reasoning/tool
+transcript opens on demand in the right panel (the normal conversation view), where any member can continue
+chatting 1:1.
+
+- **Comment row IS the answer.** `CommentRecord` gains `authorKind:'agent'` + `agentStatus`
+  (`running → awaiting_approval → complete|failed`) + `agentActivity` (machine token
+  `thinking|writing|tool:<name>`, localized by the web) + `agentSessionId` (mig 0082). The control plane stays
+  the ONLY comment mutator.
+- **Bridge = the report-turn template, detached.** `CommentService.create(askAgent)` (busy-guard: one live turn
+  per thread, 409) creates the placeholder and fires the `DiscussionTurnRunner` port → agent
+  `POST /internal/discussion-turn` (x-internal-token), which **acks 202 and runs detached** (a HITL park can
+  last minutes). `runDiscussionTurn` (apps/agent) mints an `agt_` token AS the asker (`["read","write"]`),
+  runs one capped `runChat` over the thread snapshot (+ the resource via the @-reference channel; `schedule`
+  has no reference type → thread-only), and reports progress back over
+  `POST /internal/comment-activity` (the `/internal/usage` twin) onto the placeholder.
+- **One session per thread, reused + workspace-visible.** The thread's session
+  (`visibility:'workspace'`, mig 0083, owner = first asker) is reused across asks, so the agent keeps the
+  discussion's memory and panel follow-ups. `getVisibleSession` (owner OR workspace) relaxes the session read /
+  messages / pending / permission / chat lookups — owner-only stays for list/rename/delete/model/mode.
+- **Background HITL.** The turn's `permit` parks in the `PermissionRegistry` (now storing name/input +
+  `pendingFor(sessionId)`, longer per-wait timeout) and flips the comment to `awaiting_approval`; a panel opened
+  mid-turn discovers the ask via `GET /agent/sessions/:id/pending` and answers through the normal
+  `POST .../permission`. In-memory: an agent restart mid-park strands the turn (`finally` → `failed` covers the
+  request-severed case).
+- **Web.** The composer's `@` menu leads with a synthetic `@everdict` entry (never in `mentions[]` — it flips
+  `askAgent`); the thread polls a server action while a turn is live so every viewer sees running → final; the
+  agent card's "view details" opens the panel on the session (`openAgentSession` context +
+  `everdict:open-agent-session` postMessage), where a **watch mode** polls `/messages?since=` + `/pending`
+  (a background turn streams SSE to nobody — `runChat` persists records incrementally by design).
+
 ## Running it (dev)
 
 ```

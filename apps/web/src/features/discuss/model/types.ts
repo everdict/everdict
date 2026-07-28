@@ -3,7 +3,10 @@ export interface Mentionable {
   subject: string
   name: string
   avatarUrl?: string
+  isAgent?: boolean // the synthetic @everdict entry — picking it asks the agent (never a notify target)
 }
+
+export type AgentCommentStatus = 'running' | 'awaiting_approval' | 'complete' | 'failed'
 
 export interface ThreadComment {
   id: string
@@ -12,4 +15,9 @@ export interface ThreadComment {
   body: string
   at: string
   canDelete: boolean
+  // Agent-answer fields (@everdict) — present only on agent-authored comments.
+  isAgent?: boolean
+  agentStatus?: AgentCommentStatus
+  agentActivity?: string // machine token ("thinking"|"writing"|"tool:<name>") — localized at render
+  agentSessionId?: string // the backing workspace-visible conversation (detail/continue surface)
 }

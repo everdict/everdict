@@ -24,6 +24,8 @@ export const agentSessionSchema = z.object({
   model: z.string().optional(),
   // The session's standing permission mode; unset → "default" (ask for every mutation).
   permissionMode: agentPermissionModeSchema.optional(),
+  // Who may read/continue: unset|"private" = owner only; "workspace" = any member (a comment thread's discussion session).
+  visibility: z.enum(['private', 'workspace']).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

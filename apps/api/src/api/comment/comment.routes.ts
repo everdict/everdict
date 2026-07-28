@@ -39,6 +39,7 @@ export function registerCommentRoutes(app: FastifyInstance, deps: ServerDeps): v
         body: body.data.body,
         ...(body.data.parentId ? { parentId: body.data.parentId } : {}),
         ...(body.data.mentions ? { mentions: body.data.mentions } : {}),
+        ...(body.data.askAgent ? { askAgent: true } : {}),
       });
       return reply.code(201).send(comment);
     } catch (err) {

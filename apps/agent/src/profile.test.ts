@@ -77,6 +77,7 @@ function skillRecord(over: Partial<SkillRecord>): SkillRecord {
     description: "d",
     instructions: "1. …",
     files: [],
+    refs: [],
     visibility: "workspace",
     createdBy: "u1",
     createdAt: "t",

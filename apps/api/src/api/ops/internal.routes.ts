@@ -74,6 +74,39 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     return reply.send({ ok: true });
   });
 
+  // --- internal: discussion-agent comment lifecycle (agent server → placeholder comment). The detached discussion
+  // turn (@everdict in a thread) reports its progress here: activity token while running, awaiting_approval on a
+  // HITL park, then the final markdown body on complete (or failed). The control plane stays the ONLY comment
+  // mutator. Same x-internal-token guard. ---
+  app.post("/internal/comment-activity", { schema: internalDocs.commentActivity }, async (req, reply) => {
+    if (!deps.internalToken || !deps.commentService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const body = z
+      .object({
+        tenant: z.string().min(1),
+        commentId: z.string().min(1),
+        status: z.enum(["running", "awaiting_approval", "complete", "failed"]).optional(),
+        activity: z.string().nullable().optional(), // machine token ("thinking"|"writing"|"tool:<name>"); null clears
+        body: z.string().optional(), // the final markdown answer (terminal patch)
+      })
+      .safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      const { tenant, commentId, status, activity, body: answer } = body.data;
+      await deps.commentService.applyProgress(tenant, commentId, {
+        ...(status !== undefined ? { status } : {}),
+        ...(activity !== undefined ? { activity } : {}),
+        ...(answer !== undefined ? { body: answer } : {}),
+      });
+      return reply.send({ ok: true });
+    } catch (err) {
+      return sendError(reply, err); // unknown/non-agent comment 404
+    }
+  });
+
   // --- internal: schedule fire (called by the Temporal workflow, x-internal-token guard) ---
   // The worker doesn't hold a ScorecardService, so a schedule fire goes workflow→activity→this route→ScheduleService.fire.
   // tenant is baked in as a workflow argument at schedule creation and arrives in a trusted body (already trusted via the internal token).

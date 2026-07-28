@@ -45,15 +45,21 @@ function mergeMessages(prev: AgentMessage[], incoming: AgentMessage[]): AgentMes
 
 // pendingMention (+ onConsumeMention) is threaded down from the infra panel: an entity detail page asked to
 // analyze its entity here, so drop it into the composer as a reference chip and/or pre-type a draft prompt
-// (nothing auto-sends — the member reviews and presses send). The prop shape is declared inline (not imported
-// from the widget) to keep the FSD import direction downward-only.
+// (nothing auto-sends — the member reviews and presses send). pendingSession (+ onConsumeSession) is the same
+// channel for a comment thread's "view details": open a SPECIFIC (workspace-visible discussion) session and WATCH
+// it — a background turn streams its SSE to nobody, so the panel polls /messages?since= + /pending instead. The
+// prop shapes are declared inline (not imported from the widget) to keep the FSD import direction downward-only.
 export function AgentChatPanel({
   pendingMention,
   onConsumeMention,
+  pendingSession,
+  onConsumeSession,
   user,
 }: {
   pendingMention?: { ref?: AgentReference; prompt?: string } | null
   onConsumeMention?: () => void
+  pendingSession?: { id: string } | null
+  onConsumeSession?: () => void
   user?: ChatUser
 } = {}) {
   const t = useTranslations('agentChat')
@@ -79,6 +85,10 @@ export function AgentChatPanel({
   // events and wake to react. Loaded on mount and refreshed after each turn (the agent can self-spawn via a tool).
   const [teammates, setTeammates] = useState<AgentTeammate[]>([])
   const abortRef = useRef<AbortController | null>(null)
+  // Watch mode (a discussion session opened from a comment thread): a background turn streams SSE to nobody, so
+  // while this session is active the panel polls its persisted transcript + parked approvals instead.
+  const [watchId, setWatchId] = useState<string | null>(null)
+  const maxSeqRef = useRef(-1)
 
   const loadSessions = useCallback(async () => {
     try {
@@ -206,6 +216,8 @@ export function AgentChatPanel({
     setActiveId(id)
     setMessages([])
     setArtifacts([])
+    setWatchId(null) // 워치 모드는 열어 준 그 세션에만 한정 — 다른 대화로 가면 폴링 중단
+    setPendingPermissions([])
   }, [])
 
   const newConversation = useCallback(() => {
@@ -525,6 +537,89 @@ export function AgentChatPanel({
       setInput((prev) => (prev.trim().length > 0 ? prev : (pendingMention.prompt ?? '')))
     onConsumeMention?.()
   }, [pendingMention, addReference, onConsumeMention])
+
+  // A comment thread asked to open its discussion session — switch to it in WATCH mode. The session is
+  // workspace-visible but not necessarily in the caller's own list (it belongs to the first asker), so fetch the
+  // record and merge it for the header/title. Consume so a tab re-mount does not re-open it.
+  useEffect(() => {
+    if (!pendingSession) return
+    const id = pendingSession.id
+    onConsumeSession?.()
+    if (id !== activeId) switchTo(id)
+    setWatchId(id)
+    void (async () => {
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(id)}`, {
+          cache: 'no-store',
+        })
+        if (!res.ok) return
+        const parsed = agentSessionSchema.safeParse(await res.json())
+        if (parsed.success)
+          setSessions((prev) =>
+            prev.some((s) => s.id === parsed.data.id) ? prev : [parsed.data, ...prev]
+          )
+      } catch {
+        // silent — the transcript still renders; the header shows the fallback title
+      }
+    })()
+  }, [pendingSession, onConsumeSession, activeId, switchTo])
+
+  // 트랜스크립트의 최신 seq — 워치 폴링의 ?since= 커서 (메시지 병합마다 갱신).
+  useEffect(() => {
+    maxSeqRef.current = messages.reduce((max, m) => (m.seq > max ? m.seq : max), -1)
+  }, [messages])
+
+  // Watch polling: while the watched session is active and we are not streaming a turn of our own, pull the
+  // incrementally-persisted transcript (runChat persists each record as the loop produces it) + the parked
+  // write-tool approvals a background discussion turn is awaiting. Cheap when idle (since-cursor, empty lists).
+  useEffect(() => {
+    if (!watchId || watchId !== activeId) return
+    let cancelled = false
+    const tick = async () => {
+      if (cancelled || sending) return
+      try {
+        const since = maxSeqRef.current
+        const res = await fetch(
+          `/api/agent/sessions/${encodeURIComponent(watchId)}/messages${since >= 0 ? `?since=${since}` : ''}`,
+          { cache: 'no-store' }
+        )
+        if (res.ok) {
+          const parsed = agentMessageListSchema.safeParse(await res.json())
+          if (!cancelled && parsed.success && parsed.data.messages.length > 0)
+            setMessages((prev) => mergeMessages(prev, parsed.data.messages))
+        }
+      } catch {
+        // silent — retried on the next tick
+      }
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(watchId)}/pending`, {
+          cache: 'no-store',
+        })
+        if (res.ok) {
+          const data = (await res.json()) as {
+            pending?: { requestId?: unknown; name?: unknown; input?: unknown }[]
+          }
+          if (!cancelled && Array.isArray(data.pending))
+            setPendingPermissions(
+              data.pending
+                .filter(
+                  (p): p is { requestId: string; name: string; input: unknown } =>
+                    typeof p.requestId === 'string' && typeof p.name === 'string'
+                )
+                .map((p) => ({ requestId: p.requestId, name: p.name, input: p.input }))
+            )
+        }
+      } catch {
+        // silent — retried on the next tick
+      }
+    }
+    void tick()
+    const interval = setInterval(() => void tick(), 2000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [watchId, activeId, sending])
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
 

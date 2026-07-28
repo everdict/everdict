@@ -21,6 +21,9 @@ export const AgentSessionRecordSchema = z.object({
   model: z.string().optional(),
   // The session's standing permission mode (the member picks it in the chat header). Unset → "default" (ask).
   permissionMode: AgentPermissionModeSchema.optional(),
+  // Who may read/continue the conversation: unset|"private" = the owner only (personal chat history);
+  // "workspace" = any workspace member (e.g. a comment-thread discussion session — the shared detail surface).
+  visibility: z.enum(["private", "workspace"]).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

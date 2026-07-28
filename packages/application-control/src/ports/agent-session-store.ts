@@ -6,6 +6,10 @@ import type { AgentMessageRecord, AgentPermissionMode, AgentSessionRecord } from
 export interface AgentSessionStore {
   createSession(record: AgentSessionRecord): Promise<void>;
   getSession(tenant: string, owner: string, id: string): Promise<AgentSessionRecord | undefined>;
+  // Visibility-aware lookup: the session when `subject` is its owner OR it is workspace-visible
+  // (visibility === "workspace", e.g. a comment-thread discussion session any member may read/continue).
+  // The owner path behaves exactly like getSession; owner-only surfaces (list/rename/delete) keep getSession.
+  getVisibleSession(tenant: string, subject: string, id: string): Promise<AgentSessionRecord | undefined>;
   // Newest first (updatedAt descending) — the owner's own sessions in this workspace.
   listSessions(tenant: string, owner: string): Promise<AgentSessionRecord[]>;
   // Bump updatedAt (activity) and optionally set the title (e.g. first user message → session title).

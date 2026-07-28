@@ -19,7 +19,12 @@ import { agentReferenceSchema } from '@/entities/agent-session'
 import { RELOAD_INFRA_FRAMES_EVENT } from '@/shared/lib/reload-infra-frames'
 import { cn } from '@/shared/lib/utils'
 
-import { MENTION_IN_CHAT_MESSAGE, useInfraPanel, type InfraTab } from '../model/infra-panel-context'
+import {
+  MENTION_IN_CHAT_MESSAGE,
+  OPEN_AGENT_SESSION_MESSAGE,
+  useInfraPanel,
+  type InfraTab,
+} from '../model/infra-panel-context'
 import { WorkTab } from './work-tab'
 
 // The floating infra panel — the right half of the split view. On md+ it takes real layout space as a flex-1
@@ -77,6 +82,9 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
     askAgent,
     pendingMention,
     consumePendingMention,
+    openAgentSession,
+    pendingSession,
+    consumePendingSession,
   } = useInfraPanel()
   const frames = useRef<Partial<Record<PageTab, HTMLIFrameElement | null>>>({})
   // Tabs whose iframe is currently open — kept mounted (hidden) across TAB SWITCHES so a tab's in-iframe
@@ -183,14 +191,23 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
         bounce?: boolean
         reference?: unknown
         prompt?: unknown
+        sessionId?: unknown
       } | null
       // A detail page inside an iframe (run / runtime) asked to mention its entity in the parent's agent chat
       // — optionally with a draft prompt pre-typed (the ask-agent variant).
       if (data?.type === MENTION_IN_CHAT_MESSAGE) {
         const parsed = agentReferenceSchema.safeParse(data.reference)
-        const prompt = typeof data.prompt === 'string' && data.prompt.length > 0 ? data.prompt : undefined
+        const prompt =
+          typeof data.prompt === 'string' && data.prompt.length > 0 ? data.prompt : undefined
         if (prompt) askAgent(prompt, parsed.success ? parsed.data : undefined)
         else if (parsed.success) mentionInChat(parsed.data)
+        return
+      }
+      // A comment thread's agent answer asked to open its backing discussion session (features/discuss posts
+      // this — from an iframe detail page OR its own window, since a feature cannot import this widget).
+      if (data?.type === OPEN_AGENT_SESSION_MESSAGE) {
+        if (typeof data.sessionId === 'string' && data.sessionId.length > 0)
+          openAgentSession(data.sessionId)
         return
       }
       // An iframe landed on an infra route (EmbedShell report) — record it on that tab's back stack.
@@ -229,7 +246,7 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [router, onNavigate, workspace, mentionInChat, askAgent, toRelative])
+  }, [router, onNavigate, workspace, mentionInChat, askAgent, openAgentSession, toRelative])
 
   // A server-resolved per-device preference (locale / timezone) changed in the parent. The mounted iframes read
   // it server-side off the cookie and stay frozen, so router.refresh() in the switcher never reaches their
@@ -315,6 +332,8 @@ export function InfraPanel({ user }: { user?: ChatUser } = {}) {
                 <AgentChatPanel
                   pendingMention={pendingMention}
                   onConsumeMention={consumePendingMention}
+                  pendingSession={pendingSession}
+                  onConsumeSession={consumePendingSession}
                   user={user}
                 />
               </div>

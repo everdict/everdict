@@ -8,4 +8,6 @@ export const CreateCommentBodySchema = z.object({
   parentId: z.string().min(1).optional(), // parent comment id if this is a reply (one-level thread)
   body: z.string().min(1),
   mentions: z.array(z.string().min(1)).max(50).optional(), // @mentioned member subjects (filled by the client picker)
+  // @everdict mentioned — hand the thread to the discussion agent (a placeholder agent comment answers in-thread).
+  askAgent: z.boolean().optional(),
 });

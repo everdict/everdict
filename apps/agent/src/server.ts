@@ -10,6 +10,8 @@ import { isGuardedAction } from "./action-policy.js";
 import { AgentMailbox } from "./agent-mailbox.js";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import { type CodeTryDeps, runCodeToolTry } from "./code-try.js";
+import type { CommentActivityReporter } from "./comment-activity.js";
+import { runDiscussionTurn } from "./discussion-turn.js";
 import { PermissionRegistry } from "./permission-registry.js";
 import { PermissionRules } from "./permission-rules.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
@@ -31,6 +33,9 @@ export interface AgentServerDeps extends ChatDeps {
   // Code-tool verification (check/run before publish or adopt) — the runtime + stores POST /agent/code-tools/try
   // needs. Absent → the route is 404.
   codeTry?: CodeTryDeps;
+  // Comment-lifecycle bridge back to the control plane (/internal/comment-activity) — the discussion turn reports
+  // its placeholder comment's progress through it. Absent → POST /internal/discussion-turn is disabled.
+  commentActivity?: CommentActivityReporter;
 }
 
 // Constant-time equality for the internal token (fail-closed: no secret configured OR length mismatch → false).
@@ -214,7 +219,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
     const { id } = idParams.parse(req.params);
-    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    // Visibility-aware: the owner OR any member of the workspace a "workspace"-visible session belongs to
+    // (discussion sessions — the comment thread's shared transcript). Private sessions stay owner-only.
+    const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
     return reply.send(session);
   });
@@ -261,11 +268,22 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
     const { id } = idParams.parse(req.params);
-    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
     const query = z.object({ since: z.coerce.number().int().nonnegative().optional() }).parse(req.query);
     const messages = await deps.sessions.listMessages(principal.workspace, id, query.since);
     return reply.send({ messages });
+  });
+
+  // The session's parked write-tool approvals — lets a panel opened DURING a background (discussion) turn discover
+  // the asks the turn is awaiting; answering goes through the normal POST /permission route.
+  app.get("/agent/sessions/:id/pending", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    return reply.send({ pending: permissions.pendingFor(id) });
   });
 
   // The conversation's analysis artifacts (charts/tables/reports the agent emitted) — createdAt ascending, so the
@@ -274,7 +292,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
     const { id } = idParams.parse(req.params);
-    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
     const artifacts = deps.artifacts ? await deps.artifacts.listBySession(principal.workspace, id) : [];
     return reply.send({ artifacts });
@@ -385,7 +403,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const ask = (request: { name: string; input: unknown }): Promise<PermissionDecision> => {
       const requestId = deps.newId();
       write("permission", { requestId, name: request.name, input: request.input });
-      return permissions.wait(requestId, id, controller.signal);
+      return permissions.wait(requestId, id, controller.signal, request);
     };
     const permit: PermissionHook = withRules((request) =>
       mode === "auto" && !isGuardedAction(request.name) ? "allow" : ask(request),
@@ -449,7 +467,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const { id } = idParams.parse(req.params);
     const parsed = z.object({ requestId: z.string().min(1), decision: z.enum(["allow", "deny"]) }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
+    // Visibility-aware: any workspace member may answer a workspace-visible (discussion) session's parked ask.
+    const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
     const ok = permissions.respond(parsed.data.requestId, id, parsed.data.decision);
     if (!ok) return reply.code(404).send({ code: "NOT_FOUND", message: "No pending approval for that request." });
@@ -637,6 +656,36 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const summary: typeof all = {};
     for (const [viewId, entry] of Object.entries(all)) if (requested.has(viewId)) summary[viewId] = entry;
     return reply.send({ summary });
+  });
+
+  // Discussion-turn fire (@everdict in a comment thread) — INTERNAL ONLY (the control plane's comment slice).
+  // Acks 202 and runs the turn DETACHED (a HITL approval can park it for minutes — never a held request);
+  // progress lands on the placeholder comment via the /internal/comment-activity bridge, not this response.
+  app.post("/internal/discussion-turn", async (req, reply) => {
+    const presented = req.headers["x-internal-token"];
+    if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))
+      return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
+    if (!deps.commentActivity || !deps.keyStore)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Discussion turns are not configured." });
+    const parsed = z
+      .object({
+        workspace: z.string().min(1),
+        askedBy: z.string().min(1),
+        resourceType: z.string().min(1),
+        resourceId: z.string().min(1),
+        commentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        thread: z
+          .array(z.object({ author: z.string(), authorName: z.string(), body: z.string(), at: z.string() }))
+          .max(500),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    void runDiscussionTurn(deps, permissions, parsed.data).catch((err) => {
+      // The turn already marked its comment failed (best-effort) — this log is for the operator.
+      console.error("[agent] discussion turn failed:", err);
+    });
+    return reply.code(202).send({ accepted: true });
   });
 
   // Scheduled-report fire (analysis-studio V4) — INTERNAL ONLY (the control plane's report-mode schedule fire).

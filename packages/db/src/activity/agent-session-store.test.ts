@@ -51,6 +51,18 @@ describe("InMemoryAgentSessionStore", () => {
     expect(await store.getSession("acme", "alice", "a")).toBeDefined();
   });
 
+  it("getVisibleSession returns a workspace-visible session to any member but keeps private ones owner-only", async () => {
+    await store.createSession(session({ id: "shared", owner: "alice", visibility: "workspace" }));
+    await store.createSession(session({ id: "personal", owner: "alice" }));
+    // another member sees the workspace-visible session, not the private one
+    expect((await store.getVisibleSession("acme", "bob", "shared"))?.id).toBe("shared");
+    expect(await store.getVisibleSession("acme", "bob", "personal")).toBeUndefined();
+    // the owner path behaves like getSession
+    expect((await store.getVisibleSession("acme", "alice", "personal"))?.id).toBe("personal");
+    // another workspace never sees it
+    expect(await store.getVisibleSession("other", "bob", "shared")).toBeUndefined();
+  });
+
   it("touchSession bumps updatedAt and can set the title", async () => {
     await store.createSession(session({ id: "a", title: "Untitled" }));
     await store.touchSession("acme", "a", "2026-07-09T00:00:00.000Z", "Summarize failures");

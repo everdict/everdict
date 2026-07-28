@@ -87,6 +87,32 @@ const internal = {
       ...errorResponses(400, 403, 404),
     },
   },
+  commentActivity: {
+    summary: "Report a discussion-agent comment's lifecycle (internal)",
+    description:
+      "Agent server → placeholder-comment bridge: the detached discussion turn (@everdict in a resource's comment " +
+      "thread) reports its progress — activity token while running, awaiting_approval on a HITL park, the final " +
+      "markdown body on complete (or failed). The control plane stays the only comment mutator. Guarded by " +
+      "x-internal-token (403 on mismatch; fail-closed 404 when unset).",
+    tags: ["internal"],
+    body: toJsonSchema(
+      z.object({
+        tenant: z.string().min(1),
+        commentId: z.string().min(1),
+        status: z.enum(["running", "awaiting_approval", "complete", "failed"]).optional(),
+        activity: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('machine token ("thinking"|"writing"|"tool:<name>"); null clears the line'),
+        body: z.string().optional().describe("final markdown answer (terminal patch)"),
+      }),
+    ),
+    response: {
+      200: { description: "Applied", ...toJsonSchema(OkResponseSchema) },
+      ...errorResponses(400, 403, 404),
+    },
+  },
   batchPlan: {
     summary: "Plan a Temporal batch (internal bridge)",
     description:

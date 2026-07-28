@@ -372,7 +372,14 @@
     "mentionHint": "@ to mention · ⌘/Ctrl + Enter to post",
     "cancel": "Cancel",
     "submit": "Add comment",
-    "title": "Comments"
+    "title": "Comments",
+    "askAgentHint": "Ask the agent",
+    "activityThinking": "Thinking…",
+    "activityWriting": "Writing an answer…",
+    "activityTool": "Running {name}…",
+    "awaitingApproval": "Approval needed · {name} — open details to decide",
+    "viewDetails": "View details",
+    "agentFailed": "The agent couldn't answer. Mention @everdict again to retry."
   },
   "discussDataset": {
     "showPrevious": "Show {count} earlier",

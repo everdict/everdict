@@ -47,4 +47,34 @@ describe("PermissionRegistry", () => {
     expect(registry.respond("req-1", "session-1", "deny")).toBe(false);
     await expect(pending).resolves.toBe("allow");
   });
+
+  it("pendingFor lists a session's parked asks (name + input) so a late-attaching watcher can render them", async () => {
+    const registry = new PermissionRegistry();
+    const pending = registry.wait("req-1", "session-1", undefined, {
+      name: "retry_scorecard",
+      input: { id: "sc-1" },
+    });
+    const other = registry.wait("req-2", "session-2", undefined, { name: "delete_dataset", input: {} });
+    const listed = registry.pendingFor("session-1");
+    expect(listed).toEqual([{ requestId: "req-1", name: "retry_scorecard", input: { id: "sc-1" } }]);
+    registry.respond("req-1", "session-1", "allow");
+    expect(registry.pendingFor("session-1")).toHaveLength(0); // resolved asks disappear
+    registry.respond("req-2", "session-2", "deny");
+    await expect(pending).resolves.toBe("allow");
+    await expect(other).resolves.toBe("deny");
+  });
+
+  it("a per-wait timeout overrides the registry default (background turns park longer)", async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new PermissionRegistry(1000);
+      const long = registry.wait("req-1", "session-1", undefined, undefined, 5000);
+      vi.advanceTimersByTime(1000); // the registry default would have denied by now
+      expect(registry.pendingFor("session-1")).toHaveLength(1); // still parked
+      vi.advanceTimersByTime(4000);
+      await expect(long).resolves.toBe("deny"); // the longer window still denies on expiry
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

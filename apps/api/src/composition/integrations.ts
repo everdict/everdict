@@ -1,9 +1,10 @@
-import { CommentService } from "@everdict/application-control";
+import { CommentService, type DiscussionTurnRunner } from "@everdict/application-control";
 import {
   GithubAppService,
   type GithubComAppConfig,
   type GithubEnterpriseAppConfig,
 } from "@everdict/application-control";
+import { UpstreamError } from "@everdict/contracts";
 import { MattermostService } from "@everdict/application-control";
 import type { MembershipService } from "@everdict/application-control";
 import { NotificationService } from "@everdict/application-control";
@@ -76,9 +77,57 @@ export function buildIntegrations(deps: {
   // Per-harness span-attribute mapping overlay — the mutable conversion layer between a harness and a judge, authored
   // in the judge wizard against a real trace and applied at the trace-collection seams (resolveHarnessTraceMapping).
   const spanAttrMappingService = new SpanAttrMappingService(settingsStore);
+  // Discussion-agent bridge (@everdict in a comment thread) — the report-runner twin: POST the agent service's
+  // internal trigger, which acks 202 and runs the turn DETACHED (progress comes back via /internal/comment-activity).
+  // Unset env → no runner → askAgent is skipped (the member comment still posts).
+  const discussionRunner: DiscussionTurnRunner | undefined =
+    agentUrl && agentInternalToken
+      ? {
+          run: async (input) => {
+            let res: Response;
+            try {
+              // The agent's internal surface says `workspace` (the /agent/events precedent); the port says `tenant`
+              // (control-plane vocabulary) — map explicitly, never spread.
+              res = await fetch(new URL("/internal/discussion-turn", agentUrl), {
+                method: "POST",
+                headers: { "content-type": "application/json", "x-internal-token": agentInternalToken },
+                body: JSON.stringify({
+                  workspace: input.tenant,
+                  askedBy: input.askedBy,
+                  resourceType: input.resourceType,
+                  resourceId: input.resourceId,
+                  commentId: input.commentId,
+                  sessionId: input.sessionId,
+                  thread: input.thread,
+                }),
+              });
+            } catch (err) {
+              throw new UpstreamError(
+                "UPSTREAM_ERROR",
+                { commentId: input.commentId },
+                `agent discussion service unreachable: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+            if (!res.ok)
+              throw new UpstreamError(
+                "UPSTREAM_ERROR",
+                { commentId: input.commentId, status: res.status },
+                `agent discussion trigger failed (${res.status}): ${(await res.text()).slice(0, 300)}`,
+              );
+          },
+        }
+      : undefined;
   // Resource comments (datasets, etc.) for collaborative discussion + @mention notifications. On a mention, resolve the mentioner's name from profile/membership into the personal feed.
   const commentService = new CommentService({
     store: commentStore,
+    ...(discussionRunner ? { discussionRunner } : {}),
+    // subject → display name for the discussion agent's thread snapshot (name > email local-part > raw subject).
+    memberNames: async (tenant) => {
+      const members = await membershipService.listMembers(tenant).catch(() => []);
+      return Object.fromEntries(
+        members.map((m) => [m.subject, m.name ?? m.email?.split("@")[0] ?? m.subject] as const),
+      );
+    },
     notifyMention: async ({ tenant, comment, recipients }) => {
       // listMembers already merges in profile names — the mentioner's display name (name > email local-part > default).
       const member = await membershipService

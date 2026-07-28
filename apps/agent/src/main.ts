@@ -35,6 +35,7 @@ import {
   PgRuntimeRegistry,
 } from "@everdict/registry";
 import type { CodeToolRuntime } from "./code-tools.js";
+import { commentActivityReporter } from "./comment-activity.js";
 import { type AgentConfig, loadConfig } from "./config.js";
 import { mcpToolProvider } from "./mcp-tools.js";
 import {
@@ -173,6 +174,7 @@ async function main(): Promise<void> {
     // Discussion-turn lifecycle bridge (@everdict in a comment thread) — reports the placeholder comment's
     // progress to /internal/comment-activity. Same token pair as the usage meter; off without it.
     ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
+      ? { commentActivity: commentActivityReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
       : {}),
     // allowStdio (AGENT_MCP_ALLOW_STDIO): permit adopted containerized stdio MCP servers to spawn `docker run`. Off by
     // default. allowedImages (AGENT_MCP_STDIO_ALLOWED_IMAGES): optional operator image allowlist (space/comma-separated).

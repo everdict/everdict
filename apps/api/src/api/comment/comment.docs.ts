@@ -32,12 +32,13 @@ export const commentDocs: Record<"list" | "create" | "delete", FastifySchema> = 
     description:
       "Requires comments:write (member+). With parentId it is a reply — only on a top-level comment of the same resource " +
       "(single-level threads; replying to a reply or a foreign parent is 400). @mentioned subjects get a best-effort notification " +
-      "(a notification failure never fails the comment).",
+      "(a notification failure never fails the comment). askAgent=true hands the thread to the Everdict discussion agent — " +
+      "a placeholder agent comment answers in-thread (409 while a previous ask on the resource is still working).",
     tags: ["comment"],
     body: toJsonSchema(CreateCommentBodySchema),
     response: {
       201: { description: "Created comment", ...toJsonSchema(CommentResponseSchema) },
-      ...errorResponses(400, 401, 403, 404),
+      ...errorResponses(400, 401, 403, 404, 409),
     },
   },
   delete: {

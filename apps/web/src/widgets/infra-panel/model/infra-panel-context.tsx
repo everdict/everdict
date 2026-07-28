@@ -40,6 +40,15 @@ export type PendingMention = { ref?: AgentReference; prompt?: string }
 // shell — which owns the agent chat — to mention its entity. Same-origin only.
 export const MENTION_IN_CHAT_MESSAGE = 'everdict:mention-in-chat'
 
+// postMessage `type` a comment thread's agent answer sends to open its backing discussion session in the chat
+// (features/discuss posts it — to the parent when framed, to its own window otherwise — since a feature cannot
+// import this widget; keep the literal in features/discuss/ui/comment-thread.tsx in sync). Same-origin only.
+export const OPEN_AGENT_SESSION_MESSAGE = 'everdict:open-agent-session'
+
+// A request to open the agent chat on a SPECIFIC existing session (a comment thread's workspace-visible
+// discussion session) in watch mode. Buffered like PendingMention — the panel consumes it on mount.
+export type PendingSession = { id: string }
+
 type InfraPanelValue = {
   workspace: string
   open: boolean
@@ -60,6 +69,10 @@ type InfraPanelValue = {
   askAgent: (prompt: string, ref?: AgentReference) => void
   pendingMention: PendingMention | null
   consumePendingMention: () => void
+  // Open the agent chat on a specific existing session (a comment thread's discussion session) in watch mode.
+  openAgentSession: (sessionId: string) => void
+  pendingSession: PendingSession | null
+  consumePendingSession: () => void
   snapshot: QueueSnapshot | null
   authors: Record<string, WorkAuthor>
 }
@@ -209,6 +222,15 @@ export function InfraPanelProvider({
 
   const consumePendingMention = useCallback(() => setPendingMention(null), [])
 
+  // Reveal a specific agent conversation (a comment thread's "view details") — the panel opens it in watch mode.
+  const [pendingSession, setPendingSession] = useState<PendingSession | null>(null)
+  const openAgentSession = useCallback((sessionId: string) => {
+    setPendingSession({ id: sessionId })
+    setTab('agent')
+    setOpen(true)
+  }, [])
+  const consumePendingSession = useCallback(() => setPendingSession(null), [])
+
   return (
     <InfraPanelContext.Provider
       value={{
@@ -226,6 +248,9 @@ export function InfraPanelProvider({
         askAgent,
         pendingMention,
         consumePendingMention,
+        openAgentSession,
+        pendingSession,
+        consumePendingSession,
         snapshot,
         authors,
       }}
@@ -246,4 +271,26 @@ export function useInfraPanel(): InfraPanelValue {
 // shell instead).
 export function useInfraPanelOptional(): InfraPanelValue | null {
   return useContext(InfraPanelContext)
+}
+
+// The "analyze in chat" dispatch: drop a reference into the agent chat composer + reveal the chat. On an eval/settings
+// page (left shell) it calls the panel context directly; on a page rendered INSIDE the panel's iframe there is no
+// provider, so it posts up to the parent shell over the same-origin bridge. Shared by MentionInChatButton and the
+// observability trace browser (which mentions a trace by (source, id)).
+export function useMentionInChat(): (reference: AgentReference) => void {
+  const infra = useInfraPanelOptional()
+  return useCallback(
+    (reference: AgentReference) => {
+      const framed = typeof window !== 'undefined' && window.self !== window.top
+      if (framed) {
+        window.parent.postMessage(
+          { type: MENTION_IN_CHAT_MESSAGE, reference },
+          window.location.origin
+        )
+        return
+      }
+      infra?.mentionInChat(reference)
+    },
+    [infra]
+  )
 }

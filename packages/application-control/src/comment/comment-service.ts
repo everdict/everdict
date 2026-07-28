@@ -1,5 +1,13 @@
-import { BadRequestError, type CommentRecord, ForbiddenError, NotFoundError } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type CommentAgentStatus,
+  type CommentRecord,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "@everdict/contracts";
 import type { CommentStore } from "../ports/comment-store.js";
+import type { DiscussionTurnRunner } from "../ports/discussion-turn-runner.js";
 
 // Comment service — collaborative discussion on resources (harness/dataset/scorecard/view/schedule/job/runtime) + single-level replies.
 // Shared by HTTP routes and MCP tools (BFF↔MCP parity). authZ: read=comments:read, write=comments:write, delete=author-or-admin.
@@ -16,11 +24,19 @@ export type CommentResourceType = (typeof COMMENT_RESOURCE_TYPES)[number];
 
 const MAX_BODY = 10_000; // cap the body (plenty for rich discussion, blocks DoS)
 
+// Reserved author subject for agent-authored comments (@everdict answers). Never a real member subject
+// (Keycloak subjects are opaque UUIDs; the "everdict:" prefix is ours).
+export const COMMENT_AGENT_AUTHOR = "everdict:agent";
+
 export interface CommentServiceDeps {
   store: CommentStore;
   // Mention notification hook — called when a comment contains an @-mention (recipients excluding the author). Silently skipped if unset.
   // Wired in main.ts to NotificationService.notifyMention (including actor-name resolution).
   notifyMention?: (input: { tenant: string; comment: CommentRecord; recipients: string[] }) => Promise<void>;
+  // Discussion-agent bridge (@everdict in the thread) — unset = askAgent is skipped (the member comment still posts).
+  discussionRunner?: DiscussionTurnRunner;
+  // subject → display name for the thread snapshot the agent reads. Unset → raw subjects.
+  memberNames?: (tenant: string) => Promise<Record<string, string>>;
   newId?: () => string;
   now?: () => string;
 }
@@ -48,6 +64,8 @@ export class CommentService {
 
   // Post a comment. Empty/overlong body → 400. author = author subject. mentions = @-mentioned subjects (notified, excluding the author).
   // With parentId it's a reply — only allowed on a "top-level" comment of the same resource (single-level thread; 400 if the parent is already a reply).
+  // With askAgent (@everdict mentioned) the thread is handed to the discussion agent: a placeholder agent comment is
+  // created in the same thread and the turn is fired (409 while a previous ask on this resource is still working).
   async create(input: {
     tenant: string;
     resourceType: string;
@@ -56,6 +74,7 @@ export class CommentService {
     body: string;
     parentId?: string;
     mentions?: string[];
+    askAgent?: boolean;
   }): Promise<CommentRecord> {
     this.assertType(input.resourceType);
     const body = input.body.trim();
@@ -68,6 +87,19 @@ export class CommentService {
         throw new BadRequestError("BAD_REQUEST", { parentId: input.parentId }, "Parent comment not found.");
       if (parent.parentId)
         throw new BadRequestError("BAD_REQUEST", { parentId: input.parentId }, "Cannot reply to a reply.");
+    }
+    // Busy-guard BEFORE anything persists: one agent turn per thread at a time (also serializes the shared session).
+    const thread = input.askAgent ? await this.deps.store.list(input.tenant, input.resourceType, input.resourceId) : [];
+    if (input.askAgent && this.deps.discussionRunner) {
+      const busy = thread.some(
+        (c) => c.authorKind === "agent" && (c.agentStatus === "running" || c.agentStatus === "awaiting_approval"),
+      );
+      if (busy)
+        throw new ConflictError(
+          "CONFLICT",
+          undefined,
+          "The agent is already working on this discussion — wait for it to finish.",
+        );
     }
     const ts = this.now();
     const record: CommentRecord = {
@@ -91,7 +123,86 @@ export class CommentService {
         // Ignore notification failure (the comment is already saved).
       }
     }
+    if (input.askAgent && this.deps.discussionRunner) await this.startAgentAnswer(record, [...thread, record]);
     return record;
+  }
+
+  // Create the placeholder agent comment in the trigger's thread and fire the detached discussion turn. The thread's
+  // agent session is REUSED across asks (the newest agent comment's session id) so the agent keeps the discussion's
+  // memory; the first ask mints a fresh id. A trigger failure marks the placeholder failed (never throws — the
+  // member's comment is already posted).
+  private async startAgentAnswer(trigger: CommentRecord, thread: CommentRecord[]): Promise<void> {
+    const runner = this.deps.discussionRunner;
+    if (!runner) return;
+    const previous = [...thread].reverse().find((c) => c.authorKind === "agent" && c.agentSessionId);
+    const sessionId = previous?.agentSessionId ?? this.newId();
+    const ts = this.now();
+    const placeholder: CommentRecord = {
+      id: this.newId(),
+      tenant: trigger.tenant,
+      resourceType: trigger.resourceType,
+      resourceId: trigger.resourceId,
+      // Nest the answer under the trigger's thread: reply to the trigger when it is top-level, else to its anchor.
+      parentId: trigger.parentId ?? trigger.id,
+      author: COMMENT_AGENT_AUTHOR,
+      body: "", // filled with the final markdown answer on complete
+      authorKind: "agent",
+      agentStatus: "running",
+      agentActivity: "thinking",
+      agentSessionId: sessionId,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    await this.deps.store.add(placeholder);
+    const empty: Record<string, string> = {};
+    const names = await (this.deps.memberNames?.(trigger.tenant).catch(() => empty) ?? Promise.resolve(empty));
+    try {
+      await runner.run({
+        tenant: trigger.tenant,
+        askedBy: trigger.author,
+        resourceType: trigger.resourceType,
+        resourceId: trigger.resourceId,
+        commentId: placeholder.id,
+        sessionId,
+        // Snapshot for the agent: member comments + finished agent answers (skip empty/failed placeholders).
+        thread: thread
+          .filter((c) => c.authorKind !== "agent" || (c.agentStatus === "complete" && c.body.length > 0))
+          .map((c) => ({
+            author: c.author,
+            authorName: c.authorKind === "agent" ? "Everdict" : (names[c.author] ?? c.author),
+            body: c.body,
+            at: c.createdAt,
+          })),
+      });
+    } catch {
+      // The agent service is unreachable / rejected the trigger — the placeholder must not stay "running" forever.
+      await this.deps.store
+        .update(trigger.tenant, placeholder.id, { agentStatus: "failed", agentActivity: null }, this.now())
+        .catch(() => undefined);
+    }
+  }
+
+  // Lifecycle callback for the agent's progress on its placeholder comment (the /internal/comment-activity route).
+  // Only agent comments are mutable; terminal statuses clear the "doing now" line unless the patch sets one.
+  async applyProgress(
+    tenant: string,
+    commentId: string,
+    patch: { status?: CommentAgentStatus; activity?: string | null; body?: string },
+  ): Promise<void> {
+    const existing = await this.deps.store.get(tenant, commentId);
+    if (!existing || existing.authorKind !== "agent")
+      throw new NotFoundError("NOT_FOUND", { id: commentId }, "Agent comment not found.");
+    const terminal = patch.status === "complete" || patch.status === "failed";
+    await this.deps.store.update(
+      tenant,
+      commentId,
+      {
+        ...(patch.body !== undefined ? { body: patch.body } : {}),
+        ...(patch.status !== undefined ? { agentStatus: patch.status } : {}),
+        ...(patch.activity !== undefined ? { agentActivity: patch.activity } : terminal ? { agentActivity: null } : {}),
+      },
+      this.now(),
+    );
   }
 
   // Delete — the author or a workspace admin only. Missing → 404, unauthorized → 403.

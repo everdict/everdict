@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { CornerDownRight, Loader2, MessageSquare, Trash2 } from 'lucide-react'
+import {
+  CornerDownRight,
+  Loader2,
+  MessageSquare,
+  ShieldAlert,
+  Sparkles,
+  Trash2,
+} from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
@@ -11,9 +18,28 @@ import { Avatar } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Textarea } from '@/shared/ui/input'
+import { Markdown } from '@/shared/ui/markdown'
 
-import { createCommentAction, deleteCommentAction } from '../api/comments'
+import { createCommentAction, deleteCommentAction, pollThreadAction } from '../api/comments'
 import type { Mentionable, ThreadComment } from '../model/types'
+
+// postMessage `type` that opens an agent comment's backing discussion session in the shell's agent chat — pairs
+// with widgets/infra-panel (OPEN_AGENT_SESSION_MESSAGE; a feature cannot import the widget, keep in sync). Posted
+// to the parent when this page renders inside the panel's iframe, else to our own window (same listener).
+const OPEN_AGENT_SESSION = 'everdict:open-agent-session'
+
+function openAgentSessionInShell(sessionId: string): void {
+  if (typeof window === 'undefined') return
+  const target = window.self !== window.top ? window.parent : window
+  target.postMessage({ type: OPEN_AGENT_SESSION, sessionId }, window.location.origin)
+}
+
+// An agent turn is live while running or parked on approval — the thread polls itself until it settles.
+function hasLiveAgentTurn(comments: ThreadComment[]): boolean {
+  return comments.some(
+    (c) => c.isAgent && (c.agentStatus === 'running' || c.agentStatus === 'awaiting_approval')
+  )
+}
 
 // Resource-generic comment thread (one-level replies, Linear-style) — reusable on any detail screen.
 export function CommentThread({
@@ -32,9 +58,29 @@ export function CommentThread({
   canComment: boolean
 }) {
   const t = useTranslations('discuss')
-  const tops = comments.filter((c) => !c.parentId)
+  // Server props seed the thread; while an agent answer is in flight the client polls the rebuilt thread so every
+  // viewer sees the running → final transition live (the lifecycle is server-persisted on the comment row).
+  const [thread, setThread] = useState<ThreadComment[]>(comments)
+  useEffect(() => setThread(comments), [comments])
+  const live = hasLiveAgentTurn(thread)
+  useEffect(() => {
+    if (!live) return
+    let cancelled = false
+    const interval = setInterval(() => {
+      void (async () => {
+        const r = await pollThreadAction({ resourceType, resourceId })
+        if (!cancelled && r.ok && r.thread) setThread(r.thread)
+      })()
+    }, 2500)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [live, resourceType, resourceId])
+
+  const tops = thread.filter((c) => !c.parentId)
   const repliesByParent = new Map<string, ThreadComment[]>()
-  for (const c of comments) {
+  for (const c of thread) {
     if (c.parentId) {
       const arr = repliesByParent.get(c.parentId) ?? []
       arr.push(c)
@@ -169,6 +215,16 @@ function renderBody(body: string, mentionables: Mentionable[]): ReactNode {
   return out
 }
 
+// The agent's live "doing now" line — the server stores a machine token; copy is localized here.
+function activityLabel(
+  t: (key: string, values?: Record<string, string>) => string,
+  activity?: string
+): string {
+  if (activity === 'writing') return t('activityWriting')
+  if (activity?.startsWith('tool:')) return t('activityTool', { name: activity.slice(5) })
+  return t('activityThinking')
+}
+
 function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables: Mentionable[] }) {
   const t = useTranslations('discuss')
   const locale = useLocale()
@@ -190,13 +246,19 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
       className="scroll-mt-20 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-shadow"
     >
       <div className="mb-1 flex items-center gap-2">
-        {item.actor.known && (
-          <Avatar
-            name={item.actor.name}
-            url={item.actor.avatarUrl}
-            size="sm"
-            className="rounded-full"
-          />
+        {item.isAgent ? (
+          <span className="flex size-5 items-center justify-center rounded-full bg-primary/12 text-primary">
+            <Sparkles className="size-3" />
+          </span>
+        ) : (
+          item.actor.known && (
+            <Avatar
+              name={item.actor.name}
+              url={item.actor.avatarUrl}
+              size="sm"
+              className="rounded-full"
+            />
+          )
         )}
         <span className="text-[12.5px] font-[560] text-foreground">{item.actor.name}</span>
         <time
@@ -205,13 +267,25 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
         >
           {fmtTimeAgo(item.at, locale, timeZone)}
         </time>
+        {item.isAgent && item.agentSessionId && (
+          <button
+            type="button"
+            onClick={() => openAgentSessionInShell(item.agentSessionId as string)}
+            className="ml-auto text-[11.5px] font-[510] text-muted-foreground transition-colors hover:text-primary"
+          >
+            {t('viewDetails')}
+          </button>
+        )}
         {item.canDelete && (
           <button
             type="button"
             onClick={onDelete}
             disabled={pending}
             aria-label={t('deleteComment')}
-            className="ml-auto text-faint transition-colors hover:text-destructive disabled:opacity-50"
+            className={cn(
+              'text-faint transition-colors hover:text-destructive disabled:opacity-50',
+              item.isAgent && item.agentSessionId ? '' : 'ml-auto'
+            )}
           >
             {pending ? (
               <Loader2 className="size-3.5 animate-spin" />
@@ -221,15 +295,52 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
           </button>
         )}
       </div>
-      <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">
-        {renderBody(item.body, mentionables)}
-      </p>
+      {item.isAgent ? (
+        <AgentCommentBody item={item} />
+      ) : (
+        <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">
+          {renderBody(item.body, mentionables)}
+        </p>
+      )}
       {error && (
         <Callout tone="danger" className="mt-2 py-1.5">
           {error}
         </Callout>
       )}
     </div>
+  )
+}
+
+// An agent answer renders compactly by lifecycle: a live "doing now" line while it works, an approval nudge while
+// parked, then ONLY the final markdown — the full reasoning/tool transcript lives behind "view details" (the
+// right panel opens the backing discussion session).
+function AgentCommentBody({ item }: { item: ThreadComment }) {
+  const t = useTranslations('discuss')
+  if (item.agentStatus === 'complete')
+    return <Markdown content={item.body} className="text-[13px] leading-relaxed" />
+  if (item.agentStatus === 'failed')
+    return (
+      <Callout tone="danger" className="py-1.5">
+        {t('agentFailed')}
+      </Callout>
+    )
+  if (item.agentStatus === 'awaiting_approval')
+    return (
+      <button
+        type="button"
+        onClick={() => item.agentSessionId && openAgentSessionInShell(item.agentSessionId)}
+        className="inline-flex items-center gap-1.5 text-[12.5px] font-[510] text-amber-600 transition-colors hover:text-amber-500 dark:text-amber-400"
+      >
+        <ShieldAlert className="size-3.5" />
+        {t('awaitingApproval', { name: item.agentActivity?.replace(/^tool:/, '') ?? '' })}
+      </button>
+    )
+  // running (or a not-yet-reported placeholder)
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+      <Loader2 className="size-3.5 animate-spin" />
+      {activityLabel(t, item.agentActivity)}
+    </span>
   )
 }
 
@@ -291,13 +402,15 @@ function Composer({
       taRef.current?.setSelectionRange(pos, pos)
     })
   }
+  function mentioned(text: string, name: string): boolean {
+    return new RegExp(`(^|\\s)@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$|[.,!?])`).test(
+      text
+    )
+  }
+  // Member mentions only — the synthetic @everdict entry is never a notification target; it flips askAgent instead.
   function extractMentions(text: string): string[] {
     return mentionables
-      .filter((mn) =>
-        new RegExp(`(^|\\s)@${mn.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$|[.,!?])`).test(
-          text
-        )
-      )
+      .filter((mn) => !mn.isAgent && mentioned(text, mn.name))
       .map((mn) => mn.subject)
   }
   function onSubmit() {
@@ -305,6 +418,8 @@ function Composer({
     if (!body) return
     setError(undefined)
     const mentions = extractMentions(body)
+    // @everdict mentioned → hand the thread to the discussion agent (its answer lands as an agent comment).
+    const askAgent = mentionables.some((mn) => mn.isAgent && mentioned(body, mn.name))
     startTransition(async () => {
       const r = await createCommentAction({
         resourceType,
@@ -312,6 +427,7 @@ function Composer({
         body,
         ...(parentId ? { parentId } : {}),
         ...(mentions.length > 0 ? { mentions } : {}),
+        ...(askAgent ? { askAgent: true } : {}),
       })
       if (r.ok) {
         setValue('')
@@ -378,8 +494,17 @@ function Composer({
                   i === active ? 'bg-accent text-foreground' : 'hover:bg-accent/60'
                 )}
               >
-                <Avatar name={mn.name} url={mn.avatarUrl} size="sm" className="rounded-full" />
+                {mn.isAgent ? (
+                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/12 text-primary">
+                    <Sparkles className="size-3" />
+                  </span>
+                ) : (
+                  <Avatar name={mn.name} url={mn.avatarUrl} size="sm" className="rounded-full" />
+                )}
                 <span className="truncate">{mn.name}</span>
+                {mn.isAgent && (
+                  <span className="ml-auto text-[11px] text-faint">{t('askAgentHint')}</span>
+                )}
               </button>
             ))}
           </div>
