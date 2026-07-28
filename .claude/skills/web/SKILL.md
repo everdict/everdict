@@ -15,6 +15,9 @@ courier, not an auth authority**: it forwards the user's Keycloak token and trus
    `.parse()` every control-plane response. Re-export via the entity's `index.ts`.
 3. **All control-plane calls are `server-only`** via `shared/lib/control-plane.ts` (`controlPlane.*`) —
    never fetch from the browser. Pass `AuthContext` from `authContext()` / `currentPrincipal()`.
+   Server-side outbound fetch is proxy-aware: `src/instrumentation.ts` installs an `EnvHttpProxyAgent`
+   global dispatcher (`shared/lib/proxy-dispatcher.ts`, local mirror of apps/api's — runtime-decoupling
+   forbids importing it) so corporate-proxy deployments work via standard `HTTP(S)_PROXY`/`NO_PROXY` env.
 4. **Pages = server components** that fetch + `.parse()` and pass plain props to `'use client'` islands;
    mutations are `'use server'` server actions that forward the token then `revalidatePath`.
 5. **Role-gate UI** with the `shared/auth/can.ts` mirror (`can(roles, action)`) — enforcement is still the

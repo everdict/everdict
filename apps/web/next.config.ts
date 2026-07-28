@@ -5,8 +5,10 @@ import createNextIntlPlugin from 'next-intl/plugin'
 const withNextIntl = createNextIntlPlugin('./src/shared/i18n/request.ts')
 
 const nextConfig: NextConfig = {
-  // Only uses the control-plane (@everdict/api) HTTP client, so no extra server packages.
   reactStrictMode: true,
+  // undici 는 번들하지 않고 런타임에 node_modules 에서 require — instrumentation 의 setGlobalDispatcher 가
+  // Node 내장 fetch 가 읽는 전역 심볼(Symbol.for 레지스트리)과 동일 인스턴스 의미론으로 동작하게 한다(프록시 지원).
+  serverExternalPackages: ['undici'],
   // If dev and build share the same .next, in this shared WIP tree another session's next build pollutes the dev turbopack
   // cache (SST persist failure / buildManifest ENOENT → hydration dies and every click is unresponsive).
   // pnpm dev isolates it via NEXT_DIST_DIR=.next-dev (build keeps the default .next — no production impact).

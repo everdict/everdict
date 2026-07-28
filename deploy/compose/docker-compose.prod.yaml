@@ -36,6 +36,22 @@ x-build-args: &build-args
   no_proxy: ${no_proxy:-}
   CA_CERT: ${CA_CERT:-}
 
+# Corporate-network RUNTIME passthrough — build args above cover image builds only; the running processes need the
+# same env to reach the internet (api: installProxyDispatcher covers LLM providers / trace pull·export / GitHub App /
+# Mattermost; web: instrumentation.ts covers the desktop-releases GitHub fetch). Merged only into services whose
+# process actually honors it. Compose-internal service names are ALWAYS appended to NO_PROXY so in-cluster calls
+# (web→api, api→agent, …) never route through the corporate proxy. NODE_EXTRA_CA_CERTS points at the CA the
+# Dockerfiles bake in the base stage — interpolated only when CA_CERT is present in the deploy env at up-time
+# (same var the build consumes), so Node trusts a TLS-intercepting proxy at runtime too.
+x-runtime-proxy-env: &runtime-proxy-env
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
+  http_proxy: ${http_proxy:-}
+  https_proxy: ${https_proxy:-}
+  NO_PROXY: ${NO_PROXY:-}${NO_PROXY:+,}api,agent,web,postgres,temporal,temporal-ui,browser,keycloak,host.docker.internal,localhost,127.0.0.1
+  no_proxy: ${no_proxy:-}${no_proxy:+,}api,agent,web,postgres,temporal,temporal-ui,browser,keycloak,host.docker.internal,localhost,127.0.0.1
+  NODE_EXTRA_CA_CERTS: ${CA_CERT:+/usr/local/share/ca-certificates/corp-proxy.crt}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -61,6 +77,7 @@ services:
       target: runtime
       args: *build-args
     environment:
+      <<: *runtime-proxy-env
       PORT: "8787"
       DATABASE_URL: postgresql://${POSTGRES_USER:-everdict}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-everdict}
       # Secret at-rest encryption KEK (base64, 32B). Leave empty to disable the secret store (fail-closed).
@@ -127,6 +144,7 @@ services:
       target: runtime
       args: *build-args
     environment:
+      <<: *runtime-proxy-env
       # The web (server) → API call uses the compose network's service name. KEYCLOAK_* unset → operates as tenant=default.
       CONTROL_PLANE_URL: http://api:8787
       # The web (server) proxies the assistant chat + teammates to the agent service over the compose network.
