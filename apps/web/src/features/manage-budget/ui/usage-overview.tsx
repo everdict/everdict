@@ -18,8 +18,13 @@ import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 type GroupBy = 'activity' | 'model'
+// The dimension the chart plots. Cost and tokens are metered on the same rows, so this is a lens, not a refetch.
+type Metric = 'usd' | 'tokens'
 const RANGES = [7, 30, 90] as const
 type RangeDays = (typeof RANGES)[number]
+
+const metricOf = (row: UsageItem, metric: Metric): number =>
+  metric === 'usd' ? row.usd : row.tokens
 
 function utcToday(): string {
   return new Date().toISOString().slice(0, 10)
@@ -64,12 +69,15 @@ function Segmented<T extends string | number>({
   )
 }
 
-// Metered-usage dashboard (the billing view): headline tiles, a daily-spend chart with range + group-by filters,
+// Metered-usage dashboard (the billing view): headline tiles, a daily chart with metric + range + group-by filters,
 // and the all-time (source × model) breakdown table. Read-only — the meter never blocks; caps live in BudgetManager.
 export function UsageOverview({ metered }: { metered: TenantUsage }) {
   const t = useTranslations('manageBudget')
+  const [metric, setMetric] = useState<Metric>('usd')
   const [range, setRange] = useState<RangeDays>(30)
   const [groupBy, setGroupBy] = useState<GroupBy>('activity')
+  const fmtMetric = metric === 'usd' ? fmtUsd : fmtTokens
+  const dailyTitle = metric === 'usd' ? t('dailyTitle') : t('dailyTokensTitle')
 
   const monthPrefix = utcToday().slice(0, 7)
   const mtdUsd = useMemo(
@@ -85,6 +93,7 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
   // Series identity comes from ALL daily data (not the window), so switching 7d/30d/90d never repaints survivors.
   const { series, values } = useMemo(() => {
     const dayIndex = new Map(days.map((d, i) => [d, i]))
+    const valueOf = (row: TenantUsage['daily'][number]) => metricOf(row, metric)
     const srcLabel = (s: UsageItem['source']) =>
       s === 'harness' ? t('sourceHarness') : s === 'judge' ? t('sourceJudge') : t('sourceAgent')
     let defs: {
@@ -95,7 +104,7 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
     }[]
     if (groupBy === 'activity') {
       const active = (['harness', 'judge', 'agent'] as const).filter((s) =>
-        metered.daily.some((d) => d.source === s && d.usd > 0)
+        metered.daily.some((d) => d.source === s && valueOf(d) > 0)
       )
       const slots: Record<string, string> = {
         harness: seriesColorAt(0),
@@ -110,9 +119,9 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
       }))
     } else {
       const byModel = new Map<string, number>()
-      for (const d of metered.daily) byModel.set(d.model, (byModel.get(d.model) ?? 0) + d.usd)
+      for (const d of metered.daily) byModel.set(d.model, (byModel.get(d.model) ?? 0) + valueOf(d))
       const ranked = [...byModel.entries()]
-        .filter(([, usd]) => usd > 0)
+        .filter(([, total]) => total > 0)
         .sort((a, b) => b[1] - a[1])
         .map(([m]) => m)
       const lead = ranked.slice(0, MAX_SERIES)
@@ -138,13 +147,13 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
       if (di === undefined) continue
       const si = defs.findIndex((def) => def.match(row))
       const line = si >= 0 ? matrix[si] : undefined
-      if (line) line[di] = (line[di] ?? 0) + row.usd
+      if (line) line[di] = (line[di] ?? 0) + valueOf(row)
     }
     const chartSeries: ChartSeries[] = defs.map(({ key, label, color }) => ({ key, label, color }))
     return { series: chartSeries, values: matrix }
-  }, [metered.daily, days, groupBy, t])
+  }, [metered.daily, days, groupBy, metric, t])
 
-  const periodUsd = useMemo(
+  const periodValue = useMemo(
     () => values.reduce((s, line) => s + line.reduce((a, v) => a + v, 0), 0),
     [values]
   )
@@ -178,8 +187,16 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
         />
       </div>
 
-      {/* filter row — scopes the chart below it (date range first) */}
+      {/* filter row — scopes the chart below it (which number first, then the window, then the split) */}
       <div className="flex flex-wrap items-center gap-2 pt-1">
+        <Segmented
+          value={metric}
+          onChange={setMetric}
+          options={[
+            { value: 'usd' as const, label: t('metricCost') },
+            { value: 'tokens' as const, label: t('metricTokens') },
+          ]}
+        />
         <Segmented
           value={range}
           onChange={setRange}
@@ -195,14 +212,14 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
         />
         <span className="ml-auto text-[12px] text-muted-foreground">
           {t('periodTotal', { days: range })}{' '}
-          <span className="font-[560] tabular-nums text-foreground">{fmtUsd(periodUsd)}</span>
+          <span className="font-[560] tabular-nums text-foreground">{fmtMetric(periodValue)}</span>
         </span>
       </div>
 
       <div className="rounded-lg border bg-card p-4 shadow-raise">
         <div className="mb-2 flex items-center gap-1.5">
-          <h4 className="text-[12px] font-[560] text-muted-foreground">{t('dailyTitle')}</h4>
-          <InfoTip content={t('dailyTip')} />
+          <h4 className="text-[12px] font-[560] text-muted-foreground">{dailyTitle}</h4>
+          <InfoTip content={metric === 'usd' ? t('dailyTip') : t('dailyTokensTip')} />
         </div>
         <BarChart
           x={days}
@@ -210,9 +227,9 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
           values={values}
           stacked
           showTotal
-          formatValue={fmtUsd}
+          formatValue={fmtMetric}
           formatX={(day) => day.slice(5).replace('-', '/')}
-          ariaLabel={t('dailyTitle')}
+          ariaLabel={dailyTitle}
           emptyLabel={t('chartEmpty')}
         />
       </div>
