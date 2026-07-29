@@ -5,6 +5,7 @@ import { Network } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { humanize, nodeColor, predicateRank } from '@/features/knowledge-graph'
+import type { AgentReference, AgentReferenceType } from '@/entities/agent-session'
 import {
   knowledgeEntrySchema,
   type KnowledgeEntry,
@@ -17,6 +18,7 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Markdown } from '@/shared/ui/markdown'
 
 import { useInfraPanel } from '../model/infra-panel-context'
+import { MentionInChatButton } from './mention-in-chat-button'
 
 // The panel's knowledge tab — what the node picked on the map IS, and what sits around it. Identity, harvested
 // attributes and relationships come from the published map (the same data the canvas draws); a claim additionally
@@ -99,6 +101,7 @@ export function KnowledgeTab() {
           {node.label}
         </h3>
         <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground/70">{node.key}</p>
+        <AskInChat node={node} />
       </div>
 
       <NodeAttributes node={node} />
@@ -142,6 +145,39 @@ export function KnowledgeTab() {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// A map node whose entity the agent can READ is one the member can ask about — mention it in the chat and the
+// entity's record (a claim's body + its `supersedes`/`verifiedAt` lineage, a harness's spec, …) is injected as
+// context, so "what does this claim actually say" and "how did this knowledge get here" are both answerable in
+// the conversation. Node types with no read tool (the workspace hub, a user, a tag) simply offer no button.
+const REFERENCE_TYPE_OF: Partial<Record<string, AgentReferenceType>> = {
+  knowledge: 'knowledge',
+  skill: 'skill',
+  harness: 'harness',
+  dataset: 'dataset',
+  judge: 'judge',
+  runtime: 'runtime',
+  run: 'run',
+  scorecard: 'scorecard',
+  view: 'view',
+}
+
+function AskInChat({ node }: { node: KnowledgeNodeView }) {
+  const t = useTranslations('knowledge')
+  const type = REFERENCE_TYPE_OF[node.type]
+  if (type === undefined) return null
+  const reference: AgentReference = {
+    type,
+    id: node.key,
+    label: node.label,
+    ...(node.version !== undefined ? { version: node.version } : {}),
+  }
+  return (
+    <div className="mt-2.5">
+      <MentionInChatButton reference={reference} label={t('askInChat')} />
     </div>
   )
 }

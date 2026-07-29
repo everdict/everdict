@@ -2820,7 +2820,8 @@
     "zoomOut": "Zoom out",
     "fit": "Fit to view",
     "canvasHint": "Drag to move · scroll to zoom · click a node for its detail",
-    "pending": "not yet projected"
+    "pending": "not yet projected",
+    "askInChat": "Ask in chat"
   },
   "files": {
     "title": "Files",
@@ -3463,7 +3464,8 @@
       "view": "View",
       "skill": "Skill",
       "environment": "Environment",
-      "trace": "Trace"
+      "trace": "Trace",
+      "knowledge": "Knowledge"
     }
   },
   "workspaceSettings": {

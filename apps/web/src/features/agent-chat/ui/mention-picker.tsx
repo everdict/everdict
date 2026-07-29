@@ -8,6 +8,7 @@ import {
   Container,
   Database,
   Eye,
+  Lightbulb,
   Play,
   Scale,
   Server,
@@ -32,6 +33,7 @@ export const REFERENCE_TYPE_ICON: Record<AgentReferenceType, LucideIcon> = {
   judge: Scale,
   view: Eye,
   skill: BookOpen,
+  knowledge: Lightbulb,
   environment: Container,
   trace: Telescope,
 }

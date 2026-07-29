@@ -2719,7 +2719,7 @@
     "integrationsDesc": "GitHub App·Mattermost·트레이스 싱크/소스·이미지 레지스트리.",
     "observability": "트레이스",
     "observabilityDesc": "등록한 플랫폼의 트레이스를 둘러봅니다.",
-    "knowledge": "지식 그래프",
+    "knowledge": "지식",
     "knowledgeDesc": "워크스페이스가 쌓은 지식과 스킬을, 그것이 다루는 엔티티 위에 지도로 펼칩니다.",
     "ci": "CI 연동",
     "ciDesc": "키리스 CI 평가를 위한 저장소 신뢰 연결.",
@@ -2820,7 +2820,8 @@
     "zoomOut": "축소",
     "fit": "전체 보기",
     "canvasHint": "드래그로 이동 · 스크롤로 확대 · 노드를 클릭하면 상세",
-    "pending": "미투영"
+    "pending": "미투영",
+    "askInChat": "대화에서 물어보기"
   },
   "files": {
     "title": "파일",
@@ -3463,7 +3464,8 @@
       "view": "뷰",
       "skill": "스킬",
       "environment": "환경",
-      "trace": "트레이스"
+      "trace": "트레이스",
+      "knowledge": "지식"
     }
   },
   "workspaceSettings": {

@@ -1,4 +1,6 @@
 import { GithubAppService } from "@everdict/application-control";
+import { KnowledgeEntryService } from "@everdict/application-control";
+import { KnowledgeService } from "@everdict/application-control";
 import { MattermostService } from "@everdict/application-control";
 import { MembershipService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
@@ -15,6 +17,8 @@ import type { CaseJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/cont
 import {
   InMemoryBudgetStore,
   InMemoryOAuthStateStore,
+  InMemoryKnowledgeEntryStore,
+  InMemoryKnowledgeStore,
   InMemoryRecordingStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
@@ -2067,5 +2071,68 @@ describe("MCP tools", () => {
 
     const member = await connect(deps, ["member"], "acme");
     expect((await member.callTool({ name: "create_invite", arguments: { role: "member" } })).isError).toBe(true);
+  });
+});
+
+// The knowledge tool family is what a `knowledge` @-reference resolves through (apps/agent REFERENCE_TOOL →
+// get_knowledge_entry) and what "ask the agent about this claim" depends on end to end. It stayed invisible for a
+// while because the MCP route hand-copied its deps and simply forgot these services — the routes worked, the tools
+// did not exist, and nothing failed. The route now spreads ServerDeps (a compile-time contract); this locks the
+// other half: with the services wired, the tools are actually registered under the names the resolver calls.
+describe("MCP knowledge tools", () => {
+  function withKnowledge() {
+    const base = harness();
+    const entries = new InMemoryKnowledgeEntryStore();
+    return {
+      ...base,
+      entries,
+      knowledgeService: new KnowledgeService({
+        store: new InMemoryKnowledgeStore(),
+        contextSources: { knowledgeEntries: entries },
+      }),
+      knowledgeEntryService: new KnowledgeEntryService({ store: entries }),
+    };
+  }
+
+  it("exposes the graph reads, the entry CRUD and task-context assembly", async () => {
+    const client = await connect(withKnowledge(), ["admin"]);
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const tool of [
+      "get_knowledge_entry", // the @-reference resolver's read — a broken name silently degrades every mention
+      "list_knowledge_entries",
+      "create_knowledge_entry",
+      "get_knowledge_node",
+      "knowledge_related",
+      "knowledge_subgraph",
+      "get_knowledge_graph",
+      "get_task_context",
+    ])
+      expect(names).toContain(tool);
+  });
+
+  it("reads back a claim by id — what an @-referenced knowledge chip hands the model", async () => {
+    const deps = withKnowledge();
+    const created = await deps.knowledgeEntryService.create({
+      tenant: "acme",
+      kind: "finding",
+      title: "Login cases go flaky above 8 parallel",
+      body: "The browser pods contend for the shared CDP pool.",
+      refs: [{ type: "harness", key: "web-agent", version: "2.1.0" }],
+      visibility: "workspace",
+      createdBy: "u",
+    });
+    const client = await connect(deps, ["viewer"]);
+    const read = JSON.parse(text(await client.callTool({ name: "get_knowledge_entry", arguments: { id: created.id } })));
+    expect(read.title).toBe("Login cases go flaky above 8 parallel");
+    expect(read.body).toContain("CDP pool");
+    expect(read.refs[0]).toMatchObject({ type: "harness", key: "web-agent", version: "2.1.0" });
+  });
+
+  // A workspace with no knowledge service wired (the graph needs a database) must not advertise the tools.
+  it("registers nothing when the knowledge services are absent", async () => {
+    const client = await connect(harness(), ["admin"]);
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).not.toContain("get_knowledge_entry");
+    expect(names).not.toContain("get_knowledge_node");
   });
 });

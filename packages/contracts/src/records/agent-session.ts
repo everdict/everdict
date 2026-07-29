@@ -68,6 +68,9 @@ export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 // browser (a "mention in chat" button), not the @-picker — cross-source browsing there would be prohibitively wide.
 // `environment` is an environment-kind capability (get_capability): the eval image asset, so "wire this environment
 // into a harness" / "fix its instructions" can be handed to the agent the same way every other entity is.
+// `knowledge` is a reified claim (get_knowledge_entry) — what the workspace has LEARNED, not what it is configured
+// with; the injected record carries its lineage fields (`supersedes`, `verifiedAt`, coverage), so "what does this
+// claim say" and "how did it get here" are both answerable from the reference.
 export const AGENT_REFERENCE_TYPES = [
   "harness",
   "runtime",
@@ -77,6 +80,7 @@ export const AGENT_REFERENCE_TYPES = [
   "judge",
   "view",
   "skill",
+  "knowledge",
   "environment",
   "trace",
 ] as const;

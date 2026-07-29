@@ -78,6 +78,7 @@ export const AGENT_REFERENCE_TYPES = [
   'judge',
   'view',
   'skill',
+  'knowledge', // reified claim(get_knowledge_entry) — 워크스페이스가 배운 것, 계보(supersedes/verifiedAt) 포함
   'environment', // environment kind 의 capability(get_capability) — 평가 환경 이미지 자산
   'trace',
 ] as const

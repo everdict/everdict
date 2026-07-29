@@ -79,53 +79,12 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
         }
       };
       await buildMcpServer(
-        {
-          service: deps.service,
-          scorecardService: deps.scorecardService,
-          usageMeter: deps.usageMeter,
-          budget: deps.budget,
-          scheduleService: deps.scheduleService,
-          queueService: deps.queueService,
-          viewService: deps.viewService,
-          harnessTemplates: deps.harnessTemplates,
-          harnessInstances: deps.harnessInstances,
-          datasetRegistry: deps.datasetRegistry,
-          judgeRegistry: deps.judgeRegistry,
-          judgePreviewService: deps.judgePreviewService,
-          modelRegistry: deps.modelRegistry,
-          agentRegistry: deps.agentRegistry,
-          skillService: deps.skillService,
-          capabilityService: deps.capabilityService, // Capability Store MCP tools (list/get/save/validate/probe/reach/delete) — was missing here, so the agent's /mcp saw no capability tools
-          probeCapabilityMcp: deps.probeCapabilityMcp, // capability wizard mcp "test connection" (probe_capability_mcp)
-          runtimeRegistry: deps.runtimeRegistry,
-          probeRuntime: deps.probeRuntime,
-          inspectRuntime: deps.inspectRuntime,
-          controlRuntime: deps.controlRuntime,
-          secretStore: deps.secretStore,
-          githubAppService: deps.githubAppService,
-          mattermostService: deps.mattermostService,
-          traceSourceService: deps.traceSourceService,
-          spanAttrMappingService: deps.spanAttrMappingService,
-          imageRegistryService: deps.imageRegistryService,
-          environmentAdoptionService: deps.environmentAdoptionService,
-          ciLinkService: deps.ciLinkService,
-          runnerService: deps.runnerService,
-          notificationService: deps.notificationService,
-          commentService: deps.commentService,
-          runnerHub: deps.runnerHub,
-          liveFrames: deps.liveFrames, // runner PUSH of live-screen frames (report_case_screen) — same MCP endpoint as the lease tools
-          liveLogs: deps.liveLogs, // runner PUSH of the live execution log (report_case_log)
-          caseRecorder: deps.caseRecorder, // durable replay tee for the pushed frames/logs
-
-          settingsStore: deps.settingsStore,
-          benchmarkService: deps.benchmarkService,
-          bundleService: deps.bundleService,
-          workspaceService: deps.workspaceService,
-          membershipService: deps.membershipService,
-          profileService: deps.profileService,
-          keyStore: deps.keyStore,
-          apiPublicUrl: baseUrl(req), // the everdict runner --api-url for github_install_workspace_runner
-        },
+        // The whole ServerDeps, not a hand-copied projection: this literal used to name each service one by one,
+        // and every service that was added to the routes but forgotten HERE silently lost its entire MCP tool
+        // family (capabilities once, then the knowledge tools — invisible to the agent and to Claude Code, with
+        // no error anywhere). Spreading makes McpDeps a compile-time contract instead of a checklist; only the
+        // request-derived field is added on top.
+        { ...deps, apiPublicUrl: baseUrl(req) }, // apiPublicUrl = the everdict runner --api-url for github_install_workspace_runner
         principal,
         // Read at INITIALIZE, which is when a client identifies itself — apps/agent opens one session per
         // conversation, so this labels everything the session authors with that agent + conversation.

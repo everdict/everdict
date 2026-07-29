@@ -53,6 +53,15 @@ apps/api/src/
   The slice owns **both transports** — parity is structural, not a convention you remember. Storage is the
   `@everdict/db`/`@everdict/registry` packages, injected — apps/api has no storage layer of its own.
 
+## The MCP transport gets the WHOLE deps bag
+
+`mcp.routes.ts` hands `buildMcpServer` `{ ...deps, apiPublicUrl }` — the ServerDeps spread, never a hand-copied
+field list. It used to name each service individually, and a service added to the routes but forgotten there lost
+its ENTIRE tool family with no error anywhere: the HTTP routes worked, `tools/list` was just quietly shorter (it
+happened to capabilities, then to the whole knowledge family — 49 tools missing). Spreading turns `McpDeps` into a
+compile-time contract. So a new service reaches MCP the moment it is on `ServerDeps`; the only thing a tool family
+still needs is its `register<X>Tools(server, ctx)` line in `mcp.ts` and its own `if (!deps.xService) return` gate.
+
 ## Call chain — one direction, always
 
 `transport (route | tool) → service → store/registry → DB`. A lower layer never knows an upper one.

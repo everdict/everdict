@@ -36,6 +36,9 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType): Promise<un
       return controlPlane.listRuns<Row[]>(ctx, { limit: 30 })
     case 'skill':
       return controlPlane.listSkills<Row[]>(ctx)
+    case 'knowledge':
+      // 지식 엔트리 — normalize 가 `title` 을 라벨로 집는다(엔트리엔 name 이 없음).
+      return controlPlane.listKnowledgeEntries<Row[]>(ctx)
     case 'environment': {
       // 환경 = capability 스토어의 environment kind — 하나의 스토어 목록에서 그 kind 만 추린다.
       const capabilities = await controlPlane.listCapabilities<Row[]>(ctx)

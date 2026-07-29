@@ -41,6 +41,7 @@ const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
   judge: "get_judge",
   view: "get_view",
   skill: "get_skill",
+  knowledge: "get_knowledge_entry", // a reified claim — the record carries its body AND its lineage fields
   environment: "get_capability", // an environment IS a capability of kind `environment` — one store entity, one read
   trace: "inspect_trace",
 };
