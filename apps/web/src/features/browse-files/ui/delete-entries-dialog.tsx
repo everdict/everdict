@@ -57,20 +57,23 @@ export function DeleteEntriesDialog({
 
   return (
     <Dialog open onClose={onClose} className="max-w-lg" labelledBy={titleId}>
-      <div className="flex items-start gap-3 border-b border-border px-5 py-4">
-        <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/20">
-          <TriangleAlert className="size-[18px]" />
+      {/* Single-line title → centered compact header, matching its sibling MoveEntriesDialog (both open from the
+          same selection action bar). The taller size-9 variant stays with the delete-* confirms that show an id line. */}
+      <div className="flex items-center gap-2.5 border-b border-border px-5 py-3.5">
+        <span className="grid size-7 shrink-0 place-items-center rounded-md bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/20">
+          <TriangleAlert className="size-4" />
         </span>
-        <div className="min-w-0 flex-1">
-          <h2 id={titleId} className="text-[14px] font-[560] tracking-[-0.01em] text-foreground">
-            {t('deleteEntriesTitle', { count: remaining.length })}
-          </h2>
-        </div>
+        <h2
+          id={titleId}
+          className="min-w-0 flex-1 truncate text-[14px] font-[560] tracking-[-0.01em] text-foreground"
+        >
+          {t('deleteEntriesTitle', { count: remaining.length })}
+        </h2>
         <button
           type="button"
           onClick={onClose}
           aria-label={t('close')}
-          className="-mr-1 -mt-1 grid size-7 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-accent hover:text-foreground"
+          className="-mr-1 grid size-7 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-accent hover:text-foreground"
         >
           <X className="size-4" />
         </button>

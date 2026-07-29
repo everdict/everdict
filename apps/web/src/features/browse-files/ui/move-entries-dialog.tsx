@@ -69,20 +69,24 @@ export function MoveEntriesDialog({
 
   return (
     <Dialog open onClose={onClose} className="max-w-lg" labelledBy={titleId}>
-      <div className="flex items-start gap-3 border-b border-border px-5 py-4">
-        <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
-          <CornerDownRight className="size-[18px]" />
+      {/* The title is a single line, so the row centers on it. The taller `items-start` + size-9 badge header
+          belongs to the delete-* confirms that carry a second line (the id) under the title — borrowing it here
+          just left the title floating at the top of an oversized header. */}
+      <div className="flex items-center gap-2.5 border-b border-border px-5 py-3.5">
+        <span className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
+          <CornerDownRight className="size-4" />
         </span>
-        <div className="min-w-0 flex-1">
-          <h2 id={titleId} className="text-[14px] font-[560] tracking-[-0.01em] text-foreground">
-            {t('moveTitle', { count: sources.length })}
-          </h2>
-        </div>
+        <h2
+          id={titleId}
+          className="min-w-0 flex-1 truncate text-[14px] font-[560] tracking-[-0.01em] text-foreground"
+        >
+          {t('moveTitle', { count: sources.length })}
+        </h2>
         <button
           type="button"
           onClick={onClose}
           aria-label={t('close')}
-          className="-mr-1 -mt-1 grid size-7 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-accent hover:text-foreground"
+          className="-mr-1 grid size-7 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-accent hover:text-foreground"
         >
           <X className="size-4" />
         </button>
