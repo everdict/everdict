@@ -21,7 +21,6 @@ import { LiveLogStore } from "./common/live-log-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
-import { buildManagedImages } from "./composition/images.js";
 import { buildDispatch } from "./composition/dispatch.js";
 import { artifactStoreFromEnv, meterUsagePolicyFromEnv, workspaceFsFromEnv } from "./composition/env-policy.js";
 import {
@@ -30,6 +29,8 @@ import {
   buildObservability,
   startAutoscaler,
 } from "./composition/execution-scheduling.js";
+import { buildFileExecutionService } from "./composition/file-execution.js";
+import { buildManagedImages } from "./composition/images.js";
 import { buildIntegrations } from "./composition/integrations.js";
 import { makePersistence } from "./composition/persistence.js";
 import { buildRun } from "./composition/run.js";
@@ -46,8 +47,8 @@ import {
   buildViewSnapshot,
 } from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
-import { AgentService } from "./core/agent/agent-service.js";
 import { AgentMemberToolingService } from "./core/agent/agent-member-tooling-service.js";
+import { AgentService } from "./core/agent/agent-service.js";
 import { BrowserProfileCaptureService } from "./core/browser-profile/browser-profile-capture-service.js";
 import { BrowserSessionService } from "./core/browser-session/browser-session-service.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
@@ -268,6 +269,7 @@ async function main(): Promise<void> {
     runtimeSecretsFor,
     scopedSecretsFor,
     imageRegistryService,
+    registryAuthsFor,
     runtimeBuildBackend,
     dispatcher,
     meteredDispatcher,
@@ -277,6 +279,7 @@ async function main(): Promise<void> {
     invalidateTenantBackends,
     releaseSelfRunnerBackend,
   } = buildDispatch({
+    ...(workspaceImages ? { images: workspaceImages } : {}),
     callbackStore,
     secretStore,
     settingsStore,
@@ -351,7 +354,7 @@ async function main(): Promise<void> {
     runtimeSecretsFor,
     scopedSecretsFor,
     githubAppService,
-    imageRegistryService,
+    registryAuthsFor,
     notificationService,
     platformEventService,
     envMeterPolicy,
@@ -383,7 +386,7 @@ async function main(): Promise<void> {
     runtimeSecretsFor,
     scopedSecretsFor,
     githubAppService,
-    imageRegistryService,
+    registryAuthsFor,
     notificationService,
     platformEventService,
     traceSinkService,
@@ -570,6 +573,9 @@ async function main(): Promise<void> {
     // The workspace filesystem — the shared, workspace-isolated file tree (web Files page + list_files/get_file/
     // write_file MCP tools; agents persist task outputs here as real files). Backed by S3/MinIO when env-configured.
     fsService: new FsService(workspaceFs, fsRevisionStore),
+    // "Run" for a workspace file — a sandbox per run, disposed after it. Opt-in: absent unless the deployment
+    // gave the control plane a container runtime (EVERDICT_FILE_EXECUTION_DRIVER=docker).
+    fileExecutionService: buildFileExecutionService(workspaceFs),
     // Capability Store — one discriminated versioned entity (mcp|code|skill|environment) members author, publish
     // (private|workspace|subset|public), and adopt into their agent (tool kinds) or consume at harness-authoring time
     // (environment). Reach beyond the workspace: subset fans across the author's own workspaces, public exposes to

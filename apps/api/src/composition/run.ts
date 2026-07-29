@@ -4,7 +4,7 @@ import type { NotificationService, PlatformEventService } from "@everdict/applic
 import { RunService } from "@everdict/application-control";
 import type { RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
-import type { GradeContext, JudgeSpec } from "@everdict/contracts";
+import type { GradeContext, JudgeSpec, RegistryAuth } from "@everdict/contracts";
 import type { RunStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { UsageMeter } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
@@ -60,7 +60,8 @@ export function buildRun(deps: {
   runtimeSecretsFor: RuntimeSecretsFn;
   scopedSecretsFor: ScopedSecretsFn;
   githubAppService: GithubAppService;
-  imageRegistryService: ImageRegistryService;
+  // Image pull credentials for a job's images (managed grants + BYO) — built once in buildDispatch.
+  registryAuthsFor: (workspace: string, images: string[]) => Promise<RegistryAuth[]>;
   notificationService: NotificationService;
   platformEventService: PlatformEventService;
   envMeterPolicy: (tenant: string) => boolean;
@@ -87,7 +88,7 @@ export function buildRun(deps: {
     runtimeSecretsFor,
     scopedSecretsFor,
     githubAppService,
-    imageRegistryService,
+    registryAuthsFor,
     notificationService,
     platformEventService,
     envMeterPolicy,
@@ -130,8 +131,8 @@ export function buildRun(deps: {
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
     // Private-repo seed (preferred): if the case git URL owner matches the workspace GitHub App installation, use that App token (team-shared).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
-    // Workspace registry image pull credentials — if the job image belongs to that registry, attach via job.registryAuth.
-    registryAuthsFor: (workspace) => imageRegistryService.pullAuths(workspace),
+    // Image pull credentials (managed grants + BYO registries) — the ones covering this job's images ride along.
+    registryAuthsFor,
     // Out-of-job trace collection (harness trace.collect="control-plane") — executeCase finalizes the traceRef result.
     buildTraceSource,
     secretsFor: runtimeSecretsFor, // pull auth for collection (re-resolve traceRef.authSecret)

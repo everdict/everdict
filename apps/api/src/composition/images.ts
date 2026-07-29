@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
-import type { WorkspaceImages } from "@everdict/application-control";
+import type { ImageRegistryService, WorkspaceImages } from "@everdict/application-control";
+import type { RegistryAuth } from "@everdict/contracts";
 import {
   ImageTokenService,
   InMemoryImageStore,
   ManagedImageStore,
   RegistryTokenIssuer,
   fetchManagedRegistryApi,
+  grantAsRegistryAuth,
 } from "@everdict/images";
 
 // Managed image store wiring. Entirely optional: with no endpoint or signing key configured the deployment is
@@ -36,11 +38,17 @@ export function buildManagedImages(env: NodeJS.ProcessEnv = process.env): Manage
   const certFile = env.EVERDICT_IMAGE_STORE_CERT_FILE;
   if (!endpoint || !keyFile || !certFile) return {};
 
+  // Grants outlive the queue: a dispatched job's credentials are minted BEFORE it is scheduled, so the lifetime
+  // has to cover queue wait + pull, not just the exchange. An hour is the compromise — long enough that a batch
+  // behind a busy scheduler still pulls, short enough that revoked reach stops working the same session. A job
+  // queued past it fails at pull with the registry's own error, which is visible, not silent.
+  const grantTtlSeconds = Number(env.EVERDICT_IMAGE_STORE_GRANT_TTL_SECONDS ?? 3600);
   const issuer = new RegistryTokenIssuer({
     privateKeyPem: readPem(keyFile, "KEY"),
     certificatePem: readPem(certFile, "CERT"),
     issuer: env.EVERDICT_IMAGE_STORE_ISSUER ?? "everdict",
     service: env.EVERDICT_IMAGE_STORE_SERVICE ?? "everdict-registry",
+    ...(Number.isFinite(grantTtlSeconds) && grantTtlSeconds > 0 ? { grantTtlSeconds } : {}),
   });
   // Where the CONTROL PLANE reaches the registry, which is not always where clients do: in compose the api talks
   // to http://registry:5000 over the container network while a developer's docker pulls from localhost:5001.
@@ -64,4 +72,28 @@ export function buildManagedImages(env: NodeJS.ProcessEnv = process.env): Manage
 // without running a registry. Never wired by default: it enforces no real authorization boundary.
 export function inMemoryManagedImages(endpoint?: string): ManagedImages {
   return { images: new InMemoryImageStore(endpoint ? { endpoint } : {}) };
+}
+
+// The one answer to "what credentials does this job need to pull its images" — the seam executeCase and the
+// RuntimeDispatcher both call. Managed grants come FIRST: consumers pick the first credential matching an image's
+// host, and when a workspace has also registered a BYO registry on the same host, ours is the one we can vouch for.
+//
+// Both halves are best-effort by design (the placement stance is warn-only): a registry that cannot be reached
+// must not turn into a dispatch failure for a job whose other images pull fine. An image no credential covers is
+// simply pulled anonymously, which is correct for public base images and honest for everything else — the failure
+// surfaces as the registry's own "unauthorized" at pull time rather than as a gate that guesses.
+export function buildImagePullAuths(deps: {
+  images?: WorkspaceImages;
+  imageRegistry: ImageRegistryService;
+}): (workspace: string, imageRefs: string[]) => Promise<RegistryAuth[]> {
+  return async (workspace, imageRefs) => {
+    const managed = deps.images
+      ? await deps.images
+          .mintPullGrant(workspace, imageRefs)
+          .then((grants) => grants.map(grantAsRegistryAuth))
+          .catch(() => [] as RegistryAuth[])
+      : [];
+    const byo = await deps.imageRegistry.pullAuths(workspace).catch(() => [] as RegistryAuth[]);
+    return [...managed, ...byo];
+  };
 }

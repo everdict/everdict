@@ -346,7 +346,7 @@ export interface ScorecardServiceDeps {
   // Workspace-owned GitHub App token (preferred) — if the case git URL owner matches the workspace installation, issue via that App (same as a single run).
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // Workspace image-registry pull credentials — if the job image belongs to that registry, attach via job.registryAuth (executeCase, same as a single run).
-  registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
+  registryAuthsFor?: (workspace: string, images: string[]) => Promise<RegistryAuth[]>;
   // Completion callback (succeeded/failed) — completion notification (Mattermost etc.). A failure here is independent of the scorecard result (the service swallows it).
   onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
   // Platform-event emit seam (agent-automation A1) — the lifecycle FACTS this service records: scorecard.submitted,

@@ -100,7 +100,7 @@ export interface RunServiceDeps {
   // Workspace-owned GitHub App token (preferred) — if the case git URL owner matches a workspace installation, issued via that App.
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // Workspace image-registry pull credentials — if the job image is from that registry, attach as job.registryAuth (executeCase).
-  registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
+  registryAuthsFor?: (workspace: string, images: string[]) => Promise<RegistryAuth[]>;
   // Live-progress log read (observability ②): resolve the run's runtime lane to a live backend and read the
   // case job's current stdout (Backend.logs). Best-effort — absent/miss = no logs, never an error.
   // stream: stdout (default, the result stream) | stderr (harness progress logs) — structural twin of the

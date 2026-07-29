@@ -234,6 +234,7 @@ services:
       EVERDICT_IMAGE_STORE_CERT_FILE: ${IMAGE_STORE_CERT_FILE:-/certs/image-token.crt}
       EVERDICT_IMAGE_STORE_ISSUER: ${IMAGE_STORE_ISSUER:-everdict}
       EVERDICT_IMAGE_STORE_SERVICE: ${IMAGE_STORE_SERVICE:-everdict-registry}
+      EVERDICT_IMAGE_STORE_GRANT_TTL_SECONDS: ${IMAGE_STORE_GRANT_TTL_SECONDS:-}
       # ── Externally reachable URLs (GitHub App callback · Mattermost inbound · live trace deep-links) ──
       API_PUBLIC_URL: ${API_PUBLIC_URL:-}
       WEB_BASE_URL: ${WEB_BASE_URL:-}

@@ -185,8 +185,18 @@ grant at an arbitrary repository in someone else's namespace is not a request we
   - The exchange logic lives in `@everdict/images` (`ImageTokenService`), not in `apps/api/core`:
     nothing in it knows about HTTP frameworks, and keeping it beside the issuer is what lets the live
     check exercise the real code path instead of a re-implementation of it.
-- **M4 — dispatch.** `registryAuthsFor` resolves managed grants first, BYO second; `executeCase`
-  attaches all matching entries.
+- **M4 — dispatch.** ✅ `buildImagePullAuths` is the ONE answer to "what does this job need to pull its
+  images" — managed grants first (consumers take the first host match, and ours is the credential we can
+  vouch for), BYO second; `executeCase` and the `RuntimeDispatcher` both call it, so run, scorecard and
+  topology authorize identically. The seam became **image-scoped** (`(workspace, images)`): a managed
+  grant is minted for the repositories in flight, and a resolver that answered "here is every credential
+  the tenant has" would defeat the point of scoping one. Both halves stay best-effort — an unreachable
+  registry must not fail a job whose other images pull fine (the warn-only placement stance).
+  - **Grants outlive the queue.** Credentials are minted BEFORE a job is scheduled, so the lifetime has
+    to cover queue wait + pull, not just the token exchange:
+    `EVERDICT_IMAGE_STORE_GRANT_TTL_SECONDS` defaults to an hour. Lower it to tighten how fast revoked
+    reach stops working; a job queued past it fails at pull with the registry's own error, which is
+    visible rather than silent.
 - **M5 — publish.** CLI push over a grant; atomic `--register-environment` with the minted digest.
 - **M6 — cross-tenant pull.** Scope authorization over `canConsumeCapability`; `adopt` verification
   becomes a policy answer for managed refs and keeps the HTTP check for BYO refs.

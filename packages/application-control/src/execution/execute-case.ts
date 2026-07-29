@@ -17,10 +17,10 @@ export interface ExecuteCaseDeps extends CollectTraceDeps {
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // (legacy) personal connection — evalCase.env.source.connectionId → external-account connection token (personally owned, resolved by owner). Removed in S6.
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
-  // Image pull credentials (best-effort) — every managed-store grant / workspace registry credential the tenant has;
-  // the ones covering this job's images ride along as job.registryAuths (transient).
-  // docs/architecture/managed-image-store.md
-  registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
+  // Image pull credentials for THESE images (best-effort) — the images are passed in because a managed-store grant
+  // is minted for exactly the repositories in flight, not handed out as a standing credential; the BYO half
+  // ignores them and answers with the workspace's registered registries. docs/architecture/managed-image-store.md
+  registryAuthsFor?: (workspace: string, images: string[]) => Promise<RegistryAuth[]>;
 }
 
 // Every image reference this job can pull — the case image + service-harness service images (+per-dispatch pin
@@ -43,8 +43,11 @@ export function jobImages(job: CaseJob): string[] {
 // registries needs both, and a grant/credential is scoped per host so they compose.
 async function resolveRegistryAuths(deps: ExecuteCaseDeps, job: CaseJob): Promise<RegistryAuth[]> {
   if (!deps.registryAuthsFor || !job.tenant) return [];
-  const auths = await deps.registryAuthsFor(job.tenant).catch(() => [] as RegistryAuth[]);
-  return registryAuthsForImages(auths, jobImages(job));
+  const images = jobImages(job);
+  const auths = await deps.registryAuthsFor(job.tenant, images).catch(() => [] as RegistryAuth[]);
+  // Filter again even though the provider was told the images: the BYO half returns every registered registry,
+  // and shipping a credential for a host this job never contacts is needless exposure.
+  return registryAuthsForImages(auths, images);
 }
 
 // If the case repo seed is private (git), resolve a token. Try the workspace GitHub App (installation) first and

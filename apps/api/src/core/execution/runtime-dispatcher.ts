@@ -35,8 +35,10 @@ export interface RuntimeDispatcherDeps {
     spec: RuntimeSpec,
     opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[] },
   ) => Backend;
-  // Workspace image-registry pull credentials (best-effort) — carried into the topology backend build for authenticated service-image pulls.
-  registryAuthsFor?: (tenant: string) => Promise<RegistryAuth[]>;
+  // Image pull credentials for the job's images (best-effort) — carried into the topology backend build for
+  // authenticated service-image pulls. Image-scoped for the same reason executeCase's is: a managed grant is
+  // minted for the repositories in flight, never handed out as a standing credential.
+  registryAuthsFor?: (tenant: string, images: string[]) => Promise<RegistryAuth[]>;
   // self:<runnerId> target — a personally-owned self-hosted runner. Not owned = undefined (404), owned = its liveness
   // (advertised capabilities + whether it's ONLINE right now). Capabilities gate placement; `online` drives the
   // dispatch-time "runner offline" diagnostic. A service harness needs the docker capability (gate below).
@@ -225,8 +227,9 @@ export class RuntimeDispatcher implements Dispatcher {
           // Image pull credentials — bake the ones covering this job's images into the backend (the backend is built
           // once per runtime and reused, so it carries the first build job's credentials; a documented limit of baking
           // credentials into a long-lived backend rather than passing them per dispatch).
-          const auths = (await this.deps.registryAuthsFor?.(tenant).catch(() => [])) ?? [];
-          const registryAuths = registryAuthsForImages(auths, jobImages(job));
+          const images = jobImages(job);
+          const auths = (await this.deps.registryAuthsFor?.(tenant, images).catch(() => [])) ?? [];
+          const registryAuths = registryAuthsForImages(auths, images);
           const build = this.deps.buildBackend ?? buildRuntimeBackend;
           this.deps.backends.register(
             name,

@@ -7,7 +7,7 @@ import type { RunnerHubLike } from "@everdict/application-control";
 import { ScorecardService, TraceSourceService } from "@everdict/application-control";
 import type { TraceSinkService } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, Scheduler } from "@everdict/backends";
-import type { CaseResult } from "@everdict/contracts";
+import type { CaseResult, RegistryAuth } from "@everdict/contracts";
 import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { CircuitBreaker, UsageMeter } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
@@ -49,7 +49,8 @@ export function buildScorecard(deps: {
   runtimeSecretsFor: RuntimeSecretsFn;
   scopedSecretsFor: ScopedSecretsFn;
   githubAppService: GithubAppService;
-  imageRegistryService: ImageRegistryService;
+  // Image pull credentials for a job's images (managed grants + BYO) — built once in buildDispatch.
+  registryAuthsFor: (workspace: string, images: string[]) => Promise<RegistryAuth[]>;
   notificationService: NotificationService;
   platformEventService: PlatformEventService;
   traceSinkService: TraceSinkService;
@@ -78,7 +79,7 @@ export function buildScorecard(deps: {
     runtimeSecretsFor,
     scopedSecretsFor,
     githubAppService,
-    imageRegistryService,
+    registryAuthsFor,
     notificationService,
     platformEventService,
     traceSinkService,
@@ -180,8 +181,8 @@ export function buildScorecard(deps: {
     scopedSecretsFor, // resolve harness env {secretRef} (shared + submitter's personal)
     // Private-repo dataset (preferred): if the case git URL owner matches the workspace GitHub App installation, use that App token (same as a single run).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
-    // Workspace registry image pull credentials — batch cases attach the same way as a single run.
-    registryAuthsFor: (workspace) => imageRegistryService.pullAuths(workspace),
+    // Image pull credentials — batch cases authorize exactly like a single run (one resolver, one behavior).
+    registryAuthsFor,
     // Completion notification (Mattermost) — batch-eval completion posts to the channel just like a run.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
     // Lifecycle facts (agent-automation A1) — scorecard.submitted / case.completed / cancelled.

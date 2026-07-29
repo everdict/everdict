@@ -2,7 +2,7 @@ import { ImageRegistryService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
 import { RunnerHub, type RunnerHubLike, type RunnerJobStore, StoreRunnerHub } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
-import type { BrowserProfileStore } from "@everdict/application-control";
+import type { BrowserProfileStore, WorkspaceImages } from "@everdict/application-control";
 import {
   type BackendRegistry,
   type Dispatcher as CoreDispatcher,
@@ -26,6 +26,7 @@ import { makeRuntimeController } from "../core/ops/runtime-control.js";
 import { makeRuntimeInspector } from "../core/ops/runtime-inspect.js";
 import { makeRuntimeProber } from "../core/ops/runtime-probe.js";
 import { dockerRegistryReader } from "../infrastructure/registry/registry-reader.js";
+import { buildImagePullAuths } from "./images.js";
 
 // Dispatch stack: the self-hosted runner lease hub + the front-door callback rendezvous + tenant runtime routing
 // (RuntimeSpec → live backend) + the one model-resolving/metered dispatcher every path shares + the connection probe.
@@ -42,6 +43,9 @@ export function buildDispatch(deps: {
   backends: BackendRegistry;
   metrics: Metrics;
   browserProfileStore?: BrowserProfileStore; // browser-profiles S5 — resolve a referenced profile for eval injection
+  // Managed image store (optional) — when present, a job's managed images are authorized with a minted grant
+  // instead of a registered credential. docs/architecture/managed-image-store.md
+  images?: WorkspaceImages;
   cipher?: SecretCipher; // browser-profiles S5 — decrypt the profile's captured storageState blob
   caseRecorder?: CaseRecorder; // replay ② — durable recorder the managed topology backend streams browser CDP events into
 }) {
@@ -117,6 +121,12 @@ export function buildDispatch(deps: {
   });
   // Workspace trace-source resolution for the topology pull — a service harness's selected source (name → config with the
   // auth value + correlate + scope) so a dev-cluster-deployed harness's trace is pulled from its team's platform after a case.
+  // Image pull credentials — managed grants + BYO registries, defined ONCE so run, scorecard and the runtime
+  // dispatcher all authorize a job's images the same way.
+  const registryAuthsFor = buildImagePullAuths({
+    ...(deps.images ? { images: deps.images } : {}),
+    imageRegistry: imageRegistryService,
+  });
   const traceSourceForDispatch = new TraceSourceService(settingsStore, { secretsFor: runtimeSecretsFor });
   // RuntimeSpec → live backend. nomad/k8s with a traceSource (= topology-capable) → ServiceTopologyBackend,
   // everything else → buildRuntimeBackend (local/nomad/k8s). (The old topology kind was folded into nomad/k8s + traceSource in slice 5b-2.)
@@ -149,8 +159,8 @@ export function buildDispatch(deps: {
     runtimes: runtimeRegistry,
     secretsFor: runtimeSecretsFor,
     buildBackend: runtimeBuildBackend,
-    // Workspace registry pull credentials — carried into the topology backend build to authenticate service-image pulls.
-    registryAuthsFor: (tenant) => imageRegistryService.pullAuths(tenant),
+    // Image pull credentials — carried into the topology backend build to authenticate service-image pulls.
+    registryAuthsFor,
     // self:<runnerId> — personally-owned runner. Confirm ownership (not owned = undefined) + return its liveness
     // (advertised capabilities for the service gate + whether it's online now for the "runner offline" diagnostic).
     resolveSelfRunner: async (owner, runnerId) => {
@@ -237,6 +247,7 @@ export function buildDispatch(deps: {
     runtimeSecretsFor,
     scopedSecretsFor,
     imageRegistryService,
+    registryAuthsFor,
     runtimeBuildBackend,
     dispatcher,
     meteredDispatcher,

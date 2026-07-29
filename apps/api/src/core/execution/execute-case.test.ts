@@ -166,6 +166,39 @@ describe("executeCase — attach image pull credentials (job.registryAuths)", ()
     expect(cap.seen()?.registryAuths).toEqual([AUTH, QUAY]);
   });
 
+  // A managed grant is minted for the repositories in flight, so the resolver has to be TOLD which images this
+  // job pulls — a standing "here is every credential the tenant has" would defeat the point of scoping a grant.
+  it("asks for credentials for exactly the images this job pulls", async () => {
+    const cap = capture();
+    const asked: string[][] = [];
+    const serviceSpec: NonNullable<CaseJob["harnessSpec"]> = {
+      kind: "service",
+      id: "bu",
+      version: "1",
+      services: [
+        { name: "agent", image: "ghcr.io/acme/agent:v1", needs: [], perRun: [], replicas: 1, env: {} },
+        { name: "echo", image: "mendhak/http-https-echo:latest", needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+      dependencies: [],
+      frontDoor: { service: "agent", submit: "POST /runs" },
+      traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
+    };
+    const job: CaseJob = { ...JOB, harnessSpec: serviceSpec, imagePins: { echo: "ghcr.io/acme/echo:pr-2" } };
+    await executeCase(
+      deps({
+        dispatcher: cap.dispatcher,
+        registryAuthsFor: async (_ws, images) => {
+          asked.push(images);
+          return [AUTH];
+        },
+      }),
+      "u",
+      job,
+    );
+    // Pins win over the spec image — the pin is what the runtime will actually pull.
+    expect(asked).toEqual([["ghcr.io/acme/agent:v1", "ghcr.io/acme/echo:pr-2"]]);
+  });
+
   // A self-hosted runner is user-installed and may lag the control plane; it reads only the singular field.
   it("dual-writes the deprecated singular field so an older self-hosted runner still authenticates", async () => {
     const cap = capture();
