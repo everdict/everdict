@@ -600,6 +600,16 @@ export const controlPlane = {
     }),
   // The built-in (first-party) default tools catalog — powers the Settings › Agent built-in-tools toggles.
   listAgentDefaults: <T>(auth: AuthContext) => call<T>(auth, '/agents/defaults'),
+  // 로그인한 멤버 자신의 에이전트 도구셋(Settings › Agent › Tools). 워크스페이스 AgentSpec 이 기준선이고 각 멤버가
+  // 자기 on/off 를 얹는다 — 셀프 스코프(개인 시크릿과 동형)라 별도 역할 게이트 없음. setAgentTool 의 enabled=null 은
+  // 오버라이드 해제(= 워크스페이스 기본값 따르기).
+  listAgentTools: <T>(auth: AuthContext) => call<T>(auth, '/agent/tools'),
+  setAgentTool: <T>(auth: AuthContext, key: string, enabled: boolean | null) =>
+    call<T>(auth, '/agent/tools', { method: 'PUT', body: JSON.stringify({ key, enabled }) }),
+  // 같은 오버레이의 스킬 채널 — 워크스페이스 라이브러리가 "지원하는 절차", 이건 "내 에이전트가 따르는 절차".
+  listAgentSkills: <T>(auth: AuthContext) => call<T>(auth, '/agent/skills'),
+  setAgentSkill: <T>(auth: AuthContext, key: string, enabled: boolean | null) =>
+    call<T>(auth, '/agent/skills', { method: 'PUT', body: JSON.stringify({ key, enabled }) }),
   // Workspace Skills — SKILL.md-style procedures the members author for the conversational agent (dual-scoped
   // private|workspace). Read skills:read (viewer+); author/edit/share/delete skills:write (member+, creator-or-admin
   // for a specific skill). generateSkill drafts a skill from a description via the workspace's model (skill-generate).

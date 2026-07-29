@@ -21,6 +21,24 @@
     "tabKeys": "API keys",
     "keysLoadError": "Couldn't load keys: {error}"
   },
+  "agentTools": {
+    "scope_personal": "My own tools",
+    "scope_workspace": "Workspace tools",
+    "scope_builtin": "Built-in",
+    "scopeHint_personal": "Tools you published privately — visible only to you, and only your agent can use them.",
+    "scopeHint_workspace": "Tools shared in this workspace. Switching one off applies to you alone; other members' agents keep it.",
+    "scopeHint_builtin": "Tools Everdict ships out of the box — you can follow the workspace default or override it for yourself.",
+    "type_mcp": "MCP",
+    "type_code": "Code",
+    "writes": "Can write",
+    "overridden": "Your choice",
+    "followWorkspace": "Follow the workspace default",
+    "missingSecrets": "Needs secret: {names}",
+    "shadowed": "Another tool with the same name is on, so this one is not offered.",
+    "emptyTitle": "No tools available yet",
+    "emptyHint": "Once tools are registered in this workspace, you can switch them on here.",
+    "saveFailed": "Could not save your tool setting."
+  },
   "analysisArtifacts": {
     "galleryTitle": "Analysis artifacts",
     "galleryDescription": "Reports and charts the Everdict agent produced for this view — scheduled reports land here automatically.",
@@ -2714,11 +2732,9 @@
     "skills": "Skills",
     "skillsDesc": "Every procedure the agent can follow — the ones your team writes, your own drafts, and the published and built-in ones.",
     "tools": "Tools",
-    "toolsDesc": "MCP and code tools your workspace authors for its agent — publish, version, and adopt them.",
+    "toolsDesc": "The tools this agent can use — switch the workspace's and your own on or off.",
     "environments": "Environments",
     "environmentsDesc": "Eval-environment images your workspace authors, plus the imported-environment inventory.",
-    "personalCapabilities": "My tools & skills",
-    "personalCapabilitiesDesc": "Your private publications and personal skill drafts — visible only to you.",
     "integrations": "Integrations",
     "integrationsDesc": "GitHub App, Mattermost, trace sinks and sources, image registries.",
     "observability": "Traces",
@@ -3359,7 +3375,11 @@
     "publish": "Publish",
     "publishing": "Publishing…",
     "publishedToStore": "Published \"{name}\" to the store as v{version}.",
-    "publishError": "Could not publish to the store."
+    "publishError": "Could not publish to the store.",
+    "useSkill": "Use",
+    "useSkillLabel": "Let my agent use the {name} skill",
+    "followWorkspace": "Follow the workspace default",
+    "useSkillError": "Could not save your skill setting."
   },
   "agentChat": {
     "new": "New",

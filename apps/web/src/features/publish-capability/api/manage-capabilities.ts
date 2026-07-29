@@ -20,7 +20,6 @@ function revalidateCapabilityPages(): void {
     '/[workspace]/store/mine',
     '/[workspace]/settings/tools',
     '/[workspace]/settings/environments',
-    '/[workspace]/settings/personal-capabilities',
   ])
     revalidatePath(path)
 }

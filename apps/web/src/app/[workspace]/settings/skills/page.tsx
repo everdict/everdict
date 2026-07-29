@@ -1,6 +1,7 @@
 import { getTranslations } from 'next-intl/server'
 
 import { SkillsManager } from '@/features/manage-skills'
+import { agentSkillListSchema, type AgentSkillEntry } from '@/entities/agent-skill'
 import { capabilitiesSchema, isBuiltInCapability, type Capability } from '@/entities/capability'
 import { membersSchema } from '@/entities/member'
 import { modelsSchema } from '@/entities/model'
@@ -86,6 +87,15 @@ export default async function SkillsPage() {
       ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     }
 
+  // 내 스킬셋 — 워크스페이스 라이브러리가 "지원하는 절차"라면 이건 "내 에이전트가 따르는 절차"(멤버별 오버레이).
+  // 실패해도 라이브러리는 그대로 뜬다: 스위치만 빠진다.
+  let agentSkills: AgentSkillEntry[] = []
+  try {
+    agentSkills = agentSkillListSchema.parse(await controlPlane.listAgentSkills(ctx)).skills
+  } catch {
+    agentSkills = []
+  }
+
   return (
     <div className="space-y-6">
       {error !== undefined ? (
@@ -99,6 +109,7 @@ export default async function SkillsPage() {
           header={{ title: t('skills'), description: t('skillsDesc') }}
           skills={skills}
           packaged={packaged}
+          agentSkills={agentSkills}
           currentWorkspace={principal?.workspace ?? ''}
           modelIds={modelIds}
           authors={authors}

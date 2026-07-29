@@ -37,7 +37,6 @@ function revalidateAdoptionPages(): void {
     '/[workspace]/settings',
     '/[workspace]/settings/agent',
     '/[workspace]/settings/tools',
-    '/[workspace]/settings/personal-capabilities',
   ])
     revalidatePath(path)
 }

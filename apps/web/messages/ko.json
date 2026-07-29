@@ -21,6 +21,24 @@
     "tabKeys": "API 키",
     "keysLoadError": "키를 불러오지 못했어요: {error}"
   },
+  "agentTools": {
+    "scope_personal": "나만 사용하는 도구",
+    "scope_workspace": "워크스페이스 도구",
+    "scope_builtin": "기본 제공",
+    "scopeHint_personal": "내가 비공개로 등록한 도구 — 나에게만 보이고, 내 에이전트에서만 동작합니다.",
+    "scopeHint_workspace": "이 워크스페이스에 공유된 도구 — 켜고 끄는 건 나에게만 적용되고, 다른 멤버의 에이전트는 그대로입니다.",
+    "scopeHint_builtin": "Everdict 가 기본으로 제공하는 도구 — 워크스페이스 기본값을 내가 따로 켜거나 끌 수 있습니다.",
+    "type_mcp": "MCP",
+    "type_code": "코드",
+    "writes": "쓰기 가능",
+    "overridden": "내 설정",
+    "followWorkspace": "워크스페이스 기본값 따르기",
+    "missingSecrets": "시크릿 필요: {names}",
+    "shadowed": "같은 이름의 다른 도구가 켜져 있어 이 도구는 동작하지 않습니다.",
+    "emptyTitle": "사용할 수 있는 도구가 없습니다",
+    "emptyHint": "워크스페이스에 도구가 등록되면 여기에서 켜고 끌 수 있습니다.",
+    "saveFailed": "도구 설정을 저장하지 못했습니다."
+  },
   "analysisArtifacts": {
     "galleryTitle": "분석 아티팩트",
     "galleryDescription": "Everdict 에이전트가 이 뷰에 대해 만든 리포트와 차트입니다. 예약 리포트는 자동으로 이곳에 쌓입니다.",
@@ -2714,11 +2732,9 @@
     "skills": "스킬",
     "skillsDesc": "에이전트가 따를 수 있는 모든 절차 — 팀이 만든 것, 내 초안, 그리고 발행·기본 제공된 것.",
     "tools": "도구",
-    "toolsDesc": "워크스페이스가 에이전트를 위해 저작하는 MCP·코드 도구 — 발행·버전 관리·채택.",
+    "toolsDesc": "이 에이전트가 쓸 수 있는 도구 — 워크스페이스 도구와 나만 쓰는 도구를 켜고 끕니다.",
     "environments": "환경",
     "environmentsDesc": "워크스페이스가 저작하는 평가 환경 이미지와 가져온 환경 인벤토리.",
-    "personalCapabilities": "내 도구·스킬",
-    "personalCapabilitiesDesc": "나에게만 보이는 비공개 발행물과 개인 스킬 초안.",
     "integrations": "통합",
     "integrationsDesc": "GitHub App·Mattermost·트레이스 싱크/소스·이미지 레지스트리.",
     "observability": "트레이스",
@@ -3359,7 +3375,11 @@
     "publish": "발행",
     "publishing": "발행 중…",
     "publishedToStore": "\"{name}\"을(를) 스토어에 v{version}(으)로 발행했어요.",
-    "publishError": "스토어에 발행하지 못했어요."
+    "publishError": "스토어에 발행하지 못했어요.",
+    "useSkill": "사용",
+    "useSkillLabel": "{name} 스킬을 내 에이전트가 사용",
+    "followWorkspace": "워크스페이스 기본값 따르기",
+    "useSkillError": "스킬 설정을 저장하지 못했습니다."
   },
   "agentChat": {
     "new": "새 대화",

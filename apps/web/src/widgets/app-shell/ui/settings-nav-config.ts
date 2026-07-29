@@ -10,7 +10,6 @@ import {
   KeyRound,
   Lock,
   Network,
-  Package,
   Plug,
   Shield,
   SlidersHorizontal,
@@ -56,8 +55,6 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       { href: '/preferences', labelKey: 'preferences', icon: SlidersHorizontal },
       { href: '/api-keys', labelKey: 'apiKeys', icon: KeyRound },
       { href: '/personal-secrets', labelKey: 'personalSecrets', icon: Lock },
-      // My private capabilities + personal skill drafts — user-private scope, so it lives under Account.
-      { href: '/personal-capabilities', labelKey: 'personalCapabilities', icon: Package },
     ],
   },
   {

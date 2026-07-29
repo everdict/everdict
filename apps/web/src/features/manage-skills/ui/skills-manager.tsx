@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
@@ -19,6 +19,7 @@ import {
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import type { AgentSkillEntry } from '@/entities/agent-skill'
 import { isBuiltInCapability, type Capability } from '@/entities/capability'
 import type { Skill, SkillFile, SkillVisibility } from '@/entities/skill'
 import { fmtSubject } from '@/shared/lib/format'
@@ -38,6 +39,7 @@ import {
   generateSkillAction,
   updateSkillAction,
 } from '../api/manage-skills'
+import { setAgentSkillAction } from '../api/set-agent-skill'
 import { TestSkillPanel } from './test-skill-panel'
 
 // subject → 표시 이름 + 아바타(있으면). 스킬 카드/편집화면의 "작성자" 표시에 쓰인다(멤버 프로필, 없으면 fmtSubject 폴백).
@@ -54,6 +56,7 @@ type LibraryEntry =
 export function SkillsManager({
   skills,
   packaged = [],
+  agentSkills = [],
   currentWorkspace,
   modelIds,
   authors,
@@ -67,6 +70,9 @@ export function SkillsManager({
   // (저작·버전은 스토어 소관)이지만 에이전트가 실제로 따르는 스킬이라 같은 라이브러리에 선다. 개인 능력 페이지처럼
   // capability 를 이미 따로 보여주는 화면에선 생략한다.
   packaged?: Capability[]
+  // 내 에이전트가 실제로 따르는 스킬 — 워크스페이스 라이브러리(위 두 목록)가 "지원하는 절차"라면 이건 "내가 켠 절차".
+  // 행마다 스위치를 달아 준다. 비면 스위치 없이 라이브러리로만 읽힌다(권한/서비스 미구성).
+  agentSkills?: AgentSkillEntry[]
   // capability 의 소유 워크스페이스를 판별해 스코프 섹션을 나누는 기준(빠진 경우 전부 "제공됨"으로 떨어진다).
   currentWorkspace?: string
   modelIds: string[]
@@ -84,6 +90,27 @@ export function SkillsManager({
   const [editing, setEditing] = useState<Skill | 'new' | null>(null)
   const [confirming, setConfirming] = useState<Skill | null>(null)
   const [pending, startTransition] = useTransition()
+  // 내 스킬셋(서버가 해석해 준 최종 상태) — 토글은 낙관적으로 반영하고 실패 시 되돌린다.
+  const [mySkills, setMySkills] = useState(agentSkills)
+  const [switching, setSwitching] = useState<string | undefined>(undefined)
+  const myEntry = (key: string): AgentSkillEntry | undefined => mySkills.find((e) => e.key === key)
+  // 패키지 스킬의 서버 키 — 발행물은 capability:<owner>/<id>, Everdict 빌트인은 default:<id> 로 온다(같은 카드, 두 채널).
+  const myPackagedEntry = (c: Capability): AgentSkillEntry | undefined =>
+    myEntry(`capability:${c.tenant}/${c.id}`) ?? myEntry(`default:${c.id}`)
+  const setMine = (entry: AgentSkillEntry, enabled: boolean | null) => {
+    const previous = mySkills
+    const next = enabled === null ? entry.baseline : enabled
+    setMySkills((rows) => rows.map((r) => (r.key === entry.key ? { ...r, enabled: next } : r)))
+    setSwitching(entry.key)
+    startTransition(async () => {
+      const r = await setAgentSkillAction(entry.key, enabled)
+      setSwitching(undefined)
+      if (!r.ok) {
+        setMySkills(previous)
+        toast.error(r.error ?? t('useSkillError'))
+      }
+    })
+  }
 
   const canManage = (s: Skill) => s.createdBy === currentSubject || isAdmin
   // 작성자 표시 정보 — 멤버 프로필(이름+아바타), 없으면 축약된 subject.
@@ -193,6 +220,13 @@ export function SkillsManager({
                     onShare={share}
                     onEdit={setEditing}
                     onDelete={setConfirming}
+                    use={
+                      <UseSkillSwitch
+                        entry={myEntry(`skill:${entry.skill.id}`)}
+                        busy={switching === `skill:${entry.skill.id}`}
+                        onChange={setMine}
+                      />
+                    }
                   />
                 ) : (
                   <PackagedSkillCard
@@ -202,6 +236,13 @@ export function SkillsManager({
                     // 패키지 스킬도 저작 스킬과 같은 상세 라우트로 — ?source 가 소유 워크스페이스를 가리켜
                     // 읽기 전용 문서를 연다(다이얼로그 아님: 상세는 항상 페이지여야 오른쪽 대화 패널을 함께 쓴다).
                     href={`/${workspace}/settings/skills/${encodeURIComponent(entry.capability.id)}?source=${encodeURIComponent(entry.capability.tenant)}`}
+                    use={
+                      <UseSkillSwitch
+                        entry={myPackagedEntry(entry.capability)}
+                        busy={switching === myPackagedEntry(entry.capability)?.key}
+                        onChange={setMine}
+                      />
+                    }
                   />
                 )
               )}
@@ -246,6 +287,47 @@ export function SkillsManager({
   )
 }
 
+// "내 에이전트가 이 스킬을 따를까" 스위치 — 라이브러리의 존재(워크스페이스가 지원함)와 내 운용(내가 켬)을 가르는 컨트롤.
+// 워크스페이스 기본값과 다르면 배지 + 되돌리기를 함께 보여 준다. 서버가 이 스킬을 모르면(권한/미구성) 아무것도 그리지 않는다.
+function UseSkillSwitch({
+  entry,
+  busy,
+  onChange,
+}: {
+  entry: AgentSkillEntry | undefined
+  busy: boolean
+  onChange: (entry: AgentSkillEntry, enabled: boolean | null) => void
+}) {
+  const t = useTranslations('skillsManager')
+  if (!entry) return null
+  const overridden = entry.enabled !== entry.baseline
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      {overridden && (
+        <button
+          type="button"
+          onClick={() => onChange(entry, null)}
+          disabled={busy}
+          className="text-[11.5px] text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+        >
+          {t('followWorkspace')}
+        </button>
+      )}
+      <label className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+        <input
+          type="checkbox"
+          className="accent-primary"
+          checked={entry.enabled}
+          disabled={busy}
+          onChange={(e) => onChange(entry, e.target.checked)}
+          aria-label={t('useSkillLabel', { name: entry.name })}
+        />
+        {t('useSkill')}
+      </label>
+    </div>
+  )
+}
+
 // 이 워크스페이스에서 저작하는 Skill 레코드 한 장 — 이름(상세로 링크) + 공개범위/파일수 배지 + 관리 메뉴(공유·편집·삭제).
 function SkillCard({
   skill,
@@ -256,6 +338,7 @@ function SkillCard({
   onShare,
   onEdit,
   onDelete,
+  use,
 }: {
   skill: Skill
   author: Author
@@ -265,6 +348,7 @@ function SkillCard({
   onShare: (skill: Skill, visibility: SkillVisibility) => void
   onEdit: (skill: Skill) => void
   onDelete: (skill: Skill) => void
+  use?: ReactNode // 이 멤버의 에이전트가 따를지 여부 스위치(라이브러리 관리와 별개의 축)
 }) {
   const t = useTranslations('skillsManager')
   return (
@@ -297,6 +381,7 @@ function SkillCard({
             </Badge>
           )}
         </div>
+        {use}
         {canManage && (
           <DropdownMenu
             align="end"
@@ -349,36 +434,41 @@ function PackagedSkillCard({
   capability,
   author,
   href,
+  use,
 }: {
   capability: Capability
   author: Author
   href: string
+  use?: ReactNode
 }) {
   const t = useTranslations('skillsManager')
   const builtIn = isBuiltInCapability(capability)
   const files = capability.spec.type === 'skill' ? capability.spec.files : []
   return (
     <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <Package className="size-4 shrink-0 text-muted-foreground" />
-        <Link
-          href={href}
-          className="min-w-0 truncate font-mono text-[13px] font-medium hover:text-primary hover:underline"
-        >
-          {capability.name}
-        </Link>
-        <Badge tone={builtIn ? 'info' : 'outline'} className="shrink-0">
-          {builtIn ? t('builtInBadge') : t('packagedBadge')}
-        </Badge>
-        <Badge tone="outline" className="shrink-0 font-mono">
-          v{capability.version}
-        </Badge>
-        {files.length > 0 && (
-          <Badge tone="outline" className="shrink-0 gap-1">
-            <FileText className="size-3" />
-            {files.length}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <Package className="size-4 shrink-0 text-muted-foreground" />
+          <Link
+            href={href}
+            className="min-w-0 truncate font-mono text-[13px] font-medium hover:text-primary hover:underline"
+          >
+            {capability.name}
+          </Link>
+          <Badge tone={builtIn ? 'info' : 'outline'} className="shrink-0">
+            {builtIn ? t('builtInBadge') : t('packagedBadge')}
           </Badge>
-        )}
+          <Badge tone="outline" className="shrink-0 font-mono">
+            v{capability.version}
+          </Badge>
+          {files.length > 0 && (
+            <Badge tone="outline" className="shrink-0 gap-1">
+              <FileText className="size-3" />
+              {files.length}
+            </Badge>
+          )}
+        </div>
+        {use}
       </div>
 
       <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">
