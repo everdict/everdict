@@ -95,6 +95,13 @@ export const agentReferenceSchema = z.object({
 })
 export type AgentReference = z.infer<typeof agentReferenceSchema>
 
+// 대화 패널에 실리는 "임무" — 특정 도메인 상세의 전용 진입("대화로 편집하기" 등)으로 들어왔을 때, 패널의 구조는
+// 그대로 두고 빈 화면의 라이팅과 제안만 그 작업에 맞춘다(범용 "대화에서 분석" 진입은 임무 없음 = 기본 문구).
+// 값은 메시지 카탈로그 네임스페이스(agentChat.missions.<kind>)이기도 하므로 카탈로그 키와 1:1로 유지한다.
+export const AGENT_CHAT_MISSIONS = ['skillEdit'] as const
+export const agentChatMissionSchema = z.enum(AGENT_CHAT_MISSIONS)
+export type AgentChatMission = z.infer<typeof agentChatMissionSchema>
+
 export const agentAttachmentSchema = z.object({
   name: z.string(),
   mimeType: z.string().optional(),

@@ -12,6 +12,7 @@ import {
   agentSessionSchema,
   agentTeammateListSchema,
   type AgentAttachmentInput,
+  type AgentChatMission,
   type AgentMessage,
   type AgentPermissionMode,
   type AgentReference,
@@ -46,7 +47,9 @@ function mergeMessages(prev: AgentMessage[], incoming: AgentMessage[]): AgentMes
 
 // pendingMention (+ onConsumeMention) is threaded down from the infra panel: an entity detail page asked to
 // analyze its entity here, so drop it into the composer as a reference chip and/or pre-type a draft prompt
-// (nothing auto-sends — the member reviews and presses send). pendingSession (+ onConsumeSession) is the same
+// (nothing auto-sends — the member reviews and presses send). It may also carry a MISSION — a domain-specific
+// entry such as Settings › Skills 상세의 "대화로 편집하기" — which lands on a fresh draft and reframes the empty
+// chat (title/body/suggestions) for that task; the surface itself is unchanged. pendingSession (+ onConsumeSession) is the same
 // channel for a comment thread's "view details": open a SPECIFIC (workspace-visible discussion) session and WATCH
 // it — a background turn streams its SSE to nobody, so the panel polls /messages?since= + /pending instead. The
 // prop shapes are declared inline (not imported from the widget) to keep the FSD import direction downward-only.
@@ -57,7 +60,7 @@ export function AgentChatPanel({
   onConsumeSession,
   user,
 }: {
-  pendingMention?: { ref?: AgentReference; prompt?: string } | null
+  pendingMention?: { ref?: AgentReference; prompt?: string; mission?: AgentChatMission } | null
   onConsumeMention?: () => void
   pendingSession?: { id: string } | null
   onConsumeSession?: () => void
@@ -74,6 +77,9 @@ export function AgentChatPanel({
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [references, setReferences] = useState<AgentReference[]>([])
+  // 전용 진입으로 들어온 임무(스킬 편집 등) + 그 대상 이름 — 빈 대화의 문구·제안을 그 작업에 맞춘다.
+  // 대상은 함께 떨어진 참조 칩에서 그대로 가져온다(추측 없음). 대화를 바꾸면 사라진다.
+  const [mission, setMission] = useState<{ kind: AgentChatMission; target?: string } | null>(null)
   const [attachments, setAttachments] = useState<AgentAttachmentInput[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [streamingReasoning, setStreamingReasoning] = useState('')
@@ -243,6 +249,7 @@ export function AgentChatPanel({
     setArtifacts([])
     setWatchId(null) // 워치 모드는 열어 준 그 세션에만 한정 — 다른 대화로 가면 폴링 중단
     setPendingPermissions([])
+    setMission(null) // 임무는 진입한 그 대화에만 붙는다
   }, [])
 
   const newConversation = useCallback(() => {
@@ -591,13 +598,21 @@ export function AgentChatPanel({
   // the draft prompt, then clear the buffer so a later tab re-mount (the agent tab unmounts when another infra
   // tab is shown) does not re-inject the same prefill. A prompt overwrites only an empty composer — never a
   // member's in-progress draft.
+  // A MISSION entry additionally lands on a fresh draft when a persisted conversation is open: the task framing
+  // only shows on an empty chat, and an editing mission has no business continuing someone else's thread.
   useEffect(() => {
     if (!pendingMention) return
+    if (pendingMention.mission && activeId !== null) newConversation()
     if (pendingMention.ref) addReference(pendingMention.ref)
     if (pendingMention.prompt)
       setInput((prev) => (prev.trim().length > 0 ? prev : (pendingMention.prompt ?? '')))
+    if (pendingMention.mission)
+      setMission({
+        kind: pendingMention.mission,
+        ...(pendingMention.ref ? { target: pendingMention.ref.label } : {}),
+      })
     onConsumeMention?.()
-  }, [pendingMention, addReference, onConsumeMention])
+  }, [pendingMention, addReference, onConsumeMention, activeId, newConversation])
 
   // A comment thread asked to open its discussion session — switch to it in WATCH mode. The session is
   // workspace-visible but not necessarily in the caller's own list (it belongs to the first asker), so fetch the
@@ -705,6 +720,7 @@ export function AgentChatPanel({
     <ConversationView
       title={active?.title ?? t('new')}
       user={user}
+      mission={mission}
       canvasLink={canvasLink}
       models={modelIds}
       model={activeId ? (active?.model ?? null) : draftModel}

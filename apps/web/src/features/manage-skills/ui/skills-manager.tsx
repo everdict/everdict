@@ -31,7 +31,6 @@ import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropd
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label, Textarea } from '@/shared/ui/input'
 import { PageHeader } from '@/shared/ui/page-header'
-import { SkillDocs } from '@/shared/ui/skill-docs'
 
 import {
   createSkillAction,
@@ -84,8 +83,6 @@ export function SkillsManager({
   // null = 닫힘, 'new' = 새 스킬(생성 위저드 포함), Skill = 편집.
   const [editing, setEditing] = useState<Skill | 'new' | null>(null)
   const [confirming, setConfirming] = useState<Skill | null>(null)
-  // 패키지 스킬은 여기서 고칠 수 없으므로 열람 전용 다이얼로그로만 펼친다.
-  const [viewing, setViewing] = useState<Capability | null>(null)
   const [pending, startTransition] = useTransition()
 
   const canManage = (s: Skill) => s.createdBy === currentSubject || isAdmin
@@ -202,17 +199,15 @@ export function SkillsManager({
                     key={entry.key}
                     capability={entry.capability}
                     author={authorOf(entry.capability.createdBy)}
-                    onOpen={setViewing}
+                    // 패키지 스킬도 저작 스킬과 같은 상세 라우트로 — ?source 가 소유 워크스페이스를 가리켜
+                    // 읽기 전용 문서를 연다(다이얼로그 아님: 상세는 항상 페이지여야 오른쪽 대화 패널을 함께 쓴다).
+                    href={`/${workspace}/settings/skills/${encodeURIComponent(entry.capability.id)}?source=${encodeURIComponent(entry.capability.tenant)}`}
                   />
                 )
               )}
             </div>
           ))}
         </div>
-      )}
-
-      {viewing !== null && (
-        <PackagedSkillDialog capability={viewing} onClose={() => setViewing(null)} />
       )}
 
       {editing !== null && (
@@ -349,15 +344,15 @@ function SkillCard({
 }
 
 // 스킬 kind capability 한 장 — 발행물이라 여기서는 고칠 수 없다(저작·버전은 스토어 소관). 출처 배지로 빌트인/발행물을
-// 구분하고, 열면 읽기 전용 문서를 펼친다.
+// 구분하고, 이름을 누르면 저작 스킬과 똑같이 상세 페이지로 간다(읽기 전용 문서).
 function PackagedSkillCard({
   capability,
   author,
-  onOpen,
+  href,
 }: {
   capability: Capability
   author: Author
-  onOpen: (capability: Capability) => void
+  href: string
 }) {
   const t = useTranslations('skillsManager')
   const builtIn = isBuiltInCapability(capability)
@@ -366,13 +361,12 @@ function PackagedSkillCard({
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex min-w-0 items-center gap-2">
         <Package className="size-4 shrink-0 text-muted-foreground" />
-        <button
-          type="button"
-          onClick={() => onOpen(capability)}
+        <Link
+          href={href}
           className="min-w-0 truncate font-mono text-[13px] font-medium hover:text-primary hover:underline"
         >
           {capability.name}
-        </button>
+        </Link>
         <Badge tone={builtIn ? 'info' : 'outline'} className="shrink-0">
           {builtIn ? t('builtInBadge') : t('packagedBadge')}
         </Badge>
@@ -396,37 +390,6 @@ function PackagedSkillCard({
         <span>{t('createdBy', { name: author.name })}</span>
       </div>
     </div>
-  )
-}
-
-// 패키지 스킬의 읽기 전용 문서 — 저작 스킬 상세와 같은 뷰어(SKILL.md 본문 + 부속 파일 탭)를 써서 표현이 갈리지 않게 한다.
-function PackagedSkillDialog({
-  capability,
-  onClose,
-}: {
-  capability: Capability
-  onClose: () => void
-}) {
-  const t = useTranslations('skillsManager')
-  const spec = capability.spec.type === 'skill' ? capability.spec : undefined
-  return (
-    <Dialog open onClose={onClose} align="top" className="max-w-2xl">
-      <div className="max-h-[85vh] space-y-4 overflow-y-auto p-6">
-        <div className="space-y-1">
-          <h3 className="font-mono text-sm font-medium">{capability.name}</h3>
-          <p className="text-[13px] text-muted-foreground">{capability.description}</p>
-        </div>
-        <p className="text-[12px] text-faint">
-          {isBuiltInCapability(capability) ? t('builtInHint') : t('packagedHint')}
-        </p>
-        {spec && <SkillDocs instructions={spec.instructions} files={spec.files} />}
-        <div className="flex justify-end border-t border-border pt-4">
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            {t('close')}
-          </Button>
-        </div>
-      </div>
-    </Dialog>
   )
 }
 

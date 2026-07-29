@@ -17,7 +17,7 @@ import {
 import { useTranslations } from 'next-intl'
 
 import { AgentChatPanel, type ChatUser } from '@/features/agent-chat'
-import { agentReferenceSchema } from '@/entities/agent-session'
+import { agentChatMissionSchema, agentReferenceSchema } from '@/entities/agent-session'
 import { RELOAD_INFRA_FRAMES_EVENT } from '@/shared/lib/reload-infra-frames'
 import { cn } from '@/shared/lib/utils'
 
@@ -200,16 +200,20 @@ export function InfraPanel({
         bounce?: boolean
         reference?: unknown
         prompt?: unknown
+        mission?: unknown
         sessionId?: unknown
       } | null
       // A detail page inside an iframe (run / runtime) asked to mention its entity in the parent's agent chat
-      // — optionally with a draft prompt pre-typed (the ask-agent variant).
+      // — optionally with a draft prompt pre-typed (the ask-agent variant) or a mission framing the chat for a
+      // domain-specific task (the "edit in chat" variant).
       if (data?.type === MENTION_IN_CHAT_MESSAGE) {
         const parsed = agentReferenceSchema.safeParse(data.reference)
         const prompt =
           typeof data.prompt === 'string' && data.prompt.length > 0 ? data.prompt : undefined
+        const mission = agentChatMissionSchema.safeParse(data.mission)
         if (prompt) askAgent(prompt, parsed.success ? parsed.data : undefined)
-        else if (parsed.success) mentionInChat(parsed.data)
+        else if (parsed.success)
+          mentionInChat(parsed.data, mission.success ? mission.data : undefined)
         return
       }
       // A comment thread's agent answer asked to open its backing discussion session (features/discuss posts

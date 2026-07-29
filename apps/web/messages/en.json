@@ -3337,7 +3337,6 @@
     "packagedBadge": "Published",
     "builtInHint": "An Everdict built-in skill — every workspace's agent already has it. Turn it off in Settings › Agent.",
     "packagedHint": "A skill published to the capability store. Edit it where it was authored, then republish to update this copy.",
-    "close": "Close",
     "files": "Supporting files",
     "filesHint": "Reference material the agent loads one file at a time (read_skill_file) — the SKILL.md body stays lean. Author or edit file contents with the agent from the skill's detail page.",
     "removeFile": "Remove {path}",
@@ -3430,6 +3429,18 @@
       "What datasets and harnesses are in my workspace?",
       "Check the queue and runtime capacity right now"
     ],
+    "missions": {
+      "skillEdit": {
+        "title": "Edit this skill together",
+        "body": "Say what should change. The agent reads the skill, rewrites SKILL.md and its supporting files, and asks you to approve before anything is saved.",
+        "suggestions": [
+          "Sharpen the description so the agent picks this skill at the right moment",
+          "Rewrite the body as a clear, numbered procedure",
+          "Move the long reference material into a supporting file",
+          "Test-drive this skill and tell me where it goes wrong"
+        ]
+      }
+    },
     "errorSend": "Couldn’t send the message. Try again.",
     "errorGeneric": "Something went wrong.",
     "mentionAdd": "Reference a workspace entity",

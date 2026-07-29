@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react'
 
-import type { AgentReference } from '@/entities/agent-session'
+import type { AgentChatMission, AgentReference } from '@/entities/agent-session'
 import type { KnowledgeGraph } from '@/entities/knowledge'
 import { membersSchema } from '@/entities/member'
 import { queueSnapshotSchema, type QueueSnapshot } from '@/entities/queue'
@@ -35,7 +35,13 @@ export type FrameRequest = { tab: InfraTab; path: string; seq: number }
 // (the member reviews and sends; nothing auto-sends). Buffered here because the AgentChatPanel mounts the 'agent'
 // tab lazily — the panel consumes this on mount, then clears it via consumePendingMention so a later tab re-mount
 // does not re-inject the same prefill.
-export type PendingMention = { ref?: AgentReference; prompt?: string }
+// `mission` marks a DOMAIN-SPECIFIC entry (Settings › Skills 상세의 "대화로 편집하기" 같은 전용 버튼): 패널 구조는
+// 그대로지만 빈 화면의 라이팅·제안이 그 작업에 맞춰 갈린다. 범용 "대화에서 분석" 진입은 mission 없이 기본 문구를 쓴다.
+export type PendingMention = {
+  ref?: AgentReference
+  prompt?: string
+  mission?: AgentChatMission
+}
 
 // postMessage `type` a detail page rendered INSIDE the infra panel's iframe (run / runtime) sends to the PARENT
 // shell — which owns the agent chat — to mention its entity. Same-origin only.
@@ -64,8 +70,9 @@ type InfraPanelValue = {
   openRuntime: (kind: 'runtime' | 'runner', id: string) => void
   openSchedule: (id: string) => void
   frameRequest: FrameRequest | null
-  // Open the agent chat and drop an entity reference into the composer (from an entity detail page).
-  mentionInChat: (ref: AgentReference) => void
+  // Open the agent chat and drop an entity reference into the composer (from an entity detail page). `mission`
+  // frames the chat for a domain-specific task (e.g. editing a skill) instead of the generic analysis copy.
+  mentionInChat: (ref: AgentReference, mission?: AgentChatMission) => void
   // Open the agent chat with a draft prompt pre-typed (and optionally an entity referenced) — nothing auto-sends.
   askAgent: (prompt: string, ref?: AgentReference) => void
   pendingMention: PendingMention | null
@@ -222,9 +229,9 @@ export function InfraPanelProvider({
   const openSchedule = useCallback((_id: string) => request('schedules', '/schedules'), [request])
 
   // Reveal the agent chat with this entity pre-mentioned. Buffer the reference (the panel consumes it on mount)
-  // and open on the 'agent' tab.
-  const mentionInChat = useCallback((ref: AgentReference) => {
-    setPendingMention({ ref })
+  // and open on the 'agent' tab. A mission (전용 진입) rides along so the panel can frame the task.
+  const mentionInChat = useCallback((ref: AgentReference, mission?: AgentChatMission) => {
+    setPendingMention({ ref, ...(mission ? { mission } : {}) })
     setTab('agent')
     setOpen(true)
   }, [])
@@ -327,19 +334,22 @@ export function useInfraPanelOptional(): InfraPanelValue | null {
 // page (left shell) it calls the panel context directly; on a page rendered INSIDE the panel's iframe there is no
 // provider, so it posts up to the parent shell over the same-origin bridge. Shared by MentionInChatButton and the
 // observability trace browser (which mentions a trace by (source, id)).
-export function useMentionInChat(): (reference: AgentReference) => void {
+export function useMentionInChat(): (
+  reference: AgentReference,
+  mission?: AgentChatMission
+) => void {
   const infra = useInfraPanelOptional()
   return useCallback(
-    (reference: AgentReference) => {
+    (reference: AgentReference, mission?: AgentChatMission) => {
       const framed = typeof window !== 'undefined' && window.self !== window.top
       if (framed) {
         window.parent.postMessage(
-          { type: MENTION_IN_CHAT_MESSAGE, reference },
+          { type: MENTION_IN_CHAT_MESSAGE, reference, mission },
           window.location.origin
         )
         return
       }
-      infra?.mentionInChat(reference)
+      infra?.mentionInChat(reference, mission)
     },
     [infra]
   )

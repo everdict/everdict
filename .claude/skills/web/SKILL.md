@@ -79,7 +79,20 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
 - **Guide/help copy is never inline** — render an info icon via `shared/ui/tooltip.tsx` (`InfoTip`), reveal
   on hover. Field-level `<p>` hints under inputs are fine; panel/list guidance is not.
 - **Detail views**: hide empty sections entirely (no "none" placeholder); entities show a meta strip, not a
-  bare `dl` grid.
+  bare `dl` grid. **An entity detail is a ROUTED PAGE, never a dialog** — the right infra panel is half the
+  workflow (edit/experiment on what the left half shows), and a modal makes that split impossible. Read-only
+  variants of an entity share the SAME route rather than degrading to a modal: Settings › Skills serves both
+  the authored `Skill` (by id) and the published/built-in skill-kind capability (`?source=<owner workspace>`)
+  from `settings/skills/[id]`, with one meta-strip grammar. (Built-ins are code definitions, not store rows —
+  `GET /capabilities/:id` misses them, so resolve them from the owned + public LIST merge, as the list screen does.)
+- **Domain-specific chat entries carry a MISSION**: a specialized entry like a skill detail's "대화로 편집하기"
+  passes `mission` to `MentionInChatButton` → `PendingMention.mission` → `AgentChatPanel`. The chat surface is
+  UNCHANGED; only the empty-state title/body/suggestions swap to that task's catalog block
+  (`agentChat.missions.<kind>`, vocabulary in `entities/agent-session`), and the empty state names the target
+  from the reference chip that arrived with it. A mission entry lands on a FRESH DRAFT when a persisted
+  conversation is open (the framing only shows on an empty chat) and clears on new-conversation / session
+  switch. A new mission = one enum value + one catalog block in BOTH locales + the prop at the entry — never a
+  second chat component. Generic "Analyze in chat" entries pass no mission and keep the default copy.
 - **State toggles** = a status icon + click dropdown (`shared/ui/dropdown-menu.tsx`; e.g.
   `widgets/notification-bell/`), not text links.
 - **Infra split view** (`widgets/infra-panel`): infra concerns (schedules · runtimes · runs · work queue · a

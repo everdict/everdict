@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Cpu,
   MessageSquarePlus,
+  Pencil,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
@@ -16,6 +17,7 @@ import { PinControl } from '@/features/analysis-artifacts'
 import {
   AGENT_PERMISSION_MODES,
   type AgentAttachmentInput,
+  type AgentChatMission,
   type AgentMessage,
   type AgentPermissionMode,
   type AgentReference,
@@ -170,6 +172,7 @@ export function ConversationView({
   pendingPermissions,
   onDecidePermission,
   canvasLink,
+  mission,
 }: {
   title: string
   user?: ChatUser
@@ -209,6 +212,10 @@ export function ConversationView({
   // An analysis canvas is open in the left half (analyze dashboard / saved View) — the composer shows a
   // "canvas linked" chip so the member knows the agent sees it. null/undefined → no canvas, no chip.
   canvasLink?: { viewName?: string } | null
+  // The member arrived from a domain-specific entry ("대화로 편집하기" on a skill, …) rather than the generic
+  // chat rail. Same surface, different framing: the empty chat names the task, points at the entity it was
+  // opened on (target), and offers suggestions for THAT job instead of the generic workspace prompts.
+  mission?: { kind: AgentChatMission; target?: string } | null
 }) {
   const t = useTranslations('agentChat')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -237,7 +244,13 @@ export function ConversationView({
   const items = buildTranscript(messages, artifacts)
 
   const isEmpty = messages.length === 0 && !pendingUser && !sending
-  const suggestions = t.raw('suggestions') as string[]
+  // 임무로 진입했으면 그 임무의 카탈로그 블록(agentChat.missions.<kind>)이 빈 화면의 제목·설명·제안을 대신한다 —
+  // 구조는 그대로, 라이팅만 그 작업의 것으로. 임무가 없으면 기존 범용 문구.
+  const emptyTitle = mission ? t(`missions.${mission.kind}.title`) : t('emptyMessagesTitle')
+  const emptyBody = mission ? t(`missions.${mission.kind}.body`) : t('emptyMessages')
+  const suggestions = (
+    mission ? t.raw(`missions.${mission.kind}.suggestions`) : t.raw('suggestions')
+  ) as string[]
 
   return (
     <div className="flex h-full flex-col">
@@ -266,13 +279,19 @@ export function ConversationView({
           {isEmpty ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 px-5 text-center">
               <div className="grid size-11 place-items-center rounded-2xl bg-primary/12 text-primary">
-                <Sparkles className="size-5" strokeWidth={1.75} />
+                {mission ? (
+                  <Pencil className="size-5" strokeWidth={1.75} />
+                ) : (
+                  <Sparkles className="size-5" strokeWidth={1.75} />
+                )}
               </div>
               <div className="space-y-1">
-                <p className="text-[14px] font-[560] text-foreground">{t('emptyMessagesTitle')}</p>
-                <p className="text-[12px] leading-relaxed text-muted-foreground">
-                  {t('emptyMessages')}
-                </p>
+                <p className="text-[14px] font-[560] text-foreground">{emptyTitle}</p>
+                {/* 임무의 대상 — 무엇을 두고 대화하는 중인지 못 박는다(진입한 상세가 떨군 참조 칩의 이름). */}
+                {mission?.target !== undefined && (
+                  <p className="font-mono text-[12px] text-primary">{mission.target}</p>
+                )}
+                <p className="text-[12px] leading-relaxed text-muted-foreground">{emptyBody}</p>
               </div>
               <div className="flex w-full max-w-xs flex-col gap-1.5">
                 {suggestions.map((s) => (
