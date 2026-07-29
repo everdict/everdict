@@ -5,7 +5,7 @@ import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 
 // Run resource MCP tools — the MCP twin of run.routes.ts (same RunService core, second transport).
 export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
-  const { deps, principal, ws } = ctx;
+  const { deps, principal, ws, agent } = ctx;
 
   server.registerTool(
     "list_runs",
@@ -129,6 +129,8 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
           harness: { id: harness_id, version: version ?? "latest" },
           case: evalCase,
           trigger: "mcp", // activity-view source axis — submitted by the agent over MCP
+          // P3 causedBy: an agent-driven session's submits are that run's downstream demand.
+          ...(agent?.runId !== undefined ? { causedByRunId: agent.runId } : {}),
           ...(runtime ? { runtime } : {}),
         });
         return ok(rec);

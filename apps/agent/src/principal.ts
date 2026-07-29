@@ -20,6 +20,7 @@ export interface ForwardHeaders {
   agentId?: string;
   agentName?: string;
   conversationId?: string;
+  runId?: string; // the session's CURRENT ledger run (P3) — the CP stamps agent-submitted work with it
 }
 
 export type Authenticate = (headers: ForwardHeaders) => Promise<Principal>;
@@ -39,6 +40,7 @@ export function forwardHeaderRecord(h: ForwardHeaders): Record<string, string> {
   if (h.agentId) out["x-everdict-agent-id"] = h.agentId;
   if (h.agentName) out["x-everdict-agent-name"] = h.agentName;
   if (h.conversationId) out["x-everdict-conversation-id"] = h.conversationId;
+  if (h.runId) out["x-everdict-agent-run-id"] = h.runId;
   return out;
 }
 

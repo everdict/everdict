@@ -463,5 +463,13 @@ describe("ScorecardBatch child runs — the universal-run shape (P0)", () => {
     });
     // Direct API / unknown source: honest "api", with the actor when one is known.
     expect(ScorecardBatch.childRunOrigin({ createdBy: "bot" })).toEqual({ cause: "api", actor: "bot" });
+    // P3: a run-caused batch (an agent submitted it) outranks the source mapping — the children join the
+    // demand graph as the agent run's downstream work (the edge the P4 gate and cascade cancel walk).
+    expect(
+      ScorecardBatch.childRunOrigin({
+        origin: { source: "mcp", causedByRunId: "run-a1" },
+        createdBy: "alice",
+      }),
+    ).toEqual({ cause: "run", causedByRunId: "run-a1", actor: "alice" });
   });
 });

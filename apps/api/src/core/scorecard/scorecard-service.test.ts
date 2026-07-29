@@ -1601,6 +1601,25 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
     expect((await runStore.list("acme", { scorecardId: "sc-0" })).map((r) => r.id)).toEqual(["sc-2"]);
   });
 
+  it("an agent-caused batch (origin.causedByRunId) hands its children the cause:'run' edge (P3 demand graph)", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const service = new ScorecardService({ dispatcher: okDispatch, store, runStore, datasets });
+    const rec = await service.submit({
+      tenant: "acme",
+      submittedBy: "alice",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      origin: { source: "mcp", causedByRunId: "run-agent-1" },
+    });
+    await waitTerminal(store, rec.id);
+    const children = await runStore.list("acme", { scorecardId: rec.id });
+    expect(children).toHaveLength(1);
+    expect(children[0]?.origin).toEqual({ cause: "run", causedByRunId: "run-agent-1", actor: "alice" });
+  });
+
   it("seals the replay recording teed under each child's runId and attaches the ref on write-back", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());

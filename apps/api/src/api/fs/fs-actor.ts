@@ -12,11 +12,13 @@ import type { FsActor } from "@everdict/contracts";
 export const AGENT_ID_HEADER = "x-everdict-agent-id";
 export const AGENT_NAME_HEADER = "x-everdict-agent-name";
 export const CONVERSATION_HEADER = "x-everdict-conversation-id";
+export const AGENT_RUN_HEADER = "x-everdict-agent-run-id"; // the ledger run behind this turn (P3 causedBy)
 
 export interface AgentAttribution {
   agentId?: string;
   agentName?: string;
   conversationId?: string;
+  runId?: string; // the agent's CURRENT ledger run — what agent-submitted work stamps as origin.causedByRunId
 }
 
 const MAX = 200; // headers are attacker-influencable; keep the stored labels bounded
@@ -32,11 +34,13 @@ function header(headers: Record<string, unknown>, name: string): string | undefi
 export function agentAttributionFrom(headers: Record<string, unknown>): AgentAttribution | undefined {
   const agentId = header(headers, AGENT_ID_HEADER);
   const conversationId = header(headers, CONVERSATION_HEADER);
+  const runId = header(headers, AGENT_RUN_HEADER);
   if (agentId === undefined && conversationId === undefined) return undefined;
   return {
     ...(agentId !== undefined ? { agentId } : {}),
     ...(header(headers, AGENT_NAME_HEADER) !== undefined ? { agentName: header(headers, AGENT_NAME_HEADER) } : {}),
     ...(conversationId !== undefined ? { conversationId } : {}),
+    ...(runId !== undefined ? { runId } : {}),
   };
 }
 

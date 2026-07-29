@@ -7,7 +7,7 @@ import { serveScorecard } from "./serve.js";
 
 // Scorecard resource MCP tools — the MCP twin of scorecard.routes.ts (same ScorecardService core, second transport).
 export function registerScorecardTools(server: McpServer, ctx: McpToolContext): void {
-  const { deps, principal, ws } = ctx;
+  const { deps, principal, ws, agent } = ctx;
 
   if (deps.scorecardService) {
     const scorecards = deps.scorecardService;
@@ -141,7 +141,13 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
                 version: harness_version ?? "latest",
                 ...(harness_pins ? { pins: harness_pins } : {}),
               },
-              origin: { source: originSource(principal.via), ...(origin ?? {}) },
+              origin: {
+                source: originSource(principal.via),
+                ...(origin ?? {}),
+                // P3 causedBy: an agent-driven MCP session stamps the run behind the turn — the batch and
+                // its children join the demand graph as that run's downstream work.
+                ...(agent?.runId !== undefined ? { causedByRunId: agent.runId } : {}),
+              },
               judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
               ...(graders ? { graders } : {}),
               ...(judge ? { judge } : {}),

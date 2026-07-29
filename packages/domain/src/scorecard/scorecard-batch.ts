@@ -191,6 +191,14 @@ export class ScorecardBatch {
   }
 
   static childRunOrigin(record: Pick<ScorecardRecord, "origin" | "createdBy">): RunOrigin {
+    // Run-caused batches (an agent submitted this scorecard) outrank the source mapping: the children ARE
+    // the agent run's downstream demand — the causedBy edge is what the P4 gate and cascade cancel walk.
+    if (record.origin?.causedByRunId !== undefined)
+      return {
+        cause: "run",
+        causedByRunId: record.origin.causedByRunId,
+        ...(record.createdBy ? { actor: record.createdBy } : {}),
+      };
     const source = record.origin?.source;
     if (source === "schedule") {
       return {

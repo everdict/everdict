@@ -59,6 +59,9 @@ export type ScorecardModels = z.infer<typeof ScorecardModelsSchema>;
 // this field is the reproducibility basis for "what it was evaluated with". Lightweight → included in list too. Pg is origin jsonb (mig 0033, additive).
 export const ScorecardOriginSchema = z.object({
   source: z.string(), // schedule|github-actions|api|web…
+  // Causation as a first-class edge (execution-model P3): the agent RUN whose action submitted this batch.
+  // Children inherit it as origin{cause:"run", causedByRunId} — the demand graph the P4 gate walks.
+  causedByRunId: z.string().optional(),
   // The schedule that fired this run (source === "schedule"). Lets a schedule's detail view list its own run
   // history (regression over time) — the only link otherwise is Schedule.lastScorecardId (the latest fire).
   scheduleId: z.string().optional(),

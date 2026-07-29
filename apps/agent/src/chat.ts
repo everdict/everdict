@@ -43,14 +43,21 @@ const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
   skill: "get_skill",
   knowledge: "get_knowledge_entry", // a reified claim — the record carries its body AND its lineage fields
   environment: "get_capability", // an environment IS a capability of kind `environment` — one store entity, one read
+  tool: "get_capability", // ditto for the tool kinds (mcp | code) — Settings › Agent › Tools hands the agent the spec
   trace: "inspect_trace",
 };
 
 // The read-tool arguments for a reference. Most entities read by (id, version?); a `trace` reads by (name=source,
 // traceId=id) — inspect_trace's own signature — so the context injection hands the model the trace's normalized events.
+// A `tool` may live in ANOTHER workspace (a first-party default is `_everdict`-owned, an adopted tool belongs to its
+// publisher), so its owner rides along as get_capability's `source`.
 function referenceArgs(ref: AgentReference): Record<string, unknown> {
   if (ref.type === "trace") return { name: ref.source ?? "", traceId: ref.id };
-  return { id: ref.id, ...(ref.version ? { version: ref.version } : {}) };
+  return {
+    id: ref.id,
+    ...(ref.version ? { version: ref.version } : {}),
+    ...(ref.type === "tool" && ref.source ? { source: ref.source } : {}),
+  };
 }
 
 const MAX_REFERENCE_CHARS = 4_000;
@@ -434,6 +441,8 @@ export async function runChat(
       ...headers,
       conversationId: sessionId,
       ...(session.origin?.agentId !== undefined ? { agentId: session.origin.agentId } : {}),
+      // P3 causedBy: the run behind this turn — the CP stamps agent-submitted scorecards/runs with it.
+      ...(session.runId !== undefined ? { runId: session.runId } : {}),
     },
     profile?.mcpServers ?? [],
     profile?.skills ?? [],

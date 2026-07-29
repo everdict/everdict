@@ -6,7 +6,7 @@ import { serveScorecard } from "../scorecard/serve.js";
 // Run-group MCP tools — the MCP twin of group.routes.ts (same ScorecardService core, second transport).
 // Reading a group is get_scorecard (a group IS a scorecard row; kind tells them apart).
 export function registerGroupTools(server: McpServer, ctx: McpToolContext): void {
-  const { deps, principal, ws } = ctx;
+  const { deps, principal, ws, agent } = ctx;
   if (!deps.scorecardService) return;
   const scorecards = deps.scorecardService;
 
@@ -63,7 +63,7 @@ export function registerGroupTools(server: McpServer, ctx: McpToolContext): void
               ...(trials !== undefined ? { trials } : {}),
               ...(runtime ? { runtime } : {}),
               ...(concurrency !== undefined ? { concurrency } : {}),
-              origin: { source: "mcp" },
+              origin: { source: "mcp", ...(agent?.runId !== undefined ? { causedByRunId: agent.runId } : {}) },
             }),
           ),
         ),

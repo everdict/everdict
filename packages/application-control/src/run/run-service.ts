@@ -50,6 +50,8 @@ export interface SubmitInput {
   runtime?: string; // the tenant Runtime id to run on (placement.target). If absent, the default backend (same symmetry as scorecard).
   // this run's origin (activity-view source axis): web|mcp|api|… if unset, unset (direct API). Scorecard children are shown as "scorecard" by the service.
   trigger?: string;
+  // Causation edge (P3): the agent run whose action submitted this — origin becomes {cause:"run", causedByRunId}.
+  causedByRunId?: string;
   // Inline harness spec for a service-internal synthetic harness that has no registry entry (the code-judge dry-run
   // wrapper). When set, dispatch embeds it verbatim instead of resolving the registry. Never exposed on the HTTP DTO.
   // Boot recovery re-dispatches from the registry only, so an interrupted run of an inline spec fails visibly.
@@ -193,7 +195,7 @@ export class RunService {
       ...(placedRuntime ? { runtime: placedRuntime } : {}),
       ...(effective.trigger ? { trigger: effective.trigger } : {}),
       ...(effective.submittedBy ? { submittedBy: effective.submittedBy } : {}),
-      origin: standaloneRunOrigin(effective.trigger, effective.submittedBy),
+      origin: standaloneRunOrigin(effective.trigger, effective.submittedBy, effective.causedByRunId),
       now: this.now(),
     });
     // E0 outbox: the creation fact (domain-computed — children stay silent) persists in the SAME transaction
@@ -543,7 +545,14 @@ export class RunService {
 // Structured WHY for a standalone submit (execution-model.md P0) — the free-string trigger's successor; both
 // are stamped during the transition window. web|mcp = a member acted through a UI; ci = the CI federation;
 // anything else (direct API, unset) = api. Scorecard children carry group instead (their WHY is the batch's).
-function standaloneRunOrigin(trigger: string | undefined, submittedBy: string | undefined): RunOrigin {
+function standaloneRunOrigin(
+  trigger: string | undefined,
+  submittedBy: string | undefined,
+  causedByRunId?: string,
+): RunOrigin {
+  // An agent-run-caused submit outranks the source mapping — the causedBy edge is the demand graph (P3).
+  if (causedByRunId !== undefined)
+    return { cause: "run", causedByRunId, ...(submittedBy ? { actor: submittedBy } : {}) };
   const cause = trigger === "web" || trigger === "mcp" ? "member" : trigger === "ci" ? "ci" : "api";
   return { cause, ...(submittedBy ? { actor: submittedBy } : {}) };
 }
