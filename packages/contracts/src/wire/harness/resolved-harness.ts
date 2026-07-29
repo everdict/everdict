@@ -8,8 +8,10 @@ import { HarnessSpecSchema } from "../../harness/harness-spec.js";
 export const ImageClassEntrySchema = z.object({
   image: z.string(),
   class: z
-    .enum(["workspace", "external", "local", "unqualified"])
-    .describe("workspace = matches a workspace registry; local/unqualified = no pull guarantee"),
+    .enum(["managed", "workspace", "external", "local", "unqualified"])
+    .describe(
+      "managed = everdict's own image store (we mint the pull credential); workspace = matches a BYO workspace registry; local/unqualified = no pull guarantee",
+    ),
 });
 export type ImageClassEntry = z.infer<typeof ImageClassEntrySchema>;
 export const ResolvedHarnessResponseSchema = HarnessSpecSchema.and(

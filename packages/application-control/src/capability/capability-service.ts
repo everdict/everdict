@@ -88,6 +88,10 @@ export interface CapabilityServiceDeps {
   // The workspace's registered image-registry coordinates (no secrets) — classifies an environment capability's
   // image at publish time (docs/architecture/environment-image-store.md). Unset = no classification, no warnings.
   registryCoordinates?: (workspace: string) => Promise<ImageRegistryCoordinates[]>;
+  // The workspace's namespace in the MANAGED image store, when the deployment runs one. Classified BEFORE the BYO
+  // registries: an image we host is not merely "a registry you registered", and only that class means the pull
+  // credential is ours to mint. Synchronous — it is a naming rule (imageRepoFor), not a lookup.
+  managedCoordinates?: (workspace: string) => ImageRegistryCoordinates | undefined;
   // Instance policy (operator env EVERDICT_ALLOW_MEMBER_PUBLIC_PUBLISH): when true, ANY member — not just an admin —
   // may publish/promote a capability to `public` (the instance-wide catalog). Default false keeps public an
   // admin-only reach. This is a deployment property ("is this a community instance?"), not per-workspace state, so
@@ -234,7 +238,7 @@ export class CapabilityService {
   private async environmentImageWarnings(tenant: string, spec: CapabilitySpec): Promise<ImageWarning[]> {
     if (spec.type !== "environment" || !this.deps.registryCoordinates) return [];
     try {
-      return imageWarnings([spec.image], await this.deps.registryCoordinates(tenant));
+      return imageWarnings([spec.image], await this.deps.registryCoordinates(tenant), this.managed(tenant));
     } catch {
       return [];
     }
@@ -285,9 +289,20 @@ export class CapabilityService {
     } catch {
       coordinates = [];
     }
+    const managed = this.managed(viewerTenant);
     return records.map((r) =>
-      r.spec.type === "environment" ? { ...r, imageClass: classifyImageRef(r.spec.image, coordinates) } : r,
+      r.spec.type === "environment" ? { ...r, imageClass: classifyImageRef(r.spec.image, coordinates, managed) } : r,
     );
+  }
+
+  // The viewer's managed-store coordinates, best-effort like every other classification input — a provider that
+  // throws must not turn browsing the store into an error.
+  private managed(tenant: string): ImageRegistryCoordinates | undefined {
+    try {
+      return this.deps.managedCoordinates?.(tenant);
+    } catch {
+      return undefined;
+    }
   }
 
   // Change a capability's reach (capability-level metadata, across every live version). Owner-or-admin; promoting to

@@ -103,6 +103,7 @@ import { registerGithubAppRoutes } from "./api/github-app/github-app.routes.js";
 import { registerHarnessTemplateRoutes } from "./api/harness/harness-template.routes.js";
 import { registerHarnessRoutes } from "./api/harness/harness.routes.js";
 import { registerImageRegistryRoutes } from "./api/image-registry/image-registry.routes.js";
+import { registerImagesRoutes } from "./api/images/images.routes.js";
 import { registerJudgeRoutes } from "./api/judge/judge.routes.js";
 import { registerKnowledgeRoutes } from "./api/knowledge/knowledge.routes.js";
 import { registerMattermostRoutes } from "./api/mattermost/mattermost.routes.js";
@@ -239,6 +240,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerMattermostRoutes(routes, deps);
     registerTraceSourceRoutes(routes, deps);
     registerImageRegistryRoutes(routes, deps);
+    registerImagesRoutes(routes, deps);
     registerEnvironmentAdoptionRoutes(routes, deps);
     registerCiLinkRoutes(routes, deps);
     registerRunnerRoutes(routes, deps);

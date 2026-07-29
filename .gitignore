@@ -35,3 +35,7 @@ apps/cli/bundle/
 # python bytecode
 __pycache__/
 *.pyc
+
+# managed image store signing material (deploy/compose/full.sh --profile images generates it locally).
+# A private key in git is a real secret, not a fixture — the gitleaks gate would be right to stop it.
+deploy/compose/certs/

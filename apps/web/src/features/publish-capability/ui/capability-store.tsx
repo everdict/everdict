@@ -109,6 +109,7 @@ const VIS_ICON: Record<CapabilityVisibility, typeof Lock> = {
 }
 // 뷰어 기준 이미지 분류 배지 톤 — workspace/external=풀 가능, local/unqualified=풀 보장 없음(경고).
 const IMG_CLASS_TONE: Record<CapabilityImageClass, 'success' | 'info' | 'warning'> = {
+  managed: 'success',
   workspace: 'success',
   external: 'info',
   local: 'warning',

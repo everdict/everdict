@@ -291,7 +291,7 @@ export const harnessSpecSchema = z
       .array(
         z.object({
           image: z.string(),
-          class: z.enum(['workspace', 'external', 'local', 'unqualified']),
+          class: z.enum(['managed', 'workspace', 'external', 'local', 'unqualified']),
         })
       )
       .optional(),

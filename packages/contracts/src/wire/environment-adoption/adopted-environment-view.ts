@@ -24,7 +24,7 @@ export const AdoptedEnvironmentViewSchema = z.object({
   name: z.string().optional(), // from the capability record (absent when unavailable)
   image: z.string().optional(),
   benchmark: z.string().optional(),
-  imageClass: z.enum(["workspace", "external", "local", "unqualified"]).optional(),
+  imageClass: z.enum(["managed", "workspace", "external", "local", "unqualified"]).optional(),
   verify: AdoptedEnvironmentVerifySchema.optional(),
 });
 export type AdoptedEnvironmentView = z.infer<typeof AdoptedEnvironmentViewSchema>;

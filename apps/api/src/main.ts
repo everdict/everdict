@@ -21,6 +21,7 @@ import { LiveLogStore } from "./common/live-log-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
+import { buildManagedImages } from "./composition/images.js";
 import { buildDispatch } from "./composition/dispatch.js";
 import { artifactStoreFromEnv, meterUsagePolicyFromEnv, workspaceFsFromEnv } from "./composition/env-policy.js";
 import {
@@ -250,6 +251,16 @@ async function main(): Promise<void> {
   // RunService/scorecard seal it at finalize. Frames need an object store to offload; logs/tracks record regardless.
   // Built before buildDispatch so the managed topology backend can record into it. docs/architecture/replay.md.
   const caseRecorder = new CaseRecorder(recordingStore, artifacts);
+
+  // Managed image store (optional) — the workspace's own image namespace + the registry's authorization server.
+  // Unset env = a BYO-only deployment: both stay undefined and /v2/token answers 404.
+  const { images: workspaceImages, imageTokenService } = buildManagedImages();
+  // The workspace's coordinates in that store — what makes classifyImageRef able to answer "managed". One
+  // definition, handed to every surface that classifies, so the store and the inventory never disagree.
+  const managedCoordinates = (workspace: string) =>
+    workspaceImages
+      ? { host: workspaceImages.endpoint, namespace: workspaceImages.namespaceFor(workspace) }
+      : undefined;
 
   const {
     runnerHub,
@@ -567,6 +578,7 @@ async function main(): Promise<void> {
     capabilityService: new CapabilityService({
       store: capabilityStore,
       registryCoordinates: (workspace) => imageRegistryService.coordinates(workspace),
+      managedCoordinates,
       allowMemberPublicPublish,
       firstPartyCatalog: () => [...firstPartyDefaults().map((d) => d.record), ...firstPartyCatalogExtras()],
     }),
@@ -600,6 +612,7 @@ async function main(): Promise<void> {
     traceSourceService,
     spanAttrMappingService,
     imageRegistryService,
+    imageTokenService,
     // Workspace environment-image adoption (import) — inventory of adopted environments + pull-usability verification
     // (warn-not-block). Composes the capability store (resolve + visibility) + image registry (pull auth + verify).
     environmentAdoptionService: new EnvironmentAdoptionService({
@@ -607,6 +620,7 @@ async function main(): Promise<void> {
       capabilityStore,
       verifyImage: (ws, ref) => imageRegistryService.verifyImage(ws, ref),
       registryCoordinates: (ws) => imageRegistryService.coordinates(ws),
+      managedCoordinates,
     }),
     ciLinkService,
     runnerService,

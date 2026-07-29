@@ -107,6 +107,42 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # ── Managed image store (optional, profile `images`) — everdict's OWN registry for environment images ─────────
+  # Auth is delegated to the control plane: this registry holds no user database, it trusts JWTs signed by the
+  # key in ./certs and honors exactly the access they carry (docs/architecture/managed-image-store.md).
+  # ⚠️ REGISTRY_AUTH_TOKEN_REALM is resolved by the DOCKER CLIENT, never by this container — it must be an address
+  # every machine that pulls can reach (the same class of setting as CONTROL_PLANE_WS_URL), so it defaults to
+  # API_PUBLIC_URL. Blobs live in the same MinIO as artifacts and the workspace filesystem.
+  registry:
+    profiles: ["images"]
+    image: registry:${REGISTRY_VERSION:-2}
+    environment:
+      REGISTRY_AUTH: token
+      # Defaults to a single-host stack; anyone pulling from another machine MUST set this to the api's public
+      # URL (a `:?` required-variable would break `compose config` for every deployment that does not run this
+      # profile at all, so the default is a working localhost value rather than a hard stop).
+      REGISTRY_AUTH_TOKEN_REALM: ${IMAGE_STORE_REALM:-http://127.0.0.1:8787/v2/token}
+      REGISTRY_AUTH_TOKEN_SERVICE: ${IMAGE_STORE_SERVICE:-everdict-registry}
+      REGISTRY_AUTH_TOKEN_ISSUER: ${IMAGE_STORE_ISSUER:-everdict}
+      REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE: /certs/image-token.crt
+      REGISTRY_STORAGE: s3
+      REGISTRY_STORAGE_S3_REGIONENDPOINT: http://minio:9000
+      REGISTRY_STORAGE_S3_FORCEPATHSTYLE: "true"
+      REGISTRY_STORAGE_S3_REGION: ${IMAGE_STORE_S3_REGION:-us-east-1}
+      REGISTRY_STORAGE_S3_BUCKET: ${IMAGE_STORE_S3_BUCKET:-everdict-images}
+      REGISTRY_STORAGE_S3_ACCESSKEY: ${MINIO_ROOT_USER:-everdict}
+      REGISTRY_STORAGE_S3_SECRETKEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD (openssl rand -hex 16)}
+      # Deletion is off by default in distribution; the store's remove() needs it (405 otherwise, named in the error).
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    ports:
+      - "${IMAGE_STORE_PORT:-5001}:5000"
+    restart: unless-stopped
+
   # ── Temporal server (auto-setup: creates + upgrades the schema, then runs) — persisted on Postgres ───────────
   temporal:
     image: temporalio/auto-setup:${TEMPORAL_VERSION:-1.27.2}
@@ -188,6 +224,16 @@ services:
       EVERDICT_S3_BUCKET: ${EVERDICT_S3_BUCKET:-everdict-artifacts}
       EVERDICT_S3_FS_BUCKET_PREFIX: ${EVERDICT_S3_FS_BUCKET_PREFIX:-everdict-fs}
       EVERDICT_S3_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
+      # ── Managed image store (optional, profile `images`) — unset = BYO registries only, /v2/token 404s ──
+      #    ENDPOINT is what image REFS carry, so every execution node (a self-hosted runner included) must reach
+      #    it; API is how the control plane itself reaches the registry over the compose network. The signing key
+      #    is mounted as a file, never an env value: a PEM in the environment leaks into every child process.
+      EVERDICT_IMAGE_STORE_ENDPOINT: ${IMAGE_STORE_ENDPOINT:-}
+      EVERDICT_IMAGE_STORE_API: ${IMAGE_STORE_API:-http://registry:5000}
+      EVERDICT_IMAGE_STORE_KEY_FILE: ${IMAGE_STORE_KEY_FILE:-/certs/image-token.key}
+      EVERDICT_IMAGE_STORE_CERT_FILE: ${IMAGE_STORE_CERT_FILE:-/certs/image-token.crt}
+      EVERDICT_IMAGE_STORE_ISSUER: ${IMAGE_STORE_ISSUER:-everdict}
+      EVERDICT_IMAGE_STORE_SERVICE: ${IMAGE_STORE_SERVICE:-everdict-registry}
       # ── Externally reachable URLs (GitHub App callback · Mattermost inbound · live trace deep-links) ──
       API_PUBLIC_URL: ${API_PUBLIC_URL:-}
       WEB_BASE_URL: ${WEB_BASE_URL:-}
@@ -226,6 +272,11 @@ services:
       EVERDICT_BROWSER_DOCKER_NETWORK: ${EVERDICT_BROWSER_DOCKER_NETWORK:-}
       EVERDICT_BROWSER_MAX_SESSIONS_PER_TENANT: ${EVERDICT_BROWSER_MAX_SESSIONS_PER_TENANT:-}
       EVERDICT_BROWSER_MAX_SESSIONS: ${EVERDICT_BROWSER_MAX_SESSIONS:-}
+      # ── Run a workspace file (Files viewer's "Run" + the run_file MCP tool) ──────────────────────────────────
+      # `docker` = one throwaway container per run, from the language's image (or a workspace environment image).
+      # Needs the docker.sock mount below. Unset = the capability does not exist here (route 404s, tool absent,
+      # the web hides the button) — there is deliberately no in-process fallback.
+      EVERDICT_FILE_EXECUTION_DRIVER: ${EVERDICT_FILE_EXECUTION_DRIVER:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -237,10 +288,15 @@ services:
     extra_hosts:
       # Reach host-side services (a self-hosted runner or a LiteLLM proxy running on the Docker host).
       - "host.docker.internal:host-gateway"
-    # Uncomment for EVERDICT_BROWSER_PROVISIONER=docker — the api drives the host Docker daemon to launch the
-    # headless-browser container (grants this container Docker control; prefer runtime-bound sessions if that
-    # trust is unacceptable).
-    # volumes:
+    volumes:
+      # The managed image store's signing key + certificate (profile `images`). Read-only, and a bind rather than
+      # an env value so the PEM never enters the process environment. Harmless when the profile is off — the api
+      # only reads these when EVERDICT_IMAGE_STORE_ENDPOINT is set.
+      - ./certs:/certs:ro
+    # Uncomment for EVERDICT_BROWSER_PROVISIONER=docker, or for EVERDICT_FILE_EXECUTION_DRIVER=docker (the Files
+    # viewer's "Run": one throwaway container per run of a .py/.sh/.js/.ts file — see
+    # docs/architecture/workspace-filesystem.md). Both drive the host Docker daemon, which grants this container
+    # Docker control; leave it commented if that trust is unacceptable — the run route then simply does not exist.
     #   - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${API_PORT:-8787}:8787"

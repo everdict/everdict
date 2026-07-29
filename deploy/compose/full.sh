@@ -39,6 +39,24 @@ ensure_secret AGENT_INTERNAL_TOKEN "$(openssl rand -hex 32)"
 # MinIO root credential — object storage behind the workspace filesystem (bucket per tenant) + artifact offload.
 ensure_secret MINIO_ROOT_PASSWORD "$(openssl rand -hex 16)"
 
+# Managed image store (profile `images`) — the signing key + self-signed certificate the registry trusts. Generated
+# only when that profile is being brought up, and never regenerated: rotating the key would invalidate every grant
+# already in flight, so an existing pair is left alone.
+if [[ " $* " == *" images "* ]]; then
+  mkdir -p certs
+  if [[ ! -f certs/image-token.key ]]; then
+    openssl req -newkey rsa:2048 -nodes -keyout certs/image-token.key \
+      -x509 -days 3650 -out certs/image-token.crt -subj "/CN=everdict-image-token" 2>/dev/null
+    chmod 600 certs/image-token.key
+    echo "▶ generated certs/image-token.{key,crt} (the registry's rootcertbundle + the control plane's signing key)"
+  fi
+  # Refs carry the ENDPOINT, so every machine that pulls must reach it — including a self-hosted runner on a
+  # laptop. localhost is right for a single-host stack and wrong the moment anyone else pulls; the realm follows
+  # the same rule, which is why both are surfaced here rather than buried in the compose file.
+  ensure_secret IMAGE_STORE_ENDPOINT "localhost:${IMAGE_STORE_PORT:-5001}"
+  ensure_secret IMAGE_STORE_REALM "http://127.0.0.1:${API_PORT:-8787}/v2/token"
+fi
+
 docker compose -f docker-compose.full.yaml --env-file "$ENV_FILE" "$@" up -d --build
 
 # shellcheck disable=SC1090
@@ -49,5 +67,9 @@ echo "  web            http://localhost:${WEB_PORT:-3001}"
 echo "  api            http://localhost:${API_PORT:-8787}/healthz"
 echo "  temporal ui    http://localhost:${TEMPORAL_UI_PORT:-8233}"
 echo "  minio console  http://localhost:${MINIO_CONSOLE_PORT:-9101}  (workspace-filesystem buckets: everdict-fs-<tenant>-<hash>)"
+if [[ " $* " == *" images "* ]]; then
+  echo "  image store    localhost:${IMAGE_STORE_PORT:-5001}  (everdict's own registry — refs are <endpoint>/<workspace-namespace>/<name>)"
+  echo "                 ⚠️  pulling from another machine? set IMAGE_STORE_ENDPOINT + IMAGE_STORE_REALM to reachable addresses."
+fi
 echo ""
 echo "For chat/teammates, register a model (Settings › Models) or set AGENT_MODEL / AGENT_LLM_* in $ENV_FILE."

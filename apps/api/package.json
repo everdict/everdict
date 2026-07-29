@@ -21,6 +21,7 @@
     "@everdict/db": "workspace:*",
     "@everdict/domain": "workspace:*",
     "@everdict/graders": "workspace:*",
+    "@everdict/images": "workspace:*",
     "@everdict/job-runner": "workspace:*",
     "@everdict/llm": "workspace:*",
     "@everdict/registry": "workspace:*",

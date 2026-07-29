@@ -871,10 +871,12 @@
     "leave": "Leave"
   },
   "lib": {
+    "imageClassManaged": "Everdict",
     "imageClassWorkspace": "Workspace",
     "imageClassExternal": "External",
     "imageClassLocal": "Local only",
     "imageClassUnqualified": "No registry",
+    "imageHintManaged": "Hosted in this workspace's Everdict image store — pull credentials are issued for you.",
     "imageHintWorkspace": "Workspace registry image — pulls anywhere with the right credentials.",
     "imageHintExternal": "External registry image.",
     "imageHintLocal": "Loopback host reference — cannot be pulled outside the machine it was built on.",
@@ -3738,6 +3740,7 @@
     "type_code": "Code tool",
     "type_skill": "Skill",
     "type_environment": "Environment",
+    "imgClass_managed": "Everdict store",
     "imgClass_workspace": "Workspace registry",
     "imgClass_external": "External registry",
     "imgClass_local": "Local only",

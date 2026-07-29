@@ -89,9 +89,15 @@ importers:
       '@everdict/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@everdict/drivers':
+        specifier: workspace:*
+        version: link:../../packages/drivers
       '@everdict/graders':
         specifier: workspace:*
         version: link:../../packages/graders
+      '@everdict/images':
+        specifier: workspace:*
+        version: link:../../packages/images
       '@everdict/job-runner':
         specifier: workspace:*
         version: link:../../packages/job-runner

@@ -44,6 +44,9 @@ export interface EnvironmentAdoptionServiceDeps {
   ) => Promise<{ pullable: boolean; reason: "ok" | "auth" | "not-found" | "unreachable"; digest?: string }>;
   // The workspace's registry coordinates — for the per-viewer image classification (same source as CapabilityService).
   registryCoordinates: (workspace: string) => Promise<ImageRegistryCoordinates[]>;
+  // The workspace's managed-store coordinates (see CapabilityService) — passed so an image reads the same class in
+  // the inventory as it does in the store. Two surfaces disagreeing about provenance is worse than neither showing it.
+  managedCoordinates?: (workspace: string) => ImageRegistryCoordinates | undefined;
   now?: () => string; // ISO timestamp (test injection)
 }
 
@@ -100,7 +103,7 @@ export class EnvironmentAdoptionService {
       entry,
     ];
     await this.deps.settings.set(workspace, { adoptedEnvironments: next });
-    return this.toView(entry, rec, await this.deps.registryCoordinates(workspace));
+    return this.toView(entry, rec, await this.deps.registryCoordinates(workspace), this.managed(workspace));
   }
 
   // Remove an environment from the inventory (by source,id — version-agnostic; one adoption per source/id).
@@ -123,21 +126,32 @@ export class EnvironmentAdoptionService {
         adoptedEnvironments: entries.map((e) => (e.source === source && e.id === id ? updated : e)),
       });
     }
-    return this.toView(updated, rec, await this.deps.registryCoordinates(workspace));
+    return this.toView(updated, rec, await this.deps.registryCoordinates(workspace), this.managed(workspace));
   }
 
   // The workspace's environment inventory — each adoption merged with the live capability + fresh class + verify.
   async list(workspace: string, subject: string): Promise<AdoptedEnvironmentView[]> {
     const entries = await this.entries(workspace);
     const coords = await this.deps.registryCoordinates(workspace);
+    const managed = this.managed(workspace);
     const consumer = { tenant: workspace, subject };
-    return Promise.all(entries.map(async (e) => this.toView(e, await this.resolve(e, consumer), coords)));
+    return Promise.all(entries.map(async (e) => this.toView(e, await this.resolve(e, consumer), coords, managed)));
+  }
+
+  // The workspace's managed-store coordinates, best-effort — a provider that throws must not fail the inventory.
+  private managed(workspace: string): ImageRegistryCoordinates | undefined {
+    try {
+      return this.deps.managedCoordinates?.(workspace);
+    } catch {
+      return undefined;
+    }
   }
 
   private toView(
     entry: AdoptionEntry,
     rec: CapabilityRecord | undefined,
     coords: ImageRegistryCoordinates[],
+    managed?: ImageRegistryCoordinates,
   ): AdoptedEnvironmentView {
     const spec = rec?.spec.type === "environment" ? rec.spec : undefined;
     return {
@@ -149,7 +163,7 @@ export class EnvironmentAdoptionService {
       ...(rec ? { name: rec.name } : {}),
       ...(spec ? { image: spec.image } : {}),
       ...(spec?.contents?.benchmark ? { benchmark: spec.contents.benchmark } : {}),
-      ...(spec ? { imageClass: classifyImageRef(spec.image, coords) } : {}),
+      ...(spec ? { imageClass: classifyImageRef(spec.image, coords, managed) } : {}),
       ...(entry.verify ? { verify: entry.verify } : {}),
     };
   }

@@ -15,4 +15,11 @@ export {
   ManagedImageStore,
   type ManagedImageStoreOptions,
 } from "./managed-image-store.js";
+export {
+  grantFromBasicAuth,
+  ImageTokenService,
+  type ImageTokenExchange,
+  type ImageTokenServiceDeps,
+  scopeValues,
+} from "./token-exchange.js";
 export { InMemoryImageStore } from "./in-memory-image-store.js";

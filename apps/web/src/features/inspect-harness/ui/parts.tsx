@@ -16,7 +16,7 @@ export function ImageClassBadge({ cls }: { cls?: ImageRefClass }) {
   // Turn the classification value (workspace/local/unqualified) into a catalog-key suffix: imageClass*/imageHint*.
   const suffix = cls.charAt(0).toUpperCase() + cls.slice(1)
   return (
-    <Badge tone={cls === 'workspace' ? 'info' : 'warning'} title={t(`imageHint${suffix}`)}>
+    <Badge tone={cls === 'managed' || cls === 'workspace' ? 'info' : 'warning'} title={t(`imageHint${suffix}`)}>
       {t(`imageClass${suffix}`)}
     </Badge>
   )

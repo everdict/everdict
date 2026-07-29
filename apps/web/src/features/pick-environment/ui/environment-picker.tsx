@@ -15,6 +15,7 @@ import { listStoreEnvironmentsAction, type StoreEnvironment } from '../api/list-
 // 하네스 핀/서비스/커맨드 이미지와 데이터셋 케이스 이미지가 같은 피커를 쓴다(pick-secret 과 같은 공용 슬라이스).
 // 목록은 처음 열 때 1회 로드(서버 액션); 분류 배지는 컨트롤플레인이 뷰어 워크스페이스 기준으로 계산해 준 값.
 const IMG_CLASS_TONE: Record<CapabilityImageClass, 'success' | 'info' | 'warning'> = {
+  managed: 'success',
   workspace: 'success',
   external: 'info',
   local: 'warning',

@@ -871,10 +871,12 @@
     "leave": "나가기"
   },
   "lib": {
+    "imageClassManaged": "Everdict",
     "imageClassWorkspace": "워크스페이스",
     "imageClassExternal": "외부",
     "imageClassLocal": "로컬 전용",
     "imageClassUnqualified": "레지스트리 미지정",
+    "imageHintManaged": "이 워크스페이스의 Everdict 이미지 스토어에 있어요 — pull 자격증명은 저희가 발급해요.",
     "imageHintWorkspace": "워크스페이스 레지스트리 이미지 — 자격만 있으면 어디서든 pull 돼요.",
     "imageHintExternal": "외부 레지스트리 이미지예요.",
     "imageHintLocal": "루프백 호스트 참조 — 빌드된 머신 밖에선 pull 할 수 없어요.",
@@ -3738,6 +3740,7 @@
     "type_code": "코드 도구",
     "type_skill": "스킬",
     "type_environment": "환경",
+    "imgClass_managed": "Everdict 스토어",
     "imgClass_workspace": "워크스페이스 레지스트리",
     "imgClass_external": "외부 레지스트리",
     "imgClass_local": "로컬 전용",

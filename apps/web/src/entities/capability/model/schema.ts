@@ -84,7 +84,7 @@ export type CapabilitySpec = z.infer<typeof capabilitySpecSchema>
 
 // GET /capabilities · /capabilities/public · /capabilities/:id — 전체 CapabilityRecord
 // + (environment kind 만) 뷰어 워크스페이스 레지스트리 기준 imageClass 주석(컨트롤플레인 계산·비영속, P1g 선례).
-export const capabilityImageClassSchema = z.enum(['workspace', 'external', 'local', 'unqualified'])
+export const capabilityImageClassSchema = z.enum(['managed', 'workspace', 'external', 'local', 'unqualified'])
 export type CapabilityImageClass = z.infer<typeof capabilityImageClassSchema>
 export const capabilitySchema = z.object({
   id: z.string(),

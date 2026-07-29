@@ -20,7 +20,7 @@ export const adoptedEnvironmentSchema = z.object({
   name: z.string().optional(),
   image: z.string().optional(),
   benchmark: z.string().optional(),
-  imageClass: z.enum(['workspace', 'external', 'local', 'unqualified']).optional(),
+  imageClass: z.enum(['managed', 'workspace', 'external', 'local', 'unqualified']).optional(),
   verify: adoptedEnvironmentVerifySchema.optional(),
 })
 
