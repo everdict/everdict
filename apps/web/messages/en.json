@@ -63,7 +63,7 @@
     "changeFailed": "Could not change.",
     "column": "Column",
     "copied": "Copied",
-    "countHeader": "Count",
+    "countHeader": "Runs",
     "countUnit": "{count}",
     "customEmptyHint": "Try changing the filters.",
     "customEmptyTitle": "No scorecards match.",
@@ -137,7 +137,8 @@
     "rawColScore": "Score",
     "rawColCases": "Cases",
     "rawShowAll": "Showing {shown} of {total} — show all",
-    "seriesCapped": "Plotting {max} series · {hidden} more are in the raw data below"
+    "seriesCapped": "Plotting {max} series · {hidden} more are in the raw data below",
+    "casesHeader": "Cases"
   },
   "byHarnessScorecards": {
     "harnessLabel": "Harness"

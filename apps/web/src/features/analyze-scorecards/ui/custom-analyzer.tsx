@@ -583,7 +583,10 @@ export function CustomAnalyzer({
               ) : (
                 <TH className="text-right">{t(MEASURE_KEY[config.measure])}</TH>
               )}
+              {/* Two different numbers, and readers conflate them: how many runs went into the row, and how
+                  many scored cases the rate was weighted over. A rate without its n can't be judged. */}
               <TH className="text-right">{t('countHeader')}</TH>
+              <TH className="text-right">{t('casesHeader')}</TH>
             </tr>
           </THead>
           <TBody>
@@ -622,6 +625,9 @@ export function CustomAnalyzer({
                     <TD className="text-right">{measureCell(r.value, config.measure)}</TD>
                   )}
                   <TD className="text-right text-[11px] text-faint">{r.count}</TD>
+                  <TD className="text-right text-[11px] tabular-nums text-faint">
+                    {r.cases.toLocaleString()}
+                  </TD>
                 </TR>
               )
             })}

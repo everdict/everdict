@@ -7,6 +7,10 @@ export const AnalysisGridRowSchema = z.object({
   key: z.string().describe("Opaque group key (unit-separator-joined dimension values)"),
   labels: z.array(z.string()).describe("Raw label per groupBy dimension (owner = the subject)"),
   count: z.number().int().describe("Scorecards in the group"),
+  cases: z
+    .number()
+    .int()
+    .describe("Scored cases behind the value — the sample size the rate was weighted over, NOT the scorecard count"),
   value: z.number().optional().describe("Measured value over the whole group"),
   cells: z
     .array(z.object({ key: z.string(), value: z.number().optional() }))

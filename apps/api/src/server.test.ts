@@ -3266,7 +3266,9 @@ describe("API — scorecards (dataset×harness batch eval)", () => {
     expect(body.total).toBe(2);
     expect(body.rows).toHaveLength(1); // both runs share one harness
     expect(body.rows[0].labels).toEqual(["scripted"]);
-    expect(body.rows[0].count).toBe(2);
+    expect(body.rows[0].count).toBe(2); // scorecards
+    // The sample size the rate was weighted over travels on the wire too — a rate without its n is unreadable.
+    expect(typeof body.rows[0].cases).toBe("number");
 
     // A line viz buckets by day.
     const line = await app.inject({

@@ -1,4 +1,4 @@
-import type { ScorecardRecord } from '@/entities/scorecard'
+import type { MetricSummary, ScorecardRecord } from '@/entities/scorecard'
 
 // Flexible scorecard analysis engine — a pure pivot over the listScorecards array (filter/group/measure/sort/search).
 // Leaderboard/by-harness/trend/compare are all reproduced as compositions of this config. Design: docs/architecture/scorecard-analysis-views.md.
@@ -134,16 +134,29 @@ export function dimValue(sc: ScorecardRecord, dim: Dimension): string {
   }
 }
 
+// The summary row this scorecard contributes for the selected metric (an absent selected metric falls back
+// to the first row — recipe semantics).
+function summaryOf(sc: ScorecardRecord, metric: string | undefined): MetricSummary | undefined {
+  const rows = sc.summary ?? []
+  return (metric ? rows.find((r) => r.metric === metric) : undefined) ?? rows[0]
+}
+
 // This scorecard's score (for the selected metric) — passRate first, else mean. Exported so the raw-data
 // table prints the very number the aggregate above it was computed from.
 export function scoreOfScorecard(
   sc: ScorecardRecord,
   metric: string | undefined
 ): number | undefined {
-  const rows = sc.summary ?? []
-  const row = (metric ? rows.find((r) => r.metric === metric) : undefined) ?? rows[0]
+  const row = summaryOf(sc, metric)
   if (!row) return undefined
   return row.passRate ?? row.mean
+}
+
+// How many scored cases stand behind this scorecard's score — the weight it earns in a group aggregate.
+// A row reporting no usable count still counts once: an unknown weight is a reason to under-trust the
+// number, not to drop the record.
+function weightOf(row: MetricSummary): number {
+  return Number.isFinite(row.count) && row.count > 0 ? row.count : 1
 }
 
 // A group's (bundle of scorecards) measured value.
@@ -158,12 +171,32 @@ function aggregate(
     const latest = [...cards].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
     return latest ? scoreOfScorecard(latest, metric) : undefined
   }
-  // passRate | mean — the average of each card's score (only the defined ones)
-  const vals = cards
-    .map((c) => scoreOfScorecard(c, metric))
-    .filter((v): v is number => v !== undefined)
-  if (vals.length === 0) return undefined
-  return vals.reduce((a, b) => a + b, 0) / vals.length
+  // passRate | mean — weighted by each card's CASE COUNT, never a plain mean of per-card rates. A rate is a
+  // ratio, so a bundle's rate is Σ(rate·n)/Σn: averaging the rates instead would let a 5-case smoke run
+  // outweigh a 500-case suite. Kept in lockstep with @everdict/domain's analysis.ts (the server twin).
+  let weighted = 0
+  let cases = 0
+  for (const card of cards) {
+    const row = summaryOf(card, metric)
+    if (!row) continue
+    const value = row.passRate ?? row.mean
+    if (value === undefined) continue
+    const w = weightOf(row)
+    weighted += value * w
+    cases += w
+  }
+  return cases === 0 ? undefined : weighted / cases
+}
+
+// The scored cases behind a group — the sample size, reported next to the value so a reader can tell
+// "0.9 over 500 cases" from "0.9 over 5".
+function caseCount(cards: ScorecardRecord[], metric: string | undefined): number {
+  let cases = 0
+  for (const card of cards) {
+    const row = summaryOf(card, metric)
+    if (row) cases += weightOf(row)
+  }
+  return cases
 }
 
 // All metric names in the workspace (by frequency) + the default metric.
@@ -222,7 +255,8 @@ function passesFilters(
 export interface GridRow {
   key: string
   labels: string[] // label per groupBy dimension (for display; owner is resolved)
-  count: number
+  count: number // scorecards in the group
+  cases: number // scored cases behind the value — the sample size, NOT the scorecard count
   value?: number // measured value when there is no pivot
   cells: { key: string; value?: number }[] // value per pivot column
 }
@@ -328,6 +362,7 @@ export function computeAnalysis(
       key,
       labels,
       count: cards.length,
+      cases: caseCount(cards, metric),
       value: aggregate(cards, metric, config.measure),
       cells,
     }

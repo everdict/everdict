@@ -63,7 +63,7 @@
     "changeFailed": "변경하지 못했어요.",
     "column": "열",
     "copied": "복사됨",
-    "countHeader": "건수",
+    "countHeader": "실행",
     "countUnit": "{count}건",
     "customEmptyHint": "필터를 바꿔보세요.",
     "customEmptyTitle": "조건에 맞는 스코어카드가 없어요.",
@@ -137,7 +137,8 @@
     "rawColScore": "점수",
     "rawColCases": "케이스",
     "rawShowAll": "{total}건 중 {shown}건 표시 — 전체 보기",
-    "seriesCapped": "{max}개까지만 그렸어요 · {hidden}개 시리즈는 아래 원데이터에서 확인하세요"
+    "seriesCapped": "{max}개까지만 그렸어요 · {hidden}개 시리즈는 아래 원데이터에서 확인하세요",
+    "casesHeader": "케이스"
   },
   "byHarnessScorecards": {
     "harnessLabel": "Harness"

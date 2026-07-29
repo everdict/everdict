@@ -95,6 +95,70 @@ describe("computeAnalysis — filters", () => {
   });
 });
 
+describe("computeAnalysis — case-weighted aggregation", () => {
+  // Regression: the aggregate used to be a plain mean of per-card rates, so a 5-case smoke run counted the
+  // same as a 500-case suite. A rate is a ratio — a bundle's rate is Σ(rate·n)/Σn.
+  it("weights passRate by each card's case count, not by the number of cards", () => {
+    const cards = [
+      card("suite", { summary: [{ metric: "judge", count: 500, mean: 0.8, passRate: 0.8 }] }),
+      card("smoke", { summary: [{ metric: "judge", count: 5, mean: 1.0, passRate: 1.0 }] }),
+    ];
+    const r = computeAnalysis(cards, config());
+    if (r.kind !== "grid") throw new Error("expected grid");
+    // Unweighted (the old behaviour) would be (0.8 + 1.0) / 2 = 0.9 — nearly 10 points too generous.
+    expect(r.rows[0]?.value).toBeCloseTo((500 * 0.8 + 5 * 1.0) / 505, 6);
+    expect(r.rows[0]?.value).not.toBeCloseTo(0.9, 3);
+  });
+
+  it("weights mean the same way", () => {
+    const cards = [
+      card("big", { summary: [{ metric: "cost", count: 100, mean: 2 }] }),
+      card("small", { summary: [{ metric: "cost", count: 1, mean: 40 }] }),
+    ];
+    const r = computeAnalysis(cards, config({ measure: "mean" }));
+    if (r.kind !== "grid") throw new Error("expected grid");
+    expect(r.rows[0]?.value).toBeCloseTo((100 * 2 + 1 * 40) / 101, 6); // not (2 + 40) / 2 = 21
+  });
+
+  it("reports the case count separately from the scorecard count", () => {
+    const cards = [
+      card("a", { summary: [{ metric: "judge", count: 500, mean: 0.8, passRate: 0.8 }] }),
+      card("b", { summary: [{ metric: "judge", count: 5, mean: 1.0, passRate: 1.0 }] }),
+    ];
+    const r = computeAnalysis(cards, config());
+    if (r.kind !== "grid") throw new Error("expected grid");
+    expect(r.rows[0]?.count).toBe(2); // scorecards
+    expect(r.rows[0]?.cases).toBe(505); // scored cases behind the value
+  });
+
+  it("still counts a card whose summary reports no usable case count, weighting it once", () => {
+    const cards = [
+      card("counted", { summary: [{ metric: "judge", count: 3, mean: 0, passRate: 0 }] }),
+      card("legacy", { summary: [{ metric: "judge", count: 0, mean: 1, passRate: 1 }] }),
+    ];
+    const r = computeAnalysis(cards, config());
+    if (r.kind !== "grid") throw new Error("expected grid");
+    expect(r.rows[0]?.value).toBeCloseTo((3 * 0 + 1 * 1) / 4, 6); // the legacy row is not dropped
+    expect(r.rows[0]?.cases).toBe(4);
+  });
+
+  it("weights the line series too, so a trend cannot be tilted by small runs", () => {
+    const cards = [
+      card("a", {
+        createdAt: "2026-06-01T00:00:00Z",
+        summary: [{ metric: "judge", count: 200, mean: 0.5, passRate: 0.5 }],
+      }),
+      card("b", {
+        createdAt: "2026-06-01T12:00:00Z",
+        summary: [{ metric: "judge", count: 2, mean: 1.0, passRate: 1.0 }],
+      }),
+    ];
+    const r = computeAnalysis(cards, config({ groupBy: ["day"], viz: "line" }));
+    if (r.kind !== "line") throw new Error("expected line");
+    expect(r.series[0]?.points[0]).toBeCloseTo((200 * 0.5 + 2 * 1.0) / 202, 6); // not 0.75
+  });
+});
+
 describe("computeAnalysis — grid", () => {
   it("groups by dimensions, aggregates the measure, and sorts by measure desc", () => {
     const cards = [

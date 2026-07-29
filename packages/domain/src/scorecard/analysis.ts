@@ -88,7 +88,8 @@ export interface AnalysisCard {
 export interface AnalysisGridRow {
   key: string;
   labels: string[]; // raw label per groupBy dimension (owner = the subject; display resolution is the caller's)
-  count: number;
+  count: number; // scorecards in the group
+  cases: number; // scored cases behind the value — the sample size, NOT the scorecard count
   value?: number; // measured value over the whole group (also the sort key when sorting by measure)
   cells: { key: string; value?: number }[]; // value per pivot column ([] when no pivotBy)
 }
@@ -158,14 +159,26 @@ export function analysisDimensionValue(card: AnalysisCard, dim: AnalysisDimensio
   }
 }
 
-// This card's score for the selected metric — its summary row's passRate first, else mean.
-// An explicitly selected but absent metric falls back to the card's first summary row (recipe semantics —
-// a View saved against a metric another harness doesn't emit still renders something comparable).
-function scoreOf(card: AnalysisCard, metric: string | undefined): number | undefined {
+// The summary row this card contributes for the selected metric. An explicitly selected but absent metric
+// falls back to the card's first summary row (recipe semantics — a View saved against a metric another
+// harness doesn't emit still renders something comparable).
+function summaryOf(card: AnalysisCard, metric: string | undefined): MetricSummary | undefined {
   const rows = card.summary ?? [];
-  const row = (metric ? rows.find((r) => r.metric === metric) : undefined) ?? rows[0];
+  return (metric ? rows.find((r) => r.metric === metric) : undefined) ?? rows[0];
+}
+
+// This card's score for the selected metric — passRate first, else mean.
+function scoreOf(card: AnalysisCard, metric: string | undefined): number | undefined {
+  const row = summaryOf(card, metric);
   if (!row) return undefined;
   return row.passRate ?? row.mean;
+}
+
+// How many scored cases stand behind this card's score — the weight it earns in a group aggregate.
+// A row that reports no usable count still counts once rather than vanishing: an unknown weight is a
+// reason to under-trust the number, not to drop the record.
+function weightOf(row: MetricSummary): number {
+  return Number.isFinite(row.count) && row.count > 0 ? row.count : 1;
 }
 
 // A group's (bundle of cards) measured value.
@@ -176,10 +189,32 @@ function aggregate(cards: AnalysisCard[], metric: string | undefined, measure: A
     const latest = [...cards].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
     return latest ? scoreOf(latest, metric) : undefined;
   }
-  // passRate | mean — the average of each card's score (only the defined ones)
-  const vals = cards.map((c) => scoreOf(c, metric)).filter((v): v is number => v !== undefined);
-  if (vals.length === 0) return undefined;
-  return vals.reduce((a, b) => a + b, 0) / vals.length;
+  // passRate | mean — weighted by each card's CASE COUNT, never a plain mean of per-card rates. A rate is a
+  // ratio, so a bundle's rate is Σ(rate·n)/Σn: averaging the rates instead would let a 5-case smoke run
+  // outweigh a 500-case suite and make a leaderboard rank turn on how many small runs someone launched.
+  let weighted = 0;
+  let cases = 0;
+  for (const card of cards) {
+    const row = summaryOf(card, metric);
+    if (!row) continue;
+    const value = row.passRate ?? row.mean;
+    if (value === undefined) continue;
+    const w = weightOf(row);
+    weighted += value * w;
+    cases += w;
+  }
+  return cases === 0 ? undefined : weighted / cases;
+}
+
+// The scored cases behind a group — the sample size the group's rate was computed over. Reported next to the
+// value so a reader can tell "0.9 over 500 cases" from "0.9 over 5".
+function caseCount(cards: AnalysisCard[], metric: string | undefined): number {
+  let cases = 0;
+  for (const card of cards) {
+    const row = summaryOf(card, metric);
+    if (row) cases += weightOf(row);
+  }
+  return cases;
 }
 
 // All metric names across the cards, most frequent first — the vocabulary a caller (web picker / agent) selects from.
@@ -293,7 +328,14 @@ export function computeAnalysis(
           ),
         }))
       : [];
-    return { key, labels, count: groupCards.length, value: aggregate(groupCards, metric, config.measure), cells };
+    return {
+      key,
+      labels,
+      count: groupCards.length,
+      cases: caseCount(groupCards, metric),
+      value: aggregate(groupCards, metric, config.measure),
+      cells,
+    };
   });
 
   const dir = config.sort.dir === "asc" ? 1 : -1;
