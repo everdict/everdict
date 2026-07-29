@@ -317,6 +317,18 @@ export interface ScorecardServiceDeps {
     start(scorecardId: string): Promise<void>;
     cancel?(scorecardId: string): Promise<void>; // supersede → cooperative workflow cancellation (best-effort)
   };
+  // Score-on-Temporal (P2 / orchestration.md T-c): a detached scoring pass runs as a durable score:<groupId>
+  // workflow, so re-scoring a large group survives a control-plane restart with zero duplicate judging
+  // (planScore is idempotent — unfinished-only). start throws ConflictError when a pass is already running
+  // (deterministic workflowId = the dedup); any other start failure degrades to the in-process pass.
+  temporalScores?: {
+    workflowIdFor(groupId: string): string;
+    start(input: {
+      groupId: string;
+      judges: Array<{ id: string; version: string }>;
+      submittedBy?: string;
+    }): Promise<void>;
+  };
   // Registered runtime ids for this tenant — powers runtime:"auto" (expand to every registered runtime and shard).
   runtimesFor?: (tenant: string) => Promise<string[]>;
   // Per-runtime circuit breaker shared across batches — remembers a runtime outage so sharded batches spill

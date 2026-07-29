@@ -90,6 +90,15 @@ moves (a failed pass appends a `judges`-phase step instead of touching the settl
 are visible via `judgeModels` + the `judge:<id>` summary rows. The batch pipeline's inline judging is
 unchanged (conceptually the same operation; convergence is a later refactor).
 
+**Score-on-Temporal (T-c)**: with `EVERDICT_TEMPORAL_ADDRESS` configured, a runIds-backed group's scoring
+pass runs as a durable `scoreGroupWorkflow` (`everdict-score-<groupId>`) over the same internal bridge the
+batch uses (`/internal/groups/:id/score-plan|score-case|score-finalize`): `planScore` is idempotent
+(unfinished child keys only — keyed `<caseId>#<trial>`), `scoreCase` judges ONE child and skips if already
+judged, `finalizeScore` re-aggregates. Kill the control plane mid-pass and the pass resumes with ZERO
+duplicate judging. The deterministic workflowId is the one-pass-per-group dedup (a second score → 409);
+start failure degrades to the in-process pass; embed-mode groups (no child runs to write back to) always
+take the in-process pass. See `docs/orchestration.md` (Tier-1 item 3).
+
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |
 |---|---|---|

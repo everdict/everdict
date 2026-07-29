@@ -201,6 +201,63 @@ const internal = {
       ...errorResponses(403, 404),
     },
   },
+  scorePlan: {
+    summary: "Plan a detached scoring pass (internal bridge)",
+    description:
+      "Score-on-Temporal bridge (score:<groupId>): returns the (case, trial) child keys still missing at least " +
+      "one selected judge's verdict — idempotent, so a resumed/continued workflow gets exactly the remainder " +
+      "(zero duplicate judging). Guarded by x-internal-token.",
+    tags: ["internal"],
+    params: batchIdParams,
+    body: toJsonSchema(z.object({ judges: z.array(z.object({ id: z.string(), version: z.string() })).min(1) })),
+    response: {
+      200: {
+        description: "Unfinished child keys + lane concurrency",
+        ...toJsonSchema(z.object({ keys: z.array(z.string()), concurrency: z.number() })),
+      },
+      ...errorResponses(400, 403, 404, 409),
+    },
+  },
+  scoreCase: {
+    summary: "Judge one case of a scoring pass (internal bridge)",
+    description:
+      "Score-on-Temporal bridge: judges ONE (case, trial) child and writes the verdicts back to its child run. " +
+      "Idempotent — an already-judged case returns skipped. Guarded by x-internal-token.",
+    tags: ["internal"],
+    params: batchIdParams,
+    body: toJsonSchema(
+      z.object({
+        key: z.string().describe("child key <caseId>#<trial>"),
+        judges: z.array(z.object({ id: z.string(), version: z.string() })).min(1),
+        submittedBy: z.string().optional(),
+      }),
+    ),
+    response: {
+      200: {
+        description: "Whether the case was judged (skipped = already done)",
+        ...toJsonSchema(z.object({ scored: z.boolean(), skipped: z.boolean().optional() })),
+      },
+      ...errorResponses(400, 403, 404),
+    },
+  },
+  scoreFinalize: {
+    summary: "Finalize a detached scoring pass (internal bridge)",
+    description:
+      "Score-on-Temporal bridge: re-aggregates from the re-scored children and settles through the rescore " +
+      "transition (scorecard.scored fact via the E0 outbox; an experiment promotes). Guarded by x-internal-token.",
+    tags: ["internal"],
+    params: batchIdParams,
+    body: toJsonSchema(
+      z.object({
+        judges: z.array(z.object({ id: z.string(), version: z.string() })).min(1),
+        submittedBy: z.string().optional(),
+      }),
+    ),
+    response: {
+      200: { description: "Finalized", ...toJsonSchema(OkResponseSchema) },
+      ...errorResponses(400, 403, 404, 409),
+    },
+  },
   scheduleFire: {
     summary: "Fire a schedule (internal bridge)",
     description:

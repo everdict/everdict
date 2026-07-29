@@ -116,5 +116,59 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       );
       if (!res.ok) throw new Error(`Batch finalization failed: ${res.status} ${await res.text()}`);
     },
+
+    // --- Score-on-Temporal (T-c) — the same internal bridge, for the detached phase-2 pass. ---
+    async planScore(input: {
+      groupId: string;
+      judges: Array<{ id: string; version: string }>;
+    }): Promise<{ keys: string[]; concurrency: number }> {
+      if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const res = await fetch(
+        `${schedule.apiUrl.replace(/\/$/, "")}/internal/groups/${encodeURIComponent(input.groupId)}/score-plan`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+          body: JSON.stringify({ judges: input.judges }),
+        },
+      );
+      if (!res.ok) throw new Error(`Score plan failed: ${res.status} ${await res.text()}`);
+      const json = (await res.json()) as { keys?: unknown; concurrency?: unknown };
+      if (!Array.isArray(json.keys)) throw new Error("The score plan response has no keys.");
+      return { keys: json.keys.map(String), concurrency: typeof json.concurrency === "number" ? json.concurrency : 4 };
+    },
+    async scoreGroupCase(input: {
+      groupId: string;
+      key: string;
+      judges: Array<{ id: string; version: string }>;
+      submittedBy?: string;
+    }): Promise<{ scored: boolean; skipped?: boolean }> {
+      if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const res = await fetch(
+        `${schedule.apiUrl.replace(/\/$/, "")}/internal/groups/${encodeURIComponent(input.groupId)}/score-case`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+          body: JSON.stringify({ key: input.key, judges: input.judges, submittedBy: input.submittedBy }),
+        },
+      );
+      if (!res.ok) throw new Error(`Score case failed: ${res.status} ${await res.text()}`);
+      return (await res.json()) as { scored: boolean; skipped?: boolean };
+    },
+    async finalizeScore(input: {
+      groupId: string;
+      judges: Array<{ id: string; version: string }>;
+      submittedBy?: string;
+    }): Promise<void> {
+      if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const res = await fetch(
+        `${schedule.apiUrl.replace(/\/$/, "")}/internal/groups/${encodeURIComponent(input.groupId)}/score-finalize`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+          body: JSON.stringify({ judges: input.judges, submittedBy: input.submittedBy }),
+        },
+      );
+      if (!res.ok) throw new Error(`Score finalization failed: ${res.status} ${await res.text()}`);
+    },
   };
 }

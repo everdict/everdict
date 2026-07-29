@@ -341,6 +341,27 @@ export class ScorecardService {
     return this.scoreService.score(input);
   }
 
+  // Score-on-Temporal internal bridge (worker activities → these; orchestration.md T-c `score:<groupId>`).
+  async planScore(
+    id: string,
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<{ keys: string[]; concurrency: number }> {
+    return this.scoreService.planScore(id, judges);
+  }
+
+  async runScoreCase(
+    id: string,
+    key: string,
+    judges: Array<{ id: string; version: string }>,
+    submittedBy?: string,
+  ): Promise<{ scored: boolean; skipped?: boolean }> {
+    return this.scoreService.scoreCase(id, key, judges, submittedBy);
+  }
+
+  async finalizeScore(id: string, judges: Array<{ id: string; version: string }>, submittedBy?: string): Promise<void> {
+    return this.scoreService.finalizeScore(id, judges, submittedBy);
+  }
+
   // Resolve each selected judge's version (latest→concrete) via the registry, so the recorded orchestration pins the
   // exact judge that scored — the same reproducibility guarantee harness/dataset already have. No registry (unit paths)
   // or an unresolvable id → keep the ref as-given; the scoring path silently skips a judge it can't resolve, unchanged.

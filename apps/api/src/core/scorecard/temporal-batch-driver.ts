@@ -1,4 +1,5 @@
-import { Client, Connection } from "@temporalio/client";
+import { ConflictError } from "@everdict/contracts";
+import { Client, Connection, WorkflowExecutionAlreadyStartedError } from "@temporalio/client";
 
 // Batch-on-Temporal driver — the control plane starts one durable scorecardBatchWorkflow per batch
 // (docs/architecture/temporal-batch-orchestration.md). Uses only @temporalio/client (same rule as the schedule
@@ -39,6 +40,49 @@ export class TemporalBatchDriver {
           },
         ],
       });
+    } finally {
+      await connection.close();
+    }
+  }
+
+  // Score-on-Temporal (orchestration.md T-c): the detached phase-2 pass as a durable score workflow. The
+  // deterministic workflowId IS the one-pass-per-group dedup — a second start while one runs maps to a
+  // client-visible 409; any other failure propagates for the caller's graceful in-process degrade.
+  scoreWorkflowIdFor(groupId: string): string {
+    return `everdict-score-${groupId}`;
+  }
+
+  async startScore(input: {
+    groupId: string;
+    judges: Array<{ id: string; version: string }>;
+    submittedBy?: string;
+  }): Promise<void> {
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      await client.workflow.start("scoreGroupWorkflow", {
+        taskQueue: this.opts.taskQueue ?? TASK_QUEUE,
+        workflowId: this.scoreWorkflowIdFor(input.groupId),
+        args: [
+          {
+            groupId: input.groupId,
+            judges: input.judges,
+            ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+            ...(this.opts.continueEvery !== undefined ? { continueEvery: this.opts.continueEvery } : {}),
+            ...(this.opts.rotateAtHistoryLength !== undefined
+              ? { rotateAtHistoryLength: this.opts.rotateAtHistoryLength }
+              : {}),
+          },
+        ],
+      });
+    } catch (err) {
+      if (err instanceof WorkflowExecutionAlreadyStartedError)
+        throw new ConflictError(
+          "CONFLICT",
+          { scorecard: input.groupId },
+          "A scoring pass is already in flight (score workflow running).",
+        );
+      throw err;
     } finally {
       await connection.close();
     }

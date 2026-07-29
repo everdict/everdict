@@ -112,6 +112,59 @@ export async function scorecardBatchWorkflow(input: {
   await batchActivities.finalizeBatch({ scorecardId: input.scorecardId });
 }
 
+// Detached phase-2 scoring as a durable workflow (orchestration.md T-c, workflowId `everdict-score-<groupId>`).
+// The CP owns judging/aggregation (internal bridge); the workflow owns ONLY the pass's durability: kill the CP
+// mid-pass and the activities retry against the restarted CP; kill the worker and another replays the history.
+// Zero duplicate judging on resume comes from planScore's idempotence (unfinished-only) + scoreGroupCase's
+// skip-if-judged — the same two properties that make continue-as-new trivially correct here.
+const SCORE_CONTINUE_EVERY = 500;
+const SCORE_ROTATE_AT = 20_000;
+const MAX_SCORE_LANES = 16; // judging is model calls, not sandboxes — a tighter lane cap than the batch
+
+export async function scoreGroupWorkflow(input: {
+  groupId: string;
+  judges: Array<{ id: string; version: string }>;
+  submittedBy?: string;
+  continueEvery?: number;
+  rotateAtHistoryLength?: number;
+}): Promise<void> {
+  const plan = await batchActivities.planScore({ groupId: input.groupId, judges: input.judges });
+  const limit = Math.max(1, input.continueEvery ?? SCORE_CONTINUE_EVERY);
+  const rotateAt = Math.max(1, input.rotateAtHistoryLength ?? SCORE_ROTATE_AT);
+  const keys = plan.keys.slice(0, limit);
+  let next = 0;
+  let rotatedEarly = false;
+  const lane = async (): Promise<void> => {
+    while (next < keys.length) {
+      const info = workflowInfo();
+      if (info.continueAsNewSuggested || info.historyLength >= rotateAt) {
+        rotatedEarly = true;
+        return;
+      }
+      const i = next++;
+      const key = keys[i];
+      if (key === undefined) continue;
+      await batchActivities.scoreGroupCase({
+        groupId: input.groupId,
+        key,
+        judges: input.judges,
+        ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+      });
+    }
+  };
+  const lanes = Math.max(1, Math.min(plan.concurrency, MAX_SCORE_LANES, keys.length || 1));
+  await Promise.all(Array.from({ length: lanes }, () => lane()));
+  if (rotatedEarly || plan.keys.length > limit) {
+    await continueAsNew<typeof scoreGroupWorkflow>(input);
+    return;
+  }
+  await batchActivities.finalizeScore({
+    groupId: input.groupId,
+    judges: input.judges,
+    ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+  });
+}
+
 export async function scheduledScorecardWorkflow(input: { scheduleId: string; tenant: string }): Promise<void> {
   const { scorecardId } = await fireScheduledScorecard(input);
   // A report-mode fire completes synchronously inside the fire activity (no scorecard) — nothing to poll/finalize.

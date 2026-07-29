@@ -3,6 +3,7 @@ import {
   BadRequestError,
   type CaseJob,
   type CaseResult,
+  ConflictError,
   type Dataset,
   ForbiddenError,
   type HarnessTemplateSpec,
@@ -4034,6 +4035,96 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     const children = await runStore.list("acme", { scorecardId: record.id });
     const judgeScores = children[0]?.result?.scores.filter((s) => s.metric === "judge:quality") ?? [];
     expect(judgeScores).toHaveLength(1); // replaced, not appended
+  });
+
+  it("the workflow bridge (plan → scoreCase → finalize) resumes with zero duplicate judging", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", qualityJudge);
+    let judgeCalls = 0;
+    const countingRunner: JudgeRunner = {
+      run: async (spec) => {
+        judgeCalls++;
+        return [{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }];
+      },
+    };
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const service = new ScorecardService({
+      dispatcher: ungraded,
+      store,
+      runStore,
+      datasets,
+      judges,
+      judgeRunner: countingRunner,
+    });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      task: { prompt: "hi" },
+      trials: 3,
+    });
+    await waitTerminal(store, record.id);
+    const sel = [{ id: "quality", version: "1.0.0" }];
+
+    // The workflow's plan: all three (case, trial) children are unfinished.
+    const plan = await service.planScore(record.id, sel);
+    expect(plan.keys).toHaveLength(3);
+
+    // Judge the first case, then "kill the CP": a fresh plan returns exactly the remainder.
+    const first = plan.keys[0] ?? "";
+    expect(await service.runScoreCase(record.id, first, sel)).toEqual({ scored: true });
+    const resumed = await service.planScore(record.id, sel);
+    expect(resumed.keys).toHaveLength(2);
+    expect(resumed.keys).not.toContain(first);
+
+    // Re-running an already-judged case is a skip — zero duplicate judging.
+    expect(await service.runScoreCase(record.id, first, sel)).toEqual({ scored: false, skipped: true });
+    expect(judgeCalls).toBe(1);
+
+    for (const key of resumed.keys) await service.runScoreCase(record.id, key, sel);
+    await service.finalizeScore(record.id, sel, "bob");
+    const done = await store.get(record.id);
+    expect(done?.kind).toBe("scorecard"); // promoted by the finalize
+    expect(done?.summary?.some((row) => row.metric === "judge:quality" && row.passRate === 1)).toBe(true);
+    expect(judgeCalls).toBe(3); // one judge call per (case, trial) — never more
+  });
+
+  it("routes to the durable score workflow when configured, and 409s a second pass (deterministic id dedup)", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", qualityJudge);
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const started: string[] = [];
+    const service = new ScorecardService({
+      dispatcher: ungraded,
+      store,
+      runStore,
+      datasets,
+      judges,
+      judgeRunner: passRunner,
+      temporalScores: {
+        workflowIdFor: (id) => `everdict-score-${id}`,
+        start: async (input) => {
+          if (started.includes(input.groupId))
+            throw new ConflictError("CONFLICT", { scorecard: input.groupId }, "already running");
+          started.push(input.groupId);
+        },
+      },
+    });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      task: { prompt: "hi" },
+    });
+    await waitTerminal(store, record.id);
+    await service.scoreGroup({ tenant: "acme", id: record.id, judges: [{ id: "quality", version: "latest" }] });
+    expect(started).toEqual([record.id]); // the durable workflow owns the pass — no in-process judging
+    // The judge versions handed to the workflow are PINNED (latest → concrete).
+    await expect(
+      service.scoreGroup({ tenant: "acme", id: record.id, judges: [{ id: "quality", version: "latest" }] }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("guards: non-succeeded group → 409; empty judge list → 400; foreign workspace → 404", async () => {

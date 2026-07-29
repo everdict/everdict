@@ -19,4 +19,24 @@ export interface Activities {
   planBatch(input: { scorecardId: string }): Promise<{ caseIds: string[]; concurrency: number }>;
   runBatchCase(input: { scorecardId: string; caseId: string }): Promise<{ settled: boolean; skipped?: boolean }>;
   finalizeBatch(input: { scorecardId: string }): Promise<void>;
+
+  // --- Score-on-Temporal (orchestration.md T-c, `score:<groupId>`) — the detached phase-2 pass as a durable
+  // workflow, same internal-bridge pattern as the batch. planScore is idempotent (child keys still missing a
+  // selected judge's verdict — a resumed/continued pass gets exactly the remainder), scoreGroupCase judges ONE
+  // (case, trial) child and writes back (already-judged → skipped), finalizeScore re-aggregates and settles. ---
+  planScore(input: {
+    groupId: string;
+    judges: Array<{ id: string; version: string }>;
+  }): Promise<{ keys: string[]; concurrency: number }>;
+  scoreGroupCase(input: {
+    groupId: string;
+    key: string;
+    judges: Array<{ id: string; version: string }>;
+    submittedBy?: string;
+  }): Promise<{ scored: boolean; skipped?: boolean }>;
+  finalizeScore(input: {
+    groupId: string;
+    judges: Array<{ id: string; version: string }>;
+    submittedBy?: string;
+  }): Promise<void>;
 }

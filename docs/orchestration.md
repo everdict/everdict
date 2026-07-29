@@ -61,8 +61,11 @@ that Temporal stays — which raises the follow-up: use it *better*. Every candi
 charter filter (**definition of done + must survive crashes/time + not open-ended**); everything that
 failed is listed in the anti-catalog so it cannot creep in later.
 
-**Running today (4):** `evalCaseWorkflow` · `suiteWorkflow` · `scorecardBatchWorkflow` (+ the
-workflow-owned retry batch) · `scheduledScorecardWorkflow` + `TemporalScheduleDriver` (the clock).
+**Running today (5):** `evalCaseWorkflow` · `suiteWorkflow` · `scorecardBatchWorkflow` (+ the
+workflow-owned retry batch) · `scheduledScorecardWorkflow` + `TemporalScheduleDriver` (the clock) ·
+`scoreGroupWorkflow` (`everdict-score-<groupId>` — Tier-1 item 3, SHIPPED in W2: the detached phase-2
+pass; planScore's unfinished-only idempotence + scoreGroupCase's skip-if-judged give restart-safe,
+zero-duplicate re-scoring; start failure degrades to the in-process pass).
 
 **Tier 1 — adopt next (each unlocks a roadmap phase):**
 
@@ -77,7 +80,9 @@ workflow-owned retry batch) · `scheduledScorecardWorkflow` + `TemporalScheduleD
    idle teardown is the same pattern.
 3. **Phase-2 scoring** — `scoreWorkflow(groupId, spec)`: judge N×M with per-case retries → aggregate →
    persist. Done = scored + aggregated. *Unlocks:* execution-model P2 — re-scoring a 500-case group
-   survives restarts instead of dying with the process.
+   survives restarts instead of dying with the process. **SHIPPED (W2)** as `scoreGroupWorkflow` — see
+   "Running today" above; only runIds-backed groups route to it (an embed group has no per-case store for
+   idempotent write-back, so it takes the in-process pass).
 4. **Heavy event reactions (the E3 executor)** — a thin consumer starts `workflowId = eventId`
    (idempotent by construction); the workflow runs the multi-step reaction. First residents: regression
    triage, the scorecard-fix-PR chain.

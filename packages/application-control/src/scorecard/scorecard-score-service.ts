@@ -76,9 +76,84 @@ export class ScorecardScoreService {
     if (this.inFlight.has(record.id))
       throw new ConflictError("CONFLICT", { scorecard: record.id }, "A scoring pass is already in flight.");
     const pinned = await this.pinJudges(input.tenant, input.judges);
+    // Score-on-Temporal (T-c): a durable score:<groupId> workflow owns the pass — re-scoring a large group
+    // survives a CP restart with zero duplicate judging. Only runIds-backed groups route here (per-case
+    // write-back is what makes the activities idempotent; an embed group has no per-case store, so it takes
+    // the in-process pass). A running workflow = ConflictError from start (deterministic id is the dedup);
+    // any OTHER start failure degrades gracefully to the in-process pass (same posture as batch submit).
+    if (this.deps.temporalScores && record.runIds?.length) {
+      try {
+        await this.deps.temporalScores.start({
+          groupId: record.id,
+          judges: pinned,
+          ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
+        });
+        return record;
+      } catch (err) {
+        if (err instanceof ConflictError) throw err;
+        // degrade: the workflow could not start (Temporal outage) — the pass must never silently hang
+      }
+    }
     this.inFlight.add(record.id);
     void this.track(record, record.scorecard, pinned, input.submittedBy).finally(() => this.inFlight.delete(record.id));
     return record;
+  }
+
+  // ── Score-on-Temporal internal bridge (worker activities → these three; the same pattern as the batch
+  // plan/case/finalize). The unit is the (caseId, trial) child key — caseId alone is ambiguous under trials. ──
+
+  // Idempotent plan: the child keys still MISSING at least one of the selected judges' verdicts. A re-attached
+  // (or continued-as-new) workflow gets exactly the remainder — this is what makes a CP kill mid-pass resume
+  // with zero duplicate judging.
+  async planScore(
+    id: string,
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<{ keys: string[]; concurrency: number }> {
+    const record = await this.getRecord(id);
+    if (!record) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "Scorecard not found.");
+    if (!ScorecardBatch.from(record).canScore())
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: id, status: record.status },
+        `only a succeeded group can be scored (status: ${record.status})`,
+      );
+    const results = record.scorecard?.results ?? [];
+    const missing = results.filter((r) => !judges.every((j) => r.scores.some((s) => s.metric === `judge:${j.id}`)));
+    return {
+      keys: missing.map((r) => childKey(r.caseId, r.trial)),
+      concurrency: record.orchestration?.concurrency ?? 4,
+    };
+  }
+
+  // Judge exactly one case and write its verdicts back to the child run. Idempotent: already fully judged →
+  // skipped (the workflow's activity retry / a resumed pass re-calls this harmlessly).
+  async scoreCase(
+    id: string,
+    key: string,
+    judges: Array<{ id: string; version: string }>,
+    submittedBy?: string,
+  ): Promise<{ scored: boolean; skipped?: boolean }> {
+    const record = await this.getRecord(id);
+    if (!record) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "Scorecard not found.");
+    const result = (record.scorecard?.results ?? []).find((r) => childKey(r.caseId, r.trial) === key);
+    if (!result) return { scored: false, skipped: true };
+    if (judges.every((j) => result.scores.some((s) => s.metric === `judge:${j.id}`)))
+      return { scored: false, skipped: true };
+    const selected = new Set(judges.map((j) => `judge:${j.id}`));
+    const single: CaseResult = { ...result, scores: result.scores.filter((s) => !selected.has(s.metric)) };
+    const dataset = await this.effectiveDataset(record, [single]);
+    await this.scoring.applyJudges(record.tenant, dataset, [single], judges, record.runtime, submittedBy);
+    await this.writeBackScores(record, [single]);
+    return { scored: true };
+  }
+
+  // Re-aggregate from the (now re-scored) children and settle through the rescore transition — the terminal
+  // step of the workflow pass. Reloads hydrated state, so it sees exactly what the scoreCase activities wrote.
+  async finalizeScore(id: string, judges: Array<{ id: string; version: string }>, submittedBy?: string): Promise<void> {
+    const record = await this.getRecord(id);
+    const base = record?.scorecard;
+    if (!record || !base) return;
+    await this.aggregate(record, base, base.results, judges, submittedBy);
   }
 
   private async track(
@@ -98,32 +173,7 @@ export class ScorecardScoreService {
       const dataset = await this.effectiveDataset(record, results);
       await this.scoring.applyJudges(record.tenant, dataset, results, judges, record.runtime, submittedBy);
       await this.writeBackScores(record, results);
-
-      // Aggregate to the group through the domain transition — the scorecard.scored fact rides the E0 outbox.
-      const summary = summarizeScorecard({ ...scorecard, results });
-      const newJudgeModels = await this.scoring.collectJudgeModels(record.tenant, judges, undefined);
-      const judgeModels = [...new Set([...(record.judgeModels ?? []), ...newJudgeModels])].sort();
-      const extras: ScorecardOutcomeExtras = {
-        summary,
-        ...(judgeModels.length > 0 ? { judgeModels } : {}),
-        // Embed-mode groups (no child runs) keep their embed as the score carrier; dedup groups carry runIds
-        // and hydrate from the (re-scored) children, so the embed stays out of the row.
-        ...(record.runIds?.length ? {} : { scorecard: { ...scorecard, results } }),
-      };
-      const fresh = await this.deps.store.get(record.id);
-      if (!fresh) return;
-      const transition = ScorecardBatch.from(fresh).rescore(
-        extras,
-        submittedBy !== undefined ? { actor: submittedBy } : {},
-        this.now(),
-      );
-      const stamped = stampFacts(fresh.tenant, transition.facts, { newId: this.newId, now: this.now });
-      await this.deps.store.update(
-        record.id,
-        transition.patch,
-        stamped.map((f) => f.record),
-      );
-      if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+      await this.aggregate(record, scorecard, results, judges, submittedBy);
     } catch (err) {
       // Best-effort visibility: a failed scoring pass never flips the (already settled) group — it leaves a step.
       const fresh = await this.deps.store.get(record.id).catch(() => undefined);
@@ -136,6 +186,41 @@ export class ScorecardScoreService {
         })
         .catch(() => undefined);
     }
+  }
+
+  // Aggregate to the group through the domain transition — the scorecard.scored fact rides the E0 outbox.
+  // Shared by the in-process pass (its own scored results) and the workflow finalize (the hydrated reload).
+  private async aggregate(
+    record: ScorecardRecord,
+    base: NonNullable<ScorecardRecord["scorecard"]>,
+    results: CaseResult[],
+    judges: Array<{ id: string; version: string }>,
+    submittedBy: string | undefined,
+  ): Promise<void> {
+    const summary = summarizeScorecard({ ...base, results });
+    const newJudgeModels = await this.scoring.collectJudgeModels(record.tenant, judges, undefined);
+    const judgeModels = [...new Set([...(record.judgeModels ?? []), ...newJudgeModels])].sort();
+    const extras: ScorecardOutcomeExtras = {
+      summary,
+      ...(judgeModels.length > 0 ? { judgeModels } : {}),
+      // Embed-mode groups (no child runs) keep their embed as the score carrier; dedup groups carry runIds
+      // and hydrate from the (re-scored) children, so the embed stays out of the row.
+      ...(record.runIds?.length ? {} : { scorecard: { ...base, results } }),
+    };
+    const fresh = await this.deps.store.get(record.id);
+    if (!fresh) return;
+    const transition = ScorecardBatch.from(fresh).rescore(
+      extras,
+      submittedBy !== undefined ? { actor: submittedBy } : {},
+      this.now(),
+    );
+    const stamped = stampFacts(fresh.tenant, transition.facts, { newId: this.newId, now: this.now });
+    await this.deps.store.update(
+      record.id,
+      transition.patch,
+      stamped.map((f) => f.record),
+    );
+    if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
   }
 
   // The dataset judges align against: the registered one when it resolves; otherwise (ad-hoc experiments under

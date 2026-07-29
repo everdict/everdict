@@ -234,6 +234,75 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     },
   );
 
+  // --- Score-on-Temporal internal bridge (worker activities → CP; orchestration.md T-c `score:<groupId>`).
+  // Same x-internal-token guard; the CP owns judging/aggregation, the workflow owns the pass's durability. ---
+  const scoreJudges = z.object({
+    judges: z.array(z.object({ id: z.string().min(1), version: z.string().min(1) })).min(1),
+    submittedBy: z.string().optional(),
+  });
+  app.post<{ Params: { id: string } }>(
+    "/internal/groups/:id/score-plan",
+    { schema: internalDocs.scorePlan },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      const body = scoreJudges.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        return reply.send(await deps.scorecardService.planScore(req.params.id, body.data.judges));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    "/internal/groups/:id/score-case",
+    { schema: internalDocs.scoreCase },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      const body = scoreJudges.extend({ key: z.string().min(1) }).safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        return reply.send(
+          await deps.scorecardService.runScoreCase(
+            req.params.id,
+            body.data.key,
+            body.data.judges,
+            body.data.submittedBy,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    "/internal/groups/:id/score-finalize",
+    { schema: internalDocs.scoreFinalize },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      const body = scoreJudges.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        await deps.scorecardService.finalizeScore(req.params.id, body.data.judges, body.data.submittedBy);
+        return reply.send({ ok: true });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.post<{ Params: { id: string } }>(
     "/internal/schedules/:id/fire",
     { schema: internalDocs.scheduleFire },

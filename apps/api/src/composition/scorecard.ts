@@ -96,6 +96,21 @@ export function buildScorecard(deps: {
     process.env.EVERDICT_TEMPORAL_ADDRESS && process.env.EVERDICT_TEMPORAL_BATCHES !== "0"
       ? process.env.EVERDICT_TEMPORAL_ADDRESS
       : undefined;
+  // One driver instance serves both durable families: the batch workflow (everdict-batch-<id>) and the
+  // detached scoring pass (everdict-score-<id>, orchestration.md T-c).
+  const temporalDriver = temporalBatchAddress
+    ? new TemporalBatchDriver({
+        address: temporalBatchAddress,
+        // History-budget dial: settled cases per workflow execution before continue-as-new (default 500 in the workflow).
+        ...(process.env.EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY
+          ? { continueEvery: Number(process.env.EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY) }
+          : {}),
+        // Adaptive continue-as-new floor (event count) — the server's continueAsNewSuggested is primary.
+        ...(process.env.EVERDICT_TEMPORAL_BATCH_ROTATE_HISTORY
+          ? { rotateAtHistoryLength: Number(process.env.EVERDICT_TEMPORAL_BATCH_ROTATE_HISTORY) }
+          : {}),
+      })
+    : undefined;
 
   // Resolve a REGISTERED workspace trace source by name for pull-ingest "by name" (same pool the dispatch path reads).
   const traceSourcesForIngest = new TraceSourceService(settingsStore, { secretsFor: runtimeSecretsFor });
@@ -138,19 +153,14 @@ export function buildScorecard(deps: {
     cancelLeased: (predicate) => runnerHub.requestCancel(predicate),
     adoptCase: adoptCaseFn,
     killCase,
-    ...(temporalBatchAddress
+    ...(temporalDriver
       ? {
-          temporalBatches: new TemporalBatchDriver({
-            address: temporalBatchAddress,
-            // History-budget dial: settled cases per workflow execution before continue-as-new (default 500 in the workflow).
-            ...(process.env.EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY
-              ? { continueEvery: Number(process.env.EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY) }
-              : {}),
-            // Adaptive continue-as-new floor (event count) — the server's continueAsNewSuggested is primary.
-            ...(process.env.EVERDICT_TEMPORAL_BATCH_ROTATE_HISTORY
-              ? { rotateAtHistoryLength: Number(process.env.EVERDICT_TEMPORAL_BATCH_ROTATE_HISTORY) }
-              : {}),
-          }),
+          temporalBatches: temporalDriver,
+          temporalScores: {
+            workflowIdFor: (groupId: string) => temporalDriver.scoreWorkflowIdFor(groupId),
+            start: (input: { groupId: string; judges: Array<{ id: string; version: string }>; submittedBy?: string }) =>
+              temporalDriver.startScore(input),
+          },
         }
       : {}),
     // runtime:"auto" — expand to every registered runtime id for the tenant (sharding across all of them).
