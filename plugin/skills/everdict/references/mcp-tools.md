@@ -72,6 +72,31 @@ for parameterized / service-topology harnesses.
 | `ingest_scorecard` | member | upload externally-run `TraceEvent[]` → scorecard (no harness run; **push**). |
 | `pull_scorecard` | member | pull traces from OTel/MLflow/Langfuse/LangSmith/Phoenix (`source` + `runs:[{caseId,runId}]`, `authSecret`) → scorecard (**pull**). |
 
+## Environments & the image registry (bring your own eval image)
+
+An **environment** is a capability (`spec.type: "environment"`) that gives an image ref an identity —
+what is baked in, how to wire it (`preset`), how to use it (`instructions`), who published it. The
+bytes live in the workspace's **own** registry (BYO: GHCR, Harbor, a plain `registry:2`, …);
+`everdict image push` is the publish path (see workflows §7). Everdict never builds or hosts images.
+
+| Tool | Role | Effect |
+|---|---|---|
+| `list_capabilities` | viewer | everything visible to the workspace (own + workspace + shared) — filter `spec.type === "environment"`. |
+| `list_public_capabilities` | viewer | the cross-workspace public catalog. |
+| `get_capability` | viewer | one capability (`version` opt; `source` reads another workspace's public/subset publish). |
+| `validate_capability` | member | dry-run a save: predicted version + environment image warnings. No write. |
+| `save_capability` | member | author/edit — new id → `1.0.0`, a content change → the next patch version. `visibility` applies only on create; omitted, it defaults **by kind** — an `environment` reaches the `workspace`, a tool kind stays `private`. |
+| `set_capability_visibility` | creator/admin | change reach across every version (`public` needs an admin). |
+| `list_workspace_image_registries` | viewer | the workspace's registries — coordinates + secret **names**, never values. |
+| `set_workspace_image_registry` | admin | register/update one by name (put the token in the SecretStore first). |
+| `probe_workspace_image_registry` | admin | test a registry connection before registering it. Nothing is stored. |
+| `get_image_push_credentials` | member | mint one-shot push credentials. `everdict image push` calls this for you — doing it by hand means you own keeping the value out of shell history and `~/.docker/config.json`. |
+| `list_image_tags` | viewer | a repository's tags in a workspace registry. |
+| `verify_image` | viewer | can THIS workspace pull a full ref? → `{pullable, reason, digest?}`. A failure is a result, not an error. Run it before registering an environment and pin the digest it returns. |
+| `inspect_image` | viewer | a manifest by tag or digest → digest + platforms. Use it to **digest-pin** an environment. |
+| `adopt_environment` / `list_adopted_environments` | member | bring a published environment into this workspace's inventory. |
+| `verify_adopted_environment` | member | re-check that an adopted environment is actually pullable **here** (`pullable`, `reason`, `digest`). |
+
 ## Example arguments
 
 `run_scorecard`:

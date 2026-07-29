@@ -226,6 +226,17 @@ Reused verbatim: `capabilities:read` (browse/resolve), `capabilities:write` (pub
   spec annotation-free). Deferred: the "newer environment version available" hint.
 - **E4c — store card drill-in** ✅: the environment card expands in place (single-open) to the
   rendered instructions + preset JSON + package chips.
+- **E6 — the authoring journey is one path** ✅ (the "can an agent do this end-to-end?" review): the
+  bytes and the asset stop being two disconnected acts. `everdict image push --register-environment <id>`
+  registers the pushed ref (digest-pinned from docker's `RepoDigests`, os/arch read off the local image,
+  reach defaulting to `workspace`) right after the push; the plugin skill + the conversational agent's
+  system prompt carry the build→push→register→pin recipe (before this, both only described CONSUMING an
+  environment, so the authoring half was invisible to agents); `verify_image` / `…/verify` bring the
+  adoption-grade pull check to authoring time with a digest-pin action; and Settings › Environments gets
+  the same conversation entry point the other entity surfaces have (`environment` is an agent reference
+  type, so a row can be handed to the agent as context). Two open questions close with it (digest pinning,
+  `EvalCase.image` consumption) and the first-version reach default becomes kind-dependent, so registering
+  through the API/MCP no longer creates a team asset only its author can see.
 - **E5 — agent guidance** ✅ prompt-level: the agent system prompt directs compose-from-store (browse
   `environment` capabilities → pin the ref verbatim → honor preset/instructions); the store read
   tools were already in the agent's read-only allowlist. **Pending:** the live end-to-end scenario
@@ -234,7 +245,9 @@ Reused verbatim: `capabilities:read` (browse/resolve), `capabilities:write` (pub
 ## Non-goals
 
 - **Building or hosting images** — unchanged from `workspace-image-registry.md`: Everdict references
-  images; `everdict image push` remains the publish path for bytes.
+  images; `everdict image push` remains the publish path for bytes (its `--register-environment <id>`
+  flag registers the pushed ref as an environment in the same step — the *bytes* still come from the
+  author's own `docker build`).
 - **Rewriting refs at dispatch** — specs keep verbatim strings; the store informs authoring only.
 - **Cross-tenant pull-credential brokering** — later option (see above).
 - **Multi-service environment bundles** — that is a harness template; one environment = one image.
@@ -242,13 +255,21 @@ Reused verbatim: `capabilities:read` (browse/resolve), `capabilities:write` (pub
 
 ## Open questions
 
-- **Digest pinning UX** — encourage `@sha256:` refs at publish (a one-click "resolve tag → digest"
-  helper would need a registry API call; today we only warn on mutable tags).
+- ~~**Digest pinning UX**~~ — ANSWERED (E6): the registry call exists, so the author gets both halves.
+  `GET /workspace/image-registries/verify?image=` (+ MCP `verify_image`) runs the SAME active pull check
+  environment ADOPTION runs (`ImageRegistryService.verifyImage`), closing the asymmetry where a publisher's
+  own just-pushed image got only a static classification warning while someone else's import got a real
+  check. The editor's "Verify pull" renders `pullable`/`reason` and, on success, offers a one-click **pin
+  this digest**; changing the ref discards the verdict so a stale badge can never lie. On the CLI path
+  `everdict image push --register-environment` digest-pins from docker's own `RepoDigests`.
 - **Preset drift** — when a new environment version changes the preset, already-authored harnesses
   keep their copied wiring (by design). Is a diff hint ("your harness wiring differs from the pinned
   environment's current preset") worth building, or noise?
-- **`EvalCase.image` consumption** — datasets also carry per-case images (SWE-bench official images).
-  Should dataset authoring get the same "from store" picker, or is that ecosystem (prebuilt public
-  images) better left raw?
+- ~~**`EvalCase.image` consumption**~~ — ANSWERED (E6): yes, the same picker. `EnvironmentPicker` moved out of
+  `features/register-harness` into its own `features/pick-environment` slice (the `pick-secret` precedent — a shared
+  picker belongs to no single authoring surface), and the dataset form uses it. Because a case's `image` is the
+  container THAT case runs in and a benchmark bundle almost always runs one environment, picking applies the ref to
+  **every** case (parse → set `image` → re-serialize) rather than inserting text at the caret, which would break the
+  JSON as often as not. Prebuilt public images stay perfectly authorable by hand — the picker adds a path, not a gate.
 - **Store naming** — with a non-tool kind aboard, does the web surface rename from "capabilities" to
   just "Store"? (Cosmetic; the entity name stays.)

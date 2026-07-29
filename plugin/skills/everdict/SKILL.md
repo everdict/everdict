@@ -46,6 +46,7 @@ own entities **plus** shared `_shared` ones. `workspace = tenant = trust-zone`.
 | **Judge** | an **Agent Judge** — a `model` (LLM/VLM verdict) or `harness` (delegate an agent) judge applied per-trace on a scorecard. | `list_judges`, `create_judge` |
 | **Model** | a provider + sub-model + baseUrl, referenced by id from judges / command harnesses. | `list_models`, `create_model` |
 | **Runtime** | where a run executes: `local` \| `nomad` \| `k8s` (isolation = the orchestrator's), or the user's own machine via a self-hosted runner. | `list_runtimes`, `probe_runtime`, `create_runtime` |
+| **Environment** | a published **eval environment image**: a pullable ref + what is baked in + how to wire it (`preset`) + `instructions`. Gives a bare image string an identity, shareable across workspaces. | `list_capabilities`, `save_capability`, `get_image_push_credentials` |
 | **Run** | the core primitive: one case executed once → trace + scores. A scorecard is a run × N. | `submit_run`, `list_runs`, `get_run` |
 | **Scorecard** | batch eval: dataset × harness@version → aggregated `Scorecard` + `summary`. The payoff. | `run_scorecard`, `get_scorecard`, `list_scorecards`, `diff_scorecards` |
 
@@ -69,6 +70,23 @@ Most users arrive with **their own CLI agent** and want a score. The fast path u
 
 Runs are **async**: submit → poll. Normal eval failures become failed cases (the batch still
 succeeds); only infra/budget errors fail the whole run.
+
+## Bring-your-own environment image
+
+Real benchmarks usually need a stack baked into an image (fixtures, tooling, a headless office
+suite). Everdict **references** images — it never builds or hosts them. So the loop is: build on a
+machine with Docker (the user's terminal — yours, when you have Bash), publish the bytes to the
+workspace's own registry, then register the ref as an **environment** so the team and every later
+harness can pin one identity instead of a bare string.
+
+```
+docker build …  →  everdict image push  →  save_capability(type:"environment")  →  pin the ref
+  the user's machine     workspace registry          the store asset          pins · services[].image · case.image
+```
+
+Do this **before** registering a harness whose image exists only on the author's machine — a
+local-only ref classifies as `local` and fails to pull on a managed runtime. Full recipe:
+`references/workflows.md` §7.
 
 ## Bring-your-own-trace (no harness run)
 
