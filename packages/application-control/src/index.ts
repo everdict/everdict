@@ -12,6 +12,7 @@ export type { BrowserProfileStore } from "./ports/browser-profile-store.js";
 export type { SkillStore } from "./ports/skill-store.js";
 export type { KnowledgeEntryStore } from "./ports/knowledge-entry-store.js";
 export type { CapabilityStore } from "./ports/capability-store.js";
+export type { AgentMemberPreferenceStore } from "./ports/agent-member-preference-store.js";
 export type { CallbackStore } from "./ports/callback-store.js";
 export type { CommentStore, CommentUpdatePatch } from "./ports/comment-store.js";
 export type { DiscussionTurnRunner } from "./ports/discussion-turn-runner.js";
@@ -98,6 +99,17 @@ export {
 export { deleteDatasetVersion, deleteDatasetVersions } from "./dataset/dataset-service.js";
 export { deleteModelVersion, deleteModelVersions } from "./model/model-service.js";
 export { deleteAgentVersion, deleteAgentVersions } from "./agent/agent-service.js";
+// The per-member agent — the single answer the settings pages render and the agent runtime carries (tools + skills).
+export {
+  type AgentCapabilitiesDeps,
+  type AgentCapabilitiesQuery,
+  type AgentCapabilitiesResolution,
+  type AgentSkillOrigin,
+  type AgentToolOrigin,
+  type ResolvedAgentSkill,
+  type ResolvedAgentTool,
+  resolveAgentCapabilities,
+} from "./agent/agent-capabilities.js";
 export { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness/harness-service.js";
 export { deleteJudgeVersion } from "./judge/judge-service.js";
 export {
