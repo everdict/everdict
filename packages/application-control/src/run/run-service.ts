@@ -473,6 +473,35 @@ export class RunService {
 
   // Terminal writes go through the domain guard: read the current record and skip when it is already settled
   // (first terminal write wins — a raced boot-recovery adoption must not be overwritten by a late tracker).
+  // ── Agent activations on the universal ledger (execution-model.md P3, decision O4: the CP owns the
+  // record, the agent service reports transitions over the internal bridge it already uses). Record-only —
+  // nothing dispatches here, and the ledger writes carry NO outbox facts in this slice: the agent.run.*
+  // family still announces the lifecycle (the run.* emit flip needs the subject-aware matcher guard first —
+  // see Run.settleAgent). Reports are at-least-once → both writes are idempotent. ──
+  async recordAgentRun(input: {
+    id: string;
+    tenant: string;
+    agentId: string;
+    agentVersion?: string;
+    sessionId: string;
+    eventKind: string;
+    eventId?: string;
+    createdBy?: string;
+  }): Promise<void> {
+    const existing = await this.deps.store.get(input.id);
+    if (existing) return; // a retried started-report — the first write stands
+    await this.deps.store.create(Run.newAgentRun({ ...input, now: this.now() }));
+  }
+
+  async settleAgentRun(id: string, outcome: "completed" | "failed" | "cancelled", message: string): Promise<void> {
+    const current = await this.deps.store.get(id);
+    if (!current || current.kind !== "agent") return; // never settle an eval run through the agent bridge
+    const run = Run.from(current);
+    if (run.isTerminal()) return; // first terminal write wins (a retried terminal report)
+    const { patch } = run.settleAgent(outcome, message, this.now());
+    await this.deps.store.update(id, patch);
+  }
+
   // Read-then-update is not atomic, but the tracker and boot recovery share one control-plane process.
   private async finalize(id: string, outcome: (run: Run) => RunTransition): Promise<void> {
     const current = await this.deps.store.get(id);

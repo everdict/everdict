@@ -162,18 +162,44 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
         agentId: z.string().min(1),
         eventKind: z.string().min(1),
         message: z.string().min(1),
+        // P3 ledger correlation (optional — an older agent service just keeps the event-only behavior):
+        // the agent service mints one run id per activation/turn and threads it through every report.
+        runId: z.string().min(1).optional(),
+        agentVersion: z.string().min(1).optional(),
+        eventId: z.string().min(1).optional(),
+        creator: z.string().min(1).optional(),
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    const { tenant, kind, sessionId, agentId, eventKind, message } = body.data;
+    const { tenant, kind, sessionId, agentId, eventKind, message, runId, agentVersion, eventId, creator } = body.data;
     await deps.platformEvents.emit({
       workspace: tenant,
       kind,
       subject: { type: "agent_session", id: sessionId },
-      payload: { agentId, eventKind },
+      payload: { agentId, eventKind, ...(runId !== undefined ? { runId } : {}) },
       causedBy: `agent:${agentId}:${sessionId}`,
       message,
     });
+    // The universal ledger (execution-model P3, O4): started opens Run{kind:"agent"}, a terminal report
+    // settles it. Both idempotent (at-least-once reporting); awaiting_approval is event-only.
+    if (runId !== undefined) {
+      if (kind === "agent.run.started") {
+        await deps.service.recordAgentRun({
+          id: runId,
+          tenant,
+          agentId,
+          ...(agentVersion !== undefined ? { agentVersion } : {}),
+          sessionId,
+          eventKind,
+          ...(eventId !== undefined ? { eventId } : {}),
+          ...(creator !== undefined ? { createdBy: creator } : {}),
+        });
+      } else if (kind !== "agent.run.awaiting_approval") {
+        const outcome =
+          kind === "agent.run.completed" ? "completed" : kind === "agent.run.cancelled" ? "cancelled" : "failed";
+        await deps.service.settleAgentRun(runId, outcome, message);
+      }
+    }
     return reply.send({ ok: true });
   });
 

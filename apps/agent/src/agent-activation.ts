@@ -88,6 +88,11 @@ export interface AgentActivatorDeps {
     agentId: string;
     eventKind: string;
     message: string;
+    // P3 ledger correlation: one run id per activation/turn — the CP opens/settles Run{kind:"agent"} on it.
+    runId?: string;
+    agentVersion?: string;
+    eventId?: string;
+    creator?: string;
   }) => Promise<void>;
 }
 
@@ -222,13 +227,18 @@ export class AgentActivator {
       source: "approval",
       message: `Approval decision for ${input.request.name}`,
     };
+    // P3: the continuation turn is a NEW run on the ledger (same session group as the interrupted one).
+    const runId = this.deps.newId();
+    const runRef = { runId, creator, agentVersion: spec.version };
     await this.deps.sessions.setSessionStatus(workspace, sessionId, "running", this.deps.now());
+    await this.deps.sessions.setSessionRunId(workspace, sessionId, runId, this.deps.now()).catch(() => {});
     void this.report(
       "agent.run.started",
       event,
       agentId,
       sessionId,
       `Agent ${agentId} resumed after an approval decision (${input.request.name}).`,
+      runRef,
     );
     const { token, id: keyId } = await issueAgentToken(
       this.deps.keyStore,
@@ -250,7 +260,7 @@ export class AgentActivator {
         sender: "approval",
         content: `[approval decision] Your earlier request to run the tool "${input.request.name}" was ${verdict}${input.decidedBy ? ` by ${input.decidedBy}` : ""} while this run was suspended. ${guidance}`,
       });
-      const base = this.buildPermit(event, agentId, sessionId, spec, controller.signal);
+      const base = this.buildPermit(event, agentId, sessionId, spec, controller.signal, runRef);
       let approvedOnce = input.decision === "allow" ? input.request.name : undefined;
       const permit: PermissionHook | undefined = base
         ? async (request) => {
@@ -270,6 +280,7 @@ export class AgentActivator {
         agentId,
         sessionId,
         `Agent ${agentId} run ${settled} (resumed after approval).`,
+        runRef,
       );
     } catch (err) {
       const settled = this.stopped.has(sessionId) ? "cancelled" : "failed";
@@ -280,6 +291,7 @@ export class AgentActivator {
         agentId,
         sessionId,
         `Agent ${agentId} run ${settled} (resumed after approval)${err instanceof Error ? `: ${err.message}` : ""}.`,
+        runRef,
       );
     } finally {
       this.controllers.delete(sessionId);
@@ -314,6 +326,9 @@ export class AgentActivator {
 
   private async activate(event: ActivationEvent, agentId: string, spec: AgentSpec, creator: string): Promise<void> {
     const sessionId = this.deps.newId();
+    // P3: one activation = one Run{kind:"agent"} on the CP's universal ledger — minted here, threaded
+    // through every report (started opens it, the terminal report settles it), stamped on the session.
+    const runId = this.deps.newId();
     const now = this.deps.now();
     await this.deps.sessions.createSession({
       id: sessionId,
@@ -332,10 +347,17 @@ export class AgentActivator {
         eventKind: event.kind,
       },
       status: "running",
+      runId,
       createdAt: now,
       updatedAt: now,
     });
-    void this.report("agent.run.started", event, agentId, sessionId, `Agent ${agentId} woke on ${event.kind}.`);
+    const runRef = {
+      runId,
+      creator,
+      agentVersion: spec.version,
+      ...(event.eventId !== undefined ? { eventId: event.eventId } : {}),
+    };
+    void this.report("agent.run.started", event, agentId, sessionId, `Agent ${agentId} woke on ${event.kind}.`, runRef);
     // One-shot execution credential: minted for this run, revoked with it (no standing token accumulation).
     const { token, id: keyId } = await issueAgentToken(
       this.deps.keyStore,
@@ -352,7 +374,7 @@ export class AgentActivator {
         sender: event.source ?? event.kind,
         content: renderActivationPrompt(spec, event),
       });
-      const permit = this.buildPermit(event, agentId, sessionId, spec, controller.signal);
+      const permit = this.buildPermit(event, agentId, sessionId, spec, controller.signal, runRef);
       await this.deps.runTurn(sessionId, token, controller.signal, permit);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
       await this.deps.sessions.setSessionStatus(event.workspace, sessionId, settled, this.deps.now());
@@ -362,6 +384,7 @@ export class AgentActivator {
         agentId,
         sessionId,
         `Agent ${agentId} run ${settled} (${event.kind}).`,
+        runRef,
       );
     } catch (err) {
       const settled = this.stopped.has(sessionId) ? "cancelled" : "failed";
@@ -372,6 +395,7 @@ export class AgentActivator {
         agentId,
         sessionId,
         `Agent ${agentId} run ${settled} (${event.kind})${err instanceof Error ? `: ${err.message}` : ""}.`,
+        runRef,
       );
       if (settled === "failed") throw err;
     } finally {
@@ -393,6 +417,7 @@ export class AgentActivator {
     sessionId: string,
     spec: AgentSpec,
     signal: AbortSignal,
+    run?: { runId: string; creator?: string; agentVersion?: string; eventId?: string },
   ): PermissionHook | undefined {
     const mode = spec.permissionMode ?? "default";
     if (mode === "bypass") return undefined;
@@ -409,6 +434,7 @@ export class AgentActivator {
         agentId,
         sessionId,
         `Agent ${agentId} is waiting for approval to run ${request.name}.`,
+        run,
       );
       try {
         return await wait({ workspace: event.workspace, sessionId, agentId }, request, signal);
@@ -420,7 +446,8 @@ export class AgentActivator {
     };
   }
 
-  // agent.run.* lifecycle FACT back to the control plane — best-effort, never affects the run.
+  // agent.run.* lifecycle FACT back to the control plane — best-effort, never affects the run. `run` is
+  // the P3 ledger correlation (runId + who/what the activation acts as) — absent on legacy call paths.
   private report(
     kind:
       | "agent.run.started"
@@ -432,6 +459,7 @@ export class AgentActivator {
     agentId: string,
     sessionId: string,
     message: string,
+    run?: { runId: string; creator?: string; agentVersion?: string; eventId?: string },
   ): Promise<void> {
     return (
       this.deps.reportRunEvent?.({
@@ -441,6 +469,7 @@ export class AgentActivator {
         agentId,
         eventKind: event.kind,
         message,
+        ...(run !== undefined ? run : {}),
       }) ?? Promise.resolve()
     ).catch(() => {});
   }

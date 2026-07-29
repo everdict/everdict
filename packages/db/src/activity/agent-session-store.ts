@@ -66,6 +66,13 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     s.status = status;
   }
 
+  async setSessionRunId(tenant: string, id: string, runId: string, updatedAt: string): Promise<void> {
+    const s = this.sessions.find((r) => r.tenant === tenant && r.id === id);
+    if (!s) return;
+    s.updatedAt = updatedAt;
+    s.runId = runId;
+  }
+
   async hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean> {
     return this.sessions.some(
       (s) => s.tenant === tenant && s.origin?.agentId === agentId && s.origin?.eventId === eventId,
@@ -111,12 +118,13 @@ interface SessionRow {
   visibility: string | null;
   origin: unknown;
   status: string | null;
+  run_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
 
 const SESSION_COLUMNS =
-  "id, tenant, owner, title, model, permission_mode, visibility, origin, status, created_at, updated_at";
+  "id, tenant, owner, title, model, permission_mode, visibility, origin, status, run_id, created_at, updated_at";
 
 function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
   return AgentSessionRecordSchema.parse({
@@ -129,6 +137,7 @@ function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
     ...(row.visibility !== null ? { visibility: row.visibility } : {}),
     ...(row.origin !== null && row.origin !== undefined ? { origin: row.origin } : {}),
     ...(row.status !== null ? { status: row.status } : {}),
+    ...(row.run_id !== null ? { runId: row.run_id } : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
@@ -173,8 +182,8 @@ export class PgAgentSessionStore implements AgentSessionStore {
 
   async createSession(record: AgentSessionRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_agent_sessions (id, tenant, owner, title, model, permission_mode, visibility, origin, status, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      `INSERT INTO everdict_agent_sessions (id, tenant, owner, title, model, permission_mode, visibility, origin, status, run_id, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [
         record.id,
         record.tenant,
@@ -185,6 +194,7 @@ export class PgAgentSessionStore implements AgentSessionStore {
         record.visibility ?? null,
         record.origin !== undefined ? JSON.stringify(record.origin) : null,
         record.status ?? null,
+        record.runId ?? null,
         record.createdAt,
         record.updatedAt,
       ],
@@ -257,6 +267,13 @@ export class PgAgentSessionStore implements AgentSessionStore {
     await this.client.query(
       "UPDATE everdict_agent_sessions SET status = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
       [tenant, id, status, updatedAt],
+    );
+  }
+
+  async setSessionRunId(tenant: string, id: string, runId: string, updatedAt: string): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_agent_sessions SET run_id = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
+      [tenant, id, runId, updatedAt],
     );
   }
 

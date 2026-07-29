@@ -124,3 +124,127 @@ describe("GET /internal/events — platform-event reconcile cursor", () => {
     await app.close();
   });
 });
+
+// P3: agent activations enter the universal ledger through the SAME report bridge that carries the
+// agent.run.* facts — started opens Run{kind:"agent"}, the terminal report settles it, both idempotent.
+describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)", () => {
+  function ledgerHarness() {
+    const runStore = new InMemoryRunStore();
+    const platformEvents = new PlatformEventService({ store: new InMemoryPlatformEventStore() });
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: runStore }),
+      platformEvents,
+      internalToken: "itok",
+    });
+    return { app, runStore };
+  }
+  const report = (over: Record<string, unknown>) => ({
+    tenant: "acme",
+    kind: "agent.run.started",
+    sessionId: "sess-1",
+    agentId: "sentinel",
+    eventKind: "scorecard.completed",
+    message: "woke",
+    runId: "run-a1",
+    agentVersion: "1.0.0",
+    eventId: "ev-7",
+    creator: "alice",
+    ...over,
+  });
+
+  it("started opens Run{kind:agent} (running, background, session group, event origin); terminal settles it", async () => {
+    const { app, runStore } = ledgerHarness();
+    const started = await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({}),
+    });
+    expect(started.statusCode).toBe(200);
+    const run = await runStore.get("run-a1");
+    expect(run).toMatchObject({
+      kind: "agent",
+      class: "background",
+      lifetime: "task",
+      status: "running",
+      harness: { id: "sentinel", version: "1.0.0" }, // the executable IS the agent spec
+      caseId: "ev-7", // the activation cause
+      createdBy: "alice",
+      trigger: "agent",
+      origin: { cause: "event", eventKind: "scorecard.completed", eventId: "ev-7", actor: "alice" },
+      group: { id: "sess-1", role: "turn" },
+    });
+
+    // A retried started-report never duplicates or resets the record.
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({}),
+    });
+    expect((await runStore.list("acme", { includeChildren: true })).filter((r) => r.id === "run-a1")).toHaveLength(1);
+
+    const done = await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({ kind: "agent.run.completed", message: "run completed" }),
+    });
+    expect(done.statusCode).toBe(200);
+    expect((await runStore.get("run-a1"))?.status).toBe("succeeded");
+
+    // First terminal write wins — a late failure report never flips a settled run.
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({ kind: "agent.run.failed", message: "late" }),
+    });
+    expect((await runStore.get("run-a1"))?.status).toBe("succeeded");
+  });
+
+  it("cancelled maps onto the 4-status lifecycle as failed{CANCELLED}; awaiting_approval never touches the ledger", async () => {
+    const { app, runStore } = ledgerHarness();
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({}),
+    });
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({ kind: "agent.run.awaiting_approval", message: "parked" }),
+    });
+    expect((await runStore.get("run-a1"))?.status).toBe("running"); // event-only — no transition
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({ kind: "agent.run.cancelled", message: "stopped by member" }),
+    });
+    const run = await runStore.get("run-a1");
+    expect(run?.status).toBe("failed");
+    expect(run?.error).toEqual({ code: "CANCELLED", message: "stopped by member" });
+  });
+
+  it("a report WITHOUT runId keeps the event-only behavior (an older agent service)", async () => {
+    const { app, runStore } = ledgerHarness();
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: {
+        tenant: "acme",
+        kind: "agent.run.started",
+        sessionId: "sess-1",
+        agentId: "sentinel",
+        eventKind: "scorecard.completed",
+        message: "woke",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(await runStore.list("acme", { includeChildren: true })).toEqual([]);
+  });
+});

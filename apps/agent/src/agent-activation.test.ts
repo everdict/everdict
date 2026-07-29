@@ -89,6 +89,7 @@ function sessionsStub() {
     async setSessionStatus(_tenant: string, id: string, status: string) {
       statuses.push({ id, status });
     },
+    async setSessionRunId() {},
     async hasTriggerSession(_tenant: string, agentId: string, eventId: string) {
       return created.some((s) => s.origin?.agentId === agentId && s.origin?.eventId === eventId);
     },

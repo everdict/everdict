@@ -81,6 +81,63 @@ export class Run {
     };
   }
 
+  // An agent activation enters the ledger (execution-model.md P3, decision O4: the CP owns the record, the
+  // agent service reports transitions). Born RUNNING — the report fires when the turn starts, there is no
+  // queued phase (admission arrives with P4). The HARNESS column names the executable — for an agent run
+  // that is the agent spec (agentId@version); caseId carries the activation cause (eventId, else eventKind).
+  // The session is the GROUP (role "turn" — a resumed session runs a second turn = a second run, same group).
+  static newAgentRun(input: {
+    id: string;
+    tenant: string;
+    agentId: string;
+    agentVersion?: string;
+    sessionId: string;
+    eventKind: string;
+    eventId?: string;
+    createdBy?: string; // the member the activation acts as (the agent's creator)
+    now: string;
+  }): RunRecord {
+    return {
+      id: input.id,
+      tenant: input.tenant,
+      harness: { id: input.agentId, version: input.agentVersion ?? "latest" },
+      caseId: input.eventId ?? input.eventKind,
+      status: "running",
+      trigger: "agent", // the activity view's legacy source axis (dual-stamped, like eval runs)
+      ...(input.createdBy ? { createdBy: input.createdBy } : {}),
+      kind: "agent",
+      class: "background", // agent-caused work must never starve a human's click (P0 vocabulary)
+      lifetime: "task",
+      origin: {
+        cause: "event",
+        eventKind: input.eventKind,
+        ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
+        ...(input.createdBy !== undefined ? { actor: input.createdBy } : {}),
+      },
+      group: { id: input.sessionId, role: "turn" },
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+  }
+
+  // Settle an agent run (reported by the agent service). Facts stay DELIBERATELY empty in this slice: the
+  // agent.run.* family still carries the lifecycle events — flipping the emit to run.* requires the
+  // subject-aware trigger-matcher guard first (the alias charter in contracts/platform-event.ts), or agent
+  // completions would become trigger-matchable and reopen the runaway vector. `cancelled` maps onto the
+  // 4-status run lifecycle as failed{CANCELLED} until the session work (P6) widens it.
+  settleAgent(outcome: "completed" | "failed" | "cancelled", message: string, now: string): RunTransition {
+    this.assertNotTerminal("settleAgent");
+    if (outcome === "completed") return { patch: { status: "succeeded", updatedAt: now }, facts: [] };
+    return {
+      patch: {
+        status: "failed",
+        error: { code: outcome === "cancelled" ? "CANCELLED" : "AGENT_RUN_FAILED", message },
+        updatedAt: now,
+      },
+      facts: [],
+    };
+  }
+
   // The facts describing a record's CREATION (nothing → queued) — the same E0 rule as transitions, for the
   // factory: standalone runs announce run.submitted; scorecard children stay silent (the batch's facts cover them).
   static creationFacts(record: RunRecord): PlatformFact[] {

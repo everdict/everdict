@@ -139,7 +139,8 @@ const internal = {
     description:
       "Agent service → event-log bridge (docs/architecture/agent-automation.md A5): the activation wrapper reports " +
       "agent.run.started/completed/failed/cancelled so the fleet view + audit read one durable record. These kinds " +
-      "are never trigger-matchable. Guarded by x-internal-token (403 on mismatch; fail-closed 404 when unset).",
+      "are never trigger-matchable. Guarded by x-internal-token (403 on mismatch; fail-closed 404 when unset)." +
+      " With runId (P3), the same report also maintains the universal ledger: started opens Run{kind:agent}, a terminal report settles it (idempotent, at-least-once).",
     tags: ["internal"],
     body: toJsonSchema(
       z.object({

@@ -46,6 +46,9 @@ export const AgentSessionRecordSchema = z.object({
   visibility: z.enum(["private", "workspace"]).optional(),
   // What started this session (unset = legacy/chat). Trigger runs carry agentId@version + the waking event.
   origin: AgentSessionOriginSchema.optional(),
+  // The LATEST ledger run for this session (execution-model P3 — an activation/turn = a Run{kind:"agent"};
+  // the session is the run's group). Unset on chat sessions and pre-P3 records.
+  runId: z.string().optional(),
   // Headless-run lifecycle status (unset for plain conversations). See AgentRunStatusSchema.
   status: AgentRunStatusSchema.optional(),
   createdAt: z.string(),
@@ -67,7 +70,9 @@ export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 // keyed by (source, id=traceId) not (id, version), resolves via inspect_trace, and is attached from the observability
 // browser (a "mention in chat" button), not the @-picker — cross-source browsing there would be prohibitively wide.
 // `environment` is an environment-kind capability (get_capability): the eval image asset, so "wire this environment
-// into a harness" / "fix its instructions" can be handed to the agent the same way every other entity is.
+// into a harness" / "fix its instructions" can be handed to the agent the same way every other entity is. `tool` is
+// its tool-kind sibling (mcp | code — also get_capability), so "make this tool do X" from Settings › Agent › Tools
+// reaches the agent with the tool's own spec already in context.
 // `knowledge` is a reified claim (get_knowledge_entry) — what the workspace has LEARNED, not what it is configured
 // with; the injected record carries its lineage fields (`supersedes`, `verifiedAt`, coverage), so "what does this
 // claim say" and "how did it get here" are both answerable from the reference.
@@ -82,6 +87,7 @@ export const AGENT_REFERENCE_TYPES = [
   "skill",
   "knowledge",
   "environment",
+  "tool",
   "trace",
 ] as const;
 export const AgentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES);

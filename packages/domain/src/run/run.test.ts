@@ -120,3 +120,50 @@ describe("Run — the run lifecycle domain model", () => {
     expect(Run.from(legacy).redispatch("t").patch).toEqual({ status: "running", updatedAt: "t" });
   });
 });
+
+describe("Run — agent activations on the ledger (P3)", () => {
+  const agentRun = () =>
+    Run.newAgentRun({
+      id: "run-a1",
+      tenant: "acme",
+      agentId: "sentinel",
+      agentVersion: "1.0.0",
+      sessionId: "sess-1",
+      eventKind: "scorecard.completed",
+      eventId: "ev-7",
+      createdBy: "alice",
+      now: "2026-07-30T00:00:00.000Z",
+    });
+
+  it("newAgentRun is born RUNNING with the agent as the executable and the session as the group", () => {
+    const record = agentRun();
+    expect(record).toMatchObject({
+      kind: "agent",
+      class: "background",
+      lifetime: "task",
+      status: "running",
+      harness: { id: "sentinel", version: "1.0.0" },
+      caseId: "ev-7",
+      trigger: "agent",
+      origin: { cause: "event", eventKind: "scorecard.completed", eventId: "ev-7", actor: "alice" },
+      group: { id: "sess-1", role: "turn" },
+    });
+    expect(() => RunRecordSchema.parse(record)).not.toThrow();
+  });
+
+  it("settleAgent maps completed/failed/cancelled onto the 4-status lifecycle with NO facts (the agent.run.* family still announces)", () => {
+    expect(Run.from(agentRun()).settleAgent("completed", "done", "t1")).toEqual({
+      patch: { status: "succeeded", updatedAt: "t1" },
+      facts: [],
+    });
+    expect(Run.from(agentRun()).settleAgent("failed", "boom", "t1")).toEqual({
+      patch: { status: "failed", error: { code: "AGENT_RUN_FAILED", message: "boom" }, updatedAt: "t1" },
+      facts: [],
+    });
+    expect(Run.from(agentRun()).settleAgent("cancelled", "stopped", "t1")).toEqual({
+      patch: { status: "failed", error: { code: "CANCELLED", message: "stopped" }, updatedAt: "t1" },
+      facts: [],
+    });
+    expect(() => Run.from({ ...agentRun(), status: "succeeded" }).settleAgent("failed", "late", "t2")).toThrow();
+  });
+});

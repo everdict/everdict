@@ -49,6 +49,11 @@ export interface AgentServerDeps extends ChatDeps {
     agentId: string;
     eventKind: string;
     message: string;
+    // P3 ledger correlation: one run id per activation/turn — the CP opens/settles Run{kind:"agent"} on it.
+    runId?: string;
+    agentVersion?: string;
+    eventId?: string;
+    creator?: string;
   }) => Promise<void>;
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
   // the monitoring→agent bridge). Absent → the internal event path is disabled (only user-authenticated events).

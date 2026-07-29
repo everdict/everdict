@@ -41,6 +41,11 @@ export interface AgentRunEventReport {
   agentId: string;
   eventKind: string;
   message: string;
+  // P3 ledger correlation (optional): the run id this report opens/settles on the CP's universal ledger.
+  runId?: string;
+  agentVersion?: string;
+  eventId?: string;
+  creator?: string;
 }
 
 export function runEventReporter(
@@ -59,6 +64,10 @@ export function runEventReporter(
         agentId: input.agentId,
         eventKind: input.eventKind,
         message: input.message,
+        ...(input.runId !== undefined ? { runId: input.runId } : {}),
+        ...(input.agentVersion !== undefined ? { agentVersion: input.agentVersion } : {}),
+        ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
+        ...(input.creator !== undefined ? { creator: input.creator } : {}),
       }),
     });
     if (!res.ok) throw new Error(`agent-run event report failed: ${res.status}`);
