@@ -144,12 +144,16 @@ panel/list guidance is not.
   `docs/architecture/work-queue.md`); its run rows open the run's real page in the runs tab. Runtime placement
   is captured on records (`RunRecord.runtime`/`ScorecardRecord.runtime`, mig 0040). The **files** tab is also
   purpose-built (no iframe, no rail button): Settings › Files selects a workspace-filesystem path via
-  `useInfraPanel().openFile(path)` and the panel renders it interactively (`FileViewer` — Markdown preview /
-  code / images, member editing); re-selecting swaps content in place, and a panel-side mutation bumps
-  `fsRevision` so the selecting tree refetches. Moving a file/folder is **drag-and-drop in the tree** (no Move
-  button, no path dialog): drop on a folder row, or on the tree body for the top level; invalid drops are
-  refused at `dragover` and re-checked at `drop`, and `rewriteMovedPath` re-points an open selection the move
-  carried along (see `docs/architecture/workspace-filesystem.md`). The **knowledge** tab is the same shape for the
+  `useInfraPanel().openFile(path)` and the panel renders it interactively (`FileViewer` chrome over
+  `DocumentPreview` — prose, CSV grid, code in ~35 languages, images, PDF, media, and a download for anything
+  the browser cannot show; member editing); re-selecting swaps content in place, and a panel-side mutation bumps
+  `fsRevision` so the selecting tree refetches. **Entry actions live on the tree, not in the viewer** (which
+  only reads and edits): moving is drag-and-drop (drop on a folder row, or on the tree body for the top level;
+  invalid drops refused at `dragover` and re-checked at `drop`) or the multi-select "Move to…" folder picker,
+  and deleting is the row trash / bulk delete. Multi-select follows the scorecard-list grammar (hover-revealed
+  checkboxes, shift-click ranges, Esc clears, floating action bar) and a drag from a checked row carries the
+  whole selection; `rewriteMovedPath` re-points an open selection a move carried along and `coversPath` closes
+  one a delete removed (see `docs/architecture/workspace-filesystem.md`). The **knowledge** tab is the same shape for the
   knowledge map: Settings › Knowledge is a force-directed graph (canvas-2D — pan / zoom / drag a node / search /
   per-type filter chips) of the workspace's claims and skills over the entities they concern; picking a node calls
   `useInfraPanel().openKnowledgeNode(id)` and the panel shows what that node IS (type, version, harvested attrs, a
