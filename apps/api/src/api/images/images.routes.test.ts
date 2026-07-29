@@ -2,7 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import { InMemoryRunStore } from "@everdict/db";
-import { ImageTokenService, RegistryTokenIssuer } from "@everdict/images";
+import { ImageTokenService, InMemoryImageStore, RegistryTokenIssuer } from "@everdict/images";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 
@@ -24,11 +24,13 @@ function build() {
     issuer: "everdict",
     service: "everdict-registry",
   });
+  const images = new InMemoryImageStore({ endpoint: "images.everdict.test" });
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     imageTokenService: new ImageTokenService({ issuer, service: "everdict-registry" }),
+    images,
   });
-  return { app, issuer };
+  return { app, issuer, images };
 }
 
 // The docker client's half of the handshake: basic auth whose PASSWORD is the grant.
@@ -142,6 +144,79 @@ describe("GET /v2/token — the managed registry's auth realm", () => {
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     });
     const res = await app.inject({ method: "GET", url: "/v2/token" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+const acme = { "x-everdict-tenant": "acme" };
+
+describe("POST /workspace/images/push-grant — the publish half", () => {
+  it("mints a grant for the repository plus the prefix the client builds the ref with", async () => {
+    const { app, images } = build();
+    const res = await app.inject({
+      method: "POST",
+      url: "/workspace/images/push-grant",
+      headers: acme,
+      payload: { repository: "officeqa" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const namespace = images.namespaceFor("acme");
+    expect(body.imagePrefix).toBe(`images.everdict.test/${namespace}/`);
+    expect(body.grant.repositories).toEqual([`${namespace}/officeqa`]);
+    expect(body.grant.actions).toEqual(["pull", "push"]);
+  });
+
+  it("refuses a repository outside the caller's namespace", async () => {
+    const { app } = build();
+    const res = await app.inject({
+      method: "POST",
+      url: "/workspace/images/push-grant",
+      headers: acme,
+      payload: { repository: "rival-9f8e7d6c/secret" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400s without a repository, and 404s when no managed store is configured", async () => {
+    const { app } = build();
+    expect(
+      (await app.inject({ method: "POST", url: "/workspace/images/push-grant", headers: acme, payload: {} }))
+        .statusCode,
+    ).toBe(400);
+    const byoOnly = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+    });
+    const res = await byoOnly.inject({
+      method: "POST",
+      url: "/workspace/images/push-grant",
+      headers: acme,
+      payload: { repository: "officeqa" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("GET /workspace/images/manifest — the digest a pushed image is pinned by", () => {
+  it("answers with the digest the registry stored", async () => {
+    const { app, images } = build();
+    const digest = images.push("acme", "officeqa", "v1");
+    const res = await app.inject({
+      method: "GET",
+      url: `/workspace/images/manifest?repository=${images.namespaceFor("acme")}/officeqa&reference=v1`,
+      headers: acme,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().digest).toBe(digest);
+  });
+
+  it("404s for a reference the workspace does not hold", async () => {
+    const { app } = build();
+    const res = await app.inject({
+      method: "GET",
+      url: "/workspace/images/manifest?repository=officeqa&reference=v1",
+      headers: acme,
+    });
     expect(res.statusCode).toBe(404);
   });
 });

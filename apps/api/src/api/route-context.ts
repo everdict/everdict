@@ -8,8 +8,7 @@ import { deleteDatasetVersion } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
 import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
-import type { EnvironmentAdoptionService, ImageRegistryService } from "@everdict/application-control";
-import type { ImageTokenService } from "@everdict/images";
+import type { EnvironmentAdoptionService, ImageRegistryService, WorkspaceImages } from "@everdict/application-control";
 import type { ProxyService } from "@everdict/application-control";
 import type { MattermostCommandService } from "@everdict/application-control";
 import type { MattermostService } from "@everdict/application-control";
@@ -33,7 +32,7 @@ import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService, ViewSnapshotService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { SkillService } from "@everdict/application-control";
-import type { FsService } from "@everdict/application-control";
+import type { FileExecutionService, FsService } from "@everdict/application-control";
 import type { CapabilityService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import {
@@ -77,6 +76,7 @@ import {
 } from "@everdict/db";
 import { collectHarnessImages, imageWarnings } from "@everdict/domain";
 import type { UsageMeter } from "@everdict/domain";
+import type { ImageTokenService } from "@everdict/images";
 import type {
   AgentRegistry,
   DatasetRegistry,
@@ -99,8 +99,8 @@ import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
 import type { TerminalTicketStore } from "../common/terminal-ticket.js";
 import type { TicketStore } from "../common/ticket-store.js";
-import type { AgentService } from "../core/agent/agent-service.js";
 import type { AgentMemberToolingService } from "../core/agent/agent-member-tooling-service.js";
+import type { AgentService } from "../core/agent/agent-service.js";
 import {
   BenchmarkImportBodySchema,
   BenchmarkPreviewBodySchema,
@@ -149,6 +149,10 @@ export interface ServerDeps {
   agentMemberToolingService?: AgentMemberToolingService;
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD (routes disabled if absent)
   fsService?: FsService; // the workspace filesystem (shared, workspace-isolated file tree) list/read/write/mkdir/move/remove (routes disabled if absent)
+  // Run ONE workspace file in a sandbox (the viewer's "Run" — not an eval). Composed only where an execution
+  // driver exists (EVERDICT_FILE_EXECUTION_DRIVER); absent = the route and the run_file tool do not exist, since
+  // running user code on the control-plane process is not an acceptable fallback.
+  fileExecutionService?: FileExecutionService;
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD (routes disabled if absent)
   allowMemberPublicPublish?: boolean; // instance policy surfaced to the web via GET /me (config): members may publish `public`, not only admins
   // Capability wizard mcp probe — connect to an MCP URL and list its tools ("test connection" + tool discovery). Injected by main (infrastructure/mcp). Route disabled if absent.
@@ -178,6 +182,8 @@ export interface ServerDeps {
   // Managed image store's authorization server — absent when no signing key/endpoint is configured, which is
   // exactly the "BYO only" deployment (the /v2/token route then 404s instead of pretending a registry exists).
   imageTokenService?: ImageTokenService;
+  // The store itself (same on/off switch) — push-grant minting + manifest reads for the workspace's namespace.
+  images?: WorkspaceImages;
   environmentAdoptionService?: EnvironmentAdoptionService; // workspace environment-image adoption inventory + pull verify (route disabled if absent)
   ciLinkService?: CiLinkService; // CI repo links (repo↔harness slot + OIDC trust) + picker/setup-PR (route disabled if absent)
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) (route disabled if absent)

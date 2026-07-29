@@ -197,7 +197,15 @@ grant at an arbitrary repository in someone else's namespace is not a request we
     `EVERDICT_IMAGE_STORE_GRANT_TTL_SECONDS` defaults to an hour. Lower it to tighten how fast revoked
     reach stops working; a job queued past it fails at pull with the registry's own error, which is
     visible rather than silent.
-- **M5 — publish.** CLI push over a grant; atomic `--register-environment` with the minted digest.
+- **M5 — publish.** ✅ `everdict image push` now has two targets and one command: `--registry <name>` is an
+  explicit BYO choice, otherwise the managed store is preferred when the deployment runs one and BYO is
+  the automatic fallback (a 404 from `POST /workspace/images/push-grant` is a *normal* answer here, not a
+  failure — it is how a pre-managed workspace keeps working). The grant is a bearer in the docker password
+  field, so `pushImage` cannot tell which target it got. `GET /workspace/images/manifest` gives
+  `--register-environment` the digest **the registry stored** rather than the local daemon's record of
+  what it sent; the docker `RepoDigests` scrape stays as the BYO path's only option. **Verified live** —
+  the live script's step 6 publishes through the CLI's own `pushImage` against the real registry, so the
+  code path under test is the shipped one.
 - **M6 — cross-tenant pull.** Scope authorization over `canConsumeCapability`; `adopt` verification
   becomes a policy answer for managed refs and keeps the HTTP check for BYO refs.
 - **M7 — web.** Settings › Images; BYO demoted; managed badges in the harness/environment surfaces.

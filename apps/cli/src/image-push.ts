@@ -15,9 +15,12 @@ import { z } from "zod";
 
 const pexecFile = promisify(execFile);
 
-// everdict image push — publish a locally built image to the workspace registry.
-// Mint push credentials from the control plane (POST /workspace/image-registries/push-credentials[?name=], images:push)
-// and tag+push with this machine's docker. When there are multiple registries, select one with --registry <name> (omit if there is only one). Credentials are written only to a temporary DOCKER_CONFIG directory and deleted when done
+// everdict image push — publish a locally built image to the workspace's image store.
+// Two publish targets, one command: the MANAGED store (everdict's own registry — a namespace exists the moment the
+// workspace does, and the control plane mints a scoped push grant) or a BYO registry the workspace registered.
+// Managed is preferred when the deployment runs one; `--registry <name>` selects a BYO registry explicitly, and a
+// deployment with no managed store falls back to BYO automatically (POST /workspace/image-registries/push-credentials).
+// Either way the credential is tag+push with this machine's docker. When there are multiple registries, select one with --registry <name> (omit if there is only one). Credentials are written only to a temporary DOCKER_CONFIG directory and deleted when done
 // (~/.docker/config.json is neither read nor written). Design: docs/architecture/workspace-image-registry.md
 // With --register-environment <id> the published ref is also registered as an `environment` capability, so the bytes
 // and the store asset that gives them an identity land in ONE step (docs/architecture/environment-image-store.md).
@@ -81,6 +84,72 @@ export async function fetchPushCredentials(
       body.message ?? `failed to mint push credentials (HTTP ${res.status})`,
     );
   return PushCredentialsSchema.parse(body.credentials);
+}
+
+// The managed store's push authorization — a grant token presented as the docker password, plus the prefix the
+// target ref is assembled under. Same shape the BYO path produces, so pushImage does not care which one it got.
+const PushGrantResponseSchema = z.object({
+  grant: z.object({
+    endpoint: z.string().min(1),
+    repositories: z.array(z.string().min(1)).min(1),
+    token: z.string().min(1),
+    expiresAt: z.string(),
+  }),
+  imagePrefix: z.string().min(1),
+});
+
+// The repository name a local ref publishes under — the last path segment, or --name. Needed BEFORE minting,
+// because a grant authorizes one repository (that is the point of scoping it).
+export function repositoryNameFor(localRef: string, name?: string): string {
+  if (name) return name;
+  const segments = parseImageRef(localRef).path.split("/");
+  const last = segments[segments.length - 1];
+  if (!last)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { localRef },
+      "could not derive a repository name from the local image reference",
+    );
+  return last;
+}
+
+// Mint a managed push grant. `undefined` (not a throw) when this deployment runs no managed store — the caller then
+// falls back to a BYO registry, which is the whole point of the 404 being a normal answer here.
+export async function fetchManagedPushGrant(
+  apiUrl: string,
+  apiKey: string,
+  repository: string,
+): Promise<PushCredentials | undefined> {
+  const url = new URL("/workspace/images/push-grant", apiUrl);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ repository }),
+    });
+  } catch (e) {
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { url: url.toString() },
+      `failed to reach the control plane: ${String(e)}`,
+    );
+  }
+  if (res.status === 404) return undefined; // no managed store here — BYO is the path
+  const body = (await res.json().catch(() => ({}))) as { message?: string };
+  if (!res.ok)
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { status: res.status },
+      body.message ?? `failed to mint a push grant (HTTP ${res.status})`,
+    );
+  const parsed = PushGrantResponseSchema.parse(body);
+  return {
+    host: parsed.grant.endpoint,
+    username: "everdict", // the grant is a bearer in the password field; the registry ignores the username
+    password: parsed.grant.token,
+    imagePrefix: parsed.imagePrefix,
+  };
 }
 
 interface ImagePushIo {
@@ -248,6 +317,27 @@ export async function registerEnvironment(
   return SavedCapabilitySchema.parse(body);
 }
 
+// The digest the MANAGED registry actually stored, as `repo@sha256:…`. Best-effort like every other input to the
+// registration: a failed read degrades the pin to the tag, it never fails a push that already succeeded.
+export async function fetchManagedDigest(apiUrl: string, apiKey: string, target: string): Promise<string | undefined> {
+  const parsed = parseImageRef(target);
+  const reference = parsed.digest ?? parsed.tag ?? "latest";
+  const repositoryPath = parsed.path;
+  const url = new URL("/workspace/images/manifest", apiUrl);
+  url.searchParams.set("repository", repositoryPath);
+  url.searchParams.set("reference", reference);
+  try {
+    const res = await fetch(url, { headers: { authorization: `Bearer ${apiKey}` } });
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as { digest?: string };
+    if (!body.digest) return undefined;
+    const host = parsed.host ? `${parsed.host}/` : "";
+    return `${host}${repositoryPath}@${body.digest}`;
+  } catch {
+    return undefined;
+  }
+}
+
 // A flag that was passed without a value parses as "true" (flags.ts) — for an id/path that is a user error, not a value.
 function flagValue(flags: Map<string, string>, key: string): string | undefined {
   const raw = flags.get(key);
@@ -263,6 +353,7 @@ async function registerPushedEnvironment(
   localRef: string,
   flags: Map<string, string>,
   io: ImageInspectIo = { inspect: defaultInspect },
+  managed = false,
 ): Promise<void> {
   const id = flagValue(flags, "register-environment");
   if (id === undefined)
@@ -296,14 +387,13 @@ async function registerPushedEnvironment(
   const platform = parsePlatform(
     await io.inspect(["image", "inspect", "--format", "{{.Os}}|{{.Architecture}}", target]),
   );
-  const digestRef = pickRepoDigest(
-    await io.inspect(["image", "inspect", "--format", '{{join .RepoDigests "\n"}}', target]),
-    target,
-  );
+  // On the managed path the REGISTRY is asked what it stored — the authority on the digest, rather than the local
+  // daemon's record of what it sent. Falls back to docker's RepoDigests, which is all a BYO push has.
+  const digestRef =
+    (managed ? await fetchManagedDigest(apiUrl, apiKey, target) : undefined) ??
+    pickRepoDigest(await io.inspect(["image", "inspect", "--format", '{{join .RepoDigests "\n"}}', target]), target);
   if (digestRef === undefined)
-    console.error(
-      "↳ docker reported no pushed digest — registering the tag ref (rebuilding the tag changes what runs)",
-    );
+    console.error("↳ no pushed digest was reported — registering the tag ref (rebuilding the tag changes what runs)");
 
   const registration = buildEnvironmentRegistration({
     id,
@@ -341,7 +431,14 @@ export async function imagePushCommand(localRef: string | undefined, flags: Map<
   const apiKey = flags.get("api-key") ?? process.env.EVERDICT_API_KEY;
   if (!apiKey)
     throw new BadRequestError("BAD_REQUEST", undefined, "--api-key <ak_…> (or EVERDICT_API_KEY) is required");
-  const credentials = await fetchPushCredentials(apiUrl, apiKey, flags.get("registry"));
+  // `--registry <name>` names a BYO registry, so it is an explicit choice for that path. Otherwise prefer the
+  // managed store when the deployment runs one, and fall back to BYO — which is what every pre-managed workspace
+  // still has. The user is told which one they published to, because the ref alone does not say.
+  const registry = flags.get("registry");
+  const repository = repositoryNameFor(localRef, flags.get("name"));
+  const managed = registry ? undefined : await fetchManagedPushGrant(apiUrl, apiKey, repository);
+  if (managed) console.error("▶ publishing to the workspace's everdict image store");
+  const credentials = managed ?? (await fetchPushCredentials(apiUrl, apiKey, registry));
   const target = await pushImage(credentials, localRef, { name: flags.get("name"), tag: flags.get("tag") });
   console.error("✓ Published — use this reference as a harness pin / service image:");
   console.log(target);
@@ -351,5 +448,5 @@ export async function imagePushCommand(localRef: string | undefined, flags: Map<
     );
     return;
   }
-  await registerPushedEnvironment(apiUrl, apiKey, target, localRef, flags);
+  await registerPushedEnvironment(apiUrl, apiKey, target, localRef, flags, undefined, managed !== undefined);
 }

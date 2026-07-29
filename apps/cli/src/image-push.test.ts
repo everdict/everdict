@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildDockerAuthConfig,
   buildEnvironmentRegistration,
   buildImageTargetRef,
+  fetchManagedPushGrant,
   parsePlatform,
   pickRepoDigest,
   pushImage,
+  repositoryNameFor,
 } from "./image-push.js";
 
 const CREDS = {
@@ -131,5 +133,59 @@ describe("pushImage — tag → push with a temporary config → cleanup", () =>
     const { existsSync } = await import("node:fs");
     expect(configDir).toBeDefined();
     expect(configDir && existsSync(configDir)).toBe(false);
+  });
+});
+
+describe("repositoryNameFor — what a local ref publishes as", () => {
+  it("takes the last path segment, and --name wins", () => {
+    expect(repositoryNameFor("officeqa-env:v1")).toBe("officeqa-env");
+    expect(repositoryNameFor("ghcr.io/acme/officeqa-env:v1")).toBe("officeqa-env");
+    expect(repositoryNameFor("officeqa-env:v1", "renamed")).toBe("renamed");
+  });
+});
+
+describe("fetchManagedPushGrant — managed first, BYO when there is no managed store", () => {
+  const grantBody = {
+    grant: {
+      endpoint: "images.everdict.test",
+      repositories: ["acme-1a2b3c4d/officeqa"],
+      actions: ["pull", "push"],
+      token: "grant-token",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+    },
+    imagePrefix: "images.everdict.test/acme-1a2b3c4d/",
+  };
+
+  it("presents the grant as the docker password under the fixed grant username", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(grantBody), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const credentials = await fetchManagedPushGrant("http://cp", "ak_x", "officeqa");
+    expect(credentials).toEqual({
+      host: "images.everdict.test",
+      username: "everdict",
+      password: "grant-token",
+      imagePrefix: "images.everdict.test/acme-1a2b3c4d/",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  // A deployment with no managed store answers 404 — that is a normal answer here, not a failure: the command
+  // falls back to the workspace's BYO registries, which is what every pre-managed workspace still has.
+  it("returns undefined on 404 so the caller can fall back to a BYO registry", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 404 })),
+    );
+    await expect(fetchManagedPushGrant("http://cp", "ak_x", "officeqa")).resolves.toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces a real failure verbatim instead of silently falling back", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ message: "images:push denied" }), { status: 403 })),
+    );
+    await expect(fetchManagedPushGrant("http://cp", "ak_x", "officeqa")).rejects.toThrow("images:push denied");
+    vi.unstubAllGlobals();
   });
 });

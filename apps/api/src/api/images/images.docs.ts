@@ -1,3 +1,4 @@
+import { ImagePushGrantResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -37,6 +38,47 @@ const docs = {
         ),
       },
       ...errorResponses(401, 404),
+    },
+  },
+  pushGrant: {
+    summary: "Mint a push grant for a repository in the workspace's image namespace",
+    description:
+      "Short-lived authorization to push ONE repository in the caller's managed namespace, plus the prefix the " +
+      "client assembles the target ref with. Requires images:push (member+) — the same member-gated action the " +
+      "BYO push-credential mint uses, because the response IS a usable credential. The repository is created by " +
+      "the first push. Design: docs/architecture/managed-image-store.md.",
+    tags: ["images"],
+    body: toJsonSchema(
+      z.object({ repository: z.string().min(1).describe("Repository name inside the workspace namespace") }),
+    ),
+    response: {
+      200: { description: "Push grant + image prefix", ...toJsonSchema(ImagePushGrantResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  manifest: {
+    summary: "Inspect a manifest in the workspace's image namespace",
+    description:
+      "Manifest summary (digest, media type, platforms) for a tag or digest in the caller's namespace — the " +
+      "authoritative digest to pin a just-pushed image by. Read is harnesses:read: provenance, not a credential.",
+    tags: ["images"],
+    querystring: toJsonSchema(
+      z.object({ repository: z.string().min(1), reference: z.string().min(1).describe("Tag or digest") }),
+    ),
+    response: {
+      200: {
+        description: "Manifest summary",
+        ...toJsonSchema(
+          z.object({
+            reference: z.string(),
+            digest: z.string().optional(),
+            mediaType: z.string().optional(),
+            platforms: z.array(z.string()).optional(),
+            layerCount: z.number().int().optional(),
+          }),
+        ),
+      },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
 } as const;

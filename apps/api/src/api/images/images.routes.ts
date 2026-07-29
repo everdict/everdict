@@ -1,6 +1,7 @@
 import { grantFromBasicAuth, scopeValues } from "@everdict/images";
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, sendError } from "../route-context.js";
+import { z } from "zod";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { imagesDocs } from "./images.docs.js";
 
 // The managed image store's HTTP surface. Design: docs/architecture/managed-image-store.md
@@ -33,6 +34,52 @@ export function registerImagesRoutes(app: FastifyInstance, deps: ServerDeps): vo
         // The WWW-Authenticate header is what makes a docker client re-prompt for credentials instead of
         // reporting an opaque failure — the realm it should retry against is this endpoint.
         reply.header("www-authenticate", `Basic realm="everdict image registry"`);
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Mint a push authorization for one repository in the caller's namespace (`everdict image push`). images:push is
+  // the same member-gated action the BYO path uses — it is the one action whose response IS a usable credential,
+  // which is why it was named separately in the first place. The repository is created by the first push.
+  app.post("/workspace/images/push-grant", { schema: imagesDocs.pushGrant }, async (req, reply) => {
+    if (!deps.images) return reply.code(404).send({ code: "NOT_FOUND", message: "managed image store not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z.object({ repository: z.string().min(1) }).safeParse(req.body);
+    if (!body.success)
+      return reply
+        .code(400)
+        .send({ code: "BAD_REQUEST", message: "repository is required", data: zodIssues(body.error) });
+    try {
+      gate(principal, "images:push");
+      const grant = await deps.images.mintPushGrant(principal.workspace, body.data.repository);
+      return reply.send({
+        grant,
+        imagePrefix: `${deps.images.endpoint}/${deps.images.namespaceFor(principal.workspace)}/`,
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Manifest of a reference in the caller's namespace — the authoritative digest a just-pushed image should be
+  // pinned by. Read-gated with harnesses:read like the BYO inspect: a manifest summary is provenance, not a credential.
+  app.get<{ Querystring: { repository?: string; reference?: string } }>(
+    "/workspace/images/manifest",
+    { schema: imagesDocs.manifest },
+    async (req, reply) => {
+      if (!deps.images)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "managed image store not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const { repository, reference } = req.query;
+      if (!repository || !reference)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "repository and reference are required" });
+      try {
+        gate(principal, "harnesses:read");
+        return reply.send(await deps.images.inspect(principal.workspace, repository, reference));
+      } catch (err) {
         return sendError(reply, err);
       }
     },

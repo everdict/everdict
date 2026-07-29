@@ -17,7 +17,9 @@
 // Flow:
 //   ① keys + registry → ② unauthenticated pull is refused → ③ push grant → docker login+push succeeds
 //   → ④ a pull grant for the same repo pulls it back (digest matches) → ⑤ a grant for ANOTHER workspace's
-//   namespace cannot push there (the isolation claim, tested against the real enforcement point) → ⑥ cleanup.
+//   namespace cannot push there (the isolation claim, tested against the real enforcement point)
+//   → ⑥ `everdict image push`'s own pushImage publishes with a grant (the CLI code path, not a re-implementation)
+//   → ⑦ cleanup.
 //
 // Usage: `pnpm -F @everdict/images build && node scripts/live/managed-image-store.mjs` (docker + openssl required).
 import { execFileSync, spawn } from "node:child_process";
@@ -26,6 +28,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { pushImage } from "../../apps/cli/dist/image-push.js";
 import {
   ImageTokenService,
   RegistryTokenIssuer,
@@ -77,6 +80,11 @@ const runOk = async (bin, args, input) => {
   const { code, out } = await run(bin, args, input);
   if (code !== 0) fail(`${bin} ${args.join(" ")} failed (${code}):\n${out}`);
   return out;
+};
+// The CLI's docker seam, async for the same event-loop reason as everything else that talks to the realm.
+const dockerForCli = async (args) => {
+  const { code, out } = await run("docker", args);
+  if (code !== 0) fail(`docker ${args.join(" ")} failed (${code}):\n${out}`);
 };
 const step = (n, msg) => console.log(`\n[${n}] ${msg}`);
 const fail = (msg) => {
@@ -205,8 +213,36 @@ try {
   rmSync(cfg, { recursive: true, force: true });
   rmSync(cfg2, { recursive: true, force: true });
 
+  step(6, "the CLI's own pushImage publishes with a grant (the real `everdict image push` code path)");
+  const cliGrant = await issuer.mintGrant("acme", [
+    { type: "repository", name: `${NS}/cli-published`, actions: ["pull", "push"] },
+  ]);
+  const published = await pushImage(
+    {
+      host: REGISTRY,
+      username: "everdict", // the grant is a bearer in the password field — what fetchManagedPushGrant returns
+      password: cliGrant.token,
+      imagePrefix: `${REGISTRY}/${NS}/`,
+    },
+    `${IMAGE}:v1`,
+    { name: "cli-published", tag: "v9", io: { log: (m) => console.log(`    ${m}`), docker: dockerForCli } },
+  );
+  if (published !== `${REGISTRY}/${NS}/cli-published:v9`) fail(`unexpected published ref: ${published}`);
+  const catalog = (
+    await run("curl", [
+      "-s",
+      "-H",
+      `Authorization: Bearer ${await issuer.mintRegistryToken("acme", [{ type: "repository", name: `${NS}/cli-published`, actions: ["pull"] }])}`,
+      `http://${REGISTRY}/v2/${NS}/cli-published/tags/list`,
+    ])
+  ).out;
+  if (!catalog.includes("v9")) fail(`the CLI push did not land in the registry: ${catalog}`);
+  quiet("docker", ["rmi", "-f", published]);
+
   ok = true;
-  console.log("\nPASS — distribution accepts our x5c tokens; grants push, pull, and stop at the namespace boundary.");
+  console.log(
+    "\nPASS — distribution accepts our x5c tokens; grants push, pull, stop at the namespace boundary, and the CLI publishes through one.",
+  );
 } finally {
   cleanup();
   if (!ok) console.log("\nFAIL");

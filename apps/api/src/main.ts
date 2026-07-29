@@ -619,6 +619,7 @@ async function main(): Promise<void> {
     spanAttrMappingService,
     imageRegistryService,
     imageTokenService,
+    ...(workspaceImages ? { images: workspaceImages } : {}),
     // Workspace environment-image adoption (import) — inventory of adopted environments + pull-usability verification
     // (warn-not-block). Composes the capability store (resolve + visibility) + image registry (pull auth + verify).
     environmentAdoptionService: new EnvironmentAdoptionService({
