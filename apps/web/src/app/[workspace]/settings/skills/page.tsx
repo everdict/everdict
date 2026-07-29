@@ -1,6 +1,7 @@
 import { getTranslations } from 'next-intl/server'
 
 import { SkillsManager } from '@/features/manage-skills'
+import { capabilitiesSchema, isBuiltInCapability, type Capability } from '@/entities/capability'
 import { membersSchema } from '@/entities/member'
 import { modelsSchema } from '@/entities/model'
 import { skillsSchema, type Skill } from '@/entities/skill'
@@ -32,12 +33,36 @@ export default async function SkillsPage() {
     )
   }
 
+  // The workspace's shared skills + the caller's own private drafts — the control plane scopes the list, so both
+  // scopes arrive in one call and the manager sections them.
   let skills: Skill[] = []
   let error: string | undefined
   try {
     skills = skillsSchema.parse(await controlPlane.listSkills(ctx))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
+  }
+
+  // A skill is not only a Skill record authored here: a skill-kind CAPABILITY — one a member published to the store,
+  // one shared into this workspace, or an Everdict built-in — is a `use_skill` entry for the agent all the same
+  // (apps/agent merges the two by name when it resolves a turn's profile). Mirror that merge so this page is the whole
+  // library the agent can draw on instead of half of it. Other workspaces' public skills stay in the store: they are
+  // discovery, not library. Best-effort — capabilities being unreadable must not take the authored library down too.
+  let packaged: Capability[] = []
+  try {
+    const [owned, builtIns] = await Promise.all([
+      controlPlane.listCapabilities(ctx).then((r) => capabilitiesSchema.parse(r)),
+      controlPlane.listPublicCapabilities(ctx).then((r) => capabilitiesSchema.parse(r)),
+    ])
+    // Name collisions resolve the way the agent resolves them: an authored Skill shadows a package, first package wins.
+    const claimed = new Set(skills.map((s) => s.name))
+    packaged = [...owned, ...builtIns.filter(isBuiltInCapability)].filter((c) => {
+      if (c.spec.type !== 'skill' || claimed.has(c.name)) return false
+      claimed.add(c.name)
+      return true
+    })
+  } catch {
+    packaged = []
   }
 
   // Registered model ids power the skill-generate model picker.
@@ -73,6 +98,8 @@ export default async function SkillsPage() {
         <SkillsManager
           header={{ title: t('skills'), description: t('skillsDesc') }}
           skills={skills}
+          packaged={packaged}
+          currentWorkspace={principal?.workspace ?? ''}
           modelIds={modelIds}
           authors={authors}
           canWrite={canWrite}

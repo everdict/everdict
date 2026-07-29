@@ -29,16 +29,17 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { VersionTagsEditor } from '@/features/version-tags'
-import type {
-  Capability,
-  CapabilityImageClass,
-  CapabilitySpec,
-  CapabilitySpecDiff,
-  CapabilityType,
-  CapabilityVersions,
-  CapabilityVisibility,
-  ProbeCapabilityMcpResult,
-  ValidateCapabilityResult,
+import {
+  isBuiltInCapability,
+  type Capability,
+  type CapabilityImageClass,
+  type CapabilitySpec,
+  type CapabilitySpecDiff,
+  type CapabilityType,
+  type CapabilityVersions,
+  type CapabilityVisibility,
+  type ProbeCapabilityMcpResult,
+  type ValidateCapabilityResult,
 } from '@/entities/capability'
 import type { AdoptedEnvironment } from '@/entities/environment-adoption'
 import { fmtSubject } from '@/shared/lib/format'
@@ -90,12 +91,6 @@ function offersWrite(c: Capability): boolean {
   return false
 }
 const capKey = (c: { tenant: string; id: string }): string => `${c.tenant}/${c.id}`
-
-// The reserved owner of first-party (Everdict-authored) built-ins — mirrors contracts FIRST_PARTY_TENANT. These are
-// code-defined (not DB rows), merged into the public catalog by the control plane; they can't be edited/deleted and
-// are provided as defaults (managed in Settings › Agent), so the store shows them read-only with a "built-in" badge.
-const BUILT_IN_TENANT = '_everdict'
-const isBuiltIn = (c: { tenant: string }): boolean => c.tenant === BUILT_IN_TENANT
 
 type Author = { name: string; avatarUrl?: string }
 type RequiredSecret = { name: string; description: string }
@@ -196,7 +191,7 @@ export function CapabilityStore({
   const canPublishPublic = isAdmin || allowMemberPublicPublish
   // 관리 메뉴(편집/공개범위/삭제)는 내 발행(mine) 뷰에서 + 매니지드가 아니고 + 생성자/admin 일 때만. 카탈로그는 브라우즈 전용.
   const canManage = (c: Capability) =>
-    variant === 'mine' && !isBuiltIn(c) && (c.createdBy === currentSubject || isAdmin)
+    variant === 'mine' && !isBuiltInCapability(c) && (c.createdBy === currentSubject || isAdmin)
   const authorOf = (createdBy: string): Author => {
     const a = authors[createdBy]
     return {
@@ -220,7 +215,7 @@ export function CapabilityStore({
     })
     // 매니지드(카탈로그의 얼굴)를 위로, 그다음 선택한 정렬. recent=발행 최신, name=이름, type=종류.
     return [...filtered].sort((a, b) => {
-      if (isBuiltIn(a) !== isBuiltIn(b)) return isBuiltIn(a) ? -1 : 1
+      if (isBuiltInCapability(a) !== isBuiltInCapability(b)) return isBuiltInCapability(a) ? -1 : 1
       if (sort === 'name') return a.name.localeCompare(b.name)
       if (sort === 'type')
         return a.spec.type.localeCompare(b.spec.type) || a.name.localeCompare(b.name)
@@ -233,7 +228,7 @@ export function CapabilityStore({
   const visible = list.slice(0, visibleCount)
 
   const adoptedCount = useMemo(() => items.filter(inWorkspace).length, [items, inWorkspace])
-  const managedCount = useMemo(() => items.filter(isBuiltIn).length, [items])
+  const managedCount = useMemo(() => items.filter(isBuiltInCapability).length, [items])
 
   const del = (c: Capability) =>
     startTransition(async () => {
@@ -408,7 +403,7 @@ export function CapabilityStore({
             const author = authorOf(c.createdBy)
             const TypeIcon = TYPE_ICON[c.spec.type]
             const VisIcon = VIS_ICON[c.visibility]
-            const managed = isBuiltIn(c)
+            const managed = isBuiltInCapability(c)
             const here = inWorkspace(c)
             const isEnv = c.spec.type === 'environment'
             return (
@@ -726,7 +721,7 @@ function CapabilityDetailDialog({
   const t = useTranslations('capabilityStore')
   const TypeIcon = TYPE_ICON[capability.spec.type]
   const VisIcon = VIS_ICON[capability.visibility]
-  const managed = isBuiltIn(capability)
+  const managed = isBuiltInCapability(capability)
   const isEnv = capability.spec.type === 'environment'
   const verify = adoptedEnv?.verify
   return (
@@ -1810,7 +1805,7 @@ function CapabilityDetail({
   const t = useTranslations('capabilityStore')
   // 크로스테넌트 public/subset 카드는 오너 워크스페이스를 source 로 넘겨 버전을 조회한다. 내 워크스페이스 것이면 생략.
   const source = capability.tenant !== currentWorkspace ? capability.tenant : undefined
-  const builtin = isBuiltIn(capability)
+  const builtin = isBuiltInCapability(capability)
   // 버전 태그 편집 = 내 워크스페이스 소유 + 버전 생성자-or-admin(서버가 최종 강제). 빌트인/크로스테넌트는 읽기전용.
   const canManageVersions =
     !builtin && source === undefined && (capability.createdBy === currentSubject || isAdmin)

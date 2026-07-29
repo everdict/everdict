@@ -30,3 +30,4 @@ export {
   type CapabilitySpecDiff,
   type CapabilityFieldChange,
 } from './model/schema'
+export { BUILT_IN_TENANT, isBuiltInCapability } from './lib/first-party'
