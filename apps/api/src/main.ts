@@ -46,6 +46,7 @@ import {
 } from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
 import { AgentService } from "./core/agent/agent-service.js";
+import { AgentMemberToolingService } from "./core/agent/agent-member-tooling-service.js";
 import { BrowserProfileCaptureService } from "./core/browser-profile/browser-profile-capture-service.js";
 import { BrowserSessionService } from "./core/browser-session/browser-session-service.js";
 import { buildPlacementPreflight } from "./core/execution/placement-preflight.js";
@@ -141,6 +142,7 @@ async function main(): Promise<void> {
     browserProfileStore,
     skillStore,
     capabilityStore,
+    agentMemberPreferenceStore,
     callbackStore,
     usageStore,
     budgetStore,
@@ -540,6 +542,17 @@ async function main(): Promise<void> {
     agentRegistry,
     // Agent config version-free save/edit upsert (the interactive web path) — the workspace's conversational-agent customization.
     agentService: new AgentService({ agents: agentRegistry }),
+    // Settings › Agent › Tools + › Skills — the CALLER's own agent: the workspace baseline (AgentSpec + the authored
+    // skill library) overlaid with that member's on/off. This is what keeps one workspace from meaning one agent
+    // (see agent-member-tooling-service.ts).
+    agentMemberToolingService: new AgentMemberToolingService({
+      agents: agentRegistry,
+      capabilities: capabilityStore,
+      preferences: agentMemberPreferenceStore,
+      skills: skillStore,
+      secrets: secretStore,
+      settings: settingsStore,
+    }),
     // Workspace Skills — SKILL.md procedures the members author (dual-scoped private|workspace) + skill-generate (drafts
     // a skill from a description via the workspace's registered model + key; same secret tiers/base as the model probe).
     skillService: new SkillService({ store: skillStore, latestVersionOf, fs: workspaceFs }),

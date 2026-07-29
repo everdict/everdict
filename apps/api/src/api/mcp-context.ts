@@ -45,6 +45,7 @@ import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import type { AgentService } from "../core/agent/agent-service.js";
+import type { AgentMemberToolingService } from "../core/agent/agent-member-tooling-service.js";
 import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import type { BrowserProfileCaptureService } from "../core/browser-profile/browser-profile-capture-service.js";
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
@@ -78,6 +79,7 @@ export interface McpDeps {
   modelService?: ModelService; // Model connection test (dummy completion) + version-free save/edit upsert
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) register/read — the conversational agent per workspace
   agentService?: AgentService; // Agent version-free save/edit upsert
+  agentMemberToolingService?: AgentMemberToolingService; // the caller's OWN tools + skills (workspace baseline ⊕ their overrides)
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD — dual-scoped private|workspace
   fsService?: FsService; // the workspace filesystem (shared, workspace-isolated file tree) list/read/write/mkdir/move/remove
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD

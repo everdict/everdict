@@ -1,10 +1,11 @@
-import type { FsRevisionStore } from "@everdict/application-control";
+import type { AgentMemberPreferenceStore, FsRevisionStore } from "@everdict/application-control";
 import {
   type BrowserProfileStore,
   type BudgetStore,
   type CallbackStore,
   type CapabilityStore,
   type CommentStore,
+  InMemoryAgentMemberPreferenceStore,
   InMemoryBrowserProfileStore,
   InMemoryBudgetStore,
   InMemoryCallbackStore,
@@ -35,6 +36,7 @@ import {
   type KnowledgeStore,
   type NotificationStore,
   type OAuthStateStore,
+  PgAgentMemberPreferenceStore,
   PgBrowserProfileStore,
   PgBudgetStore,
   PgCallbackStore,
@@ -148,6 +150,8 @@ export interface Persistence {
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members author) — dual-scoped private|workspace
   capabilityStore: CapabilityStore; // Capability Store (mcp|code|skill) — versioned + per-capability visibility (private|workspace|subset|public)
+  // Per-MEMBER agent overlay — which of the workspace's tools + skills each member wants their own agent to carry
+  agentMemberPreferenceStore: AgentMemberPreferenceStore;
   // Front-door callback bodies (multi-replica rendezvous) — Pg-backed when DATABASE_URL is set, else in-memory
   // (single process; the in-process rendezvous is equivalent there). docs/architecture/completion-stream-callback.md
   callbackStore: CallbackStore;
@@ -213,6 +217,7 @@ export async function makePersistence(): Promise<Persistence> {
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
       capabilityStore: new InMemoryCapabilityStore(),
+      agentMemberPreferenceStore: new InMemoryAgentMemberPreferenceStore(),
       callbackStore: new InMemoryCallbackStore(),
       usageStore: new InMemoryUsageStore(),
       budgetStore: new InMemoryBudgetStore(),
@@ -256,6 +261,7 @@ export async function makePersistence(): Promise<Persistence> {
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),
     capabilityStore: new PgCapabilityStore(client),
+    agentMemberPreferenceStore: new PgAgentMemberPreferenceStore(client),
     callbackStore: new PgCallbackStore(client),
     usageStore: new PgUsageStore(client),
     budgetStore: new PgBudgetStore(client),

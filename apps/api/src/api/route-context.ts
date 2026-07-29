@@ -99,6 +99,7 @@ import type { LiveLogStore } from "../common/live-log-store.js";
 import type { TerminalTicketStore } from "../common/terminal-ticket.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import type { AgentService } from "../core/agent/agent-service.js";
+import type { AgentMemberToolingService } from "../core/agent/agent-member-tooling-service.js";
 import {
   BenchmarkImportBodySchema,
   BenchmarkPreviewBodySchema,
@@ -142,6 +143,9 @@ export interface ServerDeps {
   modelService?: ModelService; // Model connection test (dummy completion) + version-free save/edit upsert (routes disabled if absent)
   agentRegistry?: AgentRegistry; // Agent config (instructions + MCP tool servers + model) CRUD — the workspace's conversational agent (route disabled if absent)
   agentService?: AgentService; // Agent version-free save/edit upsert (routes disabled if absent)
+  // The CALLER's own agent (Settings › Agent › Tools + › Skills) — the workspace baseline overlaid with that
+  // member's on/off, so two members of one workspace get two different agents (routes disabled if absent).
+  agentMemberToolingService?: AgentMemberToolingService;
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD (routes disabled if absent)
   fsService?: FsService; // the workspace filesystem (shared, workspace-isolated file tree) list/read/write/mkdir/move/remove (routes disabled if absent)
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD (routes disabled if absent)
