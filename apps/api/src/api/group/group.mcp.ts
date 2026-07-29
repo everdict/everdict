@@ -69,4 +69,35 @@ export function registerGroupTools(server: McpServer, ctx: McpToolContext): void
         ),
       ),
   );
+
+  server.registerTool(
+    "score_group",
+    {
+      description:
+        "Score an existing group's runs with the selected judges (phase 2, detached): judge verdicts attach " +
+        "to the child runs, the fresh aggregate to the group. Re-scoring a judge replaces its previous " +
+        "verdicts; scoring an EXPERIMENT promotes it to a scorecard. Async — returns the record as-of " +
+        "submission; poll get_scorecard until summary/judgeModels move.",
+      inputSchema: {
+        id: z.string().describe("group id (a scorecard id)"),
+        judges: z
+          .array(z.object({ id: z.string(), version: z.string().optional() }))
+          .min(1)
+          .describe("Agent Judges to apply (version defaults to latest)"),
+      },
+    },
+    ({ id, judges }: { id: string; judges: Array<{ id: string; version?: string }> }) =>
+      run(principal, "scorecards:run", async () =>
+        ok(
+          serveScorecard(
+            await scorecards.scoreGroup({
+              tenant: ws,
+              id,
+              judges: judges.map((j) => ({ id: j.id, version: j.version ?? "latest" })),
+              submittedBy: principal.subject,
+            }),
+          ),
+        ),
+      ),
+  );
 }

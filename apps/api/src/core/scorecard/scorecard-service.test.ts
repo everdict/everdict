@@ -3930,3 +3930,138 @@ describe("ScorecardService.submitExperiment — ungraded phase-1 groups (P1)", (
     await expect(service.submitExperiment(base)).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
+
+describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
+  const ungraded: Dispatcher = {
+    async dispatch(job) {
+      return {
+        caseId: job.evalCase.id,
+        harness: `${job.harness.id}@${job.harness.version}`,
+        trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } }],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [],
+      };
+    },
+  };
+  const qualityJudge: JudgeSpec = {
+    kind: "model",
+    id: "quality",
+    version: "1.0.0",
+    provider: "anthropic",
+    model: "claude-opus-4-8",
+    rubric: "good?",
+    inputs: ["trace"],
+    tags: [],
+  };
+  const passRunner: JudgeRunner = {
+    run: async (spec) => [{ graderId: `judge:${spec.id}`, metric: `judge:${spec.id}`, value: 1, pass: true }],
+  };
+  const waitScored = async (store: InMemoryScorecardStore, id: string): Promise<ScorecardRecord> => {
+    for (let i = 0; i < 100; i++) {
+      const rec = await store.get(id);
+      if (rec?.kind === "scorecard" || rec?.steps?.some((s) => s.status === "failed")) return rec;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error("scoring did not settle");
+  };
+
+  it("judges an experiment's runs after the fact, writes scores back to the children, and promotes it", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", qualityJudge);
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const service = new ScorecardService({
+      dispatcher: ungraded,
+      store,
+      runStore,
+      datasets,
+      judges,
+      judgeRunner: passRunner,
+    });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      task: { prompt: "say hi" },
+    });
+    await waitTerminal(store, record.id);
+
+    const asOf = await service.scoreGroup({
+      tenant: "acme",
+      id: record.id,
+      judges: [{ id: "quality", version: "latest" }],
+      submittedBy: "bob",
+    });
+    expect(asOf.kind).toBe("experiment"); // returned as-of submission — scoring is async
+
+    const scored = await waitScored(store, record.id);
+    expect(scored.kind).toBe("scorecard"); // promoted — a group with a verdict is a scorecard
+    expect(scored.summary?.some((row) => row.metric === "judge:quality" && row.passRate === 1)).toBe(true);
+    // Phase 1's child runs carry the verdicts (write-back) — get() hydrates from them.
+    const children = await runStore.list("acme", { scorecardId: record.id });
+    expect(children.length).toBeGreaterThan(0);
+    for (const child of children) {
+      expect(child.result?.scores.some((s) => s.metric === "judge:quality" && s.pass === true)).toBe(true);
+    }
+    const hydrated = await service.get(record.id);
+    expect(hydrated?.scorecard?.results[0]?.scores.some((s) => s.metric === "judge:quality")).toBe(true);
+  });
+
+  it("re-scoring the same judge REPLACES its previous verdicts (no duplicate judge:<id> rows)", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", qualityJudge);
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const service = new ScorecardService({
+      dispatcher: ungraded,
+      store,
+      runStore,
+      datasets,
+      judges,
+      judgeRunner: passRunner,
+    });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      task: { prompt: "hi" },
+    });
+    await waitTerminal(store, record.id);
+    await service.scoreGroup({ tenant: "acme", id: record.id, judges: [{ id: "quality", version: "latest" }] });
+    await waitScored(store, record.id);
+    await service.scoreGroup({ tenant: "acme", id: record.id, judges: [{ id: "quality", version: "latest" }] });
+    for (let i = 0; i < 100; i++) await new Promise((r) => setTimeout(r, 5)); // let the second pass settle
+    const children = await runStore.list("acme", { scorecardId: record.id });
+    const judgeScores = children[0]?.result?.scores.filter((s) => s.metric === "judge:quality") ?? [];
+    expect(judgeScores).toHaveLength(1); // replaced, not appended
+  });
+
+  it("guards: non-succeeded group → 409; empty judge list → 400; foreign workspace → 404", async () => {
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher: ungraded,
+      store,
+      datasets: new InMemoryDatasetRegistry(),
+      judges: new InMemoryJudgeRegistry(),
+      judgeRunner: passRunner,
+    });
+    await store.create({
+      id: "sc-run",
+      tenant: "acme",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "1" },
+      status: "running",
+      createdAt: "2026-07-30T00:00:00Z",
+      updatedAt: "2026-07-30T00:00:00Z",
+    });
+    await expect(
+      service.scoreGroup({ tenant: "acme", id: "sc-run", judges: [{ id: "q", version: "latest" }] }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.scoreGroup({ tenant: "acme", id: "sc-run", judges: [] })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    await expect(
+      service.scoreGroup({ tenant: "rival", id: "sc-run", judges: [{ id: "q", version: "latest" }] }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});

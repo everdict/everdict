@@ -76,14 +76,26 @@ group only — the dataset stays pure data) or `task:{prompt}` (a one-off case u
 (`_adhoc`) sentinel — **not re-drivable** after a control-plane restart, since there is no registry entry to
 re-plan from); `trials` repeats it N times. Read back through `GET /groups/:id` or the scorecard surface (one
 table). Leaderboard/trend/analysis exclude `kind:"experiment"` at the store filter; the list shows both, badged.
-Phase 2 lands separately (`POST /groups/:id/score` — P2): scoring a group's runs after the fact, which also
-covers "promote experiment → scorecard" and re-scoring.
+
+**Phase 2, detached (P2 — `POST /groups/:id/score` / MCP `score_group`)**: apply judges over an EXISTING
+group's runs and re-write the aggregate — phase 1 is never re-executed. Judge verdicts attach to the child
+runs (write-back; `get` hydrates from them), the fresh `summary`/`judgeModels` to the group, and a
+`scorecard.scored` platform fact rides the E0 outbox (`ScorecardBatch.rescore` — the transition computes it).
+Re-scoring a judge REPLACES its previous `judge:<id>` verdicts (idempotent by metric); scoring an
+**experiment promotes it** — `kind` flips to the explicit `"scorecard"` (a group with a verdict is
+definitionally a scorecard, O3). Async: 202 returns the record as-of submission; poll until the aggregate
+moves (a failed pass appends a `judges`-phase step instead of touching the settled status). Guards: only a
+`succeeded` group scores (409), one pass in flight per group (409), no results → 400. The group's
+`orchestration.judges` (the submit-time re-drive plan) is deliberately NOT rewritten — after-the-fact judges
+are visible via `judgeModels` + the `judge:<id>` summary rows. The batch pipeline's inline judging is
+unchanged (conceptually the same operation; convergence is a later refactor).
 
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |
 |---|---|---|
 | `POST /scorecards` `{dataset, harness, judges?, runtime?, concurrency?, cases?{ids,tags,limit}}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
 | `POST /groups` `{harness, dataset \| task:{prompt}, trials?, runtime?}` → 202 (P1 experiment; read = `GET /groups/:id` ↔ `get_scorecard`) | `run_experiment` | `scorecards:run` (member+) |
+| `POST /groups/:id/score` `{judges[]}` → 202 (P2 detached scoring; re-score replaces, experiment promotes) | `score_group` | `scorecards:run` (member+) |
 | `POST /scorecards/:id/cancel` → 200 (the cancelled record) | `cancel_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest` `{dataset?, harness?, traces[], judges?}` → 202 | `ingest_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest/pull` `{dataset?, harness?, source{name\|kind,endpoint,authSecret?}, runs[], judges?}` → 202 | `pull_scorecard` | `scorecards:run` (member+) |

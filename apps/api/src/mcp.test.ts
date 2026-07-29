@@ -531,6 +531,7 @@ describe("MCP tools", () => {
       "revoke_workspace_runner",
       "run_experiment",
       "run_scorecard",
+      "score_group",
       "set_dataset_version_tags",
       "set_harness_version_tags",
       "set_judge_version_tags",

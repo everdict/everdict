@@ -14,6 +14,9 @@ export const PLATFORM_EVENT_KINDS = [
   "scorecard.completed",
   "scorecard.failed",
   "scorecard.cancelled",
+  // Phase 2 re-applied after the fact (execution-model P2): judges scored an existing group's runs and the
+  // aggregate was re-written; payload.promoted marks an experiment that became a scorecard by being scored.
+  "scorecard.scored",
   "report.completed", // a scheduled analysis report was produced (analysis-studio V4)
   "comment.created",
   // Agent-run lifecycle facts (reported BY the agent service) — observable in the feed/fleet view, but NEVER

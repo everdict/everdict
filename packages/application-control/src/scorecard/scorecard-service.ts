@@ -28,6 +28,7 @@ import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
 import { ScorecardBatchService } from "./scorecard-batch-service.js";
 import { ScorecardIngestService } from "./scorecard-ingest-service.js";
+import { type ScoreGroupInput, ScorecardScoreService } from "./scorecard-score-service.js";
 import {
   type IngestScorecardInput,
   type PullIngestInput,
@@ -55,6 +56,7 @@ export type {
   ScorecardServiceDeps,
   SubmitExperimentInput,
 } from "./scorecard-shared.js";
+export type { ScoreGroupInput } from "./scorecard-score-service.js";
 
 // A scorecard run's async lifecycle: dataset resolution (404 if missing) → create record (202) → batch run (runSuite) → aggregate and persist.
 // Unit-testable independently of HTTP. AppError is thrown as-is so the caller (server) maps it to a status code.
@@ -71,6 +73,7 @@ export class ScorecardService {
   private readonly batch: ScorecardBatchService;
   private readonly ingestService: ScorecardIngestService;
   private readonly analytics: ScorecardAnalyticsService;
+  private readonly scoreService: ScorecardScoreService;
 
   constructor(private readonly deps: ScorecardServiceDeps) {
     this.newId = deps.newId ?? (() => crypto.randomUUID());
@@ -95,6 +98,13 @@ export class ScorecardService {
     });
     this.ingestService = new ScorecardIngestService(deps, { newId: this.newId, now: this.now, scoring });
     this.analytics = new ScorecardAnalyticsService(deps, { now: this.now, getRecord });
+    this.scoreService = new ScorecardScoreService(deps, {
+      newId: this.newId,
+      now: this.now,
+      scoring,
+      getRecord,
+      pinJudges: (tenant, judges) => this.pinJudgeVersions(tenant, judges),
+    });
   }
 
   // Resolve the dataset synchronously (NotFound→404), resolve the harness version/spec, create the record, then run the batch asynchronously.
@@ -323,6 +333,12 @@ export class ScorecardService {
       ...(input.retries !== undefined ? { retries: input.retries } : {}),
       ...(input.cases ? { cases: input.cases } : {}),
     });
+  }
+
+  // Phase 2 detached (P2) — apply judges over an existing group's runs and re-aggregate; also the "promote
+  // experiment → scorecard" move (scoring an experiment flips its kind). Delegated to the score collaborator.
+  async scoreGroup(input: ScoreGroupInput): Promise<ScorecardRecord> {
+    return this.scoreService.score(input);
   }
 
   // Resolve each selected judge's version (latest→concrete) via the registry, so the recorded orchestration pins the

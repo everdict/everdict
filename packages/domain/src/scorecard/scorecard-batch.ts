@@ -279,6 +279,12 @@ export class ScorecardBatch {
 
   // Restart resume may re-drive only an unsettled batch that persisted its orchestration inputs
   // (pre-mig records keep the INTERRUPTED tombstone path). docs/architecture/batch-resilience.md
+  // Phase 2 after the fact (P2): only a group that COMPLETED phase 1 can be (re-)scored — running = wait,
+  // failed = retry first, cancelled/superseded = the runs were reclaimed.
+  canScore(): boolean {
+    return this.record.status === "succeeded";
+  }
+
   canResume(): boolean {
     return !this.isTerminal() && this.record.orchestration !== undefined;
   }
@@ -426,6 +432,42 @@ export class ScorecardBatch {
             : {}),
           payload: { status: "cancelled", dataset, harness },
           message: `Scorecard ${this.record.id} cancelled — ${dataset} × ${harness}`,
+        },
+      ],
+    };
+  }
+
+  // succeeded → succeeded with phase 2 re-applied (execution-model.md P2): attach the new aggregate — scoring
+  // NEVER mutates phase 1 (the runs re-score in place via write-back; the group takes the fresh aggregate).
+  // Scoring an EXPERIMENT promotes it to a scorecard (a group with a verdict is definitionally a scorecard,
+  // O3) — the kind flips to the EXPLICIT "scorecard" so the store can persist the change. The actor is the
+  // re-scorer (not the original creator), passed by the service.
+  rescore(extras: ScorecardOutcomeExtras, by: { actor?: string }, now: string): ScorecardTransition {
+    if (!this.canScore())
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: this.record.id, status: this.record.status },
+        `only a succeeded group can be scored (status: ${this.record.status})`,
+      );
+    const { dataset, harness } = batchLabels(this.record);
+    const promoted = this.record.kind === "experiment";
+    const summary = extras.summary ?? this.record.summary;
+    const passRate = summary?.find((row) => row.passRate !== undefined)?.passRate;
+    return {
+      patch: { ...(promoted ? { kind: "scorecard" as const } : {}), ...extras, updatedAt: now },
+      facts: [
+        {
+          kind: "scorecard.scored",
+          subject: { type: "scorecard", id: this.record.id },
+          ...(by.actor !== undefined ? { actor: by.actor, recipient: by.actor } : {}),
+          payload: {
+            status: this.record.status,
+            dataset,
+            harness,
+            ...(passRate !== undefined ? { passRate } : {}),
+            ...(promoted ? { promoted: true } : {}),
+          },
+          message: `Scorecard ${this.record.id} scored — ${dataset} × ${harness}${passRate !== undefined ? ` (pass rate ${Math.round(passRate * 100)}%)` : ""}${promoted ? " (promoted from experiment)" : ""}`,
         },
       ],
     };

@@ -34,3 +34,10 @@ export const RunExperimentBodySchema = z
     message: "An experiment takes exactly one of `dataset` or `task`.",
   });
 export type RunExperimentBody = z.infer<typeof RunExperimentBodySchema>;
+
+// Score-group body (execution-model.md P2 — phase 2 detached): the judges to apply over the group's runs.
+// Re-scoring a judge REPLACES its previous verdicts; scoring an experiment promotes it to a scorecard.
+export const ScoreGroupBodySchema = z.object({
+  judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).min(1),
+});
+export type ScoreGroupBody = z.infer<typeof ScoreGroupBodySchema>;

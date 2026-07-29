@@ -129,6 +129,11 @@ export class PgScorecardStore implements ScorecardStore {
       sets.push(`status = $${i++}`);
       vals.push(patch.status);
     }
+    if (patch.kind !== undefined) {
+      // written by P2 scoring only — promoting an experiment flips kind to the explicit 'scorecard'.
+      sets.push(`kind = $${i++}`);
+      vals.push(patch.kind);
+    }
     if (patch.summary !== undefined) {
       sets.push(`summary = $${i++}`);
       vals.push(JSON.stringify(patch.summary));

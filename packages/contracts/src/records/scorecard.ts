@@ -146,8 +146,10 @@ export const ScorecardRecordSchema = z.object({
   tenant: z.string(),
   // Group kind (execution-model.md P1, decision O3: the RunGroup generalizes ScorecardRecord IN CONCEPT, the
   // table is kept). "experiment" = phase 1 alone — same fan-out, same child runs, NO judges/graders and no
-  // verdict pressure (caseVerdict stays undefined; analytics exclude it). Absent = a scorecard (the default).
-  kind: z.enum(["experiment"]).optional(),
+  // verdict pressure (caseVerdict stays undefined; analytics exclude it). Absent = a scorecard (the default);
+  // "scorecard" is written EXPLICITLY only when scoring promotes an experiment (P2 — a group with a verdict
+  // is definitionally a scorecard).
+  kind: z.enum(["scorecard", "experiment"]).optional(),
   dataset: z.object({ id: z.string(), version: z.string() }),
   harness: z.object({ id: z.string(), version: z.string() }), // resolved concrete version (never "latest")
   status: ScorecardStatusSchema,

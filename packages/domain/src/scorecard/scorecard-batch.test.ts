@@ -335,6 +335,34 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
     });
   });
 
+  it("rescore re-writes the aggregate over a succeeded group, promotes an experiment, and emits scorecard.scored", () => {
+    const summary = [{ metric: "judge:quality", count: 1, mean: 1, passRate: 1 }];
+    const experiment = ScorecardBatch.from({
+      ...queued({ createdBy: "alice", kind: "experiment" }),
+      status: "succeeded",
+    });
+    const t = experiment.rescore({ summary }, { actor: "bob" }, "t5");
+    expect(t.patch).toEqual({ kind: "scorecard", summary, updatedAt: "t5" }); // promoted — the kind flips explicitly
+    expect(t.facts).toEqual([
+      {
+        kind: "scorecard.scored",
+        subject: { type: "scorecard", id: "sc1" },
+        actor: "bob", // the RE-SCORER, not the original creator
+        recipient: "bob",
+        payload: { status: "succeeded", dataset: "d@1.0.0", harness: "h@1", passRate: 1, promoted: true },
+        message: "Scorecard sc1 scored — d@1.0.0 × h@1 (pass rate 100%) (promoted from experiment)",
+      },
+    ]);
+    // A real scorecard re-scores without a kind flip.
+    const plain = ScorecardBatch.from({ ...queued(), status: "succeeded" }).rescore({ summary }, {}, "t5");
+    expect(plain.patch).toEqual({ summary, updatedAt: "t5" });
+    expect(plain.facts[0]?.payload).not.toHaveProperty("promoted");
+    // Only a succeeded group can be scored — anything else is a conflict.
+    for (const status of ["queued", "running", "failed", "cancelled", "superseded"] as const) {
+      expect(() => ScorecardBatch.from({ ...queued(), status }).rescore({}, {}, "t5")).toThrow(ConflictError);
+    }
+  });
+
   it("creationFacts records the submitted fact with the case count and origin provenance", () => {
     const record = queued({
       createdBy: "alice",

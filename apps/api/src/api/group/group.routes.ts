@@ -4,7 +4,7 @@ import type { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { serveScorecard } from "../scorecard/serve.js";
 import { groupDocs } from "./group.docs.js";
-import { RunExperimentBodySchema } from "./request/run-experiment.js";
+import { RunExperimentBodySchema, ScoreGroupBodySchema } from "./request/run-experiment.js";
 
 // Run groups (execution-model.md P1) — the kind-aware surface over ScorecardRecord (decision O3: the group
 // generalizes the record in concept, the table is kept). v0 submits EXPERIMENTS (ungraded phase-1 fan-out);
@@ -41,6 +41,39 @@ export function registerGroupRoutes(app: FastifyInstance, deps: ServerDeps): voi
             ...(body.retries !== undefined ? { retries: body.retries } : {}),
             ...(body.cases ? { cases: body.cases } : {}),
             origin: { source: originSource(principal.via) },
+          }),
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Phase 2 detached — judge an existing group's runs after the fact; also the "promote experiment" move.
+  app.post<{ Params: { id: string } }>("/groups/:id/score", { schema: groupDocs.score }, async (req, reply) => {
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof ScoreGroupBodySchema>;
+    try {
+      body = ScoreGroupBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      return reply.code(202).send(
+        serveScorecard(
+          await deps.scorecardService.scoreGroup({
+            tenant: principal.workspace,
+            id: req.params.id,
+            judges: body.judges,
+            submittedBy: principal.subject,
           }),
         ),
       );

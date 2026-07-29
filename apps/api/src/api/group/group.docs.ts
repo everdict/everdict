@@ -2,7 +2,7 @@ import { ScorecardResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { RunExperimentBodySchema } from "./request/run-experiment.js";
+import { RunExperimentBodySchema, ScoreGroupBodySchema } from "./request/run-experiment.js";
 
 const groupIdParams = toJsonSchema(z.object({ id: z.string().describe("Group id (a ScorecardRecord id)") }));
 
@@ -24,6 +24,27 @@ const docs = {
     response: {
       202: { description: "Experiment accepted (queued)", ...toJsonSchema(ScorecardResponseSchema) },
       ...errorResponses(400, 401, 402, 403, 404, 429),
+    },
+  },
+  score: {
+    summary: "Score a group's runs (phase 2, detached)",
+    description:
+      "Apply the selected judges over an EXISTING group's runs and re-write the aggregate (execution-model.md " +
+      "P2): phase 1 is never re-executed — judge verdicts attach to the child runs, the fresh summary to the " +
+      "group, and a scorecard.scored platform fact records the pass. Re-scoring a judge REPLACES its previous " +
+      "verdicts (idempotent by judge:<id>); scoring an EXPERIMENT promotes it to a scorecard (kind flips). " +
+      "Async: returns 202 with the still-unchanged record — poll GET /groups/:id until summary/judgeModels " +
+      "move. 409 when the group is not succeeded or a scoring pass is already in flight; 400 when it has no " +
+      "case results. Requires scorecards:run (member+).",
+    tags: ["group"],
+    params: groupIdParams,
+    body: toJsonSchema(ScoreGroupBodySchema),
+    response: {
+      202: {
+        description: "Scoring started (the record is returned as-of submission)",
+        ...toJsonSchema(ScorecardResponseSchema),
+      },
+      ...errorResponses(400, 401, 403, 404, 409),
     },
   },
   get: {
