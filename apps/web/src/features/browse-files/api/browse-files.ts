@@ -6,9 +6,13 @@ import {
   fsEntrySchema,
   fsFileContentSchema,
   fsRemoveResultSchema,
+  fsRevisionSchema,
+  fsWriteConflictSchema,
   type FsEntryView,
   type FsFileContentView,
   type FsRemoveResultView,
+  type FsRevisionView,
+  type FsWriteConflictView,
 } from '@/entities/workspace-file'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -21,6 +25,9 @@ export interface FsActionResult<T> {
   ok: boolean
   data?: T
   error?: string
+  // A write that lost a race carries the resolution kit instead of a bare message: what is live now and the
+  // attempted three-way merge. Present only on writeFileAction, and only when a baseRevision was declared.
+  conflict?: FsWriteConflictView
 }
 
 function fail<T>(e: unknown): FsActionResult<T> {
@@ -48,15 +55,72 @@ export async function readFileAction(path: string): Promise<FsActionResult<FsFil
   }
 }
 
+// Publish a revision. Pass `baseRevision` (the revision the editor loaded) whenever editing an EXISTING file:
+// members and agents write these files concurrently, and without it a save silently overwrites whatever was
+// published meanwhile. A refused write comes back with `conflict` — the live content plus the attempted merge —
+// so the caller can offer a resolution rather than an error message.
 export async function writeFileAction(input: {
   path: string
   content: string
   encoding?: 'utf8' | 'base64'
   contentType?: string
+  baseRevision?: number
+  message?: string
 }): Promise<FsActionResult<FsEntryView>> {
   const ctx = await authContext()
   try {
-    return { ok: true, data: fsEntrySchema.parse(await controlPlane.writeFsFile(ctx, input)) }
+    const res = await controlPlane.writeFsFileChecked(ctx, input)
+    if (res.ok) return { ok: true, data: fsEntrySchema.parse(res.body) }
+    const envelope = res.body as { message?: unknown; data?: unknown }
+    const message =
+      typeof envelope.message === 'string' ? envelope.message : `write failed (${res.status})`
+    if (res.status !== 409) return { ok: false, error: message }
+    const conflict = fsWriteConflictSchema.safeParse(envelope.data)
+    return conflict.success
+      ? { ok: false, error: message, conflict: conflict.data }
+      : { ok: false, error: message }
+  } catch (e) {
+    return fail(e)
+  }
+}
+
+export async function listRevisionsAction(path: string): Promise<FsActionResult<FsRevisionView[]>> {
+  const ctx = await authContext()
+  try {
+    return {
+      ok: true,
+      data: z.array(fsRevisionSchema).parse(await controlPlane.listFsRevisions(ctx, path)),
+    }
+  } catch (e) {
+    return fail(e)
+  }
+}
+
+export async function readRevisionAction(
+  path: string,
+  revision: number
+): Promise<FsActionResult<FsFileContentView>> {
+  const ctx = await authContext()
+  try {
+    return {
+      ok: true,
+      data: fsFileContentSchema.parse(await controlPlane.readFsRevision(ctx, path, revision)),
+    }
+  } catch (e) {
+    return fail(e)
+  }
+}
+
+export async function restoreRevisionAction(
+  path: string,
+  revision: number
+): Promise<FsActionResult<FsEntryView>> {
+  const ctx = await authContext()
+  try {
+    return {
+      ok: true,
+      data: fsEntrySchema.parse(await controlPlane.restoreFsRevision(ctx, { path, revision })),
+    }
   } catch (e) {
     return fail(e)
   }
@@ -102,4 +166,45 @@ export async function removeEntryAction(
   } catch (e) {
     return fail(e)
   }
+}
+
+// Bulk delete / move for the tree's multi-select. The control plane exposes single-entry operations only, so the
+// fan-out happens here — one round trip for the whole selection instead of one per entry, each authorized
+// server-side. A failure on one entry (gone / permission / name taken at the destination) is reported per path
+// rather than aborting the set, so the tree can drop what succeeded and leave the rest actionable for retry.
+
+export async function removeEntriesAction(
+  targets: { path: string; recursive: boolean }[]
+): Promise<{ removed: string[]; failed: { path: string; error: string }[] }> {
+  const ctx = await authContext()
+  const removed: string[] = []
+  const failed: { path: string; error: string }[] = []
+  for (const target of targets) {
+    try {
+      fsRemoveResultSchema.parse(
+        await controlPlane.removeFsEntry(ctx, target.path, target.recursive)
+      )
+      removed.push(target.path)
+    } catch (e) {
+      failed.push({ path: target.path, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return { removed, failed }
+}
+
+export async function moveEntriesAction(
+  moves: { from: string; to: string }[]
+): Promise<{ moved: { from: string; to: string }[]; failed: { path: string; error: string }[] }> {
+  const ctx = await authContext()
+  const moved: { from: string; to: string }[] = []
+  const failed: { path: string; error: string }[] = []
+  for (const move of moves) {
+    try {
+      fsEntrySchema.parse(await controlPlane.moveFsEntry(ctx, move))
+      moved.push(move)
+    } catch (e) {
+      failed.push({ path: move.from, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return { moved, failed }
 }

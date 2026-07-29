@@ -50,6 +50,35 @@ async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Pro
   return res.json() as Promise<T>
 }
 
+// A call whose FAILURE body matters to the caller — returns the flat error envelope ({code,message,data}) instead
+// of throwing it away as a message string. Use only where a specific status carries a payload the UI acts on
+// (today: the filesystem's 409 merge kit); everything else stays on `call`.
+export interface EnvelopeResult {
+  ok: boolean
+  status: number
+  body: unknown // the parsed JSON body (the resource on success, the error envelope on failure)
+}
+
+async function callWithEnvelope(
+  auth: AuthContext,
+  path: string,
+  init?: RequestInit
+): Promise<EnvelopeResult> {
+  const res = await fetch(`${env.CONTROL_PLANE_URL.replace(/\/$/, '')}${path}`, {
+    ...init,
+    headers: requestHeaders(auth, init),
+    cache: 'no-store',
+  })
+  const raw = await res.text()
+  let body: unknown
+  try {
+    body = JSON.parse(raw)
+  } catch {
+    body = { message: raw.slice(0, 300) }
+  }
+  return { ok: res.ok, status: res.status, body }
+}
+
 // For 204 (No Content) responses only — mutations with no body where res.json() must not be called (e.g. secret set/delete).
 async function callVoid(auth: AuthContext, path: string, init?: RequestInit): Promise<void> {
   const res = await fetch(`${env.CONTROL_PLANE_URL.replace(/\/$/, '')}${path}`, {
@@ -88,17 +117,37 @@ export const controlPlane = {
   // plane normalizes them and rejects traversal).
   listFsEntries: <T>(auth: AuthContext, path: string) =>
     call<T>(auth, `/fs/entries?path=${encodeURIComponent(path)}`),
-  readFsFile: <T>(auth: AuthContext, path: string) => call<T>(auth, `/fs/file?path=${encodeURIComponent(path)}`),
+  readFsFile: <T>(auth: AuthContext, path: string) =>
+    call<T>(auth, `/fs/file?path=${encodeURIComponent(path)}`),
   writeFsFile: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/fs/file', { method: 'PUT', body: JSON.stringify(body) }),
+  // The same write, keeping a 409's BODY: losing a race to a teammate or an agent is a normal outcome of
+  // collaborative editing, not an error to flatten into a string — the resolution kit (live content + the
+  // attempted three-way merge) rides in the envelope's `data` and the caller needs it to offer a merge.
+  writeFsFileChecked: (auth: AuthContext, body: unknown) =>
+    callWithEnvelope(auth, '/fs/file', { method: 'PUT', body: JSON.stringify(body) }),
   makeFsDirectory: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/fs/directories', { method: 'POST', body: JSON.stringify(body) }),
   moveFsEntry: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/fs/move', { method: 'POST', body: JSON.stringify(body) }),
   removeFsEntry: <T>(auth: AuthContext, path: string, recursive: boolean) =>
-    call<T>(auth, `/fs/entry?path=${encodeURIComponent(path)}${recursive ? '&recursive=true' : ''}`, {
-      method: 'DELETE',
-    }),
+    call<T>(
+      auth,
+      `/fs/entry?path=${encodeURIComponent(path)}${recursive ? '&recursive=true' : ''}`,
+      {
+        method: 'DELETE',
+      }
+    ),
+  // Publication history of one file — who published each revision, when, and why (retained indefinitely).
+  listFsRevisions: <T>(auth: AuthContext, path: string, limit?: number) =>
+    call<T>(
+      auth,
+      `/fs/revisions?path=${encodeURIComponent(path)}${limit !== undefined ? `&limit=${limit}` : ''}`
+    ),
+  readFsRevision: <T>(auth: AuthContext, path: string, revision: number) =>
+    call<T>(auth, `/fs/revisions/content?path=${encodeURIComponent(path)}&revision=${revision}`),
+  restoreFsRevision: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/fs/revisions/restore', { method: 'POST', body: JSON.stringify(body) }),
   listKnowledgeEntries: <T>(auth: AuthContext) => call<T>(auth, '/knowledge/entries'),
   getKnowledgeEntry: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/knowledge/entries/${encodeURIComponent(id)}`),
