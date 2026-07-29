@@ -1,5 +1,5 @@
 import { type CaseResult, ConflictError, type EvalCase } from "@everdict/contracts";
-import type { RunRecord } from "@everdict/contracts";
+import type { RunClass, RunOrigin, RunRecord } from "@everdict/contracts";
 
 // The domain model for a run's lifecycle (queued → running → succeeded | failed). Wraps the persistence
 // record (@everdict/db RunRecord — shapes unchanged); guard methods are the SSOT for what is legal, and
@@ -17,6 +17,10 @@ export interface NewQueuedRunInput {
   runtime?: string; // the placed runtime (work-queue axis); unset = default backend
   trigger?: string; // activity-view source axis (web|mcp|api…)
   submittedBy?: string; // executor stamp — notification-feed recipient
+  // The universal-run shape (execution-model.md P0). origin = structured WHY (trigger stays dual-stamped for
+  // the legacy source axis); class defaults to interactive — a standalone submit is a person waiting.
+  origin?: RunOrigin;
+  class?: RunClass;
   now: string;
 }
 
@@ -39,6 +43,12 @@ export class Run {
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
       ...(input.runtime ? { runtime: input.runtime } : {}),
       caseSpec: input.evalCase,
+      // P0 stamps — say what this activation IS; enforcement arrives with the P4 gate.
+      kind: "eval",
+      class: input.class ?? "interactive",
+      lifetime: "task",
+      ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.runtime ? { placement: { where: "runtime" as const, target: input.runtime } } : {}),
       createdAt: input.now,
       updatedAt: input.now,
     };

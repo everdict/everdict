@@ -91,6 +91,53 @@ describe("PgRunStore", () => {
     expect(rec?.caseSpec?.placement?.target).toBe("nomad-x"); // the effective (placement-injected) case survives
   });
 
+  it("round-trips the universal-run shape (mig 0092): kind/class/origin/group stringify on INSERT and map back on read", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgRunStore(client).create({
+      id: "r3",
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      caseId: "c1",
+      status: "queued",
+      kind: "eval",
+      class: "batch",
+      lifetime: "task",
+      origin: { cause: "schedule", scheduleId: "sch-1" },
+      group: { id: "sc-9", role: "case" },
+      placement: { where: "runtime", target: "nomad-x" },
+      createdAt: "2026-07-29T00:00:00.000Z",
+      updatedAt: "2026-07-29T00:00:00.000Z",
+    });
+    // Column order (mig 0092 tail): …case_spec($13), kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at
+    expect(calls[0]?.params?.[13]).toBe("eval");
+    expect(calls[0]?.params?.[14]).toBe("batch");
+    expect(calls[0]?.params?.[15]).toBe("task");
+    expect(calls[0]?.params?.[16]).toBe(JSON.stringify({ cause: "schedule", scheduleId: "sch-1" }));
+    expect(calls[0]?.params?.[18]).toBe(JSON.stringify({ where: "runtime", target: "nomad-x" }));
+    expect(calls[0]?.params?.[20]).toBe(JSON.stringify({ id: "sc-9", role: "case" }));
+
+    const { client: reader } = fakeClient(() => ({
+      rows: [
+        {
+          ...ROW,
+          kind: "eval",
+          class: "batch",
+          lifetime: "task",
+          origin: { cause: "schedule", scheduleId: "sch-1" },
+          group_ref: { id: "sc-9", role: "case" },
+          placement: { where: "runtime", target: "nomad-x" },
+        },
+      ],
+    }));
+    const rec = await new PgRunStore(reader).get("r3");
+    expect(rec).toMatchObject({
+      kind: "eval",
+      class: "batch",
+      origin: { cause: "schedule", scheduleId: "sch-1" },
+      group: { id: "sc-9", role: "case" }, // group_ref column → the record's `group`
+    });
+  });
+
   it("get → maps the row to a RunRecord (Date→ISO, jsonb→object) + derives usage", async () => {
     const { client } = fakeClient(() => ({ rows: [ROW] }));
     const rec = await new PgRunStore(client).get("r1");

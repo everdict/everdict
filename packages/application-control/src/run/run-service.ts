@@ -7,6 +7,7 @@ import {
   type HarnessSpec,
   type JudgeRunConfig,
   type RegistryAuth,
+  type RunOrigin,
   type RunRecord,
   type TraceSource,
   type TraceSourceConfig,
@@ -190,6 +191,7 @@ export class RunService {
       ...(placedRuntime ? { runtime: placedRuntime } : {}),
       ...(effective.trigger ? { trigger: effective.trigger } : {}),
       ...(effective.submittedBy ? { submittedBy: effective.submittedBy } : {}),
+      origin: standaloneRunOrigin(effective.trigger, effective.submittedBy),
       now: this.now(),
     });
     await this.deps.store.create(record);
@@ -499,4 +501,12 @@ export class RunService {
       // A webhook failure does not affect the run result (the store is the source of truth; also queryable by polling).
     }
   }
+}
+
+// Structured WHY for a standalone submit (execution-model.md P0) — the free-string trigger's successor; both
+// are stamped during the transition window. web|mcp = a member acted through a UI; ci = the CI federation;
+// anything else (direct API, unset) = api. Scorecard children carry group instead (their WHY is the batch's).
+function standaloneRunOrigin(trigger: string | undefined, submittedBy: string | undefined): RunOrigin {
+  const cause = trigger === "web" || trigger === "mcp" ? "member" : trigger === "ci" ? "ci" : "api";
+  return { cause, ...(submittedBy ? { actor: submittedBy } : {}) };
 }

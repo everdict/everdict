@@ -39,6 +39,24 @@ describe("Run — the run lifecycle domain model", () => {
     expect(record.caseSpec).toEqual(CASE); // boot recovery's re-dispatch basis
   });
 
+  it("newQueued stamps the universal-run shape — kind/class/lifetime, origin, and runtime placement (P0)", () => {
+    const record = queued({
+      runtime: "self:dev",
+      origin: { cause: "member", actor: "alice" },
+    });
+    // The ledger can now SAY what this activation is; nothing is enforced yet (that is the P4 gate).
+    expect(record).toMatchObject({
+      kind: "eval",
+      class: "interactive", // a standalone submit is a person waiting
+      lifetime: "task",
+      origin: { cause: "member", actor: "alice" },
+      placement: { where: "runtime", target: "self:dev" },
+    });
+    // No runtime → no placement claim (default backend stays unstated rather than guessed).
+    expect(queued().placement).toBeUndefined();
+    expect(RunRecordSchema.parse(record).kind).toBe("eval");
+  });
+
   it("succeed and fail produce terminal store patches from a live run", () => {
     const run = Run.from(queued());
     expect(run.succeed(RESULT, "t1")).toEqual({ status: "succeeded", result: RESULT, updatedAt: "t1" });

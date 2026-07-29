@@ -333,3 +333,27 @@ describe("ScorecardBatch — pure derivations and the child-seed helper", () => 
     expect(derived.trialSummary).toMatchObject({ cases: 1, maxTrials: 2 });
   });
 });
+
+describe("ScorecardBatch child runs — the universal-run shape (P0)", () => {
+  it("stamps every fan-out child as an eval-kind batch-class task inside the scorecard's group", () => {
+    const child = ScorecardBatch.newChildRun({
+      id: "run-1",
+      tenant: "acme",
+      harness: { id: "h", version: "1.0.0" },
+      caseId: "c1",
+      parentScorecardId: "sc-9",
+      runtime: "nomad-x",
+      origin: { cause: "schedule", scheduleId: "sch-1" },
+      now: "2026-07-29T00:00:00.000Z",
+    });
+    expect(child).toMatchObject({
+      kind: "eval",
+      class: "batch", // fan-out never competes with a human's click
+      lifetime: "task",
+      group: { id: "sc-9", role: "case" }, // generalizes parentScorecardId (which stays for the eval surfaces)
+      origin: { cause: "schedule", scheduleId: "sch-1" },
+      placement: { where: "runtime", target: "nomad-x" },
+    });
+    expect(child.parentScorecardId).toBe("sc-9"); // the legacy axis is untouched
+  });
+});

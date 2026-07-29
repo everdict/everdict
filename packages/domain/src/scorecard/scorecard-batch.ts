@@ -1,4 +1,5 @@
 import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contracts";
+import type { RunOrigin } from "@everdict/contracts";
 import type { RunRecord, ScorecardOrigin, ScorecardRecord, ScorecardSubset } from "@everdict/contracts";
 import { summarizeTrials } from "./trials.js";
 
@@ -60,7 +61,20 @@ export interface NewChildRunInput {
   caseId: string;
   parentScorecardId: string;
   runtime?: string; // the assigned runtime lane (batch runtime or per-case shard target)
+  origin?: RunOrigin; // the batch's WHY, carried onto each case (schedule/member/api — execution-model.md P0)
   now: string;
+}
+
+// The P0 stamps every fan-out child shares: an eval-kind, batch-class task inside the scorecard's group.
+function childRunShape(input: Pick<NewChildRunInput, "parentScorecardId" | "runtime" | "origin">) {
+  return {
+    kind: "eval" as const,
+    class: "batch" as const,
+    lifetime: "task" as const,
+    group: { id: input.parentScorecardId, role: "case" as const },
+    ...(input.origin ? { origin: input.origin } : {}),
+    ...(input.runtime ? { placement: { where: "runtime" as const, target: input.runtime } } : {}),
+  };
 }
 
 export class ScorecardBatch {
@@ -114,6 +128,7 @@ export class ScorecardBatch {
       parentScorecardId: input.parentScorecardId,
       trigger: "scorecard",
       ...(input.runtime ? { runtime: input.runtime } : {}),
+      ...childRunShape(input),
       createdAt: input.now,
       updatedAt: input.now,
     };
@@ -132,6 +147,7 @@ export class ScorecardBatch {
       parentScorecardId: input.parentScorecardId,
       trigger: "scorecard",
       ...(input.runtime ? { runtime: input.runtime } : {}),
+      ...childRunShape(input),
       createdAt: input.now,
       updatedAt: input.now,
     };

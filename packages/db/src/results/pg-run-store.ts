@@ -17,6 +17,17 @@ interface RunRow {
   created_by: string | null;
   runtime: string | null;
   case_spec: unknown | null;
+  // The universal-run shape (mig 0092) — nullable; absent = legacy eval run.
+  kind: string | null;
+  class: string | null;
+  lifetime: string | null;
+  origin: unknown | null;
+  envelope: unknown | null;
+  placement: unknown | null;
+  attach: unknown | null;
+  group_ref: unknown | null;
+  lineage: unknown | null;
+  outputs: unknown | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -38,6 +49,16 @@ function rowToRecord(row: RunRow): RunRecord {
     createdBy: row.created_by ?? undefined,
     runtime: row.runtime ?? undefined,
     ...(row.case_spec ? { caseSpec: row.case_spec } : {}),
+    ...(row.kind ? { kind: row.kind } : {}),
+    ...(row.class ? { class: row.class } : {}),
+    ...(row.lifetime ? { lifetime: row.lifetime } : {}),
+    ...(row.origin ? { origin: row.origin } : {}),
+    ...(row.envelope ? { envelope: row.envelope } : {}),
+    ...(row.placement ? { placement: row.placement } : {}),
+    ...(row.attach ? { attach: row.attach } : {}),
+    ...(row.group_ref ? { group: row.group_ref } : {}),
+    ...(row.lineage ? { lineage: row.lineage } : {}),
+    ...(row.outputs ? { outputs: row.outputs } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -51,8 +72,8 @@ export class PgRunStore implements RunStore {
   async create(r: RunRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO everdict_runs
-        (id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, case_spec, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        (id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
       [
         r.id,
         r.tenant,
@@ -67,6 +88,16 @@ export class PgRunStore implements RunStore {
         r.createdBy ?? null,
         r.runtime ?? null,
         r.caseSpec ? JSON.stringify(r.caseSpec) : null,
+        r.kind ?? null,
+        r.class ?? null,
+        r.lifetime ?? null,
+        r.origin ? JSON.stringify(r.origin) : null,
+        r.envelope ? JSON.stringify(r.envelope) : null,
+        r.placement ? JSON.stringify(r.placement) : null,
+        r.attach ? JSON.stringify(r.attach) : null,
+        r.group ? JSON.stringify(r.group) : null,
+        r.lineage ? JSON.stringify(r.lineage) : null,
+        r.outputs ? JSON.stringify(r.outputs) : null,
         r.createdAt,
         r.updatedAt,
       ],
@@ -94,6 +125,14 @@ export class PgRunStore implements RunStore {
     if (patch.runtime !== undefined) {
       sets.push(`runtime = $${i++}`);
       vals.push(patch.runtime);
+    }
+    if (patch.outputs !== undefined) {
+      sets.push(`outputs = $${i++}`);
+      vals.push(JSON.stringify(patch.outputs));
+    }
+    if (patch.lineage !== undefined) {
+      sets.push(`lineage = $${i++}`);
+      vals.push(JSON.stringify(patch.lineage));
     }
     if (patch.updatedAt !== undefined) {
       sets.push(`updated_at = $${i++}`);
