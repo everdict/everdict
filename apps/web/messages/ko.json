@@ -208,11 +208,11 @@
     "modeBatch": "하네스 실행",
     "modeTraces": "트레이스 평가",
     "modeBatchHint": "매 실행마다 하네스를 데이터셋에 실행해 점수를 수집합니다.",
-    "modeTracesHint": "매 실행마다 옵저버빌리티 소스의 최근 트레이스를 rolling window로 평가합니다 — 데이터셋도, 하네스 실행도 없이.",
+    "modeTracesHint": "매 실행마다 트레이스 소스의 최근 트레이스를 rolling window로 평가합니다 — 데이터셋도, 하네스 실행도 없이.",
     "pullSourceLabel": "트레이스 소스",
     "pullSourceRequired": "트레이스 소스를 선택하세요",
     "pullSourcePlaceholder": "소스 선택",
-    "pullSourceEmpty": "트레이스 소스 없음 — 설정 › 옵저버빌리티에서 등록하세요",
+    "pullSourceEmpty": "트레이스 소스 없음 — 설정 › 트레이스에서 등록하세요",
     "pullWindowLabel": "기간(시간)",
     "pullWindowTip": "매 실행마다 최근 N시간의 트레이스를 평가합니다 (24 = 지난 하루).",
     "pullScopeLabel": "범위 (선택)",
@@ -1958,7 +1958,7 @@
   "judgePreview": {
     "heading": "실행해 보기",
     "subtitle": "연결된 플랫폼에서 실제 트레이스를 골라 이 평가자의 코드를 실행하고, 실제 점수 — 또는 크래시 출력 — 를 확인합니다.",
-    "noSourcesNote": "연결된 트레이스 소스가 없습니다 — 설정 › Observability에서 관측 플랫폼을 등록하면 샘플 트레이스를 고를 수 있어요.",
+    "noSourcesNote": "연결된 트레이스 소스가 없습니다 — 설정 › 트레이스에서 관측 플랫폼을 등록하면 샘플 트레이스를 고를 수 있어요.",
     "stepPick": "샘플 트레이스",
     "stepRun": "코드 실행",
     "changeTrace": "다른 트레이스 선택",
@@ -2716,7 +2716,7 @@
     "personalCapabilitiesDesc": "나에게만 보이는 비공개 발행물과 개인 스킬 초안.",
     "integrations": "통합",
     "integrationsDesc": "GitHub App·Mattermost·트레이스 싱크/소스·이미지 레지스트리.",
-    "observability": "옵저버빌리티",
+    "observability": "트레이스",
     "observabilityDesc": "등록한 플랫폼의 트레이스를 둘러봅니다.",
     "knowledge": "지식 그래프",
     "knowledgeDesc": "워크스페이스가 쌓은 지식과 스킬을, 그것이 다루는 엔티티 위에 지도로 펼칩니다.",
@@ -2898,8 +2898,8 @@
     "tableTruncated": "처음 {rows}행"
   },
   "observabilityPage": {
-    "title": "옵저버빌리티",
-    "description": "팀 트레이스 플랫폼을 등록하고, 보유한 트레이스와 메트릭을 그 플랫폼처럼 둘러봅니다. 하니스마다 트레이스를 가져올 소스와 판정 결과를 내보낼 소스를 골라요.",
+    "title": "트레이스",
+    "description": "팀 관측 플랫폼을 등록하고, 보유한 트레이스와 메트릭을 여기서 바로 둘러봅니다.",
     "noPermissionTitle": "접근 권한 없음",
     "noPermissionHint": "트레이스를 둘러보려면 워크스페이스 읽기 권한이 필요합니다."
   },
@@ -2953,7 +2953,7 @@
     "noEvents": "이 트레이스에 이벤트가 없습니다.",
     "rawSpans": "원시 스팬 속성 · {count}개",
     "noSourcesTitle": "트레이스 소스 없음",
-    "noSourcesHint": "설정 › 통합에서 관측 플랫폼을 등록하면 그 트레이스를 둘러볼 수 있습니다.",
+    "noSourcesHint": "설정 › 트레이스에서 관측 플랫폼을 등록하면 그 트레이스를 둘러볼 수 있습니다.",
     "noTracesTitle": "트레이스 없음",
     "noTracesHint": "이 소스가 반환한 트레이스가 없습니다.",
     "noTracesScopeHint": "이 스코프에 트레이스가 없습니다 — experiment/service 이름이 맞는지 확인하세요.",
@@ -3617,14 +3617,14 @@
     "modeRun": "하네스 실행",
     "modeTraces": "트레이스 평가",
     "runDescription": "하네스를 데이터셋에 실행해 트레이스를 생성한 뒤 채점합니다.",
-    "tracesDescription": "옵저버빌리티에 이미 있는 트레이스를 골라 평가자로 채점합니다 — 데이터셋도, 하네스 실행도 없이."
+    "tracesDescription": "관측 플랫폼에 이미 있는 트레이스를 골라 평가자로 채점합니다 — 데이터셋도, 하네스 실행도 없이."
   },
   "evaluateTraces": {
     "noSource": "트레이스 소스를 선택하세요.",
     "noTraces": "트레이스를 하나 이상 선택하세요.",
     "submitError": "평가를 시작하지 못했습니다",
     "noSourcesTitle": "트레이스 소스 없음",
-    "noSourcesHint": "설정 › 옵저버빌리티에서 트레이스 소스를 먼저 등록한 뒤, 평가할 트레이스를 고르세요.",
+    "noSourcesHint": "설정 › 트레이스에서 소스를 먼저 등록한 뒤, 평가할 트레이스를 고르세요.",
     "judgesLabel": "평가자 (선택)",
     "judgesTip": "선택한 각 트레이스를 채점하는 모델/하네스 평가자입니다. 선택하면 평가자 지표(평균 + 통과율)로 집계됩니다.",
     "judgesHelp": "선택한 평가자가 각 트레이스를 채점해 스코어카드에 평가자 지표를 추가합니다.",

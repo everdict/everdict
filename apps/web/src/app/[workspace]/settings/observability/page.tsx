@@ -66,12 +66,16 @@ export default async function ObservabilityPage() {
             canWrite={canWrite}
             secretNames={secretNames}
           />
-          <div className="border-t pt-6">
-            {/* Opt out of auto-pull here: registering/listing a source shouldn't fire a slow platform query — the user
-                selects a source and presses Fetch. Each trace's detail dialog can hand it to the agent chat as context
-                ("analyze in chat"). The pick flows (judge wizard, evaluate-traces) keep auto-loading, no mention. */}
-            <ObservabilityTraceBrowser sources={roster?.sources ?? []} />
-          </div>
+          {/* No sources → no browser section at all (hide-empty-sections): the manager's empty line already says it,
+              and a second "no sources" EmptyState below would just repeat it. */}
+          {(roster?.sources.length ?? 0) > 0 && (
+            <div className="border-t pt-6">
+              {/* Opt out of auto-pull here: registering/listing a source shouldn't fire a slow platform query — the user
+                  selects a source and presses Fetch. Each trace's detail dialog can hand it to the agent chat as context
+                  ("analyze in chat"). The pick flows (judge wizard, evaluate-traces) keep auto-loading, no mention. */}
+              <ObservabilityTraceBrowser sources={roster?.sources ?? []} />
+            </div>
+          )}
         </>
       )}
     </div>
