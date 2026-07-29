@@ -1,5 +1,5 @@
 import type { CaseJob, CaseResult, RegistryAuth } from "@everdict/contracts";
-import { imageUsesRegistryHost } from "@everdict/domain";
+import { registryAuthsForImages } from "@everdict/domain";
 import type { DispatchOptions, Dispatcher } from "../ports/dispatcher.js";
 import { type CollectTraceDeps, collectDeferredTrace } from "./collect-trace.js";
 
@@ -17,8 +17,9 @@ export interface ExecuteCaseDeps extends CollectTraceDeps {
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // (legacy) personal connection — evalCase.env.source.connectionId → external-account connection token (personally owned, resolved by owner). Removed in S6.
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
-  // Workspace image-registry (plural) pull credentials (best-effort) — if a registry matches the job image's host,
-  // attach its credentials via job.registryAuth (transient). docs/architecture/workspace-image-registry.md
+  // Image pull credentials (best-effort) — every managed-store grant / workspace registry credential the tenant has;
+  // the ones covering this job's images ride along as job.registryAuths (transient).
+  // docs/architecture/managed-image-store.md
   registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
 }
 
@@ -37,14 +38,13 @@ export function jobImages(job: CaseJob): string[] {
   return images;
 }
 
-// If any job image belongs to a workspace registry (plural), attach that registry's pull credentials
-// (same discipline as repoToken — non-persisted transient). Only the first host match — CaseJob.registryAuth is a singular contract, so
-// mixing images from two different BYO registries in one job authenticates only the first match (a documented limitation).
-async function resolveRegistryAuth(deps: ExecuteCaseDeps, job: CaseJob): Promise<RegistryAuth | undefined> {
-  if (!deps.registryAuthsFor || !job.tenant) return undefined;
+// Every credential covering an image this job pulls (same discipline as repoToken — non-persisted transient).
+// All matching registries are attached, not just the first: a topology whose services come from two different
+// registries needs both, and a grant/credential is scoped per host so they compose.
+async function resolveRegistryAuths(deps: ExecuteCaseDeps, job: CaseJob): Promise<RegistryAuth[]> {
+  if (!deps.registryAuthsFor || !job.tenant) return [];
   const auths = await deps.registryAuthsFor(job.tenant).catch(() => [] as RegistryAuth[]);
-  const images = jobImages(job);
-  return auths.find((auth) => images.some((image) => imageUsesRegistryHost(image, auth.host)));
+  return registryAuthsForImages(auths, jobImages(job));
 }
 
 // If the case repo seed is private (git), resolve a token. Try the workspace GitHub App (installation) first and
@@ -89,11 +89,14 @@ export async function executeCase(
 ): Promise<CaseResult> {
   const normalized = withHarnessImage(job);
   const repoToken = await resolveRepoToken(deps, owner, normalized);
-  const registryAuth = await resolveRegistryAuth(deps, normalized);
+  const registryAuths = await resolveRegistryAuths(deps, normalized);
   const enriched: CaseJob = {
     ...normalized,
     ...(repoToken ? { repoToken } : {}),
-    ...(registryAuth ? { registryAuth } : {}),
+    ...(registryAuths.length > 0 ? { registryAuths } : {}),
+    // Dual-write the deprecated singular field: a self-hosted runner is user-installed and may lag this control
+    // plane, and it reads only that field — dropping it would silently un-authenticate an older runner's pulls.
+    ...(registryAuths[0] ? { registryAuth: registryAuths[0] } : {}),
   };
   const result = await deps.dispatcher.dispatch(enriched, opts);
   // A case whose collection was deferred out of the job (traceRef) is completed here — the job was returned when execution ended (2-phase).

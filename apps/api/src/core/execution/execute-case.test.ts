@@ -123,7 +123,7 @@ describe("executeCase — pure execution (token resolve+attach → dispatch)", (
   });
 });
 
-describe("executeCase — attach workspace-registry pull credentials (job.registryAuth)", () => {
+describe("executeCase — attach image pull credentials (job.registryAuths)", () => {
   const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
 
   it("when the case image belongs to a workspace registry, attaches registryAuth", async () => {
@@ -142,6 +142,37 @@ describe("executeCase — attach workspace-registry pull credentials (job.regist
     const job: CaseJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "spreadsheetbench:v1" } };
     await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), "u", job);
     expect(cap.seen()?.registryAuth).toBeUndefined();
+  });
+
+  // The many-credential contract: a topology whose services live in two registries needs BOTH, which the singular
+  // field structurally could not carry (it kept the first host match and silently un-authenticated the rest).
+  it("attaches every credential the job's images need, not just the first match", async () => {
+    const cap = capture();
+    const QUAY = { host: "quay.io", password: "quay-tok" };
+    const serviceSpec: NonNullable<CaseJob["harnessSpec"]> = {
+      kind: "service",
+      id: "bu",
+      version: "1",
+      services: [
+        { name: "agent", image: "ghcr.io/acme/agent:v1", needs: [], perRun: [], replicas: 1, env: {} },
+        { name: "sidecar", image: "quay.io/acme/sidecar:v2", needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+      dependencies: [],
+      frontDoor: { service: "agent", submit: "POST /runs" },
+      traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
+    };
+    const job: CaseJob = { ...JOB, harnessSpec: serviceSpec };
+    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH, QUAY] }), "u", job);
+    expect(cap.seen()?.registryAuths).toEqual([AUTH, QUAY]);
+  });
+
+  // A self-hosted runner is user-installed and may lag the control plane; it reads only the singular field.
+  it("dual-writes the deprecated singular field so an older self-hosted runner still authenticates", async () => {
+    const cap = capture();
+    const job: CaseJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" } };
+    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), "u", job);
+    expect(cap.seen()?.registryAuths).toEqual([AUTH]);
+    expect(cap.seen()?.registryAuth).toEqual(AUTH);
   });
 
   it("a service harness is judged by its service images (+ per-dispatch pin override)", async () => {

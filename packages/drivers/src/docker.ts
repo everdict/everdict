@@ -13,7 +13,7 @@ import {
   InternalError,
   type RegistryAuth,
 } from "@everdict/contracts";
-import { dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
+import { dockerAuthConfigJson, pickRegistryAuth } from "@everdict/domain";
 
 const pexecFile = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -157,16 +157,16 @@ export class DockerDriver implements Driver {
   private readonly base: string;
   private readonly mounts: DriverMount[];
   // defaultImage: the image to use when a case carries no image. keepAlive: the sleep argument that keeps the container alive. base: the working root for relative paths.
-  // mounts: host→container bind mounts (injected by the runner — e.g. codex login). registryAuth: workspace-registry
-  // pull credentials (transient, CaseJob.registryAuth) — if the image host matches, authenticated pre-pull then run.
-  // Design: docs/architecture/portable-harness-runtime.md · workspace-image-registry.md.
+  // mounts: host→container bind mounts (injected by the runner — e.g. codex login). registryAuths: image pull
+  // credentials (transient, CaseJob.registryAuths) — if one covers the image's host, authenticated pre-pull then run.
+  // Design: docs/architecture/portable-harness-runtime.md · managed-image-store.md.
   constructor(
     private readonly opts: {
       defaultImage?: string;
       keepAlive?: string;
       base?: string;
       mounts?: DriverMount[];
-      registryAuth?: RegistryAuth;
+      registryAuths?: RegistryAuth[];
       echo?: boolean; // TEE every exec's output to this process's stdio (in-job: the job log becomes a live feed)
     } = {},
   ) {
@@ -179,9 +179,9 @@ export class DockerDriver implements Driver {
     if (!image) {
       throw new BadRequestError("BAD_REQUEST", undefined, "DockerDriver requires spec.image or defaultImage.");
     }
-    // For a workspace-registry image, authenticated pre-pull (temporary DOCKER_CONFIG) — leaves no login trace on the host daemon.
-    const auth = this.opts.registryAuth;
-    if (auth && imageUsesRegistryHost(image, auth.host)) await pullWithRegistryAuth(image, auth);
+    // For an image one of our credentials covers, authenticated pre-pull (temporary DOCKER_CONFIG) — leaves no login trace on the host daemon.
+    const auth = pickRegistryAuth(this.opts.registryAuths ?? [], image);
+    if (auth) await pullWithRegistryAuth(image, auth);
     const keep = this.opts.keepAlive ?? "infinity";
     // Bind-mount args (-v source:target[:ro]) — come before the image.
     const mountArgs = this.mounts.flatMap((m) => ["-v", `${m.source}:${m.target}${m.readOnly ? ":ro" : ""}`]);

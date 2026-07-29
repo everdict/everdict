@@ -26,9 +26,9 @@ export function buildTopologyBackend(
   deps: {
     harnesses: HarnessInstanceRegistry;
     callbackRendezvous?: CallbackRendezvous;
-    // Workspace image-registry pull credentials (resolved at build time) — for authenticated service-image pulls
-    // (nomad docker auth / k8s dockerconfigjson Secret + imagePullSecrets).
-    registryAuth?: RegistryAuth;
+    // Image pull credentials (resolved at build time) — for authenticated service-image pulls
+    // (nomad docker auth / k8s dockerconfigjson Secret + imagePullSecrets). One entry per registry host.
+    registryAuths?: RegistryAuth[];
     // Per-dispatch resolver for the harness's selected WORKSPACE-registered trace source (TraceSourceService.resolve:
     // name → config with the auth value + correlate + scope). When it yields a config, the pull uses that source
     // (a dev-cluster observability endpoint) instead of the fixed runtime traceSource; undefined = fall back.
@@ -58,13 +58,13 @@ export function buildTopologyBackend(
           addr: spec.addr,
           ...(spec.namespace ? { namespace: spec.namespace } : {}),
           ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
-          ...(deps.registryAuth ? { registryAuth: deps.registryAuth } : {}),
+          ...(deps.registryAuths ? { registryAuths: deps.registryAuths } : {}),
         })
       : new K8sTopologyRuntime({
           ...(spec.context ? { context: spec.context } : {}),
           ...(spec.namespace ? { namespacePrefix: spec.namespace } : {}),
           ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
-          ...(deps.registryAuth ? { registryAuth: deps.registryAuth } : {}),
+          ...(deps.registryAuths ? { registryAuths: deps.registryAuths } : {}),
         });
   // Build the full fixed source from the runtime spec (G1: 5 kinds + auth/correlate/scope). authSecret → the verbatim
   // auth-header value from the tenant SecretStore; otel/mlflow read it from headers.authorization and the newer three

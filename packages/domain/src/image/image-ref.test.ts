@@ -4,9 +4,13 @@ import {
   classifyImageRef,
   dockerAuthConfigJson,
   imageRegistryPrefix,
+  imageRepoFor,
   imageUsesRegistryHost,
   imageWarnings,
   parseImageRef,
+  pickRegistryAuth,
+  registryAuthsForImages,
+  registryAuthsOf,
 } from "./image-ref.js";
 
 const acme = { host: "ghcr.io", namespace: "acme" };
@@ -148,5 +152,79 @@ describe("imageWarnings — no-pull-guarantee (local/unqualified) + non-reproduc
     expect(imageWarnings(["ghcr.io/acme/agent:v1"], acme)).toEqual([]); // a version tag is treated as stable
     expect(imageWarnings(["ghcr.io/acme/agent@sha256:abc"], acme)).toEqual([]); // digest = immutable
     expect(imageWarnings(["ghcr.io/acme/agent:latest@sha256:abc"], acme)).toEqual([]); // digest present → immutable
+  });
+});
+
+// The managed image store — everdict's own namespace. Design: docs/architecture/managed-image-store.md
+describe("classifyImageRef — the managed store outranks every other class", () => {
+  const managed = { host: "images.everdict.dev", namespace: "acme-1a2b3c4d" };
+
+  it("classifies a ref inside the workspace's own managed namespace as managed", () => {
+    expect(classifyImageRef("images.everdict.dev/acme-1a2b3c4d/officeqa:v3", acme, managed)).toBe("managed");
+  });
+
+  it("does NOT claim another workspace's namespace on the same managed host", () => {
+    expect(classifyImageRef("images.everdict.dev/other-9f8e7d6c/officeqa:v3", acme, managed)).toBe("external");
+  });
+
+  it("wins over `local` when the managed store runs on loopback (the dev compose stack)", () => {
+    const dev = { host: "localhost:5001", namespace: "acme-1a2b3c4d" };
+    expect(classifyImageRef("localhost:5001/acme-1a2b3c4d/officeqa:v3", acme, dev)).toBe("managed");
+    // a different loopback repo is still local — only OUR namespace is managed.
+    expect(classifyImageRef("localhost:5001/scratch/x:v1", acme, dev)).toBe("local");
+  });
+
+  it("leaves every existing classification unchanged when no managed store is configured", () => {
+    expect(classifyImageRef("ghcr.io/acme/agent:v1", acme)).toBe("workspace");
+    expect(classifyImageRef("quay.io/x/y:1", acme)).toBe("external");
+  });
+});
+
+describe("imageRepoFor — the workspace's managed repository namespace", () => {
+  it("keeps an operator-readable head and appends a hash tail", () => {
+    expect(imageRepoFor("acme")).toMatch(/^acme-[0-9a-f]{8}$/);
+  });
+
+  it("gives case- and separator-variant tenants DISTINCT namespaces (a collision would be cross-tenant leakage)", () => {
+    expect(imageRepoFor("Acme")).not.toBe(imageRepoFor("acme"));
+    expect(imageRepoFor("a.b")).not.toBe(imageRepoFor("a-b"));
+  });
+
+  it("is stable for the same tenant and legal when the slug sanitizes to nothing", () => {
+    expect(imageRepoFor("acme")).toBe(imageRepoFor("acme"));
+    expect(imageRepoFor("___")).toMatch(/^ws-[0-9a-f]{8}$/);
+  });
+
+  it("rejects an empty tenant rather than minting a namespace nobody owns", () => {
+    expect(() => imageRepoFor("  ")).toThrow(BadRequestError);
+  });
+});
+
+describe("registry credentials — many per job, selected per image", () => {
+  const ghcr = { host: "ghcr.io", username: "bot", password: "ghcr-tok" };
+  const quay = { host: "quay.io", password: "quay-tok" };
+
+  it("prefers the plural field and falls back to the deprecated singular one", () => {
+    expect(registryAuthsOf({ registryAuths: [ghcr, quay] })).toEqual([ghcr, quay]);
+    expect(registryAuthsOf({ registryAuth: ghcr })).toEqual([ghcr]); // an older control plane
+    expect(registryAuthsOf({ registryAuths: [quay], registryAuth: ghcr })).toEqual([quay]); // dual-written: plural wins
+    expect(registryAuthsOf({})).toEqual([]);
+  });
+
+  it("picks the credential for the image's own host, and none for an uncovered image", () => {
+    expect(pickRegistryAuth([ghcr, quay], "quay.io/acme/sidecar:v2")).toEqual(quay);
+    expect(pickRegistryAuth([ghcr, quay], "mendhak/http-https-echo:latest")).toBeUndefined();
+  });
+
+  it("keeps every credential a multi-registry topology needs (the singular contract could keep only one)", () => {
+    const images = ["ghcr.io/acme/agent:v1", "quay.io/acme/sidecar:v2", "postgres:16-alpine"];
+    expect(registryAuthsForImages([ghcr, quay], images)).toEqual([ghcr, quay]);
+    expect(registryAuthsForImages([ghcr, quay], ["postgres:16-alpine"])).toEqual([]);
+  });
+
+  it("renders one docker config authenticating every host (a topology pulls from several)", () => {
+    const config = JSON.parse(dockerAuthConfigJson([ghcr, quay]));
+    expect(Object.keys(config.auths)).toEqual(["ghcr.io", "quay.io"]);
+    expect(Buffer.from(config.auths["quay.io"].auth, "base64").toString()).toBe("everdict:quay-tok");
   });
 });

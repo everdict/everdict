@@ -13,7 +13,7 @@ import {
   judgeEnv,
 } from "@everdict/contracts";
 import type { InspectNode, InspectRuntimeResult, InspectStore, InspectWorkload } from "@everdict/contracts/wire";
-import { assertHardenedIsolation, imageUsesRegistryHost } from "@everdict/domain";
+import { assertHardenedIsolation, pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
 import {
   type AdoptOutcome,
@@ -367,12 +367,12 @@ export function buildNomadJob(job: CaseJob, opts: NomadBackendOptions, jobId?: s
   };
   // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default job-runner image.
   const image = job.evalCase.image ?? opts.image;
-  // For a workspace-registry image, docker auth (transient job credentials) — only when the host matches.
-  const registryAuth = job.registryAuth;
-  const auth =
-    registryAuth && imageUsesRegistryHost(image, registryAuth.host)
-      ? [{ username: registryAuth.username ?? "everdict", password: registryAuth.password }]
-      : undefined;
+  // docker auth (transient job credentials) — the credential covering THIS task's image, if any. A Nomad task runs one
+  // image, so the many-credential job resolves to at most one auth block here.
+  const registryAuth = pickRegistryAuth(registryAuthsOf(job), image);
+  const auth = registryAuth
+    ? [{ username: registryAuth.username ?? "everdict", password: registryAuth.password }]
+    : undefined;
   // Runtime-side node constraints (operator-owned) → Nomad's {LTarget, Operand, RTarget} form.
   const constraints = opts.constraints?.map((c) => ({
     LTarget: c.attribute,

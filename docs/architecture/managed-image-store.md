@@ -132,6 +132,11 @@ grant at an arbitrary repository in someone else's namespace is not a request we
   consumer (DockerDriver pre-pull, self-hosted runner pre-pull, Nomad `Config.auth`, the K8s
   dockerconfigjson Secret, both topology builders) render all matching entries instead of the first.
   Each consumer already filters by `imageUsesRegistryHost`; the change is fan-out, not new logic.
+  The singular field is **kept and dual-written**, not deleted: a self-hosted runner is user-installed
+  and can lag the control plane, it reads only that field, and dropping it would silently
+  un-authenticate an older runner's pulls (a failure that looks like a broken registry, not like a
+  version skew). Every consumer reads through `registryAuthsOf`, which prefers the plural, so the
+  compatibility lives in one function and the field can be deleted once runners have rolled.
 - `classifyImageRef` gains a **`managed`** class ahead of `workspace`: a ref inside the tenant's own
   managed namespace is not merely "a registry you registered", it is ours — the web renders it as the
   provenance-clean case and harness validation stops warning about it.
@@ -159,7 +164,10 @@ grant at an arbitrary repository in someone else's namespace is not a request we
   `RegistryReader`, `InMemoryImageStore` beside it.
 - **M3 — the token server.** `GET /v2/token` in `apps/api`, RS256 signing key from the operator
   secret, scope authorization; `registry:2` in `deploy/compose/docker-compose.full.yaml` wired to the
-  realm with the S3 driver pointed at the existing MinIO; TLS/insecure-registry runbook.
+  realm with the S3 driver pointed at the existing MinIO; TLS/insecure-registry runbook. **M3 is where
+  the served `imageClasses` can first say `managed`**, so it must land the web enum + label with it —
+  the web parses that field with its own zod mirror and would reject the response otherwise. (M1
+  deliberately leaves the web untouched: without managed coordinates the class is unreachable.)
 - **M4 — dispatch.** `registryAuthsFor` resolves managed grants first, BYO second; `executeCase`
   attaches all matching entries.
 - **M5 — publish.** CLI push over a grant; atomic `--register-environment` with the minted digest.

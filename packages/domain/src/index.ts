@@ -155,9 +155,13 @@ export {
   collectHarnessImages,
   dockerAuthConfigJson,
   imageRegistryPrefix,
+  imageRepoFor,
   imageUsesRegistryHost,
   imageWarnings,
   parseImageRef,
+  pickRegistryAuth,
+  registryAuthsForImages,
+  registryAuthsOf,
 } from "./image/image-ref.js";
 
 // image — display-image (avatar/logo) validation (from apps/api common)
@@ -181,6 +185,17 @@ export {
   configuredIntegrations,
   selectDefaultCapabilities,
 } from "./capability/capability-defaults.js";
+// capability — the per-MEMBER selection kernel, shared by the tool and skill channels (workspace baseline ⊕ the
+// member's own overrides + name shadowing)
+export {
+  type MemberSelection,
+  type MemberSelectionCandidate,
+  authoredSkillKey,
+  builtinToolKey,
+  capabilityToolKey,
+  mcpServerToolKey,
+  selectForMember,
+} from "./capability/member-selection.js";
 // capability — spec version diff (base ↔ candidate); shares the spec-diff engine with the harness/judge diffs
 export { diffCapabilitySpecs } from "./capability/capability-diff.js";
 
@@ -302,5 +317,9 @@ export {
 } from "./knowledge/freshness.js";
 
 // workspace-file — three-way text merge: how two authors (member and/or agent) editing one file at the same
-// time reconcile without either write silently winning.
+// time reconcile without either write silently winning. Plus the run plan: which interpreter and image a file
+// gets when someone presses Run on it.
 export { mergeThreeWay } from "./workspace-file/merge.js";
+// …and the line diff between two revisions of one file, over the SAME line matching the merge uses.
+export { diffFileText } from "./workspace-file/diff.js";
+export { type FileRunPlan, fileRunPlanFor, isRunnableFilePath } from "./workspace-file/run-plan.js";

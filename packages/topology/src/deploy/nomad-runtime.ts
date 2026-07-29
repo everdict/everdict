@@ -124,7 +124,7 @@ export interface NomadTopologyRuntimeOptions {
   pollIntervalMs?: number;
   maxPolls?: number;
   readyTimeoutMs?: number;
-  registryAuth?: RegistryAuth; // workspace image-registry pull credentials — the builder renders them as docker auth
+  registryAuths?: RegistryAuth[]; // image pull credentials — the builder renders the covering one as docker auth
   // Default store isolation when there is NO trust zone (single-tenant / dev host): true → deploy declared dependency
   // stores as a dedicated silo (parity with Docker + K8s), false → external (BYO, connect via storeEnv). Mirrors the
   // K8sTopologyRuntime option of the same name.
@@ -264,7 +264,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       storeEnv,
       ...(storeValues ? { storeValues } : {}),
       zoneId: zone?.id,
-      ...(this.opts.registryAuth ? { registryAuth: this.opts.registryAuth } : {}),
+      ...(this.opts.registryAuths ? { registryAuths: this.opts.registryAuths } : {}),
       ...(this.opts.hostGatewayAddr ? { hostGatewayAddr: this.opts.hostGatewayAddr } : {}),
     });
     await this.register(job, ns);

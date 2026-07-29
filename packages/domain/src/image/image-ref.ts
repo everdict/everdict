@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   BadRequestError,
   type HarnessSpec,
@@ -42,21 +43,28 @@ function isLoopbackHost(host: string): boolean {
   return name === "localhost" || name === "127.0.0.1" || name === "[::1]";
 }
 
+// Does this ref live under these coordinates — host equal and (when a namespace is configured) path inside it.
+function refIsUnder(parsed: ParsedImageRef, coords: ImageRegistryCoordinates): boolean {
+  return (
+    parsed.host === coords.host &&
+    (!coords.namespace || parsed.path === coords.namespace || parsed.path.startsWith(`${coords.namespace}/`))
+  );
+}
+
 // registry is singular or plural — a workspace can register multiple registries, and belonging to 'any one' makes it workspace.
+// `managed` are the workspace's coordinates in everdict's OWN image store; a ref under them classifies as "managed",
+// checked FIRST because the two answer different questions ("a registry you told us about" vs "ours, we mint the grant").
 export function classifyImageRef(
   ref: string,
   registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[],
+  managed?: ImageRegistryCoordinates,
 ): ImageRefClass {
   const registries = registry === undefined ? [] : Array.isArray(registry) ? registry : [registry];
   const parsed = parseImageRef(ref);
   if (parsed.host) {
+    if (managed && refIsUnder(parsed, managed)) return "managed";
     if (isLoopbackHost(parsed.host)) return "local";
-    const inWorkspace = registries.some(
-      (r) =>
-        parsed.host === r.host &&
-        (!r.namespace || parsed.path === r.namespace || parsed.path.startsWith(`${r.namespace}/`)),
-    );
-    if (inWorkspace) return "workspace";
+    if (registries.some((r) => refIsUnder(parsed, r))) return "workspace";
     return "external";
   }
   // No host: org/name implies docker.io (external), a single segment is ambiguous (unqualified).
@@ -79,10 +87,11 @@ export function collectHarnessImages(spec: HarnessSpec): string[] {
 export function imageWarnings(
   images: string[],
   registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[],
+  managed?: ImageRegistryCoordinates,
 ): ImageWarning[] {
   const warnings: ImageWarning[] = [];
   for (const image of images) {
-    const cls = classifyImageRef(image, registry);
+    const cls = classifyImageRef(image, registry, managed);
     if (cls === "local" || cls === "unqualified") {
       warnings.push({ image, class: cls });
       continue;
@@ -103,10 +112,58 @@ export function imageUsesRegistryHost(image: string, host: string): boolean {
   return parseImageRef(image).host === host;
 }
 
+// The credentials a job actually carries. Reads the plural field, falling back to the deprecated singular one so a
+// SELF-HOSTED RUNNER or job-runner image on either side of the rename keeps authenticating (the control plane
+// dual-writes). Every consumer goes through this — nobody reads job.registryAuth directly.
+export function registryAuthsOf(job: { registryAuths?: RegistryAuth[]; registryAuth?: RegistryAuth }): RegistryAuth[] {
+  if (job.registryAuths && job.registryAuths.length > 0) return job.registryAuths;
+  return job.registryAuth ? [job.registryAuth] : [];
+}
+
+// The one credential that authenticates this image, or undefined for an image no credential covers (public/base
+// images, and the deliberate warn-only placement stance: a missing credential is not a dispatch error).
+export function pickRegistryAuth(auths: RegistryAuth[], image: string): RegistryAuth | undefined {
+  return auths.find((auth) => imageUsesRegistryHost(image, auth.host));
+}
+
+// The credentials covering ANY of these images — what a multi-image consumer (topology deploy, dockerconfigjson
+// Secret) renders. Deduplicated by host: one entry per registry, however many images it serves.
+export function registryAuthsForImages(auths: RegistryAuth[], images: string[]): RegistryAuth[] {
+  return auths.filter((auth) => images.some((image) => imageUsesRegistryHost(image, auth.host)));
+}
+
 // docker config.json contents (auths[host].auth = base64("user:pass")) — written to a temporary DOCKER_CONFIG directory
 // and used via docker --config <dir> pull/push (the user's ~/.docker/config.json is untouched). A registry with no
-// username is usually token-only (any username accepted) → we use "everdict".
-export function dockerAuthConfigJson(auth: RegistryAuth): string {
-  const encoded = Buffer.from(`${auth.username ?? "everdict"}:${auth.password}`).toString("base64");
-  return JSON.stringify({ auths: { [auth.host]: { auth: encoded } } });
+// username is usually token-only (any username accepted) → we use "everdict". Accepts several credentials because one
+// docker config authenticates several hosts — a topology pulling from the managed store AND a BYO registry needs both.
+export function dockerAuthConfigJson(auth: RegistryAuth | RegistryAuth[]): string {
+  const list = Array.isArray(auth) ? auth : [auth];
+  const auths: Record<string, { auth: string }> = {};
+  for (const entry of list) {
+    auths[entry.host] = {
+      auth: Buffer.from(`${entry.username ?? "everdict"}:${entry.password}`).toString("base64"),
+    };
+  }
+  return JSON.stringify({ auths });
+}
+
+// A workspace's repository namespace in the MANAGED image store — the image analog of `fsBucketFor`, and deliberately
+// the same collision rule: OCI repository paths are lowercase `[a-z0-9]` plus separators while tenant slugs are not,
+// so a sanitization collision ("Acme" vs "acme", "a.b" vs "a-b") would put two workspaces in one namespace, which IS
+// cross-tenant leakage. The readable head is for operators; the sha256 tail is what makes distinct tenants distinct.
+// Design: docs/architecture/managed-image-store.md
+export function imageRepoFor(tenant: string): string {
+  const slug = tenant.trim();
+  if (!slug)
+    throw new BadRequestError("BAD_REQUEST", undefined, "cannot derive an image namespace for an empty tenant");
+  const hash = createHash("sha256").update(slug).digest("hex").slice(0, 8);
+  const sanitized = slug
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/, "");
+  // A slug that sanitizes to nothing (e.g. "___") still needs a legal leading component — the hash keeps it unique.
+  return `${sanitized || "ws"}-${hash}`;
 }

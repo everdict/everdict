@@ -7,7 +7,7 @@ import {
   type TopologyService,
   serviceIsHostExec,
 } from "@everdict/contracts";
-import { dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
+import { dockerAuthConfigJson, pickRegistryAuth, registryAuthsForImages } from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import {
   type StoreValues,
@@ -79,9 +79,9 @@ export interface K8sTopologyOptions {
   storeValues?: Partial<Record<string, StoreValues>>;
   imagePullPolicy?: string; // e.g. "IfNotPresent" (when using pre-loaded images, as with kind)
   provisionDependencies?: boolean; // also deploy spec.dependencies[] (postgres/redis) + auto-inject connection env
-  // Workspace image-registry pull credentials (transient) — if a service image host matches, render a
-  // dockerconfigjson Secret + imagePullSecrets. docs/architecture/workspace-image-registry.md
-  registryAuth?: RegistryAuth;
+  // Image pull credentials (transient) — if a credential covers some service image, render a dockerconfigjson
+  // Secret + imagePullSecrets. One Secret holds every covering credential. docs/architecture/managed-image-store.md
+  registryAuths?: RegistryAuth[];
   // host.docker.internal → this IP as a pod hostAlias (gap 5). K8s has no docker host, so it is opt-in — set it to the
   // concrete gateway IP to give a K8s-deployed service the SAME host-local reach a Docker/Nomad service gets. The
   // Docker-CLI `host-gateway` keyword is not a valid hostAliases IP, so it is ignored here.
@@ -93,7 +93,7 @@ export const REGISTRY_AUTH_SECRET_NAME = "everdict-registry-auth";
 
 // Workspace registry credentials → a kubernetes.io/dockerconfigjson Secret. buildK8sManifests includes it only when
 // some service image's host matches (avoids scattering irrelevant credentials across the cluster).
-export function registryAuthSecretManifest(auth: RegistryAuth, ns: string): K8sManifest {
+export function registryAuthSecretManifest(auth: RegistryAuth | RegistryAuth[], ns: string): K8sManifest {
   return {
     apiVersion: "v1",
     kind: "Secret",
@@ -179,9 +179,8 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
   const storeValues = opts.storeValues ?? (opts.provisionDependencies ? dependencyStoreValues(spec) : {});
   const out: K8sManifest[] = [];
   // Render the dockerconfigjson Secret + imagePullSecrets only when a workspace-registry image is actually present.
-  const auth = opts.registryAuth;
-  const needsAuth = Boolean(auth && spec.services.some((s) => imageUsesRegistryHost(svcImage(s), auth.host)));
-  if (auth && needsAuth) out.push(registryAuthSecretManifest(auth, ns));
+  const auths = registryAuthsForImages(opts.registryAuths ?? [], spec.services.map(svcImage));
+  if (auths.length > 0) out.push(registryAuthSecretManifest(auths, ns));
   if (opts.provisionDependencies) out.push(...buildDependencyManifests(spec, opts));
   for (const svc of spec.services) {
     const labels = { app: svc.name, "everdict/harness": spec.id, "everdict/version": spec.version };
@@ -217,8 +216,8 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
             ...(svc.requires?.os
               ? { nodeSelector: { "kubernetes.io/os": svc.requires.os === "macos" ? "darwin" : svc.requires.os } }
               : {}),
-            // Workspace-registry image auth — reference it (the Secret above) only when this service image's host matches.
-            ...(auth && imageUsesRegistryHost(svcImage(svc), auth.host)
+            // Image auth — reference the Secret above only when a credential covers THIS service's image.
+            ...(pickRegistryAuth(auths, svcImage(svc))
               ? { imagePullSecrets: [{ name: REGISTRY_AUTH_SECRET_NAME }] }
               : {}),
             // host.docker.internal parity (gap 5) — opt-in: only when a concrete gateway IP is configured (the Docker

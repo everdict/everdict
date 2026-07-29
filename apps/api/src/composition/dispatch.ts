@@ -123,14 +123,14 @@ export function buildDispatch(deps: {
   // Defined in one place so dispatch and the connection test (probe) share the same builder/auth path.
   const runtimeBuildBackend = (
     spec: RuntimeSpec,
-    opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
+    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[] },
   ) =>
     (spec.kind === "nomad" || spec.kind === "k8s") && spec.traceSource
       ? buildTopologyBackend(spec, {
           harnesses: harnessInstanceRegistry,
           ...(callbackRendezvous ? { callbackRendezvous } : {}),
-          // Workspace registry pull credentials — the topology runtime authenticates when pulling service images (nomad auth / k8s imagePullSecrets).
-          ...(opts.registryAuth ? { registryAuth: opts.registryAuth } : {}),
+          // Image pull credentials — the topology runtime authenticates when pulling service images (nomad auth / k8s imagePullSecrets).
+          ...(opts.registryAuths ? { registryAuths: opts.registryAuths } : {}),
           // Resolved tenant secrets — for the runtime traceSource's authSecret (G1, langfuse/authenticated endpoints).
           ...(opts.secretEnv ? { secretEnv: opts.secretEnv } : {}),
           // Per-dispatch: the harness's selected workspace trace source (pull from the dev-cluster observability platform).

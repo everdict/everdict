@@ -456,13 +456,13 @@ describe("buildNomadTopologyJob — workspace-registry pull auth (registryAuth)"
         { name: "b", image: "reg/other:1", port: 9000, needs: [], perRun: [], replicas: 1, env: {} },
       ],
     };
-    const job = buildNomadTopologyJob(spec, { registryAuth: AUTH });
+    const job = buildNomadTopologyJob(spec, { registryAuths: [AUTH] });
     const [a, b] = job.Job.TaskGroups[0]?.Tasks ?? [];
     expect(a?.Config.auth).toEqual([{ username: "bot", password: "pull-tok" }]);
     expect(b?.Config.auth).toBeUndefined();
   });
 
-  it("no auth block when registryAuth is unset (current, no regression)", () => {
+  it("no auth block when registryAuths is unset (current, no regression)", () => {
     const job = buildNomadTopologyJob(SPEC);
     for (const t of job.Job.TaskGroups[0]?.Tasks ?? []) expect(t.Config.auth).toBeUndefined();
   });

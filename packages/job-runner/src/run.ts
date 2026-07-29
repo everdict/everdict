@@ -11,7 +11,7 @@ import {
   judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
-import { classifyFailure, stageForError } from "@everdict/domain";
+import { classifyFailure, registryAuthsOf, stageForError } from "@everdict/domain";
 import { DockerDriver, type DriverMount, LocalDriver } from "@everdict/drivers";
 import { OsUseEnvironment, PromptEnvironment, RepoEnvironment } from "@everdict/environments";
 import { runContextFromEnv } from "./env.js";
@@ -150,14 +150,15 @@ export async function runCaseJob(
         }
       : undefined;
   // Precedence: explicit driver → containerize (local Docker, case.image, host mounts) → default LocalDriver (in-process).
-  // registryAuth (transient on the job) — authenticated pre-pull of workspace-registry images (temporary DOCKER_CONFIG).
+  // registryAuths (transient on the job) — authenticated pre-pull of credentialed images (temporary DOCKER_CONFIG).
+  const registryAuths = registryAuthsOf(job);
   const baseDriver =
     opts.driver ??
     (opts.containerize
       ? new DockerDriver({
           echo: true, // in-job: tee container output to the job log (live tail feed) — parity with LocalDriver
           ...(opts.mounts ? { mounts: opts.mounts } : {}),
-          ...(job.registryAuth ? { registryAuth: job.registryAuth } : {}),
+          ...(registryAuths.length > 0 ? { registryAuths } : {}),
         })
       : new LocalDriver({ echo: true })); // in-job: tee harness output to the job log (live tail feed)
   return runCase(job.evalCase, {

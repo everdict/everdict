@@ -73,9 +73,16 @@ export const CaseJobSchema = z.object({
   // account connection (Connected accounts) and loads it here. RepoEnvironment uses it only for authenticated clone (http.extraheader) and
   // it is not persisted to the RunRecord/dataset (only the connectionId reference stays on the case).
   repoToken: z.string().optional(),
-  // Workspace image registry pull credential (transient) — when a job image belongs to a workspace registry host,
-  // the control plane resolves pullSecretName and loads it here (same discipline as repoToken — never persisted to results/datasets).
-  // Consumers: DockerDriver·runner topology pre-pull / nomad docker auth / k8s imagePullSecrets. docs/architecture/workspace-image-registry.md
+  // Image pull credentials (transient) — one entry per registry HOST this job's images live on: a managed-store grant
+  // and/or the workspace's BYO registries (the control plane resolves pullSecretName). Same discipline as repoToken —
+  // never persisted to results/datasets. Consumers (DockerDriver·runner topology pre-pull / nomad docker auth / k8s
+  // imagePullSecrets) select the entries matching the images they are about to pull (pickRegistryAuth).
+  // docs/architecture/managed-image-store.md
+  registryAuths: z.array(RegistryAuthSchema).optional(),
+  // (deprecated, dual-written) the singular predecessor of registryAuths. The control plane still fills it with the
+  // first entry because a SELF-HOSTED RUNNER is user-installed and can lag the control plane — an older runner reads
+  // only this field, and dropping it would silently un-authenticate its pulls. Consumers must read it only through
+  // `registryAuthsOf` (which prefers the plural). Removable once runners have rolled past the plural field.
   registryAuth: RegistryAuthSchema.optional(),
   // per-dispatch image pins (service name → image) — override the service images of a registered service topology spec at run time
   // (extending register-time HarnessTemplate slot/pins to dispatch time). Only meaningful for service harnesses.

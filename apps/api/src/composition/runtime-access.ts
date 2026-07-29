@@ -21,7 +21,7 @@ export function buildRuntimeAccess(deps: {
   runtimeSecretsFor: (tenant: string) => Promise<Record<string, string>>;
   runtimeBuildBackend: (
     spec: RuntimeSpec,
-    opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
+    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[] },
   ) => Backend;
 }) {
   const { runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend } = deps;

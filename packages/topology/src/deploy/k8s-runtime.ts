@@ -51,7 +51,7 @@ export interface K8sTopologyRuntimeOptions {
   browserImage?: string;
   imagePullPolicy?: string; // pre-loaded images (kind etc.): "IfNotPresent"
   hostGatewayAddr?: string; // host.docker.internal → this IP as a pod hostAlias (gap 5); opt-in (K8s has no docker host)
-  registryAuth?: RegistryAuth; // workspace image-registry pull credentials — renders a dockerconfigjson Secret + imagePullSecrets
+  registryAuths?: RegistryAuth[]; // image pull credentials — render a dockerconfigjson Secret + imagePullSecrets
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch; // for endpoint readiness/CDP lookups (test injection)
@@ -185,7 +185,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       ...(plan.isolation === "pool" ? { storeValues: plan.storeValues } : {}),
       imagePullPolicy: this.opts.imagePullPolicy,
       provisionDependencies: isSilo, // only silo deploys a dedicated store into the zone ns (SLICE 39); pool/external do not.
-      ...(this.opts.registryAuth ? { registryAuth: this.opts.registryAuth } : {}),
+      ...(this.opts.registryAuths ? { registryAuths: this.opts.registryAuths } : {}),
       ...(this.opts.hostGatewayAddr ? { hostGatewayAddr: this.opts.hostGatewayAddr } : {}),
     });
     await this.kubectl.apply(manifests);

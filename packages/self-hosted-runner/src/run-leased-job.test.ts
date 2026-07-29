@@ -83,11 +83,11 @@ describe("runLeasedJob — workspace-registry pre-pull (service)", () => {
     traceSource: { kind: "mlflow", endpoint: "http://mlflow:5000" },
   };
 
-  it("with registryAuth, pre-pull only host-matching images then go to runService", async () => {
+  it("with registryAuths, pre-pull only covered images then go to runService", async () => {
     const pulled: string[] = [];
     const runService = vi.fn(async () => RESULT);
     await runLeasedJob(
-      { evalCase, harness: { id: "bu", version: "1.0.0" }, harnessSpec: spec, registryAuth: AUTH },
+      { evalCase, harness: { id: "bu", version: "1.0.0" }, harnessSpec: spec, registryAuths: [AUTH] },
       { runService, pullImage: async (image) => void pulled.push(image) },
     );
     expect(pulled).toEqual(["ghcr.io/acme/agent:v1"]); // echo (docker.io) isn't a pull target
@@ -95,14 +95,39 @@ describe("runLeasedJob — workspace-registry pre-pull (service)", () => {
   });
 
   it("workspaceImagesToPull — applies per-dispatch pin overrides and dedupes", () => {
-    expect(workspaceImagesToPull(spec, { echo: "ghcr.io/acme/echo:pr-1" }, AUTH)).toEqual([
-      "ghcr.io/acme/agent:v1",
-      "ghcr.io/acme/echo:pr-1",
+    expect(workspaceImagesToPull(spec, { echo: "ghcr.io/acme/echo:pr-1" }, [AUTH])).toEqual([
+      { image: "ghcr.io/acme/agent:v1", auth: AUTH },
+      { image: "ghcr.io/acme/echo:pr-1", auth: AUTH },
     ]);
-    expect(workspaceImagesToPull(spec, undefined, { host: "quay.io", password: "p" })).toEqual([]);
+    expect(workspaceImagesToPull(spec, undefined, [{ host: "quay.io", password: "p" }])).toEqual([]);
   });
 
-  it("with no registryAuth, no pre-pull, as-is (no regression from current)", async () => {
+  it("pairs each image with ITS OWN registry credential, so one topology can pull from several registries", () => {
+    const quay = { host: "quay.io", username: "q", password: "quay-tok" };
+    const multi: NonNullable<CaseJob["harnessSpec"]> = {
+      ...spec,
+      services: [
+        { name: "agent", image: "ghcr.io/acme/agent:v1", needs: [], perRun: [], replicas: 1, env: {} },
+        { name: "sidecar", image: "quay.io/acme/sidecar:v2", needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+    };
+    expect(workspaceImagesToPull(multi, undefined, [AUTH, quay])).toEqual([
+      { image: "ghcr.io/acme/agent:v1", auth: AUTH },
+      { image: "quay.io/acme/sidecar:v2", auth: quay },
+    ]);
+  });
+
+  it("reads the deprecated singular registryAuth when a control plane predates registryAuths", async () => {
+    const pulled: string[] = [];
+    const runService = vi.fn(async () => RESULT);
+    await runLeasedJob(
+      { evalCase, harness: { id: "bu", version: "1.0.0" }, harnessSpec: spec, registryAuth: AUTH },
+      { runService, pullImage: async (image) => void pulled.push(image) },
+    );
+    expect(pulled).toEqual(["ghcr.io/acme/agent:v1"]);
+  });
+
+  it("with no registryAuths, no pre-pull, as-is (no regression from current)", async () => {
     const pullImage = vi.fn(async () => {});
     const runService = vi.fn(async () => RESULT);
     await runLeasedJob(

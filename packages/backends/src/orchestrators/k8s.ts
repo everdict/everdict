@@ -10,12 +10,13 @@ import {
   InternalError,
   NotFoundError,
   OOM_KILLED,
+  type RegistryAuth,
   UpstreamError,
   judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
 import type { InspectNode, InspectRuntimeResult, InspectStore, InspectWorkload } from "@everdict/contracts/wire";
-import { assertHardenedIsolation, dockerAuthConfigJson, imageUsesRegistryHost } from "@everdict/domain";
+import { assertHardenedIsolation, dockerAuthConfigJson, pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
 import {
   type AdoptOutcome,
@@ -705,9 +706,9 @@ function dispatchSuffix(): string {
 // The Secret name imagePullSecrets references — one per namespace, apply idempotently upserts it (kept independent of job deletion).
 export const K8S_REGISTRY_AUTH_SECRET = "everdict-registry-auth";
 
-// Workspace-registry credentials (transient job.registryAuth) → a dockerconfigjson Secret. When case.image is
-// that registry host, dispatch applies it together with the Job as a List.
-export function k8sRegistryAuthSecret(auth: NonNullable<CaseJob["registryAuth"]>, ns: string): Record<string, unknown> {
+// Image credentials (transient job.registryAuths) → a dockerconfigjson Secret. When a credential covers case.image,
+// dispatch applies it together with the Job as a List. Takes one or many — one docker config can hold several hosts.
+export function k8sRegistryAuthSecret(auth: RegistryAuth | RegistryAuth[], ns: string): Record<string, unknown> {
   return {
     apiVersion: "v1",
     kind: "Secret",
@@ -735,8 +736,8 @@ export function buildK8sJob(
   };
   // Prefer the per-case image (e.g. the official SWE-bench prebuilt = deps+repo bundled), otherwise the default job-runner image.
   const image = job.evalCase.image ?? opts.image;
-  // For a workspace-registry image, imagePullSecrets (dispatch applies the Secret above together) — only when the host matches.
-  const pullAuth = Boolean(job.registryAuth && imageUsesRegistryHost(image, job.registryAuth.host));
+  // imagePullSecrets (dispatch applies the Secret above together) — only when a credential covers this image's host.
+  const pullAuth = Boolean(pickRegistryAuth(registryAuthsOf(job), image));
   const tenant = job.tenant ?? "default";
   // Harness-declared cpu/mem (command kind) + runtime-declared GPU → requests=limits (deterministic OOM; the
   // scheduler bin-packs by real weight, and an nvidia.com/gpu request lands the pod on a GPU node). Unset = defaults.
@@ -1238,12 +1239,11 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
       await api.ensureNamespace(ns);
       const manifest = buildK8sJob(job, { ...this.opts, secretEnv }, name, ns, runtimeClassName);
       // For a workspace-registry image, apply the dockerconfigjson Secret together with the Job (List) — fixed name, idempotent upsert.
-      const auth = job.registryAuth;
       const image = job.evalCase.image ?? this.opts.image;
-      const payload =
-        auth && imageUsesRegistryHost(image, auth.host)
-          ? { apiVersion: "v1", kind: "List", items: [k8sRegistryAuthSecret(auth, ns), manifest] }
-          : manifest;
+      const auth = pickRegistryAuth(registryAuthsOf(job), image);
+      const payload = auth
+        ? { apiVersion: "v1", kind: "List", items: [k8sRegistryAuthSecret(auth, ns), manifest] }
+        : manifest;
       await api.applyJob(payload, ns);
       try {
         await this.waitForJob(api, name, ns, options?.signal);

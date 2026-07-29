@@ -1,15 +1,18 @@
 import { z } from "zod";
 
 // Image reference classification — from the workspace registry's perspective, "whose" image this is.
+// managed    = the workspace's namespace in EVERDICT'S OWN image store (host+namespace match) — we issue the pull
+//              grant, so provenance is ours and there is nothing to warn about. Checked before workspace: a managed
+//              ref is not merely "a registry you registered", and the two carry different guarantees.
 // workspace  = the workspace registry (host+namespace match) — pullable from anywhere with credentials.
 // external   = an explicit external host (ghcr.io/… etc.) or org/name form (implies docker.io) — public/external source.
 // local      = an explicit loopback host (localhost:5000/… etc.) — exists only on the machine it was built/pushed on.
 // unqualified= a single-segment name (spreadsheetbench:v1·postgres:16-alpine) — syntactically indistinguishable between a
 //              local daemon build and a Docker Hub library image (naming the ambiguity itself as a class).
-// Placement view: local+unqualified = no pull guarantee, workspace+external = pullable (given auth).
+// Placement view: local+unqualified = no pull guarantee, managed+workspace+external = pullable (given auth).
 // The parse/classify/warn rules live in @everdict/domain (image/) — re-architecture P1e.
-// Design: docs/architecture/workspace-image-registry.md
-export type ImageRefClass = "workspace" | "external" | "local" | "unqualified";
+// Design: docs/architecture/workspace-image-registry.md · docs/architecture/managed-image-store.md
+export type ImageRefClass = "managed" | "workspace" | "external" | "local" | "unqualified";
 
 // Workspace registry coordinates (no secrets) — the classification subset of WorkspaceSettings.imageRegistry.
 export interface ImageRegistryCoordinates {
@@ -36,9 +39,11 @@ export interface ImageWarning {
   class: ImageWarningClass;
 }
 
-// Registry pull/push credentials (transient) — the control plane resolves them from the workspace SecretStore
-// and ships them via CaseJob.registryAuth (same discipline as repoToken: never persist to results/datasets); the
-// consumer (DockerDriver/runner/topology builder) uses them only for an authenticated pull and then discards them.
+// Registry pull/push credentials (transient) — the control plane resolves them from the workspace SecretStore (BYO)
+// or mints them from the managed image store, and ships them via CaseJob.registryAuths (same discipline as repoToken:
+// never persist to results/datasets); the consumer (DockerDriver/runner/topology builder) uses them only for an
+// authenticated pull and then discards them. One entry per registry HOST — a job pulling from several hosts carries
+// several, and each consumer picks the entries matching the images it is about to pull (pickRegistryAuth).
 export const RegistryAuthSchema = z.object({
   host: z.string().min(1), // the registry host[:port] these credentials are valid for
   username: z.string().min(1).optional(),

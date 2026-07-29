@@ -17,7 +17,7 @@ import {
 } from "@everdict/contracts";
 import {
   capabilityKind,
-  imageUsesRegistryHost,
+  registryAuthsForImages,
   requiredCapabilitiesForJob,
   runtimeSatisfies,
   topologyNeedsDocker,
@@ -33,7 +33,7 @@ export interface RuntimeDispatcherDeps {
   // can't depend on (cycle), like topology, are handled by apps/api injecting this (falls back to buildRuntimeBackend).
   buildBackend?: (
     spec: RuntimeSpec,
-    opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
+    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[] },
   ) => Backend;
   // Workspace image-registry pull credentials (best-effort) — carried into the topology backend build for authenticated service-image pulls.
   registryAuthsFor?: (tenant: string) => Promise<RegistryAuth[]>;
@@ -222,13 +222,16 @@ export class RuntimeDispatcher implements Dispatcher {
         const name = `rt:${tenant}:${spec.id}@${spec.version}`; // one backend instance per tenant·version (reused)
         if (!this.deps.backends.has(name)) {
           const secretEnv = await this.deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
-          // Workspace registry (plural) pull credentials — bake the one matching this job image's host into the backend
-          // (the backend is built once per runtime and reused — based on the first build job; a documented limit of the single-value contract).
+          // Image pull credentials — bake the ones covering this job's images into the backend (the backend is built
+          // once per runtime and reused, so it carries the first build job's credentials; a documented limit of baking
+          // credentials into a long-lived backend rather than passing them per dispatch).
           const auths = (await this.deps.registryAuthsFor?.(tenant).catch(() => [])) ?? [];
-          const images = jobImages(job);
-          const registryAuth = auths.find((a) => images.some((image) => imageUsesRegistryHost(image, a.host)));
+          const registryAuths = registryAuthsForImages(auths, jobImages(job));
           const build = this.deps.buildBackend ?? buildRuntimeBackend;
-          this.deps.backends.register(name, build(spec, { secretEnv, ...(registryAuth ? { registryAuth } : {}) }));
+          this.deps.backends.register(
+            name,
+            build(spec, { secretEnv, ...(registryAuths.length > 0 ? { registryAuths } : {}) }),
+          );
         }
         routed = { ...job, evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } } };
       }

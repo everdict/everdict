@@ -79,7 +79,7 @@ describe("buildK8sManifests — workspace-registry pull auth (registryAuth)", ()
   });
 
   it("renders a dockerconfigjson Secret + imagePullSecrets when the service image host matches", () => {
-    const manifests = buildK8sManifests(withImage("ghcr.io/acme/agent:v1"), { registryAuth: AUTH });
+    const manifests = buildK8sManifests(withImage("ghcr.io/acme/agent:v1"), { registryAuths: [AUTH] });
     const secret = manifests.find((m) => m.kind === "Secret") as unknown as {
       metadata: { name: string };
       type: string;
@@ -96,7 +96,7 @@ describe("buildK8sManifests — workspace-registry pull auth (registryAuth)", ()
   });
 
   it("renders neither Secret nor imagePullSecrets when no image matches (no scattering of irrelevant credentials)", () => {
-    const manifests = buildK8sManifests(withImage("quay.io/x/y:1"), { registryAuth: AUTH });
+    const manifests = buildK8sManifests(withImage("quay.io/x/y:1"), { registryAuths: [AUTH] });
     expect(manifests.some((m) => m.kind === "Secret")).toBe(false);
     const deploy = manifests.find((m) => m.kind === "Deployment") as unknown as {
       spec: { template: { spec: { imagePullSecrets?: unknown } } };

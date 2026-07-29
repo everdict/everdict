@@ -1,5 +1,5 @@
 import type { CaseJob, CaseResult, RegistryAuth, ServiceHarnessSpec } from "@everdict/contracts";
-import { imageUsesRegistryHost } from "@everdict/domain";
+import { pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
 import { type DriverMount, pullWithRegistryAuth, runCaseJob } from "@everdict/job-runner";
 import {
   DockerTopologyRuntime,
@@ -66,13 +66,11 @@ export async function runLeasedJob(
 ): Promise<CaseResult> {
   const spec = job.harnessSpec;
   if (spec?.kind === "service") {
-    // Authenticated pre-pull (temporary DOCKER_CONFIG) of workspace-registry service images before deploy — the topology runtime's
+    // Authenticated pre-pull (temporary DOCKER_CONFIG) of credentialed service images before deploy — the topology runtime's
     // docker run uses the local image (the runtime interface is unchanged). Failures propagate as-is (if the pull fails, deploy can't happen either).
-    if (job.registryAuth) {
-      for (const image of workspaceImagesToPull(spec, job.imagePins, job.registryAuth)) {
-        opts.log?.(`pulling workspace-registry image: ${image}`);
-        await (opts.pullImage ?? pullWithRegistryAuth)(image, job.registryAuth);
-      }
+    for (const { image, auth } of workspaceImagesToPull(spec, job.imagePins, registryAuthsOf(job))) {
+      opts.log?.(`pulling credentialed image: ${image}`);
+      await (opts.pullImage ?? pullWithRegistryAuth)(image, auth);
     }
     const runService =
       opts.runService ??
@@ -97,18 +95,23 @@ export async function runLeasedJob(
 }
 
 // The authenticated pre-pull targets (pure) — among the service images (with per-dispatch image-pin overrides applied),
-// only those whose registry host matches auth.host, deduped. A pin swaps a service's image, so the pin value is that service's pull target.
+// each image paired with the credential covering its registry host, deduped. Images no credential covers are dropped
+// (public/base images pull anonymously). A pin swaps a service's image, so the pin value is that service's pull target.
+// Pairing per image (rather than filtering by one host) is what lets one topology pull from several registries.
 export function workspaceImagesToPull(
   spec: ServiceHarnessSpec,
   imagePins: Record<string, string> | undefined,
-  auth: RegistryAuth,
-): string[] {
+  auths: RegistryAuth[],
+): { image: string; auth: RegistryAuth }[] {
   // Host-exec services carry no image (nothing to pull).
   const images = spec.services.flatMap((s) => {
     const image = imagePins?.[s.name] ?? s.image;
     return image ? [image] : [];
   });
-  return [...new Set(images.filter((image) => imageUsesRegistryHost(image, auth.host)))];
+  return [...new Set(images)].flatMap((image) => {
+    const auth = pickRegistryAuth(auths, image);
+    return auth ? [{ image, auth }] : [];
+  });
 }
 
 // service harness: deploy and run the topology on the user's Docker daemon. No trustZones since it's a personal host; if the trace

@@ -5,7 +5,7 @@ import {
   type TopologyService,
   serviceIsHostExec,
 } from "@everdict/contracts";
-import { flattenEnv, imageUsesRegistryHost } from "@everdict/domain";
+import { flattenEnv, pickRegistryAuth } from "@everdict/domain";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import {
   DURABLE_STORE_CONFIG,
@@ -120,9 +120,9 @@ export interface NomadTopologyOptions {
   storeValues?: Partial<Record<string, StoreValues>>;
   zoneId?: string; // trust-zone (tenant) identifier — mixed into the warm job ID to prevent cross-tenant sharing
   provisionDependencies?: boolean; // also deploy spec.dependencies[] (postgres/redis) as task groups in the same job
-  // Workspace image-registry pull credentials (transient) — render the docker auth block only on tasks whose service
-  // image host matches. docs/architecture/workspace-image-registry.md
-  registryAuth?: RegistryAuth;
+  // Image pull credentials (transient) — render the docker auth block only on tasks whose service image a credential
+  // covers. One per registry host, so a topology may pull from several. docs/architecture/managed-image-store.md
+  registryAuths?: RegistryAuth[];
   // The address `host.docker.internal` resolves to (the docker-host gateway a service uses to reach a host-local model
   // gateway etc.). Default `host-gateway` = the Docker-CLI magic keyword (the DockerDriver path); a Nomad docker driver
   // that doesn't translate that keyword can override with the concrete bridge-gateway IP (e.g. "172.17.0.1"). See gap 5.
@@ -445,12 +445,11 @@ function serviceConfig(
       `Containerized service "${svc.name}" has no image.`,
     );
   }
-  const auth = opts.registryAuth;
+  const auth = pickRegistryAuth(opts.registryAuths ?? [], svc.image);
   const config: NomadTopoTask["Config"] = opts.runtime
     ? { image: svc.image, runtime: opts.runtime }
     : { image: svc.image };
-  if (auth && imageUsesRegistryHost(svc.image, auth.host))
-    config.auth = [{ username: auth.username ?? "everdict", password: auth.password }];
+  if (auth) config.auth = [{ username: auth.username ?? "everdict", password: auth.password }];
   if (svc.volumes && svc.volumes.length > 0) config.volumes = svc.volumes;
   // host.docker.internal → the docker host gateway (Docker 20.10+), so a service that calls a host-local model gateway
   // (LiteLLM etc.) reaches it — parity with the Docker/DockerDriver paths. Both topology group builders start from this;

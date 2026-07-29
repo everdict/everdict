@@ -131,6 +131,7 @@ export {
   type ImageRegistryView,
 } from "./image-registry/image-registry-service.js";
 export type { ImageManifestInfo, RegistryConnectivity, RegistryReader } from "./ports/registry-reader.js";
+export type { WorkspaceImages } from "./ports/workspace-images.js";
 export {
   type MattermostConfigView,
   MattermostService,
