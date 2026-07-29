@@ -124,7 +124,9 @@ services:
     ports:
       - "${TEMPORAL_PORT:-7233}:7233"
     healthcheck:
-      test: ["CMD-SHELL", "tctl --address 127.0.0.1:7233 cluster health | grep -q SERVING"]
+      # auto-setup binds the server to the CONTAINER IP (BIND_ON_IP default), not loopback — probing
+      # 127.0.0.1 is connection-refused forever and starves worker/temporal-ui behind service_healthy.
+      test: ["CMD-SHELL", "tctl --address $(hostname -i):7233 cluster health | grep -q SERVING"]
       interval: 10s
       timeout: 5s
       retries: 30
