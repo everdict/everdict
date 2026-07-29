@@ -27,6 +27,26 @@ export const PLATFORM_EVENT_KINDS = [
 export const PlatformEventKindSchema = z.enum(PLATFORM_EVENT_KINDS);
 export type PlatformEventKind = z.infer<typeof PlatformEventKindSchema>;
 
+// E0 kind grammar (event-plumbing.md): kinds follow `<subject>.<verb>`, and the `agent.run.*` family is the
+// PRE-P3 spelling of `run.*` — an agent activation IS a run (execution-model.md P3 makes it a Run{kind:"agent"}
+// row emitting run.* facts directly; this alias map is the registered bridge until then, and retires with P3).
+// The emit side deliberately does NOT flip here: the v1 "agents watching agents" guardrail is structural
+// (TRIGGERABLE_EVENT_KINDS simply excludes the family), and renaming the emitted kinds before the matcher gains
+// a subject-aware guard would make agent activations trigger-matchable — the runaway vector the guardrail bans.
+// Read surfaces that want the target grammar normalize through canonicalEventKind (aliased values are the P3
+// spellings, so they are intentionally NOT members of the closed vocabulary yet).
+export const AGENT_RUN_EVENT_KIND_ALIASES = {
+  "agent.run.started": "run.started",
+  "agent.run.awaiting_approval": "run.awaiting_approval",
+  "agent.run.completed": "run.completed",
+  "agent.run.failed": "run.failed",
+  "agent.run.cancelled": "run.cancelled",
+} as const satisfies Partial<Record<PlatformEventKind, string>>;
+
+export function canonicalEventKind(kind: PlatformEventKind): string {
+  return (AGENT_RUN_EVENT_KIND_ALIASES as Partial<Record<PlatformEventKind, string>>)[kind] ?? kind;
+}
+
 // What the fact is about — a pointer, never the document. Detail is read back through the normal (RBAC-gated)
 // tools at consumption time, so authorization stays authoritative at read time, not emit time.
 export const PlatformEventSubjectSchema = z.object({

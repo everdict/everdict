@@ -79,6 +79,9 @@ export const runSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
   caseId: z.string(),
   status: z.enum(['queued', 'running', 'succeeded', 'failed']),
+  // executable family (universal-run shape, execution-model P0) — unset = a legacy eval run. Readers treat
+  // undefined as "eval"; the console badges only the non-eval families (agent/command/sandbox/analysis).
+  kind: z.enum(['eval', 'agent', 'command', 'sandbox', 'analysis']).optional(),
   result: resultSchema.optional(),
   usage: usageSchema.optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),

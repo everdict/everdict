@@ -36,7 +36,7 @@ export function costLabel(usage?: Usage): string | undefined {
 // The minimal run fields a row needs — the activity console strips full run records to this before sending to the client.
 export type RunRowData = Pick<
   Run,
-  'id' | 'harness' | 'caseId' | 'status' | 'trigger' | 'usage' | 'updatedAt'
+  'id' | 'harness' | 'caseId' | 'status' | 'kind' | 'trigger' | 'usage' | 'updatedAt'
 >
 
 // One run row (self-contained: pulls its own i18n/locale). isChild = a scorecard case row (indented under its batch
@@ -74,7 +74,11 @@ export function RunRow({
             {t('caseCell', { id: run.caseId })}
           </span>
         ) : (
-          <Badge tone="outline">{sourceLabel(t, run.trigger)}</Badge>
+          <span className="inline-flex items-center gap-1.5">
+            {/* Executable family (universal-run P0) — badge only the non-eval kinds; eval rows stay as before. */}
+            {run.kind && run.kind !== 'eval' && <Badge tone="info">{run.kind}</Badge>}
+            <Badge tone="outline">{sourceLabel(t, run.trigger)}</Badge>
+          </span>
         )}
       </TD>
       <TD>

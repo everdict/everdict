@@ -34,6 +34,7 @@ function toRow(r: Run): RunRowData {
     harness: r.harness,
     caseId: r.caseId,
     status: r.status,
+    kind: r.kind,
     trigger: r.trigger,
     usage: r.usage,
     updatedAt: r.updatedAt,
