@@ -119,6 +119,16 @@ const contentEqual = (record: CapabilityRecord, body: CapabilityUpsert): boolean
     { name: body.name, description: body.description, spec: body.spec },
   );
 
+// The reach a first version gets when the author didn't say. The TOOL kinds are personal until shared — an adopted
+// mcp/code/skill capability runs inside ONE member's agent, so `private` is the honest default. An `environment` is
+// not a tool: it is the image a HARNESS pins, consumed workspace-wide (WorkspaceSettings.adoptedEnvironments, not
+// AgentSpec.capabilities), and a private one is invisible to the very team that has to run the eval. The web's
+// environment editor already defaults to `workspace`; this makes the API/MCP path (an agent registering the image a
+// member just pushed) agree instead of quietly creating a team asset nobody else can see.
+function defaultVisibilityFor(spec: CapabilitySpec): CapabilityVisibility {
+  return spec.type === "environment" ? "workspace" : "private";
+}
+
 export class CapabilityService {
   private readonly now: () => string;
 
@@ -173,7 +183,7 @@ export class CapabilityService {
       });
       return withWarnings({ workspace: tenant, id, version, created: true });
     }
-    const visibility = body.visibility ?? "private";
+    const visibility = body.visibility ?? defaultVisibilityFor(body.spec);
     if (visibility === "public" && !this.mayPublishPublic(actor))
       throw new ForbiddenError(
         "FORBIDDEN",

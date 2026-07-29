@@ -50,7 +50,9 @@ const docs = {
       "Version-free upsert of a Store capability (mcp | code | skill). A new id creates version 1.0.0; a content " +
       "change on an existing id patch-bumps to a new immutable version (so `latest` moves while pinned adoptions stay " +
       "reproducible); an unchanged spec is a no-op. Only the capability's owner or a workspace admin may publish a new " +
-      "version; publishing a brand-new capability as 'public' requires an admin. Requires capabilities:write (member+).",
+      "version; publishing a brand-new capability as 'public' requires an admin. Omitting `visibility` on the first " +
+      "version defaults by kind: an `environment` (the image a harness pins, used workspace-wide) becomes 'workspace', " +
+      "a tool kind stays 'private'. Requires capabilities:write (member+).",
     tags: ["capability"],
     params: idParams,
     body: toJsonSchema(SaveCapabilityBodySchema),

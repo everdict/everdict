@@ -5,6 +5,7 @@ import { z } from "zod";
 // content change (name/description/spec) on an existing id patch-bumps to a NEW immutable version. `visibility` /
 // `sharedWith` are honored ONLY when creating the first version — editing inherits the current reach (change it via
 // PATCH /capabilities/:id/visibility, which gates public → admin), so a content edit never silently re-shares.
+// Omitted on create, the SERVICE defaults the reach by kind — environment → workspace, tool kinds → private.
 export const SaveCapabilityBodySchema = z
   .object({
     name: z.string().min(1),

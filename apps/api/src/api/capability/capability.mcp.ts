@@ -109,7 +109,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
     "save_capability",
     {
       description:
-        "Author (create or edit) a capability — version-free upsert (new id → 1.0.0; a content change → next patch version; unchanged → no-op). `visibility`/`sharedWith` apply only when creating; editing inherits the current reach (change it via set_capability_visibility). Publishing a new capability as 'public' requires an admin. Requires capabilities:write.",
+        "Author (create or edit) a capability — version-free upsert (new id → 1.0.0; a content change → next patch version; unchanged → no-op). `visibility`/`sharedWith` apply only when creating; editing inherits the current reach (change it via set_capability_visibility). Omitted on create, `visibility` defaults BY KIND: an `environment` (the image a harness pins, used workspace-wide) → 'workspace', a tool kind → 'private'. Publishing a new capability as 'public' requires an admin. Requires capabilities:write.",
       inputSchema: {
         id: z.string(),
         name: z.string(),

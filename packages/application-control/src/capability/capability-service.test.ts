@@ -389,6 +389,18 @@ describe("CapabilityService — environment image warnings", () => {
     expect(result.imageWarnings).toBeUndefined();
   });
 
+  // Default reach is kind-dependent: a tool kind is one member's until shared, an environment is the team's image.
+  it("defaults an environment to workspace reach (a teammate sees it) while a tool kind stays private", async () => {
+    const s = svc();
+    // Given alice registers both without saying anything about visibility (the API/MCP path an agent takes)
+    await s.save("acme", member("alice"), "officeqa-env", environment("ghcr.io/acme/officeqa@sha256:ab12"));
+    await s.save("acme", member("alice"), "triage", skill());
+    // Then a teammate sees the environment …
+    expect(await s.get("acme", "officeqa-env", "bob")).toMatchObject({ visibility: "workspace" });
+    // … but not alice's private tool capability
+    await expect(s.get("acme", "triage", "bob")).rejects.toThrow();
+  });
+
   it("does not classify tool kinds — a skill save carries no imageWarnings", async () => {
     const s = registrySvc(ghcrAcme);
     const result = await s.save("acme", member("alice"), "triage", skill());

@@ -360,7 +360,11 @@ split — **no API/authz change, web IA only**:
   contract** [scaffold template prompting entry points / result paths + markdown preview] → wiring preset
   [advanced, collapsed, live JSON validation] → reach), and **new environments default to `workspace`
   visibility** (team sharing is the surface's purpose; the store wizard's `private` default stays for other
-  kinds). Discovery/import of other workspaces' environments stays in `/store` (linked). The store substrate
+  kinds). That default is the SERVICE's, not the form's (E6): `CapabilityService.save` picks the first
+  version's reach by kind when the caller omits `visibility` — `environment` → `workspace`, tool kinds →
+  `private` — so the API/MCP path (an agent registering the image a member just pushed) can't quietly create a
+  team asset nobody but its author can see. A tool kind is one member's agent's until shared; an environment is
+  what a harness pins, held workspace-wide on `WorkspaceSettings.adoptedEnvironments`. Discovery/import of other workspaces' environments stays in `/store` (linked). The store substrate
   (entity, versions, reach kernel, routes) is unchanged — presentation only.
 - **Settings › Account › My tools & skills** (`/settings/personal-capabilities`) — the user-private scope:
   `visibility='private'` capabilities the user created + personal (private) skill drafts.
