@@ -224,6 +224,38 @@ describe("RevisionedWorkspaceFs", () => {
     expect(next.revision).toBe(2);
   });
 
+  it("serves the published bytes when a crash left the visible file behind the ledger", async () => {
+    // Given a publish whose LAST step never landed: the ledger and the blob say revision 2, the visible file
+    // still holds revision 1's bytes (the write sequence is blob → ledger → head object).
+    await fs.write("acme", "notes.md", utf8("v1"), undefined, { actor: memberActor("user-a") });
+    await fs.writeRevisionBlob("acme", "notes.md", 2, utf8("v2 published"), "text/markdown; charset=utf-8");
+    await ledger.append({
+      tenant: "acme",
+      path: "notes.md",
+      revision: 2,
+      size: utf8("v2 published").byteLength,
+      contentType: "text/markdown; charset=utf-8",
+      hash: "x",
+      actor: memberActor("user-a"),
+      createdAt: "2026-07-29T00:00:00.000Z",
+    });
+    // When the file is read
+    const file = await fs.read("acme", "notes.md");
+    // Then the reader gets the PUBLISHED content — never stale bytes wearing the new revision's number
+    expect(new TextDecoder().decode(file?.data)).toBe("v2 published");
+    expect(file?.entry.revision).toBe(2);
+    // …and the visible file was repaired, so the next reader costs nothing extra
+    expect(new TextDecoder().decode(inner.files.get("acme notes.md")?.data)).toBe("v2 published");
+  });
+
+  it("does not touch a file whose bytes already match its published revision", async () => {
+    await fs.write("acme", "notes.md", utf8("v1"), undefined, { actor: memberActor("user-a") });
+    const before = inner.files.get("acme notes.md");
+    const file = await fs.read("acme", "notes.md");
+    expect(new TextDecoder().decode(file?.data)).toBe("v1");
+    expect(inner.files.get("acme notes.md")).toBe(before); // same object — no rewrite
+  });
+
   it("reports the current revision on stat and read", async () => {
     await fs.write("acme", "notes.md", utf8("v1"), undefined, { actor: memberActor("user-a") });
     await fs.write("acme", "notes.md", utf8("v2"), undefined, { actor: memberActor("user-a") });

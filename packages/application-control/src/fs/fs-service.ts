@@ -8,8 +8,8 @@ import {
   guessFsContentType,
   isFsTextContentType,
 } from "@everdict/contracts";
-import type { FsWriteConflict } from "@everdict/contracts/wire";
-import { mergeThreeWay } from "@everdict/domain";
+import type { FsRevisionDiff, FsWriteConflict } from "@everdict/contracts/wire";
+import { diffFileText, mergeThreeWay } from "@everdict/domain";
 import type { FsRevisionStore } from "../ports/fs-revision-store.js";
 import type { WorkspaceFs } from "../ports/workspace-fs.js";
 
@@ -127,10 +127,29 @@ export class FsService {
     return { ...withHead, merge: mergeThreeWay(ancestorText, input.content, live.content) };
   }
 
-  // The file's publication history, newest first — who published each revision, when, and why.
-  async history(tenant: string, path: string, limit?: number): Promise<FsRevision[]> {
+  // The file's publication history, newest first — who published each revision, when, and why. `before` pages
+  // backwards from a revision the caller already has (the revision number IS the cursor), so a file with
+  // thousands of revisions stays walkable instead of stopping at the first page.
+  async history(tenant: string, path: string, limit?: number, before?: number): Promise<FsRevision[]> {
     if (!this.revisions) return [];
-    return this.revisions.list(tenant, path, limit !== undefined ? { limit } : undefined);
+    return this.revisions.list(tenant, path, {
+      ...(limit !== undefined ? { limit } : {}),
+      ...(before !== undefined ? { before } : {}),
+    });
+  }
+
+  // What changed between two revisions of a file — the question a history panel exists to answer. `to` defaults
+  // to the live file, which is the comparison a member actually wants ("what did this revision change from what
+  // I see now"). Binary or over-sized content comes back as `truncated`, never as a fabricated text diff.
+  async diffRevisions(tenant: string, path: string, from: number, to?: number): Promise<FsRevisionDiff> {
+    const before = await this.readRevision(tenant, path, from);
+    const after = to !== undefined ? await this.readRevision(tenant, path, to) : await this.readFile(tenant, path);
+    const toRevision = after.entry.revision ?? to ?? 0;
+    if (before.encoding !== "utf8" || after.encoding !== "utf8") {
+      // Two binaries have no line diff worth showing; say so instead of diffing base64 noise.
+      return { path, from, to: toRevision, diff: { hunks: [], added: 0, removed: 0, truncated: true } };
+    }
+    return { path, from, to: toRevision, diff: diffFileText(before.content, after.content) };
   }
 
   // One past revision's content, for previewing or diffing it against the live file.

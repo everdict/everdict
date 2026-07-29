@@ -13,8 +13,10 @@ export interface FsRevisionStore {
   append(record: FsRevision): Promise<void>;
   // The file's current revision — undefined when nothing was ever published at the path.
   head(tenant: string, path: string): Promise<FsRevision | undefined>;
-  // Newest first. `limit` caps the page (implementations default to a sane page size).
-  list(tenant: string, path: string, opts?: { limit?: number }): Promise<FsRevision[]>;
+  // Newest first. `limit` caps the page (implementations default to a sane page size); `before` continues from
+  // the last row of the previous page — the revision NUMBER is the cursor, since it is already a dense,
+  // monotonic, per-path sequence, so no opaque token has to be minted or parsed.
+  list(tenant: string, path: string, opts?: { limit?: number; before?: number }): Promise<FsRevision[]>;
   get(tenant: string, path: string, revision: number): Promise<FsRevision | undefined>;
   // Carry a file's (or a whole subtree's) history along with a move, so "who published this" survives a rename.
   rename(tenant: string, from: string, to: string): Promise<void>;

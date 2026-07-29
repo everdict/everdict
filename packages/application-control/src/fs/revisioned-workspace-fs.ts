@@ -39,10 +39,28 @@ export class RevisionedWorkspaceFs implements WorkspaceFs {
     return this.withRevision(tenant, entry);
   }
 
+  // Reads REPAIR the one inconsistency this ordering can leave behind. The write sequence is blob → ledger → head
+  // object; if the process dies between steps 2 and 3, the revision is published but the visible file still holds
+  // the previous bytes — a reader would see stale content labelled with the new revision, which is worse than
+  // either half alone. So a read compares the live object against the head revision's recorded SIZE and, on a
+  // mismatch, serves the published bytes and writes them back to the head.
+  //
+  // Size, not hash: it costs nothing (both numbers are already in hand) and catches the realistic failure — a
+  // partial write of DIFFERENT content. Two revisions that differ while sharing a byte count slip through, and
+  // that is the accepted limit; the alternative is hashing every read forever to cover a crash window.
   async read(tenant: string, path: string): Promise<FsFile | undefined> {
     const file = await this.inner.read(tenant, path);
     if (!file) return undefined;
-    return { ...file, entry: await this.withRevision(tenant, file.entry) };
+    const head = await this.revisions.head(tenant, path);
+    if (!head) return file;
+    if (head.size === file.data.byteLength) {
+      return { ...file, entry: { ...file.entry, revision: head.revision } };
+    }
+    const published = await this.inner.readRevisionBlob(tenant, path, head.revision);
+    if (!published) return { ...file, entry: { ...file.entry, revision: head.revision } };
+    // Best-effort repair: the read must still succeed if the write-back fails (storage down, permissions).
+    await this.inner.write(tenant, path, published.data, head.contentType).catch(() => undefined);
+    return { ...published, entry: { ...published.entry, revision: head.revision } };
   }
 
   // Publish a new revision of `path`. With `opts.baseRevision` this is an optimistic write: it succeeds only if

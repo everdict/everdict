@@ -17,6 +17,8 @@ function toLines(text: string): string[] {
   return text.split("\n");
 }
 
+export { toLines as splitFileLines, lcsPairs as fileLineMatches };
+
 // Longest common subsequence of two line arrays, as index pairs. O(n·m) — bounded by the filesystem's own 5 MiB
 // cap and only ever reached on an actual conflict, so the simple table beats a cleverer diff here.
 function lcsPairs(a: readonly string[], b: readonly string[]): Array<[number, number]> {

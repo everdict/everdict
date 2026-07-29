@@ -29,8 +29,9 @@ export class InMemoryFsRevisionStore implements FsRevisionStore {
     return this.forPath(tenant, path)[0];
   }
 
-  async list(tenant: string, path: string, opts?: { limit?: number }): Promise<FsRevision[]> {
-    return this.forPath(tenant, path).slice(0, opts?.limit ?? DEFAULT_LIMIT);
+  async list(tenant: string, path: string, opts?: { limit?: number; before?: number }): Promise<FsRevision[]> {
+    const rows = this.forPath(tenant, path).filter((r) => opts?.before === undefined || r.revision < opts.before);
+    return rows.slice(0, opts?.limit ?? DEFAULT_LIMIT);
   }
 
   async get(tenant: string, path: string, revision: number): Promise<FsRevision | undefined> {
@@ -136,11 +137,20 @@ export class PgFsRevisionStore implements FsRevisionStore {
     return rows[0] ? rowToRecord(rows[0]) : undefined;
   }
 
-  async list(tenant: string, path: string, opts?: { limit?: number }): Promise<FsRevision[]> {
-    const { rows } = await this.client.query<FsRevisionRow>(
-      "SELECT * FROM everdict_fs_revisions WHERE tenant=$1 AND path=$2 ORDER BY revision DESC LIMIT $3",
-      [tenant, path, opts?.limit ?? DEFAULT_LIMIT],
-    );
+  // The (tenant, path, revision DESC) index serves both the first page and every continuation — `before` is a
+  // keyset cursor, so page 100 costs what page 1 costs (no OFFSET scan).
+  async list(tenant: string, path: string, opts?: { limit?: number; before?: number }): Promise<FsRevision[]> {
+    const limit = opts?.limit ?? DEFAULT_LIMIT;
+    const { rows } =
+      opts?.before === undefined
+        ? await this.client.query<FsRevisionRow>(
+            "SELECT * FROM everdict_fs_revisions WHERE tenant=$1 AND path=$2 ORDER BY revision DESC LIMIT $3",
+            [tenant, path, limit],
+          )
+        : await this.client.query<FsRevisionRow>(
+            "SELECT * FROM everdict_fs_revisions WHERE tenant=$1 AND path=$2 AND revision < $3 ORDER BY revision DESC LIMIT $4",
+            [tenant, path, opts.before, limit],
+          );
     return rows.map(rowToRecord);
   }
 

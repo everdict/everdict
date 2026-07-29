@@ -123,6 +123,32 @@ export const FsMergeResultSchema = z.object({
 });
 export type FsMergeResult = z.infer<typeof FsMergeResultSchema>;
 
+// Line diff between two revisions of one file — what the history panel shows when a member asks "what changed".
+// Hunks carry a few lines of context around each change instead of the whole document; `truncated` means the file
+// was too large to diff and the caller should fall back to showing the two contents.
+export const FsTextDiffLineSchema = z.object({
+  op: z.enum(["context", "add", "remove"]),
+  text: z.string(),
+  beforeLine: z.number().int().positive().optional(), // 1-based, absent on an added line
+  afterLine: z.number().int().positive().optional(), // 1-based, absent on a removed line
+});
+export type FsTextDiffLine = z.infer<typeof FsTextDiffLineSchema>;
+
+export const FsTextDiffHunkSchema = z.object({
+  beforeStart: z.number().int().nonnegative(),
+  afterStart: z.number().int().nonnegative(),
+  lines: z.array(FsTextDiffLineSchema),
+});
+export type FsTextDiffHunk = z.infer<typeof FsTextDiffHunkSchema>;
+
+export const FsTextDiffSchema = z.object({
+  hunks: z.array(FsTextDiffHunkSchema),
+  added: z.number().int().nonnegative(),
+  removed: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+});
+export type FsTextDiff = z.infer<typeof FsTextDiffSchema>;
+
 // ─── File types ──────────────────────────────────────────────────────────────────────────────────────────────
 // The workspace filesystem is a general-purpose tree: an agent drops a spreadsheet next to a shell script next
 // to a screenshot. So the type registry aims for BREADTH — office formats and the development long tail both —
