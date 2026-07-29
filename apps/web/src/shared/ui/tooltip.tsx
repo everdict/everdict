@@ -76,7 +76,9 @@ export function Tooltip({
             role="tooltip"
             style={style}
             className={cn(
-              'pointer-events-none z-50 w-max max-w-[300px] rounded-md border border-border bg-popover px-2.5 py-1.5 text-[11.5px] leading-relaxed text-foreground shadow-pop',
+              // `fixed` class + the topmost popover z: a tooltip floats over everything, including the popovers
+              // (110) and dialogs (100) it is triggered from — and must escape the `body > *:not(.fixed)` clamp.
+              'pointer-events-none fixed z-[120] w-max max-w-[300px] rounded-md border border-border bg-popover px-2.5 py-1.5 text-[11.5px] leading-relaxed text-foreground shadow-pop',
               'animate-in fade-in-0 zoom-in-95 duration-100',
               contentClassName
             )}

@@ -243,7 +243,10 @@ body::before {
 /* Body content goes above the overlay. But fixed overlays portaled to body must be excluded —
    ① the modal backdrop (.fixed) ② toasts (sonner's structure is body > section > ol[data-sonner-toaster], so
    body's direct child is that section — caught via :has()). If a z-index:1 stacking context is applied to these, their inner
-   high z (modal 100·toast 999999999) gets trapped and they stack behind each other. The overlay must keep its own fixed·z. */
+   high z (modal 100·toast 999999999) gets trapped and they stack behind each other. The overlay must keep its own fixed·z.
+   INVARIANT for anything portaled to <body>: carry the `fixed` CLASS, never an inline `position: fixed` alone.
+   This file is UNLAYERED, so it outranks every @layer'd Tailwind utility — a portaled popover that misses the class
+   is silently pinned to z-index:1 and disappears behind any open dialog, however high its own `z-*` says it is. */
 body > *:not(.fixed):not(:has([data-sonner-toaster])) {
   position: relative;
   z-index: 1;

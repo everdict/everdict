@@ -223,7 +223,9 @@ export function Combobox({
             ref={contentRef}
             style={style}
             className={cn(
-              'z-[110] min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover p-1 text-[13px] shadow-pop',
+              // `fixed` is a CLASS, not just the inline position: globals.css pins every body child WITHOUT it to
+              // z-index:1, which would bury the popover under an open Dialog's z-100 backdrop (see that rule's comment).
+              'fixed z-[110] min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover p-1 text-[13px] shadow-pop',
               'origin-top animate-in fade-in-0 zoom-in-95 duration-100',
               contentClassName
             )}

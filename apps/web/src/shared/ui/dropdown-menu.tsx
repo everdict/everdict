@@ -102,7 +102,9 @@ export function DropdownMenu({
               role="menu"
               style={style}
               className={cn(
-                'z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover p-1 text-[13px] shadow-pop',
+                // `fixed` class + a z above the Dialog layer (100) — same contract as Combobox: a body-portaled
+                // popover must survive globals.css's `body > *:not(.fixed)` clamp AND open inside a modal.
+                'fixed z-[110] min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover p-1 text-[13px] shadow-pop',
                 'animate-in fade-in-0 zoom-in-95 duration-100',
                 side === 'bottom' ? 'origin-top' : 'origin-bottom',
                 contentClassName
