@@ -22,7 +22,12 @@ coverage/
 # electron packaging artifacts (apps/desktop)
 apps/desktop/bundle/
 apps/desktop/release/
-apps/web/.next-dev/
+
+# alternate Next dist dirs (NEXT_DIST_DIR — a dev server running beside another one). apps/web/.gitignore only
+# covers the default `.next`, and an UNIGNORED dist dir is not merely untracked noise: Tailwind's source detection
+# honours .gitignore, so it would scan the build output and mine its binary chunks for class candidates, emitting
+# CSS with control bytes in it ("Parsing CSS source code failed").
+apps/web/.next-*/
 
 # standalone runner bundle / SEA binaries (apps/cli — `pnpm bundle` + release CI)
 apps/cli/bundle/

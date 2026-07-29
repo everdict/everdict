@@ -19,6 +19,9 @@ export const knowledgeNodeSchema = z.object({
   attrs: z.record(z.string(), z.unknown()).default({}),
   resolution: z.string().default('resolved'),
   evidenceCount: z.number().default(0),
+  // When the graph last saw this node observed — the detail panel's "as of" line. Absent on a reference node
+  // (a pin whose entity nothing has projected yet).
+  lastObservedAt: z.string().optional(),
 })
 export type KnowledgeNodeView = z.infer<typeof knowledgeNodeSchema>
 

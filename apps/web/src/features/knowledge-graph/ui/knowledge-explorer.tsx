@@ -1,45 +1,103 @@
 'use client'
 
-import { Network, RefreshCw } from 'lucide-react'
-import { useTranslations } from 'next-intl'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState, useTransition } from 'react'
+import { Maximize2, Network, RefreshCw, Search, ZoomIn, ZoomOut } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import type { KnowledgeGraph, KnowledgeNodeView } from '@/entities/knowledge'
-import { Badge } from '@/shared/ui/badge'
+import type { KnowledgeGraph } from '@/entities/knowledge'
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Input } from '@/shared/ui/input'
+
 import { reindexKnowledgeAction } from '../api/reindex-knowledge'
-import { humanize, nodeColor, predicateRank } from '../lib/node-style'
-import { KnowledgeGraphCanvas } from './knowledge-graph-canvas'
+import { humanize, nodeColor } from '../lib/node-style'
+import { KnowledgeGraphCanvas, type GraphCanvasHandle } from './knowledge-graph-canvas'
 
-// Force layout is O(n²); above this we render the highest-evidence nodes and note the rest.
-const MAX_RENDER_NODES = 220
+// Settings › Knowledge — the workspace's knowledge as a MAP: claims and skills over the entities they concern, drawn
+// as an interactive force graph. The screen is the map alone; the node detail lives elsewhere (the caller routes the
+// selection to the split-view panel), so this component stays a pure map: draw, filter, search, pick.
+//
+// The simulation is O(n²) per frame, so above this cap we lay out the best-attested nodes and say how many are left.
+const MAX_RENDER_NODES = 260
 
-export function KnowledgeExplorer({ graph, canReindex }: { graph: KnowledgeGraph; canReindex: boolean }) {
+export function KnowledgeExplorer({
+  graph,
+  canReindex,
+  selectedId,
+  onSelect,
+}: {
+  graph: KnowledgeGraph
+  canReindex: boolean
+  // The picked node, owned by the caller (the panel and the map show the same selection).
+  selectedId: string | null
+  onSelect: (nodeId: string | null) => void
+}) {
   const t = useTranslations('knowledge')
   const router = useRouter()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const canvas = useRef<GraphCanvasHandle>(null)
+  const [query, setQuery] = useState('')
+  const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(new Set())
   const [pending, startTransition] = useTransition()
-
-  const nodeById = useMemo(() => new Map(graph.nodes.map((n) => [n.nodeId, n])), [graph.nodes])
-
-  const { renderNodes, truncated } = useMemo(() => {
-    if (graph.nodes.length <= MAX_RENDER_NODES) return { renderNodes: graph.nodes, truncated: 0 }
-    const kept = [...graph.nodes].sort((a, b) => b.evidenceCount - a.evidenceCount).slice(0, MAX_RENDER_NODES)
-    return { renderNodes: kept, truncated: graph.nodes.length - kept.length }
-  }, [graph.nodes])
 
   const typeCounts = useMemo(
     () => Object.entries(graph.stats.nodesByType).sort((a, b) => b[1] - a[1]),
-    [graph.stats.nodesByType],
+    [graph.stats.nodesByType]
   )
 
-  const selected = selectedId ? (nodeById.get(selectedId) ?? null) : null
+  const { renderNodes, truncated } = useMemo(() => {
+    const visible = graph.nodes.filter((n) => !hiddenTypes.has(n.type))
+    if (visible.length <= MAX_RENDER_NODES) return { renderNodes: visible, truncated: 0 }
+    const kept = [...visible]
+      .sort((a, b) => b.evidenceCount - a.evidenceCount)
+      .slice(0, MAX_RENDER_NODES)
+    return { renderNodes: kept, truncated: visible.length - kept.length }
+  }, [graph.nodes, hiddenTypes])
 
-  const reindex = () =>
+  // Edges only exist on the map when BOTH endpoints do — a type the member filtered out takes its edges with it, and
+  // the workspace hub's scoping star never had a node to attach to.
+  const renderEdges = useMemo(() => {
+    const present = new Set(renderNodes.map((n) => n.nodeId))
+    return graph.edges.filter(
+      (e) =>
+        e.subjectNodeId !== undefined &&
+        e.objectNodeId !== undefined &&
+        present.has(e.subjectNodeId) &&
+        present.has(e.objectNodeId)
+    )
+  }, [graph.edges, renderNodes])
+
+  // Search narrows by label or type; everything else fades out on the map instead of disappearing (the shape of the
+  // graph is the context that makes a hit meaningful).
+  const matchedIds = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (needle === '') return null
+    return new Set(
+      renderNodes
+        .filter(
+          (n) =>
+            n.label.toLowerCase().includes(needle) ||
+            n.type.includes(needle) ||
+            n.key.toLowerCase().includes(needle)
+        )
+        .map((n) => n.nodeId)
+    )
+  }, [query, renderNodes])
+
+  // Follow the caller's selection: a neighbour picked in the detail panel (or a search hit) is centred here.
+  useEffect(() => {
+    if (selectedId !== null) canvas.current?.focusNode(selectedId)
+  }, [selectedId])
+
+  const submitSearch = (): void => {
+    const first =
+      matchedIds === null ? undefined : renderNodes.find((n) => matchedIds.has(n.nodeId))
+    if (first) onSelect(first.nodeId)
+  }
+
+  const reindex = (): void =>
     startTransition(async () => {
       const r = await reindexKnowledgeAction()
       if (r.ok) {
@@ -69,118 +127,107 @@ export function KnowledgeExplorer({ graph, canReindex }: { graph: KnowledgeGraph
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="text-[13px] text-muted-foreground">
-          {t('summary', { nodes: graph.stats.totalNodes, edges: graph.stats.totalEdges })}
-          {truncated > 0 && (
-            <span className="ml-2 text-muted-foreground/70">{t('truncated', { count: truncated })}</span>
-          )}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[12rem] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submitSearch()
+            }}
+            placeholder={t('searchPlaceholder')}
+            className="h-8 pl-8 text-[13px]"
+            aria-label={t('searchPlaceholder')}
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={t('zoomOut')}
+            onClick={() => canvas.current?.zoomBy(1 / 1.3)}
+          >
+            <ZoomOut />
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={t('zoomIn')}
+            onClick={() => canvas.current?.zoomBy(1.3)}
+          >
+            <ZoomIn />
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={t('fit')}
+            onClick={() => canvas.current?.fit()}
+          >
+            <Maximize2 />
+          </Button>
         </div>
         {reindexButton}
       </div>
 
-      {/* Node-type legend */}
-      <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-        {typeCounts.map(([type, count]) => (
-          <span key={type} className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
-            <span className="size-2.5 rounded-full" style={{ backgroundColor: nodeColor(type) }} />
-            {humanize(type)} <span className="tabular-nums text-muted-foreground/70">{count}</span>
-          </span>
-        ))}
+      {/* The legend doubles as the type filter — click a type to drop it from the map. */}
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+        {typeCounts.map(([type, count]) => {
+          const hidden = hiddenTypes.has(type)
+          return (
+            <button
+              key={type}
+              type="button"
+              aria-pressed={!hidden}
+              onClick={() =>
+                setHiddenTypes((prev) => {
+                  const next = new Set(prev)
+                  if (!next.delete(type)) next.add(type)
+                  return next
+                })
+              }
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] text-muted-foreground transition-opacity hover:bg-accent',
+                hidden && 'opacity-40'
+              )}
+            >
+              <span
+                className="size-2.5 rounded-full"
+                style={{ backgroundColor: nodeColor(type) }}
+                aria-hidden
+              />
+              {humanize(type)}
+              <span className="tabular-nums text-muted-foreground/70">{count}</span>
+            </button>
+          )
+        })}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
-        <Card className="overflow-hidden bg-card/40">
-          <KnowledgeGraphCanvas
-            nodes={renderNodes}
-            edges={graph.edges}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-          />
-        </Card>
-        <NodeDetail selected={selected} graph={graph} nodeById={nodeById} onSelect={setSelectedId} />
+      <div className="h-[clamp(26rem,calc(100dvh-21rem),48rem)] overflow-hidden rounded-xl border border-border bg-card/40">
+        <KnowledgeGraphCanvas
+          nodes={renderNodes}
+          edges={renderEdges}
+          selectedId={selectedId}
+          matchedIds={matchedIds}
+          onSelect={onSelect}
+          handleRef={canvas}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
+        <span>
+          {/* What is on the map right now — not the whole-graph totals, which would keep counting a type the
+              member just filtered out. */}
+          {t('summary', { nodes: renderNodes.length, edges: renderEdges.length })}
+          {truncated > 0 && (
+            <span className="ml-2 text-muted-foreground/70">
+              {t('truncated', { count: truncated })}
+            </span>
+          )}
+        </span>
+        <span className="text-muted-foreground/70">{t('canvasHint')}</span>
       </div>
     </div>
-  )
-}
-
-function NodeDetail({
-  selected,
-  graph,
-  nodeById,
-  onSelect,
-}: {
-  selected: KnowledgeNodeView | null
-  graph: KnowledgeGraph
-  nodeById: Map<string, KnowledgeNodeView>
-  onSelect: (id: string | null) => void
-}) {
-  const t = useTranslations('knowledge')
-
-  const facts = useMemo(() => {
-    if (!selected) return []
-    return graph.edges
-      .flatMap((e) => {
-        if (e.subjectNodeId === undefined || e.objectNodeId === undefined) return []
-        const isSubject = e.subjectNodeId === selected.nodeId
-        const isObject = e.objectNodeId === selected.nodeId
-        if (!isSubject && !isObject) return []
-        const otherId = isSubject ? e.objectNodeId : e.subjectNodeId
-        const other = nodeById.get(otherId)
-        // Only meaningful, materialised endpoints — drops the scoping edge to the (unmaterialised) workspace hub.
-        if (other === undefined) return []
-        return [{ predicate: e.predicate, direction: isSubject ? 'out' : ('in' as const), otherId, other }]
-      })
-      .sort((a, b) => predicateRank(a.predicate) - predicateRank(b.predicate))
-  }, [selected, graph.edges, nodeById])
-
-  if (!selected) {
-    return (
-      <Card className="grid place-items-center p-6 text-center text-[12px] text-muted-foreground">
-        {t('selectHint')}
-      </Card>
-    )
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="size-2.5 rounded-full" style={{ backgroundColor: nodeColor(selected.type) }} />
-          <Badge tone="outline">{humanize(selected.type)}</Badge>
-          {selected.version && <span className="text-[11px] text-muted-foreground">@{selected.version}</span>}
-          {selected.resolution === 'dangling' && <Badge tone="warning">{t('dangling')}</Badge>}
-        </div>
-        <CardTitle className="mt-1 break-words text-[14px]">{selected.label}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="text-[11px] text-muted-foreground">{t('evidence', { count: selected.evidenceCount })}</div>
-        <div>
-          <div className="mb-1.5 text-[11px] font-[560] uppercase tracking-wide text-muted-foreground/80">
-            {t('relationships')}
-          </div>
-          {facts.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">{t('noRelationships')}</p>
-          ) : (
-            <ul className="space-y-1">
-              {facts.map((f) => (
-                <li key={`${f.direction}:${f.predicate}:${f.otherId}`} className="flex items-baseline gap-1.5 text-[12px]">
-                  <span className="text-muted-foreground/60">{f.direction === 'out' ? '→' : '←'}</span>
-                  <span className="shrink-0 text-muted-foreground">{humanize(f.predicate)}</span>
-                  <button
-                    type="button"
-                    className="truncate text-left text-foreground hover:underline"
-                    onClick={() => onSelect(f.otherId)}
-                  >
-                    {f.other.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </CardContent>
-    </Card>
   )
 }

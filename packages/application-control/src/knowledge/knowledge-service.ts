@@ -174,19 +174,84 @@ export class KnowledgeService {
   // entity carries an `in_workspace` edge to it — so a bounded BFS from it reaches the workspace's knowledge. depth 1 is
   // the star (workspace + all entities); depth ≥2 also pulls in the inter-entity edges (scorecard→harness,
   // run→scorecard, member_of, …). Bounded by the query engine's MAX_NODES frontier guard. Read = scorecards:read.
+  //
+  // The KNOWLEDGE LAYER (claims + skills) is then overlaid LIVE from its records — the same reindex-free path
+  // assembleContext takes — because the screen's subject IS that layer: a claim a member wrote a minute ago belongs on
+  // the map without waiting for an admin to rebuild the graph. Harvest ids are deterministic, so the overlay
+  // reconciles with an already-reindexed projection instead of duplicating it.
   async graph(tenant: string, opts?: { depth?: number }): Promise<KnowledgeGraphResult> {
     const root = nodeId(tenant, { type: "workspace", key: tenant });
     const sub = await this.query.subgraph(tenant, root, { depth: opts?.depth ?? 2, direction: "both" });
+    const nodes = new Map<string, KnowledgeNode>(sub.nodes.map((n) => [n.nodeId, n]));
+    const edges = new Map<string, EdgeMention>(sub.edges.map((e) => [e.id, e]));
+
+    const overlay = await this.knowledgeLayerOverlay(tenant);
+    for (const n of overlay.nodes) nodes.set(n.nodeId, n);
+    for (const e of overlay.edges) edges.set(e.id, e);
+    // A pin whose entity has not been harvested yet has no node row, which would strand its claim as an orphan dot —
+    // so materialise those endpoints as `dangling` reference nodes (the graph's record of a pending reference). The
+    // map shows what a claim is ABOUT before the entity's own harvester ever runs.
+    for (const node of overlay.references) if (!nodes.has(node.nodeId)) nodes.set(node.nodeId, node);
+
+    const nodeList = [...nodes.values()];
+    const edgeList = [...edges.values()];
     const nodesByType: Partial<Record<NodeType, number>> = {};
-    for (const n of sub.nodes) nodesByType[n.type] = (nodesByType[n.type] ?? 0) + 1;
+    for (const n of nodeList) nodesByType[n.type] = (nodesByType[n.type] ?? 0) + 1;
     const edgesByPredicate: Partial<Record<Predicate, number>> = {};
-    for (const e of sub.edges) edgesByPredicate[e.predicate] = (edgesByPredicate[e.predicate] ?? 0) + 1;
+    for (const e of edgeList) edgesByPredicate[e.predicate] = (edgesByPredicate[e.predicate] ?? 0) + 1;
     return {
       root,
-      nodes: sub.nodes,
-      edges: sub.edges,
-      stats: { totalNodes: sub.nodes.length, totalEdges: sub.edges.length, nodesByType, edgesByPredicate },
+      nodes: nodeList,
+      edges: edgeList,
+      stats: { totalNodes: nodeList.length, totalEdges: edgeList.length, nodesByType, edgesByPredicate },
     };
+  }
+
+  // The live projection of the workspace-visible knowledge-layer records, plus the reference endpoints their pins
+  // point at. Same admission rule as reindex — workspace visibility only, and a `proposed` extraction candidate is
+  // not workspace knowledge until someone reviews it — so the live map and the harvested one agree on membership.
+  private async knowledgeLayerOverlay(
+    tenant: string,
+  ): Promise<{ nodes: KnowledgeNode[]; edges: EdgeMention[]; references: KnowledgeNode[] }> {
+    const src = this.deps.contextSources ?? this.deps.reindexSources;
+    const nodes: KnowledgeNode[] = [];
+    const edges: EdgeMention[] = [];
+    const references: KnowledgeNode[] = [];
+    const reference = (ref: NodeRef, at: string): void => {
+      references.push({
+        nodeId: nodeId(tenant, ref),
+        tenant,
+        type: ref.type,
+        key: ref.key,
+        ...(ref.version !== undefined ? { version: ref.version } : {}),
+        label: ref.version !== undefined ? `${ref.key}@${ref.version}` : ref.key,
+        attrs: {},
+        resolution: "dangling",
+        evidenceCount: 0,
+        createdAt: at,
+        updatedAt: at,
+      });
+    };
+
+    if (src?.skills) {
+      for (const s of await src.skills.list(tenant, "")) {
+        if (s.visibility !== "workspace") continue;
+        const h = harvestSkill(s);
+        nodes.push(...h.nodes);
+        edges.push(...h.edges);
+        for (const r of s.refs) reference(r, s.updatedAt);
+      }
+    }
+    if (src?.knowledgeEntries) {
+      for (const e of await src.knowledgeEntries.list(tenant, "")) {
+        if (e.visibility !== "workspace" || e.status === "proposed") continue;
+        const h = harvestKnowledgeEntry(e);
+        nodes.push(...h.nodes);
+        edges.push(...h.edges);
+        for (const r of [...e.refs, ...e.evidence]) reference(r, e.updatedAt);
+      }
+    }
+    return { nodes, edges, references };
   }
 
   // The authored notes on a node (the read side of `annotate`), newest first.

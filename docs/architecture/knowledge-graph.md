@@ -5,7 +5,8 @@
 > harvesters (scorecard/run/schedule/comment/membership + harness/dataset/judge/runtime/model/rubric/agent/capability);
 > and the `knowledge/` HTTP + MCP slice — read (node/related/subgraph/annotations) + `reindex` + the **authored write
 > path** (`annotate`/`relate`) so a user or agent contributes knowledge from Claude Code via the everdict plugin.
-> Text extraction + resolution, ingest-on-write, and web rendering are next (see §Roadmap).
+> The workspace-facing **map** (Settings › Knowledge) is landed too; text extraction + resolution and ingest-on-write
+> are next (see §Roadmap).
 
 Everdict's data is a web of relationships that today is only *implicit* — a scorecard's config names a harness,
 dataset, judges, and a runtime; a comment @-mentions a user and discusses a scorecard; an agent's reasoning talks
@@ -322,9 +323,18 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    (scorecards/runs/schedules) AND the registries (dataset/judge/runtime/model/rubric/harness/agent, at each entity's
    latest version) — so a reindex materialises every eval-config node, not just the record nodes. Write-path
    ingest-on-write (keeping the graph current without a manual reindex) is the follow-up.
-6. **Rendering** — like digo, flat, ranked fact lists powering resource "related" panels, impact analysis, and the
-   agent's context first — not a graph visualization. Plus ingest-on-write hooks so the graph stays current without a
-   manual reindex.
+6. **Rendering** — ranked flat fact lists first (resource "related" panels, impact analysis, the agent's context),
+   ✅ plus the **map** the workspace reads: Settings › Knowledge is a force-directed graph of the knowledge layer over
+   the entities it concerns (`features/knowledge-graph` — canvas-2D, pan/zoom/drag, search, per-type filters), and
+   picking a node opens its identity + surrounding relationships in the split-view panel's `knowledge` tab, which
+   reads the map the screen published (map and detail can never disagree). Two invariants make the map honest:
+   - **The knowledge layer is read LIVE, never awaited from a reindex** — `KnowledgeService.graph` overlays a fresh
+     projection of the workspace-visible entries + skills (the same records `assembleContext` reads) on top of the
+     persisted BFS. Harvest ids are deterministic, so the overlay reconciles with an already-harvested graph. A claim
+     written a minute ago is on the map; only the ENTITY stratum waits for a reindex.
+   - **A pin whose entity is not projected yet becomes a `dangling` reference node**, drawn hollow. A claim is never
+     stranded as an orphan dot just because nothing has harvested the harness it is about.
+   Still open: ingest-on-write hooks so the entity stratum stays current without a manual reindex.
 7. **Knowledge layer (v1)** — §The knowledge layer: the `knowledge` node type + `about`/`evidenced_by` predicates,
    `KnowledgeEntryRecord` (store + CRUD + MCP parity + harvester), `SkillRecord.refs`/`verifiedAt` + the skill
    harvester, coverage surfaced in the skill listing / `use_skill`, and `assembleContext` + MCP `get_task_context`

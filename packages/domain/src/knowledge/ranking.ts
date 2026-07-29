@@ -31,7 +31,9 @@ export const PREDICATE_PRIORITY: readonly Predicate[] = [
   "connects_repo",
   "exports_to",
   "pulls_from",
-  // knowledge & comms
+  // knowledge & comms — what a claim/skill is ABOUT is its headline fact, in both directions
+  "about",
+  "evidenced_by",
   "references",
   "discusses",
   "reply_to",

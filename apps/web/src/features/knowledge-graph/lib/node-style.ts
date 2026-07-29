@@ -2,10 +2,21 @@
 // @everdict/contracts as VALUE arrays the web may not import (type-only rule), so these mirror them as string-keyed
 // lookups with a fallback — an unmapped (newly added) type/predicate degrades gracefully instead of crashing.
 
-// The six render axes from the node vocabulary (docs/architecture/knowledge-graph.md §node vocabulary).
-type NodeAxis = 'actor' | 'subject' | 'infra' | 'outcome' | 'analysis' | 'comms' | 'integration'
+// The render axes from the node vocabulary (docs/architecture/knowledge-graph.md §node vocabulary). `claim` is the
+// KNOWLEDGE LAYER — the reified claims and skills the map exists to show; the rest is the entity stratum they are about.
+type NodeAxis =
+  | 'claim'
+  | 'actor'
+  | 'subject'
+  | 'infra'
+  | 'outcome'
+  | 'analysis'
+  | 'comms'
+  | 'integration'
 
 const AXIS_OF: Record<string, NodeAxis> = {
+  knowledge: 'claim',
+  skill: 'claim',
   workspace: 'actor',
   user: 'actor',
   harness: 'subject',
@@ -25,7 +36,6 @@ const AXIS_OF: Record<string, NodeAxis> = {
   tag: 'analysis',
   metric: 'analysis',
   view: 'analysis',
-  skill: 'comms',
   comment: 'comms',
   agent_session: 'comms',
   repository: 'integration',
@@ -35,9 +45,11 @@ const AXIS_OF: Record<string, NodeAxis> = {
 }
 
 // Categorical hues chosen to read on BOTH the light and near-black dark surfaces (mid-saturation, no theme token —
-// these are data colors, not UI chrome). The eval subjects get the brand indigo (they are the graph's centre of mass).
+// these are data colors, not UI chrome). The eval subjects get the brand indigo (they are the graph's centre of mass);
+// claims get the loudest hue and actors the quietest, since a workspace/user node is scoping chrome, not content.
 const AXIS_COLOR: Record<NodeAxis, string> = {
-  actor: '#8b5cf6', // violet
+  claim: '#8b5cf6', // violet — the knowledge layer
+  actor: '#64748b', // slate
   subject: '#5e6ad2', // indigo (brand)
   infra: '#0ea5e9', // sky
   outcome: '#22c55e', // green
@@ -83,6 +95,8 @@ const PREDICATE_PRIORITY: readonly string[] = [
   'connects_repo',
   'exports_to',
   'pulls_from',
+  'about',
+  'evidenced_by',
   'references',
   'discusses',
   'reply_to',

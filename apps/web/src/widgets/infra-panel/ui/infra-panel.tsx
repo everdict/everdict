@@ -8,6 +8,7 @@ import {
   CalendarClock,
   ChevronsRight,
   FileText,
+  Network,
   Play,
   Server,
   Sparkles,
@@ -27,6 +28,7 @@ import {
   type InfraTab,
 } from '../model/infra-panel-context'
 import { FilesTab } from './files-tab'
+import { KnowledgeTab } from './knowledge-tab'
 import { WorkTab } from './work-tab'
 
 // The floating infra panel — the right half of the split view. On md+ it takes real layout space as a flex-1
@@ -50,6 +52,7 @@ const TAB_META: Record<InfraTab, { icon: LucideIcon }> = {
   work: { icon: Activity },
   agent: { icon: Sparkles },
   files: { icon: FileText },
+  knowledge: { icon: Network },
 }
 
 // The page tabs and their iframe home paths (workspace-relative).
@@ -334,6 +337,7 @@ export function InfraPanel({
               </div>
             )}
             {tab === 'files' && <FilesTab canWrite={canFilesWrite} />}
+            {tab === 'knowledge' && <KnowledgeTab />}
             {tab === 'agent' && (
               <div className="h-full">
                 <AgentChatPanel

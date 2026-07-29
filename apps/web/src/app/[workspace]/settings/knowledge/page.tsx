@@ -1,12 +1,12 @@
 import { getTranslations } from 'next-intl/server'
 
 import { type KnowledgeGraph, knowledgeGraphSchema } from '@/entities/knowledge'
-import { KnowledgeExplorer } from '@/features/knowledge-graph'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
+import { SettingsKnowledgeMap } from './settings-knowledge-map'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,7 +47,7 @@ export default async function KnowledgeSettingsPage() {
       {unavailable ? (
         <EmptyState title={k('unavailableTitle')} hint={k('unavailableHint')} />
       ) : (
-        <KnowledgeExplorer graph={graph} canReindex={canReindex} />
+        <SettingsKnowledgeMap graph={graph} canReindex={canReindex} />
       )}
     </div>
   )

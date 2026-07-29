@@ -100,6 +100,8 @@ export const controlPlane = {
       method: 'DELETE',
     }),
   listKnowledgeEntries: <T>(auth: AuthContext) => call<T>(auth, '/knowledge/entries'),
+  getKnowledgeEntry: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/knowledge/entries/${encodeURIComponent(id)}`),
   createKnowledgeEntry: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/knowledge/entries', { method: 'POST', body: JSON.stringify(body) }),
   updateKnowledgeEntry: <T>(auth: AuthContext, id: string, patch: unknown) =>

@@ -2705,7 +2705,7 @@
     "observability": "Observability",
     "observabilityDesc": "Browse the traces a registered platform holds.",
     "knowledge": "Knowledge",
-    "knowledgeDesc": "Your workspace's eval data as a connected graph — what evaluates what, and how it all links.",
+    "knowledgeDesc": "The claims and skills your workspace has recorded, mapped over the entities they concern.",
     "ci": "CI",
     "ciDesc": "Repository trust links for keyless CI evaluation.",
     "runners": "Runners",
@@ -2792,15 +2792,20 @@
     "reindexed": "Graph rebuilt — {nodes} nodes, {edges} edges.",
     "reindexError": "Couldn't rebuild the knowledge graph.",
     "emptyTitle": "No knowledge yet",
-    "emptyHint": "Rebuild the graph to harvest this workspace's eval data — scorecards, runs, harnesses, datasets, judges, runtimes, members — into a queryable map.",
-    "emptyHintReadonly": "An admin can rebuild the graph to harvest this workspace's eval data into a queryable map.",
-    "selectHint": "Select a node to see its relationships.",
+    "emptyHint": "Write a claim or a skill and it appears here at once; rebuild the graph to also harvest this workspace's eval data — scorecards, runs, harnesses, datasets, judges, runtimes, members.",
+    "emptyHintReadonly": "Claims and skills appear here as members write them; an admin can rebuild the graph to also harvest this workspace's eval data.",
+    "selectHint": "Pick a node on the map to see what it is and what surrounds it.",
     "relationships": "Relationships",
-    "noRelationships": "No relationships in the loaded graph.",
+    "noRelationships": "No relationships on the map.",
     "evidence": "{count, plural, one {# observation} other {# observations}}",
-    "dangling": "unresolved",
     "unavailableTitle": "Knowledge graph unavailable",
-    "unavailableHint": "The knowledge service isn't configured on this deployment (it needs a database)."
+    "unavailableHint": "The knowledge service isn't configured on this deployment (it needs a database).",
+    "searchPlaceholder": "Search the map",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "fit": "Fit to view",
+    "canvasHint": "Drag to move · scroll to zoom · click a node for its detail",
+    "pending": "not yet projected"
   },
   "files": {
     "title": "Files",
@@ -3177,7 +3182,8 @@
     "tab_agent": "Agent",
     "tab_files": "File",
     "collapse": "Collapse panel",
-    "back": "Back"
+    "back": "Back",
+    "tab_knowledge": "Knowledge"
   },
   "agentManager": {
     "instructions": "Instructions",

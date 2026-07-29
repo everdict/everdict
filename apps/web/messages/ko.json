@@ -2705,7 +2705,7 @@
     "observability": "옵저버빌리티",
     "observabilityDesc": "등록한 플랫폼의 트레이스를 둘러봅니다.",
     "knowledge": "지식 그래프",
-    "knowledgeDesc": "워크스페이스의 평가 데이터를 연결된 그래프로 — 무엇이 무엇을 평가하고 어떻게 이어지는지.",
+    "knowledgeDesc": "워크스페이스가 쌓은 지식과 스킬을, 그것이 다루는 엔티티 위에 지도로 펼칩니다.",
     "ci": "CI 연동",
     "ciDesc": "키리스 CI 평가를 위한 저장소 신뢰 연결.",
     "runners": "공유 러너",
@@ -2792,15 +2792,20 @@
     "reindexed": "그래프 재구성 완료 — 노드 {nodes}개, 엣지 {edges}개.",
     "reindexError": "지식 그래프를 재구성하지 못했습니다.",
     "emptyTitle": "아직 지식이 없습니다",
-    "emptyHint": "그래프를 재구성하면 이 워크스페이스의 평가 데이터(스코어카드·실행·하니스·데이터셋·평가자·런타임·멤버)를 질의 가능한 지도로 수확합니다.",
-    "emptyHintReadonly": "관리자가 그래프를 재구성하면 이 워크스페이스의 평가 데이터를 질의 가능한 지도로 수확합니다.",
-    "selectHint": "노드를 선택하면 관계가 표시됩니다.",
+    "emptyHint": "지식이나 스킬을 작성하면 바로 여기에 나타납니다. 그래프를 다시 만들면 워크스페이스의 평가 데이터(스코어카드·실행·하네스·데이터셋·평가자·런타임·멤버)까지 함께 수확합니다.",
+    "emptyHintReadonly": "멤버가 지식과 스킬을 작성하면 여기에 나타납니다. 평가 데이터까지 수확하려면 관리자가 그래프를 다시 만들 수 있습니다.",
+    "selectHint": "맵에서 노드를 고르면 그게 무엇이고 무엇과 이어져 있는지 보여줍니다.",
     "relationships": "관계",
-    "noRelationships": "불러온 그래프에 관계가 없습니다.",
+    "noRelationships": "맵에 연결된 관계가 없습니다.",
     "evidence": "관측 {count}건",
-    "dangling": "미해결",
     "unavailableTitle": "지식 그래프를 사용할 수 없음",
-    "unavailableHint": "이 배포에는 지식 서비스가 구성되어 있지 않습니다(데이터베이스가 필요합니다)."
+    "unavailableHint": "이 배포에는 지식 서비스가 구성되어 있지 않습니다(데이터베이스가 필요합니다).",
+    "searchPlaceholder": "맵 검색",
+    "zoomIn": "확대",
+    "zoomOut": "축소",
+    "fit": "전체 보기",
+    "canvasHint": "드래그로 이동 · 스크롤로 확대 · 노드를 클릭하면 상세",
+    "pending": "미투영"
   },
   "files": {
     "title": "파일",
@@ -3177,7 +3182,8 @@
     "tab_agent": "에이전트",
     "tab_files": "파일",
     "collapse": "패널 접기",
-    "back": "뒤로"
+    "back": "뒤로",
+    "tab_knowledge": "지식"
   },
   "agentManager": {
     "instructions": "지침",

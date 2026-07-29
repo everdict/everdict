@@ -149,7 +149,13 @@ panel/list guidance is not.
   `fsRevision` so the selecting tree refetches. Moving a file/folder is **drag-and-drop in the tree** (no Move
   button, no path dialog): drop on a folder row, or on the tree body for the top level; invalid drops are
   refused at `dragover` and re-checked at `drop`, and `rewriteMovedPath` re-points an open selection the move
-  carried along (see `docs/architecture/workspace-filesystem.md`).
+  carried along (see `docs/architecture/workspace-filesystem.md`). The **knowledge** tab is the same shape for the
+  knowledge map: Settings › Knowledge is a force-directed graph (canvas-2D — pan / zoom / drag a node / search /
+  per-type filter chips) of the workspace's claims and skills over the entities they concern; picking a node calls
+  `useInfraPanel().openKnowledgeNode(id)` and the panel shows what that node IS (type, version, harvested attrs, a
+  claim's markdown body via `/api/knowledge/entries/[id]`) plus its relationships grouped by predicate — rendered
+  from the graph the screen published, so map and detail always agree; picking a neighbour there re-centres the map
+  (see `docs/architecture/knowledge-graph.md`).
 - **Judge `/{workspace}/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
   **Detail `/{workspace}/judges/[id]`** shows kind + fields + rubric. **Register `/{workspace}/judges/new`** — a
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`
