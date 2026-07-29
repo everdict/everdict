@@ -16,9 +16,9 @@ import { RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
 import type { CaseJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/contracts";
 import {
   InMemoryBudgetStore,
-  InMemoryOAuthStateStore,
   InMemoryKnowledgeEntryStore,
   InMemoryKnowledgeStore,
+  InMemoryOAuthStateStore,
   InMemoryRecordingStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
@@ -2122,7 +2122,9 @@ describe("MCP knowledge tools", () => {
       createdBy: "u",
     });
     const client = await connect(deps, ["viewer"]);
-    const read = JSON.parse(text(await client.callTool({ name: "get_knowledge_entry", arguments: { id: created.id } })));
+    const read = JSON.parse(
+      text(await client.callTool({ name: "get_knowledge_entry", arguments: { id: created.id } })),
+    );
     expect(read.title).toBe("Login cases go flaky above 8 parallel");
     expect(read.body).toContain("CDP pool");
     expect(read.refs[0]).toMatchObject({ type: "harness", key: "web-agent", version: "2.1.0" });
