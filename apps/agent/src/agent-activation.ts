@@ -164,6 +164,130 @@ export class AgentActivator {
     await Promise.all([...this.chains.values()]);
   }
 
+  // A6 resume leg: a decision arrived for a park whose in-process wait is GONE (an agent-service restart) —
+  // the TRANSCRIPT is the durable state, so the run resumes as ONE continuation turn on the same session,
+  // seeded with the decision. An approve pre-authorizes the FIRST re-ask of that same tool (the agent
+  // re-issues the call it parked on); everything else goes back through the normal mode-derived gate.
+  // Fire-and-forget like activations (serialized on the same per-agent chain); validation is synchronous.
+  async resumeApproval(input: {
+    workspace: string;
+    sessionId: string;
+    decision: PermissionDecision;
+    request: { name: string; input?: unknown };
+    decidedBy?: string;
+  }): Promise<{ resumed: boolean; reason?: string }> {
+    // A live run means the wait is still in-process — the delivery path resolves it; resume only a dead park.
+    if (this.controllers.has(input.sessionId)) return { resumed: false, reason: "run is live (deliver instead)" };
+    // Headless runs are workspace-visible, so any subject passes the visibility lookup.
+    const session = await this.deps.sessions.getVisibleSession(input.workspace, "everdict", input.sessionId);
+    if (!session) return { resumed: false, reason: "session not found" };
+    const agentId = session.origin?.type === "trigger" ? session.origin.agentId : undefined;
+    const creator = session.owner;
+    if (!agentId || !creator) return { resumed: false, reason: "not a resumable trigger run" };
+    let spec: AgentSpec;
+    try {
+      spec = await this.deps.registry.get(input.workspace, agentId, session.origin?.agentVersion ?? "latest");
+    } catch {
+      return { resumed: false, reason: "agent spec unavailable" };
+    }
+    const agentKey = `${input.workspace}:${agentId}`;
+    const prev = this.chains.get(agentKey) ?? Promise.resolve();
+    const next = prev
+      .then(() => this.runResumeTurn(input, agentId, spec, creator))
+      .catch((err) => {
+        console.error(`[agent] approval resume failed for ${agentId}:`, err instanceof Error ? err.message : err);
+      });
+    this.chains.set(agentKey, next);
+    return { resumed: true };
+  }
+
+  private async runResumeTurn(
+    input: {
+      workspace: string;
+      sessionId: string;
+      decision: PermissionDecision;
+      request: { name: string; input?: unknown };
+      decidedBy?: string;
+    },
+    agentId: string,
+    spec: AgentSpec,
+    creator: string,
+  ): Promise<void> {
+    const { workspace, sessionId } = input;
+    // The pseudo-event shell the permit/report plumbing rides — the resume is caused by the decision, not a
+    // platform event, so it is deliberately NOT trigger-matchable input (no eventId, no dedup interplay).
+    const event: ActivationEvent = {
+      workspace,
+      kind: "approval.decided",
+      source: "approval",
+      message: `Approval decision for ${input.request.name}`,
+    };
+    await this.deps.sessions.setSessionStatus(workspace, sessionId, "running", this.deps.now());
+    void this.report(
+      "agent.run.started",
+      event,
+      agentId,
+      sessionId,
+      `Agent ${agentId} resumed after an approval decision (${input.request.name}).`,
+    );
+    const { token, id: keyId } = await issueAgentToken(
+      this.deps.keyStore,
+      workspace,
+      creator,
+      ["write"],
+      `agent:${agentId}`,
+    );
+    const controller = new AbortController();
+    this.controllers.set(sessionId, controller);
+    try {
+      const verdict = input.decision === "allow" ? "APPROVED" : "DENIED";
+      const guidance =
+        input.decision === "allow"
+          ? "The next call to that tool is pre-approved — perform the action now, then continue the task from where you left off."
+          : "Do not perform that action. Adapt and continue (or conclude) the task from where you left off.";
+      this.deps.mailbox.enqueue(workspace, sessionId, {
+        from: "event",
+        sender: "approval",
+        content: `[approval decision] Your earlier request to run the tool "${input.request.name}" was ${verdict}${input.decidedBy ? ` by ${input.decidedBy}` : ""} while this run was suspended. ${guidance}`,
+      });
+      const base = this.buildPermit(event, agentId, sessionId, spec, controller.signal);
+      let approvedOnce = input.decision === "allow" ? input.request.name : undefined;
+      const permit: PermissionHook | undefined = base
+        ? async (request) => {
+            if (approvedOnce !== undefined && request.name === approvedOnce) {
+              approvedOnce = undefined; // one shot — a second identical ask parks like any other mutation
+              return "allow";
+            }
+            return base(request);
+          }
+        : undefined;
+      await this.deps.runTurn(sessionId, token, controller.signal, permit);
+      const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
+      await this.deps.sessions.setSessionStatus(workspace, sessionId, settled, this.deps.now());
+      void this.report(
+        settled === "cancelled" ? "agent.run.cancelled" : "agent.run.completed",
+        event,
+        agentId,
+        sessionId,
+        `Agent ${agentId} run ${settled} (resumed after approval).`,
+      );
+    } catch (err) {
+      const settled = this.stopped.has(sessionId) ? "cancelled" : "failed";
+      await this.deps.sessions.setSessionStatus(workspace, sessionId, settled, this.deps.now()).catch(() => {});
+      void this.report(
+        settled === "cancelled" ? "agent.run.cancelled" : "agent.run.failed",
+        event,
+        agentId,
+        sessionId,
+        `Agent ${agentId} run ${settled} (resumed after approval)${err instanceof Error ? `: ${err.message}` : ""}.`,
+      );
+    } finally {
+      this.controllers.delete(sessionId);
+      this.stopped.delete(sessionId);
+      await this.deps.keyStore.revoke(workspace, keyId, creator).catch(() => {});
+    }
+  }
+
   // Member stop (fleet view control): abort the live run's loop; the wrapper settles it as cancelled.
   // Returns false when the session has no live run here (already settled / not this process).
   stop(sessionId: string): boolean {

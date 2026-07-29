@@ -61,11 +61,14 @@ that Temporal stays — which raises the follow-up: use it *better*. Every candi
 charter filter (**definition of done + must survive crashes/time + not open-ended**); everything that
 failed is listed in the anti-catalog so it cannot creep in later.
 
-**Running today (5):** `evalCaseWorkflow` · `suiteWorkflow` · `scorecardBatchWorkflow` (+ the
+**Running today (6):** `evalCaseWorkflow` · `suiteWorkflow` · `scorecardBatchWorkflow` (+ the
 workflow-owned retry batch) · `scheduledScorecardWorkflow` + `TemporalScheduleDriver` (the clock) ·
 `scoreGroupWorkflow` (`everdict-score-<groupId>` — Tier-1 item 3, SHIPPED in W2: the detached phase-2
 pass; planScore's unfinished-only idempotence + scoreGroupCase's skip-if-judged give restart-safe,
-zero-duplicate re-scoring; start failure degrades to the in-process pass).
+zero-duplicate re-scoring; start failure degrades to the in-process pass) ·
+`approvalWorkflow` (`everdict-approval-<id>` — Tier-1 item 1, SHIPPED in W2: the durable approval WAIT;
+decision signal or days-long timer → deny-on-expiry via the internal bridge, idempotent against a settled
+record; the agent loop stays in the agent service — the workflow owns ONLY the wait).
 
 **Tier 1 — adopt next (each unlocks a roadmap phase):**
 
@@ -74,6 +77,8 @@ zero-duplicate re-scoring; start failure degrades to the in-process pass).
    Replaces the in-process park (10-min deny-on-expiry; an agent-service restart expires as deny —
    agent-automation's recorded v1 bound). *Unlocks:* A6's full shape; `default` permission mode becomes
    usable for headless automation. The agent loop stays in `apps/agent` — the workflow owns only the WAIT.
+   **SHIPPED (W2)** — see "Running today"; the resume leg (a post-restart decision re-drives the run as a
+   continuation turn from its transcript) lives in the agent service, exactly as chartered.
 2. **Session/warm reapers as durable per-entity timers** — `reaperWorkflow(runId)`: `sleep(ttl)` +
    extend/close signals → teardown activity. Done = torn down. *Unlocks:* execution-model P6 ("the reaper
    is the `finally`" made crash-proof for sandbox runs); browser sessions fold in later (O6); warm-pool

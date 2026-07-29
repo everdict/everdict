@@ -1,5 +1,13 @@
 import type { CaseJob, CaseResult } from "@everdict/contracts";
-import { continueAsNew, proxyActivities, sleep, workflowInfo } from "@temporalio/workflow";
+import {
+  condition,
+  continueAsNew,
+  defineSignal,
+  proxyActivities,
+  setHandler,
+  sleep,
+  workflowInfo,
+} from "@temporalio/workflow";
 import type { Activities } from "./types.js";
 
 // ⚠ Workflow code must be deterministic — no I/O, import types only.
@@ -163,6 +171,27 @@ export async function scoreGroupWorkflow(input: {
     judges: input.judges,
     ...(input.submittedBy !== undefined ? { submittedBy: input.submittedBy } : {}),
   });
+}
+
+// Durable approval WAIT (orchestration.md T-a, workflowId `everdict-approval-<id>`): park → wait for the
+// decision signal or the days-long timer → deny-on-expiry. Done = approved | denied | expired. The agent
+// loop stays in the agent service and the ledger stays on the CP — this workflow owns ONLY the wait, which
+// is exactly the piece an in-process park could never make restart-proof. The decide route signals for a
+// prompt completion, but correctness never depends on it: expireApproval skips an already-decided record,
+// so a missed signal merely lets the timer fire a no-op at TTL.
+export const approvalDecidedSignal = defineSignal("decided");
+
+export async function approvalWorkflow(input: {
+  approvalId: string;
+  tenant: string;
+  timeoutMs: number;
+}): Promise<void> {
+  let decided = false;
+  setHandler(approvalDecidedSignal, () => {
+    decided = true;
+  });
+  const settledInTime = await condition(() => decided, Math.max(1, input.timeoutMs));
+  if (!settledInTime) await batchActivities.expireApproval({ approvalId: input.approvalId, tenant: input.tenant });
 }
 
 export async function scheduledScorecardWorkflow(input: { scheduleId: string; tenant: string }): Promise<void> {

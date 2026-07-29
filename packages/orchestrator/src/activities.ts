@@ -154,6 +154,20 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       if (!res.ok) throw new Error(`Score case failed: ${res.status} ${await res.text()}`);
       return (await res.json()) as { scored: boolean; skipped?: boolean };
     },
+    // --- Durable approvals (T-a) — deny-on-expiry over the same internal bridge. ---
+    async expireApproval(input: { approvalId: string; tenant: string }): Promise<void> {
+      if (!schedule)
+        throw new Error("Approval activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const res = await fetch(
+        `${schedule.apiUrl.replace(/\/$/, "")}/internal/approvals/${encodeURIComponent(input.approvalId)}/expire`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+          body: JSON.stringify({ tenant: input.tenant }),
+        },
+      );
+      if (!res.ok) throw new Error(`Approval expiry failed: ${res.status} ${await res.text()}`);
+    },
     async finalizeScore(input: {
       groupId: string;
       judges: Array<{ id: string; version: string }>;

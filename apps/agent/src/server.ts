@@ -885,6 +885,26 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     return reply.send({ delivered });
   });
 
+  // CP → agent: RESUME a run whose park died with a restart (A6 resume leg) — one continuation turn on the
+  // same session, seeded with the decision; an approve pre-authorizes the first re-ask of that tool. Returns
+  // resumed:false with a reason when the run is live (deliver instead) or the session isn't a trigger run.
+  const resumeApprovalSchema = z.object({
+    workspace: z.string().min(1),
+    sessionId: z.string().min(1),
+    decision: z.enum(["allow", "deny"]),
+    request: z.object({ name: z.string().min(1), input: z.unknown().optional() }),
+    decidedBy: z.string().min(1).optional(),
+  });
+  app.post("/internal/resume-approval", async (req, reply) => {
+    const presented = req.headers["x-internal-token"];
+    if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))
+      return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
+    if (!activator) return reply.code(404).send({ code: "NOT_FOUND", message: "Activations are not configured." });
+    const parsed = resumeApprovalSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    return reply.send(await activator.resumeApproval(parsed.data));
+  });
+
   // Acks 202 and runs the turn DETACHED (a HITL approval can park it for minutes — never a held request);
   // progress lands on the placeholder comment via the /internal/comment-activity bridge, not this response.
   app.post("/internal/discussion-turn", async (req, reply) => {

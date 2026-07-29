@@ -1,3 +1,4 @@
+import type { PermissionHook } from "@everdict/agent-runtime";
 import type { AgentRegistry, TenantKeyStore } from "@everdict/application-control";
 import type { AgentSessionRecord, AgentSpec, AgentTrigger } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
@@ -76,8 +77,8 @@ function sessionsStub() {
     async getSession() {
       return undefined;
     },
-    async getVisibleSession() {
-      return undefined;
+    async getVisibleSession(_tenant: string, _subject: string, id: string) {
+      return created.find((s) => s.id === id);
     },
     async listSessions() {
       return [];
@@ -104,7 +105,7 @@ function sessionsStub() {
 
 function activator(opts: {
   registry: AgentRegistry;
-  runTurn?: (sessionId: string, token: string) => Promise<void>;
+  runTurn?: (sessionId: string, token: string, signal?: AbortSignal, permit?: PermissionHook) => Promise<void>;
   sessions?: ReturnType<typeof sessionsStub>;
   keyStore?: ReturnType<typeof keyStoreStub>;
   cooldownMs?: number;
@@ -283,5 +284,70 @@ describe("AgentActivator", () => {
     await instance.idle();
     expect(second).toBe(0);
     expect(runs).toHaveLength(1);
+  });
+});
+
+describe("AgentActivator.resumeApproval — the A6 resume leg", () => {
+  const parkedSession = (): AgentSessionRecord =>
+    ({
+      id: "sess-1",
+      tenant: "acme",
+      owner: "alice",
+      title: "sentinel — scorecard.completed",
+      visibility: "workspace",
+      origin: { type: "trigger", agentId: "sentinel", agentVersion: "1.0.0", eventKind: "scorecard.completed" },
+      status: "awaiting_approval",
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    }) as AgentSessionRecord;
+
+  it("runs ONE continuation turn seeded with the decision — the parked tool is pre-approved exactly once", async () => {
+    const seen: string[] = [];
+    const sessions = sessionsStub();
+    sessions.created.push(parkedSession()); // the run died with a restart — only the record remains
+    const { instance } = activator({
+      registry: registryOf(spec({ permissionMode: "default" })),
+      sessions,
+      // Exercise the permit like the loop would: re-ask the parked tool twice. No waitApproval is wired,
+      // so anything past the one-shot pre-approval fails CLOSED (deny) — never silently allow.
+      runTurn: async (_sessionId, _token, _signal, permit) => {
+        if (!permit) throw new Error("permit expected under default mode");
+        seen.push(await permit({ name: "write_file", isReadOnly: false, input: {} }));
+        seen.push(await permit({ name: "write_file", isReadOnly: false, input: {} }));
+      },
+    });
+    const res = await instance.resumeApproval({
+      workspace: "acme",
+      sessionId: "sess-1",
+      decision: "allow",
+      request: { name: "write_file", input: { path: "a.txt" } },
+      decidedBy: "bob",
+    });
+    expect(res).toEqual({ resumed: true });
+    await instance.idle();
+    expect(seen).toEqual(["allow", "deny"]); // one-shot pre-approval; the second identical ask parks/denies
+    expect(sessions.statuses.map((x) => x.status)).toEqual(["running", "completed"]);
+  });
+
+  it("refuses what cannot resume: a missing session, and a non-trigger session", async () => {
+    const sessions = sessionsStub();
+    sessions.created.push({ ...parkedSession(), id: "chat-1", origin: undefined } as AgentSessionRecord);
+    const { instance } = activator({ registry: registryOf(spec()), sessions });
+    expect(
+      await instance.resumeApproval({
+        workspace: "acme",
+        sessionId: "ghost",
+        decision: "allow",
+        request: { name: "write_file" },
+      }),
+    ).toEqual({ resumed: false, reason: "session not found" });
+    expect(
+      await instance.resumeApproval({
+        workspace: "acme",
+        sessionId: "chat-1",
+        decision: "deny",
+        request: { name: "write_file" },
+      }),
+    ).toEqual({ resumed: false, reason: "not a resumable trigger run" });
   });
 });

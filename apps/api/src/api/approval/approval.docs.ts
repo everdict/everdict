@@ -31,16 +31,16 @@ const docs = {
     description:
       "Approve or deny the parked ask: the record settles exactly once (a second decision — or deciding an " +
       "expired ask — is a 409; first write wins against the expiry timer), an approval.decided fact rides the " +
-      "E0 outbox, and the decision is delivered to the agent's live in-process wait. delivered:false means " +
-      "the loop is gone (agent-service restart) — the record still holds the decision for the resume leg. " +
-      "Requires agents:write (member+).",
+      "E0 outbox, and the decision reaches the run: a LIVE wait gets it delivered in-process " +
+      "(delivered:true); a dead park (agent-service restart) RESUMES as a continuation turn on the same " +
+      "session, seeded with the decision (resumed:true — the A6 resume leg). Requires agents:write (member+).",
     tags: ["approval"],
     params: approvalIdParams,
     body: toJsonSchema(z.object({ decision: z.enum(["approve", "deny"]) })),
     response: {
       200: {
-        description: "The settled record + whether a live wait received it",
-        ...toJsonSchema(z.object({ record: ApprovalRecordSchema, delivered: z.boolean() })),
+        description: "The settled record + how the decision reached the run",
+        ...toJsonSchema(z.object({ record: ApprovalRecordSchema, delivered: z.boolean(), resumed: z.boolean() })),
       },
       ...errorResponses(400, 401, 403, 404, 409),
     },
@@ -52,6 +52,18 @@ const docs = {
     tags: ["internal"],
     response: {
       201: { description: "The pending approval", ...toJsonSchema(ApprovalRecordSchema) },
+      ...errorResponses(400, 403, 404),
+    },
+  },
+  expire: {
+    summary: "Expire a parked approval (internal bridge)",
+    description:
+      "approval:<id> workflow timer → CP: deny-on-expiry. Idempotent — an already-decided record skips " +
+      "silently. Guarded by x-internal-token.",
+    tags: ["internal"],
+    params: approvalIdParams,
+    response: {
+      200: { description: "The (possibly already-settled) record", ...toJsonSchema(ApprovalRecordSchema) },
       ...errorResponses(400, 403, 404),
     },
   },

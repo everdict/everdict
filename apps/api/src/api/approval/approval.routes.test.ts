@@ -14,12 +14,21 @@ const unusedDispatcher: Dispatcher = {
   },
 };
 
-function build(opts: { deliver?: (a: ApprovalRecord, d: "approve" | "deny") => Promise<boolean> } = {}) {
+function build(
+  opts: {
+    deliver?: (a: ApprovalRecord, d: "approve" | "deny") => Promise<boolean>;
+    resume?: (a: ApprovalRecord, d: "approve" | "deny", by?: string) => Promise<boolean>;
+  } = {},
+) {
   const events = new InMemoryPlatformEventStore();
   const store = new InMemoryApprovalStore(events);
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-    approvalService: new ApprovalService({ store, ...(opts.deliver ? { deliver: opts.deliver } : {}) }),
+    approvalService: new ApprovalService({
+      store,
+      ...(opts.deliver ? { deliver: opts.deliver } : {}),
+      ...(opts.resume ? { resume: opts.resume } : {}),
+    }),
     internalToken: "it-secret",
   });
   return { app, events };
@@ -61,6 +70,7 @@ describe("durable agent approvals (/approvals + internal bridges — A6)", () =>
     expect(decide.json().record.status).toBe("approved");
     expect(decide.json().record.decidedBy).toBe("dev");
     expect(decide.json().delivered).toBe(true);
+    expect(decide.json().resumed).toBe(false); // a live wait needs no resume
     expect(delivered).toEqual(["req-1:approve"]);
 
     // Exactly once — a second decision is a clean conflict.
@@ -75,6 +85,29 @@ describe("durable agent approvals (/approvals + internal bridges — A6)", () =>
     // Facts rode the outbox: requested at the park, decided at the settle.
     const kinds = (await events.list("acme")).map((e) => e.kind);
     expect(kinds).toEqual(["approval.requested", "approval.decided"]);
+  });
+
+  it("a dead park RESUMES: delivery finds no live wait, so the decision starts a continuation turn (A6 resume leg)", async () => {
+    const resumes: string[] = [];
+    const { app } = build({
+      deliver: async () => false, // the loop died with a restart — nobody is waiting in-process
+      resume: async (a, d, by) => {
+        resumes.push(`${a.sessionId}:${d}:${by}`);
+        return true;
+      },
+    });
+    const park = await app.inject({ method: "POST", url: "/internal/approvals", headers: INTERNAL, payload: parkBody });
+    const id = park.json().id as string;
+    const decide = await app.inject({
+      method: "POST",
+      url: `/approvals/${id}/decide`,
+      headers: H,
+      payload: { decision: "approve" },
+    });
+    expect(decide.statusCode).toBe(200);
+    expect(decide.json().delivered).toBe(false);
+    expect(decide.json().resumed).toBe(true);
+    expect(resumes).toEqual(["sess-1:approve:dev"]);
   });
 
   it("the agent-side settle converges the ledger and skips silently when the CP decide already won", async () => {

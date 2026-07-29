@@ -58,6 +58,7 @@ import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { KnowledgeExtractionService } from "./core/knowledge/knowledge-extraction-service.js";
 import { ModelService } from "./core/model/model-service.js";
 import { DriverOpsService } from "./core/ops/driver-ops-service.js";
+import { TemporalBatchDriver } from "./core/scorecard/temporal-batch-driver.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
 import { SkillGenerator } from "./core/skill/skill-generator.js";
 import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
@@ -334,9 +335,25 @@ async function main(): Promise<void> {
   // service's own internal surface. Delivery absent (no agent service configured) = record-only.
   const approvalAgentUrl = process.env.AGENT_SERVICE_URL;
   const approvalAgentToken = process.env.AGENT_INTERNAL_TOKEN;
+  const approvalTemporal = process.env.EVERDICT_TEMPORAL_ADDRESS
+    ? new TemporalBatchDriver({ address: process.env.EVERDICT_TEMPORAL_ADDRESS })
+    : undefined;
   const approvalService = new ApprovalService({
     store: approvalStore,
     events: platformEventService,
+    ...(approvalTemporal
+      ? {
+          workflow: {
+            start: (record) =>
+              approvalTemporal.startApproval({
+                approvalId: record.id,
+                tenant: record.tenant,
+                expiresAt: record.expiresAt,
+              }),
+            signalDecided: (id) => approvalTemporal.signalApprovalDecided(id),
+          },
+        }
+      : {}),
     ...(approvalAgentUrl && approvalAgentToken
       ? {
           deliver: async (approval, decision) => {
@@ -352,6 +369,22 @@ async function main(): Promise<void> {
             if (!res.ok) return false;
             const json = (await res.json().catch(() => ({}))) as { delivered?: unknown };
             return json.delivered === true;
+          },
+          resume: async (approval, decision, decidedBy) => {
+            const res = await fetch(new URL("/internal/resume-approval", approvalAgentUrl), {
+              method: "POST",
+              headers: { "content-type": "application/json", "x-internal-token": approvalAgentToken },
+              body: JSON.stringify({
+                workspace: approval.tenant,
+                sessionId: approval.sessionId,
+                decision: decision === "approve" ? "allow" : "deny",
+                request: approval.request,
+                ...(decidedBy !== undefined ? { decidedBy } : {}),
+              }),
+            });
+            if (!res.ok) return false;
+            const json = (await res.json().catch(() => ({}))) as { resumed?: unknown };
+            return json.resumed === true;
           },
         }
       : {}),

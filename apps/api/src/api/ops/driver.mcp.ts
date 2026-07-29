@@ -10,7 +10,11 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
   if (!deps.driverOps) return;
   const driverOps = deps.driverOps;
 
-  const owned = async (id: string): Promise<boolean> => {
+  const owned = async (family: DriverWorkflowFamily, id: string): Promise<boolean> => {
+    if (family === "approval") {
+      const approval = await deps.approvalService?.get(ws, id).catch(() => undefined);
+      return approval !== undefined;
+    }
     const record = await deps.scorecardService?.get(id);
     return record !== undefined && record?.tenant === ws;
   };
@@ -21,7 +25,7 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
       description:
         "Diagnose a durable driver workflow by LEDGER id (a scorecard/group id): lifecycle status, history " +
         "pressure, and each pending activity's retry state with its last failure — answers 'where is this " +
-        "stuck, and why'. family: batch (the batch driver loop) | score (a detached scoring pass).",
+        "stuck, and why'. family: batch (driver loop) | score (detached scoring) | approval (durable WAIT).",
       inputSchema: {
         family: z.enum(DRIVER_WORKFLOW_FAMILIES),
         id: z.string().describe("the scorecard/group id (ledger vocabulary — never a raw workflowId)"),
@@ -29,7 +33,7 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
     },
     ({ family, id }: { family: DriverWorkflowFamily; id: string }) =>
       run(principal, "runtimes:read", async () => {
-        if (!(await owned(id))) return fail("NOT_FOUND: no such record in this workspace.");
+        if (!(await owned(family, id))) return fail("NOT_FOUND: no such record in this workspace.");
         return ok(await driverOps.describe(family, id));
       }),
   );
@@ -47,7 +51,7 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
     },
     ({ family, id }: { family: DriverWorkflowFamily; id: string }) =>
       run(principal, "runtimes:control", async () => {
-        if (!(await owned(id))) return fail("NOT_FOUND: no such record in this workspace.");
+        if (!(await owned(family, id))) return fail("NOT_FOUND: no such record in this workspace.");
         await driverOps.cancel(family, id);
         return ok({ ok: true });
       }),

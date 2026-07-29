@@ -304,9 +304,13 @@ P4 → `5b596abf` P5 → `88542c6c` P6 → P7 with this doc update):
   (`POST /internal/deliver-approval` → registry.respond). The in-process window stretches to the record's
   expiresAt (default 7 days) instead of 10 minutes; the LEGACY fleet channel (GET /pending →
   POST /permission) still works — the post-wait settle converges the ledger either way, first write wins.
-  Remaining rungs: the `approval:<id>` workflow (durable expiry timer + ops-surface family) and the
-  continuation turn (deciding after a restart RESUMES the run from its transcript — today the decision is
-  recorded with `delivered:false` and the run stays down).
+  The remaining rungs SHIPPED in the same wave: the `approval:<id>` workflow owns the days-long
+  deny-on-expiry (`everdict-approval-<id>` — signal on decide for prompt completion; a missed signal just
+  lets the timer fire a no-op, expire skips settled records; ops-surface family `approval`), and a decision
+  landing on a DEAD park (agent-service restart) RESUMES the run as one continuation turn on the same
+  session (`POST /internal/resume-approval` → `AgentActivator.resumeApproval`): the transcript is the
+  durable state, the decision seeds the turn, and an approve pre-authorizes exactly ONE re-ask of the
+  parked tool — everything else goes back through the normal mode-derived gate (fail closed).
 - **No run outcome roll-up yet** (turns/toolCalls/priceUsd on the record) — cost is metered via the usage
   bridge; the fleet shows status, not per-run cost.
 - **`agent.run.*` facts reach the event log, not the bell.** Feed/Mattermost notification of failed runs

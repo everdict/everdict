@@ -88,6 +88,40 @@ export class TemporalBatchDriver {
     }
   }
 
+  // Durable approval WAIT (orchestration.md T-a): one approval:<id> workflow per park — the deny-on-expiry
+  // timer that survives every process. timeoutMs is computed at start (expiresAt − now); the workflow's
+  // timer runs relative to its own start, so a small start latency only lengthens the window, never shortens
+  // a decision's validity (expire skips a settled record).
+  approvalWorkflowIdFor(approvalId: string): string {
+    return `everdict-approval-${approvalId}`;
+  }
+
+  async startApproval(input: { approvalId: string; tenant: string; expiresAt: string }): Promise<void> {
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      const timeoutMs = Math.max(1000, new Date(input.expiresAt).getTime() - Date.now());
+      await client.workflow.start("approvalWorkflow", {
+        taskQueue: this.opts.taskQueue ?? TASK_QUEUE,
+        workflowId: this.approvalWorkflowIdFor(input.approvalId),
+        args: [{ approvalId: input.approvalId, tenant: input.tenant, timeoutMs }],
+      });
+    } finally {
+      await connection.close();
+    }
+  }
+
+  // Prompt completion on decide — best-effort; a missed signal just lets the timer fire a no-op at TTL.
+  async signalApprovalDecided(approvalId: string): Promise<void> {
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      await client.workflow.getHandle(this.approvalWorkflowIdFor(approvalId)).signal("decided");
+    } finally {
+      await connection.close();
+    }
+  }
+
   // Cooperative cancellation for a superseded batch — best-effort (the record is already terminal; in-queue
   // activities also skip on the CP-side superseded guard).
   async cancel(scorecardId: string): Promise<void> {

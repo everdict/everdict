@@ -93,6 +93,28 @@ export function registerApprovalRoutes(app: FastifyInstance, deps: ServerDeps): 
     }
   });
 
+  // Deny-on-expiry (the approval workflow's timer → this route). Idempotent — a settled record skips.
+  app.post<{ Params: { id: string } }>(
+    "/internal/approvals/:id/expire",
+    { schema: approvalDocs.expire },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.approvalService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      const body = z.object({ tenant: z.string().min(1) }).safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        const record = await deps.approvalService.expire({ tenant: body.data.tenant, id: req.params.id });
+        if (!record) return reply.code(404).send({ code: "NOT_FOUND", message: "approval not found." });
+        return reply.send(record);
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.post<{ Params: { id: string } }>(
     "/internal/approvals/:id/settle",
     { schema: approvalDocs.settle },

@@ -4,9 +4,9 @@ import { Client, Connection, WorkflowNotFoundError } from "@temporalio/client";
 // Driver ops surface v0 (docs/orchestration.md, the 044 adoption gate): the durable driver's lifecycle is
 // readable and controllable ONLY through this everdict wrap — addressed by LEDGER vocabulary (a scorecard/group
 // id, never a raw workflowId), role-gated at the route, and never a second control plane (raw gRPC stays
-// unexposed). v0 families = the two workflows running today per ledger id: the batch driver loop and the
-// detached scoring pass. approval:/reaper:/reaction: join as their waves land.
-export const DRIVER_WORKFLOW_FAMILIES = ["batch", "score"] as const;
+// unexposed). Families per ledger id: the batch driver loop, the detached scoring pass, and the durable
+// approval WAIT (ledger id = the approval id). reaper:/reaction: join as their waves land.
+export const DRIVER_WORKFLOW_FAMILIES = ["batch", "score", "approval"] as const;
 export type DriverWorkflowFamily = (typeof DRIVER_WORKFLOW_FAMILIES)[number];
 
 // The diagnostic slice an ops agent (or the web) needs to answer "where is this stuck, and why": lifecycle
@@ -33,7 +33,9 @@ export class DriverOpsService {
 
   // Ledger id → deterministic workflowId — the correlation grammar (orchestration.md expansion disciplines).
   workflowIdFor(family: DriverWorkflowFamily, ledgerId: string): string {
-    return family === "batch" ? `everdict-batch-${ledgerId}` : `everdict-score-${ledgerId}`;
+    if (family === "batch") return `everdict-batch-${ledgerId}`;
+    if (family === "score") return `everdict-score-${ledgerId}`;
+    return `everdict-approval-${ledgerId}`;
   }
 
   async describe(family: DriverWorkflowFamily, ledgerId: string): Promise<DriverWorkflowStatus> {

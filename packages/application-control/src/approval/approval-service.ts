@@ -16,6 +16,16 @@ export interface ApprovalServiceDeps {
   // when no live wait exists (the loop died — an agent-service restart; the continuation turn picks it up
   // in the A6 resume leg). Absent = record-only deployments (no agent service wired).
   deliver?: (approval: ApprovalRecord, decision: "approve" | "deny") => Promise<boolean>;
+  // The durable WAIT (orchestration.md T-a): start approval:<id> at the park (deny-on-expiry timer that
+  // survives every process), signal it on decide (prompt completion — correctness never depends on it,
+  // expire skips a settled record). Absent = the local in-process timeout is the only expiry (rung-1 behavior).
+  workflow?: {
+    start(record: ApprovalRecord): Promise<void>;
+    signalDecided(id: string): Promise<void>;
+  };
+  // The resume leg (A6): when delivery finds NO live wait (the loop died), ask the agent service to run a
+  // continuation turn on the session, seeded with the decision. Returns whether a resume was started.
+  resume?: (approval: ApprovalRecord, decision: "approve" | "deny", decidedBy?: string) => Promise<boolean>;
   newId?: () => string;
   now?: () => string;
 }
@@ -61,6 +71,9 @@ export class ApprovalService {
       creation.map((c) => c.record),
     );
     if (creation.length > 0) void this.deps.events?.pushPersisted?.(creation);
+    // Durable expiry (T-a): best-effort — a Temporal outage never blocks the park (the agent's local
+    // timeout still bounds the wait at expiresAt while its process lives).
+    void this.deps.workflow?.start(record).catch(() => {});
     return record;
   }
 
@@ -83,7 +96,7 @@ export class ApprovalService {
     id: string;
     decision: "approve" | "deny";
     decidedBy?: string;
-  }): Promise<{ record: ApprovalRecord; delivered: boolean }> {
+  }): Promise<{ record: ApprovalRecord; delivered: boolean; resumed: boolean }> {
     const current = await this.get(input.tenant, input.id);
     const transition = Approval.from(current).decide(
       input.decision,
@@ -98,8 +111,14 @@ export class ApprovalService {
     );
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     const record = updated ?? { ...current, ...transition.patch };
+    void this.deps.workflow?.signalDecided(record.id).catch(() => {}); // prompt workflow completion (best-effort)
     const delivered = (await this.deps.deliver?.(record, input.decision).catch(() => false)) ?? false;
-    return { record, delivered };
+    // The resume leg: no live wait → the run died with a restart; a continuation turn picks the decision up
+    // from the transcript (the durable state). Best-effort — the decision itself is already settled above.
+    const resumed = delivered
+      ? false
+      : ((await this.deps.resume?.(record, input.decision, input.decidedBy).catch(() => false)) ?? false);
+    return { record, delivered, resumed };
   }
 
   // The agent side settling a park that was decided through the LEGACY in-process channel (POST /permission)
@@ -124,10 +143,12 @@ export class ApprovalService {
     return updated;
   }
 
-  // Deny-on-expiry — called by the approval workflow's timer (T-a). Already-settled asks skip silently.
-  async expire(id: string): Promise<ApprovalRecord | undefined> {
-    const record = await this.deps.store.get(id);
-    if (!record || !Approval.from(record).isPending()) return record;
+  // Deny-on-expiry — called by the approval workflow's timer (T-a). Already-settled asks skip silently;
+  // tenant-scoped (the internal bridge carries the workflow's tenant — a mismatch reads as missing).
+  async expire(input: { tenant: string; id: string }): Promise<ApprovalRecord | undefined> {
+    const record = await this.deps.store.get(input.id);
+    if (!record || record.tenant !== input.tenant) return undefined;
+    if (!Approval.from(record).isPending()) return record;
     const transition = Approval.from(record).expire(this.now());
     const stamped = stampFacts(record.tenant, transition.facts, { newId: this.newId, now: this.now });
     const updated = await this.deps.store.update(

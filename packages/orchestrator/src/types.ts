@@ -39,4 +39,9 @@ export interface Activities {
     judges: Array<{ id: string; version: string }>;
     submittedBy?: string;
   }): Promise<void>;
+
+  // --- Durable approvals (orchestration.md T-a, `approval:<id>`) — the workflow owns ONLY the days-long
+  // WAIT; park/decide/deliver live on the CP. expireApproval is the deny-on-expiry (idempotent: an
+  // already-decided record skips silently on the CP side). ---
+  expireApproval(input: { approvalId: string; tenant: string }): Promise<void>;
 }
