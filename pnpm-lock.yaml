@@ -467,6 +467,21 @@ importers:
         specifier: workspace:*
         version: link:../trace
 
+  packages/images:
+    dependencies:
+      '@everdict/application-control':
+        specifier: workspace:*
+        version: link:../application-control
+      '@everdict/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
+      jose:
+        specifier: ^5.9.6
+        version: 5.10.0
+
   packages/job-runner:
     dependencies:
       '@everdict/application-execution':

@@ -48,6 +48,8 @@ export interface WorkspaceImages {
   // Delete a whole repository, or one reference within it. Returns the number of manifests removed (0 = nothing there).
   remove(tenant: string, repository: string, reference?: string): Promise<number>;
 
-  // Storage the workspace occupies — feeds the same usage metering the filesystem reports into.
-  usage(tenant: string): Promise<{ bytes: number; repositories: number }>;
+  // What the workspace occupies — feeds the same usage metering the filesystem reports into. `bytes` is optional
+  // because a registry exposes no size API: deriving it means walking every manifest's blob list, so a backend
+  // that cannot answer cheaply omits it rather than reporting a number it guessed.
+  usage(tenant: string): Promise<{ repositories: number; bytes?: number }>;
 }

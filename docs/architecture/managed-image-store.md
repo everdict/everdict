@@ -159,9 +159,15 @@ grant at an arbitrary repository in someone else's namespace is not a request we
 - **M1 — port + contracts.** `WorkspaceImages` port, `ImageGrant`/`ImageRepo` wire types,
   `imageRepoFor` + `classifyImageRef` `managed` class in `@everdict/domain`, `registryAuths[]` on
   `CaseJob` with every consumer fanned out. No behavior change yet (managed store absent = today).
-- **M2 — `ManagedImageStore`.** New `packages/images` (a registry client is not object storage, so it
-  does not belong in `@everdict/storage`): namespace mapping, grant minting, tag/manifest reads over
-  `RegistryReader`, `InMemoryImageStore` beside it.
+- **M2 — `ManagedImageStore`.** ✅ New `packages/images` (a registry client is not object storage, so it
+  does not belong in `@everdict/storage`): `RegistryTokenIssuer` (the authorization server: grant →
+  scoped registry token), `ManagedRegistryApi` (catalog/tags/manifest/delete as the namespace OWNER —
+  distinct from the `RegistryReader` port, which is the BYO guest path), `ManagedImageStore` and
+  `InMemoryImageStore`. Two token audiences, deliberately: a **grant** is what a client presents as its
+  registry password, and only the token endpoint can exchange it for a **registry token**, so a grant
+  cannot be replayed at the registry. `narrowAccess` makes the exchange able to narrow a grant and never
+  widen it. Cross-tenant refs are omitted from a pull grant with a comment pointing at M6 — the safe
+  default is the registry's own 401, never authorization we invented.
 - **M3 — the token server.** `GET /v2/token` in `apps/api`, RS256 signing key from the operator
   secret, scope authorization; `registry:2` in `deploy/compose/docker-compose.full.yaml` wired to the
   realm with the S3 driver pointed at the existing MinIO; TLS/insecure-registry runbook. **M3 is where
