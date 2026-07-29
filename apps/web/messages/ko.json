@@ -2855,7 +2855,15 @@
     "conflictNoMerge": "그사이 rev {revision} 이(가) 발행됐습니다. 이 파일은 자동 병합할 수 없습니다.",
     "mergedContent": "병합된 내용",
     "keepMine": "내 내용 유지",
-    "publishMerged": "발행"
+    "publishMerged": "발행",
+    "download": "다운로드",
+    "documentFile": "문서 파일",
+    "archiveFile": "압축 파일",
+    "previewUnavailable": "미리보기를 지원하지 않는 형식",
+    "previewUnavailableHint": "내려받아 사용하는 편집기에서 여세요.",
+    "tableEmpty": "빈 표",
+    "tableRows": "{rows}행",
+    "tableTruncated": "처음 {rows}행"
   },
   "observabilityPage": {
     "title": "옵저버빌리티",
