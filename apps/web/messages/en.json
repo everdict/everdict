@@ -1648,6 +1648,7 @@
     "tagsHelp": "Used as category filters in the list (e.g. coding, browser, qa).",
     "casesLabel": "Cases (EvalCase[] JSON)",
     "casesHelp": "Each case is id · env · task · expected. Grading (graders · judges) is set when you run a scorecard — the same cases evaluate any harness.",
+    "caseImageHelp": "“From store” sets the chosen environment image as `image` on every case — the container that case runs in.",
     "immutableNote": "Versions are immutable. Re-uploading the same version with different content won't register.",
     "validate": "Validate",
     "processing": "Working…",
@@ -1775,11 +1776,6 @@
     "pinsCommandTip": "A command harness only needs the image and model slots. The template defines the slots.",
     "pinsFixedTitle": "Pins (set image/value per slot)",
     "pinsFreeTitle": "Pins (slot → image/value)",
-    "envPickerButton": "From store",
-    "envPickerLoading": "Loading environments…",
-    "envPickerEmpty": "No environment images in the store yet — publish one from the Store page.",
-    "envAdopted": "Imported",
-    "envNotPullable": "Can't pull",
     "pinFromStore": "From store: {id}@{version} — editing the value clears this provenance.",
     "pinsServiceTip": "Set the image per service. Slots are the template's service names.",
     "processingLabel": "Processing…",
@@ -1860,6 +1856,13 @@
     "volumesOverridePlaceholder": "volumes (newline — cache:/cache · /host:/c:ro)",
     "workDirLabel": "workDir (optional)",
     "workDirTip": "Working directory to run the command in. e.g. /tmp."
+  },
+  "pickEnvironment": {
+    "envPickerButton": "From store",
+    "envPickerLoading": "Loading environments…",
+    "envPickerEmpty": "No environment images in the store yet — publish one from the Store page.",
+    "envNotPullable": "Can't pull",
+    "envAdopted": "Imported"
   },
   "spanMapping": {
     "heading": "Attribute mapping (advanced)",

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 
+import { EnvironmentPicker } from '@/features/pick-environment'
 import { versionsForId } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -71,6 +72,30 @@ export function RegisterDatasetForm({
         .map((t) => t.trim())
         .filter(Boolean),
     }
+  }
+
+  // 스토어의 환경 이미지를 케이스에 적용 — case.image 는 그 케이스가 도는 컨테이너라 보통 데이터셋 하나가 환경
+  // 하나를 쓴다. 그래서 캐럿 삽입(JSON 을 깨기 쉽다) 대신 파싱→모든 케이스에 image 세팅→재직렬화로 눈에 보이게
+  // 고친다. ref 는 스토어의 no-rewrite 불변대로 그대로 넣는다. 파싱 실패면 아무것도 건드리지 않고 사유만 띄운다.
+  function applyEnvironmentImage(image: string) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(casesText)
+    } catch {
+      setResult({ ok: false, error: t('casesParseError') })
+      return
+    }
+    if (!Array.isArray(parsed)) {
+      setResult({ ok: false, error: t('casesParseError') })
+      return
+    }
+    const next = parsed.map((c) =>
+      c !== null && typeof c === 'object' && !Array.isArray(c)
+        ? { ...(c as Record<string, unknown>), image }
+        : c
+    )
+    setCasesText(JSON.stringify(next, null, 2))
+    setResult(undefined)
   }
 
   async function onValidate() {
@@ -155,7 +180,10 @@ export function RegisterDatasetForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="cases">{t('casesLabel')}</Label>
+        <div className="flex items-end justify-between gap-2">
+          <Label htmlFor="cases">{t('casesLabel')}</Label>
+          <EnvironmentPicker onPick={(env) => applyEnvironmentImage(env.image)} />
+        </div>
         <Textarea
           id="cases"
           className="min-h-72 text-[12px]"
@@ -164,6 +192,7 @@ export function RegisterDatasetForm({
           spellCheck={false}
         />
         <p className="text-[12px] leading-relaxed text-muted-foreground">{t('casesHelp')}</p>
+        <p className="text-[12px] leading-relaxed text-muted-foreground">{t('caseImageHelp')}</p>
       </div>
 
       {result && <ValidateBanner result={result} />}

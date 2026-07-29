@@ -11,7 +11,8 @@ import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
 import { listStoreEnvironmentsAction, type StoreEnvironment } from '../api/list-environments'
 
-// 핀 값 옆의 "스토어에서" 피커 — 스토어의 environment(평가환경 이미지) 자산을 골라 이미지 ref 를 그대로 삽입한다.
+// 이미지 값 옆의 "스토어에서" 피커 — 스토어의 environment(평가환경 이미지) 자산을 골라 이미지 ref 를 그대로 삽입한다.
+// 하네스 핀/서비스/커맨드 이미지와 데이터셋 케이스 이미지가 같은 피커를 쓴다(pick-secret 과 같은 공용 슬라이스).
 // 목록은 처음 열 때 1회 로드(서버 액션); 분류 배지는 컨트롤플레인이 뷰어 워크스페이스 기준으로 계산해 준 값.
 const IMG_CLASS_TONE: Record<CapabilityImageClass, 'success' | 'info' | 'warning'> = {
   workspace: 'success',
@@ -21,7 +22,7 @@ const IMG_CLASS_TONE: Record<CapabilityImageClass, 'success' | 'info' | 'warning
 }
 
 export function EnvironmentPicker({ onPick }: { onPick: (env: StoreEnvironment) => void }) {
-  const t = useTranslations('registerHarness')
+  const t = useTranslations('pickEnvironment')
   const [environments, setEnvironments] = useState<StoreEnvironment[]>()
   const [error, setError] = useState<string>()
   const [loading, setLoading] = useState(false)

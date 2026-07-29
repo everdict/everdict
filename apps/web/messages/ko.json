@@ -1648,6 +1648,7 @@
     "tagsHelp": "목록에서 카테고리 필터로 써요 (예: coding, browser, qa).",
     "casesLabel": "케이스 (EvalCase[] JSON)",
     "casesHelp": "각 케이스는 id · env · task · expected 예요. 채점(grader · judge)은 스코어카드를 돌릴 때 정해요 — 같은 케이스로 어떤 하니스든 평가해요.",
+    "caseImageHelp": "\"스토어에서\"로 고른 환경 이미지를 모든 케이스의 image 로 설정합니다 — 그 케이스가 도는 컨테이너입니다.",
     "immutableNote": "버전은 바꿀 수 없어요. 같은 버전을 다른 내용으로 다시 올리면 등록되지 않아요.",
     "validate": "검증하기",
     "processing": "처리 중…",
@@ -1775,11 +1776,6 @@
     "pinsCommandTip": "command 하니스는 image·model 두 슬롯만 채우면 돼요. 슬롯은 템플릿이 정해요.",
     "pinsFixedTitle": "Pins (슬롯마다 이미지·값 지정)",
     "pinsFreeTitle": "Pins (슬롯 → 이미지/값)",
-    "envPickerButton": "스토어에서",
-    "envPickerLoading": "환경 불러오는 중…",
-    "envPickerEmpty": "스토어에 환경 이미지가 아직 없습니다 — 스토어 페이지에서 발행하세요.",
-    "envAdopted": "가져옴",
-    "envNotPullable": "pull 불가",
     "pinFromStore": "스토어 출처: {id}@{version} — 값을 수정하면 출처 표시가 지워집니다.",
     "pinsServiceTip": "서비스마다 쓸 이미지를 지정해요. 슬롯은 템플릿의 서비스명이에요.",
     "processingLabel": "처리 중…",
@@ -1860,6 +1856,13 @@
     "volumesOverridePlaceholder": "volumes (줄바꿈 — cache:/cache · /host:/c:ro)",
     "workDirLabel": "workDir (선택)",
     "workDirTip": "명령을 실행할 작업 디렉터리예요. 예: /tmp."
+  },
+  "pickEnvironment": {
+    "envPickerButton": "스토어에서",
+    "envPickerLoading": "환경 불러오는 중…",
+    "envPickerEmpty": "스토어에 환경 이미지가 아직 없습니다 — 스토어 페이지에서 발행하세요.",
+    "envNotPullable": "pull 불가",
+    "envAdopted": "가져옴"
   },
   "spanMapping": {
     "heading": "속성 매핑 (고급)",

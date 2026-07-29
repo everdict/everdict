@@ -7,6 +7,7 @@ import { ChevronDown, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { TopologyGraph } from '@/features/inspect-harness'
+import { EnvironmentPicker } from '@/features/pick-environment'
 import type { HarnessSpec } from '@/entities/harness'
 import { TraceSourceFields } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
@@ -49,7 +50,6 @@ import {
   type WiringRow,
 } from '../lib/build-spec'
 import { EnvEditor, type ScopedSecretNames } from './env-editor'
-import { EnvironmentPicker } from './environment-picker'
 import { SpanMappingEditor } from './span-mapping-editor'
 
 const EMPTY_SECRETS: ScopedSecretNames = { workspace: [], user: [] }
