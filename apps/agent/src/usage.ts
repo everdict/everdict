@@ -64,3 +64,44 @@ export function runEventReporter(
     if (!res.ok) throw new Error(`agent-run event report failed: ${res.status}`);
   };
 }
+
+// Durable-approval bridge (A6): register a park on the control plane (POST /internal/approvals — the ask
+// survives an agent-service restart) and settle the ledger after the in-process wait resolves (the legacy
+// fleet channel and local expiry converge through the same settle; an already-decided record skips there).
+export function approvalBridge(
+  controlPlaneUrl: string,
+  internalToken: string,
+): {
+  register(input: {
+    tenant: string;
+    sessionId: string;
+    agentId?: string;
+    requestId: string;
+    request: { name: string; input?: unknown };
+  }): Promise<{ id: string; expiresAt: string }>;
+  settle(id: string, tenant: string, decision: "approve" | "deny"): Promise<void>;
+} {
+  const base = controlPlaneUrl.replace(/\/$/, "");
+  return {
+    async register(input) {
+      const res = await fetch(`${base}/internal/approvals`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-internal-token": internalToken },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) throw new Error(`approval register failed: ${res.status}`);
+      const json = (await res.json()) as { id?: unknown; expiresAt?: unknown };
+      if (typeof json.id !== "string" || typeof json.expiresAt !== "string")
+        throw new Error("approval register returned an invalid record");
+      return { id: json.id, expiresAt: json.expiresAt };
+    },
+    async settle(id, tenant, decision) {
+      const res = await fetch(`${base}/internal/approvals/${encodeURIComponent(id)}/settle`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-internal-token": internalToken },
+        body: JSON.stringify({ tenant, decision }),
+      });
+      if (!res.ok) throw new Error(`approval settle failed: ${res.status}`);
+    },
+  };
+}

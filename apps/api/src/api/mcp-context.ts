@@ -1,4 +1,5 @@
 import type { CiLinkService } from "@everdict/application-control";
+import type { ApprovalService } from "@everdict/application-control";
 import type { PlatformEventService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
 import type { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
@@ -65,6 +66,7 @@ export interface McpDeps {
   service: RunService;
   scorecardService?: ScorecardService;
   driverOps?: DriverOpsService; // Driver ops surface v0 — describe/cancel the durable Temporal driver by ledger id
+  approvalService?: ApprovalService; // durable agent approvals (A6) — list/decide
   usageMeter?: UsageMeter; // meter-only billing usage (get_usage)
   budget?: BudgetAdmin; // enforcement budget config (get_budget / set_budget_limit)
   scheduleService?: ScheduleService;

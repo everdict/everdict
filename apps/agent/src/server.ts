@@ -53,6 +53,18 @@ export interface AgentServerDeps extends ChatDeps {
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
   // the monitoring→agent bridge). Absent → the internal event path is disabled (only user-authenticated events).
   internalToken?: string;
+  // Durable-approval bridge to the control plane (A6): register the park (survives our restart) + settle the
+  // ledger after the in-process wait resolves. Absent = the legacy in-process-only park (10-minute window).
+  approvalBridge?: {
+    register(input: {
+      tenant: string;
+      sessionId: string;
+      agentId?: string;
+      requestId: string;
+      request: { name: string; input?: unknown };
+    }): Promise<{ id: string; expiresAt: string }>;
+    settle(id: string, tenant: string, decision: "approve" | "deny"): Promise<void>;
+  };
   // Code-tool verification (check/run before publish or adopt) — the runtime + stores POST /agent/code-tools/try
   // needs. Absent → the route is 404.
   codeTry?: CodeTryDeps;
@@ -231,10 +243,38 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
             deps.activationRunTurn ??
             ((sessionId, agentToken, signal, permit) =>
               runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, agentToken, signal, permit)),
-          // Approval parking (A6): the shared registry the fleet view discovers via GET /pending and answers
-          // via POST /permission — same channel as the discussion turn, same 10 min deny-on-expiry window.
-          waitApproval: (sessionId, request, signal) =>
-            permissions.wait(deps.newId(), sessionId, signal, request, ACTIVATION_APPROVAL_TIMEOUT_MS),
+          // Approval parking (A6): register the ask DURABLY on the control plane first (it survives our
+          // restart and gives members the days-long window), then wait in-process — the CP decide path
+          // delivers back via POST /internal/deliver-approval, and the legacy fleet channel (GET /pending →
+          // POST /permission) still resolves the same wait; the post-wait settle converges the ledger either
+          // way. No bridge (or a failed registration) degrades to the 10-minute in-process park.
+          waitApproval: async (ctx, request, signal) => {
+            const requestId = deps.newId();
+            const bridge = deps.approvalBridge;
+            let registered: { id: string; expiresAt: string } | undefined;
+            if (bridge) {
+              try {
+                registered = await bridge.register({
+                  tenant: ctx.workspace,
+                  sessionId: ctx.sessionId,
+                  ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
+                  requestId,
+                  request: { name: request.name, input: request.input },
+                });
+              } catch {
+                // best-effort — the in-process park still guards the mutation
+              }
+            }
+            const timeoutMs = registered
+              ? Math.max(60_000, new Date(registered.expiresAt).getTime() - Date.now())
+              : ACTIVATION_APPROVAL_TIMEOUT_MS;
+            const decision = await permissions.wait(requestId, ctx.sessionId, signal, request, timeoutMs);
+            if (registered && bridge) {
+              const settled = registered.id;
+              void bridge.settle(settled, ctx.workspace, decision === "allow" ? "approve" : "deny").catch(() => {});
+            }
+            return decision;
+          },
           now: deps.now,
           newId: deps.newId,
           ...(deps.reportRunEvent ? { reportRunEvent: deps.reportRunEvent } : {}),
@@ -827,6 +867,24 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   });
 
   // Discussion-turn fire (@everdict in a comment thread) — INTERNAL ONLY (the control plane's comment slice).
+  // CP → agent: deliver a durable-approval decision to the live in-process wait (A6). delivered:false =
+  // no live wait exists (the loop died with a restart) — the control plane keeps the decision on the record
+  // for the resume leg. Same internal-token discipline as the other /internal routes.
+  const deliverApprovalSchema = z.object({
+    sessionId: z.string().min(1),
+    requestId: z.string().min(1),
+    decision: z.enum(["allow", "deny"]),
+  });
+  app.post("/internal/deliver-approval", async (req, reply) => {
+    const presented = req.headers["x-internal-token"];
+    if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))
+      return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
+    const parsed = deliverApprovalSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    const delivered = permissions.respond(parsed.data.requestId, parsed.data.sessionId, parsed.data.decision);
+    return reply.send({ delivered });
+  });
+
   // Acks 202 and runs the turn DETACHED (a HITL approval can park it for minutes — never a held request);
   // progress lands on the placeholder comment via the /internal/comment-activity bridge, not this response.
   app.post("/internal/discussion-turn", async (req, reply) => {

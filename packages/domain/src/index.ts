@@ -75,6 +75,7 @@ export {
 
 // run — the Run aggregate (from apps/api core/run)
 export { type NewQueuedRunInput, Run, type RunTransition } from "./run/run.js";
+export { Approval, type ApprovalTransition, type NewPendingApprovalInput } from "./approval/approval.js";
 
 // member — the last-admin invariant (from apps/api core/member)
 export { MembershipPolicy } from "./member/membership-policy.js";
@@ -198,15 +199,19 @@ export {
 } from "./capability/member-selection.js";
 // capability — spec version diff (base ↔ candidate); shares the spec-diff engine with the harness/judge diffs
 export { diffCapabilitySpecs } from "./capability/capability-diff.js";
+// capability — the names a bridged tool wears in front of the model (the runtime registers them, the UI explains them)
+export { codeBridgedName, mcpBridgePrefix, mcpBridgedName } from "./capability/tool-naming.js";
 
 // registry — the version algebra every versioned registry shares (from @everdict/registry)
 export {
+  bumpVersion,
   compareVersions,
   LATEST,
   resolveRef,
   SHARED_TENANT,
   sortVersions,
   specsEqual,
+  type VersionBump,
 } from "./registry/version-algebra.js";
 
 // placement — pure multi-tenant placement policies (from @everdict/backends)

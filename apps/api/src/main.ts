@@ -4,6 +4,7 @@ import {
   registryLatestVersionResolver,
   seedFirstPartyAgents,
 } from "@everdict/application-control";
+import { ApprovalService } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { FsService, RevisionedWorkspaceFs, SkillService } from "@everdict/application-control";
 import {
@@ -138,6 +139,7 @@ async function main(): Promise<void> {
     scheduleStore,
     notificationStore,
     platformEventStore,
+    approvalStore,
     commentStore,
     knowledgeStore,
     knowledgeEntryStore,
@@ -327,6 +329,34 @@ async function main(): Promise<void> {
     membershipService,
     runtimeSecretsFor,
   });
+  // Durable agent approvals (agent-automation A6): the agent service parks over the internal bridge, members
+  // decide via /approvals, and a decision is DELIVERED back to the live in-process wait through the agent
+  // service's own internal surface. Delivery absent (no agent service configured) = record-only.
+  const approvalAgentUrl = process.env.AGENT_SERVICE_URL;
+  const approvalAgentToken = process.env.AGENT_INTERNAL_TOKEN;
+  const approvalService = new ApprovalService({
+    store: approvalStore,
+    events: platformEventService,
+    ...(approvalAgentUrl && approvalAgentToken
+      ? {
+          deliver: async (approval, decision) => {
+            const res = await fetch(new URL("/internal/deliver-approval", approvalAgentUrl), {
+              method: "POST",
+              headers: { "content-type": "application/json", "x-internal-token": approvalAgentToken },
+              body: JSON.stringify({
+                sessionId: approval.sessionId,
+                requestId: approval.requestId,
+                decision: decision === "approve" ? "allow" : "deny",
+              }),
+            });
+            if (!res.ok) return false;
+            const json = (await res.json().catch(() => ({}))) as { delivered?: unknown };
+            return json.delivered === true;
+          },
+        }
+      : {}),
+  });
+
   // Stranded discussion answers (@everdict comments whose agent-side callbacks died — crash / severed detached
   // turn) → failed + asker ping. 15 min staleness safely exceeds the activity-tick cadence AND the approval-park
   // window (10 min, deny-on-expiry then resumes), so anything older is dead. Same sweep idiom as browser sessions.
@@ -562,6 +592,7 @@ async function main(): Promise<void> {
     ...(process.env.EVERDICT_TEMPORAL_ADDRESS
       ? { driverOps: new DriverOpsService({ address: process.env.EVERDICT_TEMPORAL_ADDRESS }) }
       : {}),
+    approvalService, // durable agent approvals (A6) — members list/decide; the agent service parks/settles
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path
     schedulingControl, // PUT/GET /internal/scheduling — runtime fairness dials (env stays the boot baseline)
     usageMeter, // meter-only billing usage — GET /usage

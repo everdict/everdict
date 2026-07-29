@@ -24,9 +24,9 @@
 | Request-less auth | `agt_` tokens, `Principal.via:"agent"`, acts-as-creator | `agent-execution-auth.md` |
 | Permission modes | `default` / `auto` / `bypass` / `plan` per session + HITL prompt + rules | `action-policy.ts`, `PermissionRegistry` |
 | AgentSpec registry | versioned `(tenant,id,version)` config: instructions, MCP servers, capabilities, model | `contracts/harness/agent-spec.ts` |
-| Skills + capabilities | workspace-authored procedures, store-adopted tools, try-drive | skills P11, capability store |
+| Skills + capabilities | workspace-owned procedures (authored or copied from a store example), store-adopted tools, try-drive | skills P11, capability store |
 | Usage metering | per-conversation `priceUsd` meter + budgets | `usage-metering.md` |
-| Code contribution | `open_github_pr`, GitHub App repos, `scorecard-fix-pr` first-party skill | integrations |
+| Code contribution | `open_github_pr`, GitHub App repos, the `scorecard-fix-pr` store example (copied into the workspace's skills) | integrations |
 
 ## Why chat-only is limiting (the gaps)
 
@@ -220,7 +220,7 @@ they are.)
    durable activation, mid-lifecycle reaction, guarded writes, fleet visibility.
 2. **Failure Fix PR** — trigger: `scorecard.completed` with `filter: failedCases > 0`. Drills failed
    cases (`get_scorecard_analysis`, traces, dataset case, harness spec), root-causes, changes code in
-   the linked repo (GitHub App + code tools + `scorecard-fix-pr` skill), opens a PR
+   the linked repo (GitHub App + code tools + the workspace's copy of the `scorecard-fix-pr` example), opens a PR
    (`open_github_pr` — guarded → parked approval in `default` mode, autonomous in `bypass` within
    budget), comments the PR link on the scorecard. Proves: deep-context assembly, code contribution,
    parked approvals, provenance (`causedBy` on the comment/PR), cost roll-up.
@@ -296,8 +296,17 @@ P4 → `5b596abf` P5 → `88542c6c` P6 → P7 with this doc update):
 
 - **Teammate roster stays process-local.** Registry agents are the durable tier; chat-spawned teammates
   still live in the server Map. Persisting the roster (re-mint tokens on boot) is the follow-up.
-- **Approval parks are in-process.** 10 min deny-on-expiry; an agent-service restart expires a park as
-  deny (never allow). Durable resumable approvals (A6's full shape) are the next rung.
+- **Approval parks are DURABLE (W2 — A6's first rung).** A headless park now registers on the control
+  plane (`POST /internal/approvals` → `everdict_approvals`, mig 0094; approval.requested/decided facts via
+  the E0 outbox): the ask survives an agent-service restart as a record, members list/decide via
+  `GET /approvals` + `POST /approvals/:id/decide` (↔ MCP `list_approvals`/`decide_approval`;
+  agents:read/agents:write), and a decision is delivered back to the live in-process wait
+  (`POST /internal/deliver-approval` → registry.respond). The in-process window stretches to the record's
+  expiresAt (default 7 days) instead of 10 minutes; the LEGACY fleet channel (GET /pending →
+  POST /permission) still works — the post-wait settle converges the ledger either way, first write wins.
+  Remaining rungs: the `approval:<id>` workflow (durable expiry timer + ops-surface family) and the
+  continuation turn (deciding after a restart RESUMES the run from its transcript — today the decision is
+  recorded with `delivered:false` and the run stays down).
 - **No run outcome roll-up yet** (turns/toolCalls/priceUsd on the record) — cost is metered via the usage
   bridge; the fleet shows status, not per-run cost.
 - **`agent.run.*` facts reach the event log, not the bell.** Feed/Mattermost notification of failed runs

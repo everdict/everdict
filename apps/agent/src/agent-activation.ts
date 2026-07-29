@@ -61,7 +61,13 @@ export interface AgentActivatorDeps {
   // Park a mutation for member approval (agent-automation A6): the shared PermissionRegistry the fleet view
   // discovers via GET /pending and answers via POST /permission. Absent → headless mutations are DENIED under
   // default/auto (never silently allowed — fail closed when there is no one to ask).
-  waitApproval?: (sessionId: string, request: PermissionRequest, signal: AbortSignal) => Promise<PermissionDecision>;
+  // Park a mutation for a human decision. ctx carries what the DURABLE park (A6) records on the control
+  // plane: the workspace, the session, and the registered agent behind the activation.
+  waitApproval?: (
+    ctx: { workspace: string; sessionId: string; agentId?: string },
+    request: PermissionRequest,
+    signal: AbortSignal,
+  ) => Promise<PermissionDecision>;
   now: () => string;
   newId: () => string;
   // Loop guard #2: minimum spacing between activations of the same (agent, kind). Default 30s.
@@ -281,7 +287,7 @@ export class AgentActivator {
         `Agent ${agentId} is waiting for approval to run ${request.name}.`,
       );
       try {
-        return await wait(sessionId, request, signal);
+        return await wait({ workspace: event.workspace, sessionId, agentId }, request, signal);
       } finally {
         await this.deps.sessions
           .setSessionStatus(event.workspace, sessionId, "running", this.deps.now())

@@ -21,6 +21,8 @@ export type { NotificationListOptions, NotificationStore } from "./ports/notific
 export type { AgentEventSink } from "./ports/agent-event-sink.js";
 export type { PlatformEventListOptions, PlatformEventStore } from "./ports/platform-event-store.js";
 export type { EmitPlatformEventInput, PlatformEventEmitter } from "./ports/platform-event-emitter.js";
+export type { ApprovalListFilter, ApprovalStore } from "./ports/approval-store.js";
+export { ApprovalService, type ApprovalServiceDeps } from "./approval/approval-service.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type { OutboxEvent, RunListOptions, RunStore } from "./ports/run-store.js";
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";

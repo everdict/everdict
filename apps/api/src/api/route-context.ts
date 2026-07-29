@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
+import type { ApprovalService } from "@everdict/application-control";
 import { type CiLinkService, UpsertCiLinkBodySchema } from "@everdict/application-control";
 import { COMMENT_RESOURCE_TYPES, type CommentService } from "@everdict/application-control";
 import type { PlatformEventService } from "@everdict/application-control";
@@ -125,6 +126,8 @@ export interface ServerDeps {
   // Driver ops surface v0 (docs/orchestration.md) — read/control the durable Temporal driver by ledger id.
   // Absent when no Temporal address is configured (routes answer 404 "not configured").
   driverOps?: DriverOpsService;
+  // Durable agent approvals (agent-automation A6) — members list/decide; the agent service parks/settles.
+  approvalService?: ApprovalService;
   usageMeter?: UsageMeter; // meter-only billing usage (GET /usage) — never blocks (route disabled if absent)
   budget?: BudgetAdmin; // enforcement budget config (GET/PUT /budget) — usage + per-tenant limit (route disabled if absent)
   // Settle-only capability of the enforcement budget for the internal usage bridge (agent cost → the 402-cap total).

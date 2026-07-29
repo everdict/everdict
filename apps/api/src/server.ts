@@ -85,6 +85,7 @@ import { z } from "zod";
 import { registerAgentToolRoutes } from "./api/agent/agent-tool.routes.js";
 import { registerAgentRoutes } from "./api/agent/agent.routes.js";
 import { registerApiKeyRoutes } from "./api/api-key/api-key.routes.js";
+import { registerApprovalRoutes } from "./api/approval/approval.routes.js";
 import { registerBenchmarkRoutes } from "./api/benchmark/benchmark.routes.js";
 import { registerBillingRoutes } from "./api/billing/billing.routes.js";
 import { registerBrowserProfileRoutes } from "./api/browser-profile/browser-profile.routes.js";
@@ -213,6 +214,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerScorecardRoutes(routes, deps);
     registerGroupRoutes(routes, deps);
     registerDriverOpsRoutes(routes, deps);
+    registerApprovalRoutes(routes, deps);
     registerScheduleRoutes(routes, deps);
     registerHarnessTemplateRoutes(routes, deps);
     registerHarnessRoutes(routes, deps);

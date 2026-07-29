@@ -77,6 +77,7 @@ export type {
   ViewStore,
   BrowserProfileStore,
   SkillStore,
+  SkillVersionStore,
   KnowledgeEntryStore,
   CapabilityStore,
   UsageStore,
@@ -108,6 +109,7 @@ export { InMemoryScheduleStore } from "./results/schedule-store.js";
 export { InMemoryViewStore, PgViewStore } from "./results/view-store.js";
 export { InMemoryBrowserProfileStore, PgBrowserProfileStore } from "./workspace/browser-profile-store.js";
 export { InMemorySkillStore, PgSkillStore } from "./workspace/skill-store.js";
+export { InMemorySkillVersionStore, PgSkillVersionStore } from "./workspace/skill-version-store.js";
 export { InMemoryFsRevisionStore, PgFsRevisionStore } from "./workspace/fs-revision-store.js";
 export { InMemoryKnowledgeEntryStore, PgKnowledgeEntryStore } from "./workspace/knowledge-entry-store.js";
 export { InMemoryCapabilityStore, PgCapabilityStore } from "./workspace/capability-store.js";
@@ -153,6 +155,8 @@ export { InMemorySecretStore, PgSecretStore } from "./workspace/secret-store.js"
 export { InMemoryOAuthStateStore, PgOAuthStateStore, generateOAuthState } from "./workspace/oauth-state-store.js";
 export { InMemoryNotificationStore, PgNotificationStore } from "./activity/notification-store.js";
 export { InMemoryPlatformEventStore, PgPlatformEventStore } from "./activity/platform-event-store.js";
+export { InMemoryApprovalStore } from "./activity/approval-store.js";
+export { PgApprovalStore } from "./activity/pg-approval-store.js";
 export { InMemoryCommentStore, PgCommentStore } from "./activity/comment-store.js";
 export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent-session-store.js";
 export { InMemoryAnalysisArtifactStore, PgAnalysisArtifactStore } from "./activity/analysis-artifact-store.js";

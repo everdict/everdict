@@ -32,6 +32,8 @@ arrives by polling or webhook.
 | `POST` | `/groups/:id/score` | phase 2 detached (P2): `{ judges[] }` → **202** — judge an existing group's runs, re-write the aggregate; re-score replaces a judge's verdicts, scoring an experiment **promotes** it (`scorecards:run`) |
 | `GET`  | `/ops/driver/:family/:id` | **Driver ops surface v0**: describe the durable Temporal driver by LEDGER id (`family` = `batch`\|`score`) — status, history pressure, pending activities with last failure (`runtimes:read`; 404 without a Temporal address) |
 | `POST` | `/ops/driver/:family/:id/cancel` | cooperatively cancel the durable driver (ledger settles via the CP's own guards) (`runtimes:control`, admin) |
+| `GET`  | `/approvals` | durable agent approvals (A6): the workspace's parked agent mutations, `?status=` filter — an ask survives an agent-service restart (`agents:read`) |
+| `POST` | `/approvals/:id/decide` | `{ decision: approve\|deny }` → the record settles exactly once (409 after) + the decision is delivered to the agent's live wait (`delivered:false` = loop gone) (`agents:write`) |
 | `POST` | `/scorecards/ingest` | `{ dataset, harness, traces:[{caseId,trace:TraceEvent[]}], judges? }` → **202** (no harness run; push) (`scorecards:run`) |
 | `POST` | `/scorecards/ingest/pull` | `{ dataset, harness, source:{kind:otel\|mlflow,endpoint,authSecret?}, runs:[{caseId,runId}], judges? }` → **202** (pull from tenant OTel/MLflow; `authSecret`=SecretStore key) (`scorecards:run`) |
 | `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |

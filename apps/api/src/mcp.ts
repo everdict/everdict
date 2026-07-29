@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAgentToolTools } from "./api/agent/agent-tool.mcp.js";
 import { registerAgentTools } from "./api/agent/agent.mcp.js";
 import { registerApiKeyTools } from "./api/api-key/api-key.mcp.js";
+import { registerApprovalTools } from "./api/approval/approval.mcp.js";
 import { registerBenchmarkTools } from "./api/benchmark/benchmark.mcp.js";
 import { registerBillingTools } from "./api/billing/billing.mcp.js";
 import { registerBrowserProfileTools } from "./api/browser-profile/browser-profile.mcp.js";
@@ -67,6 +68,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerScorecardTools(server, ctx);
   registerGroupTools(server, ctx);
   registerDriverOpsTools(server, ctx);
+  registerApprovalTools(server, ctx);
   registerQueueTools(server, ctx);
   registerBillingTools(server, ctx);
   registerHarnessTemplateTools(server, ctx);

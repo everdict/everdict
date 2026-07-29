@@ -6,6 +6,12 @@ import { z } from "zod";
 // Facts only — inference ("regressed", "flaky") is the agent's job; the control plane never emits a judgment.
 // The vocabulary is CLOSED (add a kind here when a new emit point ships — never emit an ad-hoc string).
 export const PLATFORM_EVENT_KINDS = [
+  // A parked agent mutation entered/left the human-decision gate (agent-automation A6): requested when the
+  // agent parks, decided when a member (or the expiry timer) settles it — payload.decision = approved |
+  // denied | expired. Deliberately NOT trigger-matchable in v1 (agents deciding approvals is the runaway
+  // vector squared).
+  "approval.requested",
+  "approval.decided",
   "run.submitted",
   "run.completed",
   "run.failed",
