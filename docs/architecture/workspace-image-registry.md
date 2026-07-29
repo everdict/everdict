@@ -169,6 +169,29 @@ does the same tag/push mechanics itself. `docker` invocations are the CLI's conc
 pure helpers (`buildImageTargetRef`, `buildDockerAuthConfig`, local-ref parsing) are exported
 and unit-tested.
 
+### `--register-environment <id>` — bytes and identity in one step
+
+A pushed ref is still an anonymous string; the store asset that says *what it is and how to wire it*
+lives in `docs/architecture/environment-image-store.md`. Publishing them separately is the friction
+the flag removes — after a successful push it registers the ref as an `environment` capability
+(`PUT /capabilities/:id`, the same version-free upsert the web and MCP surfaces call):
+
+```
+everdict image push officeqa-env:v3 --register-environment officeqa-env \
+  [--env-name N] [--env-description T] [--benchmark B] [--instructions file.md] [--visibility V]
+```
+
+- **Digest-pinned when possible.** `docker image inspect` on the target reads back the pushed
+  `RepoDigests`; the registration pins `repo@sha256:…` (the tag ref is the fallback, announced).
+  This is the reproducibility answer to the store doc's digest-pinning open question for the CLI path.
+- **os/arch come from the local image**, packages/preset do not — the CLI registers only what it can
+  observe. Without `--instructions` the body is a **provenance line**, never fabricated guidance.
+- **Reach defaults to `workspace`** (the team's) — the same kind-dependent default the service now applies
+  when `visibility` is omitted (see `capability-store.md`); `--visibility` overrides.
+- Registration runs *after* the push, so a failure there never invalidates the published bytes —
+  the ref on stdout stays usable and the asset can be registered later.
+- Without the flag the command prints a one-line pointer to it (discovery, not a nag).
+
 ## Pull wiring (S4 — shipped)
 
 One transient contract, consumed per runtime. `CaseJob.registryAuth` (`RegistryAuthSchema` =
