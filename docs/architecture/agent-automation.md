@@ -331,7 +331,10 @@ P4 → `5b596abf` P5 → `88542c6c` P6 → P7 with this doc update):
   causer ids 400), children stamp the envelope and settle real cost against it (`everdict_envelopes`,
   mig 0096). Compute-blind demand, budget-bound spend: the agent may burst, but it structurally cannot
   spend what it was not delegated. The agent's OWN turn tokens still meter to the tenant budget only —
-  folding them into the envelope is the remaining A7 sliver.
+  folding them into the envelope is the remaining A7 sliver. The causal tree is also the KILL SWITCH
+  (§5.5, O8): a member stopping the agent run cascades — every non-terminal batch it caused cancels
+  through the normal teardown (`ScorecardService.cancelCausedBy`, fired by the run ledger's cancelled
+  settle), so large fan-out is safe to allow because it is cheap to revoke.
 
 ## Non-goals / guardrails
 

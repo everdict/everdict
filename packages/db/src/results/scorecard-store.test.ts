@@ -156,6 +156,14 @@ describe("InMemoryScorecardStore", () => {
     expect((await store.get("a"))?.kind).toBe("experiment");
   });
 
+  it("list(filter.causedByRunId) narrows to the batches a run caused (§5.5 cascade-cancel walk)", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(rec({ id: "a", origin: { source: "mcp", causedByRunId: "run-agent" } }));
+    await store.create(rec({ id: "b", origin: { source: "mcp", causedByRunId: "other-run" } }));
+    await store.create(rec({ id: "c", origin: { source: "web" } }));
+    expect((await store.list("acme", { causedByRunId: "run-agent" })).map((r) => r.id)).toEqual(["a"]);
+  });
+
   it("list(filter.scheduleId) narrows to the runs a schedule fired (origin.scheduleId — schedule-detail run history)", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec({ id: "a", origin: { source: "schedule", scheduleId: "sch-1" } }));
@@ -211,6 +219,13 @@ describe("PgScorecardStore", () => {
     expect(calls[0]?.params?.[10]).toBeNull(); // no judge_models
     expect(calls[0]?.params?.[12]).toBe("user-alice"); // created_by (runner)
     expect(calls[0]?.params?.[13]).toBeNull(); // no runtime
+  });
+
+  it("list(filter.causedByRunId) narrows in SQL on the persisted origin (cascade-cancel walk)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(client).list("acme", { causedByRunId: "run-agent" });
+    expect(calls[0]?.text).toMatch(/origin->>'causedByRunId' = \$/);
+    expect(calls[0]?.params).toContain("run-agent");
   });
 
   it("list(filter.kind) narrows in SQL — 'scorecard' also matches every pre-mig-0093 NULL row", async () => {

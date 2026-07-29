@@ -359,6 +359,25 @@ export class ScorecardService {
     return this.scoreService.score(input);
   }
 
+  // Cascade cancel (§5.5, O8): the causal tree is the kill switch — cancelling a run revokes every
+  // NON-TERMINAL batch it caused, one by one through the normal cancel machinery (record flip + in-flight
+  // stop + queued-job reclaim). Best-effort per batch: one stuck teardown never blocks the rest. The
+  // batches' own case children are torn down by cancel itself, so one level of walk covers the tree.
+  async cancelCausedBy(tenant: string, causedByRunId: string): Promise<number> {
+    const caused = await this.deps.store.list(tenant, { causedByRunId });
+    let cancelled = 0;
+    for (const record of caused) {
+      if (ScorecardBatch.from(record).isTerminal()) continue;
+      try {
+        await this.cancel({ tenant, id: record.id });
+        cancelled++;
+      } catch {
+        // already settled in a race / teardown failure — the next batch still gets revoked
+      }
+    }
+    return cancelled;
+  }
+
   // Score-on-Temporal internal bridge (worker activities → these; orchestration.md T-c `score:<groupId>`).
   async planScore(
     id: string,

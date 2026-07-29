@@ -413,8 +413,12 @@ async function main(): Promise<void> {
   const liveFrames = new LiveFrameStore();
   // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log) → served by RunService.logs().
   const liveLogs = new LiveLogStore();
+  // Cascade cancel (§5.5 O8) — late-bound: the scorecard service is built after the run service, so the
+  // hook resolves through this holder (fires only at runtime, long after boot completes).
+  const cascadeCancel: { fn?: (tenant: string, runId: string) => Promise<number> } = {};
   const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
     envelopes: envelopeStore,
+    onAgentRunCancelled: async (tenant, runId) => cascadeCancel.fn?.(tenant, runId),
     store,
     meteredDispatcher,
     dispatcher,
@@ -469,6 +473,7 @@ async function main(): Promise<void> {
     killCase,
     adoptCaseFn,
   });
+  cascadeCancel.fn = (tenant, runId) => scorecardService.cancelCausedBy(tenant, runId);
 
   await runStartupRecovery({ scorecardStore, store, scorecardService, service, adoptCaseFn });
 

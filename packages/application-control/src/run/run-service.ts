@@ -93,6 +93,9 @@ export interface RunServiceDeps {
   // Envelope spend ledger (§5.2, P4): caused runs draw from their causer's delegated envelope — the gate
   // reads headroom here, the settle meters real cost. Absent = envelopes unenforced (dev wiring).
   envelopes?: EnvelopeStore;
+  // Cascade cancel (§5.5, O8) — wired by the composition to ScorecardService.cancelCausedBy (late-bound:
+  // the scorecard service is built after the run service). Fired when an agent run settles cancelled.
+  onAgentRunCancelled?: (tenant: string, runId: string) => Promise<unknown>;
   usage?: UsageMeter; // meter-only billing usage — itemized per (source × model), attributed via billingCharges
   // Resolve a declarative harness spec from the registry and embed it in the job (if absent, built-in id branching). An unknown harness is rejected → undefined fallback.
   resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
@@ -525,6 +528,9 @@ export class RunService {
     if (run.isTerminal()) return; // first terminal write wins (a retried terminal report)
     const { patch } = run.settleAgent(outcome, message, this.now());
     await this.deps.store.update(id, patch);
+    // Cascade cancel (§5.5, O8): a member stopping the agent run revokes its whole caused tree — one
+    // cancel, not a hunt across N batches. Best-effort: the settle above is already durable.
+    if (outcome === "cancelled") void this.deps.onAgentRunCancelled?.(current.tenant, id)?.catch?.(() => {});
   }
 
   // Read-then-update is not atomic, but the tracker and boot recovery share one control-plane process.

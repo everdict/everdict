@@ -247,6 +247,11 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(`origin->>'scheduleId' = $${i++}`);
       vals.push(filter.scheduleId);
     }
+    if (filter?.causedByRunId) {
+      // the batches a run caused (§5.5 cascade-cancel walk) — jsonb field match on the persisted origin.
+      conds.push(`origin->>'causedByRunId' = $${i++}`);
+      vals.push(filter.causedByRunId);
+    }
     if (filter?.kind) {
       // "scorecard" = every pre-mig-0093 row too (NULL) — experiments are the positively-marked minority.
       conds.push(filter.kind === "experiment" ? "kind = 'experiment'" : "(kind IS NULL OR kind <> 'experiment')");

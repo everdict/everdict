@@ -3994,6 +3994,53 @@ describe("ScorecardService.submitExperiment — ungraded phase-1 groups (P1)", (
   });
 });
 
+describe("ScorecardService.cancelCausedBy — the causal tree is the kill switch (§5.5, O8)", () => {
+  it("cancels every NON-TERMINAL batch the run caused; settled and unrelated batches stay untouched", async () => {
+    const store = new InMemoryScorecardStore();
+    const base = {
+      tenant: "acme",
+      dataset: { id: "d", version: "1" },
+      harness: { id: "h", version: "1" },
+      createdAt: "2026-07-30T00:00:00Z",
+      updatedAt: "2026-07-30T00:00:00Z",
+    };
+    await store.create({
+      ...base,
+      id: "caused-live",
+      status: "running",
+      origin: { source: "mcp", causedByRunId: "run-agent" },
+    });
+    await store.create({
+      ...base,
+      id: "caused-queued",
+      status: "queued",
+      origin: { source: "mcp", causedByRunId: "run-agent" },
+    });
+    await store.create({
+      ...base,
+      id: "caused-done",
+      status: "succeeded",
+      origin: { source: "mcp", causedByRunId: "run-agent" },
+    });
+    await store.create({ ...base, id: "unrelated", status: "running", origin: { source: "web" } });
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch() {
+          throw new Error("unused");
+        },
+      },
+      store,
+      datasets: new InMemoryDatasetRegistry(),
+    });
+    const cancelled = await service.cancelCausedBy("acme", "run-agent");
+    expect(cancelled).toBe(2); // the live and the queued one — one cancel revokes the tree
+    expect((await store.get("caused-live"))?.status).toBe("cancelled");
+    expect((await store.get("caused-queued"))?.status).toBe("cancelled");
+    expect((await store.get("caused-done"))?.status).toBe("succeeded"); // terminal stays
+    expect((await store.get("unrelated"))?.status).toBe("running"); // someone else's work stays
+  });
+});
+
 describe("ScorecardService — the P4 causal admission leg (envelope 402 + draw-down)", () => {
   const agentRun = () =>
     Run.newAgentRun({

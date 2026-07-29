@@ -49,6 +49,8 @@ export interface RuntimeAccessReaders {
 export function buildRun(deps: {
   store: RunStore;
   envelopes: EnvelopeStore; // envelope spend ledger (§5.2 P4)
+  // Cascade cancel (§5.5 O8) — late-bound to ScorecardService.cancelCausedBy (built after the run service).
+  onAgentRunCancelled?: (tenant: string, runId: string) => Promise<unknown>;
   meteredDispatcher: CoreDispatcher;
   dispatcher: ModelResolvingDispatcher;
   settingsStore: WorkspaceSettingsStore;
@@ -103,6 +105,7 @@ export function buildRun(deps: {
 
   const service = new RunService({
     envelopes: deps.envelopes, // envelope spend ledger (§5.2 P4) — the causal admission leg + per-case draw-down
+    ...(deps.onAgentRunCancelled ? { onAgentRunCancelled: deps.onAgentRunCancelled } : {}),
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
     readCaseLogs: (tenant, runtimeList, caseId, stream) => readCaseLogsFn(tenant, runtimeList, caseId, stream),
     execInSandbox: (tenant, runtimeList, caseId, command) => execInSandboxFn(tenant, runtimeList, caseId, command),
