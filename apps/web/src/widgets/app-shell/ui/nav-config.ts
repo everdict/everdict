@@ -5,10 +5,8 @@ import {
   Bot,
   Boxes,
   Database,
-  FolderTree,
   Gavel,
   LayoutDashboard,
-  Lightbulb,
   MonitorDown,
   Puzzle,
   Store,
@@ -38,6 +36,9 @@ export interface NavSection {
 // infra rail (widgets/infra-panel) on the right; their full pages remain routable (panel "full page" links,
 // command palette infra group).
 // metric/model/recipe/bundle are engine parts/advanced options — excluded from the nav (routes remain, reachable via URL).
+// files/knowledge are workspace *configuration* surfaces, not eval objects: their single home is Settings
+// (Settings › Files, Settings › Agent › Knowledge — see settings-nav-config). The legacy top-level routes stay
+// reachable via URL but are deliberately absent from the sidebar and the command palette.
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
@@ -89,18 +90,6 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'agents',
         icon: Bot,
         keywords: 'agent fleet run trigger automation 에이전트 자동화 플릿',
-      },
-      {
-        href: '/knowledge',
-        labelKey: 'knowledge',
-        icon: Lightbulb,
-        keywords: 'knowledge finding decision convention claim 지식 노트',
-      },
-      {
-        href: '/files',
-        labelKey: 'files',
-        icon: FolderTree,
-        keywords: 'files filesystem file tree shell artifacts outputs 파일 파일시스템 셸',
       },
     ],
   },
