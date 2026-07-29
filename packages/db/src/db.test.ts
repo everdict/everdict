@@ -138,6 +138,50 @@ describe("PgRunStore", () => {
     });
   });
 
+  it("persists outbox events in the SAME STATEMENT as the write (E0 — data-modifying CTE, no tx seam needed)", async () => {
+    const event = {
+      id: "ev-1",
+      tenant: "acme",
+      kind: "run.completed" as const,
+      subject: { type: "run", id: "r1" },
+      actor: "alice",
+      payload: { status: "succeeded" },
+      message: "Run r1 succeeded",
+      createdAt: "2026-07-29T00:00:00.000Z",
+    };
+    // update + facts → one WITH upd … INSERT INTO everdict_platform_events … statement
+    const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
+    await new PgRunStore(client).update("r1", { status: "succeeded", updatedAt: "t1" }, [event]);
+    expect(calls[0]?.text).toMatch(/WITH upd AS \(UPDATE everdict_runs/);
+    expect(calls[0]?.text).toMatch(/INSERT INTO everdict_platform_events/);
+    expect(calls[0]?.text).toMatch(/WHERE EXISTS \(SELECT 1 FROM upd\)/); // facts land only if the update matched
+    expect(calls[0]?.params).toContain("ev-1");
+    expect(calls[0]?.params).toContain("run.completed");
+
+    // create + facts → WITH ins … INSERT INTO everdict_platform_events
+    const { client: c2, calls: calls2 } = fakeClient(() => ({ rows: [] }));
+    await new PgRunStore(c2).create(
+      {
+        id: "r9",
+        tenant: "acme",
+        harness: { id: "scripted", version: "0" },
+        caseId: "c1",
+        status: "queued",
+        createdAt: "2026-07-29T00:00:00.000Z",
+        updatedAt: "2026-07-29T00:00:00.000Z",
+      },
+      [{ ...event, id: "ev-2", kind: "run.submitted" }],
+    );
+    expect(calls2[0]?.text).toMatch(/WITH ins AS \(INSERT INTO everdict_runs/);
+    expect(calls2[0]?.text).toMatch(/INSERT INTO everdict_platform_events/);
+    expect(calls2[0]?.params).toContain("ev-2");
+
+    // no facts → the plain single-write statements, unchanged
+    const { client: c3, calls: calls3 } = fakeClient(() => ({ rows: [ROW] }));
+    await new PgRunStore(c3).update("r1", { status: "running", updatedAt: "t2" });
+    expect(calls3[0]?.text).not.toMatch(/platform_events/);
+  });
+
   it("get → maps the row to a RunRecord (Date→ISO, jsonb→object) + derives usage", async () => {
     const { client } = fakeClient(() => ({ rows: [ROW] }));
     const rec = await new PgRunStore(client).get("r1");

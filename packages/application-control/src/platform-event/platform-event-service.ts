@@ -23,6 +23,29 @@ export class PlatformEventService implements PlatformEventEmitter {
     this.nowIso = deps.now ?? (() => new Date().toISOString());
   }
 
+  // Push-only for E0 outbox events: the fact is ALREADY in the log (persisted atomically with the state
+  // change by the store); this only nudges the live consumers, with the persisted id so dedup holds.
+  async pushPersisted(events: Array<{ record: Omit<PlatformEventRecord, "seq">; recipient?: string }>): Promise<void> {
+    if (!this.deps.agentEvents) return;
+    for (const { record, recipient } of events) {
+      try {
+        await this.deps.agentEvents.emit({
+          workspace: record.tenant,
+          ...(recipient !== undefined ? { recipient } : {}),
+          kind: record.kind,
+          source: `${record.subject.type} ${record.subject.id}`,
+          message: record.message,
+          eventId: record.id,
+          subject: record.subject,
+          payload: record.payload ?? {},
+          ...(record.causedBy !== undefined ? { causedBy: record.causedBy } : {}),
+        });
+      } catch {
+        // Push is a latency optimization; the cursor reconcile is the correctness path.
+      }
+    }
+  }
+
   // Record + push one fact. Returns the appended record (with its seq) when the log is configured — callers
   // that don't need the cursor ignore it. Never throws.
   async emit(input: EmitPlatformEventInput): Promise<PlatformEventRecord | undefined> {

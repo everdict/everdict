@@ -196,7 +196,7 @@ export class ScorecardBatchService {
               : undefined;
             if (adoptable) {
               adopted += 1;
-              await this.deps.runStore.update(c.id, Run.from(c).adopt(adoptable, this.now()));
+              await this.deps.runStore.update(c.id, Run.from(c).adopt(adoptable, this.now()).patch);
               seed.push(adoptable);
               seedRunIds.push(c.id);
               continue;
@@ -206,7 +206,7 @@ export class ScorecardBatchService {
               Run.from(c).fail(
                 { code: "INTERRUPTED", message: "Interrupted by a control-plane restart — re-dispatched on resume." },
                 this.now(),
-              ),
+              ).patch,
             );
           }
         }
@@ -605,7 +605,7 @@ export class ScorecardBatchService {
       }
       if (runStore && child)
         await runStore.update(child.id, {
-          ...Run.from(child).succeed(result, this.now()),
+          ...Run.from(child).succeed(result, this.now()).patch,
           // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
           ...(ranOn ? { runtime: ranOn } : {}),
         });
@@ -914,7 +914,7 @@ export class ScorecardBatchService {
     try {
       const rec = await store.get(childId);
       if (!rec || rec.status !== "queued") return; // already running/terminal — nothing to flip
-      await store.update(childId, Run.from(rec).start(this.now()));
+      await store.update(childId, Run.from(rec).start(this.now()).patch);
     } catch {
       // Best-effort visibility flip — a failure here must never break the case (the run still executes and settles).
     }
@@ -1105,7 +1105,7 @@ export class ScorecardBatchService {
         // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         if (runStore && child)
           await runStore.update(child.id, {
-            ...Run.from(child).succeed(result, this.now()),
+            ...Run.from(child).succeed(result, this.now()).patch,
             ...(ranOn ? { runtime: ranOn } : {}),
           });
         return result;
@@ -1115,7 +1115,7 @@ export class ScorecardBatchService {
             err instanceof AppError
               ? { code: err.code, message: err.message }
               : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-          await runStore.update(child.id, Run.from(child).fail(error, this.now()));
+          await runStore.update(child.id, Run.from(child).fail(error, this.now()).patch);
         }
         throw err; // rethrow so runSuite isolates the case (freezing it into a failed CaseResult)
       }

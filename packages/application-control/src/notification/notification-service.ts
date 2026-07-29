@@ -51,19 +51,9 @@ export class NotificationService {
         body: `case ${record.caseId}`,
         link: { runId: record.id },
       });
-      await this.pushEvent({
-        workspace: tenant,
-        recipient: record.createdBy,
-        actor: record.createdBy,
-        kind: record.status === "succeeded" ? "run.completed" : "run.failed",
-        subject: { type: "run", id: record.id },
-        payload: {
-          status: record.status,
-          harness: `${record.harness.id}@${record.harness.version}`,
-          caseId: record.caseId,
-        },
-        message: `Run ${record.id} ${record.status} — ${record.harness.id}@${record.harness.version} (case ${record.caseId})`,
-      });
+      // The run.completed/failed FACT now rides the E0 outbox: the Run aggregate's terminal transition
+      // computes it and the store persists it atomically with the terminal write (run-service.finalize).
+      // This service keeps only the user-facing feed entry above + the Mattermost post below.
     }
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
     await this.post(

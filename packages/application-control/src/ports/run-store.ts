@@ -1,4 +1,4 @@
-import type { RunRecord } from "@everdict/contracts";
+import type { PlatformEventRecord, RunRecord } from "@everdict/contracts";
 
 // list options. The default (unset) returns only standalone runs — hides scorecard child runs to prevent activity-list flooding.
 // With scorecardId, returns only that batch's child runs (for the case drill-down in scorecard detail).
@@ -18,10 +18,17 @@ export interface RunListOptions {
   offset?: number;
 }
 
+// A platform event stamped with identity but not yet sequenced — what the same-tx outbox persists alongside
+// the write it describes (event-plumbing.md E0). The store assigns seq (the log's cursor) on insert.
+export type OutboxEvent = Omit<PlatformEventRecord, "seq">;
+
 // Result store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.
+// `events` (optional) is the E0 outbox: implementations persist them ATOMICALLY with the write (Postgres: one
+// data-modifying-CTE statement; in-memory: same-process append). Callers stamp id/tenant/createdAt; consumers
+// dedup on the event id, so the same id may safely also travel the push path.
 export interface RunStore {
-  create(record: RunRecord): Promise<void>;
-  update(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined>;
+  create(record: RunRecord, events?: OutboxEvent[]): Promise<void>;
+  update(id: string, patch: Partial<RunRecord>, events?: OutboxEvent[]): Promise<RunRecord | undefined>;
   get(id: string): Promise<RunRecord | undefined>;
   list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]>;
   // Remove every child run a scorecard fanned out (scorecard hard-delete cascade — orphaned children would

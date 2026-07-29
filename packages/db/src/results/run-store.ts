@@ -6,7 +6,7 @@ export function withRunUsage(r: RunRecord): RunRecord {
   return r.result ? { ...r, usage: usageFromTrace(r.result.trace) } : r;
 }
 
-import type { RunListOptions, RunStore } from "@everdict/application-control";
+import type { OutboxEvent, PlatformEventStore, RunListOptions, RunStore } from "@everdict/application-control";
 
 // Apply offset/limit to an already-sorted (newest-first) slice — mirrors the Pg `OFFSET $6 LIMIT $5`.
 // offset unset/0 = from the newest; limit unset = to the end.
@@ -18,16 +18,27 @@ function page(rows: RunRecord[], opts?: RunListOptions): RunRecord[] {
 export class InMemoryRunStore implements RunStore {
   private readonly runs = new Map<string, RunRecord>();
 
-  async create(record: RunRecord): Promise<void> {
+  // Optional E0 outbox pair: facts append right after the write. Same-process, so "atomic enough" for the
+  // dev/test store — the transactional guarantee is the Pg store's (one data-modifying-CTE statement).
+  constructor(private readonly events?: PlatformEventStore) {}
+
+  async create(record: RunRecord, events?: OutboxEvent[]): Promise<void> {
     this.runs.set(record.id, record);
+    await this.appendEvents(events);
   }
 
-  async update(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined> {
+  async update(id: string, patch: Partial<RunRecord>, events?: OutboxEvent[]): Promise<RunRecord | undefined> {
     const cur = this.runs.get(id);
     if (!cur) return undefined;
     const next = { ...cur, ...patch, id: cur.id };
     this.runs.set(id, next);
+    await this.appendEvents(events);
     return withRunUsage(next);
+  }
+
+  private async appendEvents(events?: OutboxEvent[]): Promise<void> {
+    if (!this.events || !events) return;
+    for (const e of events) await this.events.append(e);
   }
 
   async get(id: string): Promise<RunRecord | undefined> {

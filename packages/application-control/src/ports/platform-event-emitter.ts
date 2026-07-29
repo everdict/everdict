@@ -1,4 +1,4 @@
-import type { PlatformEventKind, PlatformEventSubject } from "@everdict/contracts";
+import type { PlatformEventKind, PlatformEventRecord, PlatformEventSubject } from "@everdict/contracts";
 
 export interface EmitPlatformEventInput {
   workspace: string;
@@ -17,4 +17,8 @@ export interface EmitPlatformEventInput {
 // can never affect the business result it describes, so call sites don't wrap it.
 export interface PlatformEventEmitter {
   emit(input: EmitPlatformEventInput): Promise<unknown>;
+  // Push an ALREADY-PERSISTED event (the E0 same-tx outbox wrote it with the store) to the live consumers —
+  // never persists again. The pushed id equals the persisted id, so consumer dedup holds whichever path
+  // (push or cursor reconcile) delivers first. `recipient` is push-targeting only (teammate compatibility).
+  pushPersisted?(events: Array<{ record: Omit<PlatformEventRecord, "seq">; recipient?: string }>): Promise<unknown>;
 }

@@ -6,6 +6,7 @@ import {
   type EvalCase,
   type HarnessSpec,
   type JudgeRunConfig,
+  type PlatformFact,
   type RegistryAuth,
   type RunOrigin,
   type RunRecord,
@@ -27,7 +28,7 @@ import type { Dispatcher } from "../ports/dispatcher.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
-import type { RunStore } from "../ports/run-store.js";
+import type { OutboxEvent, RunStore } from "../ports/run-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 
@@ -194,23 +195,14 @@ export class RunService {
       origin: standaloneRunOrigin(effective.trigger, effective.submittedBy),
       now: this.now(),
     });
-    await this.deps.store.create(record);
-    // Lifecycle FACT (agent-automation A2): the run entered the system. Scorecard child runs are excluded —
-    // the batch's own submitted/case.completed facts represent them (flood prevention, same as the feed).
-    if (!record.parentScorecardId) {
-      void this.deps.events?.emit({
-        workspace: record.tenant,
-        kind: "run.submitted",
-        subject: { type: "run", id: record.id },
-        ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
-        payload: {
-          status: record.status,
-          harness: `${record.harness.id}@${record.harness.version}`,
-          caseId: record.caseId,
-        },
-        message: `Run ${record.id} submitted — ${record.harness.id}@${record.harness.version} (case ${record.caseId})`,
-      });
-    }
+    // E0 outbox: the creation fact (domain-computed — children stay silent) persists in the SAME transaction
+    // as the record; the push afterwards is a latency nudge carrying the same id (consumer dedup holds).
+    const creation = this.stampFacts(record.tenant, Run.creationFacts(record));
+    await this.deps.store.create(
+      record,
+      creation.map((c) => c.record),
+    );
+    if (creation.length > 0) void this.deps.events?.pushPersisted?.(creation);
     void this.track(record.id, effective); // fire-and-track
     return record;
   }
@@ -351,12 +343,12 @@ export class RunService {
     const run = Run.from(record);
     if (adopted) {
       if (!run.canAdopt()) return false; // already settled — never rewrite a terminal record
-      await this.deps.store.update(record.id, run.adopt(adopted, this.now()));
+      await this.deps.store.update(record.id, run.adopt(adopted, this.now()).patch);
       return true;
     }
     const spec = record.caseSpec; // local narrow — canRedispatch() already requires it
     if (!run.canRedispatch() || !spec) return false;
-    await this.deps.store.update(record.id, run.redispatch(this.now()));
+    await this.deps.store.update(record.id, run.redispatch(this.now()).patch);
     void this.track(record.id, {
       tenant: record.tenant,
       harness: record.harness,
@@ -472,7 +464,7 @@ export class RunService {
     try {
       const rec = await this.deps.store.get(id);
       if (!rec || rec.status !== "queued") return;
-      await this.deps.store.update(id, Run.from(rec).start(this.now()));
+      await this.deps.store.update(id, Run.from(rec).start(this.now()).patch);
     } catch {
       // Best-effort visibility flip.
     }
@@ -486,7 +478,35 @@ export class RunService {
     if (!current) return;
     const run = Run.from(current);
     if (run.isTerminal()) return;
-    await this.deps.store.update(id, outcome(run));
+    // E0 outbox: the terminal fact the transition computed persists atomically with the terminal write —
+    // a crash between "run settled" and "the world was told" is no longer expressible.
+    const { patch, facts } = outcome(run);
+    const stamped = this.stampFacts(current.tenant, facts);
+    await this.deps.store.update(
+      id,
+      patch,
+      stamped.map((f) => f.record),
+    );
+    if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+  }
+
+  // Stamp identity (id/tenant/createdAt) onto domain facts. The store persists the rows in the same
+  // transaction as the write; the SAME ids then travel the push path, so dedup holds on either route.
+  private stampFacts(tenant: string, facts: PlatformFact[]): Array<{ record: OutboxEvent; recipient?: string }> {
+    return facts.map((f) => ({
+      record: {
+        id: this.newId(),
+        tenant,
+        kind: f.kind,
+        subject: f.subject,
+        ...(f.actor !== undefined ? { actor: f.actor } : {}),
+        payload: f.payload ?? {},
+        ...(f.causedBy !== undefined ? { causedBy: f.causedBy } : {}),
+        message: f.message,
+        createdAt: this.now(),
+      },
+      ...(f.recipient !== undefined ? { recipient: f.recipient } : {}),
+    }));
   }
 
   private async fireWebhook(url: string, id: string): Promise<void> {

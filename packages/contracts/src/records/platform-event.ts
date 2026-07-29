@@ -35,6 +35,20 @@ export const PlatformEventSubjectSchema = z.object({
 });
 export type PlatformEventSubject = z.infer<typeof PlatformEventSubjectSchema>;
 
+// A fact as a DOMAIN TRANSITION computes it — unstamped (no id/tenant/seq/timestamp; the service stamps
+// identity, and the store persists it in the SAME TRANSACTION as the state change it describes — the
+// event-plumbing.md E0 outbox). `recipient` is push-targeting metadata (teammate compatibility), never persisted.
+export const PlatformFactSchema = z.object({
+  kind: PlatformEventKindSchema,
+  subject: PlatformEventSubjectSchema,
+  actor: z.string().optional(),
+  recipient: z.string().optional(),
+  payload: z.record(z.unknown()).optional(),
+  causedBy: z.string().optional(),
+  message: z.string(),
+});
+export type PlatformFact = z.infer<typeof PlatformFactSchema>;
+
 export const PlatformEventRecordSchema = z.object({
   id: z.string(),
   // Store-assigned monotonic cursor (per deployment) — the agent service reconciles missed events with

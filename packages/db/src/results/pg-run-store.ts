@@ -1,4 +1,4 @@
-import type { RunListOptions, RunStore } from "@everdict/application-control";
+import type { OutboxEvent, RunListOptions, RunStore } from "@everdict/application-control";
 import { type RunRecord, RunRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { withRunUsage } from "./run-store.js";
@@ -65,46 +65,91 @@ function rowToRecord(row: RunRow): RunRecord {
   return withRunUsage(rec); // usage is not a column, it's derived from result.trace
 }
 
+// E0 same-tx outbox: append the event rows in the SAME STATEMENT as the run write via a data-modifying CTE —
+// atomicity without a transaction seam on SqlClient (parameterized multi-statement is not a thing in pg's
+// extended protocol; one statement with two writes is). seq stays BIGSERIAL — the log's cursor is untouched.
+function eventValuesClause(events: OutboxEvent[], startIndex: number): { sql: string; params: unknown[] } {
+  const tuples: string[] = [];
+  const params: unknown[] = [];
+  let i = startIndex;
+  for (const e of events) {
+    tuples.push(
+      `($${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}::jsonb, $${i++}, $${i++}, $${i++}::timestamptz)`,
+    );
+    params.push(
+      e.id,
+      e.tenant,
+      e.kind,
+      e.subject.type,
+      e.subject.id,
+      e.actor ?? null,
+      JSON.stringify(e.payload ?? {}),
+      e.causedBy ?? null,
+      e.message,
+      e.createdAt,
+    );
+  }
+  return { sql: tuples.join(","), params };
+}
+
+const EVENT_COLUMNS = "(id, tenant, kind, subject_type, subject_id, actor, payload, caused_by, message, created_at)";
+
+const RUN_COLUMNS =
+  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at)";
+const RUN_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)";
+
+function runInsertParams(r: RunRecord): unknown[] {
+  return [
+    r.id,
+    r.tenant,
+    r.harness.id,
+    r.harness.version,
+    r.caseId,
+    r.status,
+    r.result ? JSON.stringify(r.result) : null,
+    r.error ? JSON.stringify(r.error) : null,
+    r.parentScorecardId ?? null,
+    r.trigger ?? null,
+    r.createdBy ?? null,
+    r.runtime ?? null,
+    r.caseSpec ? JSON.stringify(r.caseSpec) : null,
+    r.kind ?? null,
+    r.class ?? null,
+    r.lifetime ?? null,
+    r.origin ? JSON.stringify(r.origin) : null,
+    r.envelope ? JSON.stringify(r.envelope) : null,
+    r.placement ? JSON.stringify(r.placement) : null,
+    r.attach ? JSON.stringify(r.attach) : null,
+    r.group ? JSON.stringify(r.group) : null,
+    r.lineage ? JSON.stringify(r.lineage) : null,
+    r.outputs ? JSON.stringify(r.outputs) : null,
+    r.createdAt,
+    r.updatedAt,
+  ];
+}
+
 // Postgres-backed result store. Same RunStore contract as in-memory — apps/api just swaps the two.
 export class PgRunStore implements RunStore {
   constructor(private readonly client: SqlClient) {}
 
-  async create(r: RunRecord): Promise<void> {
-    await this.client.query(
-      `INSERT INTO everdict_runs
-        (id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
-      [
-        r.id,
-        r.tenant,
-        r.harness.id,
-        r.harness.version,
-        r.caseId,
-        r.status,
-        r.result ? JSON.stringify(r.result) : null,
-        r.error ? JSON.stringify(r.error) : null,
-        r.parentScorecardId ?? null,
-        r.trigger ?? null,
-        r.createdBy ?? null,
-        r.runtime ?? null,
-        r.caseSpec ? JSON.stringify(r.caseSpec) : null,
-        r.kind ?? null,
-        r.class ?? null,
-        r.lifetime ?? null,
-        r.origin ? JSON.stringify(r.origin) : null,
-        r.envelope ? JSON.stringify(r.envelope) : null,
-        r.placement ? JSON.stringify(r.placement) : null,
-        r.attach ? JSON.stringify(r.attach) : null,
-        r.group ? JSON.stringify(r.group) : null,
-        r.lineage ? JSON.stringify(r.lineage) : null,
-        r.outputs ? JSON.stringify(r.outputs) : null,
-        r.createdAt,
-        r.updatedAt,
-      ],
-    );
+  async create(r: RunRecord, events?: OutboxEvent[]): Promise<void> {
+    const base = runInsertParams(r);
+    if (events && events.length > 0) {
+      // One statement, two writes (E0): the run insert and its facts commit or roll back together.
+      const ev = eventValuesClause(events, base.length + 1);
+      await this.client.query(
+        `WITH ins AS (INSERT INTO everdict_runs ${RUN_COLUMNS} VALUES ${RUN_VALUES} RETURNING id)
+         INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
+         SELECT * FROM (VALUES ${ev.sql}) AS v
+         WHERE EXISTS (SELECT 1 FROM ins)`,
+        [...base, ...ev.params],
+      );
+      return;
+    }
+    await this.client.query(`INSERT INTO everdict_runs ${RUN_COLUMNS} VALUES ${RUN_VALUES}`, base);
   }
 
-  async update(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined> {
+  async update(id: string, patch: Partial<RunRecord>, events?: OutboxEvent[]): Promise<RunRecord | undefined> {
     // Only lifecycle fields are allowed to be updated (status/result/error/runtime/updatedAt).
     const sets: string[] = [];
     const vals: unknown[] = [];
@@ -140,6 +185,20 @@ export class PgRunStore implements RunStore {
     }
     if (sets.length === 0) return this.get(id);
     vals.push(id);
+    if (events && events.length > 0) {
+      // One statement, two writes (E0): the terminal patch and the facts describing it commit atomically —
+      // and the facts land ONLY if the update matched a row (WHERE EXISTS on the updating CTE).
+      const ev = eventValuesClause(events, vals.length + 1);
+      const res = await this.client.query<RunRow>(
+        `WITH upd AS (UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i} RETURNING *),
+         ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
+                SELECT * FROM (VALUES ${ev.sql}) AS v
+                WHERE EXISTS (SELECT 1 FROM upd))
+         SELECT * FROM upd`,
+        [...vals, ...ev.params],
+      );
+      return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
+    }
     const res = await this.client.query<RunRow>(
       `UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
       vals,

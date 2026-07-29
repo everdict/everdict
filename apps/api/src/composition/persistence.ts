@@ -25,6 +25,7 @@ import {
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemorySkillStore,
+  InMemorySkillVersionStore,
   InMemoryTenantKeyStore,
   InMemoryUsageStore,
   InMemoryUserProfileStore,
@@ -56,6 +57,7 @@ import {
   PgScorecardStore,
   PgSecretStore,
   PgSkillStore,
+  PgSkillVersionStore,
   PgTenantKeyStore,
   PgUsageStore,
   PgUserProfileStore,
@@ -73,6 +75,7 @@ import {
   type SecretCipher,
   type SecretStore,
   type SkillStore,
+  type SkillVersionStore,
   type TenantKeyStore,
   type UsageStore,
   type UserProfileStore,
@@ -148,7 +151,8 @@ export interface Persistence {
   fsRevisionStore: FsRevisionStore; // workspace-filesystem publication ledger — who published which revision, when
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
-  skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members author) — dual-scoped private|workspace
+  skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members own) — dual-scoped private|workspace
+  skillVersionStore: SkillVersionStore; // a skill's stamped, immutable versions — the line its working copy moves along
   capabilityStore: CapabilityStore; // Capability Store (mcp|code|skill) — versioned + per-capability visibility (private|workspace|subset|public)
   // Per-MEMBER agent overlay — which of the workspace's tools + skills each member wants their own agent to carry
   agentMemberPreferenceStore: AgentMemberPreferenceStore;
@@ -184,8 +188,10 @@ export async function makePersistence(): Promise<Persistence> {
   if (!url) {
     const workspaceStore = new InMemoryWorkspaceStore();
     const harnessTemplateRegistry = new InMemoryHarnessTemplateRegistry();
+    // The run store and the event log form the E0 outbox pair — the store appends transition facts itself.
+    const platformEventStore = new InMemoryPlatformEventStore();
     return {
-      store: new InMemoryRunStore(),
+      store: new InMemoryRunStore(platformEventStore),
       recordingStore: new InMemoryRecordingStore(),
       scorecardStore: new InMemoryScorecardStore(),
       keyStore: new InMemoryTenantKeyStore(),
@@ -208,7 +214,7 @@ export async function makePersistence(): Promise<Persistence> {
       runnerJobStore: new InMemoryRunnerJobStore(),
       scheduleStore: new InMemoryScheduleStore(),
       notificationStore: new InMemoryNotificationStore(),
-      platformEventStore: new InMemoryPlatformEventStore(),
+      platformEventStore,
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
@@ -216,6 +222,7 @@ export async function makePersistence(): Promise<Persistence> {
       viewStore: new InMemoryViewStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
+      skillVersionStore: new InMemorySkillVersionStore(),
       capabilityStore: new InMemoryCapabilityStore(),
       agentMemberPreferenceStore: new InMemoryAgentMemberPreferenceStore(),
       callbackStore: new InMemoryCallbackStore(),
@@ -260,6 +267,7 @@ export async function makePersistence(): Promise<Persistence> {
     viewStore: new PgViewStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),
+    skillVersionStore: new PgSkillVersionStore(client),
     capabilityStore: new PgCapabilityStore(client),
     agentMemberPreferenceStore: new PgAgentMemberPreferenceStore(client),
     callbackStore: new PgCallbackStore(client),

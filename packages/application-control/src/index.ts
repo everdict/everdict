@@ -10,6 +10,7 @@ export type { AgentSessionStore } from "./ports/agent-session-store.js";
 export type { AnalysisArtifactStore } from "./ports/analysis-artifact-store.js";
 export type { BrowserProfileStore } from "./ports/browser-profile-store.js";
 export type { SkillStore } from "./ports/skill-store.js";
+export type { SkillVersionStore } from "./ports/skill-version-store.js";
 export type { KnowledgeEntryStore } from "./ports/knowledge-entry-store.js";
 export type { CapabilityStore } from "./ports/capability-store.js";
 export type { AgentMemberPreferenceStore } from "./ports/agent-member-preference-store.js";
@@ -21,7 +22,7 @@ export type { AgentEventSink } from "./ports/agent-event-sink.js";
 export type { PlatformEventListOptions, PlatformEventStore } from "./ports/platform-event-store.js";
 export type { EmitPlatformEventInput, PlatformEventEmitter } from "./ports/platform-event-emitter.js";
 export type { BudgetStore } from "./ports/budget-store.js";
-export type { RunListOptions, RunStore } from "./ports/run-store.js";
+export type { OutboxEvent, RunListOptions, RunStore } from "./ports/run-store.js";
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
 export type { ScorecardListFilter, ScorecardStore } from "./ports/scorecard-store.js";
@@ -64,14 +65,18 @@ export {
   type CreateBrowserProfileInput,
   type UpdateBrowserProfileInput,
 } from "./browser-profile/browser-profile-service.js";
+export { FileExecutionService } from "./fs/file-execution-service.js";
 export { type FsFileContent, FsService, type WriteFsFileInput } from "./fs/fs-service.js";
 export { memberActor, RevisionedWorkspaceFs } from "./fs/revisioned-workspace-fs.js";
 export {
   type CreateSkillInput,
+  type ImportSkillInput,
   SkillService,
   type SkillActor,
   type SkillServiceDeps,
   type SkillWithCoverage,
+  type StampSkillVersionInput,
+  type StoreCapabilityReader,
   type UpdateSkillInput,
 } from "./skill/skill-service.js";
 export {
@@ -86,6 +91,7 @@ export {
   type FirstPartyDefault,
   firstPartyCatalogExtras,
   firstPartyDefaults,
+  firstPartySkillExamples,
   WEBSEARCH_SECRET_NAME,
 } from "./capability/first-party.js";
 export { ProxyService, type ProxyServiceDeps, type ProxyView } from "./proxy/proxy-service.js";
@@ -129,6 +135,10 @@ export {
   type RepinResult,
   repinHarnessImages,
 } from "./harness/harness-pin-service.js";
+export {
+  adoptedImageReach,
+  type AdoptedImageReachDeps,
+} from "./environment-adoption/adopted-image-reach.js";
 export {
   type AdoptedEnvironmentVerify,
   type AdoptedEnvironmentView,

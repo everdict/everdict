@@ -57,18 +57,40 @@ describe("Run — the run lifecycle domain model", () => {
     expect(RunRecordSchema.parse(record).kind).toBe("eval");
   });
 
-  it("succeed and fail produce terminal store patches from a live run", () => {
-    const run = Run.from(queued());
-    expect(run.succeed(RESULT, "t1")).toEqual({ status: "succeeded", result: RESULT, updatedAt: "t1" });
-    expect(run.fail({ code: "INTERNAL", message: "boom" }, "t1")).toMatchObject({ status: "failed" });
+  it("succeed and fail produce terminal store patches — and the facts describing them, born in the domain (E0)", () => {
+    const run = Run.from(queued({ submittedBy: "alice" }));
+    const done = run.succeed(RESULT, "t1");
+    expect(done.patch).toEqual({ status: "succeeded", result: RESULT, updatedAt: "t1" });
+    expect(done.facts).toMatchObject([
+      { kind: "run.completed", subject: { type: "run", id: "r1" }, actor: "alice", recipient: "alice" },
+    ]);
+    const failed = run.fail({ code: "INTERNAL", message: "boom" }, "t1");
+    expect(failed.patch).toMatchObject({ status: "failed" });
+    expect(failed.facts[0]?.kind).toBe("run.failed");
+  });
+
+  it("keeps the inherited emission gates as domain law: children and initiator-less runs stay silent", () => {
+    // A scorecard child is represented by the batch's own facts (flood prevention).
+    const child = Run.from({ ...queued({ submittedBy: "alice" }), parentScorecardId: "sc-1" });
+    expect(child.succeed(RESULT, "t1").facts).toEqual([]);
+    // No known initiator → no terminal fact (today's notification-path behavior, preserved; widening = E2).
+    expect(Run.from(queued()).succeed(RESULT, "t1").facts).toEqual([]);
+    // Creation: standalone announces run.submitted; a child does not.
+    expect(Run.creationFacts(queued({ submittedBy: "alice" }))[0]?.kind).toBe("run.submitted");
+    expect(Run.creationFacts({ ...queued(), parentScorecardId: "sc-1" })).toEqual([]);
+    // Adoption settles without a fact (the old path bypassed onComplete — preserved).
+    expect(Run.from(queued({ submittedBy: "alice" })).adopt(RESULT, "t1").facts).toEqual([]);
   });
 
   it("start flips a queued run to running (compute began) and is refused once terminal", () => {
     // The onStarted hook (managed dispatch / self-hosted lease) drives this — it makes "waiting for a runner" (queued)
     // distinct from "executing" (running) so a fan-out parked behind one runner doesn't read as all-running.
-    expect(Run.from(queued()).start("t1")).toEqual({ status: "running", updatedAt: "t1" });
+    expect(Run.from(queued()).start("t1").patch).toEqual({ status: "running", updatedAt: "t1" });
     // Idempotent over an already-running record (a re-fire from spillover/speculation is a harmless no-op).
-    expect(Run.from({ ...queued(), status: "running" }).start("t2")).toEqual({ status: "running", updatedAt: "t2" });
+    expect(Run.from({ ...queued(), status: "running" }).start("t2").patch).toEqual({
+      status: "running",
+      updatedAt: "t2",
+    });
     // A late lease flip must never resurrect a settled run.
     expect(() => Run.from({ ...queued(), status: "succeeded", result: RESULT }).start("t3")).toThrow(ConflictError);
   });
@@ -86,7 +108,7 @@ describe("Run — the run lifecycle domain model", () => {
   it("adoption is legal only while the run is unsettled", () => {
     const live = Run.from({ ...queued(), status: "running" });
     expect(live.canAdopt()).toBe(true);
-    expect(live.adopt(RESULT, "t")).toMatchObject({ status: "succeeded", result: RESULT });
+    expect(live.adopt(RESULT, "t").patch).toMatchObject({ status: "succeeded", result: RESULT });
     expect(Run.from({ ...queued(), status: "failed" }).canAdopt()).toBe(false);
   });
 
@@ -95,6 +117,6 @@ describe("Run — the run lifecycle domain model", () => {
     const { caseSpec: _dropped, ...withoutSpec } = legacy;
     expect(Run.from(withoutSpec).canRedispatch()).toBe(false);
     expect(Run.from(legacy).canRedispatch()).toBe(true);
-    expect(Run.from(legacy).redispatch("t")).toEqual({ status: "running", updatedAt: "t" });
+    expect(Run.from(legacy).redispatch("t").patch).toEqual({ status: "running", updatedAt: "t" });
   });
 });

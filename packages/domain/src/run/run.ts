@@ -1,13 +1,18 @@
 import { type CaseResult, ConflictError, type EvalCase } from "@everdict/contracts";
-import type { RunClass, RunOrigin, RunRecord } from "@everdict/contracts";
+import type { PlatformFact, RunClass, RunOrigin, RunRecord } from "@everdict/contracts";
 
 // The domain model for a run's lifecycle (queued → running → succeeded | failed). Wraps the persistence
 // record (@everdict/db RunRecord — shapes unchanged); guard methods are the SSOT for what is legal, and
 // transition methods guard then return the store patch. Illegal transitions throw from the domain.
 // docs/architecture/rich-domain-core.md
 
-// The patch a transition computes — the service persists it verbatim (store.update(id, patch)).
-export type RunTransition = Partial<RunRecord>;
+// What a transition computes: the store patch AND the facts describing it (event-plumbing.md E0 — the fact
+// is born where the legality is decided, and the store persists both in the same transaction). An empty facts
+// array is normal: the taxonomy has no kind for the change, or the flood-prevention gate applies.
+export interface RunTransition {
+  patch: Partial<RunRecord>;
+  facts: PlatformFact[];
+}
 
 export interface NewQueuedRunInput {
   id: string;
@@ -22,6 +27,28 @@ export interface NewQueuedRunInput {
   origin?: RunOrigin;
   class?: RunClass;
   now: string;
+}
+
+// The inherited emission gate, now domain law: scorecard children are represented by the batch's own facts
+// (flood prevention), and — as today's notification path behaved — a terminal fact needs a known initiator.
+// Widening coverage (machine-fired runs, adopted settles) is an E2 taxonomy decision, not a silent change here.
+function terminalFact(record: RunRecord, status: "succeeded" | "failed"): PlatformFact[] {
+  if (!record.createdBy || record.parentScorecardId) return [];
+  const kind = status === "succeeded" ? ("run.completed" as const) : ("run.failed" as const);
+  return [
+    {
+      kind,
+      subject: { type: "run", id: record.id },
+      actor: record.createdBy,
+      recipient: record.createdBy,
+      payload: {
+        status,
+        harness: `${record.harness.id}@${record.harness.version}`,
+        caseId: record.caseId,
+      },
+      message: `Run ${record.id} ${status} — ${record.harness.id}@${record.harness.version} (case ${record.caseId})`,
+    },
+  ];
 }
 
 export class Run {
@@ -54,6 +81,25 @@ export class Run {
     };
   }
 
+  // The facts describing a record's CREATION (nothing → queued) — the same E0 rule as transitions, for the
+  // factory: standalone runs announce run.submitted; scorecard children stay silent (the batch's facts cover them).
+  static creationFacts(record: RunRecord): PlatformFact[] {
+    if (record.parentScorecardId) return [];
+    return [
+      {
+        kind: "run.submitted",
+        subject: { type: "run", id: record.id },
+        ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
+        payload: {
+          status: record.status,
+          harness: `${record.harness.id}@${record.harness.version}`,
+          caseId: record.caseId,
+        },
+        message: `Run ${record.id} submitted — ${record.harness.id}@${record.harness.version} (case ${record.caseId})`,
+      },
+    ];
+  }
+
   // Terminal = the record's outcome is settled; nothing may rewrite it (first terminal write wins).
   isTerminal(): boolean {
     return this.record.status === "succeeded" || this.record.status === "failed";
@@ -75,19 +121,19 @@ export class Run {
   // running record; refused once terminal (a late lease flip must never resurrect a settled run).
   start(now: string): RunTransition {
     this.assertNotTerminal("start");
-    return { status: "running", updatedAt: now };
+    return { patch: { status: "running", updatedAt: now }, facts: [] }; // no run.started kind in the taxonomy
   }
 
   // queued|running → succeeded (normal completion).
   succeed(result: CaseResult, now: string): RunTransition {
     this.assertNotTerminal("succeed");
-    return { status: "succeeded", result, updatedAt: now };
+    return { patch: { status: "succeeded", result, updatedAt: now }, facts: terminalFact(this.record, "succeeded") };
   }
 
   // queued|running → failed (execution error, isolated as a run failure).
   fail(error: { code: string; message: string }, now: string): RunTransition {
     this.assertNotTerminal("fail");
-    return { status: "failed", error, updatedAt: now };
+    return { patch: { status: "failed", error, updatedAt: now }, facts: terminalFact(this.record, "failed") };
   }
 
   // Boot-recovery adoption: settle with a result harvested from the still-alive job (zero re-run).
@@ -98,7 +144,9 @@ export class Run {
         { run: this.record.id, status: this.record.status },
         `run is already terminal (${this.record.status}) — adopt rejected`,
       );
-    return { status: "succeeded", result, updatedAt: now };
+    // Behavior-preserving: an adopted settle emitted no fact on the old path (resume bypassed onComplete) —
+    // widening that is an E2 coverage decision.
+    return { patch: { status: "succeeded", result, updatedAt: now }, facts: [] };
   }
 
   // Boot-recovery re-drive: back onto the queue's running path before re-dispatch.
@@ -109,7 +157,7 @@ export class Run {
         { run: this.record.id, status: this.record.status },
         "run cannot be re-dispatched (terminal, or no persisted caseSpec)",
       );
-    return { status: "running", updatedAt: now };
+    return { patch: { status: "running", updatedAt: now }, facts: [] };
   }
 
   private assertNotTerminal(transition: string): void {
