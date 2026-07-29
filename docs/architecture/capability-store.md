@@ -350,8 +350,18 @@ split — **no API/authz change, web IA only**:
   `/settings/skills` (living workspace skills) · `/settings/knowledge` (the knowledge graph, moved from the
   Workspace group).
 - **Settings › Workspace › Environments** (`/settings/environments`) — environments are eval infra, not agent
-  config: the workspace's authored `environment` capabilities plus the imported-environment inventory
-  (`EnvironmentInventory`: pinned ref · pull-usability verify badge · re-check / remove).
+  config, and (unlike tools) get a **dedicated environment-first surface, not the reused store chrome**
+  (`EnvironmentWorkbench` + `EnvironmentEditor`, 2026-07-29): one unified list merges the workspace's authored
+  `environment` capabilities with the imported-environment inventory per identity (`source/id`) — rows speak
+  environment vocabulary (benchmark chip · visibility/pull badges · in-place expand rendering the agent-contract
+  markdown + preset), with authored-row manage menu (edit / reach / delete), inventory re-check / remove, and an
+  inline `auth`-failure escape to Settings › Integrations (registry + pull secret). Authoring is an
+  environment-only dialog sectioned by journey (basics → image [+ registry tag helper] → contents → **agent
+  contract** [scaffold template prompting entry points / result paths + markdown preview] → wiring preset
+  [advanced, collapsed, live JSON validation] → reach), and **new environments default to `workspace`
+  visibility** (team sharing is the surface's purpose; the store wizard's `private` default stays for other
+  kinds). Discovery/import of other workspaces' environments stays in `/store` (linked). The store substrate
+  (entity, versions, reach kernel, routes) is unchanged — presentation only.
 - **Settings › Account › My tools & skills** (`/settings/personal-capabilities`) — the user-private scope:
   `visibility='private'` capabilities the user created + personal (private) skill drafts.
 

@@ -1,5 +1,5 @@
 export { CapabilityStore } from './ui/capability-store'
-export { EnvironmentInventory } from './ui/environment-inventory'
+export { EnvironmentWorkbench } from './ui/environment-workbench'
 export {
   saveCapabilityAction,
   type SaveCapabilityInput,
