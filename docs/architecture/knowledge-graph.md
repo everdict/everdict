@@ -334,6 +334,13 @@ Following everdict's one-way spine (no new package — schemas belong at the con
      written a minute ago is on the map; only the ENTITY stratum waits for a reindex.
    - **A pin whose entity is not projected yet becomes a `dangling` reference node**, drawn hollow. A claim is never
      stranded as an orphan dot just because nothing has harvested the harness it is about.
+   - **`graph()` is a RENDER model, not a dump of the spine.** It ships only edges with a node row on BOTH ends (an
+     edge to an unmaterialised endpoint can be neither drawn nor listed — on a real workspace that scoping star,
+     `in_workspace` + `created_by`, was ~half of them), and its edge is an explicit render shape
+     (`KnowledgeGraphEdge`) rather than the stored `EdgeMention`: the audit spine (origin / extractor / confidence /
+     evidencePath / sourceKind / sourceId / tenant / createdAt) was two thirds of the bytes and belongs to the
+     surfaces that answer provenance questions — `related`, `node`, `listMentions`. Measured on a 265-node
+     workspace: 640 KB → 242 KB, LCP 4.2 s → 1.0 s. Don't "restore" those fields here; add a provenance read.
    Still open: ingest-on-write hooks so the entity stratum stays current without a manual reindex.
 7. **Knowledge layer (v1)** — §The knowledge layer: the `knowledge` node type + `about`/`evidenced_by` predicates,
    `KnowledgeEntryRecord` (store + CRUD + MCP parity + harvester), `SkillRecord.refs`/`verifiedAt` + the skill

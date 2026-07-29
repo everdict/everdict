@@ -112,6 +112,11 @@ export type KnowledgeEntry = z.infer<typeof knowledgeEntrySchema>
 // node/edge element shapes are drift-guarded: the contract record (narrow — a NodeType/Predicate union where this view
 // keeps a loose string) must stay assignable to this consumer view, so a wire rename/retype of an OVERLAPPING field
 // fails the web typecheck (a Pick of a removed key is itself a compile error). This is the loose-consumer-view guard.
+//
+// The EDGE the graph endpoint sends is a deliberate RENDER PROJECTION of the stored mention — no audit spine (origin /
+// extractor / confidence / evidencePath / …), because that payload exists to be drawn and the spine was two thirds of
+// its bytes. Guarding against the record is still right (the projection's fields are the record's), but do not add
+// fields here expecting them to arrive: provenance comes from `related` / `node`. See knowledge-graph.md §Rendering.
 type AssertAssignable<A extends B, B> = A
 type _NodeGuard = AssertAssignable<
   Pick<ContractKnowledgeNode, keyof KnowledgeNodeView>,
