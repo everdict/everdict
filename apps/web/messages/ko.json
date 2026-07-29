@@ -3384,6 +3384,7 @@
       "judge": "평가자",
       "view": "뷰",
       "skill": "스킬",
+      "environment": "환경",
       "trace": "트레이스"
     }
   },
@@ -3742,6 +3743,10 @@
     "instructions": "지침",
     "envImage": "이미지 참조",
     "envImageHint": "어디서든 풀 가능한 완전한 이미지 참조 — 재현성을 위해 digest 고정을 권장합니다.",
+    "envMention": "대화에서 열기",
+    "envMentionTip": "이 환경을 에이전트에게 넘깁니다 — 하네스에 배선하거나 instructions 를 고칠 때.",
+    "envRegisterInChat": "대화로 등록",
+    "envRegisterInChatPrompt": "이 워크스페이스에 새 평가 환경 이미지를 등록하려고 해요. 내가 만든 이미지를 어떻게 올리는지 알려주고, 그다음 환경으로 등록해줘.",
     "envVerify": "풀 검증",
     "envVerifyError": "이미지를 검증하지 못했습니다.",
     "envPinDigest": "이 digest 로 고정",

@@ -78,6 +78,7 @@ export const AGENT_REFERENCE_TYPES = [
   'judge',
   'view',
   'skill',
+  'environment', // environment kind 의 capability(get_capability) — 평가 환경 이미지 자산
   'trace',
 ] as const
 export const agentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES)

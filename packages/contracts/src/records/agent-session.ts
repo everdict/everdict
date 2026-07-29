@@ -66,6 +66,8 @@ export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 // resolves into context, and to a list endpoint the composer's mention picker browses. `trace` is the exception: it is
 // keyed by (source, id=traceId) not (id, version), resolves via inspect_trace, and is attached from the observability
 // browser (a "mention in chat" button), not the @-picker — cross-source browsing there would be prohibitively wide.
+// `environment` is an environment-kind capability (get_capability): the eval image asset, so "wire this environment
+// into a harness" / "fix its instructions" can be handed to the agent the same way every other entity is.
 export const AGENT_REFERENCE_TYPES = [
   "harness",
   "runtime",
@@ -75,6 +77,7 @@ export const AGENT_REFERENCE_TYPES = [
   "judge",
   "view",
   "skill",
+  "environment",
   "trace",
 ] as const;
 export const AgentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES);

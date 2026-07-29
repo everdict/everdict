@@ -3384,6 +3384,7 @@
       "judge": "Judge",
       "view": "View",
       "skill": "Skill",
+      "environment": "Environment",
       "trace": "Trace"
     }
   },
@@ -3742,6 +3743,10 @@
     "instructions": "Instructions",
     "envImage": "Image reference",
     "envImageHint": "A fully-qualified, pullable image ref — pin a digest for reproducibility.",
+    "envMention": "Open in chat",
+    "envMentionTip": "Hand this environment to the agent — wire it into a harness, or revise its instructions.",
+    "envRegisterInChat": "Register in chat",
+    "envRegisterInChatPrompt": "I want to register a new eval environment image in this workspace. Show me how to publish the image I built, then register it as an environment.",
     "envVerify": "Verify pull",
     "envVerifyError": "Could not verify the image.",
     "envPinDigest": "Pin this digest",

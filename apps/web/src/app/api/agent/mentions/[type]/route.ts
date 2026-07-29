@@ -36,6 +36,14 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType): Promise<un
       return controlPlane.listRuns<Row[]>(ctx, { limit: 30 })
     case 'skill':
       return controlPlane.listSkills<Row[]>(ctx)
+    case 'environment': {
+      // 환경 = capability 스토어의 environment kind — 하나의 스토어 목록에서 그 kind 만 추린다.
+      const capabilities = await controlPlane.listCapabilities<Row[]>(ctx)
+      return (Array.isArray(capabilities) ? capabilities : []).filter((c) => {
+        const spec = (c as Row).spec
+        return spec !== null && typeof spec === 'object' && (spec as Row).type === 'environment'
+      })
+    }
     case 'trace':
       // trace references are attached from the observability browser (keyed by source+traceId), not @-picked here.
       return []

@@ -1,6 +1,5 @@
 import { getTranslations } from 'next-intl/server'
 
-import { EnvironmentWorkbench } from '@/features/publish-capability'
 // server-only 로더(controlPlane)라 클라이언트가 쓰는 배럴을 통하지 않고 직접 임포트한다(download-desktop/api 선례).
 import { loadEnvironmentContext } from '@/features/publish-capability/api/environment-context'
 import { capabilitiesSchema, type Capability } from '@/entities/capability'
@@ -10,6 +9,8 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
+
+import { SettingsEnvironments } from './settings-environments'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,7 +55,7 @@ export default async function EnvironmentsSettingsPage() {
       {error !== undefined ? (
         <Callout tone="danger">{s('connectError', { error })}</Callout>
       ) : (
-        <EnvironmentWorkbench
+        <SettingsEnvironments
           authored={authored}
           imported={context.adoptedEnvironments}
           authors={context.authors}

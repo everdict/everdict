@@ -12,11 +12,13 @@ import {
   RefreshCw,
   Search,
   Share2,
+  Sparkles,
   Trash2,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import type { AgentReference } from '@/entities/agent-session'
 import type { Capability } from '@/entities/capability'
 import type { AdoptedEnvironment } from '@/entities/environment-adoption'
 import { fmtDateTime, fmtSubject } from '@/shared/lib/format'
@@ -33,6 +35,7 @@ import { Tooltip } from '@/shared/ui/tooltip'
 
 import { unadoptEnvironmentAction, verifyAdoptedEnvironmentAction } from '../api/adopt-environment'
 import { deleteCapabilityVersionAction } from '../api/manage-capabilities'
+import { pullReasonLabel } from '../lib/pull-reason'
 import { EnvironmentEditor } from './environment-editor'
 import { ReachDialog } from './reach-controls'
 
@@ -60,6 +63,8 @@ export function EnvironmentWorkbench({
   canPublishPublic,
   myWorkspaces,
   imageRegistries,
+  onMention,
+  onAskAgent,
 }: {
   authored: Capability[]
   imported: AdoptedEnvironment[]
@@ -72,6 +77,10 @@ export function EnvironmentWorkbench({
   canPublishPublic: boolean
   myWorkspaces: { id: string; name: string }[]
   imageRegistries: { name: string; host: string }[]
+  // 대화 진입점 — 우측 대화 패널은 위젯 레이어라 피처가 직접 못 쓴다(FSD 상향 임포트 금지). 페이지 레벨 클라이언트
+  // 컴포넌트가 훅을 소유하고 이 콜백으로 내려준다(SettingsFilesExplorer/SettingsKnowledgeMap 선례).
+  onMention?: (reference: AgentReference) => void
+  onAskAgent?: (prompt: string, reference?: AgentReference) => void
 }) {
   const t = useTranslations('capabilityStore')
   const [query, setQuery] = useState('')
@@ -182,6 +191,17 @@ export function EnvironmentWorkbench({
           {t('envFindInStore')}
           <ArrowUpRight className="size-3.5" />
         </Link>
+        {canWrite && onAskAgent !== undefined && (
+          // 이미지를 만든 사람이 바로 등록까지 가는 경로 — 에이전트가 push 명령을 안내하고 등록(save_capability)까지 한다.
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onAskAgent(t('envRegisterInChatPrompt'))}
+          >
+            <Sparkles />
+            {t('envRegisterInChat')}
+          </Button>
+        )}
         {canWrite && (
           <Button size="sm" onClick={() => setEditing('new')}>
             <Plus />
@@ -219,6 +239,7 @@ export function EnvironmentWorkbench({
               onDelete={() => row.capability !== undefined && setConfirming(row.capability)}
               onReverify={() => row.inventory !== undefined && reverify(row.inventory)}
               onRemove={() => row.inventory !== undefined && removeFromInventory(row.inventory)}
+              {...(onMention !== undefined ? { onMention } : {})}
             />
           ))}
         </div>
@@ -277,17 +298,6 @@ export function EnvironmentWorkbench({
 const nameOf = (row: EnvironmentRow): string =>
   row.capability?.name ?? row.inventory?.name ?? row.inventory?.id ?? row.key
 
-// pull 불가 사유 배지 문구 — verify.reason 별(권한/없음/레지스트리 불통), 사유 없이 불가면 일반 "풀 불가".
-function pullReasonLabel(
-  t: (key: string) => string,
-  reason: 'ok' | 'auth' | 'not-found' | 'unreachable' | undefined
-): string {
-  if (reason === 'auth') return t('verifyAuth')
-  if (reason === 'not-found') return t('verifyNotFound')
-  if (reason === 'unreachable') return t('verifyUnreachable')
-  return t('importedNotPullableBadge')
-}
-
 function EnvironmentRowCard({
   row,
   expanded,
@@ -302,6 +312,7 @@ function EnvironmentRowCard({
   onDelete,
   onReverify,
   onRemove,
+  onMention,
 }: {
   row: EnvironmentRow
   expanded: boolean
@@ -316,6 +327,7 @@ function EnvironmentRowCard({
   onDelete: () => void
   onReverify: () => void
   onRemove: () => void
+  onMention?: (reference: AgentReference) => void
 }) {
   const t = useTranslations('capabilityStore')
   const c = row.capability
@@ -403,6 +415,26 @@ function EnvironmentRowCard({
                 {t('envRegistryFix')}
                 <ArrowUpRight className="size-3" />
               </Link>
+            </Tooltip>
+          )}
+          {c !== undefined && onMention !== undefined && (
+            // 이 환경을 대화 컨텍스트로 — 하네스에 배선하거나 instructions 를 손보는 일은 대화가 더 빠르다.
+            <Tooltip content={t('envMentionTip')} side="top" align="end">
+              <button
+                type="button"
+                aria-label={t('envMention')}
+                onClick={() =>
+                  onMention({
+                    type: 'environment',
+                    id: c.id,
+                    version: c.version,
+                    label: c.name,
+                  })
+                }
+                className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Sparkles className="size-4" />
+              </button>
             </Tooltip>
           )}
           {inv !== undefined && canImport && (
