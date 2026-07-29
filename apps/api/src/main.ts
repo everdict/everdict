@@ -9,6 +9,7 @@ import { FsService, RevisionedWorkspaceFs, SkillService } from "@everdict/applic
 import {
   CapabilityService,
   EnvironmentAdoptionService,
+  adoptedImageReach,
   firstPartyCatalogExtras,
   firstPartyDefaults,
 } from "@everdict/application-control";
@@ -55,6 +56,7 @@ import { buildPlacementPreflight } from "./core/execution/placement-preflight.js
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { KnowledgeExtractionService } from "./core/knowledge/knowledge-extraction-service.js";
 import { ModelService } from "./core/model/model-service.js";
+import { DriverOpsService } from "./core/ops/driver-ops-service.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
 import { SkillGenerator } from "./core/skill/skill-generator.js";
 import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
@@ -143,6 +145,7 @@ async function main(): Promise<void> {
     viewStore,
     browserProfileStore,
     skillStore,
+    skillVersionStore,
     capabilityStore,
     agentMemberPreferenceStore,
     callbackStore,
@@ -255,7 +258,13 @@ async function main(): Promise<void> {
 
   // Managed image store (optional) — the workspace's own image namespace + the registry's authorization server.
   // Unset env = a BYO-only deployment: both stay undefined and /v2/token answers 404.
-  const { images: workspaceImages, imageTokenService } = buildManagedImages();
+  // Cross-tenant pull reach (M6) is bound AFTER the adoption service exists: the store needs reach, and reach
+  // needs the store's coordinates to classify an image. The cycle is real, so the predicate is a thunk over a
+  // holder the adoption wiring fills in — until then it denies, which is the same answer as running without M6.
+  const imageReach: { resolve?: (tenant: string, ref: string) => Promise<boolean> } = {};
+  const { images: workspaceImages, imageTokenService } = buildManagedImages(process.env, {
+    crossTenantPull: (tenant, ref) => (imageReach.resolve ? imageReach.resolve(tenant, ref) : Promise.resolve(false)),
+  });
   // The workspace's coordinates in that store — what makes classifyImageRef able to answer "managed". One
   // definition, handed to every surface that classifies, so the store and the inventory never disagree.
   const managedCoordinates = (workspace: string) =>
@@ -507,6 +516,36 @@ async function main(): Promise<void> {
       : {}),
   });
 
+  // Capability Store — one discriminated versioned entity (mcp|code|skill|environment) members author, publish
+  // (private|workspace|subset|public), and adopt into their agent (tool kinds) or consume at harness-authoring time
+  // (environment). Reach beyond the workspace: subset fans across the author's own workspaces, public exposes to
+  // everyone (admin-gated). Environment publishes classify their image against the workspace's registries
+  // (warn-not-block). See docs/architecture/capability-store.md + docs/architecture/environment-image-store.md.
+  // Hoisted out of the deps literal because the skill library reads it: taking a store skill = copying it in.
+  const capabilityService = new CapabilityService({
+    store: capabilityStore,
+    registryCoordinates: (workspace) => imageRegistryService.coordinates(workspace),
+    managedCoordinates,
+    allowMemberPublicPublish,
+    // Everdict's own entries, all three kinds: the default tools, the catalog-only servers, and the SKILL EXAMPLES —
+    // examples are catalog entries a workspace copies into its library, never attachments (firstPartySkillExamples).
+    firstPartyCatalog: () => [...firstPartyDefaults().map((d) => d.record), ...firstPartyCatalogExtras()],
+  });
+
+  // Workspace environment-image adoption (import) — inventory of adopted environments + pull-usability verification
+  // (warn-not-block). Composes the capability store (resolve + visibility) + image registry (pull auth + verify).
+  // Hoisted out of the deps literal because it closes the M6 cycle: its inventory IS the cross-tenant reach answer.
+  const environmentAdoptionService = new EnvironmentAdoptionService({
+    settings: settingsStore,
+    capabilityStore,
+    verifyImage: (ws, ref) => imageRegistryService.verifyImage(ws, ref),
+    registryCoordinates: (ws) => imageRegistryService.coordinates(ws),
+    managedCoordinates,
+  });
+  // Close the cycle: a ref in another workspace's namespace is pullable exactly when this workspace has adopted an
+  // environment that declares it AND that capability is still consumable (re-checked on every read).
+  imageReach.resolve = adoptedImageReach({ list: (ws, subject) => environmentAdoptionService.list(ws, subject) });
+
   const app = buildServer({
     terminalTickets,
     ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
@@ -518,6 +557,11 @@ async function main(): Promise<void> {
     ...(caseRecorder ? { caseRecorder } : {}), // durable replay tee (opt-in) for the pushed frames/logs
     service,
     scorecardService,
+    // Driver ops surface v0 (docs/orchestration.md) — present only when Temporal is configured; reads/controls
+    // the durable driver (batch/score workflows) by ledger id, through the everdict wrap only.
+    ...(process.env.EVERDICT_TEMPORAL_ADDRESS
+      ? { driverOps: new DriverOpsService({ address: process.env.EVERDICT_TEMPORAL_ADDRESS }) }
+      : {}),
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path
     schedulingControl, // PUT/GET /internal/scheduling — runtime fairness dials (env stays the boot baseline)
     usageMeter, // meter-only billing usage — GET /usage
@@ -566,28 +610,27 @@ async function main(): Promise<void> {
       skills: skillStore,
       secrets: secretStore,
       settings: settingsStore,
+      // The tool DETAIL surface needs two things the list never did: a live MCP connect (what functions does this
+      // really serve) and the AgentSpec upsert (rebinding a tool's secret is an agent-config edit).
+      agentService: new AgentService({ agents: agentRegistry }),
+      probeMcp: probeMcpServer,
     }),
     // Workspace Skills — SKILL.md procedures the members author (dual-scoped private|workspace) + skill-generate (drafts
     // a skill from a description via the workspace's registered model + key; same secret tiers/base as the model probe).
-    skillService: new SkillService({ store: skillStore, latestVersionOf, fs: workspaceFs }),
+    skillService: new SkillService({
+      store: skillStore,
+      latestVersionOf,
+      fs: workspaceFs,
+      versions: skillVersionStore, // the stamped version line ("edit it in conversation, then name the version")
+      capabilities: capabilityService, // taking a store example = copying it into this library
+    }),
     // The workspace filesystem — the shared, workspace-isolated file tree (web Files page + list_files/get_file/
     // write_file MCP tools; agents persist task outputs here as real files). Backed by S3/MinIO when env-configured.
     fsService: new FsService(workspaceFs, fsRevisionStore),
     // "Run" for a workspace file — a sandbox per run, disposed after it. Opt-in: absent unless the deployment
     // gave the control plane a container runtime (EVERDICT_FILE_EXECUTION_DRIVER=docker).
     fileExecutionService: buildFileExecutionService(workspaceFs),
-    // Capability Store — one discriminated versioned entity (mcp|code|skill|environment) members author, publish
-    // (private|workspace|subset|public), and adopt into their agent (tool kinds) or consume at harness-authoring time
-    // (environment). Reach beyond the workspace: subset fans across the author's own workspaces, public exposes to
-    // everyone (admin-gated). Environment publishes classify their image against the workspace's registries
-    // (warn-not-block). See docs/architecture/capability-store.md + docs/architecture/environment-image-store.md.
-    capabilityService: new CapabilityService({
-      store: capabilityStore,
-      registryCoordinates: (workspace) => imageRegistryService.coordinates(workspace),
-      managedCoordinates,
-      allowMemberPublicPublish,
-      firstPartyCatalog: () => [...firstPartyDefaults().map((d) => d.record), ...firstPartyCatalogExtras()],
-    }),
+    capabilityService,
     // Instance policy surfaced to the web (GET /me → config): does a plain member — not only an admin — get to
     // publish a capability to the instance-wide `public` catalog? Operator opt-in for a community-style deployment.
     allowMemberPublicPublish,
@@ -620,15 +663,7 @@ async function main(): Promise<void> {
     imageRegistryService,
     imageTokenService,
     ...(workspaceImages ? { images: workspaceImages } : {}),
-    // Workspace environment-image adoption (import) — inventory of adopted environments + pull-usability verification
-    // (warn-not-block). Composes the capability store (resolve + visibility) + image registry (pull auth + verify).
-    environmentAdoptionService: new EnvironmentAdoptionService({
-      settings: settingsStore,
-      capabilityStore,
-      verifyImage: (ws, ref) => imageRegistryService.verifyImage(ws, ref),
-      registryCoordinates: (ws) => imageRegistryService.coordinates(ws),
-      managedCoordinates,
-    }),
+    environmentAdoptionService,
     ciLinkService,
     runnerService,
     notificationService, // notification feed (bell inbox) route — self-scoped

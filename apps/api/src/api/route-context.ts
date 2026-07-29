@@ -112,15 +112,19 @@ import { BundleSchema, type BundleService, requiredActionsForBundle } from "../c
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { KnowledgeExtractionService } from "../core/knowledge/knowledge-extraction-service.js";
 import type { ModelService } from "../core/model/model-service.js";
+import type { DriverOpsService } from "../core/ops/driver-ops-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
 import type { SkillGenerator } from "../core/skill/skill-generator.js";
-import type { McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
+import type { McpProbeAuth, McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
 import { buildMcpServer } from "../mcp.js";
 
 export interface ServerDeps {
   service: RunService;
   scorecardService?: ScorecardService; // dataset×harness batch eval (route disabled if absent)
+  // Driver ops surface v0 (docs/orchestration.md) — read/control the durable Temporal driver by ledger id.
+  // Absent when no Temporal address is configured (routes answer 404 "not configured").
+  driverOps?: DriverOpsService;
   usageMeter?: UsageMeter; // meter-only billing usage (GET /usage) — never blocks (route disabled if absent)
   budget?: BudgetAdmin; // enforcement budget config (GET/PUT /budget) — usage + per-tenant limit (route disabled if absent)
   // Settle-only capability of the enforcement budget for the internal usage bridge (agent cost → the 402-cap total).
@@ -155,8 +159,10 @@ export interface ServerDeps {
   fileExecutionService?: FileExecutionService;
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD (routes disabled if absent)
   allowMemberPublicPublish?: boolean; // instance policy surfaced to the web via GET /me (config): members may publish `public`, not only admins
-  // Capability wizard mcp probe — connect to an MCP URL and list its tools ("test connection" + tool discovery). Injected by main (infrastructure/mcp). Route disabled if absent.
-  probeCapabilityMcp?: (url: string, token?: string) => Promise<McpProbeResult>;
+  // MCP probe — connect to an MCP URL and list its tools. Two callers: the capability wizard's "test connection"
+  // (a pasted `token`) and Settings › Agent › Tools' function discovery (a resolved `authorization` header). Injected
+  // by main (infrastructure/mcp). Route disabled if absent.
+  probeCapabilityMcp?: (url: string, auth?: McpProbeAuth) => Promise<McpProbeResult>;
 
   skillGenerator?: SkillGenerator; // skill-generate — draft a skill from a description via the workspace's model (route disabled if absent)
   runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)

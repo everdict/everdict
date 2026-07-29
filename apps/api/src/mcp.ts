@@ -30,6 +30,7 @@ import { registerInviteTools } from "./api/member/invite.mcp.js";
 import { registerMemberTools } from "./api/member/member.mcp.js";
 import { registerModelTools } from "./api/model/model.mcp.js";
 import { registerNotificationTools } from "./api/notification/notification.mcp.js";
+import { registerDriverOpsTools } from "./api/ops/driver.mcp.js";
 import { registerProfileTools } from "./api/profile/profile.mcp.js";
 import { registerProxyTools } from "./api/proxy/proxy.mcp.js";
 import { registerQueueTools } from "./api/queue/queue.mcp.js";
@@ -65,6 +66,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerRunTools(server, ctx);
   registerScorecardTools(server, ctx);
   registerGroupTools(server, ctx);
+  registerDriverOpsTools(server, ctx);
   registerQueueTools(server, ctx);
   registerBillingTools(server, ctx);
   registerHarnessTemplateTools(server, ctx);

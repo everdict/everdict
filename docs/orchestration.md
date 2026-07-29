@@ -109,6 +109,10 @@ TTL timer).
   idempotency and ledger-vocabulary addressing come free.
 - **Every new workflow lands in the Driver ops surface on day one** — describe/pending/cancel visible to
   the ops agent; a workflow the agent can't see violates the adoption gate that justified Temporal.
+  **v0 SHIPPED (W2)**: `GET /ops/driver/:family/:id` + `POST …/cancel` (families `batch`|`score`) ↔ MCP
+  `describe_driver_workflow`/`cancel_driver_workflow` — ledger-vocabulary addressing (a scorecard/group id,
+  never a raw workflowId), ledger-ownership scoping, read = `runtimes:read`, cancel = `runtimes:control`.
+  `approval:`/`reaper:`/`reaction:` join the family enum as their waves land.
 - **Workflows never emit facts directly** — their activities' state transitions do (same-tx outbox), so
   the event plane's "transition ⇒ fact" invariant holds inside workflows too.
 - **Activities that create demand pass the §5 gate** — a workflow is not a side door around admission.

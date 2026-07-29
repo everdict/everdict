@@ -112,6 +112,7 @@ import { registerInviteRoutes } from "./api/member/invite.routes.js";
 import { registerMemberRoutes } from "./api/member/member.routes.js";
 import { registerModelRoutes } from "./api/model/model.routes.js";
 import { registerNotificationRoutes } from "./api/notification/notification.routes.js";
+import { registerDriverOpsRoutes } from "./api/ops/driver.routes.js";
 import { registerInternalRoutes } from "./api/ops/internal.routes.js";
 import { registerProfileRoutes } from "./api/profile/profile.routes.js";
 import { registerProxyRoutes } from "./api/proxy/proxy.routes.js";
@@ -211,6 +212,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerRunObservabilityRoutes(routes, deps);
     registerScorecardRoutes(routes, deps);
     registerGroupRoutes(routes, deps);
+    registerDriverOpsRoutes(routes, deps);
     registerScheduleRoutes(routes, deps);
     registerHarnessTemplateRoutes(routes, deps);
     registerHarnessRoutes(routes, deps);

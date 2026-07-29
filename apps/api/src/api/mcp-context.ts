@@ -3,7 +3,7 @@ import type { PlatformEventService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
 import type { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
-import type { EnvironmentAdoptionService, ImageRegistryService } from "@everdict/application-control";
+import type { EnvironmentAdoptionService, ImageRegistryService, WorkspaceImages } from "@everdict/application-control";
 import type { ProxyService } from "@everdict/application-control";
 import type { CapabilityService } from "@everdict/application-control";
 import type { MattermostService } from "@everdict/application-control";
@@ -17,7 +17,7 @@ import type { RunnerService } from "@everdict/application-control";
 import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import type { SkillService } from "@everdict/application-control";
-import type { FsService } from "@everdict/application-control";
+import type { FileExecutionService, FsService } from "@everdict/application-control";
 import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type { ViewService, ViewSnapshotService } from "@everdict/application-control";
@@ -44,8 +44,8 @@ import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
 import type { TicketStore } from "../common/ticket-store.js";
-import type { AgentService } from "../core/agent/agent-service.js";
 import type { AgentMemberToolingService } from "../core/agent/agent-member-tooling-service.js";
+import type { AgentService } from "../core/agent/agent-service.js";
 import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import type { BrowserProfileCaptureService } from "../core/browser-profile/browser-profile-capture-service.js";
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
@@ -53,9 +53,10 @@ import type { BundleService } from "../core/bundle/bundle-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { KnowledgeExtractionService } from "../core/knowledge/knowledge-extraction-service.js";
 import type { ModelService } from "../core/model/model-service.js";
+import type { DriverOpsService } from "../core/ops/driver-ops-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
-import type { McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
+import type { McpProbeAuth, McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
 import type { AgentAttribution } from "./fs/fs-actor.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
@@ -63,12 +64,13 @@ import type { AgentAttribution } from "./fs/fs-actor.js";
 export interface McpDeps {
   service: RunService;
   scorecardService?: ScorecardService;
+  driverOps?: DriverOpsService; // Driver ops surface v0 — describe/cancel the durable Temporal driver by ledger id
   usageMeter?: UsageMeter; // meter-only billing usage (get_usage)
   budget?: BudgetAdmin; // enforcement budget config (get_budget / set_budget_limit)
   scheduleService?: ScheduleService;
   queueService?: QueueService; // work queue snapshot (running/waiting/next-scheduled per runtime lane)
   viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
-  viewSnapshotService?: ViewSnapshotService; // capture_view_snapshot — write a View’s numbers to the workspace filesystem
+  viewSnapshotService?: ViewSnapshotService; // capture_view_snapshot — write a View's numbers to the workspace filesystem
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;
@@ -82,8 +84,9 @@ export interface McpDeps {
   agentMemberToolingService?: AgentMemberToolingService; // the caller's OWN tools + skills (workspace baseline ⊕ their overrides)
   skillService?: SkillService; // Workspace Skills (SKILL.md procedures the members author) CRUD — dual-scoped private|workspace
   fsService?: FsService; // the workspace filesystem (shared, workspace-isolated file tree) list/read/write/mkdir/move/remove
+  fileExecutionService?: FileExecutionService; // run one workspace file in a sandbox (run_file) — absent unless a driver is composed
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD
-  probeCapabilityMcp?: (url: string, token?: string) => Promise<McpProbeResult>; // capability wizard mcp "test connection" + tool discovery
+  probeCapabilityMcp?: (url: string, auth?: McpProbeAuth) => Promise<McpProbeResult>; // mcp "test connection" + tool discovery (wizard token / bound authorization)
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
   inspectRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<InspectRuntimeResult>; // runtime live cluster view
@@ -100,6 +103,7 @@ export interface McpDeps {
   traceSourceService?: TraceSourceService; // workspace trace sources (register + pull/export selection + list/inspect browser)
   spanAttrMappingService?: SpanAttrMappingService; // per-harness span-attr mapping overlay (the conversion layer between a harness and a judge)
   imageRegistryService?: ImageRegistryService; // workspace image registry (classification baseline + push publishing)
+  images?: WorkspaceImages; // everdict's OWN managed image store — absent on a BYO-only deployment
   environmentAdoptionService?: EnvironmentAdoptionService; // workspace environment-image adoption inventory + pull verify
   ciLinkService?: CiLinkService; // CI repo link (repo↔harness slot + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster
