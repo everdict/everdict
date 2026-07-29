@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Boxes,
   Check,
+  ChevronRight,
   CircleAlert,
   CircleCheck,
   Code2,
@@ -58,6 +59,7 @@ import { Markdown } from '@/shared/ui/markdown'
 import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { SkillDocs } from '@/shared/ui/skill-docs'
 import { StatCard } from '@/shared/ui/stat-card'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 import { adoptCapabilityAction, unadoptCapabilityAction } from '../api/adopt-capability'
 import {
@@ -168,9 +170,10 @@ export function CapabilityStore({
   const [pending, startTransition] = useTransition()
 
   // 필터 — 하네스/데이터셋 목록과 동일한 지속 필터(검색·종류·상태·정렬). 워크스페이스 + variant 별로 기억.
+  // 카탈로그에서 상태 필터가 사라졌으므로(있는 것은 아예 안 보임) 저장 키를 v2 로 올려 예전 값이 되살아나지 않게 한다.
   const FILTER_DEFAULTS = { query: '', type: 'all', status: 'all', sort: 'recent' }
   const { values, set, reset, dirty } = usePersistentFilters(
-    `store:${variant}:${currentWorkspace}`,
+    `store:${variant}:v2:${currentWorkspace}`,
     FILTER_DEFAULTS
   )
   const { query, type, status, sort } = values
@@ -201,12 +204,19 @@ export function CapabilityStore({
     }
   }
 
+  // 카탈로그는 발견 목록이다 — 이미 워크스페이스에 있는 것은 여기서 감춘다(관리는 설정 › 에이전트 · 환경).
+  // 내 발행(mine)은 내가 낸 것을 전부 보여줘야 하므로 감추지 않고, 상태 필터로 구분한다.
+  const browsable = useMemo(
+    () => (variant === 'catalog' ? items.filter((c) => !inWorkspace(c)) : items),
+    [items, variant, inWorkspace]
+  )
+
   const list = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const filtered = items.filter((c) => {
+    const filtered = browsable.filter((c) => {
       if (type !== 'all' && c.spec.type !== type) return false
-      if (status === 'adopted' && !inWorkspace(c)) return false
-      if (status === 'not' && inWorkspace(c)) return false
+      if (variant === 'mine' && status === 'adopted' && !inWorkspace(c)) return false
+      if (variant === 'mine' && status === 'not' && inWorkspace(c)) return false
       return (
         q.length === 0 ||
         c.name.toLowerCase().includes(q) ||
@@ -222,7 +232,7 @@ export function CapabilityStore({
         return a.spec.type.localeCompare(b.spec.type) || a.name.localeCompare(b.name)
       return b.createdAt.localeCompare(a.createdAt) // recent
     })
-  }, [items, query, type, status, sort, inWorkspace])
+  }, [browsable, query, type, status, sort, variant, inWorkspace])
 
   // 필터가 바뀌면 페이지네이션을 처음으로 되돌린다.
   useEffect(() => setVisibleCount(PAGE), [query, type, status, sort])
@@ -239,7 +249,8 @@ export function CapabilityStore({
       setConfirming(null)
     })
 
-  // 채택 — 필요 시크릿/쓰기 옵션이 있으면 다이얼로그로 바인딩을 받고, 없으면 바로 채택.
+  // 워크스페이스에 추가 — 필요 시크릿/쓰기 옵션이 있으면 다이얼로그로 바인딩을 받고, 없으면 바로 추가.
+  // 추가에 성공하면 상세를 닫는다: 카탈로그에서 그 행은 이제 목록에서 사라지므로 열어 둘 상세가 없다.
   const startAdopt = (c: Capability) => {
     if (requiredSecretsOf(c).length > 0 || offersWrite(c)) setAdopting(c)
     else adopt(c, {}, false)
@@ -253,25 +264,33 @@ export function CapabilityStore({
         secretBindings,
         enableWrite,
       })
-      if (r.ok) toast.success(t('adopted', { name: c.name }))
-      else toast.error(r.error ?? t('adoptError'))
+      if (r.ok) {
+        toast.success(t('added', { name: c.name }))
+        setDetail(null)
+      } else {
+        toast.error(r.error ?? t('addError'))
+      }
       setAdopting(null)
     })
   const unadopt = (c: Capability) =>
     startTransition(async () => {
       const r = await unadoptCapabilityAction(c.tenant, c.id)
-      if (r.ok) toast.success(t('removed', { name: c.name }))
-      else toast.error(r.error ?? t('adoptError'))
+      if (r.ok) toast.success(t('removedFromWorkspace', { name: c.name }))
+      else toast.error(r.error ?? t('addError'))
     })
 
-  // environment 가져오기/해제 — 워크스페이스 인벤토리에 넣고, 넣을 때 pull 가능성을 검증한다(warn-not-block).
+  // environment 추가/제거 — 워크스페이스 인벤토리에 넣고, 넣을 때 pull 가능성을 검증한다(warn-not-block).
   const importEnv = (c: Capability) =>
     startTransition(async () => {
       const r = await adoptEnvironmentAction({ source: c.tenant, id: c.id, version: c.version })
-      if (!r.ok) toast.error(r.error ?? t('importError'))
-      else if (r.environment.verify?.pullable === false)
+      if (!r.ok) {
+        toast.error(r.error ?? t('importError'))
+        return
+      }
+      if (r.environment.verify?.pullable === false)
         toast.warning(t('importedNotPullable', { name: c.name }))
       else toast.success(t('imported', { name: c.name }))
+      setDetail(null)
     })
   const removeEnv = (c: Capability) =>
     startTransition(async () => {
@@ -346,7 +365,17 @@ export function CapabilityStore({
       <div className={cn('grid gap-3', variant === 'catalog' ? 'grid-cols-3' : 'grid-cols-2')}>
         <StatCard label={t('statTotal')} value={items.length} />
         <StatCard
-          label={t('statAdopted')}
+          label={
+            variant === 'catalog' ? (
+              // 목록에서 감춘 항목이 어디로 갔는지 — 인라인 안내문 대신 info 아이콘으로.
+              <span className="inline-flex items-center gap-1">
+                {t('statInWorkspace')}
+                <InfoTip content={t('statInWorkspaceTip')} align="start" />
+              </span>
+            ) : (
+              t('statInWorkspace')
+            )
+          }
           value={adoptedCount}
           tone={adoptedCount > 0 ? 'primary' : 'default'}
         />
@@ -371,13 +400,16 @@ export function CapabilityStore({
           className="w-[140px]"
           aria-label={t('typeLabel')}
         />
-        <Combobox
-          options={statusOptions}
-          value={status}
-          onChange={(v) => set('status', v)}
-          className="w-[150px]"
-          aria-label={t('statusLabel')}
-        />
+        {/* 상태 필터는 내 발행 뷰 전용 — 카탈로그는 "아직 워크스페이스에 없는 것"만 담기 때문에 고를 상태가 없다. */}
+        {variant === 'mine' && (
+          <Combobox
+            options={statusOptions}
+            value={status}
+            onChange={(v) => set('status', v)}
+            className="w-[150px]"
+            aria-label={t('statusLabel')}
+          />
+        )}
         <Combobox
           options={sortOptions}
           value={sort}
@@ -390,14 +422,19 @@ export function CapabilityStore({
       </div>
 
       {list.length === 0 ? (
-        <EmptyState
-          icon={<Boxes />}
-          title={t(variant === 'mine' ? 'mineEmptyTitle' : 'emptyTitle')}
-          hint={t(variant === 'mine' ? 'mineEmptyHint' : 'emptyHint')}
-          {...(variant === 'mine' && canWrite
-            ? { action: <Button onClick={() => setEditing('new')}>{t('publish')}</Button> }
-            : {})}
-        />
+        // 카탈로그를 전부 가져간 경우와 "아직 아무것도 없음"은 다른 상황 — 감춘 이유를 말해 준다.
+        variant === 'catalog' && browsable.length === 0 && items.length > 0 ? (
+          <EmptyState icon={<CircleCheck />} title={t('allAddedTitle')} hint={t('allAddedHint')} />
+        ) : (
+          <EmptyState
+            icon={<Boxes />}
+            title={t(variant === 'mine' ? 'mineEmptyTitle' : 'emptyTitle')}
+            hint={t(variant === 'mine' ? 'mineEmptyHint' : 'emptyHint')}
+            {...(variant === 'mine' && canWrite
+              ? { action: <Button onClick={() => setEditing('new')}>{t('publish')}</Button> }
+              : {})}
+          />
+        )
       ) : (
         <div className="space-y-2">
           {visible.map((c) => {
@@ -406,7 +443,6 @@ export function CapabilityStore({
             const VisIcon = VIS_ICON[c.visibility]
             const managed = isBuiltInCapability(c)
             const here = inWorkspace(c)
-            const isEnv = c.spec.type === 'environment'
             return (
               <div
                 key={capKey(c)}
@@ -451,7 +487,7 @@ export function CapabilityStore({
                         )}
                         {here && (
                           <Badge tone="success" className="shrink-0">
-                            {isEnv ? t('importedBadge') : t('adoptedBadge')}
+                            {t('inWorkspaceBadge')}
                           </Badge>
                         )}
                         <code className="shrink-0 rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-secondary-foreground ring-1 ring-inset ring-border">
@@ -464,83 +500,53 @@ export function CapabilityStore({
                       <RowMeta capability={c} />
                     </div>
                   </div>
-                  {/* 우측 액션 영역 — 카드(role=button)가 상세를 열므로, 여기 버튼 클릭이 카드 열림으로 버블링되지 않게 막는다. */}
-                  <div
-                    className="flex shrink-0 items-center gap-1.5"
-                    onClick={(e) => e.stopPropagation()}
-                  >
+                  {/* 우측 — 행은 읽기 전용이다. 워크스페이스에 추가/제거는 상세에서만 하므로 행마다 버튼이 자리를 먹지
+                      않는다(리니어st. 조용한 행 + 호버 시 드릴인 신호). 관리 메뉴만 제자리에 남고, 카드(role=button)가
+                      상세를 열므로 메뉴 클릭은 버블링을 막는다. */}
+                  <div className="flex shrink-0 items-center gap-1.5">
                     {canManage(c) && (
-                      <DropdownMenu
-                        align="end"
-                        trigger={({ open, toggle }) => (
-                          <button
-                            type="button"
-                            onClick={toggle}
-                            disabled={pending}
-                            aria-label={t('menu')}
-                            aria-expanded={open}
-                            className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                          >
-                            <MoreHorizontal className="size-4" />
-                          </button>
-                        )}
-                      >
-                        <DropdownItem icon={<Pencil />} onSelect={() => setEditing(c)}>
-                          {t('edit')}
-                        </DropdownItem>
-                        <DropdownItem icon={<Share2 />} onSelect={() => setReaching(c)}>
-                          {t('changeReach')}
-                        </DropdownItem>
-                        <DropdownSeparator />
-                        <DropdownItem
-                          icon={<Trash2 />}
-                          tone="danger"
-                          onSelect={() => setConfirming(c)}
+                      <span onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu
+                          align="end"
+                          trigger={({ open, toggle }) => (
+                            <button
+                              type="button"
+                              onClick={toggle}
+                              disabled={pending}
+                              aria-label={t('menu')}
+                              aria-expanded={open}
+                              className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                            >
+                              <MoreHorizontal className="size-4" />
+                            </button>
+                          )}
                         >
-                          {t('delete')}
-                        </DropdownItem>
-                      </DropdownMenu>
+                          <DropdownItem icon={<Pencil />} onSelect={() => setEditing(c)}>
+                            {t('edit')}
+                          </DropdownItem>
+                          <DropdownItem icon={<Share2 />} onSelect={() => setReaching(c)}>
+                            {t('changeReach')}
+                          </DropdownItem>
+                          <DropdownSeparator />
+                          <DropdownItem
+                            icon={<Trash2 />}
+                            tone="danger"
+                            onSelect={() => setConfirming(c)}
+                          >
+                            {t('delete')}
+                          </DropdownItem>
+                        </DropdownMenu>
+                      </span>
                     )}
-                    {isEnv
-                      ? canImportEnvironment &&
-                        (here ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            disabled={pending}
-                            onClick={() => removeEnv(c)}
-                          >
-                            <Check />
-                            {t('importedRemove')}
-                          </Button>
-                        ) : (
-                          <Button size="sm" disabled={pending} onClick={() => importEnv(c)}>
-                            <Plus />
-                            {t('import')}
-                          </Button>
-                        ))
-                      : canAdopt &&
-                        (here ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            disabled={pending}
-                            onClick={() => unadopt(c)}
-                          >
-                            <Check />
-                            {t('adoptedRemove')}
-                          </Button>
-                        ) : (
-                          <Button size="sm" disabled={pending} onClick={() => startAdopt(c)}>
-                            <Plus />
-                            {t('adopt')}
-                          </Button>
-                        ))}
                     <Avatar
                       name={author.name}
                       url={author.avatarUrl}
                       size="sm"
                       className="rounded-full"
+                    />
+                    <ChevronRight
+                      className="size-4 text-faint opacity-0 transition-opacity group-hover:opacity-100"
+                      aria-hidden
                     />
                   </div>
                 </div>
@@ -724,6 +730,8 @@ function CapabilityDetailDialog({
   const VisIcon = VIS_ICON[capability.visibility]
   const managed = isBuiltInCapability(capability)
   const isEnv = capability.spec.type === 'environment'
+  // 환경은 워크스페이스 인벤토리(settings:write), 그 외는 내 에이전트(agents:write) — 권한은 다르고 문구는 하나다.
+  const canChange = isEnv ? canImportEnvironment : canAdopt
   const verify = adoptedEnv?.verify
   return (
     <Dialog open onClose={onClose} align="top" className="max-w-2xl">
@@ -793,11 +801,13 @@ function CapabilityDetailDialog({
           </div>
         )}
 
+        {/* 상세가 가져오기의 유일한 표면 — 목록 행은 읽기 전용이고, 워크스페이스에 넣고 빼는 일은 여기서만 한다.
+            환경(인벤토리)과 도구·스킬(에이전트)은 저장되는 곳이 다르지만 사용자에게는 같은 한 가지 동작이라 문구를 통일한다. */}
         <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
           {inWorkspace ? (
             <span className="inline-flex items-center gap-1.5 text-[12px] font-[510] text-success">
               <CircleCheck className="size-4" />
-              {t('detailAdopted')}
+              {t('detailInWorkspace')}
             </span>
           ) : (
             <span />
@@ -806,31 +816,22 @@ function CapabilityDetailDialog({
             <Button variant="secondary" size="sm" onClick={onClose}>
               {t('close')}
             </Button>
-            {isEnv
-              ? canImportEnvironment &&
-                (inWorkspace ? (
-                  <Button variant="secondary" size="sm" disabled={pending} onClick={onRemoveEnv}>
-                    <Check />
-                    {t('importedRemove')}
-                  </Button>
-                ) : (
-                  <Button size="sm" disabled={pending} onClick={onImport}>
-                    <Plus />
-                    {t('import')}
-                  </Button>
-                ))
-              : canAdopt &&
-                (inWorkspace ? (
-                  <Button variant="secondary" size="sm" disabled={pending} onClick={onUnadopt}>
-                    <Check />
-                    {t('adoptedRemove')}
-                  </Button>
-                ) : (
-                  <Button size="sm" disabled={pending} onClick={onAdopt}>
-                    <Plus />
-                    {t('adopt')}
-                  </Button>
-                ))}
+            {canChange &&
+              (inWorkspace ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={pending}
+                  onClick={isEnv ? onRemoveEnv : onUnadopt}
+                >
+                  {t('removeFromWorkspace')}
+                </Button>
+              ) : (
+                <Button size="sm" disabled={pending} onClick={isEnv ? onImport : onAdopt}>
+                  <Plus />
+                  {t('addToWorkspace')}
+                </Button>
+              ))}
           </div>
         </div>
       </div>
@@ -1708,7 +1709,7 @@ function CapabilityEditorDialog({
   )
 }
 
-// 채택 다이얼로그 — 필요 시크릿을 내 워크스페이스 시크릿 이름으로 바인딩 + 쓰기 옵트인. 그 다음 에이전트에 pin 추가.
+// 추가 다이얼로그 — 필요 시크릿을 내 워크스페이스 시크릿 이름으로 바인딩 + 쓰기 옵트인. 그 다음 에이전트에 pin 추가.
 function AdoptDialog({
   capability,
   secretNames,
@@ -1734,9 +1735,9 @@ function AdoptDialog({
     <Dialog open onClose={onClose} className="max-w-md">
       <div className="space-y-4 p-5">
         <div>
-          <h3 className="text-sm font-medium">{t('adoptTitle', { name: capability.name })}</h3>
+          <h3 className="text-sm font-medium">{t('addTitle', { name: capability.name })}</h3>
           {capability.spec.type === 'code' && (
-            <p className="mt-1 text-[12px] text-muted-foreground">{t('adoptCodeNote')}</p>
+            <p className="mt-1 text-[12px] text-muted-foreground">{t('addCodeNote')}</p>
           )}
         </div>
         {required.length > 0 && (
@@ -1783,7 +1784,7 @@ function AdoptDialog({
             {t('cancel')}
           </Button>
           <Button size="sm" disabled={pending} onClick={() => onAdopt(bindings, enableWrite)}>
-            {pending ? t('saving') : t('adopt')}
+            {pending ? t('saving') : t('addToWorkspace')}
           </Button>
         </div>
       </div>

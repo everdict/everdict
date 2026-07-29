@@ -515,8 +515,8 @@ const GRAFANA_MCP: CapabilityRecord = {
   name: "grafana",
   description:
     "Query a Grafana instance — search dashboards, run Prometheus/Loki queries, list alert rules and incidents. " +
-    "Adopt it, bind your Grafana URL + a service-account token, and the agent runs the official grafana/mcp-grafana " +
-    "server in a container. Read-only.",
+    "Add it to your workspace, bind your Grafana URL + a service-account token, and the agent runs the official " +
+    "grafana/mcp-grafana server in a container. Read-only.",
   spec: {
     type: "mcp",
     image: "grafana/mcp-grafana",
@@ -554,7 +554,7 @@ const PLAYWRIGHT_MCP: CapabilityRecord = {
   description:
     "Drive a real browser — navigate, click, type, and read pages via Playwright's accessibility snapshots (token-" +
     "efficient, no screenshots). Runs the official microsoft/playwright-mcp server (headless chromium) in a container. " +
-    "Enable write at adoption to allow the navigation/interaction tools.",
+    "Enable write when you add it to allow the navigation/interaction tools.",
   spec: {
     type: "mcp",
     image: "mcr.microsoft.com/playwright/mcp",
