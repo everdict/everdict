@@ -1,5 +1,9 @@
 # Run as the core primitive — scorecard = orchestration over runs
 
+> **Successor: [execution-model.md](./execution-model.md)** — this document made run the primitive of the
+> EVAL axis; that one generalizes it to every execution (agent activations, sandbox commands) and adds the
+> run group + detachable second phase.
+
 > **Status: Steps 0–2 SHIPPED.** Doc-first SSOT for the "promote run to a real primitive" refactor.
 > Decided direction with the user: **run is the execution primitive; scorecard is a thin orchestration/aggregation
 > layer composed OVER runs.** Like [scheduled-evals](./scheduled-evals.md) / [self-hosted-runner](./self-hosted-runner.md):

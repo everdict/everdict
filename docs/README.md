@@ -35,6 +35,10 @@
 - [desktop-app](architecture/desktop-app.md) · [self-hosted-runner](architecture/self-hosted-runner.md) · [self-hosted-service-runner](architecture/self-hosted-service-runner.md)
 - [notifications](architecture/notifications.md) · [scheduled-evals](architecture/scheduled-evals.md) · [github-actions-trigger](architecture/github-actions-trigger.md) · [bundles](architecture/bundles.md)
 - [leaderboard-model-dimension](architecture/leaderboard-model-dimension.md) · [run-as-primitive](architecture/run-as-primitive.md) · [execution-scoring-orchestration](architecture/execution-scoring-orchestration.md)
+- [execution-model](architecture/execution-model.md) — **DESIGN**: Run as the universal execution record (eval · agent · command), run groups + the optional second phase, and one way to cause a run
+- [native-observability](architecture/native-observability.md) — **DESIGN**: Everdict owns the trace domain — OTel collector ingestion + tenant-scoped store; external platforms = egress mirrors + import shims
+- [event-plumbing](architecture/event-plumbing.md) — **DESIGN**: the platform's nervous system — structural fact emission, one log + N cursor consumers, subscriptions → admitted runs
+- [execution-master-plan](architecture/execution-master-plan.md) — **PLAN OF RECORD**: the five designs sequenced into waves W0–W7; Temporal placed per the catalog; 21 decisions locked
 - [judge-placement-locality](architecture/judge-placement-locality.md) · [front-door-generalization](architecture/front-door-generalization.md) · [target-acquisition-generalization](architecture/target-acquisition-generalization.md)
 - [completion-stream-callback](architecture/completion-stream-callback.md) · [portable-harness-runtime](architecture/portable-harness-runtime.md) · [harness-taxonomy](architecture/harness-taxonomy.md)
 

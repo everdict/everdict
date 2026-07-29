@@ -98,6 +98,10 @@ control plane (apps/api)                          agent service (apps/agent)
 ## Pillar A — the automation substrate
 
 ### A1. Event contract + persisted log (control plane)
+> **Generalized by [event-plumbing.md](./event-plumbing.md)** — A1 built the log as an agent-activation
+> substrate; the successor design makes it the platform's one fact stream (structural emission from
+> domain transitions, all reactors as durable-cursor consumers, coverage waves, the §5 admission
+> coupling).
 `PlatformEventRecord` in `@everdict/contracts` (records + wire), `platform_events` migration
 (workspace-scoped, append-only, indexed by `(workspace, ts)` + `(workspace, kind)`), an
 `EventLog` port in `application-control`, and a single `emitPlatformEvent` seam inside
@@ -129,6 +133,11 @@ run machinery, roster persisted in a small table instead of the Map). One execut
 doors (registry-crafted vs chat-spawned).
 
 ### A4. Agent-run identity (contracts + db)
+> **Superseded in direction by [execution-model.md](./execution-model.md).** A4 gave the agent run an identity
+> *inside the session record*, which left the platform with two execution ledgers (`RunRecord` vs
+> `AgentSessionRecord.status`) and two surfaces (`/runs` vs `/agents`). The successor design makes an agent
+> activation a `Run{kind:"agent"}` and keeps the session as the conversation it always was.
+
 Extend `AgentSessionRecord` with `origin` + `status` + `outcome` (summary, counters, priceUsd roll-up
 from the existing usage meter) — one migration. Chat sessions get `origin:{type:"chat"}` backfill. The
 run's status transitions are owned by the agent service loop wrapper (started → awaiting_approval ↔
