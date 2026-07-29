@@ -14,7 +14,11 @@ second transport. See `docs/mcp.md` + rule `auth`.
 - **Same auth core, no second path.** The Bearer on `/mcp` is validated by the SAME `compositeAuthenticator`
   (Keycloak JWT via JWKS / `ak_…`) → `Principal`. Build the MCP server bound to that Principal; every tool gates
   with `authorize(principal, action)` and scopes to `principal.workspace`. Authz/validation failures → MCP tool
-  error (`isError: true`, message prefixed with the AppError code), not a thrown protocol error.
+  error (`isError: true`, message prefixed with the AppError code), not a thrown protocol error. The error's
+  **structured `extra` rides along** as JSON under the message (`failFrom` in `mcp-context.ts`): several failures
+  are only actionable through that payload — a filesystem write that lost a race returns the live content plus an
+  attempted merge — and the HTTP transport has always shipped it as the envelope's `data`. Dropping it on one
+  transport is a parity bug, so never hand-roll `fail(\`${code}: ${message}\`)` in a tool.
 - **OAuth = MCP Authorization spec ("login like Linear").** No token → `401` + `WWW-Authenticate:
   resource_metadata=…`; serve `/.well-known/oauth-protected-resource` (RFC 9728) naming **Keycloak** as the
   authorization server (`authorizationServers` from `KEYCLOAK_ISSUER`). Never invent a bespoke MCP login.

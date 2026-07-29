@@ -16,6 +16,10 @@ export const FsUsageSchema = z.object({
   bytes: z.number().int().nonnegative(),
   truncated: z.boolean(),
   topLevel: z.array(FsUsageTopLevelSchema),
+  // Published history's own footprint. The tree walk above cannot see it (revision blobs live outside the tree)
+  // and retention is unlimited, so on an actively-edited workspace this outgrows `bytes` — reporting it keeps
+  // "what this workspace stores" honest. Absent when the deployment has no revision ledger.
+  history: z.object({ revisions: z.number().int().nonnegative(), bytes: z.number().int().nonnegative() }).optional(),
 });
 export type FsUsage = z.infer<typeof FsUsageSchema>;
 export type FsUsageTopLevel = z.infer<typeof FsUsageTopLevelSchema>;

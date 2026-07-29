@@ -143,6 +143,16 @@ export function fail(message: string): CallToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+// An AppError as the agent sees it: the code + message, PLUS the error's structured data when it carries any.
+// That payload is often the whole point of the failure — a filesystem write that lost a race returns the live
+// content and an attempted merge, and without it the agent is told "CONFLICT" with no way to recover. The HTTP
+// transport has always shipped it (`toEnvelope().data`); dropping it here made the two transports disagree.
+function failFrom(err: AppError): CallToolResult {
+  const head = `${err.code}: ${err.message}`;
+  if (err.extra === undefined || Object.keys(err.extra).length === 0) return fail(head);
+  return fail(`${head}\n${JSON.stringify(err.extra, null, 2)}`);
+}
+
 // authorize + AppError → isError conversion (so the agent recognizes it as a tool error / permission error).
 export async function run(
   principal: Principal,
@@ -153,7 +163,7 @@ export async function run(
     authorize(principal, action);
     return await fn();
   } catch (err) {
-    if (err instanceof AppError) return fail(`${err.code}: ${err.message}`);
+    if (err instanceof AppError) return failFrom(err);
     return fail(err instanceof Error ? err.message : String(err));
   }
 }
@@ -163,7 +173,7 @@ export async function plain(fn: () => Promise<CallToolResult>): Promise<CallTool
   try {
     return await fn();
   } catch (err) {
-    if (err instanceof AppError) return fail(`${err.code}: ${err.message}`);
+    if (err instanceof AppError) return failFrom(err);
     return fail(err instanceof Error ? err.message : String(err));
   }
 }

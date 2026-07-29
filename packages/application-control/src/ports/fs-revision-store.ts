@@ -18,4 +18,10 @@ export interface FsRevisionStore {
   get(tenant: string, path: string, revision: number): Promise<FsRevision | undefined>;
   // Carry a file's (or a whole subtree's) history along with a move, so "who published this" survives a rename.
   rename(tenant: string, from: string, to: string): Promise<void>;
+  // How much the workspace's history costs — revision count + total bytes. Answered from the ledger's own `size`
+  // column (one aggregate), never by walking object storage, so the Settings usage read stays cheap.
+  usage(tenant: string): Promise<{ revisions: number; bytes: number }>;
+  // Drop a workspace's entire history. The ONE caller is the danger-zone "empty the filesystem" action: once no
+  // file references it, retained history is a surprise and a storage leak. Ordinary deletes keep their history.
+  purge(tenant: string): Promise<number>;
 }

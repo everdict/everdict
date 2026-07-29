@@ -57,6 +57,11 @@ class FakeFs implements WorkspaceFs {
     const hit = this.blobs.get(`${tenant} ${path}@${revision}`);
     return hit ? { entry: entryOf(path, hit.data, hit.contentType, revision), data: hit.data } : undefined;
   }
+  async removeRevisionBlobs(tenant: string): Promise<number> {
+    const mine = [...this.blobs.keys()].filter((k) => k.startsWith(`${tenant} `));
+    for (const k of mine) this.blobs.delete(k);
+    return mine.length;
+  }
 }
 
 function entryOf(path: string, data: Uint8Array, contentType: string, revision?: number): FsEntry {
@@ -101,6 +106,15 @@ class FakeRevisionStore implements FsRevisionStore {
       if (row.path === from) row.path = to;
       else if (row.path.startsWith(`${from}/`)) row.path = `${to}/${row.path.slice(from.length + 1)}`;
     }
+  }
+  async usage(tenant: string): Promise<{ revisions: number; bytes: number }> {
+    const mine = this.rows.filter((r) => r.tenant === tenant);
+    return { revisions: mine.length, bytes: mine.reduce((sum, r) => sum + r.size, 0) };
+  }
+  async purge(tenant: string): Promise<number> {
+    const before = this.rows.length;
+    for (let i = this.rows.length - 1; i >= 0; i--) if (this.rows[i]?.tenant === tenant) this.rows.splice(i, 1);
+    return before - this.rows.length;
   }
 }
 

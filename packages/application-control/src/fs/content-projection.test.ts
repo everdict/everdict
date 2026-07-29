@@ -131,6 +131,11 @@ class FakeFs implements WorkspaceFs {
   ): Promise<void> {
     this.revisionBlobs.set(`${this.key(tenant, path)}@${revision}`, { data, contentType });
   }
+  async removeRevisionBlobs(tenant: string): Promise<number> {
+    const mine = [...this.revisionBlobs.keys()].filter((k) => k.startsWith(`${tenant} `));
+    for (const k of mine) this.revisionBlobs.delete(k);
+    return mine.length;
+  }
   async readRevisionBlob(tenant: string, path: string, revision: number): Promise<FsFile | undefined> {
     const hit = this.revisionBlobs.get(`${this.key(tenant, path)}@${revision}`);
     if (!hit) return undefined;

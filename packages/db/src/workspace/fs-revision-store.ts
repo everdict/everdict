@@ -46,6 +46,19 @@ export class InMemoryFsRevisionStore implements FsRevisionStore {
     }
   }
 
+  async usage(tenant: string): Promise<{ revisions: number; bytes: number }> {
+    const mine = this.rows.filter((r) => r.tenant === tenant);
+    return { revisions: mine.length, bytes: mine.reduce((sum, r) => sum + r.size, 0) };
+  }
+
+  async purge(tenant: string): Promise<number> {
+    const before = this.rows.length;
+    for (let i = this.rows.length - 1; i >= 0; i--) {
+      if (this.rows[i]?.tenant === tenant) this.rows.splice(i, 1);
+    }
+    return before - this.rows.length;
+  }
+
   private forPath(tenant: string, path: string): FsRevision[] {
     return this.rows.filter((r) => r.tenant === tenant && r.path === path).sort(newestFirst);
   }
@@ -137,6 +150,25 @@ export class PgFsRevisionStore implements FsRevisionStore {
       [tenant, path, revision],
     );
     return rows[0] ? rowToRecord(rows[0]) : undefined;
+  }
+
+  // One aggregate over the tenant's rows — the ledger already stores each revision's byte size, so the Settings
+  // usage read never has to walk the revision bucket.
+  async usage(tenant: string): Promise<{ revisions: number; bytes: number }> {
+    const { rows } = await this.client.query<{ revisions: string | number; bytes: string | number | null }>(
+      "SELECT count(*) AS revisions, COALESCE(sum(size), 0) AS bytes FROM everdict_fs_revisions WHERE tenant=$1",
+      [tenant],
+    );
+    const row = rows[0];
+    return { revisions: row ? int(row.revisions) : 0, bytes: row?.bytes != null ? int(row.bytes) : 0 };
+  }
+
+  async purge(tenant: string): Promise<number> {
+    const { rows } = await this.client.query<{ path: string }>(
+      "DELETE FROM everdict_fs_revisions WHERE tenant=$1 RETURNING path",
+      [tenant],
+    );
+    return rows.length;
   }
 
   // A move rewrites the stored path — the file keeps its history instead of starting over at revision 1. Both the

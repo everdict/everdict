@@ -235,4 +235,11 @@ export class InMemoryWorkspaceFs implements WorkspaceFs {
     if (!hit) return undefined;
     return { entry: { ...this.fileEntry(p, hit), revision }, data: hit.data };
   }
+
+  async removeRevisionBlobs(tenant: string): Promise<number> {
+    const tree = this.tree(tenant);
+    const removed = tree.revisions.size;
+    tree.revisions.clear();
+    return removed;
+  }
 }

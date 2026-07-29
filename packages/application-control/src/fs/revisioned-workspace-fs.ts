@@ -134,6 +134,10 @@ export class RevisionedWorkspaceFs implements WorkspaceFs {
     return this.inner.readRevisionBlob(tenant, path, revision);
   }
 
+  removeRevisionBlobs(tenant: string): Promise<number> {
+    return this.inner.removeRevisionBlobs(tenant);
+  }
+
   private async withRevision(tenant: string, entry: FsEntry): Promise<FsEntry> {
     const head = await this.revisions.head(tenant, entry.path);
     return head ? { ...entry, revision: head.revision } : entry;

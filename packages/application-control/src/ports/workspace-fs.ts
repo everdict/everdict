@@ -55,4 +55,7 @@ export interface WorkspaceFs {
     contentType: string,
   ): Promise<void>;
   readRevisionBlob(tenant: string, path: string, revision: number): Promise<FsFile | undefined>;
+  // Drop every revision blob the workspace holds — the storage half of the danger-zone wipe (the ledger half is
+  // FsRevisionStore.purge). Returns the number of blobs removed.
+  removeRevisionBlobs(tenant: string): Promise<number>;
 }

@@ -13,6 +13,7 @@ import {
   skillContentEquals,
   writeSkillContent,
 } from "../fs/content-projection.js";
+import { memberActor } from "../fs/revisioned-workspace-fs.js";
 import {
   type LatestVersionResolver,
   extendPinCoverage,
@@ -101,10 +102,13 @@ export class SkillService {
     };
     if (this.deps.fs) {
       // filesystem first: if the projection fails, no DB row is created — the SSOT is never silently stale
-      await writeSkillContent(this.deps.fs, input.tenant, record.id, {
-        instructions: record.instructions,
-        files: record.files,
-      });
+      await writeSkillContent(
+        this.deps.fs,
+        input.tenant,
+        record.id,
+        { instructions: record.instructions, files: record.files },
+        memberActor(input.createdBy), // the author owns this revision, not "the system"
+      );
     }
     await this.deps.store.create(record);
     return record;
@@ -136,6 +140,8 @@ export class SkillService {
     try {
       const content = await readSkillContent(fs, tenant, record.id);
       if (!content) {
+        // Backfilling a legacy DB-only row onto the filesystem is machinery, not authorship — deliberately no
+        // actor, so the history reads "system" instead of crediting whoever happened to open the page.
         await writeSkillContent(fs, tenant, record.id, { instructions: record.instructions, files: record.files });
         return record;
       }
@@ -159,10 +165,13 @@ export class SkillService {
     if (patch.visibility !== undefined) next.visibility = patch.visibility;
     if (this.deps.fs && (patch.instructions !== undefined || patch.files !== undefined)) {
       // filesystem first (same discipline as create): project the merged content before the DB write
-      await writeSkillContent(this.deps.fs, tenant, id, {
-        instructions: next.instructions ?? current.instructions,
-        files: next.files ?? current.files,
-      });
+      await writeSkillContent(
+        this.deps.fs,
+        tenant,
+        id,
+        { instructions: next.instructions ?? current.instructions, files: next.files ?? current.files },
+        memberActor(actor.subject),
+      );
     }
     const updated = await this.deps.store.update(tenant, id, next);
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `skill '${id}' not found.`);

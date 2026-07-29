@@ -53,6 +53,27 @@ describe("InMemoryFsRevisionStore", () => {
     expect(await store.get("other", "reports/q3.md", 1)).toBeUndefined();
   });
 
+  it("reports the workspace's history footprint, scoped to that workspace", async () => {
+    // Given revisions in two workspaces
+    const store = new InMemoryFsRevisionStore();
+    await store.append(revision({ revision: 1, size: 100 }));
+    await store.append(revision({ revision: 2, size: 250 }));
+    await store.append(revision({ tenant: "other", size: 999 }));
+    // Then usage sums only the caller's own — this is what Settings reports as history storage
+    expect(await store.usage("acme")).toEqual({ revisions: 2, bytes: 350 });
+    expect(await store.usage("nobody")).toEqual({ revisions: 0, bytes: 0 });
+  });
+
+  it("purges one workspace's history without touching another's", async () => {
+    const store = new InMemoryFsRevisionStore();
+    await store.append(revision());
+    await store.append(revision({ path: "other.md" }));
+    await store.append(revision({ tenant: "other" }));
+    expect(await store.purge("acme")).toBe(2);
+    expect(await store.list("acme", "reports/q3.md")).toEqual([]);
+    expect(await store.list("other", "reports/q3.md")).toHaveLength(1);
+  });
+
   it("carries history across a file rename and a directory move", async () => {
     // Given history under a directory
     const store = new InMemoryFsRevisionStore();
@@ -106,6 +127,27 @@ describe("PgFsRevisionStore", () => {
       createdAt: "2026-07-29T00:00:00.000Z",
     });
     expect(client.calls[0]?.text).toContain("ORDER BY revision DESC LIMIT 1");
+  });
+
+  it("answers usage with one aggregate instead of walking storage", async () => {
+    const client = fakeClient([{ revisions: "12", bytes: "4096" }]);
+    expect(await new PgFsRevisionStore(client).usage("acme")).toEqual({ revisions: 12, bytes: 4096 });
+    expect(client.calls[0]?.text).toContain("count(*)");
+    expect(client.calls[0]?.text).toContain("COALESCE(sum(size), 0)");
+    expect(client.calls[0]?.params).toEqual(["acme"]);
+  });
+
+  it("reports zero history for a workspace that never published", async () => {
+    // pg returns a row with sum(size) = NULL when nothing matched — that must read as 0, not NaN
+    const client = fakeClient([{ revisions: "0", bytes: null }]);
+    expect(await new PgFsRevisionStore(client).usage("acme")).toEqual({ revisions: 0, bytes: 0 });
+  });
+
+  it("purges a workspace's history in one statement, scoped to it", async () => {
+    const client = fakeClient([{ path: "a.md" }, { path: "b.md" }]);
+    expect(await new PgFsRevisionStore(client).purge("acme")).toBe(2);
+    expect(client.calls[0]?.text).toContain("DELETE FROM everdict_fs_revisions WHERE tenant=$1");
+    expect(client.calls[0]?.params).toEqual(["acme"]);
   });
 
   it("rewrites both the exact path and its subtree on a move", async () => {

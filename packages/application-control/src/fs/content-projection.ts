@@ -1,4 +1,4 @@
-import type { SkillFile } from "@everdict/contracts";
+import type { FsActor, SkillFile } from "@everdict/contracts";
 import type { WorkspaceFs } from "../ports/workspace-fs.js";
 
 // Skill + knowledge-entry content on the workspace filesystem — the SSOT layout every surface shares (the web
@@ -34,21 +34,28 @@ export interface SkillContent {
 
 // Replace a skill's whole filesystem projection (instructions + supporting files). Full replacement — a lingering
 // file from a previous version would otherwise resurface on read.
+//
+// `actor` is who saved the skill. Without it the projection publishes as `system`, and the file's history would
+// credit nobody for an edit a person (or an agent) actually made — the same SKILL.md is editable from Settings,
+// from the shell and by agents, so all three have to land in one comparable history.
 export async function writeSkillContent(
   fs: WorkspaceFs,
   tenant: string,
   id: string,
   content: SkillContent,
+  actor?: FsActor,
 ): Promise<void> {
+  const opts = actor ? { actor } : undefined;
   await fs.remove(tenant, skillDir(id), { recursive: true }); // 0 when absent — fine
   await fs.write(
     tenant,
     skillInstructionsPath(id),
     encoder.encode(content.instructions),
     "text/markdown; charset=utf-8",
+    opts,
   );
   for (const file of content.files) {
-    await fs.write(tenant, skillFilePath(id, file.path), encoder.encode(file.content));
+    await fs.write(tenant, skillFilePath(id, file.path), encoder.encode(file.content), undefined, opts);
   }
 }
 
@@ -82,8 +89,20 @@ export function skillContentEquals(a: SkillContent, b: SkillContent): boolean {
   return b.files.every((f) => byPath.get(f.path) === f.content);
 }
 
-export async function writeKnowledgeBody(fs: WorkspaceFs, tenant: string, id: string, body: string): Promise<void> {
-  await fs.write(tenant, knowledgeEntryPath(id), encoder.encode(body), "text/markdown; charset=utf-8");
+export async function writeKnowledgeBody(
+  fs: WorkspaceFs,
+  tenant: string,
+  id: string,
+  body: string,
+  actor?: FsActor,
+): Promise<void> {
+  await fs.write(
+    tenant,
+    knowledgeEntryPath(id),
+    encoder.encode(body),
+    "text/markdown; charset=utf-8",
+    actor ? { actor } : undefined,
+  );
 }
 
 export async function readKnowledgeBody(fs: WorkspaceFs, tenant: string, id: string): Promise<string | undefined> {

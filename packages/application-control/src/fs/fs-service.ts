@@ -44,6 +44,9 @@ export interface FsUsage {
   bytes: number;
   truncated: boolean;
   topLevel: FsUsageTopLevel[];
+  // Published history's own footprint (revision blobs, which live outside the tree above) — absent when the
+  // deployment has no revision ledger wired.
+  history?: { revisions: number; bytes: number };
 }
 
 const USAGE_WALK_CAP = 20_000; // max entries visited per usage sweep — keeps a huge tree from stalling Settings
@@ -182,7 +185,17 @@ export class FsService {
       files += stats.files;
       bytes += stats.bytes;
     }
-    return { files, bytes, truncated: budget.truncated, topLevel };
+    // Published history is REAL storage the tree walk cannot see (the revision blobs live outside it), and with
+    // unlimited retention it outgrows the visible tree on any actively-edited workspace. Reporting it separately
+    // keeps "what the workspace holds" honest without pretending old revisions are current files.
+    const history = await this.revisions?.usage(tenant);
+    return {
+      files,
+      bytes,
+      truncated: budget.truncated,
+      topLevel,
+      ...(history ? { history } : {}),
+    };
   }
 
   private async walkUsage(
@@ -215,12 +228,19 @@ export class FsService {
 
   // Empty the whole workspace filesystem — the Settings danger-zone action (admin-gated at the route). Removes
   // every top-level entry recursively; the tree itself (the tenant's bucket) stays, ready for new writes.
-  async clear(tenant: string): Promise<{ removed: number }> {
+  //
+  // History goes too, and ONLY here. Deleting one file keeps its revisions on purpose (the content stays
+  // restorable, and "who deleted this and what did it say" stays answerable), but "empty the filesystem" is the
+  // wipe: history no file references is a surprise to whoever pressed it and a silent storage cost, since
+  // revision blobs live outside the tree this walk clears. `purgedRevisions` reports what went with it.
+  async clear(tenant: string): Promise<{ removed: number; purgedRevisions: number }> {
     let removed = 0;
     for (const entry of await this.fs.list(tenant, "")) {
       removed += await this.fs.remove(tenant, entry.path, { recursive: true });
     }
-    return { removed };
+    const purgedRevisions = (await this.revisions?.purge(tenant)) ?? 0;
+    await this.fs.removeRevisionBlobs(tenant); // storage half; the ledger above is the audit half
+    return { removed, purgedRevisions };
   }
 }
 

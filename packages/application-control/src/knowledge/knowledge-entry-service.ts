@@ -11,6 +11,7 @@ import {
 } from "@everdict/contracts";
 import type { Coverage } from "@everdict/domain";
 import { readKnowledgeBody, removeKnowledgeBody, writeKnowledgeBody } from "../fs/content-projection.js";
+import { memberActor } from "../fs/revisioned-workspace-fs.js";
 import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
 import type { WorkspaceFs } from "../ports/workspace-fs.js";
 import {
@@ -109,7 +110,9 @@ export class KnowledgeEntryService {
       createdAt: ts,
       updatedAt: ts,
     };
-    if (this.deps.fs) await writeKnowledgeBody(this.deps.fs, input.tenant, record.id, record.body); // filesystem first
+    // filesystem first; attributed to the author so the body's history names a person, not "the system"
+    if (this.deps.fs)
+      await writeKnowledgeBody(this.deps.fs, input.tenant, record.id, record.body, memberActor(input.createdBy));
     await this.deps.store.create(record);
     return record;
   }
@@ -214,7 +217,7 @@ export class KnowledgeEntryService {
     if (patch.status !== undefined) next.status = patch.status;
     if (patch.visibility !== undefined) next.visibility = patch.visibility;
     if (this.deps.fs && patch.body !== undefined) {
-      await writeKnowledgeBody(this.deps.fs, tenant, id, patch.body); // filesystem first, same as create
+      await writeKnowledgeBody(this.deps.fs, tenant, id, patch.body, memberActor(actor.subject)); // same as create
     }
     const updated = await this.deps.store.update(tenant, id, next);
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `knowledge entry '${id}' not found.`);

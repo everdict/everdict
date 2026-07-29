@@ -352,6 +352,22 @@ export class S3WorkspaceFs implements WorkspaceFs {
     );
   }
 
+  // Empty the tenant's revision bucket (the danger-zone wipe's storage half). The bucket itself stays — the next
+  // publish reuses it — and deletion goes per-key for the same MinIO reason as every other removal here.
+  async removeRevisionBlobs(tenant: string): Promise<number> {
+    const bucket = await this.revisionBucketFor(tenant);
+    const keys: string[] = [];
+    let token: string | undefined;
+    do {
+      const res = await this.send("list-revisions", () =>
+        this.client.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token })),
+      );
+      for (const obj of res.Contents ?? []) if (obj.Key) keys.push(obj.Key);
+      token = res.IsTruncated ? res.NextContinuationToken : undefined;
+    } while (token);
+    return this.deleteKeys(bucket, keys);
+  }
+
   async readRevisionBlob(tenant: string, path: string, revision: number): Promise<FsFile | undefined> {
     const p = normalizeFsPath(path);
     const bucket = await this.revisionBucketFor(tenant);

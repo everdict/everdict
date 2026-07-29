@@ -53,7 +53,10 @@ rule `api-layer`):
 | `ingest_scorecard` | `scorecards:run` | upload externally-run `TraceEvent[]` → scorecard (no harness run; push) |
 | `pull_scorecard` | `scorecards:run` | pull traces from a tenant's OTel/MLflow (`source` + `runs:[{caseId,runId}]`, `authSecret`=SecretStore key) → scorecard |
 
-Authorization/validation failures come back as MCP tool errors (`isError`), e.g. `FORBIDDEN: …`.
+Authorization/validation failures come back as MCP tool errors (`isError`), e.g. `FORBIDDEN: …`. When the error
+carries structured data it is appended as JSON under that line — the same payload the HTTP envelope puts in
+`data`. That is how a caller recovers rather than just failing: `write_file` losing a race to a concurrent
+publish returns `CONFLICT: …` plus the live content, the head revision and an attempted three-way merge.
 
 ## Auth — "login like Linear MCP" (MCP Authorization spec)
 The MCP server is an OAuth **Protected Resource**; **Keycloak is the authorization server** (the same one the

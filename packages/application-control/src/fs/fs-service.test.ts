@@ -46,6 +46,9 @@ class StoredFile implements WorkspaceFs {
   async readRevisionBlob(): Promise<FsFile | undefined> {
     throw new Error("unused");
   }
+  async removeRevisionBlobs(): Promise<number> {
+    return 0;
+  }
 }
 
 const bytes = (text: string) => new TextEncoder().encode(text);
