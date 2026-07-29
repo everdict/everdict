@@ -146,7 +146,10 @@ panel/list guidance is not.
   purpose-built (no iframe, no rail button): Settings › Files selects a workspace-filesystem path via
   `useInfraPanel().openFile(path)` and the panel renders it interactively (`FileViewer` — Markdown preview /
   code / images, member editing); re-selecting swaps content in place, and a panel-side mutation bumps
-  `fsRevision` so the selecting tree refetches (see `docs/architecture/workspace-filesystem.md`).
+  `fsRevision` so the selecting tree refetches. Moving a file/folder is **drag-and-drop in the tree** (no Move
+  button, no path dialog): drop on a folder row, or on the tree body for the top level; invalid drops are
+  refused at `dragover` and re-checked at `drop`, and `rewriteMovedPath` re-points an open selection the move
+  carried along (see `docs/architecture/workspace-filesystem.md`).
 - **Judge `/{workspace}/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
   **Detail `/{workspace}/judges/[id]`** shows kind + fields + rubric. **Register `/{workspace}/judges/new`** — a
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`

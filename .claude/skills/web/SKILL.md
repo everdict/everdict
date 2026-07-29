@@ -85,7 +85,8 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   `contentWindow.location`, never the src prop, or React would undo the user's in-iframe navigation).
   The **files** tab is purpose-built like work/agent (no iframe, no rail button): Settings › Files calls
   `useInfraPanel().openFile(path)` → the panel renders `FileViewer` (features/browse-files) interactively;
-  panel-side mutations bump `fsRevision` so the selecting tree refetches in place.
+  panel-side mutations bump `fsRevision` so the selecting tree refetches in place. Moving an entry is
+  drag-and-drop in `FileTreePane` (the viewer has no Move button) — the tree owns the folder context.
   Panel lifecycle: iframes persist across TAB SWITCHES only — CLOSING the panel discards them (user decision:
   reopen = fresh per-tab render, and the recovery gesture for stuck frames). The header back button walks a
   parent-tracked per-tab stack fed by `everdict:frame-nav` reports — never `history.back()` (joint session

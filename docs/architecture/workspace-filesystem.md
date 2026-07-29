@@ -60,6 +60,19 @@ move(tenant, from, to) → FsEntry            // file rename or whole-subtree mo
 | Web (`/[workspace]/files`) | Lazy tree + viewer/editor (Markdown preview, CodeMirror, image preview) + a bash-style shell (`ls cd cat tree mkdir touch echo>/>> cp mv rm`) sharing one directory cache. |
 | Settings › Files | The workspace filesystem browsed in-service (never the object-storage console): the page is the folder tree ALONE, and a selected file renders interactively in the right-hand split-view panel (the infra panel's purpose-built `files` tab — Markdown preview / code / images, member editing; a panel-side mutation bumps `fsRevision` so the tree refetches in place). No shell and no storage/cleanup surface here. `GET /fs/usage` + `DELETE /fs` (settings:write) stay API/MCP-only ops surfaces (`get_fs_usage` / `delete_all_files`). |
 
+**Relocation is drag-and-drop in the tree** (both web surfaces), never a path dialog: drag an entry onto a
+folder row — or onto the tree body for the top level — and the tree calls `POST /fs/move`. The drop is
+refused where the filesystem would reject it anyway (onto itself, back into its current folder, into its own
+subtree); hovering a collapsed folder mid-drag opens it, and the target expands after the drop so the entry
+is visible where it landed.
+
+⚠️ **S3 batch delete is off-limits** (`S3WorkspaceFs.deleteKeys`): removal fans out single `DeleteObject`
+calls, never `DeleteObjects`. MinIO — the storage the self-hosted stack ships — requires a `Content-MD5`
+header on `DeleteObjects` that aws-sdk-js v3 no longer sends (its CRC32 checksum default; no client option
+or explicit `ChecksumAlgorithm` restores it). The batch call fails on every such deployment, which took down
+recursive removes AND directory moves — and since a move copies before it deletes, the failure duplicated
+the tree. Regression guard: `packages/storage/src/s3-fs.scenario.test.ts` (env-gated live MinIO).
+
 AuthZ: `files:read` (viewer+ — browsing is benign) / `files:write` (member+ — collaborative content
 like datasets/skills). No `files:delete`: removal is ordinary content mutation, not governance.
 

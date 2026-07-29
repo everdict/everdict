@@ -2,7 +2,6 @@ import {
   CopyObjectCommand,
   CreateBucketCommand,
   DeleteObjectCommand,
-  DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
@@ -37,6 +36,8 @@ export interface S3WorkspaceFsOptions {
   region?: string; // default us-east-1
   bucketPrefix?: string; // per-tenant bucket name prefix (default "everdict-fs")
 }
+
+const DELETE_CONCURRENCY = 16; // in-flight single-object deletes per wave (see deleteKeys)
 
 function isS3NotFound(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
@@ -143,16 +144,20 @@ export class S3WorkspaceFs implements WorkspaceFs {
     return keys;
   }
 
+  // Deliberately per-key DeleteObject, NOT the batch DeleteObjects: MinIO — the storage this project ships in
+  // its own self-hosted stack — requires a Content-MD5 header on DeleteObjects, which aws-sdk-js v3 stopped
+  // sending when it moved to CRC32 checksums (no client option restores it; an explicit ChecksumAlgorithm does
+  // not either — verified against minio:RELEASE.2024-12-18). The batch call therefore failed on EVERY such
+  // deployment, taking recursive removes and DIRECTORY MOVES down with it — and a directory move copies before
+  // it deletes, so the failure left the copy behind and duplicated the tree. Single-object deletes are accepted
+  // everywhere; a bounded fan-out keeps a large sweep quick without flooding the endpoint.
   private async deleteKeys(bucket: string, keys: string[]): Promise<number> {
     let removed = 0;
-    for (let i = 0; i < keys.length; i += 1000) {
-      const batch = keys.slice(i, i + 1000);
-      await this.send("remove", () =>
-        this.client.send(
-          new DeleteObjectsCommand({
-            Bucket: bucket,
-            Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
-          }),
+    for (let i = 0; i < keys.length; i += DELETE_CONCURRENCY) {
+      const batch = keys.slice(i, i + DELETE_CONCURRENCY);
+      await Promise.all(
+        batch.map((Key) =>
+          this.send("remove", () => this.client.send(new DeleteObjectCommand({ Bucket: bucket, Key }))),
         ),
       );
       removed += batch.length;
