@@ -1,6 +1,6 @@
 'use client'
 
-import { FileTreePane } from '@/features/browse-files'
+import { FileTreePane, rewriteMovedPath } from '@/features/browse-files'
 import type { FsEntryView } from '@/entities/workspace-file'
 import { useInfraPanelOptional } from '@/widgets/infra-panel'
 
@@ -24,6 +24,11 @@ export function SettingsFilesExplorer({
       canWrite={canWrite}
       {...(filePath !== null ? { selectedPath: filePath } : {})}
       onOpenFile={(path) => infra?.openFile(path)}
+      onMoved={(from, to) => {
+        // A drag carried the open file (or the folder holding it) elsewhere — follow it in the panel.
+        const next = rewriteMovedPath(filePath ?? undefined, from, to)
+        if (next !== undefined) infra?.openFile(next)
+      }}
       refreshToken={infra?.fsRevision ?? 0}
     />
   )

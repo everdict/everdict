@@ -37,3 +37,16 @@ export function languageFor(path: string): 'python' | 'node' {
 export function isMarkdownPath(path: string): boolean {
   return path.endsWith('.md') || path.endsWith('.markdown')
 }
+
+// A move rewrites the moved entry's path AND every path under it (moving a directory carries its subtree).
+// Returns the open selection's new path, or undefined when the move left the selection untouched.
+export function rewriteMovedPath(
+  selected: string | undefined,
+  from: string,
+  to: string
+): string | undefined {
+  if (selected === undefined) return undefined
+  if (selected === from) return to
+  if (selected.startsWith(`${from}/`)) return `${to}${selected.slice(from.length)}`
+  return undefined
+}

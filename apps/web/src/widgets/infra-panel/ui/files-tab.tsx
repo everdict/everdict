@@ -14,7 +14,7 @@ import { useInfraPanel } from '../model/infra-panel-context'
 // mutation here bumps fsRevision so the tree on the left refetches; a delete clears back to the empty state.
 export function FilesTab({ canWrite }: { canWrite: boolean }) {
   const t = useTranslations('files')
-  const { filePath, openFile, closeFile, notifyFsMutation } = useInfraPanel()
+  const { filePath, closeFile, notifyFsMutation } = useInfraPanel()
 
   if (filePath === null) {
     return (
@@ -29,7 +29,6 @@ export function FilesTab({ canWrite }: { canWrite: boolean }) {
         path={filePath}
         canWrite={canWrite}
         onMutated={notifyFsMutation}
-        onMoved={openFile}
         onDeleted={closeFile}
       />
     </div>

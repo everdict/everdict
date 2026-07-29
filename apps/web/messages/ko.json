@@ -2818,7 +2818,7 @@
     "cancel": "취소",
     "create": "만들기",
     "delete": "삭제",
-    "move": "이동",
+    "moveFailed": "이동하지 못했습니다",
     "preview": "미리보기",
     "raw": "원문",
     "binaryFile": "바이너리 파일",

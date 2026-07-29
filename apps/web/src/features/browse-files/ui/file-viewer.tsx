@@ -10,32 +10,25 @@ import { Button } from '@/shared/ui/button'
 import { CodeEditor } from '@/shared/ui/code-editor'
 import { Dialog } from '@/shared/ui/dialog'
 import { EmptyState } from '@/shared/ui/empty-state'
-import { Input, Label } from '@/shared/ui/input'
 import { Markdown } from '@/shared/ui/markdown'
 
-import {
-  moveEntryAction,
-  readFileAction,
-  removeEntryAction,
-  writeFileAction,
-} from '../api/browse-files'
+import { readFileAction, removeEntryAction, writeFileAction } from '../api/browse-files'
 import { displayPath, isMarkdownPath, languageFor } from '../lib/fs-path'
 
-// One rendered file — header (path · mtime · preview/edit/move/delete) + content (Markdown preview, code,
-// image, binary notice), self-loading by path. Shared by the Files workbench's right pane and the infra
-// panel's file tab, so both surfaces render a selection identically. Style-agnostic: the host owns the frame
-// (card border / panel scroll); selection bookkeeping stays with the host via onMoved/onDeleted/onMutated.
+// One rendered file — header (path · mtime · preview/edit/delete) + content (Markdown preview, code, image,
+// binary notice), self-loading by path. Shared by the Files workbench's right pane and the infra panel's file
+// tab, so both surfaces render a selection identically. Style-agnostic: the host owns the frame (card border /
+// panel scroll); selection bookkeeping stays with the host via onDeleted/onMutated. Relocation is NOT here —
+// moving a file is drag-and-drop in the tree (user decision), which is also where the folder context lives.
 export function FileViewer({
   path,
   canWrite,
   onMutated,
-  onMoved,
   onDeleted,
 }: {
   path: string
   canWrite: boolean
-  onMutated?: () => void // fired after any mutation (save / move / delete) so the host can refresh its tree
-  onMoved?: (to: string) => void // the host re-points its selection (this component reloads off the new path prop)
+  onMutated?: () => void // fired after any mutation (save / delete) so the host can refresh its tree
   onDeleted?: () => void // the host clears its selection
 }) {
   const t = useTranslations('files')
@@ -46,9 +39,6 @@ export function FileViewer({
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [mdRaw, setMdRaw] = useState(false)
-  const [moveTo, setMoveTo] = useState<string | null>(null)
-  const [moveError, setMoveError] = useState<string | undefined>(undefined)
-  const [moveBusy, setMoveBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const load = useCallback(async () => {
@@ -80,23 +70,6 @@ export function FileViewer({
     } else {
       setFileError(res.error)
     }
-  }
-
-  async function submitMove() {
-    if (moveTo === null) return
-    const to = moveTo.trim().replace(/^\/+/, '')
-    if (to === '') return
-    setMoveBusy(true)
-    setMoveError(undefined)
-    const res = await moveEntryAction(path, to)
-    setMoveBusy(false)
-    if (!res.ok) {
-      setMoveError(res.error)
-      return
-    }
-    setMoveTo(null)
-    onMutated?.()
-    onMoved?.(to)
   }
 
   async function deleteFile() {
@@ -155,21 +128,9 @@ export function FileViewer({
             </>
           )}
           {canWrite && !editing && (
-            <>
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  setMoveTo(path)
-                  setMoveError(undefined)
-                }}
-              >
-                {t('move')}
-              </Button>
-              <Button variant="ghost" size="xs" onClick={() => setConfirmDelete(true)}>
-                <Trash2 /> {t('delete')}
-              </Button>
-            </>
+            <Button variant="ghost" size="xs" onClick={() => setConfirmDelete(true)}>
+              <Trash2 /> {t('delete')}
+            </Button>
           )}
         </div>
       </div>
@@ -212,40 +173,6 @@ export function FileViewer({
           />
         )}
       </div>
-
-      {/* move dialog */}
-      <Dialog open={moveTo !== null} onClose={() => setMoveTo(null)} className="max-w-md">
-        <div className="space-y-3 p-4">
-          <p className="text-[13.5px] font-[510] text-foreground">{t('move')}</p>
-          <div className="space-y-1.5">
-            <Label htmlFor="fs-move-input">{t('pathLabel')}</Label>
-            <Input
-              id="fs-move-input"
-              value={moveTo ?? ''}
-              onChange={(e) => setMoveTo(e.target.value)}
-              autoFocus
-              spellCheck={false}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void submitMove()
-              }}
-            />
-          </div>
-          {moveError !== undefined && <p className="text-[12.5px] text-destructive">{moveError}</p>}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setMoveTo(null)}>
-              {t('cancel')}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={moveBusy || (moveTo ?? '').trim() === ''}
-              onClick={() => void submitMove()}
-            >
-              {t('move')}
-            </Button>
-          </div>
-        </div>
-      </Dialog>
 
       {/* delete confirm */}
       <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} className="max-w-sm">

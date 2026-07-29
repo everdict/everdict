@@ -2818,7 +2818,7 @@
     "cancel": "Cancel",
     "create": "Create",
     "delete": "Delete",
-    "move": "Move",
+    "moveFailed": "Move failed",
     "preview": "Preview",
     "raw": "Raw",
     "binaryFile": "Binary file",

@@ -7,13 +7,15 @@ import { useTranslations } from 'next-intl'
 import type { FsEntryView } from '@/entities/workspace-file'
 import { EmptyState } from '@/shared/ui/empty-state'
 
+import { rewriteMovedPath } from '../lib/fs-path'
 import { FileShell } from './file-shell'
 import { FileTreePane } from './file-tree-pane'
 import { FileViewer } from './file-viewer'
 
-// The Files workbench — tree (FileTreePane) + inline viewer/editor (FileViewer) + the bash-style shell. Every
-// mutation source (viewer save/move/delete, shell commands) bumps one refresh token so the tree refetches in
-// place. Read-only for viewers; members write (control-plane enforced; the UI pre-gates for honest affordances).
+// The Files workbench — tree (FileTreePane, drag-and-drop moves included) + inline viewer/editor (FileViewer)
+// + the bash-style shell. Every mutation source (viewer save/delete, a dragged move, shell commands) bumps one
+// refresh token so the tree refetches in place. Read-only for viewers; members write (control-plane enforced;
+// the UI pre-gates for honest affordances).
 export function FilesWorkbench({
   initialEntries,
   canWrite,
@@ -35,6 +37,9 @@ export function FilesWorkbench({
           canWrite={canWrite}
           {...(selectedPath !== undefined ? { selectedPath } : {})}
           onOpenFile={setSelectedPath}
+          onMoved={(from, to) =>
+            setSelectedPath((current) => rewriteMovedPath(current, from, to) ?? current)
+          }
           refreshToken={refreshToken}
         />
 
@@ -49,7 +54,6 @@ export function FilesWorkbench({
               path={selectedPath}
               canWrite={canWrite}
               onMutated={refreshTree}
-              onMoved={setSelectedPath}
               onDeleted={() => setSelectedPath(undefined)}
             />
           )}
