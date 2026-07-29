@@ -1,15 +1,18 @@
 import type { SkillEntry } from "@everdict/agent-runtime";
 import {
+  type AgentCapabilitiesResolution,
+  type AgentMemberPreferenceStore,
   type AgentRegistry,
   type CapabilityStore,
   type LatestVersionResolver,
+  type ResolvedAgentSkill,
+  type ResolvedAgentTool,
   type SecretStore,
   type SkillStore,
-  firstPartyDefaults,
+  resolveAgentCapabilities,
   resolveCoverage,
 } from "@everdict/application-control";
-import type { CapabilityRecord, CapabilityRequirement } from "@everdict/contracts";
-import { canConsumeCapability, selectDefaultCapabilities } from "@everdict/domain";
+import type { AgentSpec, CapabilityRequirement, SkillRecord } from "@everdict/contracts";
 import type { ResolvedCodeTool } from "./code-tools.js";
 import type { ResolvedMcpServer } from "./mcp-tools.js";
 import type { Principal } from "./principal.js";
@@ -65,76 +68,156 @@ function composeSystemPrompt(
   return parts.join("\n\n");
 }
 
-// Merge the FIRST-PARTY default toolset into the resolved tools. A default is offered only when the workspace hasn't
-// opted it out (by id), its tool name isn't already taken (adopted/authored tools SHADOW a default), and — for an
-// integration-gated default — that integration is configured (the pure gate in @everdict/domain). First-party code is
-// Everdict-authored → trusted, so it runs on any driver (sandbox:false, unlike adopted-from-others code). A default
-// that declares required secrets none of which resolve is dropped — a built-in tool is never offered broken. Mutates
-// `acc` in place. See docs/architecture/capability-store.md ("First-party default toolset").
-function applyFirstPartyDefaults(
-  acc: { mcpServers: ResolvedMcpServer[]; skills: SkillEntry[]; codeTools: ResolvedCodeTool[] },
-  disabledDefaults: readonly string[],
-  integrationsConfigured: readonly CapabilityRequirement[],
-  resolveDefaultSecret: (name: string) => string | undefined,
-): void {
-  const takenNames = [
-    ...acc.mcpServers.map((m) => m.name),
-    ...acc.skills.map((s) => s.name),
-    ...acc.codeTools.map((c) => c.name),
-  ];
-  const candidates = firstPartyDefaults().map((d) => ({
-    id: d.record.id,
-    name: d.record.name,
-    requires: d.requires,
-    def: d,
-  }));
-  for (const { def } of selectDefaultCapabilities(candidates, {
-    integrationsConfigured,
-    disabledDefaults,
-    takenNames,
-  })) {
-    const spec = def.record.spec;
-    if (spec.type === "code") {
-      const env: Record<string, string> = {};
-      for (const rs of spec.requiredSecrets) {
-        const value = resolveDefaultSecret(rs.name);
-        if (value !== undefined) env[rs.name] = value;
-      }
-      if (spec.requiredSecrets.length > 0 && Object.keys(env).length === 0) continue; // unconfigured → not offered
-      acc.codeTools.push({
-        name: def.record.name,
-        description: def.record.description,
-        language: spec.language,
-        code: spec.code,
-        parametersSchema: spec.parametersSchema,
-        isReadOnly: spec.isReadOnly,
-        env,
-        ...(spec.timeoutSec !== undefined ? { timeoutSec: spec.timeoutSec } : {}),
-        ...(spec.image !== undefined ? { image: spec.image } : {}),
-        sandbox: false, // first-party = trusted → runs on any runtime, including the host LocalDriver
-        examples: spec.examples,
-      });
-    } else if (spec.type === "mcp") {
-      if (!spec.url) continue; // first-party mcp DEFAULTS are HTTP-url only (image/stdio servers are catalog-adopt, never defaults)
-      const authName = spec.requiredSecrets[0]?.name;
-      const authorization = authName ? resolveDefaultSecret(authName) : undefined;
-      if (spec.requiredSecrets.length > 0 && authorization === undefined) continue; // unconfigured → not offered
-      acc.mcpServers.push({
-        kind: "http",
-        name: def.record.name,
-        url: spec.url,
-        ...(authorization ? { authorization } : {}),
-        write: spec.write,
-      });
-    } else if (spec.type === "skill" && !acc.skills.some((s) => s.name === def.record.name)) {
-      acc.skills.push({
-        name: def.record.name,
-        description: def.record.description,
-        instructions: spec.instructions,
-        files: spec.files,
-      });
+// The member's enabled skills → the `use_skill` library. The DECISION (which skills this member's agent follows,
+// including the workspace's opt-outs, the integration gate and name shadowing) was already made by
+// resolveAgentCapabilities; this only loads each one's body.
+// Freshness coverage (current | behind | unverified) is a property of an AUTHORED skill's pinned refs, so it is
+// computed for those records only — in ONE batched pass, as before. Best-effort: no resolver / a failed lookup means
+// the listing simply carries no badge.
+async function shapeSkills(
+  enabled: readonly ResolvedAgentSkill[],
+  workspace: string,
+  latestVersionOf: LatestVersionResolver | undefined,
+): Promise<SkillEntry[]> {
+  const authoredRecords: SkillRecord[] = [];
+  const authoredIndex = new Map<string, number>(); // key → its row in authoredRecords (and in the coverage result)
+  for (const skill of enabled) {
+    if (skill.origin.channel !== "authored") continue;
+    authoredIndex.set(skill.key, authoredRecords.length);
+    authoredRecords.push(skill.origin.record);
+  }
+  let coverage: Awaited<ReturnType<typeof resolveCoverage>> | undefined;
+  if (latestVersionOf && authoredRecords.length > 0) {
+    try {
+      coverage = await resolveCoverage(workspace, authoredRecords, latestVersionOf, new Date().toISOString());
+    } catch {
+      coverage = undefined;
     }
   }
+
+  const library: SkillEntry[] = [];
+  for (const skill of enabled) {
+    if (skill.origin.channel === "authored") {
+      const record = skill.origin.record;
+      const index = authoredIndex.get(skill.key);
+      const c = index === undefined ? undefined : coverage?.[index];
+      library.push({
+        name: record.name,
+        description: record.description,
+        instructions: record.instructions,
+        files: record.files,
+        ...(c !== undefined ? { coverage: c } : {}),
+      });
+      continue;
+    }
+    // Packaged: an adopted / published / first-party skill capability — the body travels with the version.
+    const record = skill.origin.channel === "builtin" ? skill.origin.builtin.record : skill.origin.record;
+    if (record.spec.type !== "skill") continue;
+    library.push({
+      name: record.name,
+      description: record.description,
+      instructions: record.spec.instructions,
+      files: record.spec.files,
+    });
+  }
+  return library;
+}
+
+// One resolved tool → the runnable form the agent bridges. The DECISION of what belongs in this member's toolset was
+// already made (resolveAgentToolset); this only shapes what survived and binds its secrets:
+//  · a first-party default resolves secrets from the operator-global values first, everything else from the member's
+//    own workspace/personal tiers (through the binding map the resolver computed);
+//  · a tool whose required secrets don't resolve is DROPPED for the transports that cannot run without them —
+//    a stdio MCP container and a built-in are never offered broken;
+//  · sandbox = the code came from another workspace (first-party is Everdict-authored → trusted on any driver).
+// Mutates `acc` in place.
+function shapeTool(
+  tool: ResolvedAgentTool,
+  acc: { mcpServers: ResolvedMcpServer[]; codeTools: ResolvedCodeTool[] },
+  resolve: {
+    secret: (name: string | undefined) => string | undefined;
+    defaultSecret: (name: string) => string | undefined;
+  },
+  workspace: string,
+): void {
+  const origin = tool.origin;
+  if (origin.channel === "mcpServer") {
+    // The raw escape hatch is HTTP-only (stdio is reachable via the curated capability path).
+    const server = origin.server;
+    const authorization = resolve.secret(server.authSecret); // verbatim header value (e.g. "Bearer …")
+    acc.mcpServers.push({
+      kind: "http",
+      name: server.name,
+      url: server.url,
+      ...(authorization ? { authorization } : {}),
+      write: server.write,
+    });
+    return;
+  }
+  const builtin = origin.channel === "builtin";
+  const record = origin.channel === "builtin" ? origin.builtin.record : origin.record;
+  const spec = record.spec;
+  // The member-side value of a secret the capability declares by its logical name.
+  const secretValue = (logical: string): string | undefined => {
+    const bound = tool.secretBindings[logical] ?? logical;
+    return builtin ? resolve.defaultSecret(bound) : resolve.secret(bound);
+  };
+
+  if (spec.type === "mcp") {
+    if (spec.image) {
+      if (builtin) return; // first-party mcp DEFAULTS are HTTP-url only (image/stdio servers are catalog-adopt)
+      // Containerized stdio server: each required secret becomes a container env var. An unbound one means the tool
+      // cannot run at all, so it is not offered (mirroring the code path's "unconfigured → absent").
+      const env: Record<string, string> = {};
+      for (const rs of spec.requiredSecrets) {
+        const value = secretValue(rs.name);
+        if (value === undefined) return;
+        env[rs.name] = value;
+      }
+      acc.mcpServers.push({
+        kind: "stdio",
+        name: record.name,
+        image: spec.image,
+        args: spec.args,
+        env,
+        write: tool.writes,
+      });
+      return;
+    }
+    if (!spec.url) return; // neither image nor url → an invalid mcp spec (rejected at the save boundary); skip defensively
+    // Remote HTTP server: the first declared required secret is the `Authorization` value.
+    const authName = spec.requiredSecrets[0]?.name;
+    const authorization = authName ? secretValue(authName) : undefined;
+    if (builtin && spec.requiredSecrets.length > 0 && authorization === undefined) return; // unconfigured → not offered
+    acc.mcpServers.push({
+      kind: "http",
+      name: record.name,
+      url: spec.url,
+      ...(authorization ? { authorization } : {}),
+      write: tool.writes,
+    });
+    return;
+  }
+  if (spec.type !== "code") return; // skills/environments are not bridged as tools
+  const env: Record<string, string> = {};
+  for (const rs of spec.requiredSecrets) {
+    const value = secretValue(rs.name);
+    if (value !== undefined) env[rs.name] = value;
+  }
+  if (builtin && spec.requiredSecrets.length > 0 && Object.keys(env).length === 0) return; // unconfigured → not offered
+  acc.codeTools.push({
+    name: record.name,
+    description: record.description,
+    language: spec.language,
+    code: spec.code,
+    parametersSchema: spec.parametersSchema,
+    isReadOnly: spec.isReadOnly,
+    env,
+    ...(spec.timeoutSec !== undefined ? { timeoutSec: spec.timeoutSec } : {}),
+    ...(spec.image !== undefined ? { image: spec.image } : {}),
+    sandbox: !builtin && record.tenant !== workspace,
+    examples: spec.examples,
+  });
 }
 
 // D-plugin: the agent runs with the workspace's registered agent configuration. Resolve (workspace, configId) →
@@ -148,6 +231,8 @@ export function registryProfileResolver(opts: {
   secretStore: SecretStore;
   skillStore: SkillStore;
   capabilityStore: CapabilityStore;
+  // The caller's own decisions (Settings › Agent › Tools + › Skills). Absent ⇒ every member gets the workspace baseline.
+  preferences?: AgentMemberPreferenceStore;
   baseSystemPrompt: string;
   configId: string;
   // Operator-provided values for first-party DEFAULT tools, keyed by the secret name the default declares (e.g. the
@@ -161,29 +246,6 @@ export function registryProfileResolver(opts: {
   latestVersionOf?: LatestVersionResolver;
 }): ProfileResolver {
   return async (principal, agentId) => {
-    // Skills load independently of the AgentSpec — a workspace can have a skill library without a registered agent
-    // config. The caller sees the workspace-shared skills + their own private drafts. Best-effort.
-    let skills: SkillEntry[] = [];
-    try {
-      const records = await opts.skillStore.list(principal.workspace, principal.subject);
-      const resolver = opts.latestVersionOf;
-      const coverage = resolver
-        ? await resolveCoverage(principal.workspace, records, resolver, new Date().toISOString())
-        : undefined;
-      skills = records.map((s, i) => {
-        const c = coverage?.[i];
-        return {
-          name: s.name,
-          description: s.description,
-          instructions: s.instructions,
-          files: s.files,
-          ...(c !== undefined ? { coverage: c } : {}),
-        };
-      });
-    } catch {
-      skills = [];
-    }
-
     // The consumer's secret tiers (workspace + personal) — the auth for raw mcpServers, adopted capabilities, AND the
     // first-party defaults resolves from here. Fetched once, best-effort (a failure degrades to no secrets).
     let scoped: Awaited<ReturnType<SecretStore["scopedEntries"]>> = { workspace: {}, user: {} };
@@ -198,119 +260,53 @@ export function registryProfileResolver(opts: {
     const resolveDefaultSecret = (name: string): string | undefined =>
       opts.defaultToolSecrets?.[name] ?? resolveSecret(name);
 
-    // Which integrations the workspace has configured — gates the integration-dependent defaults. Best-effort.
-    let integrationsConfigured: readonly CapabilityRequirement[] = [];
-    try {
-      integrationsConfigured = (await opts.integrationsConfigured?.(principal.workspace)) ?? [];
-    } catch {
-      integrationsConfigured = [];
-    }
-
-    let spec: Awaited<ReturnType<AgentRegistry["get"]>> | undefined;
+    let spec: AgentSpec | undefined;
     try {
       spec = await opts.agentRegistry.get(principal.workspace, agentId ?? opts.configId, "latest");
     } catch {
       spec = undefined; // no workspace agent registered (or lookup failed) → base persona + skills + defaults only
     }
 
+    // THIS member's agent — not the workspace's. The AgentSpec + the authored skill library are the shared baseline
+    // (hand-wired servers, adopted capabilities, default opt-outs, the team's skills); the caller's own overrides sit
+    // on top, so the same assistant answers two members of one workspace with different tools AND different
+    // procedures. Best-effort: a lookup failure degrades to fewer tools/skills, never to a failed turn.
     const mcpServers: ResolvedMcpServer[] = [];
     const codeTools: ResolvedCodeTool[] = [];
-    if (spec) {
-      for (const s of spec.mcpServers) {
-        const authorization = resolveSecret(s.authSecret); // verbatim header value (e.g. "Bearer …") — same discipline as trace sources
-        // The raw escape hatch is HTTP-only (stdio is reachable via the curated capability path below).
-        mcpServers.push({
-          kind: "http",
-          name: s.name,
-          url: s.url,
-          ...(authorization ? { authorization } : {}),
-          write: s.write,
-        });
-      }
-
-      // Adopted Store capabilities — immutable-version references resolved cross-tenant, with visibility re-checked at
-      // load time (a revoked/unpublished capability degrades to skipped). mcp → an MCP server (reuse the bridge);
-      // skill → a `use_skill` entry (merged with the ambient library, deduped by name); code → a native tool.
-      for (const ref of spec.capabilities) {
-        let record: CapabilityRecord | undefined;
-        try {
-          record = await opts.capabilityStore.getVersion(ref.source, ref.id, ref.version);
-        } catch {
-          record = undefined;
-        }
-        if (!record) continue; // unresolvable pin → skip (best-effort)
-        if (!canConsumeCapability(record, { tenant: principal.workspace, subject: principal.subject })) continue; // access revoked → skip
-        const capSpec = record.spec;
-        if (capSpec.type === "mcp") {
-          const write = capSpec.write && ref.enableWrite; // adopter opt-in AND the server offers write tools
-          if (capSpec.image) {
-            // Containerized stdio server: bind each required secret to the adopter's own secret VALUE → a container
-            // env var. Skip if a required secret is unbound (unconfigured → not offered, mirroring the code-tool path).
-            const env: Record<string, string> = {};
-            let unbound = false;
-            for (const rs of capSpec.requiredSecrets) {
-              const value = resolveSecret(ref.secretBindings[rs.name]);
-              if (value === undefined) {
-                unbound = true;
-                break;
-              }
-              env[rs.name] = value;
-            }
-            if (unbound) continue;
-            mcpServers.push({ kind: "stdio", name: record.name, image: capSpec.image, args: capSpec.args, env, write });
-          } else if (capSpec.url) {
-            // Remote HTTP server: the first declared required secret is the `Authorization` value; the adopter maps
-            // its NAME to one of their own workspace/personal secrets via ref.secretBindings.
-            const authName = capSpec.requiredSecrets[0]?.name;
-            const authorization = resolveSecret(authName ? ref.secretBindings[authName] : undefined);
-            mcpServers.push({
-              kind: "http",
-              name: record.name,
-              url: capSpec.url,
-              ...(authorization ? { authorization } : {}),
-              write,
-            });
-          }
-          // neither image nor url → an invalid mcp spec (rejected at the save boundary); skip defensively.
-        } else if (capSpec.type === "skill") {
-          if (!skills.some((s) => s.name === record.name))
-            skills.push({
-              name: record.name,
-              description: record.description,
-              instructions: capSpec.instructions,
-              files: capSpec.files,
-            });
-        } else if (capSpec.type === "code") {
-          // Bind each declared required secret to the adopter's own secret VALUE (the code reads it as an env var by
-          // its logical name). sandbox = adopted from another workspace → the ToolProvider requires an isolated runtime.
-          const env: Record<string, string> = {};
-          for (const rs of capSpec.requiredSecrets) {
-            const value = resolveSecret(ref.secretBindings[rs.name]);
-            if (value !== undefined) env[rs.name] = value;
-          }
-          codeTools.push({
-            name: record.name,
-            description: record.description,
-            language: capSpec.language,
-            code: capSpec.code,
-            parametersSchema: capSpec.parametersSchema,
-            isReadOnly: capSpec.isReadOnly,
-            env,
-            ...(capSpec.timeoutSec !== undefined ? { timeoutSec: capSpec.timeoutSec } : {}),
-            ...(capSpec.image !== undefined ? { image: capSpec.image } : {}),
-            sandbox: ref.source !== principal.workspace,
-            examples: capSpec.examples,
-          });
-        }
-      }
+    let resolved: AgentCapabilitiesResolution = { tools: [], skills: [] };
+    try {
+      resolved = await resolveAgentCapabilities(
+        {
+          agentRegistry: opts.agentRegistry,
+          capabilityStore: opts.capabilityStore,
+          skillStore: opts.skillStore,
+          ...(opts.preferences ? { preferences: opts.preferences } : {}),
+          ...(opts.integrationsConfigured ? { integrationsConfigured: opts.integrationsConfigured } : {}),
+        },
+        {
+          tenant: principal.workspace,
+          subject: principal.subject,
+          agentId: agentId ?? opts.configId,
+          ...(spec ? { spec } : {}), // already loaded above for instructions/model — no second registry round-trip
+        },
+      );
+    } catch {
+      resolved = { tools: [], skills: [] };
+    }
+    for (const tool of resolved.tools) {
+      if (!tool.enabled) continue;
+      shapeTool(
+        tool,
+        { mcpServers, codeTools },
+        { secret: resolveSecret, defaultSecret: resolveDefaultSecret },
+        principal.workspace,
+      );
     }
 
-    // First-party DEFAULT toolset — merged AFTER adopted/authored tools so a same-named adopted tool shadows a default.
-    applyFirstPartyDefaults(
-      { mcpServers, skills, codeTools },
-      spec?.disabledDefaults ?? [],
-      integrationsConfigured,
-      resolveDefaultSecret,
+    const skills = await shapeSkills(
+      resolved.skills.filter((s) => s.enabled),
+      principal.workspace,
+      opts.latestVersionOf,
     );
 
     const hasWriteTools = mcpServers.some((s) => s.write);

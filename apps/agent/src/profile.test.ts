@@ -1,4 +1,10 @@
-import type { AgentRegistry, CapabilityStore, SecretStore, SkillStore } from "@everdict/application-control";
+import type {
+  AgentMemberPreferenceStore,
+  AgentRegistry,
+  CapabilityStore,
+  SecretStore,
+  SkillStore,
+} from "@everdict/application-control";
 import {
   type AgentSpec,
   type CapabilityRecord,
@@ -86,12 +92,25 @@ function skillRecord(over: Partial<SkillRecord>): SkillRecord {
   };
 }
 
+// A minimal per-member overlay whose get() returns the given decisions for every member (tests pass one member's).
+function memberPreferences(
+  tools: Record<string, boolean>,
+  skills: Record<string, boolean> = {},
+): AgentMemberPreferenceStore {
+  const state = (tenant: string, subject: string) => ({ tenant, subject, tools, skills, updatedAt: "t" });
+  return {
+    get: async (tenant, subject) => state(tenant, subject),
+    setEntry: async (tenant, subject) => state(tenant, subject),
+  };
+}
+
 function resolver(
   spec: AgentSpec | undefined,
   secrets: SecretStore = secretStore({}),
   skills: SkillStore = skillStore(),
   caps: CapabilityStore = capabilityStore(),
   integrations: readonly CapabilityRequirement[] = [],
+  preferences?: AgentMemberPreferenceStore,
 ) {
   return registryProfileResolver({
     agentRegistry: agentRegistry(spec),
@@ -101,6 +120,7 @@ function resolver(
     baseSystemPrompt: BASE,
     configId: "default",
     integrationsConfigured: async () => integrations,
+    ...(preferences ? { preferences } : {}),
   });
 }
 
@@ -442,5 +462,116 @@ describe("registryProfileResolver", () => {
     const webSearch = profile.codeTools.filter((t) => t.name === "web_search");
     expect(webSearch).toHaveLength(1); // the built-in default is shadowed, not duplicated
     expect(webSearch[0]?.language).toBe("python"); // the adopted tool, not the built-in node default
+  });
+  // The per-MEMBER toolset: the workspace AgentSpec is the baseline, each member's own decisions sit on top, so the
+  // same assistant does NOT answer every member of a workspace with the same tools.
+  it("drops a workspace tool the member switched off, without touching the workspace's agent", async () => {
+    const adopted = capRecord(
+      {
+        type: "code",
+        language: "python",
+        code: "print('{}')",
+        parametersSchema: { type: "object", properties: {} },
+        isReadOnly: true,
+        requiredSecrets: [],
+        examples: [],
+      },
+      { name: "jira" },
+    );
+    const args = [
+      spec({ capabilities: [capRef()] }),
+      secretStore({}),
+      skillStore(),
+      capabilityStore([adopted]),
+      [] as readonly CapabilityRequirement[],
+    ] as const;
+    const asIs = await resolver(...args)(principal);
+    expect(asIs.codeTools.map((t) => t.name)).toContain("jira");
+
+    const optedOut = await resolver(...args, memberPreferences({ "capability:acme/cap1": false }))(principal);
+    expect(optedOut.codeTools.map((t) => t.name)).not.toContain("jira");
+  });
+
+  it("carries a tool the member switched on that the workspace never adopted", async () => {
+    const mine = capRecord(
+      {
+        type: "code",
+        language: "python",
+        code: "print('{}')",
+        parametersSchema: { type: "object", properties: {} },
+        isReadOnly: true,
+        requiredSecrets: [],
+        examples: [],
+      },
+      { id: "scratch", name: "scratch", tenant: "acme", visibility: "private", createdBy: "u1" },
+    );
+    const caps = {
+      getVersion: async () => undefined,
+      listVisible: async () => [mine],
+    } as unknown as CapabilityStore;
+    const off = await resolver(spec(), secretStore({}), skillStore(), caps)(principal);
+    expect(off.codeTools.map((t) => t.name)).not.toContain("scratch");
+
+    const on = await resolver(
+      spec(),
+      secretStore({}),
+      skillStore(),
+      caps,
+      [],
+      memberPreferences({ "capability:acme/scratch": true }),
+    )(principal);
+    expect(on.codeTools.map((t) => t.name)).toContain("scratch");
+  });
+
+  it("lets a member re-enable a built-in default their workspace opted out of", async () => {
+    const optedOut = spec({ disabledDefaults: ["web-search"] });
+    const secrets = secretStore({ TAVILY_API_KEY: "tvly-x" });
+    const workspaceDefault = await resolver(optedOut, secrets)(principal);
+    expect(workspaceDefault.codeTools.map((t) => t.name)).not.toContain("web_search");
+
+    const mine = await resolver(
+      optedOut,
+      secrets,
+      skillStore(),
+      capabilityStore(),
+      [],
+      memberPreferences({ "default:web-search": true }),
+    )(principal);
+    expect(mine.codeTools.map((t) => t.name)).toContain("web_search");
+  });
+  // Skills are per-member too: the workspace library says which procedures exist, the member says which ones their
+  // agent follows.
+  it("drops a workspace skill the member switched off, without touching the library", async () => {
+    const library = skillStore([skillRecord({ name: "triage", id: "s-triage" })]);
+    const asIs = await resolver(undefined, secretStore({}), library)(principal);
+    expect(asIs.skills.map((s) => s.name)).toContain("triage");
+
+    const optedOut = await resolver(
+      undefined,
+      secretStore({}),
+      library,
+      capabilityStore(),
+      [],
+      memberPreferences({}, { "skill:s-triage": false }),
+    )(principal);
+    expect(optedOut.skills.map((s) => s.name)).not.toContain("triage");
+  });
+
+  it("lets a member re-enable a built-in skill their workspace opted out of", async () => {
+    const optedOut = spec({ disabledDefaults: ["scorecard-fix-pr"] });
+    const workspaceDefault = await resolver(optedOut, secretStore({}), skillStore(), capabilityStore(), ["github"])(
+      principal,
+    );
+    expect(workspaceDefault.skills.map((s) => s.name)).not.toContain("scorecard_fix_pr");
+
+    const mine = await resolver(
+      optedOut,
+      secretStore({}),
+      skillStore(),
+      capabilityStore(),
+      ["github"],
+      memberPreferences({}, { "default:scorecard-fix-pr": true }),
+    )(principal);
+    expect(mine.skills.map((s) => s.name)).toContain("scorecard_fix_pr");
   });
 });

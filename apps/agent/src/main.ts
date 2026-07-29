@@ -12,6 +12,7 @@ import {
 import {
   InMemoryAgentSessionStore,
   InMemoryAnalysisArtifactStore,
+  PgAgentMemberPreferenceStore,
   PgAgentSessionStore,
   PgAnalysisArtifactStore,
   PgCapabilityStore,
@@ -129,6 +130,9 @@ async function main(): Promise<void> {
         secretStore,
         skillStore: new PgSkillStore(client),
         capabilityStore: new PgCapabilityStore(client),
+        // The caller's own decisions (Settings › Agent › Tools + › Skills) — resolved per turn, so the agent answers
+        // each member with THEIR tools and THEIR procedures instead of one workspace-wide set.
+        preferences: new PgAgentMemberPreferenceStore(client),
         baseSystemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
         configId: config.AGENT_CONFIG_ID,
         latestVersionOf,
