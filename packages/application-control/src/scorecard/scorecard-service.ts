@@ -244,7 +244,11 @@ export class ScorecardService {
     // in-process loop — the batch must never silently hang on a Temporal outage.
     // Multi-trial batches (N children per case) stay on the in-process loop — the Temporal driver keys planBatch/
     // runBatchCase by caseId and would collapse the trials. docs/architecture/trial-based-verdict.md
-    if (this.deps.temporalBatches && trials <= 1) {
+    // Inline-dataset batches (ad-hoc experiments) must NOT take the Temporal driver: the workflow re-plans
+    // from the DATASET REGISTRY (planBatch → datasets.get), which cannot see an inline dataset — the plan
+    // activity would 404-retry forever (caught live by the ops surface on day one). Same exclusion as
+    // multi-trial batches; the in-process loop drives them.
+    if (this.deps.temporalBatches && trials <= 1 && !input.inlineDataset) {
       const workflowId = this.deps.temporalBatches.workflowIdFor(record.id);
       await this.deps.store.update(record.id, {
         orchestration: { ...(record.orchestration ?? { judges: [], concurrency, retries }), workflowId },

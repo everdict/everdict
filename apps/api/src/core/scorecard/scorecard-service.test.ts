@@ -3918,6 +3918,32 @@ describe("ScorecardService.submitExperiment — ungraded phase-1 groups (P1)", (
     expect((await datasets.get("acme", "d", "1.0.0")).cases[0]?.graders).toHaveLength(1); // registry untouched
   });
 
+  it("an ad-hoc experiment never takes the Temporal batch driver (the workflow re-plans from the registry, which cannot see an inline dataset)", async () => {
+    const { jobs, dispatcher } = capture();
+    const store = new InMemoryScorecardStore();
+    const started: string[] = [];
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets: new InMemoryDatasetRegistry(),
+      temporalBatches: {
+        workflowIdFor: (id) => `everdict-batch-${id}`,
+        start: async (id) => {
+          started.push(id);
+        },
+      },
+    });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      task: { prompt: "say hi" },
+    });
+    const done = await waitTerminal(store, record.id);
+    expect(started).toEqual([]); // in-process loop drove it — no workflow, no _adhoc 404-retry loop
+    expect(done.orchestration?.workflowId).toBeUndefined();
+    expect(jobs).toHaveLength(1);
+  });
+
   it("rejects both/neither of dataset and task with a 400", async () => {
     const service = new ScorecardService({
       dispatcher: capture().dispatcher,
