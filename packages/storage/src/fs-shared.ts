@@ -45,6 +45,21 @@ export function fsBucketFor(prefix: string, tenant: string): string {
   return `${head}-${hash}`;
 }
 
+// The tenant's REVISION bucket — a sibling of its tree bucket holding the immutable per-revision copies. A
+// separate bucket rather than a reserved key prefix inside the tree, because a prefix would surface as a folder
+// in `list("")` and every operation (list/stat/write/move/usage) would need to remember to filter it out; one
+// forgotten guard and the internals leak into the user's tree. Same collision-proof naming, so dropping a
+// workspace stays "drop its two buckets". The `-rev` suffix keeps the prefix inside its 32-char budget.
+export function fsRevisionBucketFor(prefix: string, tenant: string): string {
+  return fsBucketFor(`${assertFsBucketPrefix(prefix).slice(0, 28)}-rev`, tenant);
+}
+
+// Key of one revision's blob inside that bucket. Zero-padded so a plain lexicographic listing is chronological,
+// and unambiguous: a real path can never collide with `<path>/<10 digits>` for a DIFFERENT file's revision.
+export function fsRevisionKey(path: string, revision: number): string {
+  return `${path}/${String(revision).padStart(10, "0")}`;
+}
+
 export function fsEntryName(path: string): string {
   return path.split("/").at(-1) ?? path;
 }

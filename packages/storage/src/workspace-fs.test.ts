@@ -1,6 +1,6 @@
 import { BadRequestError, ConflictError, NotFoundError, normalizeFsPath } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { fsBucketFor } from "./fs-shared.js";
+import { fsBucketFor, fsRevisionBucketFor, fsRevisionKey } from "./fs-shared.js";
 import { InMemoryWorkspaceFs } from "./in-memory-fs.js";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
@@ -36,6 +36,22 @@ describe("fsBucketFor (one MinIO/S3 bucket per tenant — the isolation boundary
     expect(fsBucketFor("everdict-fs", "Acme")).not.toBe(fsBucketFor("everdict-fs", "acme"));
     expect(fsBucketFor("everdict-fs", "a.b")).not.toBe(fsBucketFor("everdict-fs", "a-b"));
     expect(fsBucketFor("everdict-fs", "a_b")).not.toBe(fsBucketFor("everdict-fs", "a.b"));
+  });
+
+  it("keeps revision blobs in a SEPARATE, still bucket-legal bucket per tenant", () => {
+    // Given the tenant's tree bucket
+    const tree = fsBucketFor("everdict-fs", "acme");
+    const revisions = fsRevisionBucketFor("everdict-fs", "acme");
+    // Then history lives beside the tree, never inside it (so no listing can ever surface it)
+    expect(revisions).not.toBe(tree);
+    expect(revisions).toMatch(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/);
+    expect(revisions.length).toBeLessThanOrEqual(63);
+    // And a 32-char operator prefix still yields a legal name (the suffix must fit the prefix budget)
+    expect(() => fsRevisionBucketFor("a".repeat(32), "acme")).not.toThrow();
+  });
+
+  it("orders revision keys chronologically under plain lexicographic listing", () => {
+    expect(fsRevisionKey("a/b.md", 2) < fsRevisionKey("a/b.md", 10)).toBe(true);
   });
 
   it("caps overlong tenants at the 63-char bucket limit and rejects an illegal prefix", () => {
@@ -128,5 +144,21 @@ describe("InMemoryWorkspaceFs (the WorkspaceFs contract semantics)", () => {
     await expect(fs.write("acme", "big.bin", big)).rejects.toBeInstanceOf(BadRequestError);
     await expect(fs.write("acme", "/", utf8("x"))).rejects.toBeInstanceOf(BadRequestError);
     await expect(fs.remove("acme", "")).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("stores revision blobs outside the visible tree and per tenant", async () => {
+    // Given a revision published for one tenant
+    const fs = new InMemoryWorkspaceFs();
+    await fs.write("acme", "notes.md", utf8("live"));
+    await fs.writeRevisionBlob("acme", "notes.md", 1, utf8("v1"), "text/markdown; charset=utf-8");
+    // Then it reads back by (path, revision)…
+    const blob = await fs.readRevisionBlob("acme", "notes.md", 1);
+    expect(text(blob?.data ?? new Uint8Array())).toBe("v1");
+    expect(blob?.entry.revision).toBe(1);
+    // …never shows up in the tree…
+    expect(await fs.list("acme", "")).toEqual([expect.objectContaining({ path: "notes.md", kind: "file" })]);
+    // …and is invisible to another workspace
+    expect(await fs.readRevisionBlob("other", "notes.md", 1)).toBeUndefined();
+    expect(await fs.readRevisionBlob("acme", "notes.md", 2)).toBeUndefined();
   });
 });

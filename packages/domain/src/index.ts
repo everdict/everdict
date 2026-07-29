@@ -299,3 +299,7 @@ export {
   DEFAULT_UNVERIFIED_AFTER_DAYS,
   intervalEnd,
 } from "./knowledge/freshness.js";
+
+// workspace-file — three-way text merge: how two authors (member and/or agent) editing one file at the same
+// time reconcile without either write silently winning.
+export { mergeThreeWay } from "./workspace-file/merge.js";

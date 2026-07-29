@@ -20,6 +20,7 @@ interface StoredFile {
 interface TenantTree {
   files: Map<string, StoredFile>; // canonical path → file
   dirs: Set<string>; // explicit dirs (mkdir markers); implicit dirs derive from file paths
+  revisions: Map<string, StoredFile>; // "<path>@<revision>" → the immutable copy published under that number
 }
 
 // In-process workspace filesystem for dev/test. Per-tenant maps — one tenant can never see another's tree
@@ -31,7 +32,7 @@ export class InMemoryWorkspaceFs implements WorkspaceFs {
     const key = assertFsTenant(tenant);
     let tree = this.tenants.get(key);
     if (!tree) {
-      tree = { files: new Map(), dirs: new Set() };
+      tree = { files: new Map(), dirs: new Set(), revisions: new Map() };
       this.tenants.set(key, tree);
     }
     return tree;
@@ -213,5 +214,25 @@ export class InMemoryWorkspaceFs implements WorkspaceFs {
     }
     if (!this.isDir(tree, dst)) tree.dirs.add(dst); // an empty explicit dir stays a dir after the move
     return { path: dst, name: fsEntryName(dst), kind: "dir" };
+  }
+
+  // Revision blobs live in their own map — never in `files`, so they can never appear in a listing or be walked
+  // by usage/clear (the in-memory mirror of the S3 adapter's separate revision bucket).
+  async writeRevisionBlob(
+    tenant: string,
+    path: string,
+    revision: number,
+    data: Uint8Array,
+    contentType: string,
+  ): Promise<void> {
+    const p = normalizeFsPath(path);
+    this.tree(tenant).revisions.set(`${p}@${revision}`, { data, contentType, modifiedAt: new Date().toISOString() });
+  }
+
+  async readRevisionBlob(tenant: string, path: string, revision: number): Promise<FsFile | undefined> {
+    const p = normalizeFsPath(path);
+    const hit = this.tree(tenant).revisions.get(`${p}@${revision}`);
+    if (!hit) return undefined;
+    return { entry: { ...this.fileEntry(p, hit), revision }, data: hit.data };
   }
 }

@@ -26,6 +26,8 @@ import {
   fsAncestors,
   fsBucketFor,
   fsEntryName,
+  fsRevisionBucketFor,
+  fsRevisionKey,
   sortFsEntries,
 } from "./fs-shared.js";
 
@@ -72,7 +74,15 @@ export class S3WorkspaceFs implements WorkspaceFs {
   // The tenant's bucket, created lazily on first touch (HeadBucket → CreateBucket; the create race between
   // replicas is benign — same artifact-store idiom). Cached per process so the common path costs nothing.
   private async bucketFor(tenant: string): Promise<string> {
-    const bucket = fsBucketFor(this.prefix, tenant);
+    return this.ensureBucket(fsBucketFor(this.prefix, tenant));
+  }
+
+  // The tenant's revision bucket — same lazy creation, created only when a revision is actually published.
+  private async revisionBucketFor(tenant: string): Promise<string> {
+    return this.ensureBucket(fsRevisionBucketFor(this.prefix, tenant));
+  }
+
+  private async ensureBucket(bucket: string): Promise<string> {
     if (!this.ensured.has(bucket)) {
       try {
         await this.client.send(new HeadBucketCommand({ Bucket: bucket }));
@@ -321,6 +331,51 @@ export class S3WorkspaceFs implements WorkspaceFs {
     for (const key of keys) await this.copyKey(bucket, key, `${dst}/${key.slice(srcPrefix.length)}`);
     await this.deleteKeys(bucket, keys);
     return { path: dst, name: fsEntryName(dst), kind: "dir" };
+  }
+
+  // Immutable revision content, in the tenant's sibling revision bucket — invisible to every tree operation
+  // above, which all scope themselves to the tree bucket. A move does NOT relocate these: the ledger rewrites
+  // the path it stores, and the blob is addressed by (path, revision) at read time through that same ledger.
+  async writeRevisionBlob(
+    tenant: string,
+    path: string,
+    revision: number,
+    data: Uint8Array,
+    contentType: string,
+  ): Promise<void> {
+    const p = normalizeFsPath(path);
+    const bucket = await this.revisionBucketFor(tenant);
+    await this.send("write-revision", () =>
+      this.client.send(
+        new PutObjectCommand({ Bucket: bucket, Key: fsRevisionKey(p, revision), Body: data, ContentType: contentType }),
+      ),
+    );
+  }
+
+  async readRevisionBlob(tenant: string, path: string, revision: number): Promise<FsFile | undefined> {
+    const p = normalizeFsPath(path);
+    const bucket = await this.revisionBucketFor(tenant);
+    try {
+      const res = await this.send("read-revision", () =>
+        this.client.send(new GetObjectCommand({ Bucket: bucket, Key: fsRevisionKey(p, revision) })),
+      );
+      const data = (await res.Body?.transformToByteArray()) ?? new Uint8Array();
+      return {
+        entry: {
+          path: p,
+          name: fsEntryName(p),
+          kind: "file",
+          size: data.byteLength,
+          contentType: res.ContentType ?? undefined,
+          modifiedAt: res.LastModified?.toISOString(),
+          revision,
+        },
+        data,
+      };
+    } catch (err) {
+      if (isS3NotFound(err)) return undefined;
+      throw err;
+    }
   }
 
   private async copyKey(bucket: string, fromKey: string, toKey: string): Promise<void> {

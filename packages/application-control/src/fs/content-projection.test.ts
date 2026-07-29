@@ -119,6 +119,27 @@ class FakeFs implements WorkspaceFs {
   async move(): Promise<FsEntry> {
     throw new Error("unused in these tests");
   }
+  // Revision blobs: the projection never touches them (versioning is the RevisionedWorkspaceFs decorator's job),
+  // so the fake keeps them in their own map purely to satisfy the port.
+  readonly revisionBlobs = new Map<string, { data: Uint8Array; contentType: string }>();
+  async writeRevisionBlob(
+    tenant: string,
+    path: string,
+    revision: number,
+    data: Uint8Array,
+    contentType: string,
+  ): Promise<void> {
+    this.revisionBlobs.set(`${this.key(tenant, path)}@${revision}`, { data, contentType });
+  }
+  async readRevisionBlob(tenant: string, path: string, revision: number): Promise<FsFile | undefined> {
+    const hit = this.revisionBlobs.get(`${this.key(tenant, path)}@${revision}`);
+    if (!hit) return undefined;
+    const name = path.split("/").at(-1) ?? path;
+    return {
+      entry: { path, name, kind: "file", size: hit.data.byteLength, contentType: hit.contentType, revision },
+      data: hit.data,
+    };
+  }
 }
 
 class BrokenReadFs extends FakeFs {
