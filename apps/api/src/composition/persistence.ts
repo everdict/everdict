@@ -1,4 +1,9 @@
-import type { AgentMemberPreferenceStore, ApprovalStore, FsRevisionStore } from "@everdict/application-control";
+import type {
+  AgentMemberPreferenceStore,
+  ApprovalStore,
+  EnvelopeStore,
+  FsRevisionStore,
+} from "@everdict/application-control";
 import {
   type BrowserProfileStore,
   type BudgetStore,
@@ -12,6 +17,7 @@ import {
   InMemoryCallbackStore,
   InMemoryCapabilityStore,
   InMemoryCommentStore,
+  InMemoryEnvelopeStore,
   InMemoryFsRevisionStore,
   InMemoryKnowledgeEntryStore,
   InMemoryKnowledgeStore,
@@ -45,6 +51,7 @@ import {
   PgCallbackStore,
   PgCapabilityStore,
   PgCommentStore,
+  PgEnvelopeStore,
   PgFsRevisionStore,
   PgKnowledgeEntryStore,
   PgKnowledgeStore,
@@ -148,6 +155,7 @@ export interface Persistence {
   notificationStore: NotificationStore; // personal notification feed (bell inbox) — records run/scorecard completion with recipient=subject
   platformEventStore: PlatformEventStore; // append-only platform-event log (agent-automation A1) — durable facts + reconcile cursor
   approvalStore: ApprovalStore; // durable agent approvals (A6) — the parked ask survives an agent-service restart
+  envelopeStore: EnvelopeStore; // envelope spend ledger (§5.2 P4) — headroom reads + caused-cost settles
   commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
   knowledgeStore: KnowledgeStore; // workspace knowledge graph — append-only mention/edge + upsert node projection
   knowledgeEntryStore: KnowledgeEntryStore; // knowledge entries (reified claims) — dual-scoped private|workspace
@@ -219,6 +227,7 @@ export async function makePersistence(): Promise<Persistence> {
       notificationStore: new InMemoryNotificationStore(),
       platformEventStore,
       approvalStore: new InMemoryApprovalStore(platformEventStore),
+      envelopeStore: new InMemoryEnvelopeStore(),
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
@@ -265,6 +274,7 @@ export async function makePersistence(): Promise<Persistence> {
     notificationStore: new PgNotificationStore(client),
     platformEventStore: new PgPlatformEventStore(client),
     approvalStore: new PgApprovalStore(client),
+    envelopeStore: new PgEnvelopeStore(client),
     commentStore: new PgCommentStore(client),
     knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),

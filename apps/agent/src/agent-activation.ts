@@ -93,6 +93,7 @@ export interface AgentActivatorDeps {
     agentVersion?: string;
     eventId?: string;
     creator?: string;
+    budgetUsd?: number; // the delegated slice (A7/§5.2) — becomes the run's envelope on the CP
   }) => Promise<void>;
 }
 
@@ -229,7 +230,12 @@ export class AgentActivator {
     };
     // P3: the continuation turn is a NEW run on the ledger (same session group as the interrupted one).
     const runId = this.deps.newId();
-    const runRef = { runId, creator, agentVersion: spec.version };
+    const runRef = {
+      runId,
+      creator,
+      agentVersion: spec.version,
+      ...(spec.budgetUsd !== undefined ? { budgetUsd: spec.budgetUsd } : {}),
+    };
     await this.deps.sessions.setSessionStatus(workspace, sessionId, "running", this.deps.now());
     await this.deps.sessions.setSessionRunId(workspace, sessionId, runId, this.deps.now()).catch(() => {});
     void this.report(
@@ -356,6 +362,8 @@ export class AgentActivator {
       creator,
       agentVersion: spec.version,
       ...(event.eventId !== undefined ? { eventId: event.eventId } : {}),
+      // The delegated slice (A7 → §5.2): the CP stamps it as the run's envelope — caused work draws from it.
+      ...(spec.budgetUsd !== undefined ? { budgetUsd: spec.budgetUsd } : {}),
     };
     void this.report("agent.run.started", event, agentId, sessionId, `Agent ${agentId} woke on ${event.kind}.`, runRef);
     // One-shot execution credential: minted for this run, revoked with it (no standing token accumulation).
@@ -417,7 +425,7 @@ export class AgentActivator {
     sessionId: string,
     spec: AgentSpec,
     signal: AbortSignal,
-    run?: { runId: string; creator?: string; agentVersion?: string; eventId?: string },
+    run?: { runId: string; creator?: string; agentVersion?: string; eventId?: string; budgetUsd?: number },
   ): PermissionHook | undefined {
     const mode = spec.permissionMode ?? "default";
     if (mode === "bypass") return undefined;
@@ -459,7 +467,7 @@ export class AgentActivator {
     agentId: string,
     sessionId: string,
     message: string,
-    run?: { runId: string; creator?: string; agentVersion?: string; eventId?: string },
+    run?: { runId: string; creator?: string; agentVersion?: string; eventId?: string; budgetUsd?: number },
   ): Promise<void> {
     return (
       this.deps.reportRunEvent?.({

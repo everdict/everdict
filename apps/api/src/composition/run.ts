@@ -1,4 +1,4 @@
-import type { GithubAppService } from "@everdict/application-control";
+import type { EnvelopeStore, GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
@@ -48,6 +48,7 @@ export interface RuntimeAccessReaders {
 // Single-run service + its judge runner. The judge runner is returned too because ScorecardService reuses it.
 export function buildRun(deps: {
   store: RunStore;
+  envelopes: EnvelopeStore; // envelope spend ledger (§5.2 P4)
   meteredDispatcher: CoreDispatcher;
   dispatcher: ModelResolvingDispatcher;
   settingsStore: WorkspaceSettingsStore;
@@ -101,6 +102,7 @@ export function buildRun(deps: {
   const { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn } = readers;
 
   const service = new RunService({
+    envelopes: deps.envelopes, // envelope spend ledger (§5.2 P4) — the causal admission leg + per-case draw-down
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
     readCaseLogs: (tenant, runtimeList, caseId, stream) => readCaseLogsFn(tenant, runtimeList, caseId, stream),
     execInSandbox: (tenant, runtimeList, caseId, command) => execInSandboxFn(tenant, runtimeList, caseId, command),

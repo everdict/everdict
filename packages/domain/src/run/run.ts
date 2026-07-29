@@ -1,5 +1,5 @@
 import { type CaseResult, ConflictError, type EvalCase } from "@everdict/contracts";
-import type { PlatformFact, RunClass, RunOrigin, RunRecord } from "@everdict/contracts";
+import type { PlatformFact, RunClass, RunEnvelope, RunOrigin, RunRecord } from "@everdict/contracts";
 
 // The domain model for a run's lifecycle (queued → running → succeeded | failed). Wraps the persistence
 // record (@everdict/db RunRecord — shapes unchanged); guard methods are the SSOT for what is legal, and
@@ -26,6 +26,7 @@ export interface NewQueuedRunInput {
   // the legacy source axis); class defaults to interactive — a standalone submit is a person waiting.
   origin?: RunOrigin;
   class?: RunClass;
+  envelope?: RunEnvelope; // the delegated budget this run draws from (§5.2 — stamped by the admission gate)
   now: string;
 }
 
@@ -75,6 +76,7 @@ export class Run {
       class: input.class ?? "interactive",
       lifetime: "task",
       ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.envelope ? { envelope: input.envelope } : {}),
       ...(input.runtime ? { placement: { where: "runtime" as const, target: input.runtime } } : {}),
       createdAt: input.now,
       updatedAt: input.now,
@@ -95,6 +97,7 @@ export class Run {
     eventKind: string;
     eventId?: string;
     createdBy?: string; // the member the activation acts as (the agent's creator)
+    budgetUsd?: number; // the delegated slice (AgentSpec.budgetUsd) — becomes this run's envelope (§5.2)
     now: string;
   }): RunRecord {
     return {
@@ -115,6 +118,9 @@ export class Run {
         ...(input.createdBy !== undefined ? { actor: input.createdBy } : {}),
       },
       group: { id: input.sessionId, role: "turn" },
+      // The envelope THIS run delegates downstream (§5.2): its own id is the envelope id — every caused run
+      // draws from it, and the P4 gate refuses at 402 once the slice is spent. No budget = no envelope.
+      ...(input.budgetUsd !== undefined ? { envelope: { id: input.id, capUsd: input.budgetUsd } } : {}),
       createdAt: input.now,
       updatedAt: input.now,
     };

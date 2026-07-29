@@ -520,6 +520,7 @@ export class ScorecardBatchService {
 
       this.deps.budget?.admit(ctx.tenant);
       const runStore = this.deps.runStore;
+      const caseEnvelope = current ? await this.childEnvelope(current) : undefined; // §5.2 — the delegated pool this case draws from
       let child: RunRecord | undefined;
       if (runStore) {
         child = ScorecardBatch.newChildRun({
@@ -530,6 +531,7 @@ export class ScorecardBatchService {
           parentScorecardId: id,
           ...(evalCase.placement?.target ? { runtime: evalCase.placement.target } : {}),
           ...(current ? { origin: ScorecardBatch.childRunOrigin(current) } : {}),
+          ...(caseEnvelope ? { envelope: caseEnvelope } : {}),
           now: this.now(),
         });
         await runStore.create(child);
@@ -594,10 +596,14 @@ export class ScorecardBatchService {
       }
       // Bill the case, itemized per model: managed/ws-runner bill the whole cost; an own-pays personal self-hosted run
       // bills the workspace only for calls on a workspace-billed model. The same lines feed the meter + enforcement budget.
+      let caseUsd = 0;
       for (const c of billingCharges(result, ctx.tenant)) {
         this.deps.budget?.settle(c.tenant, c.cost);
         this.deps.usage?.record(c.tenant, c.source, c.model, c.cost, c.evaluations);
+        caseUsd += c.cost.usd;
       }
+      // Envelope draw-down (§5.2 O7 meter): the full caused cost charges the delegating envelope.
+      if (caseEnvelope && caseUsd > 0) void this.deps.envelopes?.settle(caseEnvelope.id, ctx.tenant, caseUsd);
       // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
       if (ctx.judges.length > 0) {
         await this.scoring
@@ -861,6 +867,9 @@ export class ScorecardBatchService {
       // first, so the idempotent planBatch naturally skips them and finalize aggregates them; the workflow then
       // drives only the re-dispatch remainder. Start failure degrades to the in-process loop (same as submit).
       if (this.deps.temporalBatches && this.deps.runStore) {
+        // Seeds carry the envelope stamp for lineage consistency but never settle against it — their cost
+        // was already settled by the batch that originally ran them. Resolved once, not per seed.
+        const seededEnvelope = await this.childEnvelope(record);
         for (const r of [...seed, ...recovered]) {
           await this.deps.runStore.create(
             ScorecardBatch.newSeededChildRun({
@@ -871,6 +880,7 @@ export class ScorecardBatchService {
               parentScorecardId: record.id,
               ...(src.runtime ? { runtime: src.runtime } : {}),
               origin: ScorecardBatch.childRunOrigin(record),
+              ...(seededEnvelope ? { envelope: seededEnvelope } : {}),
               now: this.now(),
             }),
           );
@@ -926,6 +936,15 @@ export class ScorecardBatchService {
     } catch {
       // Best-effort visibility flip — a failure here must never break the case (the run still executes and settles).
     }
+  }
+
+  // The delegated envelope every fan-out child draws from (§5.2, P4): resolved from the batch's causer run
+  // (origin.causedByRunId → its envelope, own or inherited). One read; a miss = no envelope (unenforced).
+  private async childEnvelope(record: { origin?: { causedByRunId?: string } }): Promise<{ id: string } | undefined> {
+    const causerId = record.origin?.causedByRunId;
+    if (!causerId || !this.deps.runStore) return undefined;
+    const causer = await this.deps.runStore.get(causerId);
+    return causer?.envelope ? { id: causer.envelope.id } : undefined;
   }
 
   // Reflect the case results finalized by batch judge/offload into each child run (since we don't store the embed, get's hydration source must be current).
@@ -1053,6 +1072,7 @@ export class ScorecardBatchService {
     // per batch; the record was created before track() is called, so a miss only means "no origin stamp".
     const batchForOrigin = await this.deps.store.get(id);
     const childOrigin = batchForOrigin ? ScorecardBatch.childRunOrigin(batchForOrigin) : undefined;
+    const childEnv = batchForOrigin ? await this.childEnvelope(batchForOrigin) : undefined; // §5.2, once per batch
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // throws if over budget → batch fails
       const enriched: CaseJob = {
@@ -1080,6 +1100,7 @@ export class ScorecardBatchService {
           parentScorecardId: id,
           ...(runtime ? { runtime } : {}), // propagate the batch's runtime to the child too — the queue's runtime-lane axis
           ...(childOrigin ? { origin: childOrigin } : {}),
+          ...(childEnv ? { envelope: childEnv } : {}),
           now: this.now(),
         });
         await runStore.create(child);
@@ -1106,10 +1127,14 @@ export class ScorecardBatchService {
         // Cost attribution: managed=batch tenant · workspace-shared runner=that workspace (team resource) · personal runner=own-pays. Same as a single run.
         // Bill the case, itemized per model (same as a single run): managed/ws-runner bill the whole cost; an own-pays
         // personal self-hosted run bills the workspace only for calls on a workspace-billed model. Meter + budget together.
+        let caseUsd = 0;
         for (const c of billingCharges(result, tenant)) {
           this.deps.budget?.settle(c.tenant, c.cost);
           this.deps.usage?.record(c.tenant, c.source, c.model, c.cost, c.evaluations);
+          caseUsd += c.cost.usd;
         }
+        // Envelope draw-down (§5.2 O7 meter): the full caused cost charges the delegating envelope.
+        if (childEnv && caseUsd > 0) void this.deps.envelopes?.settle(childEnv.id, tenant, caseUsd);
         // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         if (runStore && child)
           await runStore.update(child.id, {

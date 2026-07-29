@@ -1,4 +1,4 @@
-import type { GithubAppService } from "@everdict/application-control";
+import type { EnvelopeStore, GithubAppService } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import type { Metrics } from "@everdict/application-control";
@@ -30,6 +30,7 @@ export interface ScorecardRuntimeAccess {
 export function buildScorecard(deps: {
   scorecardStore: ScorecardStore;
   runStore: RunStore;
+  envelopes: EnvelopeStore; // envelope spend ledger (§5.2 P4)
   recordingStore?: RecordingStore;
   meteredDispatcher: CoreDispatcher;
   scheduler: Scheduler;
@@ -116,6 +117,7 @@ export function buildScorecard(deps: {
   const traceSourcesForIngest = new TraceSourceService(settingsStore, { secretsFor: runtimeSecretsFor });
 
   return new ScorecardService({
+    envelopes: deps.envelopes, // §5.2 — submit-gate headroom + per-case draw-down
     dispatcher: meteredDispatcher,
     store: scorecardStore,
     // Grader factory (@everdict/graders) for executeCase/collectDeferredTrace collection-mode scoring (re-architecture P2 S3).

@@ -39,6 +39,7 @@ import type { ArtifactStore } from "../ports/artifact-store.js";
 import { offloadSnapshot } from "../ports/artifact-store.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
+import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
@@ -406,6 +407,8 @@ export interface ScorecardServiceDeps {
   // When set, fan out a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).
   // When unset, keep the current behavior: an embedded scorecard only, no child runs (shares the same RunStore as a single run). Children are hidden from the activity list by default.
   runStore?: RunStore;
+  // Envelope spend ledger (§5.2, P4) — the submit gate reads headroom, the per-case settle meters cost.
+  envelopes?: EnvelopeStore;
   // Durable replay recording (optional) — at child write-back, seal the frames/logs teed under the child's runId and attach the ref.
   recordingStore?: RecordingStore;
   concurrency?: number;

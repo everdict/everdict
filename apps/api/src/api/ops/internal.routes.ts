@@ -168,10 +168,12 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
         agentVersion: z.string().min(1).optional(),
         eventId: z.string().min(1).optional(),
         creator: z.string().min(1).optional(),
+        budgetUsd: z.number().positive().optional(),
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    const { tenant, kind, sessionId, agentId, eventKind, message, runId, agentVersion, eventId, creator } = body.data;
+    const { tenant, kind, sessionId, agentId, eventKind, message, runId, agentVersion, eventId, creator, budgetUsd } =
+      body.data;
     await deps.platformEvents.emit({
       workspace: tenant,
       kind,
@@ -193,6 +195,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
           eventKind,
           ...(eventId !== undefined ? { eventId } : {}),
           ...(creator !== undefined ? { createdBy: creator } : {}),
+          ...(budgetUsd !== undefined ? { budgetUsd } : {}),
         });
       } else if (kind !== "agent.run.awaiting_approval") {
         const outcome =

@@ -21,6 +21,7 @@ import {
   type TrialDiff,
   can,
 } from "@everdict/domain";
+import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { ScorecardListFilter } from "../ports/scorecard-store.js";
@@ -149,6 +150,19 @@ export class ScorecardService {
     const { cases: selectedCases, subset } = selectSubsetCases(resolved, input.cases);
     // Run-time grading plan — this batch scores with the requested graders instead of each case's defaults (S5).
     const dataset: Dataset = { ...resolved, cases: applyGradingPlan(selectedCases, input.graders) };
+
+    // P4 causal leg (§5.1): an agent-caused batch draws its WHOLE fan-out from the causer's envelope —
+    // headroom is checked here (402 past the cap, 429 past the depth guard, NEVER silently) before any
+    // case exists; the children stamp the envelope at creation and settle real cost against it per case.
+    if (input.origin?.causedByRunId && this.deps.runStore) {
+      const trialsForCount = input.trials !== undefined ? Math.max(1, Math.floor(input.trials)) : 1;
+      await admitCausedWork(
+        { runStore: this.deps.runStore, ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}) },
+        input.tenant,
+        input.origin.causedByRunId,
+        selectedCases.length * trialsForCount,
+      );
+    }
 
     // Resolve the harness version (latest→concrete) + embed the declarative spec. Built-ins (scripted/claude-code) aren't in the registry → as-given.
     // If submit-time ephemeral pins are present, use resolveWithPins with no fallback — evaluation must not pass while silently ignoring the pins.

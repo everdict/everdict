@@ -141,6 +141,7 @@ async function main(): Promise<void> {
     notificationStore,
     platformEventStore,
     approvalStore,
+    envelopeStore,
     commentStore,
     knowledgeStore,
     knowledgeEntryStore,
@@ -413,6 +414,7 @@ async function main(): Promise<void> {
   // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log) → served by RunService.logs().
   const liveLogs = new LiveLogStore();
   const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
+    envelopes: envelopeStore,
     store,
     meteredDispatcher,
     dispatcher,
@@ -438,6 +440,7 @@ async function main(): Promise<void> {
   });
 
   const scorecardService = buildScorecard({
+    envelopes: envelopeStore,
     scorecardStore,
     runStore: store,
     ...(recordingStore ? { recordingStore } : {}),

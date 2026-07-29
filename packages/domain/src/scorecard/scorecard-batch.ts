@@ -1,6 +1,6 @@
 import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contracts";
 import type { PlatformFact, RunOrigin } from "@everdict/contracts";
-import type { RunRecord, ScorecardOrigin, ScorecardRecord, ScorecardSubset } from "@everdict/contracts";
+import type { RunEnvelope, RunRecord, ScorecardOrigin, ScorecardRecord, ScorecardSubset } from "@everdict/contracts";
 import { summarizeTrials } from "./trials.js";
 
 // The domain model for a scorecard batch's lifecycle (queued → running → succeeded | failed | superseded | cancelled).
@@ -69,17 +69,19 @@ export interface NewChildRunInput {
   parentScorecardId: string;
   runtime?: string; // the assigned runtime lane (batch runtime or per-case shard target)
   origin?: RunOrigin; // the batch's WHY, carried onto each case (schedule/member/api — execution-model.md P0)
+  envelope?: RunEnvelope; // the delegated budget this case draws from (§5.2 — {id} of the causer's envelope)
   now: string;
 }
 
 // The P0 stamps every fan-out child shares: an eval-kind, batch-class task inside the scorecard's group.
-function childRunShape(input: Pick<NewChildRunInput, "parentScorecardId" | "runtime" | "origin">) {
+function childRunShape(input: Pick<NewChildRunInput, "parentScorecardId" | "runtime" | "origin" | "envelope">) {
   return {
     kind: "eval" as const,
     class: "batch" as const,
     lifetime: "task" as const,
     group: { id: input.parentScorecardId, role: "case" as const },
     ...(input.origin ? { origin: input.origin } : {}),
+    ...(input.envelope ? { envelope: input.envelope } : {}),
     ...(input.runtime ? { placement: { where: "runtime" as const, target: input.runtime } } : {}),
   };
 }

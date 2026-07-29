@@ -96,6 +96,11 @@ export const AgentSpecSchema = z.object({
   // Default permission mode for this agent's headless runs (default = ask → parked approvals; auto/bypass for
   // trusted automation). A chat session's own mode still overrides per conversation.
   permissionMode: AgentPermissionModeSchema.optional(),
+  // Per-ACTIVATION delegated budget (USD) — A7's unenforced per-agent budget becomes the run's ENVELOPE
+  // (execution-model §5.2): every run this activation causes draws from this slice and is refused at 402
+  // past it. Unset = no envelope (the tenant budget still gates globally). The agent never reasons about
+  // capacity — compute-blind demand, budget-bound spend.
+  budgetUsd: z.number().positive().optional(),
   // Activation opt-in: only an enabled agent is trigger-matched. The chat "default" config never needs this.
   enabled: z.boolean().default(false),
   tags: z.array(z.string()).default([]),

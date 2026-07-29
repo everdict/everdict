@@ -15,8 +15,14 @@ import {
   type TraceEvent,
   UpstreamError,
 } from "@everdict/contracts";
-import { InMemoryRecordingStore, InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@everdict/db";
-import { CircuitBreaker, type Principal, inMemoryUsageMeter } from "@everdict/domain";
+import {
+  InMemoryEnvelopeStore,
+  InMemoryRecordingStore,
+  InMemoryRunStore,
+  InMemoryScorecardStore,
+  type ScorecardRecord,
+} from "@everdict/db";
+import { CircuitBreaker, type Principal, Run, inMemoryUsageMeter } from "@everdict/domain";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryDatasetRegistry,
@@ -1606,6 +1612,17 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
     await datasets.register("acme", datasetWithCase());
     const store = new InMemoryScorecardStore();
     const runStore = new InMemoryRunStore();
+    // The causer must exist — the P4 gate rejects a forged causedByRunId (an envelope-less causer admits unbounded).
+    await runStore.create(
+      Run.newAgentRun({
+        id: "run-agent-1",
+        tenant: "acme",
+        agentId: "sentinel",
+        sessionId: "sess-0",
+        eventKind: "scorecard.completed",
+        now: "2026-07-30T00:00:00.000Z",
+      }),
+    );
     const service = new ScorecardService({ dispatcher: okDispatch, store, runStore, datasets });
     const rec = await service.submit({
       tenant: "acme",
@@ -3974,6 +3991,79 @@ describe("ScorecardService.submitExperiment — ungraded phase-1 groups (P1)", (
       service.submitExperiment({ ...base, dataset: { id: "d", version: "1" }, task: { prompt: "hi" } }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(service.submitExperiment(base)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("ScorecardService — the P4 causal admission leg (envelope 402 + draw-down)", () => {
+  const agentRun = () =>
+    Run.newAgentRun({
+      id: "run-agent",
+      tenant: "acme",
+      agentId: "sentinel",
+      agentVersion: "1.0.0",
+      sessionId: "sess-1",
+      eventKind: "scorecard.completed",
+      createdBy: "alice",
+      budgetUsd: 0.05,
+      now: "2026-07-30T00:00:00.000Z",
+    });
+  const paidDispatch: Dispatcher = {
+    async dispatch(job) {
+      return {
+        caseId: job.evalCase.id,
+        harness: `${job.harness.id}@${job.harness.version}`,
+        trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 10, outputTokens: 10, usd: 0.01 } }],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [],
+      };
+    },
+  };
+
+  it("an agent-caused batch stamps its children with the envelope and DRAWS IT DOWN as cases settle", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const runStore = new InMemoryRunStore();
+    await runStore.create(agentRun());
+    const envelopes = new InMemoryEnvelopeStore();
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({ dispatcher: paidDispatch, store, runStore, datasets, envelopes });
+    const rec = await service.submit({
+      tenant: "acme",
+      submittedBy: "alice",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      origin: { source: "mcp", causedByRunId: "run-agent" },
+    });
+    await waitTerminal(store, rec.id);
+    const children = await runStore.list("acme", { scorecardId: rec.id });
+    expect(children[0]?.envelope).toEqual({ id: "run-agent" }); // drawn from the causer's delegated slice
+    const spend = await envelopes.spend("run-agent");
+    expect(spend.runs).toBe(1); // admitted at the gate (fan-out counted)
+    expect(spend.usd).toBeCloseTo(0.01); // the case's real cost metered against the envelope
+  });
+
+  it("refuses new agent-caused work at 402 once the delegated slice is spent — never silently", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const runStore = new InMemoryRunStore();
+    await runStore.create(agentRun());
+    const envelopes = new InMemoryEnvelopeStore();
+    await envelopes.settle("run-agent", "acme", 0.05); // the slice is fully spent
+    const service = new ScorecardService({
+      dispatcher: paidDispatch,
+      store: new InMemoryScorecardStore(),
+      runStore,
+      datasets,
+      envelopes,
+    });
+    await expect(
+      service.submit({
+        tenant: "acme",
+        dataset: { id: "d", version: "1.0.0" },
+        harness: { id: "scripted", version: "0" },
+        origin: { source: "mcp", causedByRunId: "run-agent" },
+      }),
+    ).rejects.toMatchObject({ code: "BUDGET_EXCEEDED", status: 402 });
   });
 });
 

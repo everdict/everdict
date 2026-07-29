@@ -54,6 +54,7 @@ export interface AgentServerDeps extends ChatDeps {
     agentVersion?: string;
     eventId?: string;
     creator?: string;
+    budgetUsd?: number;
   }) => Promise<void>;
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
   // the monitoring→agent bridge). Absent → the internal event path is disabled (only user-authenticated events).

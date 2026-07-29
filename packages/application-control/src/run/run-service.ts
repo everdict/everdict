@@ -22,10 +22,12 @@ import {
   billingCharges,
   resolveHarnessSecrets,
 } from "@everdict/domain";
+import { admitCausedWork } from "../admission/admission.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
 import { type StampedFact, stampFacts } from "../platform-event/outbox.js";
 import { type ArtifactStore, offloadSnapshot } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
+import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
@@ -88,6 +90,9 @@ export interface RunServiceDeps {
     harness: { id: string; version: string };
   }) => Promise<void>;
   budget?: BudgetTracker; // the API owns the admission gate (402 when exceeded) and cost settle
+  // Envelope spend ledger (§5.2, P4): caused runs draw from their causer's delegated envelope — the gate
+  // reads headroom here, the settle meters real cost. Absent = envelopes unenforced (dev wiring).
+  envelopes?: EnvelopeStore;
   usage?: UsageMeter; // meter-only billing usage — itemized per (source × model), attributed via billingCharges
   // Resolve a declarative harness spec from the registry and embed it in the job (if absent, built-in id branching). An unknown harness is rejected → undefined fallback.
   resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
@@ -178,6 +183,16 @@ export class RunService {
     assertRuntimeTarget(this.deps.requireRuntime, target);
     // Placement capability preflight: reject at submit (400) if the chosen runtime can't run this harness (before any dispatch).
     if (target) await this.deps.preflightPlacement?.({ tenant: input.tenant, target, harness: input.harness });
+    // P4 causal leg FIRST (§5.1 order): caused work draws from its causer's envelope (402 past the cap,
+    // 429 past the depth guard) and is stamped with it; only then the tenant-level budget gate.
+    const causedEnvelope = input.causedByRunId
+      ? await admitCausedWork(
+          { runStore: this.deps.store, ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}) },
+          input.tenant,
+          input.causedByRunId,
+          1,
+        )
+      : undefined;
     this.deps.budget?.admit(input.tenant); // PaymentRequiredError (402) when exceeded — no run created
     // When a runtime is chosen, inject it as the case's placement.target → RuntimeDispatcher routes to the tenant runtime (same symmetry as scorecard).
     const effective: SubmitInput = input.runtime
@@ -196,6 +211,9 @@ export class RunService {
       ...(effective.trigger ? { trigger: effective.trigger } : {}),
       ...(effective.submittedBy ? { submittedBy: effective.submittedBy } : {}),
       origin: standaloneRunOrigin(effective.trigger, effective.submittedBy, effective.causedByRunId),
+      // Caused work is background by default (§5.4 — autonomous fan-out never starves a human's click).
+      ...(effective.causedByRunId ? { class: "background" as const } : {}),
+      ...(causedEnvelope ? { envelope: causedEnvelope } : {}),
       now: this.now(),
     });
     // E0 outbox: the creation fact (domain-computed — children stay silent) persists in the SAME transaction
@@ -206,7 +224,7 @@ export class RunService {
       creation.map((c) => c.record),
     );
     if (creation.length > 0) void this.deps.events?.pushPersisted?.(creation);
-    void this.track(record.id, effective); // fire-and-track
+    void this.track(record.id, effective, record.envelope?.id); // fire-and-track
     return record;
   }
 
@@ -378,7 +396,7 @@ export class RunService {
     return this.deps.store.list(tenant, opts);
   }
 
-  private async track(id: string, input: SubmitInput): Promise<void> {
+  private async track(id: string, input: SubmitInput, envelopeId?: string): Promise<void> {
     // A declarative harness (command etc.) has its spec resolved from the registry and embedded in the job — the agent interprets it with no code.
     // An inline spec (service-internal synthetic harness, e.g. the code-judge dry-run wrapper) wins over the registry.
     // Built-ins (claude-code/scripted) aren't in the registry, so undefined → fall back to id branching.
@@ -421,10 +439,14 @@ export class RunService {
       // Cost attribution, itemized per model: managed = the job's tenant · workspace-shared runner = that workspace ·
       // personal runner = own-pays, EXCEPT calls that used a workspace-billed model (the team's key paid) → the
       // workspace. The same lines feed the meter (usage display) + the enforcement budget.
+      let caseUsd = 0;
       for (const c of billingCharges(result, input.tenant)) {
         this.deps.budget?.settle(c.tenant, c.cost);
         this.deps.usage?.record(c.tenant, c.source, c.model, c.cost, c.evaluations);
+        caseUsd += c.cost.usd;
       }
+      // Envelope draw-down (§5.2 O7 meter): the full caused cost charges the delegating envelope.
+      if (envelopeId && caseUsd > 0) void this.deps.envelopes?.settle(envelopeId, input.tenant, caseUsd);
       // Offload os-use screenshots (embedded base64) to object storage → the record keeps only the URL (slim). On failure the run still succeeds (fallback: keep base64).
       if (this.deps.artifacts && result.snapshot) {
         try {
@@ -489,6 +511,7 @@ export class RunService {
     eventKind: string;
     eventId?: string;
     createdBy?: string;
+    budgetUsd?: number; // the delegated slice (A7/§5.2) — stamped as this run's envelope
   }): Promise<void> {
     const existing = await this.deps.store.get(input.id);
     if (existing) return; // a retried started-report — the first write stands

@@ -46,6 +46,7 @@ export interface AgentRunEventReport {
   agentVersion?: string;
   eventId?: string;
   creator?: string;
+  budgetUsd?: number; // the delegated slice (A7/§5.2) — the CP stamps it as the run's envelope
 }
 
 export function runEventReporter(
@@ -68,6 +69,7 @@ export function runEventReporter(
         ...(input.agentVersion !== undefined ? { agentVersion: input.agentVersion } : {}),
         ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
         ...(input.creator !== undefined ? { creator: input.creator } : {}),
+        ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}),
       }),
     });
     if (!res.ok) throw new Error(`agent-run event report failed: ${res.status}`);

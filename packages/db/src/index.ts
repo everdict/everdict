@@ -156,6 +156,7 @@ export { InMemoryOAuthStateStore, PgOAuthStateStore, generateOAuthState } from "
 export { InMemoryNotificationStore, PgNotificationStore } from "./activity/notification-store.js";
 export { InMemoryPlatformEventStore, PgPlatformEventStore } from "./activity/platform-event-store.js";
 export { InMemoryApprovalStore } from "./activity/approval-store.js";
+export { InMemoryEnvelopeStore, PgEnvelopeStore } from "./results/envelope-store.js";
 export { PgApprovalStore } from "./activity/pg-approval-store.js";
 export { InMemoryCommentStore, PgCommentStore } from "./activity/comment-store.js";
 export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent-session-store.js";
