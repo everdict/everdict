@@ -346,9 +346,8 @@ split — **no API/authz change, web IA only**:
   on `/store/mine` (all kinds in one list) and in the kind-scoped Settings pages below — both render the same
   `CapabilityStore` `variant='mine'`.
 - **Settings › Agent group = the agent as one concern**: `/settings/agent` (config + adopted refs + default-tool
-  toggles) · `/settings/tools` (workspace-authored `mcp`/`code` capabilities: publish · version · reach · adopt) ·
-  `/settings/skills` (living workspace skills) · `/settings/knowledge` (the knowledge graph, moved from the
-  Workspace group).
+  toggles) · `/settings/tools` (**the member's own toolset** — see below) · `/settings/skills` (living workspace
+  skills) · `/settings/knowledge` (the knowledge graph, moved from the Workspace group).
 - **Settings › Workspace › Environments** (`/settings/environments`) — environments are eval infra, not agent
   config, and (unlike tools) get a **dedicated environment-first surface, not the reused store chrome**
   (`EnvironmentWorkbench` + `EnvironmentEditor`, 2026-07-29): one unified list merges the workspace's authored
@@ -366,8 +365,42 @@ split — **no API/authz change, web IA only**:
   team asset nobody but its author can see. A tool kind is one member's agent's until shared; an environment is
   what a harness pins, held workspace-wide on `WorkspaceSettings.adoptedEnvironments`. Discovery/import of other workspaces' environments stays in `/store` (linked). The store substrate
   (entity, versions, reach kernel, routes) is unchanged — presentation only.
-- **Settings › Account › My tools & skills** (`/settings/personal-capabilities`) — the user-private scope:
-  `visibility='private'` capabilities the user created + personal (private) skill drafts.
+## The member's agent: Tools + Skills are per member (confirmed 2026-07-29)
+
+A workspace is not one agent. Two members of the same workspace want different tools on the assistant they talk to and
+different procedures it follows, and before this the only knobs were workspace-wide: `AgentSpec.capabilities[]` (so
+adopting a tool handed it to everyone) and the skill library (so every member's agent carried every skill). Confirmed
+direction (2026-07-29, with the user): **the workspace is the shared BASELINE — "which tools and skills this workspace
+supports" — and each member overlays their own on/off on top of it.**
+
+- **Both pages are a list and a switch.** `/settings/tools` shows every tool the caller can put on their agent;
+  `/settings/skills` keeps its authoring surface (create · edit · share · delete) and gains a per-row "use" switch.
+  Rows group by scope — `personal` (published/drafted private by this member, visible to them alone) · `workspace`
+  (adopted on the AgentSpec, hand-wired `mcpServers[]`, authored here, or published workspace-wide) · `builtin` (the
+  first-party defaults). On the Tools page publishing, versioning, reach, the catalog and the workspace counts are NOT
+  present (user decision) — authoring and discovery stay in `/store` and `/store/mine`. Settings › Account no longer
+  carries a "My tools & skills" tab: a member's private tools and private skill drafts appear in the `personal`
+  section of the two Agent pages.
+- **The overlay.** `AgentMemberPreferences` (`(tenant, subject) → {tools, skills}`, each `key → boolean`, mig 0090) is
+  per member and self-scoped, like a personal secret. An ABSENT key means "follow the workspace" — clearing an override
+  deletes the key rather than freezing today's baseline value, so a later workspace change still reaches that member.
+  Keys namespace the channels: `default:<id>` · `capability:<owner>/<id>` · `mcp:<name>` (tools) · `skill:<id>`
+  (an authored Skill record).
+- **The baselines.** ON for everyone: adopted capabilities, hand-wired MCP servers, the workspace's authored skills
+  (plus the caller's own drafts), and non-opted-out first-party defaults. Listed but OFF until the member switches
+  them on: a capability published here that nobody adopted — tool or skill kind — and the member's own private
+  publications. Existing workspaces therefore behave exactly as before until someone touches a switch.
+- **One decision point.** `resolveAgentCapabilities` (`@everdict/application-control`) assembles both candidate pools
+  in ONE pass over the baseline (adopted references carry both kinds; visibility re-checked cross-tenant), overlays the
+  member's preferences and resolves name shadowing through the pure `selectForMember` kernel (`@everdict/domain`) —
+  which is what keeps "an authored skill shadows a same-named package" and "an adopted tool shadows a built-in" true
+  per member rather than per workspace. BOTH the settings pages (`GET/PUT /agent/tools` + `/agent/skills`, with the
+  `list_agent_tools`/`set_agent_tool`/`list_agent_skills`/`set_agent_skill` MCP twins) and the agent runtime
+  (`apps/agent` profile resolver, per turn, keyed by `principal.subject`) read it — so what a member configures and
+  what their agent carries cannot disagree. Skill FRESHNESS coverage stays an authored-record concern, computed for the
+  enabled authored skills in one batched pass.
+- Shadowing is per channel: a tool and a skill may share a name (the model reaches them through different doors —
+  a tool call vs `use_skill`). The workspace-wide default-tool toggles on Settings › Agent remain the admin baseline.
 
 ## First-party default toolset (confirmed 2026-07-27)
 
