@@ -135,6 +135,16 @@ mem/Pg stores, Zod at every boundary, web is a pure HTTP mirror.
 - **Charts come from `shared/ui/charts`** (see skill `web`): one palette (`--chart-*`, CVD-validated per surface),
   one axis/grid/tooltip/legend implementation, entity-stable color slots. Ratio measures pin the axis to 0–100%;
   other measures auto-scale to their own range.
+- **Case-weighted aggregation (fixed 2026-07-29).** `passRate`/`mean` over a group are Σ(rate·n)/Σn, not the mean
+  of per-scorecard rates — a 5-case smoke run must not weigh the same as a 500-case suite (it displayed 0.900
+  where the answer was 0.802). Rows carry `cases` (the sample size) separately from `count` (the scorecards),
+  because a rate without its n cannot be judged. A summary row with no usable count weighs 1 rather than
+  vanishing. The domain engine and the web copy are fixed in lockstep; V4 removes the duplication.
+- **Captures accumulate on the workspace filesystem.** `POST /views/:id/snapshots` (+ MCP
+  `capture_view_snapshot`) computes the View server-side and writes `views/<id>/<capturedAt>.json` — the
+  numbers, the config that produced them, and the sample size. A report-mode schedule captures on every fire
+  before its agent turn, so the data record survives a failed interpretation. Reads go through the existing
+  `/fs` surface (there is no snapshot list endpoint by design). See `docs/architecture/workspace-filesystem.md`.
 
 ### S2 — `View` entity (persist & load) — **SHIPPED**
 - `@everdict/db`: `ViewStore` interface + `InMemoryViewStore` + `PgViewStore` + migration `0038_create_views.sql`

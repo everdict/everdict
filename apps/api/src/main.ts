@@ -42,6 +42,7 @@ import {
   buildMattermostCommand,
   buildQueue,
   buildView,
+  buildViewSnapshot,
 } from "./composition/services.js";
 import { buildWorkspace } from "./composition/workspace.js";
 import { AgentService } from "./core/agent/agent-service.js";
@@ -397,11 +398,14 @@ async function main(): Promise<void> {
   // Close the schedule cycle: build ScheduleService (it needs scorecardService) and publish it into scheduleRef so
   // the member-removal hook can resolve it. Nothing before this point invokes that hook (a member can only leave a
   // running server, long after boot). See composition/schedule.ts.
+  // View captures — built before the schedule wiring because a report-mode fire accumulates one on every run.
+  const viewSnapshotService = buildViewSnapshot({ viewStore, scorecardStore, workspaceFs });
   const scheduleService = wireScheduleService(scheduleRef, {
     scheduleStore,
     scorecardService,
     ...(traceSourceService ? { traceSourceService } : {}),
     notificationService, // report-mode fire completion fan-out (analysis-studio V4)
+    viewSnapshotService, // report fires also accumulate the View's numbers on the workspace filesystem
   });
 
   const queueService = buildQueue({
@@ -506,6 +510,7 @@ async function main(): Promise<void> {
     scheduleService,
     queueService,
     viewService,
+    viewSnapshotService,
     benchmarkService,
     bundleService,
     harnessTemplates: harnessTemplateRegistry,

@@ -52,6 +52,12 @@ export type { RuntimeListEntry, RuntimeRegistry } from "./ports/runtime-registry
 // Control-plane use-case services (the api services move here incrementally — re-architecture P2d).
 export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";
 export {
+  type CaptureViewSnapshotInput,
+  ViewSnapshotService,
+  type ViewSnapshotRef,
+  type ViewSnapshotServiceDeps,
+} from "./view/view-snapshot-service.js";
+export {
   BrowserProfileService,
   type BrowserProfileServiceDeps,
   type CreateBrowserProfileInput,

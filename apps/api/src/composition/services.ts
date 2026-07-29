@@ -7,6 +7,8 @@ import type { RunnerService } from "@everdict/application-control";
 import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import { ViewService } from "@everdict/application-control";
+import { ViewSnapshotService } from "@everdict/application-control";
+import type { WorkspaceFs } from "@everdict/application-control";
 import { BrowserProfileService } from "@everdict/application-control";
 import type { Scheduler } from "@everdict/backends";
 import type {
@@ -181,6 +183,21 @@ export function buildQueue(deps: {
 // Saved scorecard-analysis Views — store/share a named AnalysisConfig (opaque config) on the workspace. Live re-run, so no snapshot.
 export function buildView(deps: { viewStore: ViewStore }): ViewService {
   return new ViewService({ store: deps.viewStore });
+}
+
+// View captures — the accumulating filesystem record behind the live lens. Reads the scorecard store directly
+// (cross-resource data goes through the owning store, never a peer service) and writes through the SAME
+// revisioned filesystem every other surface uses, so a capture is attributed like any other publish.
+export function buildViewSnapshot(deps: {
+  viewStore: ViewStore;
+  scorecardStore: ScorecardStore;
+  workspaceFs: WorkspaceFs;
+}): ViewSnapshotService {
+  return new ViewSnapshotService({
+    views: deps.viewStore,
+    scorecards: deps.scorecardStore,
+    fs: deps.workspaceFs,
+  });
 }
 
 export function buildBrowserProfile(deps: { browserProfileStore: BrowserProfileStore }): BrowserProfileService {

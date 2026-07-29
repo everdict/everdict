@@ -24,6 +24,24 @@ export function knowledgeEntryPath(id: string): string {
   return `knowledge/${id}.md`;
 }
 
+// Saved-View snapshots accumulate under one directory per View:
+//   views/<viewId>/<capturedAt>.json
+// Path segments allow only [A-Za-z0-9._-], so the instant is stamped without the ISO colons. Sorting the
+// directory by name therefore sorts it by time, which is what makes the accumulation browsable as-is.
+export function viewSnapshotDir(viewId: string): string {
+  return `views/${viewId}`;
+}
+export function viewSnapshotPath(viewId: string, capturedAt: string): string {
+  return `views/${viewId}/${snapshotStamp(capturedAt)}.json`;
+}
+
+// "2026-07-29T14:45:00.123Z" → "2026-07-29T14-45-00Z". Second resolution: two captures inside one second
+// would collide, and a write is create-or-replace, so the later one wins — an acceptable trade for a name a
+// human can read, since captures are driven by people and schedules, not by a loop.
+export function snapshotStamp(iso: string): string {
+  return iso.replace(/\.\d+Z$/, "Z").replace(/:/g, "-");
+}
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 

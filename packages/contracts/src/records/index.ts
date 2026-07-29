@@ -21,6 +21,7 @@ export * from "./tenant-key.js";
 export * from "./usage.js";
 export * from "./user-profile.js";
 export * from "./view.js";
+export * from "./view-snapshot.js";
 export * from "./workspace.js";
 export * from "./workspace-file.js";
 export * from "./workspace-invite.js";

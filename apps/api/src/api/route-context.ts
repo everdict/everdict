@@ -29,7 +29,7 @@ import {
   originSource,
 } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
-import type { ViewService } from "@everdict/application-control";
+import type { ViewService, ViewSnapshotService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { SkillService } from "@everdict/application-control";
 import type { FsService } from "@everdict/application-control";
@@ -128,6 +128,7 @@ export interface ServerDeps {
   queueService?: QueueService; // work-queue snapshot (running/waiting/next-scheduled per runtime lane) (route disabled if absent)
   metrics?: { render(): string }; // Prometheus text exposition (GET /metrics) (route disabled if absent)
   viewService?: ViewService; // saved scorecard-analysis View CRUD (route disabled if absent)
+  viewSnapshotService?: ViewSnapshotService; // capture a View onto the workspace filesystem (route disabled if absent)
   benchmarkService?: BenchmarkService; // benchmark catalog + ingest (route disabled if absent)
   bundleService?: BundleService; // bundle apply (one-shot register of harness+benchmark+runtime; route disabled if absent)
   harnessTemplates?: HarnessTemplateRegistry; // harness category (template structure) CRUD

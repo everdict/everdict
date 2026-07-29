@@ -20,7 +20,7 @@ import type { SkillService } from "@everdict/application-control";
 import type { FsService } from "@everdict/application-control";
 import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
-import type { ViewService } from "@everdict/application-control";
+import type { ViewService, ViewSnapshotService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import { type Action, type Principal, authorize } from "@everdict/auth";
@@ -67,6 +67,7 @@ export interface McpDeps {
   scheduleService?: ScheduleService;
   queueService?: QueueService; // work queue snapshot (running/waiting/next-scheduled per runtime lane)
   viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
+  viewSnapshotService?: ViewSnapshotService; // capture_view_snapshot — write a View’s numbers to the workspace filesystem
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;

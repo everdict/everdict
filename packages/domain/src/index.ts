@@ -55,6 +55,7 @@ export {
   type AnalysisMeasure,
   type AnalysisResult,
   type AnalysisViz,
+  analysisConfigFromStored,
   analysisDimensionValue,
   analysisMetricNames,
   computeAnalysis,

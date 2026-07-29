@@ -6,6 +6,7 @@ import { getTranslations } from 'next-intl/server'
 import { MentionInChatButton } from '@/widgets/infra-panel'
 import { ViewArtifactGallery } from '@/features/analysis-artifacts/server'
 import { CustomAnalyzer, loadAnalysisData, storedToConfig } from '@/features/analyze-scorecards'
+import { ViewSnapshots } from '@/features/capture-view-snapshot'
 import { CommentsSection } from '@/features/discuss'
 import { ViewReportSchedules } from '@/features/view-report-schedule'
 import { buttonVariants } from '@/shared/ui/button'
@@ -66,6 +67,10 @@ export default async function ViewPage({
           activeViewId={view.id}
         />
       )}
+
+      {/* The accumulating record — this View's numbers captured to the workspace filesystem. A View re-runs
+          live and remembers nothing; these files are what it said, and when. */}
+      <ViewSnapshots workspace={workspace} viewId={id} />
 
       {/* Report schedules for THIS view — "every Monday, report this view's movement" (analysis-studio V3/V4). */}
       <ViewReportSchedules viewId={id} canManage={canManage} />

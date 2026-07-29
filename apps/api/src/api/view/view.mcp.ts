@@ -1,6 +1,7 @@
 import type { UpdateViewInput } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { fsActorFor } from "../fs/fs-actor.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 export function registerViewTools(server: McpServer, ctx: McpToolContext): void {
@@ -89,6 +90,24 @@ export function registerViewTools(server: McpServer, ctx: McpToolContext): void 
           });
           return ok({ id, deleted: true });
         }),
+    );
+  }
+
+  if (deps.viewSnapshotService) {
+    const snapshots = deps.viewSnapshotService;
+    server.registerTool(
+      "capture_view_snapshot",
+      {
+        description:
+          "Capture a saved View onto the workspace filesystem — compute its analysis now and write it, with the " +
+          "config that produced it, to views/<id>/<capturedAt>.json. A View re-runs live and remembers nothing; " +
+          "captures accumulate the record of what it said. Read them back with list_files/get_file on views/<id>.",
+        inputSchema: { id: z.string().describe("saved View id") },
+      },
+      ({ id }) =>
+        run(principal, "scorecards:run", async () =>
+          ok(await snapshots.capture({ tenant: ws, viewId: id, actor: fsActorFor(principal, ctx.agent) })),
+        ),
     );
   }
 }

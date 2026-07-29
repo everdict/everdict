@@ -4,6 +4,7 @@ import type {
   NotificationService,
   ScorecardService,
   TraceSourceService,
+  ViewSnapshotService,
 } from "@everdict/application-control";
 import { UpstreamError } from "@everdict/contracts";
 import type { ScheduleStore } from "@everdict/db";
@@ -43,9 +44,17 @@ export function wireScheduleService(
     traceSourceService?: TraceSourceService;
     // Optional — REPORT-mode completion fan-out (feed + Mattermost + agent event). Absent = report fires silently.
     notificationService?: NotificationService;
+    // Optional — accumulate the View's numbers on the workspace filesystem on every report fire.
+    viewSnapshotService?: ViewSnapshotService;
   },
 ): ScheduleService {
-  const { scheduleStore, scorecardService, traceSourceService, notificationService } = deps;
+  const {
+    scheduleStore,
+    scorecardService,
+    traceSourceService,
+    notificationService,
+    viewSnapshotService: viewSnapshots,
+  } = deps;
   const temporalAddress = process.env.EVERDICT_TEMPORAL_ADDRESS;
   // REPORT-mode firer (analysis-studio V4): a headless analysis turn on the agent service over its internal,
   // x-internal-token-gated route. Wired only when the agent bridge env is present (the same pair the agent-event
@@ -118,6 +127,20 @@ export function wireScheduleService(
     // scorecard's own onComplete (schedule-branded via origin.source === "schedule").
     scorecardStatus: async (id) => (await scorecardService.get(id))?.status,
     ...(reportRunner ? { reportRunner } : {}),
+    // Report fires also accumulate the View's numbers on the workspace filesystem. The schedule creator is the
+    // publisher, so the file history credits the person whose schedule produced it.
+    ...(viewSnapshots
+      ? {
+          captureViewSnapshot: (input) =>
+            viewSnapshots.capture({
+              tenant: input.tenant,
+              viewId: input.viewId,
+              actor: { kind: "member", subject: input.createdBy },
+              trigger: "schedule",
+              scheduleId: input.scheduleId,
+            }),
+        }
+      : {}),
   });
   ref.set(scheduleService);
   return scheduleService;

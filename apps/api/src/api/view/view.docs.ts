@@ -11,7 +11,32 @@ import { UpdateViewBodySchema } from "./request/update-view.js";
 // Authz reuses the scorecard actions (no new action): read = scorecards:read, write = scorecards:run;
 // edit/delete additionally require creator-or-admin (decided in the service).
 // Values are widened to FastifySchema so Fastify does NOT narrow reply.code() to the documented status keys.
-export const viewDocs: Record<"create" | "list" | "get" | "update" | "delete", FastifySchema> = {
+export const viewDocs: Record<"create" | "list" | "get" | "update" | "delete" | "captureSnapshot", FastifySchema> = {
+  captureSnapshot: {
+    summary: "Capture the view onto the workspace filesystem",
+    description:
+      "Compute the view's analysis now and write it — together with the config that produced it — as JSON " +
+      "under views/<id>/<capturedAt>.json on the workspace filesystem. A view is a recipe that re-runs live " +
+      "and remembers nothing; captures are the accumulating record of what it said, and they are ordinary " +
+      "files, so they are listed and read through the /fs surface (and an agent's list_files/get_file) rather " +
+      "than a list endpoint here. Report-mode schedules capture automatically on every fire. Requires " +
+      "scorecards:run; someone else's private view reads 404.",
+    tags: ["view"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: {
+      200: {
+        description: "Where the capture landed",
+        ...toJsonSchema(
+          z.object({
+            path: z.string().describe("Workspace filesystem path of the written snapshot"),
+            capturedAt: z.string(),
+            totals: z.object({ scorecards: z.number().int(), cases: z.number().int() }),
+          }),
+        ),
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
   create: {
     summary: "Save an analysis view",
     description:

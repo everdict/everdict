@@ -217,6 +217,61 @@ function caseCount(cards: AnalysisCard[], metric: string | undefined): number {
   return cases;
 }
 
+// A saved View stores its config as a FLAT STRING MAP — the web persists the deep-link query rather than the
+// object, so `ViewRecord.config` is `{group: "harness,model", measure: "passRate", ...}`, not an AnalysisConfig.
+// Reading one back is therefore PARSING, not casting: the recipe may have been written by an older build, by a
+// hand-edited URL, or by an agent, so every field is validated and falls back to the default instead of trusting
+// the stored value. Mirrors the web's paramsToConfig (apps/web/.../analyze-scorecards/model/analysis.ts).
+export function analysisConfigFromStored(raw: unknown): AnalysisConfig {
+  const params: Record<string, string> = {};
+  if (raw !== null && typeof raw === "object")
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) if (typeof v === "string") params[k] = v;
+
+  const list = (v: string | undefined): string[] | undefined => {
+    const items = v ? v.split(",").filter(Boolean) : [];
+    return items.length > 0 ? items : undefined;
+  };
+  const isDimension = (v: string): v is AnalysisDimension => (ANALYSIS_DIMENSIONS as readonly string[]).includes(v);
+
+  const filters: AnalysisFilters = {
+    ...maybe("dataset", list(params.dataset)),
+    ...maybe("harness", list(params.harness)),
+    ...maybe("model", list(params.model)),
+    ...maybe("judgeModel", list(params.judgeModel)),
+    ...maybe("status", list(params.status)),
+    ...maybe("owner", list(params.owner)),
+    ...maybe("originSource", list(params.origin)),
+    ...maybe("from", params.from),
+    ...maybe("to", params.to),
+  };
+
+  const groupBy = (list(params.group) ?? []).filter(isDimension).slice(0, 2);
+  const pivotBy = params.pivot !== undefined && isDimension(params.pivot) ? params.pivot : undefined;
+  const measure = (ANALYSIS_MEASURES as readonly string[]).includes(params.measure ?? "")
+    ? (params.measure as AnalysisMeasure)
+    : "passRate";
+  const viz = (ANALYSIS_VIZ as readonly string[]).includes(params.viz ?? "") ? (params.viz as AnalysisViz) : "table";
+  const [sortBy, sortDir] = (params.sort ?? "measure:desc").split(":");
+
+  return {
+    filters,
+    groupBy: groupBy.length > 0 ? groupBy : ["harness"],
+    ...maybe("pivotBy", pivotBy),
+    ...maybe("metric", params.metric),
+    measure,
+    sort: { by: sortBy === "label" ? "label" : "measure", dir: sortDir === "asc" ? "asc" : "desc" },
+    ...maybe("search", params.q),
+    viz,
+    ...(params.incomplete === "1" ? { includeIncomplete: true } : {}),
+  };
+}
+
+// Include a key only when it has a value — the config's optional fields are `exactOptionalPropertyTypes`,
+// so an explicit `undefined` is not the same as an absent key.
+function maybe<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
+  return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
+}
+
 // All metric names across the cards, most frequent first — the vocabulary a caller (web picker / agent) selects from.
 export function analysisMetricNames(cards: AnalysisCard[]): string[] {
   const freq = new Map<string, number>();

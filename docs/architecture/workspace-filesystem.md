@@ -217,6 +217,7 @@ separate surface, subject to the same cap.
 skills/<id>/SKILL.md       # the skill's instructions
 skills/<id>/files/<path>   # each supporting file
 knowledge/<id>.md          # a knowledge entry's markdown body
+views/<id>/<capturedAt>.json   # a saved View captured at a moment (accumulating; see below)
 ```
 
 `SkillService` / `KnowledgeEntryService` (when composed with `fs`):
@@ -229,6 +230,30 @@ knowledge/<id>.md          # a knowledge entry's markdown body
 - **The DB row stays a full replica** so `list` stays one query and filesystem-less processes (the
   agent server's direct store reads) keep working; a filesystem outage degrades reads to the
   replica instead of failing them.
+
+### View captures — the filesystem as an accumulating record
+
+Skills and knowledge project their CURRENT content (one file per entity, overwritten). A saved View
+does the opposite: `ViewSnapshotService` appends `views/<viewId>/<capturedAt>.json`, so the directory
+grows into a time series rather than converging on one file.
+
+- **Why files, not a table.** A View is a recipe — it recomputes on every open and remembers nothing,
+  which is right for a lens and wrong for a record ("what did this say last Monday?" had no answer,
+  and editing the config silently rewrote the past). Writing captures to the filesystem gives the
+  history a home that the Files tree, the shell and an agent's `list_files`/`get_file` already read:
+  no new read endpoint, no new store, no migration. `POST /views/:id/snapshots` (and MCP
+  `capture_view_snapshot`) is therefore write-only — there is deliberately no snapshot list route.
+- **The config travels with the result.** Numbers whose recipe is unknown are not evidence, so each
+  file carries the `AnalysisConfig` it was computed from alongside the grid/line and the sample size.
+- **Two triggers.** A member captures on demand; a report-mode schedule captures on every fire,
+  BEFORE the agent turn — the snapshot is deterministic and the report is an interpretation of it, so
+  the cheap deterministic half must not be lost when the expensive interpretive half fails. A capture
+  failure never fails the fire either: accumulation is an addition to reporting, not a precondition.
+- **Attribution comes free.** Captures write through the same `RevisionedWorkspaceFs` as everything
+  else, so each one publishes an attributed revision (the member, or the schedule's creator).
+- The stamp drops the ISO colons (`2026-07-29T14-45-00Z.json`) because path segments allow only
+  `[A-Za-z0-9._-]`; name order is therefore time order, which is what makes the directory browsable
+  as-is. Second resolution — two captures inside one second collide and the later wins.
 
 ## Boundaries / non-goals
 

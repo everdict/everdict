@@ -4097,5 +4097,15 @@
     "instructions": "Instructions",
     "tools": "Tools",
     "versionCount": "{count} versions"
+  },
+  "viewSnapshots": {
+    "title": "Accumulated record",
+    "capture": "Capture now",
+    "capturing": "Capturing…",
+    "captured": "Captured · {cases} cases",
+    "captureFailed": "Couldn't capture: {error}",
+    "open": "Open",
+    "emptyTitle": "Nothing captured yet.",
+    "emptyHint": "This view recomputes from current data every time it opens. Capture it and the numbers of that moment stay as a workspace file."
   }
 }

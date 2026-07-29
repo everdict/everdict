@@ -4097,5 +4097,15 @@
     "instructions": "Instructions",
     "tools": "도구",
     "versionCount": "버전 {count}개"
+  },
+  "viewSnapshots": {
+    "title": "누적 기록",
+    "capture": "지금 저장",
+    "capturing": "저장 중…",
+    "captured": "스냅샷을 저장했어요 · 케이스 {cases}건",
+    "captureFailed": "저장하지 못했어요: {error}",
+    "open": "열기",
+    "emptyTitle": "아직 저장된 기록이 없어요.",
+    "emptyHint": "이 뷰는 열 때마다 지금 데이터로 다시 계산돼요. 저장해두면 그때의 숫자가 워크스페이스 파일로 남아요."
   }
 }

@@ -412,6 +412,10 @@ export const controlPlane = {
     }),
   deleteView: (auth: AuthContext, id: string) =>
     callVoid(auth, `/views/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // Capture the View’s numbers onto the workspace filesystem (views/<id>/<capturedAt>.json). The captures are
+  // ordinary files, so they are listed back with listFsEntries — there is no view-snapshot read endpoint.
+  captureViewSnapshot: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/views/${encodeURIComponent(id)}/snapshots`, { method: 'POST' }),
   // filter.judge = only batches that applied this Agent Judge (the judge detail's evaluation history);
   // filter.schedule = only the runs a schedule fired (the schedule detail's run history). Mutually exclusive.
   listScorecards: <T>(auth: AuthContext, filter?: { judge?: string; schedule?: string }) =>

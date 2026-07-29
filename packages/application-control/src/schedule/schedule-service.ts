@@ -73,6 +73,16 @@ export interface ScheduleServiceDeps {
   // Synchronous within the fire (the runner enforces the turn budget); the completion notification is emitted by the
   // apps/api runner adapter, not here. If not injected, a report-mode fire throws BadRequest.
   reportRunner?: AgentReportRunner;
+  // Called on a REPORT-mode fire, BEFORE the agent turn — writes the View's numbers to the workspace filesystem
+  // so the schedule accumulates a data record, not only a narrated one. Deliberately separate from the runner:
+  // the snapshot is deterministic, the report is an interpretation of it, and the cheap deterministic half must
+  // not be lost when the expensive interpretive half fails. Absent = no accumulation (a fire still reports).
+  captureViewSnapshot?: (input: {
+    tenant: string;
+    viewId: string;
+    createdBy: string;
+    scheduleId: string;
+  }) => Promise<unknown>;
   newId?: () => string;
   now?: () => string;
 }
@@ -197,6 +207,22 @@ export class ScheduleService {
     if (t.report) {
       if (!reportRunner)
         throw new BadRequestError("BAD_REQUEST", { id }, "Report firer is not configured (report firing disabled).");
+      // Capture first, report second. The snapshot is the deterministic half — the View's numbers as of this
+      // fire, on the filesystem — and it must survive an agent turn that errors or exhausts its budget. A
+      // capture failure is never allowed to fail the fire either: accumulation is an addition to reporting,
+      // not a precondition for it, so a filesystem outage degrades to "no snapshot this week".
+      if (this.deps.captureViewSnapshot) {
+        try {
+          await this.deps.captureViewSnapshot({
+            tenant,
+            viewId: t.report.view,
+            createdBy: schedule.createdBy,
+            scheduleId: id,
+          });
+        } catch {
+          /* accumulation is best-effort — the report below is what the schedule promised */
+        }
+      }
       // Report fire — one headless agent analysis turn over the View; no scorecard is produced. The same
       // catch-classify applies: a deterministic failure (deleted view, revoked creator) auto-disables the schedule.
       try {
