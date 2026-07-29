@@ -426,8 +426,14 @@ export async function runChat(
   const profile = deps.resolveProfile ? await deps.resolveProfile(principal, session.origin?.agentId) : undefined;
   const systemPrompt = profile?.systemPrompt ?? deps.systemPrompt;
 
+  // The MCP session carries this conversation's identity, so anything the agent publishes through the control
+  // plane (workspace files) is attributed to the agent + conversation rather than looking like the member's edit.
   const tools = await deps.toolProvider(
-    headers,
+    {
+      ...headers,
+      conversationId: sessionId,
+      ...(session.origin?.agentId !== undefined ? { agentId: session.origin.agentId } : {}),
+    },
     profile?.mcpServers ?? [],
     profile?.skills ?? [],
     profile?.codeTools ?? [],

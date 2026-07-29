@@ -9,10 +9,17 @@ export interface Principal {
 
 // The headers apps/agent forwards to the control plane on the caller's behalf: the bearer (Keycloak JWT or ak_
 // key) plus the active-workspace / dev-tenant selectors the web already sets.
+//
+// The agent/conversation fields are ATTRIBUTION, not authorization: the bearer is the member's, so the control
+// plane already knows who authorized the call — these say which agent ran it and in which conversation, so what
+// the agent authors (workspace files today) is credited to the agent instead of reading as the member's own edit.
 export interface ForwardHeaders {
   authorization?: string;
   workspace?: string;
   tenant?: string;
+  agentId?: string;
+  agentName?: string;
+  conversationId?: string;
 }
 
 export type Authenticate = (headers: ForwardHeaders) => Promise<Principal>;
@@ -29,6 +36,9 @@ export function forwardHeaderRecord(h: ForwardHeaders): Record<string, string> {
   if (h.authorization) out.authorization = h.authorization;
   if (h.workspace) out["x-everdict-workspace"] = h.workspace;
   if (h.tenant) out["x-everdict-tenant"] = h.tenant;
+  if (h.agentId) out["x-everdict-agent-id"] = h.agentId;
+  if (h.agentName) out["x-everdict-agent-name"] = h.agentName;
+  if (h.conversationId) out["x-everdict-conversation-id"] = h.conversationId;
   return out;
 }
 

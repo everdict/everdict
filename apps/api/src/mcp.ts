@@ -13,6 +13,7 @@ import { registerCommentTools } from "./api/comment/comment.mcp.js";
 import { registerDatasetTools } from "./api/dataset/dataset.mcp.js";
 import { registerEnvironmentAdoptionTools } from "./api/environment-adoption/environment-adoption.mcp.js";
 import { registerEventTools } from "./api/event/event.mcp.js";
+import type { AgentAttribution } from "./api/fs/fs-actor.js";
 import { registerFsTools } from "./api/fs/fs.mcp.js";
 import { registerGithubAppTools } from "./api/github-app/github-app.mcp.js";
 import { registerHarnessTemplateTools } from "./api/harness/harness-template.mcp.js";
@@ -49,12 +50,14 @@ export type { McpDeps, McpToolContext } from "./api/mcp-context.js";
 // MCP composition root — the second transport over the same service core as the HTTP routes.
 // Tool bodies live in the owning resource slice (<domain>/<resource>.mcp.ts, next to <resource>.routes.ts);
 // this file only builds the per-Principal server (stateless per-request instance) and registers each slice's tools.
-export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
+export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: AgentAttribution): McpServer {
   const server = new McpServer(
     { name: "everdict", version: "0.1.0" },
     { instructions: "Everdict eval control plane. Workspace-scoped run/harness tools." },
   );
-  const ctx: McpToolContext = { deps, principal, ws: principal.workspace };
+  // The session is bound to the caller AND (when declared at initialize) to the agent holding it, so anything the
+  // session authors is attributed to that agent rather than looking like the member typed it.
+  const ctx: McpToolContext = { deps, principal, ws: principal.workspace, ...(agent ? { agent } : {}) };
 
   registerRunTools(server, ctx);
   registerScorecardTools(server, ctx);

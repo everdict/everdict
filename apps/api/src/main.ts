@@ -5,7 +5,7 @@ import {
   seedFirstPartyAgents,
 } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
-import { FsService, SkillService } from "@everdict/application-control";
+import { FsService, RevisionedWorkspaceFs, SkillService } from "@everdict/application-control";
 import {
   CapabilityService,
   EnvironmentAdoptionService,
@@ -135,6 +135,7 @@ async function main(): Promise<void> {
     commentStore,
     knowledgeStore,
     knowledgeEntryStore,
+    fsRevisionStore,
     viewStore,
     browserProfileStore,
     skillStore,
@@ -164,12 +165,16 @@ async function main(): Promise<void> {
   // The workspace filesystem — S3/MinIO when env-configured (distributed: every replica sees one tree), else
   // in-memory (dev). Same object storage as artifacts, namespaced under the "fs/" key prefix. Skill + knowledge
   // bodies live on it as the SSOT (content-projection); the Files page + fs tools browse it.
-  const workspaceFs = (await workspaceFsFromEnv()) ?? new InMemoryWorkspaceFs();
+  const rawWorkspaceFs = (await workspaceFsFromEnv()) ?? new InMemoryWorkspaceFs();
   console.log(
-    workspaceFs instanceof InMemoryWorkspaceFs
+    rawWorkspaceFs instanceof InMemoryWorkspaceFs
       ? "▶ workspace filesystem: in-memory (dev — set EVERDICT_S3_* for the distributed backend)"
       : "▶ workspace filesystem: S3/MinIO (distributed)",
   );
+  // Versioning is wired ONCE, here: every consumer below (the Files surfaces, the agent's fs tools, the skill and
+  // knowledge content projections) writes through this decorator, so each write publishes an attributed revision
+  // and a write that declares its base can never silently overwrite a concurrent one. Nothing downstream opts in.
+  const workspaceFs = new RevisionedWorkspaceFs(rawWorkspaceFs, fsRevisionStore);
 
   // Knowledge entries — reified claims (the knowledge layer's record). CRUD + verify; freshness-decorated reads.
   // Bodies live on the workspace filesystem (knowledge/<id>.md) with the DB row as the replica.
@@ -535,7 +540,7 @@ async function main(): Promise<void> {
     skillService: new SkillService({ store: skillStore, latestVersionOf, fs: workspaceFs }),
     // The workspace filesystem — the shared, workspace-isolated file tree (web Files page + list_files/get_file/
     // write_file MCP tools; agents persist task outputs here as real files). Backed by S3/MinIO when env-configured.
-    fsService: new FsService(workspaceFs),
+    fsService: new FsService(workspaceFs, fsRevisionStore),
     // Capability Store — one discriminated versioned entity (mcp|code|skill|environment) members author, publish
     // (private|workspace|subset|public), and adopt into their agent (tool kinds) or consume at harness-authoring time
     // (environment). Reach beyond the workspace: subset fans across the author's own workspaces, public exposes to

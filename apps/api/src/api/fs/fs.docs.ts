@@ -1,10 +1,11 @@
-import { FsEntrySchema } from "@everdict/contracts";
+import { FsEntrySchema, FsRevisionSchema } from "@everdict/contracts";
 import { FsFileContentSchema, FsRemoveResultSchema, FsUsageSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { MakeFsDirectoryBodySchema } from "./request/make-fs-directory.js";
 import { MoveFsEntryBodySchema } from "./request/move-fs-entry.js";
+import { RestoreFsRevisionBodySchema } from "./request/restore-fs-revision.js";
 import { WriteFsFileBodySchema } from "./request/write-fs-file.js";
 
 // OpenAPI descriptors for the workspace-filesystem routes — doc-only (rule api-layer): attaching these is behavior-free.
@@ -44,15 +45,60 @@ const docs = {
     },
   },
   write: {
-    summary: "Write a file",
+    summary: "Publish a file revision",
     description:
-      "Create-or-replace a file (parents become implicit directories). Text by default; pass encoding 'base64' for " +
-      "binary. Writing over a directory is 409; files cap at 5 MiB. Requires files:write (member+).",
+      "Create-or-replace a file (parents become implicit directories) and publish it as a new revision attributed " +
+      "to the caller. Text by default; pass encoding 'base64' for binary. Writing over a directory is 409; files " +
+      "cap at 5 MiB. Send `baseRevision` (the revision you edited) to make the write safe against concurrent " +
+      "editors: if anything was published since, the response is 409 whose `data` carries the live content and an " +
+      "attempted three-way merge instead of overwriting it. Requires files:write (member+).",
     tags: ["fs"],
     body: toJsonSchema(WriteFsFileBodySchema),
     response: {
-      200: { description: "Written entry", ...toJsonSchema(FsEntrySchema) },
+      200: { description: "Written entry (with its new revision)", ...toJsonSchema(FsEntrySchema) },
       ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  revisions: {
+    summary: "A file's publication history",
+    description:
+      "Every published revision of a file, newest first — who published it (member or agent, with the agent and " +
+      "conversation it ran in, plus the member it acted for), when, the content hash and the publish message. " +
+      "Retained indefinitely. Requires files:read (viewer+).",
+    tags: ["fs"],
+    querystring: pathQuery(true, {
+      limit: { type: "string", description: "Max revisions to return (default 50)" },
+    }),
+    response: {
+      200: { description: "Revisions, newest first", ...toJsonSchema(z.array(FsRevisionSchema)) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  revisionContent: {
+    summary: "Read one past revision",
+    description:
+      "The content published under a specific revision — for previewing or diffing it against the live file. " +
+      "Shaped exactly like a live read (utf8 vs base64). An unknown revision is 404. Requires files:read (viewer+).",
+    tags: ["fs"],
+    querystring: pathQuery(true, {
+      revision: { type: "string", description: "Revision number" },
+    }),
+    response: {
+      200: { description: "Revision content", ...toJsonSchema(FsFileContentSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  restore: {
+    summary: "Restore a past revision",
+    description:
+      "Re-publishes an earlier revision's content as a NEW revision attributed to the caller — history is " +
+      "append-only, so a rollback is itself audited (the new revision records which one it restored). An unknown " +
+      "revision is 404. Requires files:write (member+).",
+    tags: ["fs"],
+    body: toJsonSchema(RestoreFsRevisionBodySchema),
+    response: {
+      200: { description: "The file at its new revision", ...toJsonSchema(FsEntrySchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   mkdir: {

@@ -3,6 +3,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { FastifyInstance } from "fastify";
+import { agentAttributionFrom } from "./api/fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "./api/route-context.js";
 import { baseUrl, mcpChallenge, protectedResourceMetadata, resolveBearerPrincipal } from "./api/route-context.js";
 import { buildMcpServer } from "./mcp.js";
@@ -126,6 +127,9 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
           apiPublicUrl: baseUrl(req), // the everdict runner --api-url for github_install_workspace_runner
         },
         principal,
+        // Read at INITIALIZE, which is when a client identifies itself — apps/agent opens one session per
+        // conversation, so this labels everything the session authors with that agent + conversation.
+        agentAttributionFrom(req.headers),
       ).connect(transport);
     }
     touch(transport.sessionId); // activity → keep this live session out of the idle sweep

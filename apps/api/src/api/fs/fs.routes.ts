@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { agentAttributionFrom, fsActorFor } from "./fs-actor.js";
 import { fsDocs } from "./fs.docs.js";
 import { MakeFsDirectoryBodySchema } from "./request/make-fs-directory.js";
 import { MoveFsEntryBodySchema } from "./request/move-fs-entry.js";
+import { RestoreFsRevisionBodySchema } from "./request/restore-fs-revision.js";
 import { WriteFsFileBodySchema } from "./request/write-fs-file.js";
 
 const ListQuerySchema = z.object({ path: z.string().max(600).optional() });
@@ -11,6 +13,18 @@ const FileQuerySchema = z.object({ path: z.string().min(1).max(600) });
 const RemoveQuerySchema = z.object({
   path: z.string().min(1).max(600),
   recursive: z.enum(["true", "false"]).optional(),
+});
+// Query params arrive as strings — coerced after parsing, like the `recursive` flag above.
+const RevisionListQuerySchema = z.object({
+  path: z.string().min(1).max(600),
+  limit: z
+    .string()
+    .regex(/^\d{1,3}$/)
+    .optional(),
+});
+const RevisionContentQuerySchema = z.object({
+  path: z.string().min(1).max(600),
+  revision: z.string().regex(/^\d{1,9}$/),
 });
 
 // The workspace filesystem — a shared, workspace-isolated file tree (agent task outputs, artifacts, skill/knowledge
@@ -66,9 +80,73 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     const parsed = WriteFsFileBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      return reply.send(await deps.fsService.writeFile(principal.workspace, parsed.data));
+      const actor = fsActorFor(principal, agentAttributionFrom(req.headers));
+      return reply.send(await deps.fsService.writeFile(principal.workspace, parsed.data, actor));
     } catch (err) {
-      return sendError(reply, err); // over a dir → 409, oversized/traversal → 400
+      return sendError(reply, err); // over a dir / lost race → 409 (+ the merge kit), oversized/traversal → 400
+    }
+  });
+
+  // The file's publication history — who published each revision, when, and why. Read-gated like any browse.
+  app.get("/fs/revisions", { schema: fsDocs.revisions }, async (req, reply) => {
+    if (!deps.fsService) return reply.code(404).send({ code: "NOT_FOUND", message: "filesystem not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "files:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = RevisionListQuerySchema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      const limit = parsed.data.limit !== undefined ? Number(parsed.data.limit) : undefined;
+      return reply.send(await deps.fsService.history(principal.workspace, parsed.data.path, limit));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // One past revision's content — previewing it, or diffing it against what is live now.
+  app.get("/fs/revisions/content", { schema: fsDocs.revisionContent }, async (req, reply) => {
+    if (!deps.fsService) return reply.code(404).send({ code: "NOT_FOUND", message: "filesystem not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "files:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = RevisionContentQuerySchema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await deps.fsService.readRevision(principal.workspace, parsed.data.path, Number(parsed.data.revision)),
+      );
+    } catch (err) {
+      return sendError(reply, err); // unknown revision → 404
+    }
+  });
+
+  // Restore = publish the old bytes as a NEW revision, attributed to whoever pressed it. History is append-only.
+  app.post("/fs/revisions/restore", { schema: fsDocs.restore }, async (req, reply) => {
+    if (!deps.fsService) return reply.code(404).send({ code: "NOT_FOUND", message: "filesystem not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "files:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = RestoreFsRevisionBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      const actor = fsActorFor(principal, agentAttributionFrom(req.headers));
+      return reply.send(
+        await deps.fsService.restoreRevision(principal.workspace, parsed.data.path, parsed.data.revision, actor),
+      );
+    } catch (err) {
+      return sendError(reply, err); // unknown revision → 404
     }
   });
 

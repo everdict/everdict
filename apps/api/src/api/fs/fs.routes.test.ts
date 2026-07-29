@@ -1,6 +1,6 @@
-import { FsService, RunService, SkillService } from "@everdict/application-control";
+import { FsService, RevisionedWorkspaceFs, RunService, SkillService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { InMemoryRunStore, InMemorySkillStore } from "@everdict/db";
+import { InMemoryFsRevisionStore, InMemoryRunStore, InMemorySkillStore } from "@everdict/db";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
@@ -13,10 +13,17 @@ const unusedDispatcher: Dispatcher = {
 
 const H = { "x-everdict-tenant": "acme" };
 
+// The composition the API actually runs: the filesystem WRAPPED in versioning, sharing one ledger with the
+// service (main.ts wires exactly this), so these tests exercise publishing/conflict/history end to end.
+function versionedFs(): FsService {
+  const ledger = new InMemoryFsRevisionStore();
+  return new FsService(new RevisionedWorkspaceFs(new InMemoryWorkspaceFs(), ledger), ledger);
+}
+
 function build(withFs = true) {
   const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
   if (!withFs) return buildServer({ service });
-  return buildServer({ service, fsService: new FsService(new InMemoryWorkspaceFs()) });
+  return buildServer({ service, fsService: versionedFs() });
 }
 
 describe("fs routes (the workspace filesystem HTTP surface)", () => {
@@ -184,5 +191,125 @@ describe("fs routes (the workspace filesystem HTTP surface)", () => {
     });
     const skill = await app.inject({ method: "GET", url: `/skills/${id}`, headers: H });
     expect(skill.json().instructions).toBe("# Edited via the shell");
+  });
+});
+
+describe("fs revisions (who published what, and safe concurrent editing)", () => {
+  const write = (
+    app: ReturnType<typeof build>,
+    payload: Record<string, unknown>,
+    headers: Record<string, string> = H,
+  ) => app.inject({ method: "PUT", url: "/fs/file", headers, payload });
+
+  it("publishes a numbered revision per write and reports the current one on read", async () => {
+    const app = build();
+    expect((await write(app, { path: "reports/q3.md", content: "draft" })).json().revision).toBe(1);
+    expect((await write(app, { path: "reports/q3.md", content: "final" })).json().revision).toBe(2);
+    const read = await app.inject({ method: "GET", url: "/fs/file?path=reports/q3.md", headers: H });
+    expect(read.json().entry.revision).toBe(2);
+  });
+
+  it("records the author of every revision, and the AGENT when one wrote on a member's behalf", async () => {
+    // Given a member's own edit followed by an agent's, declared through the attribution headers
+    const app = build();
+    await write(app, { path: "notes.md", content: "mine", message: "first" });
+    const asAgent: Record<string, string> = {
+      ...H,
+      "x-everdict-agent-id": "analyst",
+      "x-everdict-agent-name": "Analyst",
+      "x-everdict-conversation-id": "sess-9",
+    };
+    await write(app, { path: "notes.md", content: "by the agent" }, asAgent);
+    // Then the history distinguishes them — including which conversation the agent ran in
+    const history = await app.inject({ method: "GET", url: "/fs/revisions?path=notes.md", headers: H });
+    expect(history.statusCode).toBe(200);
+    expect(history.json()).toMatchObject([
+      { revision: 2, actor: { kind: "agent", agentId: "analyst", conversationId: "sess-9" } },
+      { revision: 1, actor: { kind: "member" }, message: "first" },
+    ]);
+  });
+
+  it("refuses a write built on a stale revision and hands back the merge kit", async () => {
+    // Given two authors editing revision 1 of the same file
+    const app = build();
+    await write(app, { path: "notes.md", content: "line1\nline2\nline3\n" });
+    await write(app, { path: "notes.md", content: "line1\nline2 by B\nline3\n", baseRevision: 1 });
+    // When the slower author publishes against revision 1
+    const stale = await write(app, { path: "notes.md", content: "line1 by A\nline2\nline3\n", baseRevision: 1 });
+    // Then it is refused — with the live content and an auto-merge that keeps BOTH edits
+    expect(stale.statusCode).toBe(409);
+    const data = stale.json().data;
+    expect(data).toMatchObject({ path: "notes.md", baseRevision: 1, headRevision: 2 });
+    expect(data.head.content).toBe("line1\nline2 by B\nline3\n");
+    expect(data.merge).toMatchObject({ merged: "line1 by A\nline2 by B\nline3\n", conflicts: [] });
+    // And nothing was overwritten
+    const read = await app.inject({ method: "GET", url: "/fs/file?path=notes.md", headers: H });
+    expect(read.json().content).toBe("line1\nline2 by B\nline3\n");
+  });
+
+  it("reports a true conflict with both sides when the same line was rewritten", async () => {
+    const app = build();
+    await write(app, { path: "notes.md", content: "title\n" });
+    await write(app, { path: "notes.md", content: "title by B\n", baseRevision: 1 });
+    const stale = await write(app, { path: "notes.md", content: "title by A\n", baseRevision: 1 });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().data.merge.conflicts).toMatchObject([{ ours: "title by A", theirs: "title by B" }]);
+  });
+
+  it("accepts the retry once it declares the revision it actually merged", async () => {
+    const app = build();
+    await write(app, { path: "notes.md", content: "a\n" });
+    await write(app, { path: "notes.md", content: "a\nb\n", baseRevision: 1 });
+    const retry = await write(app, { path: "notes.md", content: "a\nb\nc\n", baseRevision: 2 });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().revision).toBe(3);
+  });
+
+  it("reads a past revision's content and restores it as a NEW attributed revision", async () => {
+    // Given a file that was overwritten
+    const app = build();
+    await write(app, { path: "notes.md", content: "the good version" });
+    await write(app, { path: "notes.md", content: "the bad version" });
+    // Then the old content is still readable…
+    const old = await app.inject({ method: "GET", url: "/fs/revisions/content?path=notes.md&revision=1", headers: H });
+    expect(old.json()).toMatchObject({ content: "the good version", encoding: "utf8" });
+    // …and restoring it publishes a THIRD revision rather than rewriting history
+    const restored = await app.inject({
+      method: "POST",
+      url: "/fs/revisions/restore",
+      headers: H,
+      payload: { path: "notes.md", revision: 1 },
+    });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().revision).toBe(3);
+    const live = await app.inject({ method: "GET", url: "/fs/file?path=notes.md", headers: H });
+    expect(live.json().content).toBe("the good version");
+    const history = await app.inject({ method: "GET", url: "/fs/revisions?path=notes.md", headers: H });
+    expect(history.json()[0]).toMatchObject({ revision: 3, restoredFrom: 1 });
+  });
+
+  it("404s an unknown revision and never leaks another workspace's history", async () => {
+    const app = build();
+    await write(app, { path: "notes.md", content: "x" });
+    const missing = await app.inject({
+      method: "GET",
+      url: "/fs/revisions/content?path=notes.md&revision=99",
+      headers: H,
+    });
+    expect(missing.statusCode).toBe(404);
+    const other = await app.inject({
+      method: "GET",
+      url: "/fs/revisions?path=notes.md",
+      headers: { "x-everdict-tenant": "spica" },
+    });
+    expect(other.json()).toEqual([]);
+  });
+
+  it("carries the history with the file when it is moved", async () => {
+    const app = build();
+    await write(app, { path: "draft.md", content: "v1" });
+    await app.inject({ method: "POST", url: "/fs/move", headers: H, payload: { from: "draft.md", to: "final.md" } });
+    const history = await app.inject({ method: "GET", url: "/fs/revisions?path=final.md", headers: H });
+    expect(history.json()).toMatchObject([{ revision: 1 }]);
   });
 });

@@ -55,6 +55,7 @@ import type { ModelService } from "../core/model/model-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
 import type { McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
+import type { AgentAttribution } from "./fs/fs-actor.js";
 
 // MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
 // Each tool is authorized by the Principal's roles and scoped to workspace (the control plane is the auth/authz authority).
@@ -129,6 +130,10 @@ export interface McpToolContext {
   deps: McpDeps;
   principal: Principal;
   ws: string; // principal.workspace
+  // WHICH agent holds this session, when the client declared it at initialize (apps/agent does, per conversation).
+  // The bearer already says which MEMBER — this says which agent ran on their behalf, so authorship of what the
+  // session writes (workspace files today) names the agent and its conversation instead of just the member.
+  agent?: AgentAttribution;
 }
 
 export function ok(data: unknown): CallToolResult {
