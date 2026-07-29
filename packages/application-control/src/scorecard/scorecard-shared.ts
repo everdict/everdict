@@ -233,6 +233,11 @@ export function applyGradingPlan(cases: EvalCase[], plan?: GraderSpec[]): EvalCa
 
 export interface RunScorecardInput {
   tenant: string;
+  // INTERNAL (experiment façade only — routes never expose these two): group kind stamped on the record, and a
+  // pre-resolved dataset that BYPASSES the registry lookup (the ad-hoc task path / the graders-stripped copy).
+  // docs/architecture/execution-model.md P1.
+  kind?: "experiment";
+  inlineDataset?: Dataset;
   // submitter (principal.subject) — the owner used to resolve a private-repo case's personally-owned connection ("clone via my connection").
   // Consequently a private-repo dataset is effectively single-owner (a case's connectionId only resolves when that owner submits).
   submittedBy?: string;
@@ -265,6 +270,22 @@ export interface RunScorecardInput {
   // In-batch OOM auto-boost (opt-in — every boost re-runs the case): an OOM_KILLED case re-dispatches inside
   // the batch with doubled job-only memory up to the cap, instead of waiting for a retry-failed round-trip.
   oomAutoBoost?: boolean;
+}
+
+// P1 experiment submit — phase 1 alone (execution-model.md): EXACTLY ONE of `dataset` (registered cases,
+// graders stripped for this group) or `task` (one ad-hoc prompt case under the EXPERIMENT_ADHOC_REF sentinel).
+export interface SubmitExperimentInput {
+  tenant: string;
+  submittedBy?: string;
+  harness: { id: string; version: string };
+  dataset?: { id: string; version: string };
+  task?: { prompt: string; timeoutSec?: number };
+  trials?: number; // drive the task/cases N times (pass@k-style repetition without the verdict)
+  runtime?: string;
+  concurrency?: number;
+  retries?: number;
+  cases?: { ids?: string[]; tags?: string[]; limit?: number }; // subset selection (dataset experiments only)
+  origin?: ScorecardOrigin;
 }
 
 export interface ScorecardServiceDeps {

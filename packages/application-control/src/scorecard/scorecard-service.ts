@@ -2,6 +2,7 @@ import {
   BadRequestError,
   type CaseResult,
   type Dataset,
+  EXPERIMENT_ADHOC_REF,
   ForbiddenError,
   type HarnessSpec,
   NotFoundError,
@@ -32,6 +33,7 @@ import {
   type PullIngestInput,
   type RunScorecardInput,
   type ScorecardServiceDeps,
+  type SubmitExperimentInput,
   applyGradingPlan,
   embedHarnessSpec,
   selectSubsetCases,
@@ -51,6 +53,7 @@ export type {
   PullIngestInput,
   RunScorecardInput,
   ScorecardServiceDeps,
+  SubmitExperimentInput,
 } from "./scorecard-shared.js";
 
 // A scorecard run's async lifecycle: dataset resolution (404 if missing) → create record (202) → batch run (runSuite) → aggregate and persist.
@@ -129,7 +132,9 @@ export class ScorecardService {
           `No trace sink named '${input.traceSink}' is configured in this workspace ("none" suppresses export).`,
         );
     }
-    const resolved = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
+    const resolved =
+      input.inlineDataset ??
+      (await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest"));
     // Partial run — the rest of the pipeline (batch/judge/aggregate) operates on a dataset containing only the selected cases. Marked via record.subset.
     const { cases: selectedCases, subset } = selectSubsetCases(resolved, input.cases);
     // Run-time grading plan — this batch scores with the requested graders instead of each case's defaults (S5).
@@ -187,6 +192,7 @@ export class ScorecardService {
     const record: ScorecardRecord = ScorecardBatch.newQueued({
       id: this.newId(),
       tenant: input.tenant,
+      ...(input.kind ? { kind: input.kind } : {}),
       dataset: { id: dataset.id, version: dataset.version },
       harness: { id: input.harness.id, version: harnessVersion }, // resolved concrete version (never "latest")
       ...(origin ? { origin } : {}),
@@ -266,6 +272,57 @@ export class ScorecardService {
       },
     );
     return record;
+  }
+
+  // P1 experiment — phase 1 alone (execution-model.md): the SAME fan-out machinery as a scorecard, with no
+  // judges and every grader stripped, so caseVerdict stays undefined end to end (observational runs, no
+  // verdict pressure; analytics exclude kind:"experiment"). Ad-hoc task → one synthetic prompt case under
+  // the EXPERIMENT_ADHOC_REF sentinel (NOT re-drivable after a restart — no registry entry to re-plan from);
+  // dataset → the registered cases with graders removed (the dataset itself stays pure data).
+  async submitExperiment(input: SubmitExperimentInput): Promise<ScorecardRecord> {
+    if (input.task && input.dataset)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        {},
+        "An experiment takes exactly one of `dataset` or `task` — not both.",
+      );
+    let inline: Dataset;
+    if (input.task) {
+      inline = {
+        id: EXPERIMENT_ADHOC_REF,
+        version: "adhoc",
+        tags: [],
+        cases: [
+          {
+            id: "task",
+            env: { kind: "prompt" },
+            task: input.task.prompt,
+            graders: [],
+            timeoutSec: input.task.timeoutSec ?? 1800,
+            tags: [],
+          },
+        ],
+      };
+    } else if (input.dataset) {
+      const resolved = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
+      inline = { ...resolved, cases: resolved.cases.map((c) => ({ ...c, graders: [] })) };
+    } else {
+      throw new BadRequestError("BAD_REQUEST", {}, "An experiment takes exactly one of `dataset` or `task`.");
+    }
+    return this.submit({
+      tenant: input.tenant,
+      kind: "experiment",
+      inlineDataset: inline,
+      dataset: { id: inline.id, version: inline.version },
+      harness: input.harness,
+      ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
+      ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.trials !== undefined ? { trials: input.trials } : {}),
+      ...(input.runtime ? { runtime: input.runtime } : {}),
+      ...(input.concurrency !== undefined ? { concurrency: input.concurrency } : {}),
+      ...(input.retries !== undefined ? { retries: input.retries } : {}),
+      ...(input.cases ? { cases: input.cases } : {}),
+    });
   }
 
   // Resolve each selected judge's version (latest→concrete) via the registry, so the recorded orchestration pins the

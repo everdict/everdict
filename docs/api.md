@@ -27,6 +27,8 @@ arrives by polling or webhook.
 | `GET`  | `/runtimes` | workspace-owned + `_shared` execution runtimes (`runtimes:read`) |
 | `GET`  | `/runtimes/:id/versions/:version` | full `RuntimeSpec`; `version` may be `latest` (`runtimes:read`) |
 | `POST` | `/scorecards` | `{ dataset, harness, judges?, runtime? }` → **202** `ScorecardRecord(queued)` (`scorecards:run`, member+) |
+| `POST` | `/groups` | run an **experiment** (ungraded phase-1 group, execution-model P1): `{ harness, dataset \| task:{prompt}, trials?, runtime? }` → **202** `ScorecardRecord(kind:"experiment")` — graders stripped, no judges/verdict; excluded from leaderboard/trend/analysis (`scorecards:run`) |
+| `GET`  | `/groups/:id` | the group record with hydrated detail — same record as `/scorecards/:id`, kind-aware name (`scorecards:read`) |
 | `POST` | `/scorecards/ingest` | `{ dataset, harness, traces:[{caseId,trace:TraceEvent[]}], judges? }` → **202** (no harness run; push) (`scorecards:run`) |
 | `POST` | `/scorecards/ingest/pull` | `{ dataset, harness, source:{kind:otel\|mlflow,endpoint,authSecret?}, runs:[{caseId,runId}], judges? }` → **202** (pull from tenant OTel/MLflow; `authSecret`=SecretStore key) (`scorecards:run`) |
 | `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |

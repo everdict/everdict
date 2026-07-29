@@ -146,6 +146,16 @@ describe("InMemoryScorecardStore", () => {
     expect(await store.list("acme", { judge: "unknown" })).toEqual([]);
   });
 
+  it("list(filter.kind) separates experiments from scorecards — and 'scorecard' matches every pre-field record", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(rec({ id: "a", kind: "experiment" }));
+    await store.create(rec({ id: "b" })); // a real scorecard (kind unset — every pre-mig-0093 row looks like this)
+    expect((await store.list("acme", { kind: "experiment" })).map((r) => r.id)).toEqual(["a"]);
+    expect((await store.list("acme", { kind: "scorecard" })).map((r) => r.id)).toEqual(["b"]);
+    expect(await store.list("acme")).toHaveLength(2); // unset = everything (the web list shows both, badged)
+    expect((await store.get("a"))?.kind).toBe("experiment");
+  });
+
   it("list(filter.scheduleId) narrows to the runs a schedule fired (origin.scheduleId — schedule-detail run history)", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec({ id: "a", origin: { source: "schedule", scheduleId: "sch-1" } }));
@@ -196,10 +206,20 @@ describe("PgScorecardStore", () => {
     await new PgScorecardStore(client).create(rec({ createdBy: "user-alice" }));
     expect(calls[0]?.text).toMatch(/INSERT INTO everdict_scorecards/);
     expect(calls[0]?.params?.[0]).toBe("sc1");
-    expect(calls[0]?.params?.[8]).toBeNull(); // no models (rec default)
-    expect(calls[0]?.params?.[9]).toBeNull(); // no judge_models
-    expect(calls[0]?.params?.[11]).toBe("user-alice"); // created_by (runner)
-    expect(calls[0]?.params?.[12]).toBeNull(); // no scorecard
+    expect(calls[0]?.params?.[2]).toBeNull(); // no kind (rec default = scorecard; mig 0093)
+    expect(calls[0]?.params?.[9]).toBeNull(); // no models (rec default)
+    expect(calls[0]?.params?.[10]).toBeNull(); // no judge_models
+    expect(calls[0]?.params?.[12]).toBe("user-alice"); // created_by (runner)
+    expect(calls[0]?.params?.[13]).toBeNull(); // no runtime
+  });
+
+  it("list(filter.kind) narrows in SQL — 'scorecard' also matches every pre-mig-0093 NULL row", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(client).list("acme", { kind: "experiment" });
+    expect(calls[0]?.text).toMatch(/kind = 'experiment'/);
+    const { client: c2, calls: calls2 } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(c2).list("acme", { kind: "scorecard" });
+    expect(calls2[0]?.text).toMatch(/kind IS NULL OR kind <> 'experiment'/);
   });
 
   it("persists outbox events in the SAME STATEMENT as the write (E0 — data-modifying CTE, same as PgRunStore)", async () => {
@@ -301,7 +321,7 @@ describe("PgScorecardStore", () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     await new PgScorecardStore(client).create(rec({ analysisRef: ref }));
     expect(calls[0]?.text).toMatch(/analysis_ref/); // column present in the INSERT list (absent pre-fix)
-    expect(calls[0]?.params?.[16]).toBe(ref); // positioned after scorecard ($16), before sink_export
+    expect(calls[0]?.params?.[17]).toBe(ref); // positioned after scorecard ($17), before sink_export
   });
 
   it("list(filter) → dataset_id/status clauses in the SQL WHERE + parameterization (avoids a full scan)", async () => {

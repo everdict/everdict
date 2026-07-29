@@ -100,6 +100,7 @@ import { registerEventRoutes } from "./api/event/event.routes.js";
 import { registerFrontdoorCallbackRoutes } from "./api/execution/frontdoor-callback.routes.js";
 import { registerFsRoutes } from "./api/fs/fs.routes.js";
 import { registerGithubAppRoutes } from "./api/github-app/github-app.routes.js";
+import { registerGroupRoutes } from "./api/group/group.routes.js";
 import { registerHarnessTemplateRoutes } from "./api/harness/harness-template.routes.js";
 import { registerHarnessRoutes } from "./api/harness/harness.routes.js";
 import { registerImageRegistryRoutes } from "./api/image-registry/image-registry.routes.js";
@@ -209,6 +210,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerRunRoutes(routes, deps);
     registerRunObservabilityRoutes(routes, deps);
     registerScorecardRoutes(routes, deps);
+    registerGroupRoutes(routes, deps);
     registerScheduleRoutes(routes, deps);
     registerHarnessTemplateRoutes(routes, deps);
     registerHarnessRoutes(routes, deps);

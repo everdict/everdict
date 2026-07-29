@@ -31,6 +31,7 @@ export type ScorecardOutcomeExtras = Partial<
 export interface NewQueuedBatchInput {
   id: string;
   tenant: string;
+  kind?: "experiment"; // group kind (P1) — absent = scorecard (the default); experiment = phase 1 alone, ungraded
   dataset: { id: string; version: string };
   harness: { id: string; version: string }; // resolved concrete version (never "latest")
   origin?: ScorecardOrigin; // trigger provenance (submit) / retry lineage (retryOf)
@@ -134,6 +135,7 @@ export class ScorecardBatch {
     return {
       id: input.id,
       tenant: input.tenant,
+      ...(input.kind ? { kind: input.kind } : {}),
       dataset: input.dataset,
       harness: input.harness,
       status: "queued",

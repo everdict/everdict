@@ -52,7 +52,11 @@ export class InMemoryScorecardStore implements ScorecardStore {
       .filter((c) => !filter?.harness || c.harness.id === filter.harness)
       .filter((c) => !filter?.status || c.status === filter.status)
       .filter((c) => !filter?.judge || (c.orchestration?.judges ?? []).some((j) => j.id === filter.judge))
-      .filter((c) => !filter?.scheduleId || c.origin?.scheduleId === filter.scheduleId);
+      .filter((c) => !filter?.scheduleId || c.origin?.scheduleId === filter.scheduleId)
+      // kind filter (P1): "scorecard" also matches every pre-field record (kind unset = scorecard).
+      .filter(
+        (c) => !filter?.kind || (filter.kind === "experiment" ? c.kind === "experiment" : c.kind !== "experiment"),
+      );
     // List omits the heavy scorecard/steps + detail-only runIds/export/analysisRef (summary/models only) — get the detail via get.
     return all.map(({ scorecard, steps, runIds, export: _export, analysisRef, ...rest }) => rest);
   }

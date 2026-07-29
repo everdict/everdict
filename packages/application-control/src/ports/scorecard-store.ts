@@ -9,6 +9,9 @@ export interface ScorecardListFilter {
   status?: ScorecardStatus;
   judge?: string; // applied Agent Judge id (orchestration.judges[].id, any version) — the judge detail's evaluation history
   scheduleId?: string; // the schedule that fired the run (origin.scheduleId) — the schedule detail's run history
+  // Group kind (P1): "experiment" = only ungraded phase-1 groups; "scorecard" = only real scorecards (incl. every
+  // pre-mig-0093 NULL row). Unset = everything (current behavior — the web list shows both, badged).
+  kind?: "experiment" | "scorecard";
 }
 
 // Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.

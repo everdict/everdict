@@ -6,6 +6,7 @@ import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
 interface ScorecardRow {
   id: string;
   tenant: string;
+  kind: string | null; // group kind (mig 0093) — NULL = scorecard, 'experiment' = ungraded phase-1 group
   dataset_id: string;
   dataset_version: string;
   harness_id: string;
@@ -37,6 +38,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
   return ScorecardRecordSchema.parse({
     id: row.id,
     tenant: row.tenant,
+    kind: row.kind ?? undefined, // lightweight → included in list too (experiment badge / analytics exclusion)
     dataset: { id: row.dataset_id, version: row.dataset_version },
     harness: { id: row.harness_id, version: row.harness_version },
     status: row.status,
@@ -61,13 +63,14 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, scorecard, analysis_ref, sink_export, error, steps, run_ids, created_at, updated_at)";
-const SCORECARD_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, scorecard, analysis_ref, sink_export, error, steps, run_ids, created_at, updated_at)";
+const SCORECARD_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)";
 
 function scorecardInsertParams(r: ScorecardRecord): unknown[] {
   return [
     r.id,
     r.tenant,
+    r.kind ?? null,
     r.dataset.id,
     r.dataset.version,
     r.harness.id,
@@ -239,8 +242,12 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(`origin->>'scheduleId' = $${i++}`);
       vals.push(filter.scheduleId);
     }
+    if (filter?.kind) {
+      // "scorecard" = every pre-mig-0093 row too (NULL) — experiments are the positively-marked minority.
+      conds.push(filter.kind === "experiment" ? "kind = 'experiment'" : "(kind IS NULL OR kind <> 'experiment')");
+    }
     const res = await this.client.query<ScorecardRow>(
-      `SELECT id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, error, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, error, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

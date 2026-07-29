@@ -66,10 +66,24 @@ to `origin`'s *where*; older records / machine principals may lack it) — light
 the web's author display + user filter (same pattern as datasets/harnesses `created_by`).
 Migrations: `packages/db/migrations/0006_create_scorecards.sql`, `0035_add_scorecard_created_by.sql`.
 
+## Experiments (ungraded phase-1 groups — execution-model P1)
+An **experiment** is a scorecard row that stopped after phase 1 (decision O3: the RunGroup generalizes
+`ScorecardRecord` in concept, the table is kept — `kind:"experiment"`, mig `0093`): the SAME fan-out and child
+runs, with every grader stripped and no judges, so `caseVerdict` stays `undefined` end to end — the child runs
+and their trajectories are the product ("does this harness even work / what does it do"). Submit via
+`POST /groups` / MCP `run_experiment` with EXACTLY ONE of `dataset` (registered cases, graders removed for this
+group only — the dataset stays pure data) or `task:{prompt}` (a one-off case under the `EXPERIMENT_ADHOC_REF`
+(`_adhoc`) sentinel — **not re-drivable** after a control-plane restart, since there is no registry entry to
+re-plan from); `trials` repeats it N times. Read back through `GET /groups/:id` or the scorecard surface (one
+table). Leaderboard/trend/analysis exclude `kind:"experiment"` at the store filter; the list shows both, badged.
+Phase 2 lands separately (`POST /groups/:id/score` — P2): scoring a group's runs after the fact, which also
+covers "promote experiment → scorecard" and re-scoring.
+
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |
 |---|---|---|
 | `POST /scorecards` `{dataset, harness, judges?, runtime?, concurrency?, cases?{ids,tags,limit}}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
+| `POST /groups` `{harness, dataset \| task:{prompt}, trials?, runtime?}` → 202 (P1 experiment; read = `GET /groups/:id` ↔ `get_scorecard`) | `run_experiment` | `scorecards:run` (member+) |
 | `POST /scorecards/:id/cancel` → 200 (the cancelled record) | `cancel_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest` `{dataset?, harness?, traces[], judges?}` → 202 | `ingest_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest/pull` `{dataset?, harness?, source{name\|kind,endpoint,authSecret?}, runs[], judges?}` → 202 | `pull_scorecard` | `scorecards:run` (member+) |

@@ -17,9 +17,11 @@ import { registerEventTools } from "./api/event/event.mcp.js";
 import type { AgentAttribution } from "./api/fs/fs-actor.js";
 import { registerFsTools } from "./api/fs/fs.mcp.js";
 import { registerGithubAppTools } from "./api/github-app/github-app.mcp.js";
+import { registerGroupTools } from "./api/group/group.mcp.js";
 import { registerHarnessTemplateTools } from "./api/harness/harness-template.mcp.js";
 import { registerHarnessTools } from "./api/harness/harness.mcp.js";
 import { registerImageRegistryTools } from "./api/image-registry/image-registry.mcp.js";
+import { registerImagesTools } from "./api/images/images.mcp.js";
 import { registerJudgeTools } from "./api/judge/judge.mcp.js";
 import { registerKnowledgeTools } from "./api/knowledge/knowledge.mcp.js";
 import { registerMattermostTools } from "./api/mattermost/mattermost.mcp.js";
@@ -62,6 +64,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
 
   registerRunTools(server, ctx);
   registerScorecardTools(server, ctx);
+  registerGroupTools(server, ctx);
   registerQueueTools(server, ctx);
   registerBillingTools(server, ctx);
   registerHarnessTemplateTools(server, ctx);
@@ -98,6 +101,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerMattermostTools(server, ctx);
   registerTraceSourceTools(server, ctx);
   registerImageRegistryTools(server, ctx);
+  registerImagesTools(server, ctx);
   registerEnvironmentAdoptionTools(server, ctx);
   registerCiLinkTools(server, ctx);
   registerRunnerTools(server, ctx);

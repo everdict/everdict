@@ -65,6 +65,7 @@ export class ScorecardAnalyticsService {
     const records = await this.deps.store.list(tenant, {
       dataset: opts.datasetId,
       status: "succeeded",
+      kind: "scorecard", // experiments are ungraded (P1) — they never belong on a trend
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
     });
     return trendSeries(records, opts);
@@ -87,6 +88,7 @@ export class ScorecardAnalyticsService {
     const records = await this.deps.store.list(tenant, {
       dataset: opts.datasetId,
       status: "succeeded",
+      kind: "scorecard", // experiments are ungraded (P1) — they never rank
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
     });
     return leaderboard(records, opts);
@@ -102,6 +104,7 @@ export class ScorecardAnalyticsService {
     const dataset = f.dataset?.length === 1 ? f.dataset[0] : undefined;
     const harness = f.harness?.length === 1 ? f.harness[0] : undefined;
     const records = await this.deps.store.list(tenant, {
+      kind: "scorecard", // experiments are ungraded (P1) — score-less rows would only add noise to the pivot
       ...(dataset !== undefined ? { dataset } : {}),
       ...(harness !== undefined ? { harness } : {}),
     });

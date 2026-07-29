@@ -3851,3 +3851,82 @@ describe("ScorecardService.delete — hard delete (creator-or-admin, terminal on
     });
   });
 });
+
+describe("ScorecardService.submitExperiment — ungraded phase-1 groups (P1)", () => {
+  // Records every dispatched job so the tests can assert what phase 1 actually ran.
+  const capture = () => {
+    const jobs: Parameters<Dispatcher["dispatch"]>[0][] = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        jobs.push(job);
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } }],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [], // ungraded — nothing scored the run
+        };
+      },
+    };
+    return { jobs, dispatcher };
+  };
+
+  it("an ad-hoc task experiment runs the prompt N times under the _adhoc sentinel — no judges, no verdict", async () => {
+    const { jobs, dispatcher } = capture();
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({ dispatcher, store, datasets: new InMemoryDatasetRegistry() });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      submittedBy: "alice",
+      harness: { id: "scripted", version: "0" },
+      task: { prompt: "say hi" },
+      trials: 2,
+    });
+    expect(record.kind).toBe("experiment");
+    expect(record.dataset).toEqual({ id: "_adhoc", version: "adhoc" }); // EXPERIMENT_ADHOC_REF sentinel
+    expect(record.orchestration?.judges).toEqual([]);
+    const done = await waitTerminal(store, record.id);
+    expect(done.status).toBe("succeeded");
+    expect(jobs).toHaveLength(2); // trials — the same task, twice
+    expect(jobs[0]?.evalCase.task).toBe("say hi");
+    expect(jobs[0]?.evalCase.graders).toEqual([]);
+    // Ungraded end to end: no pass-deciding score exists, so no summary row carries a passRate.
+    expect((done.summary ?? []).every((row) => row.passRate === undefined)).toBe(true);
+  });
+
+  it("a dataset experiment strips every case grader for the group (the dataset itself stays pure data)", async () => {
+    const { jobs, dispatcher } = capture();
+    const datasets = new InMemoryDatasetRegistry();
+    const graded: Dataset = datasetWithCase();
+    await datasets.register("acme", {
+      ...graded,
+      cases: graded.cases.map((c) => ({ ...c, graders: [{ id: "steps" }] })),
+    });
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({ dispatcher, store, datasets });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      dataset: { id: "d", version: "1.0.0" },
+    });
+    expect(record.kind).toBe("experiment");
+    expect(record.dataset).toEqual({ id: "d", version: "1.0.0" }); // the real ref — re-drivable, unlike _adhoc
+    await waitTerminal(store, record.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.evalCase.graders).toEqual([]); // stripped for THIS group only
+    expect((await datasets.get("acme", "d", "1.0.0")).cases[0]?.graders).toHaveLength(1); // registry untouched
+  });
+
+  it("rejects both/neither of dataset and task with a 400", async () => {
+    const service = new ScorecardService({
+      dispatcher: capture().dispatcher,
+      store: new InMemoryScorecardStore(),
+      datasets: new InMemoryDatasetRegistry(),
+    });
+    const base = { tenant: "acme", harness: { id: "scripted", version: "0" } };
+    await expect(
+      service.submitExperiment({ ...base, dataset: { id: "d", version: "1" }, task: { prompt: "hi" } }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(service.submitExperiment(base)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});

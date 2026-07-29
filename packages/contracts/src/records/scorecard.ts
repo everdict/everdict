@@ -134,9 +134,20 @@ export type ScorecardExport = z.infer<typeof ScorecardExportSchema>;
 // real datasetId. docs/scorecards.md
 export const TRACE_EVAL_REF = "_traces";
 
+// Reserved sentinel dataset ref for an EXPERIMENT over an ad-hoc task (execution-model.md P1) — "drive this
+// harness on a one-off prompt, N times" has no registrable dataset, so the NOT-NULL dataset columns carry
+// this sentinel (same convention as TRACE_EVAL_REF). An ad-hoc experiment is NOT re-drivable after a
+// control-plane restart (there is no registry entry to re-plan from — the recovery path settles it like a
+// pre-caseSpec record); dataset-backed experiments re-drive normally.
+export const EXPERIMENT_ADHOC_REF = "_adhoc";
+
 export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
+  // Group kind (execution-model.md P1, decision O3: the RunGroup generalizes ScorecardRecord IN CONCEPT, the
+  // table is kept). "experiment" = phase 1 alone — same fan-out, same child runs, NO judges/graders and no
+  // verdict pressure (caseVerdict stays undefined; analytics exclude it). Absent = a scorecard (the default).
+  kind: z.enum(["experiment"]).optional(),
   dataset: z.object({ id: z.string(), version: z.string() }),
   harness: z.object({ id: z.string(), version: z.string() }), // resolved concrete version (never "latest")
   status: ScorecardStatusSchema,
