@@ -84,10 +84,28 @@ export interface KnowledgeReindexResult {
 
 // The whole-workspace graph projection for rendering (Settings › Knowledge): the reachable nodes + edges plus derived
 // counts by node type / predicate for the overview. A read-model over the query engine — no new store surface.
+//
+// The edge shape is deliberately the RENDER shape, not the stored `EdgeMention`: this payload ships whole to a
+// browser, and at ~250 nodes the audit spine (origin/extractor/confidence/evidencePath/sourceKind/sourceId/tenant/
+// createdAt on every edge) was two thirds of a 640 KB response. Provenance has its own surfaces — `related`,
+// `node`, `listMentions` — which is where an auditor (or an agent) asks who observed a relationship and from what.
+export interface KnowledgeGraphEdge {
+  id: string;
+  predicate: Predicate;
+  subjectNodeId: string;
+  objectNodeId: string;
+  subjectTypeHint?: NodeType;
+  objectTypeHint?: NodeType;
+  polarity: EdgeMention["polarity"];
+  // Predicate-specific display attributes — `about` carries the claim's [asOf, verifiedVersion] interval, which is
+  // the one thing a renderer reads off an edge.
+  edgeAttrs: Record<string, unknown>;
+}
+
 export interface KnowledgeGraphResult {
   root: string;
   nodes: KnowledgeNode[];
-  edges: EdgeMention[];
+  edges: KnowledgeGraphEdge[];
   stats: {
     totalNodes: number;
     totalEdges: number;
@@ -194,7 +212,25 @@ export class KnowledgeService {
     for (const node of overlay.references) if (!nodes.has(node.nodeId)) nodes.set(node.nodeId, node);
 
     const nodeList = [...nodes.values()];
-    const edgeList = [...edges.values()];
+    // Only edges whose BOTH endpoints are on the map: an edge to an unmaterialised node cannot be drawn and cannot
+    // be listed as a relationship, so shipping it is pure weight. In practice this is the scoping star —
+    // `in_workspace` to the (never-materialised) workspace hub and `created_by` to unharvested users — which was
+    // ~460 of 990 edges on a 265-node workspace.
+    const edgeList = [...edges.values()].flatMap((e) => {
+      if (e.subjectNodeId === undefined || e.objectNodeId === undefined) return [];
+      if (!nodes.has(e.subjectNodeId) || !nodes.has(e.objectNodeId)) return [];
+      const edge: KnowledgeGraphEdge = {
+        id: e.id,
+        predicate: e.predicate,
+        subjectNodeId: e.subjectNodeId,
+        objectNodeId: e.objectNodeId,
+        ...(e.subjectTypeHint !== undefined ? { subjectTypeHint: e.subjectTypeHint } : {}),
+        ...(e.objectTypeHint !== undefined ? { objectTypeHint: e.objectTypeHint } : {}),
+        polarity: e.polarity,
+        edgeAttrs: e.edgeAttrs,
+      };
+      return [edge];
+    });
     const nodesByType: Partial<Record<NodeType, number>> = {};
     for (const n of nodeList) nodesByType[n.type] = (nodesByType[n.type] ?? 0) + 1;
     const edgesByPredicate: Partial<Record<Predicate, number>> = {};

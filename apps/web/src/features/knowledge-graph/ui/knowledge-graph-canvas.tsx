@@ -39,7 +39,9 @@ export interface GraphCanvasHandle {
 const MIN_SCALE = 0.15
 const MAX_SCALE = 4
 const LABEL_SCALE = 0.85 // below this, only focused/hub labels are drawn — zoom in to read the rest
+const HUB_LABEL_SCALE = 0.45 // …and below THIS even the hub labels go: zoomed that far out they overlap into mush
 const HUB_LABELS = 14 // how many of the best-connected nodes stay labelled at rest
+const MIN_SCREEN_RADIUS = 2.4 // px — a node stays visible when a big graph is framed far out
 const CLICK_SLOP = 4 // px of pointer travel still counted as a click, not a drag
 
 interface View {
@@ -203,7 +205,7 @@ export function KnowledgeGraphCanvas({
       if (!meta) continue
       const alpha = presence(node.id)
       if (alpha < 0.03) continue
-      const r = radiusFor(node.degree)
+      const r = Math.max(radiusFor(node.degree), MIN_SCREEN_RADIUS / view.scale)
       const color = nodeColor(meta.type)
       const isFocus = node.id === focusId
       const isSelected = node.id === selectedRef.current
@@ -240,7 +242,7 @@ export function KnowledgeGraphCanvas({
         (matched !== null && matched.has(node.id)) ||
         focusNeighbors?.has(node.id) === true ||
         view.scale >= LABEL_SCALE ||
-        hubLabels.has(node.id)
+        (hubLabels.has(node.id) && view.scale >= HUB_LABEL_SCALE)
       if (labelled) {
         const text = meta.label.length > 34 ? `${meta.label.slice(0, 33)}…` : meta.label
         labels.push({ x: node.x, y: node.y + r + 11 / view.scale, text, alpha })

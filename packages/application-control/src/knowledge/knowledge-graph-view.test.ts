@@ -88,6 +88,28 @@ describe("KnowledgeService.graph", () => {
     ).toHaveLength(2);
   });
 
+  it("ships only what the map can draw: no half-dangling edges, no audit spine", async () => {
+    const svc = new KnowledgeService({
+      store: emptyStore,
+      contextSources: { knowledgeEntries: { list: async () => [entry("flaky-login", [webAgent])] } },
+    });
+
+    const graph = await svc.graph("acme");
+
+    // The claim's `in_workspace` / `created_by` edges point at a hub and a user nobody materialised — undrawable,
+    // unlistable, and (on a real workspace) two thirds of the payload.
+    expect(graph.edges.map((e) => e.predicate).sort()).toEqual(["about"]);
+    expect(graph.stats.totalEdges).toBe(1);
+    for (const e of graph.edges) {
+      expect(graph.nodes.some((n) => n.nodeId === e.subjectNodeId)).toBe(true);
+      expect(graph.nodes.some((n) => n.nodeId === e.objectNodeId)).toBe(true);
+      // Provenance lives on `related` / `node` / listMentions, not on every edge of a whole-workspace render payload.
+      expect(e).not.toHaveProperty("evidencePath");
+      expect(e).not.toHaveProperty("sourceId");
+      expect(e).not.toHaveProperty("confidence");
+    }
+  });
+
   it("never shadows a harvested node with a reference stub", async () => {
     const harvested: KnowledgeNode = {
       nodeId: "harness:acme:web-agent@2.1.0",

@@ -45,6 +45,24 @@ async function build(withKnowledge: boolean) {
   await store.putNodes(h.nodes);
   await store.putMentions(h.mentions);
   await store.putEdges(h.edges);
+  // The harness the scorecard evaluated, materialised the way its own harvester would (a reindex covers the
+  // registries too). Without a node row on BOTH ends an edge is not drawable, so the graph read-model omits it —
+  // this is what makes the scorecard→harness `evaluates` edge part of the rendered map.
+  await store.putNodes([
+    {
+      nodeId: HARNESS_NODE,
+      tenant: "acme",
+      type: "harness",
+      key: "web-agent",
+      version: "2.1.0",
+      label: "web-agent@2.1.0",
+      attrs: {},
+      resolution: "resolved",
+      evidenceCount: 1,
+      createdAt: "2026-07-27T00:00:00Z",
+      updatedAt: "2026-07-27T00:00:00Z",
+    },
+  ]);
   const scorecards = new InMemoryScorecardStore();
   await scorecards.create(SCORECARD);
   const datasets = new InMemoryDatasetRegistry();
@@ -191,6 +209,9 @@ describe("knowledge routes", () => {
     expect(body.stats.nodesByType.scorecard).toBe(1);
     expect(body.stats.totalNodes).toBe(body.nodes.length);
     expect(body.edges.some((e) => e.predicate === "evaluates")).toBe(true);
+    // …but the scoping star does NOT ship: the workspace hub is never materialised, so `in_workspace` has no
+    // second endpoint to draw to. On a real workspace that is most of the payload.
+    expect(body.edges.some((e) => e.predicate === "in_workspace")).toBe(false);
   });
 
   it("400s a graph depth below 1", async () => {

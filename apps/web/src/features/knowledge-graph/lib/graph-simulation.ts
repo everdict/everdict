@@ -27,6 +27,8 @@ export interface Simulation {
   links: SimulationLink[]
   index: Map<string, number>
   alpha: number
+  // Cooling rate, derived from the node count — see alphaDecayFor.
+  alphaDecay: number
 }
 
 export interface SimulationEdge {
@@ -39,13 +41,20 @@ const GOLDEN_ANGLE = 2.399963229728653 // radians — the phyllotaxis seed angle
 const LINK_DISTANCE = 96 // the spring's rest length
 const LINK_STRENGTH = 0.045
 const REPULSION = 3200 // many-body strength; force = REPULSION / d²
-const REPULSION_RANGE = 520 // beyond this two nodes stop pushing each other (keeps distant clusters compact)
 const CENTER_PULL = 0.006 // weak drift back to the origin so nothing escapes the frame
 const VELOCITY_DECAY = 0.62
-const ALPHA_DECAY = 0.022
 
 // Below this the picture no longer visibly moves — the caller stops ticking (and stops burning frames).
 export const ALPHA_MIN = 0.006
+
+// A big graph needs a LONGER settle, not a faster one: the same cooling schedule that suits 20 nodes freezes 250
+// of them mid-collapse, leaving a hairball with a few stragglers flung wide. Ticks scale with √n (≈200 at 20
+// nodes, ≈450 at 250) and the loop still stops dead at rest, so the cost is a slightly longer opening animation,
+// not a permanently spinning frame.
+function alphaDecayFor(n: number): number {
+  const ticks = 90 * Math.sqrt(Math.max(4, n))
+  return 1 - Math.exp(Math.log(ALPHA_MIN) / ticks)
+}
 
 export function createSimulation(nodeIds: string[], edges: SimulationEdge[]): Simulation {
   const index = new Map<string, number>(nodeIds.map((id, i) => [id, i]))
@@ -65,7 +74,7 @@ export function createSimulation(nodeIds: string[], edges: SimulationEdge[]): Si
     nodes[a].degree += 1
     nodes[b].degree += 1
   }
-  return { nodes, links, index, alpha: 1 }
+  return { nodes, links, index, alpha: 1, alphaDecay: alphaDecayFor(n) }
 }
 
 // Advance one frame. Returns whether the picture is still moving (alpha above the rest threshold).
@@ -75,7 +84,9 @@ export function tickSimulation(sim: Simulation): boolean {
   if (n === 0) return false
   const alpha = sim.alpha
 
-  // Many-body repulsion (all pairs, range-limited). The node cap upstream keeps this well inside a frame budget.
+  // Many-body repulsion over ALL pairs — deliberately unbounded. A distance cutoff makes big graphs collapse:
+  // clusters that drift past it stop seeing each other, so they never push apart and the picture becomes a knot
+  // with stragglers. At the upstream node cap this is ~34k pairs a tick (single-digit milliseconds).
   for (let i = 0; i < n; i++) {
     const a = nodes[i]
     for (let j = i + 1; j < n; j++) {
@@ -83,7 +94,6 @@ export function tickSimulation(sim: Simulation): boolean {
       let dx = a.x - b.x
       let dy = a.y - b.y
       let d2 = dx * dx + dy * dy
-      if (d2 > REPULSION_RANGE * REPULSION_RANGE) continue
       if (d2 < 1) {
         // Coincident — separate them along an index-derived direction (deterministic, never random).
         dx = ((i * 13 + 7) % 11) / 11 - 0.5
@@ -132,7 +142,7 @@ export function tickSimulation(sim: Simulation): boolean {
     node.y += node.vy
   }
 
-  sim.alpha = Math.max(0, sim.alpha - sim.alpha * ALPHA_DECAY)
+  sim.alpha = Math.max(0, sim.alpha - sim.alpha * sim.alphaDecay)
   return sim.alpha > ALPHA_MIN
 }
 
