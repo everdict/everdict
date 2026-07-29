@@ -193,7 +193,7 @@ export async function makePersistence(): Promise<Persistence> {
     return {
       store: new InMemoryRunStore(platformEventStore),
       recordingStore: new InMemoryRecordingStore(),
-      scorecardStore: new InMemoryScorecardStore(),
+      scorecardStore: new InMemoryScorecardStore(platformEventStore),
       keyStore: new InMemoryTenantKeyStore(),
       harnessTemplateRegistry,
       harnessInstanceRegistry: new InMemoryHarnessInstanceRegistry(harnessTemplateRegistry),

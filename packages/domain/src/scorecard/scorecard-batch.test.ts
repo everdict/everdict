@@ -211,12 +211,15 @@ describe("ScorecardBatch — guards (the SSOT for legality)", () => {
   });
 });
 
-describe("ScorecardBatch — transitions (guard, then return the store patch)", () => {
+describe("ScorecardBatch — transitions (guard, then return {patch, facts})", () => {
   it("start moves a queued or running batch to running; a terminal batch rejects it with ConflictError", () => {
-    expect(ScorecardBatch.from(queued()).start("t1")).toEqual({ status: "running", updatedAt: "t1" });
+    expect(ScorecardBatch.from(queued()).start("t1")).toEqual({
+      patch: { status: "running", updatedAt: "t1" },
+      facts: [],
+    });
     expect(ScorecardBatch.from({ ...queued(), status: "running" }).start("t1")).toEqual({
-      status: "running",
-      updatedAt: "t1",
+      patch: { status: "running", updatedAt: "t1" },
+      facts: [],
     });
     expect(() => ScorecardBatch.from({ ...queued(), status: "superseded" }).start("t1")).toThrow(ConflictError);
   });
@@ -224,18 +227,39 @@ describe("ScorecardBatch — transitions (guard, then return the store patch)", 
   it("succeed and fail stamp the terminal status plus the outcome extras verbatim", () => {
     const summary = [{ metric: "tests-pass", count: 1, mean: 1, passRate: 1 }];
     const live = ScorecardBatch.from({ ...queued(), status: "running" });
-    expect(live.succeed({ summary, runIds: ["r1"] }, "t2")).toEqual({
+    expect(live.succeed({ summary, runIds: ["r1"] }, "t2").patch).toEqual({
       status: "succeeded",
       summary,
       runIds: ["r1"],
       updatedAt: "t2",
     });
-    expect(live.fail({ code: "INTERNAL", message: "boom", phase: "judges" }, { steps: [] }, "t2")).toEqual({
+    expect(live.fail({ code: "INTERNAL", message: "boom", phase: "judges" }, { steps: [] }, "t2").patch).toEqual({
       status: "failed",
       error: { code: "INTERNAL", message: "boom", phase: "judges" },
       steps: [],
       updatedAt: "t2",
     });
+  });
+
+  it("succeed/fail emit the completion fact for an initiated batch — passRate pointer included, machine-fired silent", () => {
+    const summary = [{ metric: "tests-pass", count: 2, mean: 0.5, passRate: 0.5 }];
+    const initiated = ScorecardBatch.from({ ...queued({ createdBy: "alice" }), status: "running" });
+    expect(initiated.succeed({ summary }, "t2").facts).toEqual([
+      {
+        kind: "scorecard.completed",
+        subject: { type: "scorecard", id: "sc1" },
+        actor: "alice",
+        recipient: "alice",
+        payload: { status: "succeeded", dataset: "d@1.0.0", harness: "h@1", passRate: 0.5 },
+        message: "Scorecard sc1 succeeded — d@1.0.0 × h@1 (pass rate 50%)",
+      },
+    ]);
+    // A bare failure (no extras.summary) falls back to the record's persisted summary — the notification gate's exact read.
+    const failed = initiated.fail({ code: "INTERNAL", message: "boom" }, {}, "t2").facts;
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatchObject({ kind: "scorecard.failed", payload: { status: "failed" } });
+    // Machine-fired (no createdBy): settles silently — the gate the notification path always applied.
+    expect(ScorecardBatch.from({ ...queued(), status: "running" }).succeed({ summary }, "t2").facts).toEqual([]);
   });
 
   it("every terminal state rejects succeed/fail/start/supersede/cancel — first terminal write wins", () => {
@@ -249,34 +273,52 @@ describe("ScorecardBatch — transitions (guard, then return the store patch)", 
     }
   });
 
-  it("cancel stops a live batch with the CANCELLED error", () => {
-    const live = ScorecardBatch.from({ ...queued(), status: "running" });
+  it("cancel stops a live batch with the CANCELLED error and emits the cancelled fact (born at the transition)", () => {
+    const live = ScorecardBatch.from({ ...queued({ createdBy: "alice" }), status: "running" });
     expect(live.cancel("t3")).toEqual({
-      status: "cancelled",
-      error: { code: "CANCELLED", message: "Stopped by user" },
-      updatedAt: "t3",
+      patch: {
+        status: "cancelled",
+        error: { code: "CANCELLED", message: "Stopped by user" },
+        updatedAt: "t3",
+      },
+      facts: [
+        {
+          kind: "scorecard.cancelled",
+          subject: { type: "scorecard", id: "sc1" },
+          actor: "alice",
+          recipient: "alice",
+          payload: { status: "cancelled", dataset: "d@1.0.0", harness: "h@1" },
+          message: "Scorecard sc1 cancelled — d@1.0.0 × h@1",
+        },
+      ],
     });
-    expect(ScorecardBatch.from(queued()).cancel("t3")).toMatchObject({ status: "cancelled" });
+    // No initiator: the fact still fires (anyone watching the batch cares), just unaddressed.
+    const anonymous = ScorecardBatch.from(queued()).cancel("t3");
+    expect(anonymous.patch).toMatchObject({ status: "cancelled" });
+    expect(anonymous.facts).toHaveLength(1);
+    expect(anonymous.facts[0]).not.toHaveProperty("actor");
   });
 
-  it("supersede reclaims a live batch with the SUPERSEDED error naming the replacement", () => {
-    const live = ScorecardBatch.from({ ...queued(), status: "running" });
+  it("supersede reclaims a live batch with the SUPERSEDED error naming the replacement — silently (no fact)", () => {
+    const live = ScorecardBatch.from({ ...queued({ createdBy: "alice" }), status: "running" });
     expect(live.supersede("sc-new", "t3")).toEqual({
-      status: "superseded",
-      error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-new)" },
-      updatedAt: "t3",
+      patch: {
+        status: "superseded",
+        error: { code: "SUPERSEDED", message: "Replaced by a newer fire of the same PR (sc-new)" },
+        updatedAt: "t3",
+      },
+      facts: [],
     });
   });
 
   it("settleAborted legally re-writes an already-superseded record with the partial outcome, but never a settled one", () => {
     const reclaimed = ScorecardBatch.from({ ...queued(), status: "superseded" });
     expect(reclaimed.settleAborted({ runIds: ["r1"] }, "t4")).toEqual({
-      status: "superseded",
-      runIds: ["r1"],
-      updatedAt: "t4",
+      patch: { status: "superseded", runIds: ["r1"], updatedAt: "t4" },
+      facts: [],
     });
     // Also legal mid-race from a still-running record (supersede status write and abort are not atomic).
-    expect(ScorecardBatch.from({ ...queued(), status: "running" }).settleAborted({}, "t4")).toMatchObject({
+    expect(ScorecardBatch.from({ ...queued(), status: "running" }).settleAborted({}, "t4").patch).toMatchObject({
       status: "superseded",
     });
     for (const status of ["succeeded", "failed"] as const) {
@@ -285,12 +327,36 @@ describe("ScorecardBatch — transitions (guard, then return the store patch)", 
   });
 
   it("settleAborted PRESERVES a cancelled record's status (user stop settles as cancelled, not superseded)", () => {
-    const cancelled = ScorecardBatch.from({ ...queued(), status: "cancelled" });
+    const cancelled = ScorecardBatch.from({ ...queued({ createdBy: "alice" }), status: "cancelled" });
+    // No fact either — the cancelled fact already fired when the stop was requested (cancel()).
     expect(cancelled.settleAborted({ runIds: ["r1"] }, "t4")).toEqual({
-      status: "cancelled",
-      runIds: ["r1"],
-      updatedAt: "t4",
+      patch: { status: "cancelled", runIds: ["r1"], updatedAt: "t4" },
+      facts: [],
     });
+  });
+
+  it("creationFacts records the submitted fact with the case count and origin provenance", () => {
+    const record = queued({
+      createdBy: "alice",
+      origin: { source: "schedule", scheduleId: "sch_1" },
+    });
+    expect(ScorecardBatch.creationFacts(record, 3)).toEqual([
+      {
+        kind: "scorecard.submitted",
+        subject: { type: "scorecard", id: "sc1" },
+        actor: "alice",
+        recipient: "alice",
+        payload: {
+          status: "queued",
+          dataset: "d@1.0.0",
+          harness: "h@1",
+          cases: 3,
+          origin: "schedule",
+          scheduleId: "sch_1",
+        },
+        message: "Scorecard sc1 submitted — d@1.0.0 × h@1 (3 cases)",
+      },
+    ]);
   });
 });
 

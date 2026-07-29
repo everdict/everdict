@@ -1,6 +1,7 @@
 import type { Scorecard } from "@everdict/contracts";
 import type { ScorecardRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { InMemoryPlatformEventStore } from "../activity/platform-event-store.js";
 import type { SqlClient } from "../client.js";
 import { PgScorecardStore } from "./pg-scorecard-store.js";
 import { InMemoryScorecardStore } from "./scorecard-store.js";
@@ -50,6 +51,39 @@ describe("InMemoryScorecardStore", () => {
     expect(list[0]?.models?.primary).toBe("m"); // the model axis is lightweight → included in list too (for leaderboard)
     expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]); // the judge axis is lightweight too → included in list
     expect(list[0]?.scorecard).toBeUndefined(); // list has no heavy scorecard
+  });
+
+  it("appends outbox events to the paired platform-event store right after the write (E0 in-memory pair)", async () => {
+    const events = new InMemoryPlatformEventStore();
+    const store = new InMemoryScorecardStore(events);
+    await store.create(rec(), [
+      {
+        id: "ev-1",
+        tenant: "acme",
+        kind: "scorecard.submitted",
+        subject: { type: "scorecard", id: "sc1" },
+        payload: { status: "queued" },
+        message: "Scorecard sc1 submitted",
+        createdAt: "2026-07-29T00:00:00.000Z",
+      },
+    ]);
+    const appended = await events.list("acme");
+    expect(appended).toHaveLength(1);
+    expect(appended[0]).toMatchObject({ id: "ev-1", kind: "scorecard.submitted" });
+    // update on a missing id → no write, no events (the in-memory pair appends only after a matched
+    // write — mirrors the Pg WHERE EXISTS guard).
+    await store.update("missing", { status: "running" }, [
+      {
+        id: "ev-2",
+        tenant: "acme",
+        kind: "scorecard.completed",
+        subject: { type: "scorecard", id: "missing" },
+        payload: {},
+        message: "never lands",
+        createdAt: "2026-07-29T00:00:00.000Z",
+      },
+    ]);
+    expect(await events.list("acme")).toHaveLength(1);
   });
 
   it("createdBy (runner)·runtime (placement runtime) are lightweight meta — included in both get and list", async () => {
@@ -166,6 +200,39 @@ describe("PgScorecardStore", () => {
     expect(calls[0]?.params?.[9]).toBeNull(); // no judge_models
     expect(calls[0]?.params?.[11]).toBe("user-alice"); // created_by (runner)
     expect(calls[0]?.params?.[12]).toBeNull(); // no scorecard
+  });
+
+  it("persists outbox events in the SAME STATEMENT as the write (E0 — data-modifying CTE, same as PgRunStore)", async () => {
+    const event = {
+      id: "ev-1",
+      tenant: "acme",
+      kind: "scorecard.completed" as const,
+      subject: { type: "scorecard", id: "sc1" },
+      actor: "alice",
+      payload: { status: "succeeded", passRate: 1 },
+      message: "Scorecard sc1 succeeded",
+      createdAt: "2026-07-29T00:00:00.000Z",
+    };
+    // update + facts → one WITH upd … INSERT INTO everdict_platform_events … statement
+    const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
+    await new PgScorecardStore(client).update("sc1", { status: "succeeded", updatedAt: "t1" }, [event]);
+    expect(calls[0]?.text).toMatch(/WITH upd AS \(UPDATE everdict_scorecards/);
+    expect(calls[0]?.text).toMatch(/INSERT INTO everdict_platform_events/);
+    expect(calls[0]?.text).toMatch(/WHERE EXISTS \(SELECT 1 FROM upd\)/); // facts land only if the update matched
+    expect(calls[0]?.params).toContain("ev-1");
+    expect(calls[0]?.params).toContain("scorecard.completed");
+
+    // create + facts → WITH ins … INSERT INTO everdict_platform_events
+    const { client: c2, calls: calls2 } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(c2).create(rec(), [{ ...event, id: "ev-2", kind: "scorecard.submitted" }]);
+    expect(calls2[0]?.text).toMatch(/WITH ins AS \(INSERT INTO everdict_scorecards/);
+    expect(calls2[0]?.text).toMatch(/INSERT INTO everdict_platform_events/);
+    expect(calls2[0]?.params).toContain("ev-2");
+
+    // no facts → the plain single-write statements, unchanged
+    const { client: c3, calls: calls3 } = fakeClient(() => ({ rows: [ROW] }));
+    await new PgScorecardStore(c3).update("sc1", { status: "running", updatedAt: "t2" });
+    expect(calls3[0]?.text).not.toMatch(/platform_events/);
   });
 
   it("get → maps the row to a ScorecardRecord (incl. full scorecard + models + judgeModels + createdBy)", async () => {

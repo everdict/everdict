@@ -38,6 +38,7 @@ import { OOM_ESCALATION_CAP_MB, executeWithOomBoost } from "../ops/oom-boost.js"
 import { executeWithSpillover } from "../ops/runtime-spillover.js";
 import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
+import { stampFacts } from "../platform-event/outbox.js";
 import type { DispatchOptions } from "../ports/dispatcher.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { type Dispatch, runSuite } from "../run-suite.js";
@@ -424,7 +425,7 @@ export class ScorecardBatchService {
     const rec = await this.deps.store.get(id);
     if (rec) {
       const batch = ScorecardBatch.from(rec);
-      if (!batch.isTerminal()) await this.deps.store.update(id, batch.start(this.now()));
+      if (!batch.isTerminal()) await this.deps.store.update(id, batch.start(this.now()).patch);
     }
     await this.appendBatchStep(id, {
       phase: "dispatch",
@@ -689,21 +690,28 @@ export class ScorecardBatchService {
       this.batchContexts.delete(id);
       return;
     }
+    // E0 outbox: the completion fact rides the terminal transition (domain-gated on createdBy — the gate the
+    // notification path always applied) and persists atomically with the settle; the push after is the latency
+    // nudge carrying the same ids (consumer dedup holds).
+    const settlement = batch.succeed(
+      {
+        summary,
+        models: scorecardModels(scorecard, declared),
+        ...(judgeModels.length > 0 ? { judgeModels } : {}),
+        ...(exported ? { export: exported } : {}),
+        ...(analysisRef ? { analysisRef } : {}),
+        steps: final?.steps ?? [],
+        ...(runIds.length > 0 ? { runIds } : { scorecard }),
+      },
+      this.now(),
+    );
+    const stampedCompletion = stampFacts(ctx.tenant, settlement.facts, { newId: this.newId, now: this.now });
     await this.deps.store.update(
       id,
-      batch.succeed(
-        {
-          summary,
-          models: scorecardModels(scorecard, declared),
-          ...(judgeModels.length > 0 ? { judgeModels } : {}),
-          ...(exported ? { export: exported } : {}),
-          ...(analysisRef ? { analysisRef } : {}),
-          steps: final?.steps ?? [],
-          ...(runIds.length > 0 ? { runIds } : { scorecard }),
-        },
-        this.now(),
-      ),
+      settlement.patch,
+      stampedCompletion.map((f) => f.record),
     );
+    if (stampedCompletion.length > 0) void this.deps.events?.pushPersisted?.(stampedCompletion);
     this.batchContexts.delete(id);
     if (this.deps.onComplete) {
       const done = await this.deps.store.get(id);
@@ -997,7 +1005,7 @@ export class ScorecardBatchService {
     // Register the cooperative-cancellation handle — when supersedeInFlight aborts, runSuite stops firing remaining cases.
     const controller = new AbortController();
     this.inFlight.set(id, controller);
-    await this.deps.store.update(id, openingBatch.start(this.now()));
+    await this.deps.store.update(id, openingBatch.start(this.now()).patch);
     // Progress (step) timeline — append as the run proceeds + persist incrementally so the web shows "how far / what" it's doing.
     const steps: ScorecardStep[] = [];
     const pushStep = (p: string, status: ScorecardStep["status"], message: string, caseId?: string): void => {
@@ -1305,7 +1313,7 @@ export class ScorecardBatchService {
                   : { scorecard, ...(hasChildren ? { runIds: [...seedRunIds, ...caseToChild.values()] } : {}) }),
               },
               this.now(),
-            ),
+            ).patch,
           );
         this.inFlight.delete(id);
         return; // completion notification for a replaced batch is noise — skip
@@ -1381,9 +1389,17 @@ export class ScorecardBatchService {
         if (controller.signal.aborted) {
           // If supersede arrived mid-pipeline (judge/offload), don't revive to succeeded — all results attach, but
           // the newer fire is the answer for this PR, so terminate as superseded (leaderboard/baseline see only the new one).
-          await this.deps.store.update(id, batch.settleAborted(extras, this.now()));
+          await this.deps.store.update(id, batch.settleAborted(extras, this.now()).patch);
         } else if (!batch.isTerminal()) {
-          await this.deps.store.update(id, batch.succeed(extras, this.now()));
+          // E0 outbox: the completion fact rides the terminal transition and persists atomically with the settle.
+          const settlement = batch.succeed(extras, this.now());
+          const stamped = stampFacts(tenant, settlement.facts, { newId: this.newId, now: this.now });
+          await this.deps.store.update(
+            id,
+            settlement.patch,
+            stamped.map((f) => f.record),
+          );
+          if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
         }
         // else: a raced supersede settled the record before the abort signal reached this loop — first
         // terminal write wins, the late success is a no-op skip.
@@ -1415,9 +1431,20 @@ export class ScorecardBatchService {
         const batch = ScorecardBatch.from(settled);
         if (controller.signal.aborted) {
           // A failure after supersede isn't reported as a failure (a reclaimed batch's leftover errors are noise) — keep superseded.
-          await this.deps.store.update(id, batch.settleAborted({ ...extras, error: { ...base, phase } }, this.now()));
+          await this.deps.store.update(
+            id,
+            batch.settleAborted({ ...extras, error: { ...base, phase } }, this.now()).patch,
+          );
         } else if (!batch.isTerminal()) {
-          await this.deps.store.update(id, batch.fail({ ...base, phase }, extras, this.now()));
+          // E0 outbox: the failure fact rides the terminal transition and persists atomically with the settle.
+          const settlement = batch.fail({ ...base, phase }, extras, this.now());
+          const stamped = stampFacts(tenant, settlement.facts, { newId: this.newId, now: this.now });
+          await this.deps.store.update(
+            id,
+            settlement.patch,
+            stamped.map((f) => f.record),
+          );
+          if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
         }
         // else: a raced supersede already settled this record — a late failure never overwrites it (first
         // terminal write wins).

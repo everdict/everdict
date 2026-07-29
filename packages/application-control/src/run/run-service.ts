@@ -23,12 +23,13 @@ import {
   resolveHarnessSecrets,
 } from "@everdict/domain";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
+import { type StampedFact, stampFacts } from "../platform-event/outbox.js";
 import { type ArtifactStore, offloadSnapshot } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
-import type { OutboxEvent, RunStore } from "../ports/run-store.js";
+import type { RunStore } from "../ports/run-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 
@@ -492,21 +493,8 @@ export class RunService {
 
   // Stamp identity (id/tenant/createdAt) onto domain facts. The store persists the rows in the same
   // transaction as the write; the SAME ids then travel the push path, so dedup holds on either route.
-  private stampFacts(tenant: string, facts: PlatformFact[]): Array<{ record: OutboxEvent; recipient?: string }> {
-    return facts.map((f) => ({
-      record: {
-        id: this.newId(),
-        tenant,
-        kind: f.kind,
-        subject: f.subject,
-        ...(f.actor !== undefined ? { actor: f.actor } : {}),
-        payload: f.payload ?? {},
-        ...(f.causedBy !== undefined ? { causedBy: f.causedBy } : {}),
-        message: f.message,
-        createdAt: this.now(),
-      },
-      ...(f.recipient !== undefined ? { recipient: f.recipient } : {}),
-    }));
+  private stampFacts(tenant: string, facts: PlatformFact[]): StampedFact[] {
+    return stampFacts(tenant, facts, { newId: this.newId, now: this.now });
   }
 
   private async fireWebhook(url: string, id: string): Promise<void> {

@@ -130,7 +130,7 @@ export class ScorecardIngestService {
     traces: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
   ): Promise<void> {
-    await this.deps.store.update(record.id, ScorecardBatch.from(record).start(this.now()));
+    await this.deps.store.update(record.id, ScorecardBatch.from(record).start(this.now()).patch);
     try {
       await this.finishIngest(record.id, tenant, dataset, harnessLabel, traces, judges, undefined, record.createdBy);
     } catch (err) {
@@ -150,7 +150,7 @@ export class ScorecardIngestService {
     judges: Array<{ id: string; version: string }>,
   ): Promise<void> {
     const id = record.id;
-    await this.deps.store.update(id, ScorecardBatch.from(record).start(this.now()));
+    await this.deps.store.update(id, ScorecardBatch.from(record).start(this.now()).patch);
     try {
       if (!this.deps.buildTraceSource)
         throw new BadRequestError("BAD_REQUEST", {}, "trace source builder is not configured (pull disabled).");
@@ -329,6 +329,8 @@ export class ScorecardIngestService {
     if (!current) return;
     const batch = ScorecardBatch.from(current);
     if (batch.isTerminal()) return;
-    await this.deps.store.update(id, outcome(batch));
+    // Facts deliberately dropped (not threaded to the outbox): ingest completions were silent before E0 (no
+    // onComplete/notification path ever ran here) — widening that coverage is an E2 decision, not a default.
+    await this.deps.store.update(id, outcome(batch).patch);
   }
 }

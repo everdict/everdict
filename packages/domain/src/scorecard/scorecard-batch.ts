@@ -1,5 +1,5 @@
 import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contracts";
-import type { RunOrigin } from "@everdict/contracts";
+import type { PlatformFact, RunOrigin } from "@everdict/contracts";
 import type { RunRecord, ScorecardOrigin, ScorecardRecord, ScorecardSubset } from "@everdict/contracts";
 import { summarizeTrials } from "./trials.js";
 
@@ -8,8 +8,14 @@ import { summarizeTrials } from "./trials.js";
 // for what is legal, and transition methods guard then return the store patch. Illegal transitions throw from
 // the domain. docs/architecture/rich-domain-core.md
 
-// The patch a transition computes — the service persists it verbatim (store.update(id, patch)).
-export type ScorecardTransition = Partial<ScorecardRecord>;
+// The transition an aggregate method computes (E0, same shape as Run): the store patch the service persists
+// verbatim, plus the lifecycle FACTS born in the same decision — a fact is computed where its legality is
+// decided; the service stamps identity and persists both in one transaction. Transitions must never be
+// spread ({...transition} silently drops both halves past the type checker) — always use .patch.
+export interface ScorecardTransition {
+  patch: Partial<ScorecardRecord>;
+  facts: PlatformFact[];
+}
 export type ScorecardOrchestration = NonNullable<ScorecardRecord["orchestration"]>;
 export type ScorecardRunError = NonNullable<ScorecardRecord["error"]>;
 
@@ -77,6 +83,45 @@ function childRunShape(input: Pick<NewChildRunInput, "parentScorecardId" | "runt
   };
 }
 
+// The label pair every scorecard fact carries — dataset@version × harness@version.
+function batchLabels(record: ScorecardRecord): { dataset: string; harness: string } {
+  return {
+    dataset: `${record.dataset.id}@${record.dataset.version}`,
+    harness: `${record.harness.id}@${record.harness.version}`,
+  };
+}
+
+// Terminal fact (scorecard.completed/failed) — only for batches with an initiator (createdBy), the gate the
+// notification path always applied: machine-fired batches settle silently. Widening that is an E2 decision.
+function batchTerminalFact(
+  record: ScorecardRecord,
+  status: "succeeded" | "failed",
+  extras: ScorecardOutcomeExtras,
+): PlatformFact[] {
+  if (!record.createdBy) return [];
+  const { dataset, harness } = batchLabels(record);
+  // passRate from the summary this terminal write persists (extras wins; a bare failure keeps the record's) —
+  // the pointer an agent trigger can filter on (`passRate < 1`) without re-reading the full results.
+  const summary = extras.summary ?? record.summary;
+  const passRate = summary?.find((row) => row.passRate !== undefined)?.passRate;
+  return [
+    {
+      kind: status === "succeeded" ? "scorecard.completed" : "scorecard.failed",
+      subject: { type: "scorecard", id: record.id },
+      actor: record.createdBy,
+      recipient: record.createdBy,
+      payload: {
+        status,
+        dataset,
+        harness,
+        ...(passRate !== undefined ? { passRate } : {}),
+        ...(record.origin?.source !== undefined ? { origin: record.origin.source } : {}),
+      },
+      message: `Scorecard ${record.id} ${status} — ${dataset} × ${harness}${passRate !== undefined ? ` (pass rate ${Math.round(passRate * 100)}%)` : ""}`,
+    },
+  ];
+}
+
 export class ScorecardBatch {
   private constructor(private readonly record: ScorecardRecord) {}
 
@@ -119,6 +164,30 @@ export class ScorecardBatch {
 
   // The batch's WHY, carried onto each fan-out child (execution-model.md P0): the scorecard origin's
   // free-string source mapped onto the structured cause vocabulary. Children never guess their own cause.
+  // The creation fact (scorecard.submitted) — the batch entered the system; watching agents can follow it
+  // from here. The case count is submit-time knowledge (the resolved dataset), not on the record, so the
+  // caller passes it. Ingest-created batches stay silent today (no submitted fact — the pre-outbox behavior);
+  // widening that coverage is an E2 decision, not a default.
+  static creationFacts(record: ScorecardRecord, cases: number): PlatformFact[] {
+    const { dataset, harness } = batchLabels(record);
+    return [
+      {
+        kind: "scorecard.submitted",
+        subject: { type: "scorecard", id: record.id },
+        ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
+        payload: {
+          status: record.status,
+          dataset,
+          harness,
+          cases,
+          ...(record.origin?.source !== undefined ? { origin: record.origin.source } : {}),
+          ...(record.origin?.scheduleId !== undefined ? { scheduleId: record.origin.scheduleId } : {}),
+        },
+        message: `Scorecard ${record.id} submitted — ${dataset} × ${harness} (${cases} cases)`,
+      },
+    ];
+  }
+
   static childRunOrigin(record: Pick<ScorecardRecord, "origin" | "createdBy">): RunOrigin {
     const source = record.origin?.source;
     if (source === "schedule") {
@@ -295,29 +364,40 @@ export class ScorecardBatch {
   // queued|running → running (the driver loop begins, or a re-attached workflow re-plans a running batch).
   start(now: string): ScorecardTransition {
     this.assertNotTerminal("start");
-    return { status: "running", updatedAt: now };
+    return { patch: { status: "running", updatedAt: now }, facts: [] };
   }
 
   // queued|running → succeeded (normal completion, with the aggregated outcome payload).
   succeed(extras: ScorecardOutcomeExtras, now: string): ScorecardTransition {
     this.assertNotTerminal("succeed");
-    return { status: "succeeded", ...extras, updatedAt: now };
+    return {
+      patch: { status: "succeeded", ...extras, updatedAt: now },
+      facts: batchTerminalFact(this.record, "succeeded", extras),
+    };
   }
 
   // queued|running → failed (a pipeline-phase error; partial results ride along for visibility).
   fail(error: ScorecardRunError, extras: ScorecardOutcomeExtras, now: string): ScorecardTransition {
     this.assertNotTerminal("fail");
-    return { status: "failed", error, ...extras, updatedAt: now };
+    return {
+      patch: { status: "failed", error, ...extras, updatedAt: now },
+      facts: batchTerminalFact(this.record, "failed", extras),
+    };
   }
 
   // queued|running → superseded — a newer fire (replacedBy) reclaims this batch. superseded is terminal but
   // neither success nor failure, so baseline/diff/leaderboard stay clean.
   supersede(replacedBy: string, now: string): ScorecardTransition {
     this.assertNotTerminal("supersede");
+    // No fact: a replaced batch is reclaimed plumbing, not an outcome anyone subscribed to (it also skips
+    // its completion notification) — the replacing batch's own submitted fact is the signal.
     return {
-      status: "superseded",
-      error: { code: "SUPERSEDED", message: `Replaced by a newer fire of the same PR (${replacedBy})` },
-      updatedAt: now,
+      patch: {
+        status: "superseded",
+        error: { code: "SUPERSEDED", message: `Replaced by a newer fire of the same PR (${replacedBy})` },
+        updatedAt: now,
+      },
+      facts: [],
     };
   }
 
@@ -326,10 +406,26 @@ export class ScorecardBatch {
   // in-flight run and force-kills the runtime jobs after writing this status.
   cancel(now: string): ScorecardTransition {
     this.assertNotTerminal("cancel");
+    // The cancelled fact is born HERE — the completion path deliberately skips aborted batches, so this
+    // transition is the only place the outcome is decided (settleAborted later merely attaches partials).
+    const { dataset, harness } = batchLabels(this.record);
     return {
-      status: "cancelled",
-      error: { code: "CANCELLED", message: "Stopped by user" },
-      updatedAt: now,
+      patch: {
+        status: "cancelled",
+        error: { code: "CANCELLED", message: "Stopped by user" },
+        updatedAt: now,
+      },
+      facts: [
+        {
+          kind: "scorecard.cancelled",
+          subject: { type: "scorecard", id: this.record.id },
+          ...(this.record.createdBy !== undefined
+            ? { actor: this.record.createdBy, recipient: this.record.createdBy }
+            : {}),
+          payload: { status: "cancelled", dataset, harness },
+          message: `Scorecard ${this.record.id} cancelled — ${dataset} × ${harness}`,
+        },
+      ],
     };
   }
 
@@ -346,8 +442,9 @@ export class ScorecardBatch {
       );
     // Preserve whichever aborted-terminal status the record already carries (cancel vs supersede); default to
     // superseded for the (unreached) case where the settlement runs over a still-queued/running record.
+    // No fact: the cancelled fact already fired when the abort was requested; superseded settles silently.
     const status = this.record.status === "cancelled" ? "cancelled" : "superseded";
-    return { status, ...extras, updatedAt: now };
+    return { patch: { status, ...extras, updatedAt: now }, facts: [] };
   }
 
   private assertNotTerminal(transition: string): void {

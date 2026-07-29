@@ -21,6 +21,7 @@ import {
   can,
 } from "@everdict/domain";
 import { ScoringService } from "../execution/scoring-service.js";
+import { stampFacts } from "../platform-event/outbox.js";
 import type { ScorecardListFilter } from "../ports/scorecard-store.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
@@ -205,23 +206,17 @@ export class ScorecardService {
       now: this.now(),
     });
 
-    await this.deps.store.create(record);
-    // Lifecycle FACT (agent-automation A2): the batch entered the system — watching agents can follow it from here.
-    void this.deps.events?.emit({
-      workspace: input.tenant,
-      kind: "scorecard.submitted",
-      subject: { type: "scorecard", id: record.id },
-      ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
-      payload: {
-        status: record.status,
-        dataset: `${record.dataset.id}@${record.dataset.version}`,
-        harness: `${record.harness.id}@${record.harness.version}`,
-        cases: dataset.cases.length,
-        ...(origin?.source !== undefined ? { origin: origin.source } : {}),
-        ...(origin?.scheduleId !== undefined ? { scheduleId: origin.scheduleId } : {}),
-      },
-      message: `Scorecard ${record.id} submitted — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version} (${dataset.cases.length} cases)`,
+    // E0 outbox: the creation fact (scorecard.submitted, domain-computed) persists in the SAME transaction
+    // as the record; the push afterwards is a latency nudge carrying the same id (consumer dedup holds).
+    const creation = stampFacts(record.tenant, ScorecardBatch.creationFacts(record, dataset.cases.length), {
+      newId: this.newId,
+      now: this.now,
     });
+    await this.deps.store.create(
+      record,
+      creation.map((c) => c.record),
+    );
+    if (creation.length > 0) void this.deps.events?.pushPersisted?.(creation);
     // Server-side supersede — reclaim any in-flight batch for the same PR (origin.repo+prNumber) × same (harness, dataset) and
     // replace it with this fire. GitHub-side concurrency only cancels the "workflow" while an already-submitted batch keeps running on the server
     // (preventing an orphaned eval from tying up environments/budget/runner queue). merge/dev fires (no prNumber) are out of scope.
@@ -396,7 +391,7 @@ export class ScorecardService {
       if (r.id === newId) continue;
       const batch = ScorecardBatch.from(r);
       if (!batch.canSupersede({ repo, prNumber })) continue;
-      await this.deps.store.update(r.id, batch.supersede(newId, this.now()));
+      await this.deps.store.update(r.id, batch.supersede(newId, this.now()).patch);
       await this.stopInFlight(r);
     }
   }
@@ -430,21 +425,16 @@ export class ScorecardService {
     const rec = await this.deps.store.get(input.id);
     if (!rec || rec.tenant !== input.tenant)
       throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "Scorecard not found.");
-    await this.deps.store.update(rec.id, ScorecardBatch.from(rec).cancel(this.now()));
-    // Lifecycle FACT (agent-automation A2) — the completion path deliberately skips aborted batches, so the
-    // cancelled fact is recorded here, at the only place the transition happens.
-    void this.deps.events?.emit({
-      workspace: input.tenant,
-      kind: "scorecard.cancelled",
-      subject: { type: "scorecard", id: rec.id },
-      ...(rec.createdBy !== undefined ? { actor: rec.createdBy, recipient: rec.createdBy } : {}),
-      payload: {
-        status: "cancelled",
-        dataset: `${rec.dataset.id}@${rec.dataset.version}`,
-        harness: `${rec.harness.id}@${rec.harness.version}`,
-      },
-      message: `Scorecard ${rec.id} cancelled — ${rec.dataset.id}@${rec.dataset.version} × ${rec.harness.id}@${rec.harness.version}`,
-    });
+    // E0 outbox: the cancelled fact rides the transition (the domain is where "the completion path skips
+    // aborted batches" is law, so the fact is born there) and persists atomically with the terminal write.
+    const cancellation = ScorecardBatch.from(rec).cancel(this.now());
+    const stamped = stampFacts(rec.tenant, cancellation.facts, { newId: this.newId, now: this.now });
+    await this.deps.store.update(
+      rec.id,
+      cancellation.patch,
+      stamped.map((f) => f.record),
+    );
+    if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     await this.stopInFlight(rec);
     return (await this.get(rec.id)) ?? rec;
   }

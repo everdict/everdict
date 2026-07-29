@@ -1,4 +1,5 @@
 import type { ScorecardRecord, ScorecardStatus } from "@everdict/contracts";
+import type { OutboxEvent } from "./run-store.js";
 
 // list filter — narrows dataset/harness/status in the store (SQL) so leaderboard/trend don't scan the whole workspace.
 // If unset, everything (current behavior). Summary-derived axes like model/judgeModel are still filtered in the service/suite (can't narrow in SQL).
@@ -12,9 +13,11 @@ export interface ScorecardListFilter {
 
 // Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.
 // Note: list intentionally omits the heavy `scorecard` (trace-included) field (summary only). Get the full thing via get.
+// `events`: E0 outbox rows (stamped facts from the aggregate transition) persisted ATOMICALLY with the write —
+// same contract as RunStore. A call site that passes none keeps its pre-outbox silence.
 export interface ScorecardStore {
-  create(record: ScorecardRecord): Promise<void>;
-  update(id: string, patch: Partial<ScorecardRecord>): Promise<ScorecardRecord | undefined>;
+  create(record: ScorecardRecord, events?: OutboxEvent[]): Promise<void>;
+  update(id: string, patch: Partial<ScorecardRecord>, events?: OutboxEvent[]): Promise<ScorecardRecord | undefined>;
   get(id: string): Promise<ScorecardRecord | undefined>;
   list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]>;
   // Hard delete (scorecards are result records, not versioned reproducibility artifacts — no tombstone).

@@ -349,9 +349,10 @@ export interface ScorecardServiceDeps {
   registryAuthsFor?: (workspace: string, images: string[]) => Promise<RegistryAuth[]>;
   // Completion callback (succeeded/failed) — completion notification (Mattermost etc.). A failure here is independent of the scorecard result (the service swallows it).
   onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
-  // Platform-event emit seam (agent-automation A1) — the lifecycle FACTS this service records: scorecard.submitted,
-  // scorecard.case.completed (streaming, both drivers), scorecard.cancelled. Completion facts stay on the
-  // NotificationService path (onComplete), which emits through the same seam. emit never throws (best-effort).
+  // Platform-event seam (agent-automation A1). Since E0, the batch lifecycle facts (scorecard.submitted/
+  // completed/failed/cancelled) are computed by the ScorecardBatch transitions and persisted through the
+  // store's same-tx outbox — this emitter carries only their pushPersisted latency nudge plus the one
+  // remaining direct emit, scorecard.case.completed (streaming, both drivers). emit never throws (best-effort).
   events?: PlatformEventEmitter;
   // Trace-sink export (when configured) — send scored results (trace+scores) to the workspace observability platform (TraceSinkService).
   // The returned outcome is recorded in record.export; a failure is isolated from the scorecard result (surfaced via outcome.status only). docs/architecture/trace-sink.md

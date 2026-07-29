@@ -1,20 +1,40 @@
 import type { ScorecardRecord } from "@everdict/contracts";
 
-import type { ScorecardListFilter, ScorecardStore } from "@everdict/application-control";
+import type {
+  OutboxEvent,
+  PlatformEventStore,
+  ScorecardListFilter,
+  ScorecardStore,
+} from "@everdict/application-control";
 
 export class InMemoryScorecardStore implements ScorecardStore {
   private readonly cards = new Map<string, ScorecardRecord>();
 
-  async create(record: ScorecardRecord): Promise<void> {
+  // E0 outbox pair: in-memory has no transaction to share, so "same tx" degrades to "append right after the
+  // write" — the ordering guarantee tests rely on (same as InMemoryRunStore).
+  constructor(private readonly events?: PlatformEventStore) {}
+
+  async create(record: ScorecardRecord, events?: OutboxEvent[]): Promise<void> {
     this.cards.set(record.id, record);
+    await this.appendEvents(events);
   }
 
-  async update(id: string, patch: Partial<ScorecardRecord>): Promise<ScorecardRecord | undefined> {
+  async update(
+    id: string,
+    patch: Partial<ScorecardRecord>,
+    events?: OutboxEvent[],
+  ): Promise<ScorecardRecord | undefined> {
     const cur = this.cards.get(id);
     if (!cur) return undefined;
     const next = { ...cur, ...patch, id: cur.id };
     this.cards.set(id, next);
+    await this.appendEvents(events);
     return next;
+  }
+
+  private async appendEvents(events?: OutboxEvent[]): Promise<void> {
+    if (!this.events || !events) return;
+    for (const e of events) await this.events.append(e);
   }
 
   async get(id: string): Promise<ScorecardRecord | undefined> {

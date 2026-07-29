@@ -1570,7 +1570,7 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
       store,
       runStore,
       datasets,
-      newId: () => `sc-${n++}`, // sc-0 = scorecard, sc-1 = child run of case c1
+      newId: () => `sc-${n++}`, // sc-0 = scorecard, sc-1 = submitted-fact event id (E0), sc-2 = child run of case c1
     });
     await service.submit({
       tenant: "acme",
@@ -1579,10 +1579,10 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
     });
     const rec = await waitTerminal(store, "sc-0");
     expect(rec.status).toBe("succeeded");
-    expect(rec.runIds).toEqual(["sc-1"]); // reference to the fanned-out child run
+    expect(rec.runIds).toEqual(["sc-2"]); // reference to the fanned-out child run
     expect(rec.scorecard).toBeUndefined(); // storage dedup — the heavy embed is not stored (runIds only)
 
-    const child = await runStore.get("sc-1");
+    const child = await runStore.get("sc-2");
     expect(child?.status).toBe("succeeded");
     expect(child?.parentScorecardId).toBe("sc-0");
     expect(child?.trigger).toBe("scorecard");
@@ -1597,7 +1597,7 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
 
     // The activity list (default) hides children, but by scorecardId those batch children are visible.
     expect(await runStore.list("acme")).toEqual([]);
-    expect((await runStore.list("acme", { scorecardId: "sc-0" })).map((r) => r.id)).toEqual(["sc-1"]);
+    expect((await runStore.list("acme", { scorecardId: "sc-0" })).map((r) => r.id)).toEqual(["sc-2"]);
   });
 
   it("seals the replay recording teed under each child's runId and attaches the ref on write-back", async () => {
@@ -1615,7 +1615,7 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
       runStore,
       recordingStore,
       datasets,
-      newId: () => `sc-${n++}`, // sc-0 = scorecard, sc-1 = child run of case c1
+      newId: () => `sc-${n++}`, // sc-0 = scorecard, sc-1 = submitted-fact event id (E0), sc-2 = child run of case c1
     });
     await service.submit({
       tenant: "acme",
@@ -1625,7 +1625,7 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
     await waitTerminal(store, "sc-0");
 
     // The child run's final result carries the sealed recording ref; the recording is retrievable.
-    const child = await runStore.get("sc-1");
+    const child = await runStore.get("sc-2");
     expect(child?.result?.recordingRef?.ref).toBe("memory://recording/evd-sc-0-c1");
     expect((await recordingStore.get("evd-sc-0-c1"))?.tracks.frames).toHaveLength(1);
   });

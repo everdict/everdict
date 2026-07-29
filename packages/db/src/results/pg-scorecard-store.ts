@@ -1,6 +1,7 @@
-import type { ScorecardListFilter, ScorecardStore } from "@everdict/application-control";
+import type { OutboxEvent, ScorecardListFilter, ScorecardStore } from "@everdict/application-control";
 import { type ScorecardRecord, ScorecardRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
 
 interface ScorecardRow {
   id: string;
@@ -59,43 +60,64 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 }
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
+const SCORECARD_COLUMNS =
+  "(id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, scorecard, analysis_ref, sink_export, error, steps, run_ids, created_at, updated_at)";
+const SCORECARD_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)";
+
+function scorecardInsertParams(r: ScorecardRecord): unknown[] {
+  return [
+    r.id,
+    r.tenant,
+    r.dataset.id,
+    r.dataset.version,
+    r.harness.id,
+    r.harness.version,
+    r.status,
+    r.summary ? JSON.stringify(r.summary) : null,
+    r.models ? JSON.stringify(r.models) : null,
+    r.judgeModels ? JSON.stringify(r.judgeModels) : null,
+    r.origin ? JSON.stringify(r.origin) : null,
+    r.createdBy ?? null,
+    r.runtime ?? null,
+    r.subset ? JSON.stringify(r.subset) : null,
+    r.orchestration ? JSON.stringify(r.orchestration) : null,
+    r.scorecard ? JSON.stringify(r.scorecard) : null,
+    r.analysisRef ?? null,
+    r.export ? JSON.stringify(r.export) : null,
+    r.error ? JSON.stringify(r.error) : null,
+    r.steps ? JSON.stringify(r.steps) : null,
+    r.runIds ? JSON.stringify(r.runIds) : null,
+    r.createdAt,
+    r.updatedAt,
+  ];
+}
+
 export class PgScorecardStore implements ScorecardStore {
   constructor(private readonly client: SqlClient) {}
 
-  async create(r: ScorecardRecord): Promise<void> {
-    await this.client.query(
-      `INSERT INTO everdict_scorecards
-        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, scorecard, analysis_ref, sink_export, error, steps, run_ids, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
-      [
-        r.id,
-        r.tenant,
-        r.dataset.id,
-        r.dataset.version,
-        r.harness.id,
-        r.harness.version,
-        r.status,
-        r.summary ? JSON.stringify(r.summary) : null,
-        r.models ? JSON.stringify(r.models) : null,
-        r.judgeModels ? JSON.stringify(r.judgeModels) : null,
-        r.origin ? JSON.stringify(r.origin) : null,
-        r.createdBy ?? null,
-        r.runtime ?? null,
-        r.subset ? JSON.stringify(r.subset) : null,
-        r.orchestration ? JSON.stringify(r.orchestration) : null,
-        r.scorecard ? JSON.stringify(r.scorecard) : null,
-        r.analysisRef ?? null,
-        r.export ? JSON.stringify(r.export) : null,
-        r.error ? JSON.stringify(r.error) : null,
-        r.steps ? JSON.stringify(r.steps) : null,
-        r.runIds ? JSON.stringify(r.runIds) : null,
-        r.createdAt,
-        r.updatedAt,
-      ],
-    );
+  async create(r: ScorecardRecord, events?: OutboxEvent[]): Promise<void> {
+    const base = scorecardInsertParams(r);
+    if (events && events.length > 0) {
+      // One statement, two writes (E0): the scorecard insert and its facts commit or roll back together
+      // (same data-modifying-CTE outbox as PgRunStore).
+      const ev = eventValuesClause(events, base.length + 1);
+      await this.client.query(
+        `WITH ins AS (INSERT INTO everdict_scorecards ${SCORECARD_COLUMNS} VALUES ${SCORECARD_VALUES} RETURNING id)
+         INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
+         SELECT * FROM (VALUES ${ev.sql}) AS v
+         WHERE EXISTS (SELECT 1 FROM ins)`,
+        [...base, ...ev.params],
+      );
+      return;
+    }
+    await this.client.query(`INSERT INTO everdict_scorecards ${SCORECARD_COLUMNS} VALUES ${SCORECARD_VALUES}`, base);
   }
 
-  async update(id: string, patch: Partial<ScorecardRecord>): Promise<ScorecardRecord | undefined> {
+  async update(
+    id: string,
+    patch: Partial<ScorecardRecord>,
+    events?: OutboxEvent[],
+  ): Promise<ScorecardRecord | undefined> {
     // Only lifecycle fields are allowed to be updated (status/summary/scorecard/error/steps/updatedAt).
     const sets: string[] = [];
     const vals: unknown[] = [];
@@ -157,6 +179,20 @@ export class PgScorecardStore implements ScorecardStore {
     }
     if (sets.length === 0) return this.get(id);
     vals.push(id);
+    if (events && events.length > 0) {
+      // One statement, two writes (E0): the terminal patch and the facts describing it commit atomically —
+      // and the facts land ONLY if the update matched a row (WHERE EXISTS on the updating CTE).
+      const ev = eventValuesClause(events, vals.length + 1);
+      const res = await this.client.query<ScorecardRow>(
+        `WITH upd AS (UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${i} RETURNING *),
+         ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
+                SELECT * FROM (VALUES ${ev.sql}) AS v
+                WHERE EXISTS (SELECT 1 FROM upd))
+         SELECT * FROM upd`,
+        [...vals, ...ev.params],
+      );
+      return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;
+    }
     const res = await this.client.query<ScorecardRow>(
       `UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
       vals,

@@ -73,8 +73,6 @@ export class NotificationService {
       // Provenance — a scorecard fired by a schedule (cron tick or manual "run now") gets a schedule-BRANDED feed
       // notification ("Scheduled run …") in place of the generic one, so the bell reads as "my scheduled job ran".
       origin?: { source?: string };
-      // The persisted metric summary — the platform event carries its first passRate as a filterable pointer.
-      summary?: { passRate?: number }[];
     },
   ): Promise<void> {
     const scheduled = record.origin?.source === "schedule";
@@ -92,25 +90,10 @@ export class NotificationService {
         title: `${scheduled ? "Scheduled run" : "Scorecard"} ${record.status === "succeeded" ? "completed" : "failed"} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
         link: { scorecardId: record.id },
       });
-      // passRate from the persisted metric summary (first row that has one) — the pointer an agent trigger can
-      // filter on (`passRate < 1` = the batch had failing cases) without re-reading the full results.
-      const passRate = record.summary?.find((row) => row.passRate !== undefined)?.passRate;
-      await this.pushEvent({
-        workspace: tenant,
-        recipient: record.createdBy,
-        actor: record.createdBy,
-        kind: record.status === "succeeded" ? "scorecard.completed" : "scorecard.failed",
-        subject: { type: "scorecard", id: record.id },
-        payload: {
-          status: record.status,
-          dataset: `${record.dataset.id}@${record.dataset.version}`,
-          harness: `${record.harness.id}@${record.harness.version}`,
-          ...(passRate !== undefined ? { passRate } : {}),
-          ...(record.origin?.source !== undefined ? { origin: record.origin.source } : {}),
-        },
-        message: `Scorecard ${record.id} ${record.status} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}${passRate !== undefined ? ` (pass rate ${Math.round(passRate * 100)}%)` : ""}`,
-      });
     }
+    // The scorecard.completed/failed platform event moved to the E0 outbox: ScorecardBatch.succeed/fail
+    // compute the fact (same createdBy gate, passRate pointer included) and the settle persists it
+    // atomically with the terminal write — this path keeps only the feed + Mattermost channels.
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
     await this.post(
       tenant,

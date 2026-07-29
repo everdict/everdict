@@ -1,6 +1,7 @@
 import type { OutboxEvent, RunListOptions, RunStore } from "@everdict/application-control";
 import { type RunRecord, RunRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
 import { withRunUsage } from "./run-store.js";
 
 interface RunRow {
@@ -64,35 +65,6 @@ function rowToRecord(row: RunRow): RunRecord {
   });
   return withRunUsage(rec); // usage is not a column, it's derived from result.trace
 }
-
-// E0 same-tx outbox: append the event rows in the SAME STATEMENT as the run write via a data-modifying CTE —
-// atomicity without a transaction seam on SqlClient (parameterized multi-statement is not a thing in pg's
-// extended protocol; one statement with two writes is). seq stays BIGSERIAL — the log's cursor is untouched.
-function eventValuesClause(events: OutboxEvent[], startIndex: number): { sql: string; params: unknown[] } {
-  const tuples: string[] = [];
-  const params: unknown[] = [];
-  let i = startIndex;
-  for (const e of events) {
-    tuples.push(
-      `($${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}, $${i++}::jsonb, $${i++}, $${i++}, $${i++}::timestamptz)`,
-    );
-    params.push(
-      e.id,
-      e.tenant,
-      e.kind,
-      e.subject.type,
-      e.subject.id,
-      e.actor ?? null,
-      JSON.stringify(e.payload ?? {}),
-      e.causedBy ?? null,
-      e.message,
-      e.createdAt,
-    );
-  }
-  return { sql: tuples.join(","), params };
-}
-
-const EVENT_COLUMNS = "(id, tenant, kind, subject_type, subject_id, actor, payload, caused_by, message, created_at)";
 
 const RUN_COLUMNS =
   "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at)";
