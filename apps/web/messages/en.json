@@ -33,7 +33,9 @@
     "unpinned": "Unpinned.",
     "pinFailed": "Pin action failed.",
     "loadingViews": "Loading views…",
-    "noViews": "No views yet — save one from the analyze dashboard."
+    "noViews": "No views yet — save one from the analyze dashboard.",
+    "chartEmpty": "Nothing to plot.",
+    "seriesCapped": "{hidden} more series not shown."
   },
   "analyzeScorecards": {
     "all": "All",
@@ -126,7 +128,16 @@
     "vizBars": "Bars",
     "vizTable": "Table",
     "artifactCount": "{count, plural, one {# artifact} other {# artifacts}}",
-    "lastReportAt": "report {time}"
+    "lastReportAt": "report {time}",
+    "rawTitle": "Raw data",
+    "rawCount": "{count} records",
+    "rawEmpty": "No underlying scorecards for this selection.",
+    "rawFocused": "Showing {label} only",
+    "rawColRan": "Ran",
+    "rawColScore": "Score",
+    "rawColCases": "Cases",
+    "rawShowAll": "Showing {shown} of {total} — show all",
+    "seriesCapped": "Plotting {max} series · {hidden} more are in the raw data below"
   },
   "byHarnessScorecards": {
     "harnessLabel": "Harness"

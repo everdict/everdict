@@ -134,8 +134,12 @@ export function dimValue(sc: ScorecardRecord, dim: Dimension): string {
   }
 }
 
-// This scorecard's score (for the selected metric) — passRate first, else mean.
-function scoreOf(sc: ScorecardRecord, metric: string | undefined): number | undefined {
+// This scorecard's score (for the selected metric) — passRate first, else mean. Exported so the raw-data
+// table prints the very number the aggregate above it was computed from.
+export function scoreOfScorecard(
+  sc: ScorecardRecord,
+  metric: string | undefined
+): number | undefined {
   const rows = sc.summary ?? []
   const row = (metric ? rows.find((r) => r.metric === metric) : undefined) ?? rows[0]
   if (!row) return undefined
@@ -152,10 +156,12 @@ function aggregate(
   if (measure === 'count') return cards.length
   if (measure === 'latest') {
     const latest = [...cards].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
-    return latest ? scoreOf(latest, metric) : undefined
+    return latest ? scoreOfScorecard(latest, metric) : undefined
   }
   // passRate | mean — the average of each card's score (only the defined ones)
-  const vals = cards.map((c) => scoreOf(c, metric)).filter((v): v is number => v !== undefined)
+  const vals = cards
+    .map((c) => scoreOfScorecard(c, metric))
+    .filter((v): v is number => v !== undefined)
   if (vals.length === 0) return undefined
   return vals.reduce((a, b) => a + b, 0) / vals.length
 }
@@ -236,8 +242,29 @@ export interface LineResult {
 }
 export type AnalysisResult = GridResult | LineResult
 
-function groupKey(sc: ScorecardRecord, dims: Dimension[]): string {
-  return dims.map((d) => dimValue(sc, d)).join('')
+export function groupKeyOf(sc: ScorecardRecord, dims: Dimension[]): string {
+  return dims.map((d) => dimValue(sc, d)).join('\u0001')
+}
+
+// The rows BEHIND the aggregate. The dashboard lists these under the chart as the raw-data table, and
+// scopes them to one group on drill-down. It runs the same predicate computeAnalysis does, so the table
+// can never disagree with the numbers plotted above it.
+export function filterScorecards(
+  scorecards: ScorecardRecord[],
+  config: AnalysisConfig,
+  resolveOwner: (s: string) => string = (s) => s
+): ScorecardRecord[] {
+  return scorecards.filter((sc) => passesFilters(sc, config, resolveOwner))
+}
+
+// Which dimension the line chart buckets on — computeAnalysis picks the same one.
+export function timeDimensionOf(config: AnalysisConfig): Dimension {
+  return config.groupBy.find((d) => TIME_DIMENSIONS.includes(d)) ?? 'day'
+}
+
+// The dimension that becomes one line per value (undefined = a single aggregate series).
+export function seriesDimensionOf(config: AnalysisConfig): Dimension | undefined {
+  return config.groupBy.find((d) => !TIME_DIMENSIONS.includes(d))
 }
 
 // Main — scorecard array + config → result (grid|line). resolveOwner: subject→display name.
@@ -253,8 +280,8 @@ export function computeAnalysis(
 
   if (config.viz === 'line') {
     // x-axis = the time dimension in groupBy (the first one), series = the remaining groupBy dimension (if any).
-    const timeDim = config.groupBy.find((d) => TIME_DIMENSIONS.includes(d)) ?? 'day'
-    const seriesDim = config.groupBy.find((d) => !TIME_DIMENSIONS.includes(d))
+    const timeDim = timeDimensionOf(config)
+    const seriesDim = seriesDimensionOf(config)
     const buckets = [...new Set(filtered.map((sc) => dimValue(sc, timeDim)))].sort()
     const seriesKeys = seriesDim
       ? [...new Set(filtered.map((sc) => dimValue(sc, seriesDim)))].sort()
@@ -277,7 +304,7 @@ export function computeAnalysis(
   // grid (table | bars)
   const groups = new Map<string, ScorecardRecord[]>()
   for (const sc of filtered) {
-    const k = groupKey(sc, config.groupBy)
+    const k = groupKeyOf(sc, config.groupBy)
     groups.set(k, [...(groups.get(k) ?? []), sc])
   }
   const pivotKeys = config.pivotBy

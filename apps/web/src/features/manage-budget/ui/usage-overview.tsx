@@ -6,25 +6,20 @@ import { useTranslations } from 'next-intl'
 import type { TenantUsage, UsageItem } from '@/entities/usage'
 import { fmtTokens, fmtUsd } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
+import {
+  BarChart,
+  MAX_SERIES,
+  OTHER_COLOR,
+  seriesColorAt,
+  type ChartSeries,
+} from '@/shared/ui/charts'
 import { StatCard } from '@/shared/ui/stat-card'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { UsageChart, type ChartSeries } from './usage-chart'
-
 type GroupBy = 'activity' | 'model'
 const RANGES = [7, 30, 90] as const
 type RangeDays = (typeof RANGES)[number]
-
-// Fixed slot order — a source always wears its slot; models wear the slot of their all-time rank. Never re-dealt on
-// filter changes (color follows the entity, not its current rank in the window).
-const SLOT_COLORS = [
-  'var(--chart-1)',
-  'var(--chart-2)',
-  'var(--chart-3)',
-  'var(--chart-4)',
-] as const
-const OTHER_COLOR = 'var(--chart-other)'
 
 function utcToday(): string {
   return new Date().toISOString().slice(0, 10)
@@ -34,7 +29,8 @@ function utcToday(): string {
 function lastDays(count: number): string[] {
   const out: string[] = []
   const end = new Date(`${utcToday()}T00:00:00Z`).getTime()
-  for (let i = count - 1; i >= 0; i--) out.push(new Date(end - i * 86_400_000).toISOString().slice(0, 10))
+  for (let i = count - 1; i >= 0; i--)
+    out.push(new Date(end - i * 86_400_000).toISOString().slice(0, 10))
   return out
 }
 
@@ -91,12 +87,21 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
     const dayIndex = new Map(days.map((d, i) => [d, i]))
     const srcLabel = (s: UsageItem['source']) =>
       s === 'harness' ? t('sourceHarness') : s === 'judge' ? t('sourceJudge') : t('sourceAgent')
-    let defs: { key: string; label: string; color: string; match: (row: TenantUsage['daily'][number]) => boolean }[]
+    let defs: {
+      key: string
+      label: string
+      color: string
+      match: (row: TenantUsage['daily'][number]) => boolean
+    }[]
     if (groupBy === 'activity') {
       const active = (['harness', 'judge', 'agent'] as const).filter((s) =>
         metered.daily.some((d) => d.source === s && d.usd > 0)
       )
-      const slots: Record<string, string> = { harness: 'var(--chart-1)', judge: 'var(--chart-2)', agent: 'var(--chart-3)' }
+      const slots: Record<string, string> = {
+        harness: seriesColorAt(0),
+        judge: seriesColorAt(1),
+        agent: seriesColorAt(2),
+      }
       defs = active.map((s) => ({
         key: s,
         label: srcLabel(s),
@@ -110,11 +115,11 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
         .filter(([, usd]) => usd > 0)
         .sort((a, b) => b[1] - a[1])
         .map(([m]) => m)
-      const lead = ranked.slice(0, SLOT_COLORS.length)
+      const lead = ranked.slice(0, MAX_SERIES)
       defs = lead.map((m, i) => ({
         key: `model:${m}`,
         label: m === '' ? t('modelUnattributed') : m,
-        color: SLOT_COLORS[i] ?? OTHER_COLOR,
+        color: seriesColorAt(i),
         match: (row) => row.model === m,
       }))
       if (ranked.length > lead.length) {
@@ -139,7 +144,10 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
     return { series: chartSeries, values: matrix }
   }, [metered.daily, days, groupBy, t])
 
-  const periodUsd = useMemo(() => values.reduce((s, line) => s + line.reduce((a, v) => a + v, 0), 0), [values])
+  const periodUsd = useMemo(
+    () => values.reduce((s, line) => s + line.reduce((a, v) => a + v, 0), 0),
+    [values]
+  )
 
   // Itemized (source × model) breakdown — drop empty/legacy-unattributed lines, heaviest spend first.
   const items = metered.items
@@ -158,7 +166,11 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label={t('mtdCost')} value={fmtUsd(mtdUsd)} hint={monthPrefix} tone="primary" />
         <StatCard label={t('meteredCost')} value={fmtUsd(metered.usd)} hint={t('allTimeHint')} />
-        <StatCard label={t('meteredTokens')} value={fmtTokens(metered.tokens)} hint={t('allTimeHint')} />
+        <StatCard
+          label={t('meteredTokens')}
+          value={fmtTokens(metered.tokens)}
+          hint={t('allTimeHint')}
+        />
         <StatCard
           label={t('meteredEvaluations')}
           value={metered.evaluations.toLocaleString()}
@@ -192,7 +204,17 @@ export function UsageOverview({ metered }: { metered: TenantUsage }) {
           <h4 className="text-[12px] font-[560] text-muted-foreground">{t('dailyTitle')}</h4>
           <InfoTip content={t('dailyTip')} />
         </div>
-        <UsageChart days={days} series={series} values={values} />
+        <BarChart
+          x={days}
+          series={series}
+          values={values}
+          stacked
+          showTotal
+          formatValue={fmtUsd}
+          formatX={(day) => day.slice(5).replace('-', '/')}
+          ariaLabel={t('dailyTitle')}
+          emptyLabel={t('chartEmpty')}
+        />
       </div>
 
       {items.length > 0 && (

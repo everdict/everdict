@@ -15,10 +15,18 @@ import {
   rateHealth,
 } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
+import {
+  LineChart,
+  MAX_SERIES,
+  RankedBars,
+  seriesColorAt,
+  type ChartSeries,
+} from '@/shared/ui/charts'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
 import { StatCard } from '@/shared/ui/stat-card'
+import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 import {
   computeAnalysis,
@@ -26,17 +34,25 @@ import {
   configToStored,
   DIMENSION_KEY,
   dimValue,
+  filterScorecards,
+  groupKeyOf,
   MEASURE_KEY,
   metricsOf,
+  seriesDimensionOf,
   storedToConfig,
+  timeDimensionOf,
   type AnalysisConfig,
   type Dimension,
   type Measure,
   type Viz,
 } from '../model/analysis'
+import { RawRowsTable } from './raw-rows-table'
 import { SavedViewsBar } from './saved-views-bar'
 
 type Author = { name: string; avatarUrl?: string }
+
+// What the raw-data table is scoped to after a mark is clicked: one group row (grid key) or one time bucket.
+type Focus = { kind: 'group' | 'bucket'; key: string; label: string }
 
 const GROUP_DIMS: Dimension[] = [
   'harness',
@@ -106,83 +122,6 @@ function measureCell(value: number | undefined, measure: Measure) {
   )
 }
 
-// Multi-series line chart (trend). Values are scaled 0~100% if assumed to be 0~1 (pass rate), otherwise min~max normalized.
-function LineChart({
-  buckets,
-  series,
-}: {
-  buckets: string[]
-  series: { label: string; points: (number | undefined)[] }[]
-}) {
-  const t = useTranslations('analyzeScorecards')
-  const W = 720
-  const H = 200
-  const pad = { l: 8, r: 8, t: 10, b: 22 }
-  const all = series.flatMap((s) => s.points).filter((v): v is number => v !== undefined)
-  const max = Math.max(1, ...all)
-  const min = Math.min(0, ...all)
-  const span = max - min || 1
-  const n = buckets.length
-  const x = (i: number) => pad.l + (n <= 1 ? 0 : (i * (W - pad.l - pad.r)) / (n - 1))
-  const y = (v: number) => pad.t + (1 - (v - min) / span) * (H - pad.t - pad.b)
-  const COLORS = [
-    'var(--color-primary)',
-    'var(--color-success)',
-    'var(--color-warning)',
-    '#4ea7ff',
-    '#eb5757',
-  ]
-  return (
-    <div className="space-y-2 overflow-x-auto rounded-lg border bg-card p-4 shadow-raise">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="h-52 w-full min-w-[520px]"
-        role="img"
-        aria-label={t('scoreTrend')}
-      >
-        {series.map((s, si) => {
-          const pts = s.points
-            .map((v, i) => (v === undefined ? null : `${x(i)},${y(v)}`))
-            .filter(Boolean)
-            .join(' ')
-          return (
-            <polyline
-              key={s.label}
-              points={pts}
-              fill="none"
-              stroke={COLORS[si % COLORS.length]}
-              strokeWidth={2}
-              strokeLinejoin="round"
-            />
-          )
-        })}
-        {buckets.map((b, i) => (
-          <text
-            key={b}
-            x={x(i)}
-            y={H - 6}
-            textAnchor="middle"
-            className="fill-[var(--color-faint)] text-[9px]"
-          >
-            {b.length > 7 ? b.slice(5) : b}
-          </text>
-        ))}
-      </svg>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
-        {series.map((s, si) => (
-          <span key={s.label} className="inline-flex items-center gap-1 text-muted-foreground">
-            <span
-              className="inline-block size-2 rounded-full"
-              style={{ background: COLORS[si % COLORS.length] }}
-            />
-            {s.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // Flexible scorecard analysis dashboard — compose leaderboard/by-harness/trend/compare on one screen via filter/group/measure/search.
 // Save a composed analysis as a named View (private|shared); opening a saved view re-runs it against current data (live).
 export function CustomAnalyzer({
@@ -207,6 +146,8 @@ export function CustomAnalyzer({
   const t = useTranslations('analyzeScorecards')
   const [config, setConfig] = useState<AnalysisConfig>(initialConfig)
   const [copied, setCopied] = useState(false)
+  // Drill-down target: the group row / time bucket whose underlying records the raw table is scoped to.
+  const [focus, setFocus] = useState<Focus>()
 
   // config → URL (no navigation) — for deep-linking/sharing.
   useEffect(() => {
@@ -284,6 +225,53 @@ export function CustomAnalyzer({
     () => computeAnalysis(scorecards, config, resolveOwner, t('all')),
     [scorecards, config, authors, t]
   )
+
+  // Re-shaping the analysis invalidates a drill-down key, so the focus goes with it.
+  const shapeKey = `${config.groupBy.join(',')}:${config.viz}`
+  useEffect(() => setFocus(undefined), [shapeKey])
+
+  // The records the aggregate was computed from — the raw table below, scoped to the focused mark.
+  const rawRows = useMemo(
+    () => filterScorecards(scorecards, config, resolveOwner),
+    [scorecards, config, authors]
+  )
+  const focusedRows = useMemo(() => {
+    if (!focus) return rawRows
+    if (focus.kind === 'bucket') {
+      const dim = timeDimensionOf(config)
+      return rawRows.filter((sc) => dimValue(sc, dim) === focus.key)
+    }
+    return rawRows.filter((sc) => groupKeyOf(sc, config.groupBy) === focus.key)
+  }, [rawRows, focus, config])
+
+  // Slots are dealt over the WHOLE dataset's values for the series dimension, never over the filtered
+  // result — so narrowing a filter never repaints the survivors and an entity keeps its hue.
+  const seriesColorOf = useMemo(() => {
+    const map = new Map<string, string>()
+    const dim = seriesDimensionOf(config)
+    if (!dim) return map
+    const all = [...new Set(scorecards.map((sc) => dimValue(sc, dim)))].sort()
+    all.forEach((raw, i) => map.set(dim === 'owner' ? resolveOwner(raw) : raw, seriesColorAt(i)))
+    return map
+  }, [scorecards, config, authors])
+
+  // A measure whose values all sit inside 0~1 is a ratio: pin the axis to 0–100% so a bar's length means the
+  // same thing across re-filters. Everything else scales to its own range instead of a hardcoded ceiling.
+  const measureValues =
+    result.kind === 'line'
+      ? result.series.flatMap((s) => s.points).filter((v): v is number => v !== undefined)
+      : result.rows
+          .flatMap((r) => (r.cells.length > 0 ? r.cells.map((c) => c.value) : [r.value]))
+          .filter((v): v is number => v !== undefined)
+  const isRatio =
+    config.measure !== 'count' &&
+    measureValues.length > 0 &&
+    measureValues.every((v) => v >= 0 && v <= 1)
+  const ratioDomain = isRatio ? { min: 0, max: 1 } : undefined
+  const formatMeasure = (v: number) =>
+    config.measure === 'count' ? v.toLocaleString() : isRatio ? fmtPct(v) : v.toFixed(2)
+
+  const focusGroup = (key: string, label: string) => setFocus({ kind: 'group', key, label })
 
   const filterCombo = (
     label: string,
@@ -524,96 +512,134 @@ export function CustomAnalyzer({
         </div>
       </div>
 
-      {/* results */}
+      {/* results — every mark is a drill-down handle into the raw rows below */}
       {result.total === 0 ? (
         <EmptyState title={t('customEmptyTitle')} hint={t('customEmptyHint')} />
       ) : result.kind === 'line' ? (
-        <LineChart buckets={result.buckets} series={result.series} />
+        (() => {
+          // Past the palette's slots we do NOT invent hues — the tail is left out and said so out loud.
+          const shown = result.series.slice(0, MAX_SERIES)
+          const hidden = result.series.length - shown.length
+          const series: ChartSeries[] = shown.map((s) => ({
+            key: s.label,
+            label: s.label,
+            color: seriesColorOf.get(s.label) ?? seriesColorAt(0),
+          }))
+          return (
+            <div className="rounded-lg border bg-card p-4 shadow-raise">
+              <LineChart
+                x={result.buckets}
+                series={series}
+                values={shown.map((s) => s.points)}
+                formatValue={formatMeasure}
+                formatX={(label) => (label.length > 7 ? label.slice(5) : label)}
+                {...(ratioDomain ? { domain: ratioDomain } : {})}
+                ariaLabel={t('scoreTrend')}
+                emptyLabel={t('customEmptyTitle')}
+                onSelect={(i) => {
+                  const bucket = result.buckets[i]
+                  if (bucket) setFocus({ kind: 'bucket', key: bucket, label: bucket })
+                }}
+              />
+              {hidden > 0 && (
+                <p className="mt-2 text-[11px] text-faint">
+                  {t('seriesCapped', { hidden, max: MAX_SERIES })}
+                </p>
+              )}
+            </div>
+          )
+        })()
       ) : config.viz === 'bars' ? (
-        <div className="space-y-1.5 rounded-lg border bg-card p-3.5 shadow-raise">
-          {result.rows.map((r) => {
-            const v = r.value ?? 0
-            const pct = v <= 1 ? v : 0
-            return (
-              <div key={r.key} className="flex items-center gap-3">
-                <span
-                  className="w-48 shrink-0 truncate text-[13px] font-[510]"
-                  title={r.labels.join(' · ')}
-                >
-                  {r.labels.join(' · ') || t('all')}
-                </span>
-                <div className="relative h-5 flex-1 overflow-hidden rounded bg-secondary/50">
-                  <div
-                    className="h-full rounded bg-primary/60"
-                    style={{ width: `${Math.round(pct * 100)}%` }}
-                  />
-                </div>
-                <span className="w-16 shrink-0 text-right">
-                  {measureCell(r.value, config.measure)}
-                </span>
-                <span className="w-10 shrink-0 text-right text-[11px] text-faint">
-                  {t('countUnit', { count: r.count })}
-                </span>
-              </div>
-            )
-          })}
+        <div className="rounded-lg border bg-card p-3.5 shadow-raise">
+          <RankedBars
+            rows={result.rows.map((r) => ({
+              key: r.key,
+              label: r.labels.join(' · ') || t('all'),
+              ...(r.value !== undefined ? { value: r.value } : {}),
+              count: r.count,
+            }))}
+            formatValue={formatMeasure}
+            {...(ratioDomain ? { domain: ratioDomain } : {})}
+            renderValue={(row) => measureCell(row.value, config.measure)}
+            countLabel={(count) => t('countUnit', { count })}
+            emptyLabel={t('customEmptyTitle')}
+            {...(focus?.kind === 'group' ? { selectedKey: focus.key } : {})}
+            onSelect={(row) => focusGroup(row.key, row.label)}
+          />
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border bg-card shadow-raise">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-faint">
-                {config.groupBy.map((d) => (
-                  <th key={d} className="px-3 py-2 font-[510]">
-                    {t(DIMENSION_KEY[d])}
-                  </th>
-                ))}
-                {result.pivotKeys.length > 0 ? (
-                  result.pivotKeys.map((pk) => (
-                    <th key={pk} className="px-3 py-2 text-right font-[510]">
-                      {pk}
-                    </th>
-                  ))
-                ) : (
-                  <th className="px-3 py-2 text-right font-[510]">
-                    {t(MEASURE_KEY[config.measure])}
-                  </th>
-                )}
-                <th className="px-3 py-2 text-right font-[510]">{t('countHeader')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.rows.map((r) => (
-                <tr
+        <Table>
+          <THead>
+            <tr>
+              {config.groupBy.map((d) => (
+                <TH key={d}>{t(DIMENSION_KEY[d])}</TH>
+              ))}
+              {result.pivotKeys.length > 0 ? (
+                result.pivotKeys.map((pk) => (
+                  <TH key={pk} className="text-right">
+                    {pk}
+                  </TH>
+                ))
+              ) : (
+                <TH className="text-right">{t(MEASURE_KEY[config.measure])}</TH>
+              )}
+              <TH className="text-right">{t('countHeader')}</TH>
+            </tr>
+          </THead>
+          <TBody>
+            {result.rows.map((r) => {
+              const label = r.labels.join(' · ') || t('all')
+              return (
+                <TR
                   key={r.key}
-                  className="border-b border-border/60 last:border-0 hover:bg-elevated"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={label}
+                  className={cn(
+                    'cursor-pointer',
+                    focus?.kind === 'group' && focus.key === r.key && 'bg-elevated'
+                  )}
+                  onClick={() => focusGroup(r.key, label)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      focusGroup(r.key, label)
+                    }
+                  }}
                 >
                   {r.labels.map((l, i) => (
-                    <td key={i} className="px-3 py-2 font-[510] text-foreground">
+                    <TD key={i} className="font-[510]">
                       {l || '—'}
-                    </td>
+                    </TD>
                   ))}
                   {result.pivotKeys.length > 0 ? (
                     r.cells.map((c) => (
-                      <td key={c.key} className="px-3 py-2 text-right">
+                      <TD key={c.key} className="text-right">
                         {measureCell(c.value, config.measure)}
-                      </td>
+                      </TD>
                     ))
                   ) : (
-                    <td className="px-3 py-2 text-right">{measureCell(r.value, config.measure)}</td>
+                    <TD className="text-right">{measureCell(r.value, config.measure)}</TD>
                   )}
-                  <td className="px-3 py-2 text-right text-[11px] text-faint">{r.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  <TD className="text-right text-[11px] text-faint">{r.count}</TD>
+                </TR>
+              )
+            })}
+          </TBody>
+        </Table>
       )}
 
       <p className="text-[11px] text-faint">
         {t('customSummary', { total: result.total })}
         {config.measure === 'passRate' ? t('customSummaryPassRate', { pct: fmtPct(1) }) : ''}
       </p>
+
+      {/* The records behind the aggregate — the chart's table-view twin, and where a clicked mark lands. */}
+      <RawRowsTable
+        rows={focusedRows}
+        {...(config.metric ? { metric: config.metric } : {})}
+        {...(focus ? { focusLabel: focus.label, onClearFocus: () => setFocus(undefined) } : {})}
+      />
     </div>
   )
 }

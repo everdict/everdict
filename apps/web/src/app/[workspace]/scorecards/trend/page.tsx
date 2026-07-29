@@ -12,6 +12,9 @@ import { fmtDateTime, fmtDateTimeFull, fmtMetricLabel, fmtScore } from '@/shared
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+// The palette module directly, not the barrel — this page is server-rendered and only needs the token,
+// not the client chart components the barrel pulls in.
+import { SERIES_SLOTS } from '@/shared/ui/charts/palette'
 import { EntityRef } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -69,8 +72,8 @@ function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
     >
       <defs>
         <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--color-primary)" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="var(--color-primary)" stopOpacity="0" />
+          <stop offset="0%" stopColor={SERIES_SLOTS[0]} stopOpacity="0.18" />
+          <stop offset="100%" stopColor={SERIES_SLOTS[0]} stopOpacity="0" />
         </linearGradient>
       </defs>
       {baseScore !== null && (
@@ -96,7 +99,7 @@ function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
         </>
       )}
       <polygon points={area} fill="url(#trend-fill)" />
-      <polyline points={line} fill="none" stroke="var(--color-primary)" strokeWidth={2} />
+      <polyline points={line} fill="none" stroke={SERIES_SLOTS[0]} strokeWidth={2} />
       {pts.map((p) => (
         <circle
           key={p.scorecardId}

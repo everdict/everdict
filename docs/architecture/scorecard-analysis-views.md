@@ -124,6 +124,17 @@ mem/Pg stores, Zod at every boundary, web is a pure HTTP mirror.
   scorecards list page's analytics segment points at `/analyze`. Existing server endpoints
   (`leaderboard`/`trend`/`diff`) stay for MCP/agents; the web dashboard computes from `listScorecards`.
 - Reuse: by-harness grouping logic, trend SVG sparkline, `shared/lib/format`, `shared/ui/{score,chip,stat-card}`.
+- **Raw-data layer (added 2026-07-29).** The aggregate is never the whole story, so the dashboard also lists the
+  scorecard rows it was computed from, under the chart. It is NOT a fourth `viz` value — `viz` is bound to the
+  domain/API `AnalysisConfig` enum (`analysis-query.ts`), and raw rows are orthogonal to the aggregate shape, so
+  they render for every viz. `filterScorecards`/`groupKeyOf`/`timeDimensionOf` (exported from the same model
+  module the pivot uses) guarantee the table applies the identical predicate — the rows can't disagree with the
+  numbers above them. Clicking any mark (bar, line bucket, table row) scopes the table to that group with a
+  clearable chip; re-shaping the analysis clears the focus, since the group key no longer means anything. The
+  table caps at 50 rows with an explicit "showing N of M" expander — never a silent truncation.
+- **Charts come from `shared/ui/charts`** (see skill `web`): one palette (`--chart-*`, CVD-validated per surface),
+  one axis/grid/tooltip/legend implementation, entity-stable color slots. Ratio measures pin the axis to 0–100%;
+  other measures auto-scale to their own range.
 
 ### S2 — `View` entity (persist & load) — **SHIPPED**
 - `@everdict/db`: `ViewStore` interface + `InMemoryViewStore` + `PgViewStore` + migration `0038_create_views.sql`

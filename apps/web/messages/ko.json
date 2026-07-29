@@ -33,7 +33,9 @@
     "unpinned": "고정을 해제했습니다.",
     "pinFailed": "고정 작업에 실패했습니다.",
     "loadingViews": "뷰 불러오는 중…",
-    "noViews": "아직 뷰가 없습니다. 분석 대시보드에서 저장해 보세요."
+    "noViews": "아직 뷰가 없습니다. 분석 대시보드에서 저장해 보세요.",
+    "chartEmpty": "그릴 데이터가 없어요.",
+    "seriesCapped": "{hidden}개 시리즈는 표시하지 않았어요."
   },
   "analyzeScorecards": {
     "all": "전체",
@@ -126,7 +128,16 @@
     "vizBars": "막대",
     "vizTable": "표",
     "artifactCount": "아티팩트 {count}개",
-    "lastReportAt": "리포트 {time}"
+    "lastReportAt": "리포트 {time}",
+    "rawTitle": "원데이터",
+    "rawCount": "{count}건",
+    "rawEmpty": "이 조건에 해당하는 원본 스코어카드가 없어요.",
+    "rawFocused": "{label} 만 보는 중",
+    "rawColRan": "실행",
+    "rawColScore": "점수",
+    "rawColCases": "케이스",
+    "rawShowAll": "{total}건 중 {shown}건 표시 — 전체 보기",
+    "seriesCapped": "{max}개까지만 그렸어요 · {hidden}개 시리즈는 아래 원데이터에서 확인하세요"
   },
   "byHarnessScorecards": {
     "harnessLabel": "Harness"

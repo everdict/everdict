@@ -121,10 +121,13 @@ verbs → no HITL. This slice is valuable standalone (big-workspace dashboard pe
   `render_chart {spec}` (validated ChartSpec → chart artifact), `write_report {title, markdown}`,
   `export_table {title, rows}`. The agent host (`apps/agent`) persists the record, links it to the
   session/message, and streams an `artifact` SSE event.
-- **ChartSpec** (closed, zod-validated, in contracts): `{type: 'line'|'bar'|'area'|'scatter'|'dist',
-  title, x, series: [{label, points}], y?: {unit, domain}}` with point caps. Rendered by a new
-  `apps/web/src/shared/ui/charts/*` family grown from the existing hand-rolled SVG
-  (`scorecard-analyzer.tsx` line chart generalized).
+- **ChartSpec** (closed, zod-validated, in contracts): **shipped as `{type: 'line'|'bar', x, series:
+  [{label, points}], yUnit?}`** with point/series caps — `area`/`scatter`/`dist` were never built and are
+  not a commitment (add one only when a caller needs it). Rendered by the
+  `apps/web/src/shared/ui/charts/*` family, which is also what the pivot canvas and the billing dashboard
+  draw with, so an agent-emitted chart and a hand-built one are the same object visually. The contract
+  allows more series than the palette has slots: the renderer plots `MAX_SERIES` and discloses the rest
+  rather than generating hues.
 - **View attachment**: `pin_artifact` (host tool + `POST /views/:id/artifacts/:artifactId/pin` + web pin
   button) attaches an artifact to a view; the view page shows the pinned gallery. Unpinned artifacts
   remain browsable in their conversation.
@@ -281,8 +284,13 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
 
 ## Non-goals / guardrails
 
-- **No active-content artifacts.** Markdown + ChartSpec + files only; no HTML/JS rendering of
-  LLM-emitted content, ever.
+- ~~**No active-content artifacts.**~~ **Superseded 2026-07-28 by Principle 2** (maintainer decision):
+  free-form `html` artifacts ship alongside the declarative kinds. The invariant is CONTAINMENT, not
+  prohibition — LLM-emitted markup executes only in an opaque-origin sandboxed iframe under a deny-all
+  CSP, never in the app origin.
+- **No color-only encoding.** Every chart has a table twin: the pivot canvas renders the raw scorecard
+  rows under the aggregate (drill-down scopes them to the clicked mark), and artifact tables/reports carry
+  their own values. A value must never be readable only by hue or bar length.
 - **No control-plane code execution.** `run_analysis` and any code capability dispatch through the
   job-runner isolation path (code-judge invariant); non-isolated runtimes refuse.
 - **No new authz surface.** Views/artifacts/reports gate on `scorecards:read`/`scorecards:run`; schedules

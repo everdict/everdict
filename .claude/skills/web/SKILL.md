@@ -58,6 +58,17 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
 ## Established UI conventions (enforced — reuse, don't reinvent)
 - **Format atoms**: score/model/version/time formatting goes through `shared/lib/format.ts` +
   `shared/ui/{score,chip}.tsx`, NEVER per-page inline.
+- **Charts** = `shared/ui/charts` (`LineChart` / `BarChart` [grouped+stacked] / `RankedBars`), never a
+  new hand-rolled SVG. The family owns the axis, the nice-rounded ticks, the recessive hairline grid, the
+  hover/focus tooltip and the legend, so a chart cannot invent its own chrome. **Colors come only from
+  `palette.ts`** (`--chart-1..5` + `--chart-other` in `globals.css`, stepped per surface and validated as a
+  set for CVD/contrast — re-run the validator if you touch them): slots are assigned in FIXED ORDER from a
+  stable, *unfiltered* key list (color follows the entity, so filtering never repaints survivors), and past
+  `MAX_SERIES` the tail folds into "other" or is dropped WITH a visible note — never a generated 6th hue.
+  Ratio measures pin the domain to `{min: 0, max: 1}`; everything else auto-scales (never a hardcoded
+  ceiling). Every chart needs a table twin — the values must be readable without color (see the analyze
+  dashboard's raw-data table). A chart with genuinely different semantics (the trend page's baseline
+  threshold + status dots) may stay bespoke, but still takes its series color from `palette.ts`.
 - **Settings UIs** = Linear settings-list (`shared/ui/settings-list.tsx`, label-left / compact-control-right
   divided rows), not stacked full-width forms. **Settings content width is ONE shared column**: every settings
   tab — form/account (General · Profile · Preferences · API keys · Personal secrets) AND data-dense (Members ·
@@ -91,8 +102,13 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   the neighbourhood, so the map and the detail cannot disagree; picking a neighbour in the panel writes the selection
   back, which re-centres the map. A feature must not reach up into the panel: like `SettingsFilesExplorer`, the
   page-level `SettingsKnowledgeMap` owns `useInfraPanelOptional()` and passes `selectedId`/`onSelect` down.
-  Moving an entry is drag-and-drop in `FileTreePane` (the viewer has no Move button) — the tree owns the folder
-  context.
+  Entry actions belong to `FileTreePane`, never to `FileViewer` (which only reads/edits the open document — no
+  Move, no Delete): the tree owns the folder context and the multi-select. Moving is drag-and-drop (dragging a
+  checked row carries the whole selection) plus a "Move to…" folder picker for destinations a drag can't reach;
+  deleting is a hover-revealed row trash and a bulk action. Multi-select reuses the scorecard-list grammar
+  (hover-revealed checkbox, shift-click range, click-toggles-instead-of-opening while selecting, Esc clears,
+  portaled action bar measured against the enclosing `<main>`) — it is NOT persisted, because a path is not a
+  stable id. Hosts re-point (`onMoved` → `rewriteMovedPath`) or close (`onRemoved` → `coversPath`) their viewer.
   Panel lifecycle: iframes persist across TAB SWITCHES only — CLOSING the panel discards them (user decision:
   reopen = fresh per-tab render, and the recovery gesture for stuck frames). The header back button walks a
   parent-tracked per-tab stack fed by `everdict:frame-nav` reports — never `history.back()` (joint session
@@ -101,6 +117,14 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   a framed page its own theme computation. Auth: a dead session must never render sign-in inside the panel —
   middleware 401-escapes embed requests, and the [workspace] layout renders `FrameEscape` (top-window escape)
   for the principal-null case the middleware can't see.
+- **Rendering a workspace file** is `features/browse-files/ui/document-preview.tsx` — ONE switch over
+  `previewKindFor(path, contentType, encoding)` covering prose · CSV grid · code · image · pdf · media · office
+  document · archive · binary, with `FileViewer` owning only the chrome (raw toggle, download, edit, history).
+  A new format is a row in the contracts type table (`FS_CONTENT_TYPES`, the SSOT) plus a branch here — the web
+  MIRRORS the class tables in `lib/file-kind.ts` because runtime-decoupling forbids importing contracts values,
+  so keep the two in step. `CodeEditor` takes a wide `CodeLanguage`: a new language is a lazy
+  `@codemirror/legacy-modes` entry, never a second editor, and unknown paths render as `'plain'` rather than
+  guessing. Anything the browser can't show still downloads (`lib/file-bytes.ts`, client-side blob).
 - **Secret-name inputs** are never free text — use `SecretPicker` from `features/pick-secret`
   (combobox over preloaded names + "new" inline create; `defaultMultiline` for PEM/kubeconfig).
   Used by harness env, GHE App private key, Mattermost tokens.
