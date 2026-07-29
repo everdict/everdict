@@ -1,5 +1,6 @@
 import { ImageRegistryService, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { UpstreamError } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it, vi } from "vitest";
 import { buildServer } from "../../server.js";
@@ -54,6 +55,52 @@ describe("image registry read routes (tags / manifest)", () => {
       headers: acme,
     });
     expect(res.json()).toMatchObject({ reference: "v2", digest: "sha256:abc" });
+  });
+
+  it("verifies that the workspace can pull a full ref and hands back the digest to pin", async () => {
+    const { app, imageRegistryService } = build();
+    await imageRegistryService.upsert("acme", { name: "ghcr", host: "ghcr.io", namespace: "acme" });
+    const res = await app.inject({
+      method: "GET",
+      url: `/workspace/image-registries/verify?image=${encodeURIComponent("ghcr.io/acme/env:v3")}`,
+      headers: acme,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ pullable: true, reason: "ok", digest: "sha256:abc" });
+  });
+
+  it("reports a rejected pull as a RESULT (200 + reason), not an error", async () => {
+    const settings = new InMemoryWorkspaceSettingsStore();
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      imageRegistryService: new ImageRegistryService({
+        settings,
+        secretsFor: async () => ({}),
+        reader: {
+          checkConnection: vi.fn(async () => ({ reachable: true, detail: "" })),
+          listTags: vi.fn(async () => []),
+          inspectManifest: vi.fn(async () => {
+            throw new UpstreamError("UPSTREAM_ERROR", { status: 401 }, "unauthorized");
+          }),
+        },
+      }),
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: `/workspace/image-registries/verify?image=${encodeURIComponent("ghcr.io/other/env:v3")}`,
+      headers: acme,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ pullable: false, reason: "auth" });
+  });
+
+  it("400s when the image ref is missing", async () => {
+    const res = await build().app.inject({
+      method: "GET",
+      url: "/workspace/image-registries/verify",
+      headers: acme,
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it("400s when repository is missing", async () => {

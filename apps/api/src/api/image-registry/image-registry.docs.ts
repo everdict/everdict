@@ -129,6 +129,31 @@ const docs = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
+  verify: {
+    summary: "Verify that this workspace can pull an image ref",
+    description:
+      "Active pull-usability check for a FULL image ref (host/repo:tag or @digest): resolves the matching registered " +
+      "registry's pull credential (anonymous when the host is not registered) and fetches the manifest. A failure is a " +
+      "RESULT, not an error — {pullable:false, reason: auth|not-found|unreachable}. On success the resolved digest is " +
+      "the recommended reproducible pin for an environment capability. Requires harnesses:read.",
+    tags: ["image-registry"],
+    querystring: toJsonSchema(
+      z.object({ image: z.string().describe('Full image reference — "ghcr.io/acme/env:v3" · "…@sha256:…"') }),
+    ),
+    response: {
+      200: {
+        description: "Pull-usability outcome",
+        ...toJsonSchema(
+          z.object({
+            pullable: z.boolean(),
+            reason: z.enum(["ok", "auth", "not-found", "unreachable"]),
+            digest: z.string().optional(),
+          }),
+        ),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
   pushCredentials: {
     summary: "Mint push credentials for a registry",
     description:

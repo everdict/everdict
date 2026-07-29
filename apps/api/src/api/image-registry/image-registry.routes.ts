@@ -136,6 +136,29 @@ export function registerImageRegistryRoutes(app: FastifyInstance, deps: ServerDe
     },
   );
 
+  // Active pull check for a FULL image ref — "can THIS workspace actually pull it?", plus the resolved digest the
+  // environment editor offers as a digest pin. The same check environment adoption runs, exposed at AUTHORING time so
+  // an author verifies the image they just pushed instead of only getting a static classification warning. A failure
+  // is a RESULT (pullable:false + reason), never an error. Read (harnesses:read), no side effects.
+  app.get<{ Querystring: { image?: string } }>(
+    "/workspace/image-registries/verify",
+    { schema: imageRegistryDocs.verify },
+    async (req, reply) => {
+      if (!deps.imageRegistryService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const image = req.query.image;
+      if (!image) return reply.code(400).send({ code: "BAD_REQUEST", message: "image is required" });
+      try {
+        gate(principal, "harnesses:read");
+        return reply.send(await deps.imageRegistryService.verifyImage(principal.workspace, image));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // Mint push credentials — the 'value' of pushSecretName goes out in the response (non-persistent, the caller discards it after docker login+push).
   // Select the registry via ?name= — omitting it is allowed only when there's exactly one (omitting it with multiple → 400, listing the names).
   app.post<{ Querystring: { name?: string } }>(

@@ -145,6 +145,15 @@ export const imageTagsSchema = z.object({
 })
 export type ImageTags = z.infer<typeof imageTagsSchema>
 
+// GET /workspace/image-registries/verify — 저작 시점 실 pull 검증. 정적 분류 경고(imageWarnings)와 달리 레지스트리에
+// 실제로 물어본 결과이고, digest 가 오면 그것이 재현 가능한 핀이다. 실패도 200 결과(pullable:false + reason).
+export const imageVerifySchema = z.object({
+  pullable: z.boolean(),
+  reason: z.enum(['ok', 'auth', 'not-found', 'unreachable']),
+  digest: z.string().optional(),
+})
+export type ImageVerify = z.infer<typeof imageVerifySchema>
+
 // POST /agent/code-tools/try 200 — code 도구 검증 결과. check=구문(파스만) · run=예제 입력 실제 실행(에이전트와 동일
 // 실행계약+샌드박스 게이트). 무상태·영속 안 됨(스킬 try 와 동형이라 계약 앵커 없이 로컬 형태만).
 export const codeToolTryResultSchema = z.object({

@@ -1,17 +1,19 @@
 'use server'
 
 import {
-  type CapabilitySpec,
   codeToolTryResultSchema,
-  type CodeToolTryResult,
   imageTagsSchema,
+  imageVerifySchema,
   probeCapabilityMcpResultSchema,
+  validateCapabilityResultSchema,
+  type CapabilitySpec,
+  type CodeToolTryResult,
+  type ImageVerify,
   type ProbeCapabilityMcpResult,
   type ValidateCapabilityResult,
-  validateCapabilityResultSchema,
 } from '@/entities/capability'
-import { agentPlane } from '@/shared/lib/agent-plane'
 import { authContext } from '@/shared/auth/principal'
+import { agentPlane } from '@/shared/lib/agent-plane'
 import { controlPlane } from '@/shared/lib/control-plane'
 
 // 위자드 저작 보조 서버액션 — 저장 전 검증(validate)·mcp 연결 테스트(probe)·environment 이미지 태그 조회. 실패는 결과로
@@ -98,8 +100,28 @@ export async function listImageTagsAction(
 ): Promise<ImageTagsResult> {
   const ctx = await authContext()
   try {
-    const { tags } = imageTagsSchema.parse(await controlPlane.listImageTags(ctx, repository, registry))
+    const { tags } = imageTagsSchema.parse(
+      await controlPlane.listImageTags(ctx, repository, registry)
+    )
     return { ok: true, tags }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export interface ImageVerifyResult {
+  ok: boolean
+  result?: ImageVerify
+  error?: string
+}
+
+// 저작 시점 실 pull 검증 — 정적 분류 경고(imageWarnings)는 "레지스트리 등록 여부"만 보는데, 이건 레지스트리에 실제로
+// 물어본다(내가 방금 push 한 이미지를 정말 당길 수 있는가). digest 가 오면 그것이 재현 가능한 핀.
+export async function verifyImageAction(image: string): Promise<ImageVerifyResult> {
+  const ctx = await authContext()
+  try {
+    const result = imageVerifySchema.parse(await controlPlane.verifyImage(ctx, image))
+    return { ok: true, result }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

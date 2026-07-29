@@ -1,12 +1,18 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import { Boxes, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
+import { Boxes, ChevronDown, ChevronRight, Loader2, ShieldCheck } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import type { Capability, CapabilitySpec, CapabilityVisibility } from '@/entities/capability'
+import type {
+  Capability,
+  CapabilitySpec,
+  CapabilityVisibility,
+  ImageVerify,
+} from '@/entities/capability'
 import { cn } from '@/shared/lib/utils'
+import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
@@ -14,7 +20,8 @@ import { Input, Label, Textarea } from '@/shared/ui/input'
 import { Markdown } from '@/shared/ui/markdown'
 
 import { saveCapabilityAction } from '../api/manage-capabilities'
-import { listImageTagsAction } from '../api/wizard-tools'
+import { listImageTagsAction, verifyImageAction } from '../api/wizard-tools'
+import { pullReasonLabel, withDigest } from '../lib/pull-reason'
 import { VisibilityPicker, WorkspacePicker } from './reach-controls'
 
 type EnvironmentSpec = Extract<CapabilitySpec, { type: 'environment' }>
@@ -74,7 +81,29 @@ export function EnvironmentEditor({
   const [tagRepo, setTagRepo] = useState('')
   const [tagLoading, setTagLoading] = useState(false)
   const [imageTags, setImageTags] = useState<string[] | null>(null)
+  // 실 pull 검증 — 저장 시 붙는 정적 분류 경고(imageWarnings)는 "레지스트리에 등록된 호스트인가"만 보는 반면,
+  // 이건 레지스트리에 실제로 매니페스트를 물어본다(방금 push 한 내 이미지를 정말 당길 수 있는가 + digest).
+  const [verify, setVerify] = useState<ImageVerify | null>(null)
+  const [verifying, setVerifying] = useState(false)
   const [pending, startTransition] = useTransition()
+
+  // ref 가 바뀌면 이전 검증 결과는 거짓말이 된다 — 즉시 폐기한다(digest 핀 적용은 예외: 검증된 그 이미지 그대로다).
+  const changeImage = (next: string) => {
+    setImage(next)
+    setVerify(null)
+  }
+  const runVerify = () => {
+    setVerifying(true)
+    setVerify(null)
+    void verifyImageAction(image.trim()).then((r) => {
+      setVerifying(false)
+      if (r.ok && r.result !== undefined) setVerify(r.result)
+      else toast.error(r.error ?? t('envVerifyError'))
+    })
+  }
+  const verifiedDigest = verify?.digest
+  const canPinDigest =
+    verify?.pullable === true && verifiedDigest !== undefined && !image.includes('@')
 
   // 프리셋 JSON 라이브 피드백 — 저장까지 기다리지 않고 입력 중에 유효성을 보여준다(기존 저장-시점-실패 UX 교정).
   const presetError = useMemo(() => {
@@ -101,7 +130,7 @@ export function EnvironmentEditor({
   }
   const pickTag = (tag: string) => {
     const host = imageRegistries.find((reg) => reg.name === tagRegistry)?.host
-    setImage(`${host ? `${host}/` : ''}${tagRepo.trim()}:${tag}`)
+    changeImage(`${host ? `${host}/` : ''}${tagRepo.trim()}:${tag}`)
   }
 
   const buildSpec = (): EnvironmentSpec | { error: string } => {
@@ -245,10 +274,42 @@ export function EnvironmentEditor({
             <Input
               id="env-image"
               value={image}
-              onChange={(e) => setImage(e.target.value)}
+              onChange={(e) => changeImage(e.target.value)}
               placeholder="ghcr.io/acme/officeqa-env@sha256:…"
               className="font-mono text-[13px]"
             />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={verifying || image.trim().length === 0}
+              onClick={runVerify}
+            >
+              {verifying ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
+              {t('envVerify')}
+            </Button>
+            {verify !== null &&
+              (verify.pullable ? (
+                <Badge tone="success">{t('pullableBadge')}</Badge>
+              ) : (
+                <Badge tone="warning">{pullReasonLabel(t, verify.reason)}</Badge>
+              ))}
+            {verifiedDigest !== undefined && (
+              <span className="truncate font-mono text-[11.5px] text-muted-foreground">
+                {verifiedDigest.slice(0, 19)}…
+              </span>
+            )}
+            {canPinDigest && verifiedDigest !== undefined && (
+              // 검증된 그 이미지의 digest 로 바꾸는 것이므로 검증 결과는 유지한다(changeImage 가 아니라 setImage).
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setImage(withDigest(image.trim(), verifiedDigest))}
+              >
+                {t('envPinDigest')}
+              </Button>
+            )}
           </div>
           {imageRegistries.length > 0 && (
             <div className="space-y-2 rounded-md border border-border bg-secondary/30 p-3">

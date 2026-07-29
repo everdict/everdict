@@ -88,6 +88,17 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
         run(principal, "harnesses:read", async () => ok(await registry.listTags(ws, repository, name))),
     );
     server.registerTool(
+      "verify_image",
+      {
+        description:
+          "Can THIS workspace pull a full image ref? Resolves the matching registered registry's pull credential (anonymous for an unregistered host) and fetches the manifest → {pullable, reason: ok|auth|not-found|unreachable, digest?}. A failure is a result, never an error. Use it before registering an environment capability — and pin the returned digest instead of a mutable tag.",
+        inputSchema: {
+          image: z.string().min(1).describe('full image reference — "ghcr.io/acme/env:v3" · "…@sha256:…"'),
+        },
+      },
+      ({ image }) => run(principal, "harnesses:read", async () => ok(await registry.verifyImage(ws, image))),
+    );
+    server.registerTool(
       "inspect_image",
       {
         description:

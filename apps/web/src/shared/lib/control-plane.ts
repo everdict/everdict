@@ -631,6 +631,10 @@ export const controlPlane = {
       auth,
       `/workspace/image-registries/tags?repository=${encodeURIComponent(repository)}${registry ? `&registry=${encodeURIComponent(registry)}` : ''}`
     ),
+  // GET /workspace/image-registries/verify — 이 워크스페이스가 그 ref 를 실제로 pull 할 수 있는지(+ digest).
+  // 실패는 에러가 아니라 결과(pullable:false + reason) — 저작 화면이 배지로 렌더한다.
+  verifyImage: <T>(auth: AuthContext, image: string) =>
+    call<T>(auth, `/workspace/image-registries/verify?image=${encodeURIComponent(image)}`),
   getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
   setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),
