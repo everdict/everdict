@@ -528,6 +528,7 @@ export class ScorecardBatchService {
           caseId,
           parentScorecardId: id,
           ...(evalCase.placement?.target ? { runtime: evalCase.placement.target } : {}),
+          ...(current ? { origin: ScorecardBatch.childRunOrigin(current) } : {}),
           now: this.now(),
         });
         await runStore.create(child);
@@ -861,6 +862,7 @@ export class ScorecardBatchService {
               result: r,
               parentScorecardId: record.id,
               ...(src.runtime ? { runtime: src.runtime } : {}),
+              origin: ScorecardBatch.childRunOrigin(record),
               now: this.now(),
             }),
           );
@@ -1039,6 +1041,10 @@ export class ScorecardBatchService {
     // Per-case dispatch (orchestration per case): admit (per-case since it's a batch) → enrich the job → pure executeCase → settle.
     // The pure execution (token resolve+attach → dispatch) is handled by executeCase (shared with a single run); settlement/child-run lifecycle is handled by the orchestration here.
     // When runStore is set, create a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).
+    // The batch's structured WHY, computed once and carried onto every fan-out child (P0). One extra read
+    // per batch; the record was created before track() is called, so a miss only means "no origin stamp".
+    const batchForOrigin = await this.deps.store.get(id);
+    const childOrigin = batchForOrigin ? ScorecardBatch.childRunOrigin(batchForOrigin) : undefined;
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // throws if over budget → batch fails
       const enriched: CaseJob = {
@@ -1065,6 +1071,7 @@ export class ScorecardBatchService {
           caseId: job.evalCase.id,
           parentScorecardId: id,
           ...(runtime ? { runtime } : {}), // propagate the batch's runtime to the child too — the queue's runtime-lane axis
+          ...(childOrigin ? { origin: childOrigin } : {}),
           now: this.now(),
         });
         await runStore.create(child);

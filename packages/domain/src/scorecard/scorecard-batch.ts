@@ -117,6 +117,21 @@ export class ScorecardBatch {
     };
   }
 
+  // The batch's WHY, carried onto each fan-out child (execution-model.md P0): the scorecard origin's
+  // free-string source mapped onto the structured cause vocabulary. Children never guess their own cause.
+  static childRunOrigin(record: Pick<ScorecardRecord, "origin" | "createdBy">): RunOrigin {
+    const source = record.origin?.source;
+    if (source === "schedule") {
+      return {
+        cause: "schedule",
+        ...(record.origin?.scheduleId ? { scheduleId: record.origin.scheduleId } : {}),
+      };
+    }
+    if (source === "github-actions") return { cause: "ci" };
+    const cause = source === "web" || source === "mcp" ? ("member" as const) : ("api" as const);
+    return { cause, ...(record.createdBy ? { actor: record.createdBy } : {}) };
+  }
+
   // Fan-out child run, born queued (flipped to running when compute starts; see NewChildRunInput).
   static newChildRun(input: NewChildRunInput): RunRecord {
     return {

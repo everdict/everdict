@@ -356,4 +356,18 @@ describe("ScorecardBatch child runs — the universal-run shape (P0)", () => {
     });
     expect(child.parentScorecardId).toBe("sc-9"); // the legacy axis is untouched
   });
+
+  it("childRunOrigin maps the batch's free-string source onto the structured cause vocabulary", () => {
+    expect(ScorecardBatch.childRunOrigin({ origin: { source: "schedule", scheduleId: "sch-1" } })).toEqual({
+      cause: "schedule",
+      scheduleId: "sch-1",
+    });
+    expect(ScorecardBatch.childRunOrigin({ origin: { source: "github-actions" } })).toEqual({ cause: "ci" });
+    expect(ScorecardBatch.childRunOrigin({ origin: { source: "web" }, createdBy: "alice" })).toEqual({
+      cause: "member",
+      actor: "alice",
+    });
+    // Direct API / unknown source: honest "api", with the actor when one is known.
+    expect(ScorecardBatch.childRunOrigin({ createdBy: "bot" })).toEqual({ cause: "api", actor: "bot" });
+  });
 });
