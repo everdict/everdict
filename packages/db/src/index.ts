@@ -111,6 +111,10 @@ export { InMemorySkillStore, PgSkillStore } from "./workspace/skill-store.js";
 export { InMemoryFsRevisionStore, PgFsRevisionStore } from "./workspace/fs-revision-store.js";
 export { InMemoryKnowledgeEntryStore, PgKnowledgeEntryStore } from "./workspace/knowledge-entry-store.js";
 export { InMemoryCapabilityStore, PgCapabilityStore } from "./workspace/capability-store.js";
+export {
+  InMemoryAgentMemberPreferenceStore,
+  PgAgentMemberPreferenceStore,
+} from "./workspace/agent-member-preference-store.js";
 export { type SqlClient, type PgPool, makePool, sqlClient } from "./client.js";
 export {
   type UsageRow,
