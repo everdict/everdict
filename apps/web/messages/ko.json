@@ -3479,6 +3479,7 @@
   "agentChat": {
     "new": "새 대화",
     "history": "대화 기록",
+    "live": "응답 진행 중",
     "model": "모델",
     "modelDefault": "워크스페이스 기본",
     "modelPick": "모델 선택",
@@ -3573,6 +3574,7 @@
       }
     },
     "errorSend": "메시지를 보내지 못했어요. 다시 시도해 주세요.",
+    "errorBusy": "이 대화에서 이미 응답이 진행 중이에요. 진행 중인 스트림에 다시 연결했어요.",
     "errorGeneric": "문제가 발생했어요.",
     "mentionAdd": "워크스페이스 엔티티 참조",
     "sendToChat": "대화에서 분석",

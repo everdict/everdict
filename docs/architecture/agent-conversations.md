@@ -113,10 +113,21 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   tasteful `animate-in` motion — all in everdict's design-system atoms/tokens.
 - **P8 (real-time + rename + attachments, landed)** — a turn **streams over SSE** (content-negotiated on the chat
   route, `reply.hijack`): `delta` events grow a live assistant bubble, `message` events merge each persisted
-  record; the Stop button aborts the request → the server aborts the loop (`req.raw` close). **Session rename**
-  (`PATCH /agent/sessions/:id` + inline UI). **File attachments** — text files (paperclip / drag-drop) are read
-  client-side and folded into the model context (like @-references); only metadata (name/type/size) is persisted
-  (`AgentAttachment`, migration 0068).
+  record. **Session rename** (`PATCH /agent/sessions/:id` + inline UI). **File attachments** — text files
+  (paperclip / drag-drop) are read client-side and folded into the model context (like @-references); only
+  metadata (name/type/size) is persisted (`AgentAttachment`, migration 0068).
+- **Live turns are decoupled from the connection** (`apps/agent/src/live-turns.ts`) — the original P8 coupling
+  ("client disconnect aborts the loop") made switching conversations kill or orphan a running turn: the panel
+  looked idle on return and a re-send double-ran the session. Now POST /chat registers the turn in a per-session
+  **LiveTurnRegistry** and the SSE response is just its first subscriber: a disconnect only detaches (the loop
+  keeps running headless, records keep persisting), a concurrent /chat on the same session is refused with
+  **409** (the duplicate-turn guard), **`GET /agent/sessions/:id/stream`** re-attaches (204 when idle; replays
+  the in-flight assistant/reasoning buffers + parked HITL asks, then follows the broadcast to the terminal
+  done/error), and **`POST /agent/sessions/:id/stop`** is the explicit abort the Stop button now calls. Session
+  responses carry a computed **`live`** flag (wire-only, `AgentSessionResponseSchema` — never persisted): the
+  history menu shows a running badge, and the panel auto-re-attaches when it opens a live session (a send that
+  409s restores the input and re-attaches instead of erroring). A parked write-tool approval survives navigation
+  — deny now comes only from timeout or /stop, and the re-attach replay re-renders the prompt.
 - **P9 (per-workspace customization, landed — Phase 1)** — each workspace can enhance its own agent, plugging its
   context + tools into the shared framework the way Claude Code takes a per-project CLAUDE.md + MCP servers. A new
   **registered, versioned `AgentSpec` entity** (`(tenant, id, version) → AgentSpec`, same immutable-version SSOT as

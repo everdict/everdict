@@ -157,9 +157,22 @@ function SessionRows({
                       <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
                         {s.title}
                       </span>
-                      <span className="shrink-0 text-[10.5px] tabular-nums text-faint group-hover:hidden">
-                        {relativeTime(s.updatedAt, locale)}
-                      </span>
+                      {/* 라이브 턴 진행 중 배지 — 세션 응답의 computed live 플래그. 열면 그 스트림에 재접속된다. */}
+                      {s.live ? (
+                        <span
+                          className="relative flex size-2 shrink-0"
+                          role="status"
+                          aria-label={t('live')}
+                          title={t('live')}
+                        >
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/50" />
+                          <span className="relative inline-flex size-2 rounded-full bg-primary" />
+                        </span>
+                      ) : (
+                        <span className="shrink-0 text-[10.5px] tabular-nums text-faint group-hover:hidden">
+                          {relativeTime(s.updatedAt, locale)}
+                        </span>
+                      )}
                     </button>
                     <Button
                       variant="ghost"

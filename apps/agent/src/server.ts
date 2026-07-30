@@ -16,6 +16,7 @@ import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import { type CodeTryDeps, runCodeToolTry } from "./code-try.js";
 import type { CommentActivityReporter } from "./comment-activity.js";
 import { runDiscussionTurn } from "./discussion-turn.js";
+import { LiveTurnRegistry } from "./live-turns.js";
 import { PermissionRegistry } from "./permission-registry.js";
 import { PermissionRules } from "./permission-rules.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
@@ -160,6 +161,10 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const mailbox = new AgentMailbox();
   // Fine-grained "always allow / deny this tool" rules (per session) that short-circuit the HITL prompt.
   const rules = new PermissionRules();
+  // Live chat turns keyed by session: a turn OUTLIVES the request that started it (SSE responses are just
+  // subscribers, a disconnect only detaches), GET /stream re-attaches, POST /stop is the explicit abort, and a
+  // concurrent /chat on the same session 409s. See live-turns.ts.
+  const liveTurns = new LiveTurnRegistry();
   // S3 teammates — long-lived agents the supervisor wakes when a message lands in their mailbox; each runs a
   // request-less turn authenticated by its own agt_ token (runTeammateTurn). Turns are serialized per teammate.
   // The teammate registry — sessionId → its execution token (+ key id for revoke), owner/workspace scope, and the
@@ -337,7 +342,11 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
     const sessions = await deps.sessions.listSessions(principal.workspace, principal.subject);
-    return reply.send({ sessions });
+    // `live` is a computed view field (a turn is streaming in this process right now), decorated per response —
+    // never persisted on the record. The history menu renders it as the "running" badge.
+    return reply.send({
+      sessions: sessions.map((s) => (liveTurns.isLive(principal.workspace, s.id) ? { ...s, live: true } : s)),
+    });
   });
 
   app.get("/agent/sessions/:id", async (req, reply) => {
@@ -348,7 +357,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // (discussion sessions — the comment thread's shared transcript). Private sessions stay owner-only.
     const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
-    return reply.send(session);
+    // Same computed `live` decoration as the list — the panel checks it before deciding to re-attach.
+    return reply.send(liveTurns.isLive(principal.workspace, id) ? { ...session, live: true } : session);
   });
 
   app.patch("/agent/sessions/:id", async (req, reply) => {
@@ -447,10 +457,6 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    // Client disconnect (the web's Stop button aborts the fetch) → abort the loop mid-turn. Fires harmlessly on
-    // normal completion too (the loop has already finished by then).
-    const controller = new AbortController();
-    req.raw.on("close", () => controller.abort());
     const headers = forwardHeaders(req);
     const { message, references, attachments, canvas, agentDraft } = body.data;
     // The turn's effective mode: an explicit body.mode (API callers / one-off overrides) wins, else the session's
@@ -459,6 +465,14 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // workspace-visible (discussion) session.
     const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
     const mode = body.data.mode ?? session?.permissionMode ?? "default";
+    // One live turn per session (the duplicate-turn guard): claim the slot BEFORE starting the loop; a concurrent
+    // /chat is refused with 409, so a panel that lost its stream re-attaches via GET /stream instead of
+    // double-running the loop. The turn is NOT tied to this request — a client disconnect only detaches the SSE
+    // subscriber below; stopping is the explicit POST /stop. An unknown/invisible session skips the claim and
+    // lets runChat's own NotFound answer (a 409 must not leak another member's private session).
+    const controller = session ? liveTurns.begin(principal.workspace, id) : new AbortController();
+    if (controller === null)
+      return reply.code(409).send({ code: "CONFLICT", message: "A turn is already running for this conversation." });
 
     const drainInput = (): ChatMessage[] => mailbox.drain(principal.workspace, id);
     // Route send_message to another of the caller's conversations (S2 generalization): delivered to that session's
@@ -487,6 +501,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
 
     // Non-streaming clients (tests / API callers) get the buffered JSON tail. No human channel: writes auto-allow
     // (bypass/auto alike) or follow the session rules (default/plan), and plan mode auto-approves (onPlan absent).
+    // The turn still feeds the live-turn fan-out (records only), so a web panel that attaches mid-turn follows it.
     if (!(req.headers.accept ?? "").includes("text/event-stream")) {
       try {
         const result = await runChat(
@@ -499,6 +514,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           attachments,
           controller.signal,
           {
+            onRecord: (r) => liveTurns.broadcast(principal.workspace, id, "message", r),
             drainInput,
             sendMessage,
             spawnTeammate,
@@ -511,10 +527,16 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         return reply.send(result);
       } catch (err) {
         return sendError(reply, err);
+      } finally {
+        liveTurns.broadcast(principal.workspace, id, "done", {});
+        liveTurns.end(principal.workspace, id);
       }
     }
 
-    // SSE: stream the loop's text deltas + each persisted message record live, then a terminal `done`.
+    // SSE: stream the loop's text deltas + each persisted message record live, then a terminal `done`. This
+    // response is just the live turn's FIRST subscriber — every event goes through the registry broadcast, so a
+    // late GET /stream attacher receives the same feed, and this client disconnecting (the web switching
+    // conversations or unmounting the tab) only detaches the subscriber while the loop keeps running.
     reply.hijack();
     reply.raw.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
@@ -522,13 +544,22 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       connection: "keep-alive",
       "x-accel-buffering": "no",
     });
-    const write = (event: string, data: unknown): void => {
+    const subscriber = (event: string, data: unknown): void => {
+      if (reply.raw.destroyed) return;
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    // HITL: a write tool call parks here — emit a `permission` ask (with a fresh id) and await the human's POST. A
-    // client disconnect or timeout resolves to "deny" (the registry's safe default). Wrapped by withRules so a
-    // standing "always allow/deny" rule for the tool answers without prompting. In "auto" mode, routine mutations
-    // run without asking — only the guarded (destructive/governance/credential) actions still park for approval.
+    const detach = session ? liveTurns.attach(principal.workspace, id, subscriber) : null;
+    req.raw.on("close", () => detach?.());
+    const write = (event: string, data: unknown): void => {
+      // Unknown session → no registered turn (broadcast no-ops): write the error tail directly instead.
+      if (session) liveTurns.broadcast(principal.workspace, id, event, data);
+      else subscriber(event, data);
+    };
+    // HITL: a write tool call parks here — emit a `permission` ask (with a fresh id) and await the human's POST.
+    // A timeout or an explicit /stop resolves to "deny" (the registry's safe default); a mere disconnect no longer
+    // denies — the ask survives for a re-attaching panel (GET /stream replays it via pendingFor). Wrapped by
+    // withRules so a standing "always allow/deny" rule for the tool answers without prompting. In "auto" mode,
+    // routine mutations run without asking — only the guarded (destructive/governance/credential) actions park.
     const ask = (request: { name: string; input: unknown }): Promise<PermissionDecision> => {
       const requestId = deps.newId();
       write("permission", { requestId, name: request.name, input: request.input });
@@ -606,8 +637,65 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     } catch (err) {
       write("error", { message: err instanceof AppError ? err.message : "Internal error" });
     } finally {
-      reply.raw.end();
+      liveTurns.end(principal.workspace, id);
+      if (!reply.raw.destroyed) reply.raw.end();
     }
+  });
+
+  // Re-attach to the session's LIVE turn (the panel switched conversations and came back, another tab, or a
+  // recovered network drop — the turn kept running headless). 204 = nothing live. Replays what the attacher
+  // missed — the in-flight assistant buffers plus every parked ask still awaiting a decision — then subscribes
+  // until the turn's terminal done/error. Persisted records are NOT replayed here (GET /messages owns those;
+  // the panel hydrates and merges by id). Visibility-aware like the transcript reads.
+  app.get("/agent/sessions/:id/stream", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    const snapshot = liveTurns.snapshot(principal.workspace, id);
+    if (!snapshot) return reply.code(204).send();
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    });
+    const write = (event: string, data: unknown): void => {
+      if (reply.raw.destroyed) return;
+      reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    if (snapshot.streamingReasoning.length > 0) write("reasoning", { text: snapshot.streamingReasoning });
+    if (snapshot.streamingText.length > 0) write("delta", { text: snapshot.streamingText });
+    // Parked write-tool asks (a plan ask parks nameless — it is replayed from the snapshot instead).
+    for (const p of permissions.pendingFor(id)) if (p.name.length > 0) write("permission", p);
+    if (snapshot.pendingPlan) write("plan", snapshot.pendingPlan);
+    const detach = liveTurns.attach(principal.workspace, id, (event, data) => {
+      write(event, data);
+      if (event === "done" || event === "error") reply.raw.end();
+    });
+    if (!detach) {
+      // The turn settled between the snapshot and the subscribe — nothing more will come.
+      write("done", {});
+      reply.raw.end();
+      return;
+    }
+    req.raw.on("close", detach);
+  });
+
+  // Explicitly stop the session's live turn — the web's Stop button (a client disconnect no longer aborts the
+  // loop). The abort settles the loop, whose terminal event closes every attached stream. 404 when nothing is
+  // live. Visibility-aware like /permission: any member may stop a workspace-visible discussion session's turn.
+  app.post("/agent/sessions/:id/stop", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    if (!liveTurns.stop(principal.workspace, id))
+      return reply.code(404).send({ code: "NOT_FOUND", message: "No live turn for that conversation." });
+    return reply.send({ ok: true });
   });
 
   // HITL decision: resolve a parked write-tool approval the SSE turn is awaiting. Scoped to the session owner + the

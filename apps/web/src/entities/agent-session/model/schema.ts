@@ -1,8 +1,5 @@
-import type {
-  AgentMessageRecord,
-  AgentPermissionMode,
-  AgentSessionRecord,
-} from '@everdict/contracts'
+import type { AgentMessageRecord, AgentPermissionMode } from '@everdict/contracts'
+import type { AgentSessionResponse } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4); the EXPORTED types are anchored to @everdict/contracts
@@ -59,6 +56,9 @@ export const agentSessionSchema = z.object({
   origin: agentSessionOriginSchema.optional(),
   // Headless-run lifecycle status (unset for plain conversations).
   status: agentRunStatusSchema.optional(),
+  // Computed by the agent service (never persisted): a chat turn is streaming RIGHT NOW — the panel re-attaches
+  // to it (GET /stream) and the history menu shows the running badge.
+  live: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -163,18 +163,19 @@ export const agentMessageListSchema = z.object({ messages: z.array(agentMessageS
 // Fleet view (agent-automation A5): every agent RUN in the workspace (sessions with an origin), newest first.
 export const agentRunListSchema = z.object({ runs: z.array(agentSessionSchema) })
 
-// Drift guards — identical-shape entities (the web models every record field and no extra), so each guard is
-// bidirectional: a renamed/dropped/added field on EITHER side fails the web typecheck.
+// Drift guards — identical-shape entities (the web models every field and no extra), so each guard is
+// bidirectional: a renamed/dropped/added field on EITHER side fails the web typecheck. The session anchors to
+// the WIRE response (record + the computed `live` decoration), not the bare record — the web consumes responses.
 type AssertAssignable<A extends B, B> = A
 type WebAgentSession = z.infer<typeof agentSessionSchema>
 type WebAgentMessage = z.infer<typeof agentMessageSchema>
-type _sessionFwd = AssertAssignable<WebAgentSession, AgentSessionRecord>
-type _sessionBack = AssertAssignable<AgentSessionRecord, WebAgentSession>
+type _sessionFwd = AssertAssignable<WebAgentSession, AgentSessionResponse>
+type _sessionBack = AssertAssignable<AgentSessionResponse, WebAgentSession>
 type _messageFwd = AssertAssignable<WebAgentMessage, AgentMessageRecord>
 type _messageBack = AssertAssignable<AgentMessageRecord, WebAgentMessage>
 
 // Exported names alias the contract types (consumers untouched: same identifiers).
-export type AgentSession = AgentSessionRecord
+export type AgentSession = AgentSessionResponse
 export type AgentMessage = AgentMessageRecord
 export type { AgentPermissionMode }
 

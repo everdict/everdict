@@ -3,20 +3,18 @@ import { NextResponse } from 'next/server'
 import { authContext } from '@/shared/auth/principal'
 import { agentPlane } from '@/shared/lib/agent-plane'
 
-// Send a user message and run one agent turn. The web requests text/event-stream, so this proxies the agent's SSE
-// straight through (unbuffered) — token deltas + persisted message records arrive live. A non-stream request falls
-// back to the buffered JSON tail. The turn survives a dropped connection (re-attach via the /stream route; stop is
-// the explicit /stop route), and a 409 passes through as-is — a turn is already running for the session.
-export async function POST(
-  request: Request,
+// Re-attach to the session's LIVE turn (the panel switched conversations and came back — the turn kept running
+// on the agent server). Proxies the agent's SSE straight through (unbuffered), like the chat route; 204 means
+// nothing is live and the panel stays idle.
+export async function GET(
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   const ctx = await authContext()
   const { id } = await params
-  const accept = request.headers.get('accept') ?? ''
   try {
-    const body = await request.json().catch(() => ({}))
-    const upstream = await agentPlane.chatRaw(ctx, id, body, accept)
+    const upstream = await agentPlane.streamRaw(ctx, id)
+    if (upstream.status === 204) return new Response(null, { status: 204 })
     if (upstream.body === null) {
       return NextResponse.json({ error: `agent ${upstream.status}` }, { status: 502 })
     }

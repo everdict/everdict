@@ -3479,6 +3479,7 @@
   "agentChat": {
     "new": "New",
     "history": "History",
+    "live": "Reply in progress",
     "model": "Model",
     "modelDefault": "Workspace default",
     "modelPick": "Select model",
@@ -3573,6 +3574,7 @@
       }
     },
     "errorSend": "Couldn’t send the message. Try again.",
+    "errorBusy": "A reply is already in progress in this conversation — reconnected to the live stream.",
     "errorGeneric": "Something went wrong.",
     "mentionAdd": "Reference a workspace entity",
     "sendToChat": "Analyze in chat",

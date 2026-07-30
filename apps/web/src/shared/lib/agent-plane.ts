@@ -140,4 +140,20 @@ export const agentPlane = {
       }
     )
   },
+  // Raw re-attach to the session's LIVE turn (a turn survives the request that started it): 200 = an SSE feed
+  // that replays the in-flight bubble + parked approvals then follows the turn; 204 = nothing live (stay idle).
+  streamRaw: (auth: AuthContext, id: string): Promise<Response> => {
+    const headers = authHeaders(auth)
+    headers.accept = 'text/event-stream'
+    return fetch(
+      `${env.AGENT_URL.replace(/\/$/, '')}/agent/sessions/${encodeURIComponent(id)}/stream`,
+      { headers, cache: 'no-store' }
+    )
+  },
+  // Explicitly stop the session's live turn — the Stop button (a client disconnect no longer aborts the loop).
+  stopTurn: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}/stop`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
 }

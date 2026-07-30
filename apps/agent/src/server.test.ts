@@ -1033,4 +1033,151 @@ describe("agent server", () => {
       await app.close();
     });
   });
+
+  // A live turn is decoupled from the request that started it: it is keyed per session (409 on a duplicate),
+  // re-attachable (GET /stream) and explicitly stoppable (POST /stop) — the regression suite for the "switching
+  // conversations looked idle and double-ran the turn" defect.
+  describe("live turns", () => {
+    // A transport gated on an external release — the turn stays LIVE until the test releases it, so concurrency
+    // (409 / live flag / re-attach) is exercised deterministically. Abort-aware: /stop settles the pending call.
+    function gatedTransport(text: string) {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      let started!: () => void;
+      const startedPromise = new Promise<void>((r) => {
+        started = r;
+      });
+      const transport: LlmTransport = {
+        provider: "fake",
+        stream: async (req) => {
+          req.onContentDelta?.(text);
+          started();
+          await new Promise<void>((resolve) => {
+            void gate.then(resolve);
+            req.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return {
+            content: text,
+            toolCalls: [],
+            finishReason: "stop",
+            usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
+          };
+        },
+      };
+      return { transport, release, started: startedPromise };
+    }
+
+    it("refuses a second turn while one is live (409) and reports the session as live", async () => {
+      const gated = gatedTransport("streaming answer");
+      const app = buildServer(makeDeps({ resolveModel: async () => ({ transport: gated.transport, model: "m" }) }));
+      const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+
+      const first = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "go" },
+      });
+      await gated.started;
+
+      // The session list + detail both carry the computed live flag while the turn runs.
+      const listed = (await app.inject({ method: "GET", url: "/agent/sessions", headers: auth })).json().sessions as {
+        id: string;
+        live?: boolean;
+      }[];
+      expect(listed.find((s) => s.id === session.id)?.live).toBe(true);
+      expect(
+        (await app.inject({ method: "GET", url: `/agent/sessions/${session.id}`, headers: auth })).json().live,
+      ).toBe(true);
+
+      // A concurrent turn on the same session is refused — the duplicate-turn guard.
+      const dup = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/chat`,
+        headers: auth,
+        payload: { message: "again" },
+      });
+      expect(dup.statusCode).toBe(409);
+
+      gated.release();
+      const done = await first;
+      expect(done.statusCode).toBe(200);
+      expect(done.payload).toContain("event: done");
+
+      // Settled: the flag is gone and the refused duplicate never reached the transcript.
+      const after = (await app.inject({ method: "GET", url: `/agent/sessions/${session.id}`, headers: auth })).json();
+      expect(after.live).toBeUndefined();
+      const roles = (
+        await app.inject({ method: "GET", url: `/agent/sessions/${session.id}/messages`, headers: auth })
+      ).json().messages as { role: string }[];
+      expect(roles.map((m) => m.role)).toEqual(["user", "assistant"]);
+      await app.close();
+    });
+
+    it("a late attacher replays the in-flight bubble and follows the turn to done (GET /stream)", async () => {
+      const gated = gatedTransport("partial text");
+      const app = buildServer(makeDeps({ resolveModel: async () => ({ transport: gated.transport, model: "m" }) }));
+      const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const first = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "go" },
+      });
+      await gated.started;
+
+      const watcher = app.inject({ method: "GET", url: `/agent/sessions/${session.id}/stream`, headers: auth });
+      // Give the watcher a beat to authenticate + subscribe before the turn settles.
+      await new Promise((r) => setTimeout(r, 50));
+      gated.release();
+      const [chatRes, watchRes] = await Promise.all([first, watcher]);
+      expect(chatRes.statusCode).toBe(200);
+      expect(watchRes.statusCode).toBe(200);
+      // The delta emitted BEFORE the attach arrives via the snapshot replay; the terminal done closes the stream.
+      expect(watchRes.payload).toContain("event: delta");
+      expect(watchRes.payload).toContain("partial text");
+      expect(watchRes.payload).toContain("event: done");
+
+      // Nothing live anymore → a fresh attach answers 204 (the panel stays idle).
+      expect(
+        (await app.inject({ method: "GET", url: `/agent/sessions/${session.id}/stream`, headers: auth })).statusCode,
+      ).toBe(204);
+      await app.close();
+    });
+
+    it("POST /stop aborts the live turn — the explicit stop that replaced disconnect-as-stop", async () => {
+      const gated = gatedTransport("never finishes on its own");
+      const app = buildServer(makeDeps({ resolveModel: async () => ({ transport: gated.transport, model: "m" }) }));
+      const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const first = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "go" },
+      });
+      await gated.started;
+
+      const stopped = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/stop`,
+        headers: auth,
+        payload: {},
+      });
+      expect(stopped.statusCode).toBe(200);
+      expect(stopped.json().ok).toBe(true);
+
+      // The abort settles the loop and the SSE response ends.
+      const done = await first;
+      expect(done.statusCode).toBe(200);
+
+      // Nothing live anymore → stop reports 404.
+      expect(
+        (await app.inject({ method: "POST", url: `/agent/sessions/${session.id}/stop`, headers: auth, payload: {} }))
+          .statusCode,
+      ).toBe(404);
+      await app.close();
+    });
+  });
 });
