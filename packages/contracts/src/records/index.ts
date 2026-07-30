@@ -19,6 +19,7 @@ export * from "./schedule.js";
 export * from "./scorecard.js";
 export * from "./secret.js";
 export * from "./skill.js";
+export * from "./subscription.js";
 export * from "./tenant-key.js";
 export * from "./usage.js";
 export * from "./user-profile.js";

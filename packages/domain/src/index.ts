@@ -333,3 +333,11 @@ export { mergeThreeWay } from "./workspace-file/merge.js";
 // …and the line diff between two revisions of one file, over the SAME line matching the merge uses.
 export { diffFileText } from "./workspace-file/diff.js";
 export { type FileRunPlan, fileRunPlanFor, isRunnableFilePath } from "./workspace-file/run-plan.js";
+
+// subscription — the one event-selection predicate shared by agent triggers and E3 subscriptions (kinds
+// allowlist + declarative payload filters): every reaction executor matches events through this law.
+export {
+  type EventSelector,
+  eventSelectorMatches,
+  type SelectorEvent,
+} from "./subscription/selector-match.js";

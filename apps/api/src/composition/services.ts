@@ -6,6 +6,8 @@ import { QueueService } from "@everdict/application-control";
 import type { RunnerService } from "@everdict/application-control";
 import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
+import type { AgentRegistry } from "@everdict/application-control";
+import { SubscriptionService } from "@everdict/application-control";
 import { ViewService } from "@everdict/application-control";
 import { ViewSnapshotService } from "@everdict/application-control";
 import type { WorkspaceFs } from "@everdict/application-control";
@@ -16,6 +18,7 @@ import type {
   RunStore,
   ScorecardStore,
   SecretStore,
+  SubscriptionStore,
   ViewStore,
   WorkspaceSettingsStore,
 } from "@everdict/db";
@@ -176,6 +179,26 @@ export function buildQueue(deps: {
         ...(spec.memoryBudgetMb !== undefined ? { memoryBudgetMb: spec.memoryBudgetMb } : {}),
         ...(spec.cpuBudget !== undefined ? { cpuBudget: spec.cpuBudget } : {}),
       };
+    },
+  });
+}
+
+// Subscription registry (event-plumbing.md E3 §6) — event → reaction rules under governance. Reaction
+// targets naming an agent are validated against the tenant registry, so a rule never points at nothing
+// (get resolves "latest" incl. the _shared fallback — existence, not activatability).
+export function buildSubscription(deps: {
+  subscriptionStore: SubscriptionStore;
+  agentRegistry: AgentRegistry;
+}): SubscriptionService {
+  return new SubscriptionService({
+    store: deps.subscriptionStore,
+    agentExists: async (tenant, agentId) => {
+      try {
+        await deps.agentRegistry.get(tenant, agentId, "latest");
+        return true;
+      } catch {
+        return false;
+      }
     },
   });
 }

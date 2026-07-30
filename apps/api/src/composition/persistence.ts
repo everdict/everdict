@@ -37,6 +37,7 @@ import {
   InMemorySecretStore,
   InMemorySkillStore,
   InMemorySkillVersionStore,
+  InMemorySubscriptionStore,
   InMemoryTenantKeyStore,
   InMemoryTrajectoryStore,
   InMemoryUsageStore,
@@ -73,6 +74,7 @@ import {
   PgSecretStore,
   PgSkillStore,
   PgSkillVersionStore,
+  PgSubscriptionStore,
   PgTenantKeyStore,
   PgTrajectoryStore,
   PgUsageStore,
@@ -92,6 +94,7 @@ import {
   type SecretStore,
   type SkillStore,
   type SkillVersionStore,
+  type SubscriptionStore,
   type TenantKeyStore,
   type UsageStore,
   type UserProfileStore,
@@ -169,6 +172,7 @@ export interface Persistence {
   knowledgeStore: KnowledgeStore; // workspace knowledge graph — append-only mention/edge + upsert node projection
   knowledgeEntryStore: KnowledgeEntryStore; // knowledge entries (reified claims) — dual-scoped private|workspace
   fsRevisionStore: FsRevisionStore; // workspace-filesystem publication ledger — who published which revision, when
+  subscriptionStore: SubscriptionStore; // subscription registry (event → reaction rules, E3 §6)
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members own) — dual-scoped private|workspace
@@ -257,6 +261,7 @@ export async function makePersistence(): Promise<Persistence> {
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
       fsRevisionStore: new InMemoryFsRevisionStore(),
+      subscriptionStore: new InMemorySubscriptionStore(),
       viewStore: new InMemoryViewStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
@@ -306,6 +311,7 @@ export async function makePersistence(): Promise<Persistence> {
     knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),
     fsRevisionStore: new PgFsRevisionStore(client),
+    subscriptionStore: new PgSubscriptionStore(client),
     viewStore: new PgViewStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),

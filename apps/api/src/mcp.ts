@@ -46,6 +46,7 @@ import { registerScheduleTools } from "./api/schedule/schedule.mcp.js";
 import { registerScorecardTools } from "./api/scorecard/scorecard.mcp.js";
 import { registerSecretTools } from "./api/secret/secret.mcp.js";
 import { registerSkillTools } from "./api/skill/skill.mcp.js";
+import { registerSubscriptionTools } from "./api/subscription/subscription.mcp.js";
 import { registerTraceSourceTools } from "./api/trace-source/trace-source.mcp.js";
 import { registerTrajectoryTools } from "./api/trajectory/trajectory.mcp.js";
 import { registerViewTools } from "./api/view/view.mcp.js";
@@ -89,6 +90,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerBundleTools(server, ctx);
   registerScheduleTools(server, ctx);
   registerViewTools(server, ctx);
+  registerSubscriptionTools(server, ctx);
   registerSecretTools(server, ctx);
   registerNotificationTools(server, ctx);
   registerEventTools(server, ctx);

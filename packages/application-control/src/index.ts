@@ -37,6 +37,7 @@ export type { OutboxEvent, RunListOptions, RunStore } from "./ports/run-store.js
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
 export type { ScorecardListFilter, ScorecardStore } from "./ports/scorecard-store.js";
+export type { SubscriptionStore } from "./ports/subscription-store.js";
 export type { UsageStore } from "./ports/usage-store.js";
 export type { ViewStore } from "./ports/view-store.js";
 export type { OAuthStateStore } from "./ports/oauth-state-store.js";
@@ -63,6 +64,12 @@ export type { AgentRegistry } from "./ports/agent-registry.js";
 export type { RuntimeListEntry, RuntimeRegistry } from "./ports/runtime-registry.js";
 
 // Control-plane use-case services (the api services move here incrementally — re-architecture P2d).
+export {
+  type CreateSubscriptionInput,
+  SubscriptionService,
+  type SubscriptionServiceDeps,
+  type UpdateSubscriptionInput,
+} from "./subscription/subscription-service.js";
 export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";
 export {
   type CaptureViewSnapshotInput,

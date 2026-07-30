@@ -54,6 +54,7 @@ import {
   buildCiLink,
   buildMattermostCommand,
   buildQueue,
+  buildSubscription,
   buildView,
   buildViewSnapshot,
 } from "./composition/services.js";
@@ -158,6 +159,7 @@ async function main(): Promise<void> {
     knowledgeStore,
     knowledgeEntryStore,
     fsRevisionStore,
+    subscriptionStore,
     viewStore,
     browserProfileStore,
     skillStore,
@@ -569,6 +571,7 @@ async function main(): Promise<void> {
     tenantQuotas,
   });
   const viewService = buildView({ viewStore });
+  const subscriptionService = buildSubscription({ subscriptionStore, agentRegistry });
   // Reverse secret-usage index (GET /secrets/usage) — reads the registries + settings to annotate each workspace
   // secret with its live reference sites. Read-only; scans latest specs per request (nothing cached).
   const secretUsageService = new SecretUsageService({
@@ -746,6 +749,7 @@ async function main(): Promise<void> {
     scheduleService,
     queueService,
     viewService,
+    subscriptionService,
     viewSnapshotService,
     benchmarkService,
     bundleService,

@@ -143,6 +143,7 @@ import { registerScheduleRoutes } from "./api/schedule/schedule.routes.js";
 import { registerScorecardRoutes } from "./api/scorecard/scorecard.routes.js";
 import { registerSecretRoutes } from "./api/secret/secret.routes.js";
 import { registerSkillRoutes } from "./api/skill/skill.routes.js";
+import { registerSubscriptionRoutes } from "./api/subscription/subscription.routes.js";
 import { registerTraceSourceRoutes } from "./api/trace-source/trace-source.routes.js";
 import { registerTrajectoryRoutes } from "./api/trajectory/trajectory.routes.js";
 import { registerViewRoutes } from "./api/view/view.routes.js";
@@ -245,6 +246,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerEventRoutes(routes, deps);
     registerCommentRoutes(routes, deps);
     registerViewRoutes(routes, deps);
+    registerSubscriptionRoutes(routes, deps);
     registerKnowledgeRoutes(routes, deps);
     registerGithubAppRoutes(routes, deps);
     registerMattermostRoutes(routes, deps);

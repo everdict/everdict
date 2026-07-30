@@ -32,7 +32,7 @@ import {
   originSource,
 } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
-import type { ViewService, ViewSnapshotService } from "@everdict/application-control";
+import type { SubscriptionService, ViewService, ViewSnapshotService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { SkillService } from "@everdict/application-control";
 import type { FileExecutionService, FsService } from "@everdict/application-control";
@@ -141,6 +141,7 @@ export interface ServerDeps {
   scheduleService?: ScheduleService; // scheduled (cron) scorecard CRUD (route disabled if absent)
   queueService?: QueueService; // work-queue snapshot (running/waiting/next-scheduled per runtime lane) (route disabled if absent)
   metrics?: { render(): string }; // Prometheus text exposition (GET /metrics) (route disabled if absent)
+  subscriptionService?: SubscriptionService; // subscription registry (event → reaction rules, E3) (route disabled if absent)
   viewService?: ViewService; // saved scorecard-analysis View CRUD (route disabled if absent)
   viewSnapshotService?: ViewSnapshotService; // capture a View onto the workspace filesystem (route disabled if absent)
   benchmarkService?: BenchmarkService; // benchmark catalog + ingest (route disabled if absent)

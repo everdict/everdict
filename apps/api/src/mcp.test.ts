@@ -8,7 +8,7 @@ import { RunnerHub } from "@everdict/application-control";
 import { RunnerService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
 import { ScorecardService } from "@everdict/application-control";
-import { SkillService } from "@everdict/application-control";
+import { SkillService, SubscriptionService } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
@@ -25,6 +25,7 @@ import {
   InMemoryScheduleStore,
   InMemoryScorecardStore,
   InMemorySkillStore,
+  InMemorySubscriptionStore,
   InMemoryTenantKeyStore,
   InMemoryTrajectoryStore,
   InMemoryUserProfileStore,
@@ -108,6 +109,7 @@ function harness() {
   const modelRegistry = new InMemoryModelRegistry();
   const agentRegistry = new InMemoryAgentRegistry();
   const skillService = new SkillService({ store: new InMemorySkillStore() });
+  const subscriptionService = new SubscriptionService({ store: new InMemorySubscriptionStore() });
   const runtimeRegistry = new InMemoryRuntimeRegistry();
   const bundleService = new BundleService({
     harnessTemplates,
@@ -183,6 +185,7 @@ function harness() {
     modelRegistry,
     agentRegistry,
     skillService,
+    subscriptionService,
     runtimeRegistry,
     probeRuntime: async (_ws: string, spec: RuntimeSpec) => ({
       kind: spec.kind,
@@ -463,6 +466,7 @@ describe("MCP tools", () => {
       "create_sandbox",
       "create_schedule",
       "create_skill",
+      "create_subscription",
       "delete_agent",
       "delete_agent_versions",
       "delete_dataset",
@@ -474,6 +478,7 @@ describe("MCP tools", () => {
       "delete_schedule",
       "delete_scorecard",
       "delete_skill",
+      "delete_subscription",
       "diff_datasets",
       "diff_harness_versions",
       "diff_judge_versions",
@@ -535,6 +540,7 @@ describe("MCP tools", () => {
       "list_scorecards",
       "list_skill_versions",
       "list_skills",
+      "list_subscriptions",
       "list_trace_source_traces",
       "list_trajectories",
       "list_workspace_github_app",
@@ -584,6 +590,7 @@ describe("MCP tools", () => {
       "unlink_workspace_github_app_installation",
       "update_schedule",
       "update_skill",
+      "update_subscription",
       "validate_agent",
       "validate_dataset",
       "validate_judge",
@@ -2212,5 +2219,36 @@ describe("sandbox session tools — BFF↔MCP parity (P6)", () => {
     const viewer = await connect(deps, ["viewer"]);
     const res = await viewer.callTool({ name: "create_sandbox", arguments: { image: "img" } });
     expect(res.isError).toBe(true);
+  });
+});
+
+describe("subscription tools — BFF↔MCP parity (E3 §6)", () => {
+  it("a member creates and lists a subscription; a viewer can read but not write", async () => {
+    const member = await connect(harness(), ["member"]);
+    const created = await member.callTool({
+      name: "create_subscription",
+      arguments: {
+        name: "regressions to the hook",
+        selector: { kinds: ["scorecard.completed"], filters: [{ field: "passRate", op: "lt", value: 1 }] },
+        reaction: { kind: "webhook", url: "https://hooks.example.com/everdict" },
+      },
+    });
+    expect(created.isError).toBeFalsy();
+    const record = JSON.parse(text(created));
+    expect(record.governance).toEqual({ enabled: true });
+
+    const viewer = await connect(harness(), ["viewer"]);
+    // Same deps object is NOT shared across connect(harness()) calls — list on the member's client instead.
+    const listed = JSON.parse(text(await member.callTool({ name: "list_subscriptions", arguments: {} })));
+    expect(listed).toHaveLength(1);
+    const denied = await viewer.callTool({
+      name: "create_subscription",
+      arguments: {
+        name: "nope",
+        selector: { kinds: ["scorecard.completed"], filters: [] },
+        reaction: { kind: "webhook", url: "https://hooks.example.com/x" },
+      },
+    });
+    expect(denied.isError).toBe(true); // agents:write is member+
   });
 });

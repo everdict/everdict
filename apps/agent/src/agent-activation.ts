@@ -1,7 +1,8 @@
 import type { PermissionDecision, PermissionHook, PermissionRequest } from "@everdict/agent-runtime";
 import type { AgentRegistry, AgentSessionStore, TenantKeyStore } from "@everdict/application-control";
-import type { AgentSpec, AgentTrigger, AgentTriggerFilter, TraceEvent } from "@everdict/contracts";
+import type { AgentSpec, AgentTrigger, TraceEvent } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
+import { eventSelectorMatches } from "@everdict/domain";
 import { isGuardedAction } from "./action-policy.js";
 import type { AgentMailbox } from "./agent-mailbox.js";
 import { transcriptToTrace } from "./run-trace.js";
@@ -25,30 +26,10 @@ export interface ActivationEvent {
 }
 
 // Pure predicate: one trigger subscribes to this event when the kind is listed AND every filter passes
-// against the event's pointer payload.
+// against the event's pointer payload. The law itself lives in @everdict/domain (eventSelectorMatches) —
+// agent triggers and E3 subscriptions share the same selector grammar, so they must share the matcher.
 export function triggerMatches(trigger: AgentTrigger, event: ActivationEvent): boolean {
-  if (!(trigger.kinds as readonly string[]).includes(event.kind)) return false;
-  const payload = event.payload ?? {};
-  return trigger.filters.every((filter) => filterPasses(filter, payload));
-}
-
-function filterPasses(filter: AgentTriggerFilter, payload: Record<string, unknown>): boolean {
-  const actual = payload[filter.field];
-  switch (filter.op) {
-    case "exists":
-      return actual !== undefined && actual !== null;
-    case "eq":
-      return actual === filter.value;
-    case "neq":
-      return actual !== filter.value;
-    default: {
-      if (typeof actual !== "number" || typeof filter.value !== "number") return false;
-      if (filter.op === "lt") return actual < filter.value;
-      if (filter.op === "lte") return actual <= filter.value;
-      if (filter.op === "gt") return actual > filter.value;
-      return actual >= filter.value;
-    }
-  }
+  return eventSelectorMatches(trigger, event);
 }
 
 export interface AgentActivatorDeps {

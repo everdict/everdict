@@ -74,6 +74,7 @@ export type {
   ScorecardStore,
   ScorecardListFilter,
   ScheduleStore,
+  SubscriptionStore,
   ViewStore,
   BrowserProfileStore,
   SkillStore,
@@ -109,6 +110,7 @@ export { InMemoryScheduleStore } from "./results/schedule-store.js";
 export { InMemoryViewStore, PgViewStore } from "./results/view-store.js";
 export { InMemoryBrowserProfileStore, PgBrowserProfileStore } from "./workspace/browser-profile-store.js";
 export { InMemorySkillStore, PgSkillStore } from "./workspace/skill-store.js";
+export { InMemorySubscriptionStore, PgSubscriptionStore } from "./workspace/subscription-store.js";
 export { InMemorySkillVersionStore, PgSkillVersionStore } from "./workspace/skill-version-store.js";
 export { InMemoryFsRevisionStore, PgFsRevisionStore } from "./workspace/fs-revision-store.js";
 export { InMemoryKnowledgeEntryStore, PgKnowledgeEntryStore } from "./workspace/knowledge-entry-store.js";
