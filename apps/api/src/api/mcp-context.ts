@@ -1,5 +1,6 @@
 import type { CiLinkService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
+import type { TrajectoryStore } from "@everdict/application-control";
 import type { ApprovalService } from "@everdict/application-control";
 import type { PlatformEventService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
@@ -130,6 +131,7 @@ export interface McpDeps {
   apiPublicUrl?: string; // control-plane public base — the everdict runner --api-url in github_install_workspace_runner (falls back to the request base)
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped
   sandboxSessions?: SandboxSessionService; // sandbox session runs (execution-model P6) — absent = no container runtime here
+  trajectoryStore?: TrajectoryStore; // the owned evidence ledger's browse surface (N1 look-inward)
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions
   browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — workspace-scoped
   browserProfileCaptureService?: BrowserProfileCaptureService; // capture a session login into a profile (browser-profiles S3)

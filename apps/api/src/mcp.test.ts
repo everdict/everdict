@@ -159,6 +159,7 @@ function harness() {
     }),
     // Sandbox session runs (P6) — a stub driver so the MCP surface is testable; shares the run/trajectory
     // stores with RunService so get_run_trajectory serves a closed session's sealed evidence (parity roundtrip).
+    trajectoryStore: sharedTrajectories,
     sandboxSessions: new SandboxSessionService({
       store: sharedRunStore,
       trajectories: sharedTrajectories,
@@ -531,6 +532,7 @@ describe("MCP tools", () => {
       "list_skill_versions",
       "list_skills",
       "list_trace_source_traces",
+      "list_trajectories",
       "list_workspace_github_app",
       "list_workspace_owned_runners",
       "list_workspace_runners",

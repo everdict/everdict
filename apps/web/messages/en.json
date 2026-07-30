@@ -2259,7 +2259,8 @@
     "usageCost": "Cost",
     "usageTokens": "Tokens",
     "usageCalls": "Calls",
-    "usageTokensBreakdown": "{prompt} in · {completion} out"
+    "usageTokensBreakdown": "{prompt} in · {completion} out",
+    "sealedEvidence": "Served from the sealed trajectory (source: {source}) — evidence kept by everdict, independent of any external platform."
   },
   "runsTable": {
     "sourceWeb": "Web",
@@ -2925,7 +2926,9 @@
     "title": "Traces",
     "description": "Register your team's observability platforms and browse the traces and metrics they hold — right here.",
     "noPermissionTitle": "No access",
-    "noPermissionHint": "You need workspace read access to browse traces."
+    "noPermissionHint": "You need workspace read access to browse traces.",
+    "ownStoreTitle": "everdict traces",
+    "ownStoreDescription": "The sealed evidence this workspace holds — own executions, OTLP-door arrivals, and materialized imports. A row opens its run."
   },
   "traceBrowser": {
     "sourceLabel": "Trace source",
@@ -4131,5 +4134,15 @@
     "open": "Open",
     "emptyTitle": "Nothing captured yet.",
     "emptyHint": "This view recomputes from current data every time it opens. Capture it and the numbers of that moment stay as a workspace file."
+  },
+  "trajectoryBrowser": {
+    "emptyTitle": "No sealed traces yet",
+    "emptyHint": "Run something, point an OTLP exporter at /v1/traces, or pull-ingest — sealed trajectories land here.",
+    "count": "{count} sealed",
+    "events": "{count} events",
+    "loadMore": "Load more",
+    "source_run": "run",
+    "source_otlp": "otlp",
+    "source_import": "import"
   }
 }

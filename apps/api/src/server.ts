@@ -144,6 +144,7 @@ import { registerScorecardRoutes } from "./api/scorecard/scorecard.routes.js";
 import { registerSecretRoutes } from "./api/secret/secret.routes.js";
 import { registerSkillRoutes } from "./api/skill/skill.routes.js";
 import { registerTraceSourceRoutes } from "./api/trace-source/trace-source.routes.js";
+import { registerTrajectoryRoutes } from "./api/trajectory/trajectory.routes.js";
 import { registerViewRoutes } from "./api/view/view.routes.js";
 import { registerWorkspaceSettingsRoutes } from "./api/workspace/settings.routes.js";
 import { registerWorkspaceRoutes } from "./api/workspace/workspace.routes.js";
@@ -260,6 +261,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerBillingRoutes(routes, deps);
     registerBrowserSessionRoutes(routes, deps);
     registerSandboxRoutes(routes, deps);
+    registerTrajectoryRoutes(routes, deps);
     registerBrowserProfileRoutes(routes, deps);
     registerProxyRoutes(routes, deps);
     registerInternalRoutes(routes, deps);

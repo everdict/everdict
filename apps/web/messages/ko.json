@@ -2259,7 +2259,8 @@
     "usageCost": "비용",
     "usageTokens": "토큰",
     "usageCalls": "호출",
-    "usageTokensBreakdown": "입력 {prompt} · 출력 {completion}"
+    "usageTokensBreakdown": "입력 {prompt} · 출력 {completion}",
+    "sealedEvidence": "봉인 궤적에서 서빙됨 (source: {source}) — 외부 플랫폼과 무관하게 everdict가 보관하는 증거입니다."
   },
   "runsTable": {
     "sourceWeb": "웹",
@@ -2925,7 +2926,9 @@
     "title": "트레이스",
     "description": "팀 관측 플랫폼을 등록하고, 보유한 트레이스와 메트릭을 여기서 바로 둘러봅니다.",
     "noPermissionTitle": "접근 권한 없음",
-    "noPermissionHint": "트레이스를 둘러보려면 워크스페이스 읽기 권한이 필요합니다."
+    "noPermissionHint": "트레이스를 둘러보려면 워크스페이스 읽기 권한이 필요합니다.",
+    "ownStoreTitle": "everdict 트레이스",
+    "ownStoreDescription": "이 워크스페이스가 보관 중인 봉인 증거 — 자체 실행, OTLP 문으로 도착한 것, 구체화된 임포트. 행을 열면 해당 run으로 이동합니다."
   },
   "traceBrowser": {
     "sourceLabel": "트레이스 소스",
@@ -4131,5 +4134,15 @@
     "open": "열기",
     "emptyTitle": "아직 저장된 기록이 없어요.",
     "emptyHint": "이 뷰는 열 때마다 지금 데이터로 다시 계산돼요. 저장해두면 그때의 숫자가 워크스페이스 파일로 남아요."
+  },
+  "trajectoryBrowser": {
+    "emptyTitle": "봉인된 트레이스가 아직 없습니다",
+    "emptyHint": "무언가를 실행하거나, OTLP 익스포터를 /v1/traces에 연결하거나, pull-ingest 하면 봉인 궤적이 여기에 쌓입니다.",
+    "count": "{count}개 봉인됨",
+    "events": "{count} 이벤트",
+    "loadMore": "더 보기",
+    "source_run": "run",
+    "source_otlp": "otlp",
+    "source_import": "import"
   }
 }

@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import type { ApprovalService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
+import type { TrajectoryStore } from "@everdict/application-control";
 import { type CiLinkService, UpsertCiLinkBodySchema } from "@everdict/application-control";
 import { COMMENT_RESOURCE_TYPES, type CommentService } from "@everdict/application-control";
 import type { PlatformEventService } from "@everdict/application-control";
@@ -231,6 +232,7 @@ export interface ServerDeps {
   caseRecorder?: CaseRecorder; // durable replay tee — persists the pushed frames/logs (docs/architecture/replay.md)
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped (routes disabled if absent)
   sandboxSessions?: SandboxSessionService; // sandbox session runs (execution-model P6) — absent = no container runtime here
+  trajectoryStore?: TrajectoryStore; // the owned evidence ledger's browse surface (N1 look-inward)
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions (browser-session WS disabled if absent)
   browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — workspace-scoped (routes disabled if absent)
   browserProfileCaptureService?: BrowserProfileCaptureService; // capture a session login into a profile (browser-profiles S3) — needs browser sessions (route disabled if absent)

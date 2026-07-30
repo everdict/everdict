@@ -47,6 +47,7 @@ import { registerScorecardTools } from "./api/scorecard/scorecard.mcp.js";
 import { registerSecretTools } from "./api/secret/secret.mcp.js";
 import { registerSkillTools } from "./api/skill/skill.mcp.js";
 import { registerTraceSourceTools } from "./api/trace-source/trace-source.mcp.js";
+import { registerTrajectoryTools } from "./api/trajectory/trajectory.mcp.js";
 import { registerViewTools } from "./api/view/view.mcp.js";
 import { registerSettingsTools } from "./api/workspace/settings.mcp.js";
 import { registerWorkspaceTools } from "./api/workspace/workspace.mcp.js";
@@ -93,6 +94,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerEventTools(server, ctx);
   registerBrowserSessionTools(server, ctx);
   registerSandboxTools(server, ctx);
+  registerTrajectoryTools(server, ctx);
   registerBrowserProfileTools(server, ctx);
   registerProxyTools(server, ctx);
   registerCommentTools(server, ctx);

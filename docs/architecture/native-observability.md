@@ -117,7 +117,14 @@ collector and the store**.
   v0) + tenant ingest tokens; normalize → TrajectoryStore. Dogfood: our own harness/agent traces land
   through the door (replacing two-phase pull where the harness can emit OTLP).
 - **N1 — Look inward.** Settings › Traces primary tab reads our store (browse/inspect/waterfall reuse);
-  `LiveTraceRef` → internal link; trace chips point home.
+  `LiveTraceRef` → internal link; trace chips point home. **First rung SHIPPED (master-plan W5)**:
+  `TrajectoryStore.list` (metas only, keyset cursor) → `GET /trajectories` + `list_trajectories` (the
+  browse surface over the owned ledger), Settings › Traces gains the PRIMARY "everdict traces" section
+  (each row opens its run — the run is the home), and the run detail page dual-reads: row embed first,
+  else the sealed trajectory (labeled with its provenance source) — this is how agent/sandbox/OTLP runs
+  render a trace at all. Remaining: chat trace chips for own-store trajectories ride the existing `run`
+  reference (zero new contract); a dedicated internal waterfall + `LiveTraceRef` internal rewrite arrive
+  with the N2 ingestion surfaces.
 - **N2 — Libraries + production ingestion.** `everdict-otel` (TS/Py) + migration recipes; continuous
   evaluation (judges over live traces; platform events from trace facts).
 - **N3 — Scale rung.** ClickHouse adapter; retention/quota surfaces; ingestion admission in the §5 gate.

@@ -126,6 +126,10 @@ export const controlPlane = {
   // attempted three-way merge) rides in the envelope's `data` and the caller needs it to offer a merge.
   writeFsFileChecked: (auth: AuthContext, body: unknown) =>
     callWithEnvelope(auth, '/fs/file', { method: 'PUT', body: JSON.stringify(body) }),
+  // Run one file in a sandbox and get back stdout/stderr/exit code plus whatever it wrote. 404 when the
+  // deployment composed no execution driver — the viewer only offers Run when GET /me says it can.
+  runFsFile: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/fs/executions', { method: 'POST', body: JSON.stringify(body) }),
   makeFsDirectory: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/fs/directories', { method: 'POST', body: JSON.stringify(body) }),
   moveFsEntry: <T>(auth: AuthContext, body: unknown) =>
@@ -139,10 +143,18 @@ export const controlPlane = {
       }
     ),
   // Publication history of one file — who published each revision, when, and why (retained indefinitely).
-  listFsRevisions: <T>(auth: AuthContext, path: string, limit?: number) =>
+  listFsRevisions: <T>(auth: AuthContext, path: string, limit?: number, before?: number) =>
     call<T>(
       auth,
-      `/fs/revisions?path=${encodeURIComponent(path)}${limit !== undefined ? `&limit=${limit}` : ''}`
+      `/fs/revisions?path=${encodeURIComponent(path)}${limit !== undefined ? `&limit=${limit}` : ''}${
+        before !== undefined ? `&before=${before}` : ''
+      }`
+    ),
+  // What changed between two revisions (omit `to` to compare against the live file).
+  diffFsRevisions: <T>(auth: AuthContext, path: string, from: number, to?: number) =>
+    call<T>(
+      auth,
+      `/fs/revisions/diff?path=${encodeURIComponent(path)}&from=${from}${to !== undefined ? `&to=${to}` : ''}`
     ),
   readFsRevision: <T>(auth: AuthContext, path: string, revision: number) =>
     call<T>(auth, `/fs/revisions/content?path=${encodeURIComponent(path)}&revision=${revision}`),
@@ -192,6 +204,17 @@ export const controlPlane = {
             : '/runs'
     ),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
+  // The run's OWNED trajectory (sealed evidence; embed fallback during dual-read — meta.source says which copy served).
+  getRunTrajectory: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/trajectory`),
+  // Browse the workspace's sealed trajectories (the owned evidence ledger, N1 look-inward) — metas only, cursor-paginated.
+  listTrajectories: <T>(auth: AuthContext, query: { limit?: number; cursor?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (query.limit !== undefined) qs.set('limit', String(query.limit))
+    if (query.cursor) qs.set('cursor', query.cursor)
+    const suffix = qs.toString()
+    return call<T>(auth, `/trajectories${suffix ? `?${suffix}` : ''}`)
+  },
   // Live-progress log snapshot (the LiveLogs widget polls; found=false = nothing to tail yet).
   // stream: stdout (default, the result stream) | stderr (harness progress logs).
   getRunLogs: <T>(auth: AuthContext, id: string, stream?: 'stdout' | 'stderr') =>
@@ -412,7 +435,7 @@ export const controlPlane = {
     }),
   deleteView: (auth: AuthContext, id: string) =>
     callVoid(auth, `/views/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // Capture the View’s numbers onto the workspace filesystem (views/<id>/<capturedAt>.json). The captures are
+  // Capture the View's numbers onto the workspace filesystem (views/<id>/<capturedAt>.json). The captures are
   // ordinary files, so they are listed back with listFsEntries — there is no view-snapshot read endpoint.
   captureViewSnapshot: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/views/${encodeURIComponent(id)}/snapshots`, { method: 'POST' }),
@@ -606,6 +629,18 @@ export const controlPlane = {
   listAgentTools: <T>(auth: AuthContext) => call<T>(auth, '/agent/tools'),
   setAgentTool: <T>(auth: AuthContext, key: string, enabled: boolean | null) =>
     call<T>(auth, '/agent/tools', { method: 'PUT', body: JSON.stringify({ key, enabled }) }),
+  // 도구 상세 — 목록 행 뒤의 설명(도달 방식·모델이 부르는 function·시크릿·출처). 키에 `:`/`/`가 들어가므로 인코딩한다.
+  getAgentTool: <T>(auth: AuthContext, key: string) =>
+    call<T>(auth, `/agent/tools/${encodeURIComponent(key)}`),
+  // 연결 테스트 — 내 바인딩된 시크릿으로 실제 접속해 서버가 진짜 제공하는 function 을 확인(원격 HTTP MCP 만).
+  probeAgentTool: <T>(auth: AuthContext, key: string) =>
+    call<T>(auth, `/agent/tools/${encodeURIComponent(key)}/probe`, { method: 'POST' }),
+  // 시크릿 바인딩 — 값이 아니라 이름을 잇는다. 워크스페이스 AgentSpec 편집이라 agents:write.
+  bindAgentToolSecrets: <T>(auth: AuthContext, key: string, bindings: Record<string, string>) =>
+    call<T>(auth, `/agent/tools/${encodeURIComponent(key)}/secrets`, {
+      method: 'PUT',
+      body: JSON.stringify({ bindings }),
+    }),
   // 같은 오버레이의 스킬 채널 — 워크스페이스 라이브러리가 "지원하는 절차", 이건 "내 에이전트가 따르는 절차".
   listAgentSkills: <T>(auth: AuthContext) => call<T>(auth, '/agent/skills'),
   setAgentSkill: <T>(auth: AuthContext, key: string, enabled: boolean | null) =>
@@ -627,6 +662,20 @@ export const controlPlane = {
     callVoid(auth, `/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   generateSkill: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/skills/generate', { method: 'POST', body: JSON.stringify(body) }),
+  // 스토어 발행물(everdict 예제 / 다른 워크스페이스 발행)을 이 워크스페이스 라이브러리로 **복사**한다 —
+  // 가져온 뒤에는 직접 쓴 스킬과 완전히 같다(편집·버전 찍기 모두 여기서). skills:write.
+  importSkill: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/skills/import', { method: 'POST', body: JSON.stringify(body) }),
+  // 스킬의 버전 라인 — 지금 내용을 한 버전으로 "찍고"(stamp), 찍힌 버전은 불변으로 남는다.
+  listSkillVersions: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/skills/${encodeURIComponent(id)}/versions`),
+  getSkillVersion: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/skills/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  stampSkillVersion: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/skills/${encodeURIComponent(id)}/versions`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   // Capability Store — 한 판별자 엔티티(mcp|code|skill)를 저작·발행·채택. read capabilities:read(viewer+);
   // save/reach/delete capabilities:write(member+, 특정 capability 는 owner-or-admin, public 승격은 admin).
   listCapabilities: <T>(auth: AuthContext) => call<T>(auth, '/capabilities'),
@@ -832,6 +881,13 @@ export const controlPlane = {
     callVoid(auth, `/workspace/image-registries/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
+  // 관리형 이미지 스토어 — everdict가 직접 운영하는 워크스페이스 이미지 네임스페이스(BYO 레지스트리와 별개).
+  // 목록/태그는 harnesses:read, 회수(unpublish)는 images:push. 관리형 스토어가 없는 배포에서는 전부 404.
+  listWorkspaceImages: <T>(auth: AuthContext) => call<T>(auth, '/workspace/images'),
+  listWorkspaceImageTags: <T>(auth: AuthContext, repository: string) =>
+    call<T>(auth, `/workspace/images/${encodeURIComponent(repository)}/tags`),
+  removeWorkspaceImage: <T>(auth: AuthContext, repository: string) =>
+    call<T>(auth, `/workspace/images/${encodeURIComponent(repository)}`, { method: 'DELETE' }),
   // Workspace environment-image adoption (import) — the inventory of adopted environments + pull-usability verify.
   // Read = capabilities:read (viewer+); adopt/unadopt/verify = settings:write (admin, workspace-level config).
   listAdoptedEnvironments: <T>(auth: AuthContext) =>

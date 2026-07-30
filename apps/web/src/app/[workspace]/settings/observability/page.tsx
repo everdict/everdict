@@ -1,6 +1,7 @@
 import { getTranslations } from 'next-intl/server'
 
 import { ObservabilityTraceBrowser } from '@/widgets/infra-panel'
+import { TrajectoryBrowser } from '@/features/browse-traces'
 import { TraceSourceManager } from '@/features/manage-trace-source'
 import { secretsSchema } from '@/entities/secret'
 import { traceSourcesResponseSchema, type TraceSourcesResponse } from '@/entities/trace-source'
@@ -57,10 +58,18 @@ export default async function ObservabilityPage() {
   return (
     <div className="space-y-8">
       {header}
+      {/* The PRIMARY section reads OUR store (native-observability N1 "look inward"): every sealed trajectory —
+          own executions, OTLP-door arrivals, materialized imports — each row opening its run (the home). The
+          external platforms below stay as the pull/export integration surface. */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium">{t('ownStoreTitle')}</h2>
+        <p className="text-xs text-muted-foreground">{t('ownStoreDescription')}</p>
+        <TrajectoryBrowser />
+      </section>
       {error !== undefined ? (
         <Callout tone="danger">{error}</Callout>
       ) : (
-        <>
+        <div className="space-y-8 border-t pt-6">
           <TraceSourceManager
             sources={roster?.sources ?? []}
             canWrite={canWrite}
@@ -76,7 +85,7 @@ export default async function ObservabilityPage() {
               <ObservabilityTraceBrowser sources={roster?.sources ?? []} />
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   )

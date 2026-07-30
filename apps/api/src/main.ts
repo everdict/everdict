@@ -679,6 +679,7 @@ async function main(): Promise<void> {
     terminalTickets,
     ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
     ...(sandboxSessions ? { sandboxSessions } : {}), // sandbox session runs (P6) — routes/tools absent without a driver
+    trajectoryStore, // the owned evidence ledger's browse surface (N1 look-inward): GET /trajectories + list_trajectories
     browserProfileService, // saved authenticated browser profiles (browser-profiles S2) — workspace-scoped metadata CRUD
     ...(browserProfileCaptureService ? { browserProfileCaptureService } : {}), // S3 capture (needs browser sessions)
     proxyService, // workspace BYO egress proxies (browser-profiles S4) — per-country pool + session geo

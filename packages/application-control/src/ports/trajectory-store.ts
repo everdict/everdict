@@ -16,6 +16,13 @@ export interface TrajectoryMeta {
   sealedAt: string;
 }
 
+// One page of the store's ledger (metas only — bodies stay behind get()). Cursor = opaque base64 of the
+// last row's (sealedAt, runId), newest first — the house pagination shape.
+export interface TrajectoryListResult {
+  items: TrajectoryMeta[];
+  nextCursor?: string;
+}
+
 export interface TrajectoryStore {
   // Seal a run's whole trajectory. IDEMPOTENT by runId — the first seal wins: a retried settle or a judged
   // write-back never rewrites evidence.
@@ -26,4 +33,7 @@ export interface TrajectoryStore {
     events: TraceEvent[];
   }): Promise<TrajectoryMeta>;
   get(tenant: string, runId: string): Promise<{ meta: TrajectoryMeta; events: TraceEvent[] } | undefined>;
+  // Browse the workspace's sealed evidence, newest first (N1 "look inward" — Settings › Traces reads OUR
+  // store). Metas only: a page never hauls bodies.
+  list(tenant: string, opts?: { limit?: number; cursor?: string }): Promise<TrajectoryListResult>;
 }

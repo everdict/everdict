@@ -55,6 +55,9 @@ function fakeTrajectories() {
       const hit = sealed.get(runId);
       return hit && hit.meta.tenant === tenant ? hit : undefined;
     },
+    async list(tenant) {
+      return { items: [...sealed.values()].map((r) => r.meta).filter((m) => m.tenant === tenant) };
+    },
   };
   return { store, sealed };
 }

@@ -33,6 +33,18 @@ export type Score = z.infer<typeof scoreSchema>
 export const traceEventSchema = z.object({ t: z.number(), kind: z.string() }).passthrough()
 export type TraceEvent = z.infer<typeof traceEventSchema>
 
+// GET /runs/:id/trajectory — the OWNED sealed evidence (native-observability N1). meta.source says which
+// copy served: run|otlp|import (the store) or embed (the dual-read fallback while row embeds live).
+export const trajectoryResponseSchema = z.object({
+  meta: z.object({
+    source: z.string(),
+    eventCount: z.number().int().nonnegative(),
+    sealedAt: z.string(),
+  }),
+  events: z.array(traceEventSchema).default([]),
+})
+export type TrajectoryResponse = z.infer<typeof trajectoryResponseSchema>
+
 export const resultSchema = z
   .object({
     scores: z.array(scoreSchema).default([]),

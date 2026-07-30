@@ -9,7 +9,7 @@ import { LiveScreen, SandboxTerminal } from '@/widgets/sandbox-terminal'
 import { TraceTimeline } from '@/widgets/trace-timeline'
 import { CommentsSection } from '@/features/discuss'
 import { membersSchema } from '@/entities/member'
-import { runSchema, type Run } from '@/entities/run'
+import { runSchema, trajectoryResponseSchema, type Run } from '@/entities/run'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { fmtSubject, fmtTokens, fmtUsd } from '@/shared/lib/format'
@@ -137,9 +137,23 @@ export default async function RunDetailPage({
   }
 
   const scores = run.result?.scores ?? []
-  const trace = run.result?.trace ?? []
   const snapshot = run.result?.snapshot
   const usage = run.usage
+
+  // Trace: the row embed first (legacy eval runs), else the OWNED trajectory store (N1 look-inward) — the
+  // sealed evidence is how agent/sandbox/OTLP runs render at all (they never carry a result embed).
+  // Soft-fail: an unsealed run simply has no trace section yet.
+  let trace = run.result?.trace ?? []
+  let trajectorySource: string | undefined
+  if (trace.length === 0) {
+    try {
+      const sealed = trajectoryResponseSchema.parse(await controlPlane.getRunTrajectory(ctx, id))
+      trace = sealed.events
+      trajectorySource = sealed.meta.source
+    } catch {
+      // 404 = nothing sealed (and no embed) — the page just omits the trace sections.
+    }
+  }
 
   // Replay is available for any settled run that produced an agent trace (EVERY harness does) or a recording —
   // not only ones with environment frames. A still-running run shows the live section instead. The agent trace is
@@ -345,6 +359,13 @@ export default async function RunDetailPage({
 
       <section className="space-y-2.5">
         <SectionHeader title={t('trace')} />
+        {/* Served from the owned store (no row embed): say so — the evidence survives independent of any
+            external platform, and `source` is its provenance (run | otlp | import). */}
+        {trajectorySource !== undefined && (
+          <p className="text-xs text-muted-foreground">
+            {t('sealedEvidence', { source: trajectorySource })}
+          </p>
+        )}
         <Card className="p-4">
           <TraceTimeline trace={trace} />
         </Card>
