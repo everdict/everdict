@@ -35,6 +35,11 @@ export const CasePlacementSchema = z.object({
   blockedReason: z.string().optional(),
   restarts: z.number().optional().describe("Task/container restart count observed on the unit"),
   oom: z.boolean().optional().describe("The unit's events indicate an OOM kill (exit 137)"),
+  // Live resource ask of the placed unit (best-effort): Nomad AllocatedResources (CPU MHz) / K8s pod requests
+  // (millicores), memory in MiB — the "how much did this case actually reserve" half of a capacity diagnosis.
+  cpu: z.number().optional(),
+  memoryMb: z.number().optional(),
+  ageSeconds: z.number().optional().describe("Wall-clock since the unit was created, when the source carries it"),
   events: z.array(PlacementEventSchema).default([]),
 });
 export type CasePlacement = z.infer<typeof CasePlacementSchema>;

@@ -955,7 +955,16 @@ describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
         if (path.includes("/allocations"))
           return {
             status: 200,
-            text: JSON.stringify([{ ID: "a1", ClientStatus: "running", NodeName: "worker-2", DesiredStatus: "run" }]),
+            text: JSON.stringify([
+              {
+                ID: "a1",
+                ClientStatus: "running",
+                NodeName: "worker-2",
+                DesiredStatus: "run",
+                CreateTime: (Date.now() - 90_000) * 1e6, // 90s ago, nanoseconds
+                AllocatedResources: { Tasks: { agent: { Cpu: { CpuShares: 500 }, Memory: { MemoryMB: 2048 } } } },
+              },
+            ]),
           };
         if (path === "/v1/allocation/a1")
           return {
@@ -981,6 +990,10 @@ describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
     expect(placement?.node).toBe("worker-2");
     expect(placement?.events.map((e) => e.type)).toEqual(["Received", "Driver", "Started"]);
     expect(placement?.events[0]?.at).toBe(new Date(1_700_000_000_000).toISOString());
+    // Live detail: the unit's resource ask + its age ride along (resources=true list read).
+    expect(placement?.cpu).toBe(500);
+    expect(placement?.memoryMb).toBe(2048);
+    expect(placement?.ageSeconds).toBeGreaterThanOrEqual(89);
   });
 
   it("failed alloc whose events indicate an OOM kill → phase 'dead' with oom=true", async () => {

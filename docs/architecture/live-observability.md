@@ -137,7 +137,10 @@ service was OOM-looping, or the evidence vanished with the deleted job.
 `Backend.inspectCase(caseId) → CasePlacement` (wire SSOT `@everdict/contracts/wire`): the case's newest
 orchestrator job normalized to `phase queued | blocked | starting | running | dead` + the placed unit/node,
 the scheduler's capacity verdict when blocked (Nomad blocked-evaluation exhausted dimensions / K8s
-`FailedScheduling` message), an OOM verdict, restarts, and the orchestrator event feed (image pulls, kills).
+`FailedScheduling` message), an OOM verdict, restarts, the unit's live resource ask (`cpu`/`memoryMb` — Nomad
+`resources=true` AllocatedResources / K8s pod requests) + `ageSeconds`, and the orchestrator event feed (image
+pulls, kills). The run detail's meta strip links the runtime lane to the runtime detail page (the Lens-style
+cluster console — `inspect_runtime`), so case → node → cluster is one click each.
 Nomad + K8s implement it; the fan-out (`runtime-access.ts`) picks the first lane that answers. Surfaces:
 `GET /runs/:id/placement` + MCP `get_run_placement` + the run detail's "Runtime placement" panel
 (self-null when nothing to describe — e.g. self-hosted lanes). The Nomad dispatch wait loop also fires
@@ -147,11 +150,14 @@ the verdict as a step instead of silent queueing (managed twin of the self-hoste
 ### Topology health (`TopologyInspectable`)
 
 For service harnesses the case job is only the driver — the thing that actually fails is the warm topology.
-`ServiceTopologyBackend` implements `inspectTopology(harness, tenant) → TopologyStatus` (per-service state,
-readiness, restart churn, OOM, last notable event — the STRUCTURED promotion of the old timeout-only
-`diagnose()` string) and `topologyServiceLogs(harness, service, tenant)` (one service's log tail), backed by
-new optional `TopologyRuntime` reads implemented by all three runtimes (Nomad alloc TaskStates · K8s pod
-statuses via `Kubectl.podStatuses`/`logs` · Docker `ps`/`logs`). Surfaces: `GET /runs/:id/topology` +
+`ServiceTopologyBackend` implements `inspectTopology(harness, tenant) → TopologyStatus` and
+`topologyServiceLogs(harness, service, tenant)` (one service's log tail), backed by new optional
+`TopologyRuntime` reads implemented by all three runtimes (Nomad alloc TaskStates · K8s pod statuses via
+`Kubectl.podStatuses`/`logs`/`objectEvents` · Docker `ps`/`logs`). The roster is the DECLARED units (services
+AND dependency stores, with `role`/`image`/`port`) unioned with the LIVE state — per unit: state, readiness,
+restart churn, OOM, node, resource ask, age, the warm `endpoint`, and the orchestrator event feed (the
+STRUCTURED promotion of the old timeout-only `diagnose()` string); a declared unit nothing carries rosters
+honestly as `absent`. Surfaces: `GET /runs/:id/topology` +
 `GET /runs/:id/topology/services/:service/logs` + MCP `get_run_topology`/`get_topology_service_logs` + the
 run detail's "Service topology" panel (roster + per-row on-demand log fold; self-null for non-service runs).
 

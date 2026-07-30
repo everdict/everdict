@@ -148,6 +148,29 @@ interface TaskEventLike {
   Type?: string;
   DisplayMessage?: string;
   Details?: Record<string, string>;
+  Time?: number; // int64 NANOSECONDS since epoch
+}
+
+// Task events → the wire event feed (newest 10, empty ones dropped, ns → ISO). Local twin of the backends
+// mapper — the two packages deliberately don't share code (topology ↛ backends internals).
+function topologyEventFeed(events: TaskEventLike[]): Array<{ type?: string; message: string; at?: string }> {
+  return events
+    .filter((e) => (e.DisplayMessage ?? "").trim() !== "" || (e.Type ?? "").trim() !== "")
+    .slice(-10)
+    .map((e) => ({
+      ...(e.Type ? { type: e.Type } : {}),
+      message: (e.DisplayMessage ?? e.Type ?? "").trim(),
+      ...(typeof e.Time === "number" && e.Time > 0 ? { at: new Date(Math.floor(e.Time / 1e6)).toISOString() } : {}),
+    }));
+}
+
+// TaskStates.StartedAt (RFC3339; zero-value "0001-01-01…" = not started) → whole seconds of age, or undefined.
+function taskAgeSeconds(startedAt: string | undefined, nowMs: number): number | undefined {
+  if (!startedAt) return undefined;
+  const t = Date.parse(startedAt);
+  if (!Number.isFinite(t) || t <= 0) return undefined;
+  const seconds = Math.round((nowMs - t) / 1000);
+  return seconds >= 0 ? seconds : undefined;
 }
 // OOM signature: the explicit oom_killed detail, a bare exit code 137 (SIGKILL — the OOM killer's), or "oom" text.
 function eventLooksOom(e: TaskEventLike): boolean {
@@ -677,49 +700,101 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     return notes.length > 0 ? [...new Set(notes)].join("; ") : undefined;
   }
 
-  // The structured sibling of diagnose (topology observability): the live per-service roster of the warm topology —
-  // task state, restart churn, OOM verdicts, and the last notable event — readable WHILE a run drives it. Each task
-  // of the topology job (services AND provisioned dependency stores) is one roster row; the newest desired-run
-  // alloc's view of a task wins. 404 = no topology deployed (an honest "deployed:false", not an error).
+  // The structured sibling of diagnose (topology observability): the live per-service DETAIL roster of the warm
+  // topology — the DECLARED units (services + dependency stores, with image/port/role) unioned with the LIVE task
+  // state (state, restart churn, OOM, node, resources, age, event feed) plus the warm endpoint — readable WHILE a
+  // run drives it. A declared unit no alloc carries rosters honestly as "absent". 404 = no topology deployed.
   async describeTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyStatus | undefined> {
     try {
       const ns = zone?.namespace ?? this.opts.namespace;
+      const declared: Array<{ name: string; role: "service" | "store"; image?: string; port?: number }> = [
+        ...spec.services.map((s) => ({
+          name: s.name,
+          role: "service" as const,
+          ...(s.image ? { image: s.image } : {}),
+          ...(s.port !== undefined ? { port: s.port } : {}),
+        })),
+        ...dependencyStores(spec).map(({ name, def }) => ({
+          name,
+          role: "store" as const,
+          image: def.image,
+          port: def.port,
+        })),
+      ];
       const res = await this.http.request(
         "GET",
-        `/v1/job/${topologyJobId(spec, zone?.id)}/allocations${this.nsq(ns, "?")}`,
+        `/v1/job/${topologyJobId(spec, zone?.id)}/allocations?resources=true${this.nsq(ns, "&")}`,
       );
       if (res.status === 404)
-        return { deployed: false, runtime: "nomad", ...(ns ? { namespace: ns } : {}), services: [] };
+        return {
+          deployed: false,
+          runtime: "nomad",
+          ...(ns ? { namespace: ns } : {}),
+          services: declared.map((d) => ({ ...d, status: "absent", ready: false, events: [] })),
+        };
       if (res.status >= 300) return undefined;
       const allocs = JSON.parse(res.text) as Array<{
         ClientStatus?: string;
         CreateIndex?: number;
         DesiredStatus?: string;
         NodeName?: string;
-        TaskStates?: Record<string, { State?: string; Restarts?: number; Events?: TaskEventLike[] }>;
+        AllocatedResources?: {
+          Tasks?: Record<string, { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } }>;
+        };
+        TaskStates?: Record<
+          string,
+          { State?: string; Restarts?: number; StartedAt?: string; Events?: TaskEventLike[] }
+        >;
       }>;
-      const services: TopologyServiceStatus[] = [];
-      const seen = new Set<string>();
+      // The newest desired-run alloc's view of a task wins (a superseded alloc's dead tasks must not shadow it).
+      const observed = new Map<
+        string,
+        {
+          st: { State?: string; Restarts?: number; StartedAt?: string; Events?: TaskEventLike[] };
+          alloc: (typeof allocs)[number];
+        }
+      >();
       const sorted = [...allocs].sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0));
-      // Desired-run allocs first so a superseded alloc's dead tasks don't shadow the live replacement.
       for (const a of [...sorted.filter((x) => x.DesiredStatus === "run"), ...sorted]) {
         for (const [task, st] of Object.entries(a.TaskStates ?? {})) {
-          if (seen.has(task)) continue;
-          seen.add(task);
-          const events = st.Events ?? [];
-          const oom = events.some(eventLooksOom);
-          const last = [...events].reverse().find((e) => (e.DisplayMessage ?? "").trim().length > 0);
-          services.push({
-            name: task,
-            status: st.State ?? a.ClientStatus ?? "unknown",
-            ready: st.State === "running",
-            ...(st.Restarts !== undefined && st.Restarts > 0 ? { restarts: st.Restarts } : {}),
-            ...(oom ? { oom: true } : {}),
-            ...(a.NodeName ? { node: a.NodeName } : {}),
-            ...(last?.DisplayMessage ? { lastEvent: last.DisplayMessage.slice(0, 200) } : {}),
-          });
+          if (!observed.has(task)) observed.set(task, { st, alloc: a });
         }
       }
+      const endpoints = this.warm.get(`${spec.id}@${spec.version}@${zone?.id ?? "default"}`)?.handle.endpoints ?? {};
+      const nowMs = Date.now();
+      const row = (d: {
+        name: string;
+        role?: "service" | "store";
+        image?: string;
+        port?: number;
+      }): TopologyServiceStatus => {
+        const o = observed.get(d.name);
+        const events = o?.st.Events ?? [];
+        const oom = events.some(eventLooksOom);
+        const last = [...events].reverse().find((e) => (e.DisplayMessage ?? "").trim().length > 0);
+        const ask = o?.alloc.AllocatedResources?.Tasks?.[d.name];
+        const age = taskAgeSeconds(o?.st.StartedAt, nowMs);
+        return {
+          ...d,
+          status: o ? (o.st.State ?? o.alloc.ClientStatus ?? "unknown") : "absent",
+          ready: o?.st.State === "running",
+          ...(o?.st.Restarts !== undefined && o.st.Restarts > 0 ? { restarts: o.st.Restarts } : {}),
+          ...(oom ? { oom: true } : {}),
+          ...(o?.alloc.NodeName ? { node: o.alloc.NodeName } : {}),
+          ...(last?.DisplayMessage ? { lastEvent: last.DisplayMessage.slice(0, 200) } : {}),
+          ...(endpoints[d.name] ? { endpoint: endpoints[d.name] } : {}),
+          ...(ask?.Cpu?.CpuShares ? { cpu: ask.Cpu.CpuShares } : {}),
+          ...(ask?.Memory?.MemoryMB ? { memoryMb: ask.Memory.MemoryMB } : {}),
+          ...(age !== undefined ? { ageSeconds: age } : {}),
+          events: topologyEventFeed(events),
+        };
+      };
+      const seen = new Set(declared.map((d) => d.name));
+      const services = [
+        ...declared.map(row),
+        // Tasks the cluster carries that the spec doesn't declare (older spec revisions, sidecars) still roster.
+        ...[...observed.keys()].filter((t) => !seen.has(t)).map((name) => row({ name })),
+      ];
       return {
         deployed: services.some((s) => s.ready === true),
         runtime: "nomad",

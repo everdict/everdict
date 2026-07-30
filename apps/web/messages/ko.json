@@ -3750,8 +3750,12 @@
     "title": "서비스 토폴로지",
     "notDeployed": "지금 클러스터에 떠 있는 웜 토폴로지가 없어요.",
     "restarts": "재시작 {count}",
-    "showLogs": "로그",
-    "hideLogs": "접기",
+    "role": { "service": "서비스", "store": "스토어" },
+    "age": "가동 {age}",
+    "endpoint": "엔드포인트",
+    "showDetail": "상세",
+    "hideDetail": "접기",
+    "loadingLogs": "로그를 불러오는 중…",
     "noLogs": "이 서비스의 로그가 없어요."
   },
   "runPlacement": {
@@ -3768,6 +3772,8 @@
     "unit": "유닛",
     "job": "잡",
     "namespace": "네임스페이스",
+    "memory": "메모리",
+    "age": "가동 시간",
     "restarts": "재시작"
   },
   "replay": {

@@ -17,18 +17,60 @@ export interface Kubectl {
   // Run a command inside a pod (for store admin DDL/ACL). Resolve the pod name via a selector → exec.
   exec(pod: string, ns: string, command: string[], stdin?: string): Promise<string>;
   podFor(selector: string, ns: string): Promise<string>; // label selector (e.g. app=x) → first pod name
-  // Live pod status roster for a label selector (topology observability) — phase/readiness/restarts/reason/node.
-  // Optional + best-effort: a runtime without it simply reports the topology as not inspectable; undefined = the
-  // query itself failed.
+  // Live pod status roster for a label selector (topology observability) — phase/readiness/restarts/reason/node
+  // plus the pod's resource ask (millicores / MiB) and start time. Optional + best-effort: a runtime without it
+  // simply reports the topology as not inspectable; undefined = the query itself failed.
   podStatuses?(
     selector: string,
     ns: string,
   ): Promise<
-    | Array<{ name: string; phase?: string; ready?: boolean; restarts?: number; reason?: string; node?: string }>
+    | Array<{
+        name: string;
+        phase?: string;
+        ready?: boolean;
+        restarts?: number;
+        reason?: string;
+        node?: string;
+        cpu?: number;
+        memoryMb?: number;
+        startedAt?: string;
+      }>
     | undefined
   >;
   // Current log tail of a target (pod or deployment/x) — the service-level log read. Optional + best-effort.
   logs?(target: string, ns: string, tailLines?: number): Promise<string | undefined>;
+  // Namespace events attached to one object (a pod) — scheduling/kubelet causes. Optional + best-effort.
+  objectEvents?(
+    name: string,
+    ns: string,
+  ): Promise<Array<{ reason?: string; message: string; at?: string }> | undefined>;
+}
+
+// K8s quantity parsers (pure, minimal): cpu "500m"→500 / "1"→1000 millicores; memory "512Mi"→512 / "1Gi"→1024 MiB.
+export function k8sCpuMillicores(q: string | undefined): number | undefined {
+  if (!q) return undefined;
+  const m = q.match(/^(\d+(?:\.\d+)?)(m?)$/);
+  if (!m?.[1]) return undefined;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? Math.round(m[2] === "m" ? n : n * 1000) : undefined;
+}
+export function k8sMemMiB(q: string | undefined): number | undefined {
+  if (!q) return undefined;
+  const m = q.match(/^(\d+(?:\.\d+)?)(Ki|Mi|Gi|Ti|K|M|G|T)?$/);
+  if (!m?.[1]) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  const factor: Record<string, number> = {
+    Ki: 1 / 1024,
+    Mi: 1,
+    Gi: 1024,
+    Ti: 1024 * 1024,
+    K: 1e3 / (1024 * 1024),
+    M: 1e6 / (1024 * 1024),
+    G: 1e9 / (1024 * 1024),
+    T: 1e12 / (1024 * 1024),
+  };
+  return Math.round(n * (m[2] ? (factor[m[2]] ?? 1) : 1 / (1024 * 1024)));
 }
 
 interface RunResult {
@@ -156,9 +198,13 @@ export function kubectlCli(opts: { context?: string; bin?: string } = {}): Kubec
       try {
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
           metadata?: { name?: string };
-          spec?: { nodeName?: string };
+          spec?: {
+            nodeName?: string;
+            containers?: Array<{ resources?: { requests?: { cpu?: string; memory?: string } } }>;
+          };
           status?: {
             phase?: string;
+            startTime?: string;
             containerStatuses?: Array<{
               ready?: boolean;
               restartCount?: number;
@@ -177,6 +223,9 @@ export function kubectlCli(opts: { context?: string; bin?: string } = {}): Kubec
               terminated?.reason ??
               (terminated?.exitCode === 137 ? "OOMKilled" : undefined) ??
               cs?.state?.waiting?.reason;
+            const requests = p.spec?.containers?.[0]?.resources?.requests;
+            const cpu = k8sCpuMillicores(requests?.cpu);
+            const memoryMb = k8sMemMiB(requests?.memory);
             return {
               name: p.metadata?.name as string,
               ...(p.status?.phase ? { phase: p.status.phase } : {}),
@@ -184,8 +233,42 @@ export function kubectlCli(opts: { context?: string; bin?: string } = {}): Kubec
               ...(cs?.restartCount !== undefined ? { restarts: cs.restartCount } : {}),
               ...(reason ? { reason } : {}),
               ...(p.spec?.nodeName ? { node: p.spec.nodeName } : {}),
+              ...(cpu !== undefined ? { cpu } : {}),
+              ...(memoryMb !== undefined ? { memoryMb } : {}),
+              ...(p.status?.startTime ? { startedAt: p.status.startTime } : {}),
             };
           });
+      } catch {
+        return undefined;
+      }
+    },
+    async objectEvents(name, ns) {
+      const res = await run(bin, [
+        ...ctx,
+        "-n",
+        ns,
+        "get",
+        "events",
+        "--field-selector",
+        `involvedObject.name=${name}`,
+        "-o",
+        "json",
+      ]);
+      if (res.code !== 0) return undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          reason?: string;
+          message?: string;
+          lastTimestamp?: string | null;
+          eventTime?: string | null;
+        }>;
+        return items
+          .filter((e) => (e.message ?? "").trim() !== "")
+          .map((e) => ({
+            ...(e.reason ? { reason: e.reason } : {}),
+            message: (e.message ?? "").trim(),
+            ...(e.lastTimestamp || e.eventTime ? { at: (e.lastTimestamp || e.eventTime) as string } : {}),
+          }));
       } catch {
         return undefined;
       }

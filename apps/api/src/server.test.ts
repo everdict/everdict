@@ -1899,8 +1899,8 @@ describe("API — run live logs (observability: snapshot + SSE tail)", () => {
         deployed: true,
         runtime: "nomad",
         services: [
-          { name: "agent-server", status: "running", ready: true },
-          { name: `${harness.id}-postgres`, status: "pending", ready: false },
+          { name: "agent-server", status: "running", ready: true, events: [] },
+          { name: `${harness.id}-postgres`, status: "pending", ready: false, events: [] },
         ],
       }),
       readTopologyServiceLogs: async (_t, _r, _h, service) => (service === "agent-server" ? "srv log tail" : undefined),

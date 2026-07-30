@@ -446,33 +446,75 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     };
   }
 
-  // The live per-service health roster of the warm topology (topology observability) — pod phase/readiness,
-  // restart churn, OOM verdicts per declared service. Requires the injected Kubectl to support podStatuses
-  // (the real CLI does; a minimal fake reads as not inspectable). Best-effort, never throws.
+  // The live per-service DETAIL roster of the warm topology (topology observability) — the DECLARED units
+  // (services + dependency stores, with image/port/role) unioned with the live pod state (phase/readiness,
+  // restart churn, OOM, node, resources, age, event feed) plus the warm endpoint. Requires the injected Kubectl
+  // to support podStatuses (the real CLI does; a minimal fake reads as not inspectable). Best-effort, never throws.
   async describeTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyStatus | undefined> {
     const read = this.kubectl.podStatuses?.bind(this.kubectl);
     if (!read) return undefined;
     try {
       const ns = this.nsFor(zone);
+      const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
+      const endpoints = this.warm.get(key)?.handle.endpoints ?? {};
+      const nowMs = Date.now();
       const services: TopologyServiceStatus[] = [];
       let anyPod = false;
-      for (const svc of spec.services) {
-        const pods = await read(`everdict/harness=${spec.id},everdict/version=${spec.version},app=${svc.name}`, ns);
+      const declared: Array<{
+        name: string;
+        role: "service" | "store";
+        image?: string;
+        port?: number;
+        selector: string;
+      }> = [
+        ...spec.services.map((s) => ({
+          name: s.name,
+          role: "service" as const,
+          ...(s.image ? { image: s.image } : {}),
+          ...(s.port !== undefined ? { port: s.port } : {}),
+          selector: `everdict/harness=${spec.id},everdict/version=${spec.version},app=${s.name}`,
+        })),
+        // Dependency stores stand as `app=<storeName>` Deployments in the same namespace.
+        ...dependencyStores(spec).map(({ store, name, def }) => ({
+          name,
+          role: "store" as const,
+          image: def.image,
+          port: def.port,
+          selector: `app=${storeName(spec, store)}`,
+        })),
+      ];
+      for (const d of declared) {
+        const pods = await read(d.selector, ns);
         if (pods === undefined) return undefined; // the query itself failed — degrade honestly
         const pod = pods.find((p) => p.phase === "Running" || p.phase === "Pending") ?? pods.at(-1);
+        const { selector: _s, ...identity } = d;
         if (!pod) {
-          services.push({ name: svc.name, status: "absent", ready: false });
+          services.push({ ...identity, status: "absent", ready: false, events: [] });
           continue;
         }
         anyPod = true;
+        const events = (await this.kubectl.objectEvents?.(pod.name, ns).catch(() => undefined)) ?? [];
+        const started = pod.startedAt ? Date.parse(pod.startedAt) : Number.NaN;
+        const age = Number.isFinite(started) ? Math.max(0, Math.round((nowMs - started) / 1000)) : undefined;
         services.push({
-          name: svc.name,
+          ...identity,
           status: pod.phase ?? "unknown",
           ready: pod.phase === "Running" && pod.ready !== false,
           ...(pod.restarts !== undefined && pod.restarts > 0 ? { restarts: pod.restarts } : {}),
           ...(pod.reason === "OOMKilled" ? { oom: true } : {}),
           ...(pod.node ? { node: pod.node } : {}),
           ...(pod.reason ? { lastEvent: pod.reason } : {}),
+          ...(endpoints[d.name] ? { endpoint: endpoints[d.name] } : {}),
+          ...(pod.cpu !== undefined ? { cpu: pod.cpu } : {}),
+          ...(pod.memoryMb !== undefined ? { memoryMb: pod.memoryMb } : {}),
+          ...(age !== undefined ? { ageSeconds: age } : {}),
+          events: events
+            .slice(-10)
+            .map((e) => ({
+              ...(e.reason ? { type: e.reason } : {}),
+              message: e.message,
+              ...(e.at ? { at: e.at } : {}),
+            })),
         });
       }
       return { deployed: anyPod, runtime: "k8s", namespace: ns, services };

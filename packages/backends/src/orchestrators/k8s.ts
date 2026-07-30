@@ -67,12 +67,25 @@ export interface K8sApi {
   ): Promise<Array<{ name: string; namespace: string; creationTimestamp?: string }> | undefined>;
   // Termination reason of the job's (failed) pod — e.g. "OOMKilled". Best-effort: undefined when unavailable.
   podFailureReason(name: string, ns: string): Promise<string | undefined>;
-  // The job's pods with their live placement status (phase/node/restarts + the waiting|terminated reason) —
-  // the case-scoped placement read (CaseInspectable). undefined when the query itself fails (best-effort).
+  // The job's pods with their live placement status (phase/node/restarts + the waiting|terminated reason, plus
+  // the resource ask [millicores/MiB] and start time) — the case-scoped placement read (CaseInspectable).
+  // undefined when the query itself fails (best-effort).
   podsForJob(
     name: string,
     ns: string,
-  ): Promise<Array<{ name: string; phase?: string; node?: string; reason?: string; restarts?: number }> | undefined>;
+  ): Promise<
+    | Array<{
+        name: string;
+        phase?: string;
+        node?: string;
+        reason?: string;
+        restarts?: number;
+        cpu?: number;
+        memoryMb?: number;
+        startedAt?: string;
+      }>
+    | undefined
+  >;
   // Namespace events attached to one object (a pod) — FailedScheduling / image-pull failures / kills, the WHY
   // feed behind a stuck placement. undefined when the query itself fails (best-effort).
   objectEvents(name: string, ns: string): Promise<Array<{ reason?: string; message: string; at?: string }> | undefined>;
@@ -245,9 +258,13 @@ export function kubectlApi(
       try {
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
           metadata?: { name?: string };
-          spec?: { nodeName?: string };
+          spec?: {
+            nodeName?: string;
+            containers?: Array<{ resources?: { requests?: { cpu?: string; memory?: string } } }>;
+          };
           status?: {
             phase?: string;
+            startTime?: string;
             containerStatuses?: Array<{
               restartCount?: number;
               state?: { waiting?: { reason?: string }; terminated?: { reason?: string; exitCode?: number } };
@@ -265,12 +282,18 @@ export function kubectlApi(
               terminated?.reason ??
               (terminated?.exitCode === 137 ? "OOMKilled" : undefined) ??
               cs?.state?.waiting?.reason;
+            const requests = p.spec?.containers?.[0]?.resources?.requests;
+            const cpu = k8sCpuToMillicores(requests?.cpu);
+            const memoryMb = k8sMemToMiB(requests?.memory);
             return {
               name: p.metadata?.name as string,
               ...(p.status?.phase ? { phase: p.status.phase } : {}),
               ...(p.spec?.nodeName ? { node: p.spec.nodeName } : {}),
               ...(reason ? { reason } : {}),
               ...(cs?.restartCount !== undefined ? { restarts: cs.restartCount } : {}),
+              ...(cpu !== undefined ? { cpu } : {}),
+              ...(memoryMb !== undefined ? { memoryMb } : {}),
+              ...(p.status?.startTime ? { startedAt: p.status.startTime } : {}),
             };
           });
       } catch {
@@ -1026,6 +1049,8 @@ export class K8sBackend
               : scheduling
                 ? ("blocked" as const)
                 : ("starting" as const);
+        const started = pod.startedAt ? Date.parse(pod.startedAt) : Number.NaN;
+        const age = Number.isFinite(started) ? Math.max(0, Math.round((Date.now() - started) / 1000)) : undefined;
         return {
           ...base,
           phase,
@@ -1034,6 +1059,9 @@ export class K8sBackend
           ...(phase === "blocked" && scheduling ? { blockedReason: scheduling.message } : {}),
           ...(pod.restarts !== undefined && pod.restarts > 0 ? { restarts: pod.restarts } : {}),
           ...(pod.reason === "OOMKilled" ? { oom: true } : {}),
+          ...(pod.cpu !== undefined ? { cpu: pod.cpu } : {}),
+          ...(pod.memoryMb !== undefined ? { memoryMb: pod.memoryMb } : {}),
+          ...(age !== undefined ? { ageSeconds: age } : {}),
           events: events.slice(-20).map((e) => ({
             ...(e.reason ? { type: e.reason } : {}),
             message: e.message,

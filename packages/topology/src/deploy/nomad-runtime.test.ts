@@ -713,12 +713,16 @@ describe("NomadTopologyRuntime.describeTopology / serviceLogs (topology observab
     const topo = await rt.describeTopology(SPEC);
     expect(topo?.deployed).toBe(true);
     expect(topo?.runtime).toBe("nomad");
+    // The declared identity (role/image) is unioned with the live task state.
     expect(topo?.services.find((s) => s.name === "agent-server")).toMatchObject({
+      role: "service",
+      image: "aegra:1",
       status: "running",
       ready: true,
       node: "worker-1",
     });
     expect(topo?.services.find((s) => s.name === "aegra-postgres")).toMatchObject({
+      role: "store",
       status: "pending",
       ready: false,
       restarts: 4,
@@ -727,7 +731,7 @@ describe("NomadTopologyRuntime.describeTopology / serviceLogs (topology observab
     });
   });
 
-  it("a 404 job reads as an honest deployed:false; another API failure reads as undefined", async () => {
+  it("a 404 job reads as an honest deployed:false with the DECLARED units rostered absent; an API failure as undefined", async () => {
     const gone = new NomadTopologyRuntime({
       addr: "http://nomad",
       http: {
@@ -736,7 +740,15 @@ describe("NomadTopologyRuntime.describeTopology / serviceLogs (topology observab
         },
       },
     });
-    expect(await gone.describeTopology(SPEC)).toMatchObject({ deployed: false, services: [] });
+    const topo = await gone.describeTopology(SPEC);
+    expect(topo?.deployed).toBe(false);
+    // The declared identity still rosters (role/image/port) so the reader sees WHAT should be standing.
+    expect(topo?.services.find((s) => s.name === "agent-server")).toMatchObject({
+      role: "service",
+      status: "absent",
+      image: "aegra:1",
+    });
+    expect(topo?.services.some((s) => s.role === "store")).toBe(true);
     const erroring = new NomadTopologyRuntime({
       addr: "http://nomad",
       http: {

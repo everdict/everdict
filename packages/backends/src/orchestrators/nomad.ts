@@ -988,16 +988,15 @@ export class NomadBackend
       if (!newest?.ID) return undefined;
       const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
       const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
-      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
+      // resources=true — the list stub carries AllocatedResources only when asked (the same trap the runtime
+      // inspection hit live: without it the unit's cpu/mem ask reads blank).
+      const allocsRes = await this.http.request(
+        "GET",
+        `/v1/job/${encodeURIComponent(newest.ID)}/allocations?resources=true${ns ? `&namespace=${encodeURIComponent(ns)}` : ""}`,
+      );
       if (allocsRes.status >= 300) return undefined;
       const alloc = currentAlloc(
-        JSON.parse(allocsRes.text) as Array<{
-          ID: string;
-          ClientStatus?: string;
-          CreateIndex?: number;
-          DesiredStatus?: string;
-          NodeName?: string;
-        }>,
+        JSON.parse(allocsRes.text) as Array<NomadAllocStub & { CreateIndex?: number; DesiredStatus?: string }>,
       );
       const base = { job: newest.ID, ...(ns ? { namespace: ns } : {}) };
       if (!alloc?.ID) {
@@ -1020,6 +1019,7 @@ export class NomadBackend
             ? ("dead" as const)
             : ("starting" as const);
       const restarts = events.filter((e) => e.Type === "Restarting").length;
+      const age = nomadAllocAgeSeconds(alloc.CreateTime, Date.now());
       return {
         ...base,
         phase,
@@ -1027,6 +1027,8 @@ export class NomadBackend
         ...(alloc.NodeName ? { node: alloc.NodeName } : {}),
         ...(eventsIndicateOom(events) ? { oom: true } : {}),
         ...(restarts > 0 ? { restarts } : {}),
+        ...nomadAllocResources(alloc),
+        ...(age !== undefined ? { ageSeconds: age } : {}),
         events: nomadEventsToPlacement(events),
       };
     } catch {

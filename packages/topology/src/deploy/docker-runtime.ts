@@ -185,20 +185,42 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     );
   }
 
-  // The live per-service roster of the warm topology (topology observability) — docker has no restart/event
-  // history in `ps`, so the roster is a binary running/absent per deterministic container name. Best-effort.
+  // The live per-service DETAIL roster of the warm topology (topology observability) — the declared identity
+  // (role/image/port) + running/absent per deterministic container name + the warm endpoint. Docker `ps` carries
+  // no restart/event history, so those fields stay absent here. Best-effort.
   async describeTopology(spec: ServiceHarnessSpec): Promise<TopologyStatus | undefined> {
     try {
       const network = netName(spec);
-      const rows = [
-        ...dependencyStores(spec).map(({ name }) => ({ name, container: `${network}-${name}` })),
-        ...spec.services.map((svc) => ({ name: svc.name, container: `${network}-${sanitize(svc.name)}` })),
+      const rows: Array<{
+        name: string;
+        role: "service" | "store";
+        image?: string;
+        port?: number;
+        container: string;
+      }> = [
+        ...dependencyStores(spec).map(({ name, def }) => ({
+          name,
+          role: "store" as const,
+          image: def.image,
+          port: def.port,
+          container: `${network}-${name}`,
+        })),
+        ...spec.services.map((svc) => ({
+          name: svc.name,
+          role: "service" as const,
+          ...(svc.image ? { image: svc.image } : {}),
+          ...(svc.port !== undefined ? { port: svc.port } : {}),
+          container: `${network}-${sanitize(svc.name)}`,
+        })),
       ];
       const up = new Set(await this.docker.running(rows.map((r) => r.container)));
-      const services = rows.map((r) => ({
-        name: r.name,
-        status: up.has(r.container) ? "running" : "absent",
-        ready: up.has(r.container),
+      const endpoints = this.warm.get(`${spec.id}@${spec.version}`)?.handle.endpoints ?? {};
+      const services = rows.map(({ container, ...identity }) => ({
+        ...identity,
+        status: up.has(container) ? "running" : "absent",
+        ready: up.has(container),
+        ...(endpoints[identity.name] ? { endpoint: endpoints[identity.name] } : {}),
+        events: [],
       }));
       return { deployed: services.some((s) => s.ready), runtime: "docker", services };
     } catch {

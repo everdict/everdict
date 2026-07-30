@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import type { CasePlacement } from '@everdict/contracts/wire'
+import { fmtDurationMs } from '@/shared/lib/format'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { SectionHeader } from '@/shared/ui/section-header'
@@ -66,6 +67,13 @@ export function RunPlacement({ runId, initialStatus }: { runId: string; initialS
     ...(placement.unit ? [{ label: t('unit'), value: placement.unit }] : []),
     ...(placement.job ? [{ label: t('job'), value: placement.job }] : []),
     ...(placement.namespace ? [{ label: t('namespace'), value: placement.namespace }] : []),
+    ...(placement.cpu !== undefined ? [{ label: 'CPU', value: String(placement.cpu) }] : []),
+    ...(placement.memoryMb !== undefined
+      ? [{ label: t('memory'), value: `${placement.memoryMb} MiB` }]
+      : []),
+    ...(placement.ageSeconds !== undefined
+      ? [{ label: t('age'), value: fmtDurationMs(placement.ageSeconds * 1000) }]
+      : []),
     ...(placement.restarts !== undefined && placement.restarts > 0
       ? [{ label: t('restarts'), value: String(placement.restarts) }]
       : []),

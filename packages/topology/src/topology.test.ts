@@ -2350,7 +2350,7 @@ describe("ServiceTopologyBackend — inspectTopology / topologyServiceLogs (Topo
       return {
         deployed: true,
         runtime: "nomad",
-        services: [{ name: "agent-server", status: "running", ready: true }],
+        services: [{ name: "agent-server", status: "running", ready: true, events: [] }],
       };
     },
     async serviceLogs(_spec, service, zone) {

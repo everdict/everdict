@@ -3750,8 +3750,12 @@
     "title": "Service topology",
     "notDeployed": "No warm topology is standing on the cluster right now.",
     "restarts": "restarts {count}",
-    "showLogs": "logs",
-    "hideLogs": "hide",
+    "role": { "service": "service", "store": "store" },
+    "age": "up {age}",
+    "endpoint": "endpoint",
+    "showDetail": "detail",
+    "hideDetail": "hide",
+    "loadingLogs": "Loading logs…",
     "noLogs": "No logs available for this service."
   },
   "runPlacement": {
@@ -3768,6 +3772,8 @@
     "unit": "Unit",
     "job": "Job",
     "namespace": "Namespace",
+    "memory": "Memory",
+    "age": "Uptime",
     "restarts": "Restarts"
   },
   "replay": {
