@@ -130,8 +130,11 @@ collector and the store**.
   SHIPPED (master-plan W6)**: the reserved trace source `everdict` points the pull machinery at the owned
   store — one-off (`ingest/pull` with `source:{name:"everdict"}`) and periodic (a pull-mode schedule with
   `pull.source:"everdict"` judges a rolling window each fire). No external platform, no re-upload, no
-  materialize duplicate. Trace facts already flow (E4 thresholds). Remaining: the `everdict-otel` TS/Py
-  convenience libraries + migration recipes.
+  materialize duplicate. Trace facts already flow (E4 thresholds). The library rung also SHIPPED: `@everdict/otel`
+  (`packages/otel`, dependency-free semconv + exporter-config helpers, drift-guarded against the
+  receiver) + `docs/everdict-otel.md` migration recipes (zero-code env, TS in-code, Python env-only —
+  no Python package needed; the door's protobuf gap is documented with the collector front). Remaining:
+  publish pipelines when the repo goes public.
 - **N3 — Scale rung.** ClickHouse adapter; retention/quota surfaces; ingestion admission in the §5 gate.
 - **N4 — Mirror consolidation.** Collector-level exporters subsume raw-trace mirroring; score-attach
   sinks remain API-side.

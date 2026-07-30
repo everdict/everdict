@@ -551,6 +551,12 @@ importers:
         specifier: ^6.27.0
         version: 6.27.0
 
+  packages/otel:
+    devDependencies:
+      '@everdict/trace':
+        specifier: workspace:*
+        version: link:../trace
+
   packages/registry:
     dependencies:
       '@everdict/application-control':
