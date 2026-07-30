@@ -20,6 +20,7 @@ import {
   InMemoryRecordingStore,
   InMemoryRunStore,
   InMemoryScorecardStore,
+  InMemoryTrajectoryStore,
   type ScorecardRecord,
 } from "@everdict/db";
 import { CircuitBreaker, type Principal, Run, inMemoryUsageMeter } from "@everdict/domain";
@@ -706,6 +707,104 @@ describe("ScorecardService — placement waiting diagnostic (Phase 1: immediate 
 
     expect((rec.steps ?? []).filter((s) => s.phase === "dispatch" && s.status === "info")).toHaveLength(0);
     expect(rec.status).toBe("succeeded");
+  });
+});
+
+describe("materialize-on-import — imported traces seal as OUR copy and are judged from it (W4)", () => {
+  const pulled: TraceEvent[] = [
+    { t: 0, kind: "llm_call", model: "external-model" },
+    { t: 1, kind: "tool_call", id: "t1", name: "bash", args: {} },
+  ];
+
+  const build = (trajectories: InMemoryTrajectoryStore, source: TraceSource) => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      defaultTraceGraders,
+      trajectories,
+      buildTraceSource: () => source,
+      newId: () => "sc-mat",
+    });
+    return { store, datasets, service };
+  };
+
+  it("a pull-ingested trace seals in the owned store (source: import) — delete it on the source platform, the evidence still opens", async () => {
+    const trajectories = new InMemoryTrajectoryStore();
+    let deleted = false;
+    const source: TraceSource = {
+      fetch: async () => {
+        if (deleted) throw new UpstreamError("UPSTREAM_ERROR", {}, "trace was deleted on the source platform");
+        return pulled;
+      },
+    };
+    const { store, datasets, service } = build(trajectories, source);
+    await datasets.register("acme", datasetWithCase());
+
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      source: { kind: "otel", endpoint: "http://jaeger:16686" },
+      runs: [{ caseId: "c1", runId: "external-trace-9" }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("succeeded");
+
+    // The source platform loses the trace AFTER the pull — our sealed copy is unaffected.
+    deleted = true;
+    const sealed = await trajectories.get("acme", `ingest:${created.id}:c1`);
+    expect(sealed?.meta).toMatchObject({ source: "import", eventCount: 2 });
+    expect(sealed?.events).toEqual(pulled);
+    // The record embed and the sealed copy agree (one evidence, two carriers until refs-not-embeds).
+    expect(done.scorecard?.results[0]?.trace).toEqual(pulled);
+  });
+
+  it("judging reads the SEALED copy, never a fresher fetch — a pre-existing seal under the same key wins", async () => {
+    const trajectories = new InMemoryTrajectoryStore();
+    const sealedFirst: TraceEvent[] = [{ t: 0, kind: "tool_call", id: "t1", name: "bash", args: {} }];
+    // The key is deterministic (ingest:<scorecardId>:<caseId>), so the original evidence can be sealed ahead.
+    await trajectories.seal({ runId: "ingest:sc-mat:c1", tenant: "acme", source: "import", events: sealedFirst });
+    const { store, datasets, service } = build(trajectories, { fetch: async () => pulled });
+    await datasets.register("acme", datasetWithCase());
+
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      source: { kind: "otel", endpoint: "http://jaeger:16686" },
+      runs: [{ caseId: "c1", runId: "external-trace-9" }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+
+    // First write won: the embed AND the derived metrics come from the sealed copy, not the fresh pull.
+    expect(done.scorecard?.results[0]?.trace).toEqual(sealedFirst);
+    expect(done.scorecard?.results[0]?.scores.find((s) => s.metric === "tool_calls")?.value).toBe(1);
+  });
+
+  it("push ingest materializes through the same door (both ingest paths converge on finishIngest)", async () => {
+    const trajectories = new InMemoryTrajectoryStore();
+    const { store, datasets, service } = build(trajectories, {
+      fetch: async () => {
+        throw new Error("push ingest never pulls");
+      },
+    });
+    await datasets.register("acme", datasetWithCase());
+
+    const created = await service.ingest({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      traces: [{ caseId: "c1", trace: pulled }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("succeeded");
+    expect((await trajectories.get("acme", `ingest:${created.id}:c1`))?.meta).toMatchObject({
+      source: "import",
+      eventCount: 2,
+    });
   });
 });
 

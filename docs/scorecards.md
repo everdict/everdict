@@ -175,6 +175,13 @@ the same `spansToTraceEvents` seam — per-harness span variance is absorbed by 
 `finishIngest` pipeline as push (re-derive `tool_calls`/`usd`/`span`, apply judges, store). So push and pull converge
 on one scoring path; only the *acquisition* differs.
 
+**Materialize-on-import (owned evidence).** Before anything grades or judges an ingested trace, `finishIngest`
+seals it as **our copy** in the owned `TrajectoryStore` (`source: "import"`, keyed `ingest:<scorecardId>:<caseId>`)
+and everything downstream — trace graders, judges, the record embed, export — reads the **sealed copy** (first write
+wins). The scorecard's evidence lifetime detaches from the source platform at the pull: delete the trace there
+afterwards and the evidence still opens. The external `runId` remains provenance on the record (the pull path's
+attach/export coordinates). See `docs/architecture/native-observability.md`.
+
 **Evaluate existing traces (no dataset / no harness run).** `dataset` and `harness` are **optional** on both ingest
 paths. Omit them to score the traces *directly*: each trace becomes its own case (synthesized `EvalCase`, judges only —
 no `expected`/ground-truth alignment) and the record is stamped with the reserved sentinel `dataset`/`harness`

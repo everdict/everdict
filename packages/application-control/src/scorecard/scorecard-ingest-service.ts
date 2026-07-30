@@ -8,6 +8,7 @@ import {
   type Scorecard,
   type ScorecardRecord,
   TRACE_EVAL_REF,
+  type TraceEvent,
   type TraceSourceConfig,
   snapshotFromEvidence,
   toScores,
@@ -255,8 +256,9 @@ export class ScorecardIngestService {
     for (const up of perCase) {
       const evalCase = caseById.get(up.caseId);
       if (!evalCase) continue; // skip caseIds not in the dataset (can't align)
+      const trace = await this.materialize(id, tenant, up.caseId, up.trace);
       const snapshot = up.snapshot ?? { kind: "repo", diff: "", changedFiles: [], headSha: "ingested" };
-      const ctx: GradeContext = { case: evalCase, trace: up.trace, snapshot };
+      const ctx: GradeContext = { case: evalCase, trace, snapshot };
       // Re-derive trace-only graders (steps/cost/latency) — same metrics as a live run for diff alignment. The
       // grader impls live in @everdict/graders, which the application layer never imports; apps/api injects them
       // as defaultTraceGraders (re-architecture P2 S4). Absent = uploaded scores only (no derived trace metrics).
@@ -265,7 +267,7 @@ export class ScorecardIngestService {
       results.push({
         caseId: up.caseId,
         harness: harnessLabel,
-        trace: up.trace,
+        trace,
         snapshot,
         ...(up.evidence ? { evidence: up.evidence } : {}),
         scores: [...derived, ...(up.scores ?? [])],
@@ -312,6 +314,31 @@ export class ScorecardIngestService {
         this.now(),
       ),
     );
+  }
+
+  // Materialize-on-import (native-observability N-O1 / master plan W4): an imported trace is sealed as OUR
+  // copy the moment it enters, and everything downstream (graders, judges, the record embed, export) reads the
+  // SEALED copy — the scorecard's evidence lifetime detaches from the source platform at the pull (delete the
+  // trace there afterwards; the sealed copy still opens). Keyed ingest:<scorecardId>:<caseId> (deterministic and
+  // tenant-unique via the scorecard id — an external run id could collide across tenants in the run_id PK); the
+  // external run id remains provenance on the record (the pull path's attach/export coordinates). First write
+  // wins: a pre-existing seal under the same key is what gets judged, never a fresher fetch. Rung-1 posture: a
+  // store failure falls back to the fetched bytes (the row embed still serves evidence) instead of failing the
+  // scorecard — the refs-not-embeds rung makes the copy load-bearing.
+  private async materialize(
+    scorecardId: string,
+    tenant: string,
+    caseId: string,
+    events: TraceEvent[],
+  ): Promise<TraceEvent[]> {
+    if (!this.deps.trajectories || events.length === 0) return events;
+    try {
+      const runId = `ingest:${scorecardId}:${caseId}`;
+      await this.deps.trajectories.seal({ runId, tenant, source: "import", events });
+      return (await this.deps.trajectories.get(tenant, runId))?.events ?? events;
+    } catch {
+      return events;
+    }
   }
 
   private async failIngest(id: string, err: unknown): Promise<void> {
