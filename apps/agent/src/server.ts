@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
-import type { AgentRegistry, TenantKeyStore } from "@everdict/application-control";
+import type { AgentRegistry, SubscriptionStore, TenantKeyStore } from "@everdict/application-control";
 import type { AgentSessionRecord } from "@everdict/contracts";
 import { AgentPermissionModeSchema, AgentReferenceSchema, AppError, CodeToolSpecSchema } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
@@ -34,6 +34,9 @@ export interface AgentServerDeps extends ChatDeps {
   // Agent registry — with keyStore, powers registry-driven trigger activation (agent-automation A3): a platform
   // event matching an ENABLED agent's triggers launches a headless run. Absent → events only wake teammates.
   agentRegistry?: AgentRegistry;
+  // E3 subscription registry — with the activator, reaction.kind="agent" rules wake their target agent
+  // through the same guards as spec triggers. Absent → spec triggers only.
+  subscriptions?: SubscriptionStore;
   // Test seam: the activation run executor. Default = the teammate-turn machinery (one request-less loop turn).
   activationRunTurn?: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<void>;
   // agent.run.* lifecycle facts → the control plane's event log (fleet observability, agent-automation A5).
@@ -245,6 +248,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           keyStore: deps.keyStore,
           sessions: deps.sessions,
           mailbox,
+          ...(deps.subscriptions ? { subscriptions: deps.subscriptions } : {}),
           runTurn:
             deps.activationRunTurn ??
             ((sessionId, agentToken, signal, permit) =>

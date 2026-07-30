@@ -1,6 +1,13 @@
 import type { PermissionHook } from "@everdict/agent-runtime";
 import type { AgentRegistry, TenantKeyStore } from "@everdict/application-control";
-import type { AgentMessageRecord, AgentSessionRecord, AgentSpec, AgentTrigger, TraceEvent } from "@everdict/contracts";
+import type {
+  AgentMessageRecord,
+  AgentSessionRecord,
+  AgentSpec,
+  AgentTrigger,
+  SubscriptionRecord,
+  TraceEvent,
+} from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { type ActivationEvent, AgentActivator, triggerMatches } from "./agent-activation.js";
 import { AgentMailbox } from "./agent-mailbox.js";
@@ -114,6 +121,7 @@ function activator(opts: {
   sessions?: ReturnType<typeof sessionsStub>;
   keyStore?: ReturnType<typeof keyStoreStub>;
   cooldownMs?: number;
+  subscriptions?: SubscriptionRecord[];
 }) {
   const sessions = opts.sessions ?? sessionsStub();
   const keyStore = opts.keyStore ?? keyStoreStub();
@@ -143,6 +151,9 @@ function activator(opts: {
       return () => `s-${++n}`;
     })(),
     ...(opts.cooldownMs !== undefined ? { cooldownMs: opts.cooldownMs } : {}),
+    ...(opts.subscriptions !== undefined
+      ? { subscriptions: { listEnabled: async () => opts.subscriptions ?? [] } }
+      : {}),
   });
   return { instance, sessions, keyStore, mailbox, runs, reports };
 }
@@ -418,5 +429,71 @@ describe("AgentActivator.resumeApproval — the A6 resume leg", () => {
         request: { name: "write_file" },
       }),
     ).toEqual({ resumed: false, reason: "not a resumable trigger run" });
+  });
+});
+
+describe("subscription-driven activation (E3 — reaction.kind=agent)", () => {
+  const rule = (over: Partial<SubscriptionRecord> = {}): SubscriptionRecord => ({
+    id: "sub-1",
+    tenant: "acme",
+    name: "wake sentinel",
+    selector: { kinds: ["run.failed"], filters: [] },
+    reaction: { kind: "agent", agentId: "sentinel" },
+    governance: { enabled: true },
+    createdBy: "alice",
+    createdAt: "2026-07-30T00:00:00.000Z",
+    updatedAt: "2026-07-30T00:00:00.000Z",
+    ...over,
+  });
+
+  it("a matching subscription wakes its target agent even when the agent's own triggers do not match", async () => {
+    // The spec subscribes to scorecard.completed only — run.failed reaches it purely through the rule.
+    const { instance, sessions } = activator({
+      registry: registryOf(spec()),
+      subscriptions: [rule()],
+    });
+    const activated = await instance.onEvent(event({ kind: "run.failed", eventId: "ev-rf" }));
+    await instance.idle();
+    expect(activated).toBe(1);
+    expect(sessions.created).toHaveLength(1);
+    expect(sessions.created[0]?.origin).toMatchObject({ type: "trigger", agentId: "sentinel", eventId: "ev-rf" });
+  });
+
+  it("an agent whose own trigger already fired is not woken twice by a subscription on the same event", async () => {
+    const { instance, sessions } = activator({
+      registry: registryOf(spec()),
+      subscriptions: [rule({ selector: { kinds: ["scorecard.completed"], filters: [] } })],
+    });
+    const activated = await instance.onEvent(event()); // matches BOTH the spec trigger and the rule
+    await instance.idle();
+    expect(activated).toBe(1);
+    expect(sessions.created).toHaveLength(1);
+  });
+
+  it("honors the rule's own cooldownSec and skips a disabled target agent", async () => {
+    const sessions = sessionsStub();
+    const { instance } = activator({
+      registry: registryOf(spec()),
+      sessions,
+      subscriptions: [rule({ governance: { enabled: true, cooldownSec: 3600 } })],
+    });
+    expect(await instance.onEvent(event({ kind: "run.failed", eventId: "e1" }))).toBe(1);
+    expect(await instance.onEvent(event({ kind: "run.failed", eventId: "e2" }))).toBe(0); // paced by the rule
+    await instance.idle();
+
+    const disabled = activator({
+      registry: registryOf(spec({ enabled: false, triggers: [] })),
+      subscriptions: [rule()],
+    });
+    expect(await disabled.instance.onEvent(event({ kind: "run.failed" }))).toBe(0);
+  });
+
+  it("keeps loop guard #1: a fact caused by the target agent's own run never re-wakes it", async () => {
+    const { instance } = activator({
+      registry: registryOf(spec()),
+      subscriptions: [rule()],
+    });
+    const activated = await instance.onEvent(event({ kind: "run.failed", causedBy: "agent:sentinel:some-session" }));
+    expect(activated).toBe(0);
   });
 });

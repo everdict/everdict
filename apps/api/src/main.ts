@@ -5,7 +5,12 @@ import {
   seedFirstPartyAgents,
 } from "@everdict/application-control";
 import { ApprovalService } from "@everdict/application-control";
-import { EventConsumerRunner, runFeedConsumer, scorecardFeedConsumer } from "@everdict/application-control";
+import {
+  EventConsumerRunner,
+  runFeedConsumer,
+  scorecardFeedConsumer,
+  subscriptionReactionConsumer,
+} from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import {
   FsService,
@@ -380,6 +385,9 @@ async function main(): Promise<void> {
   });
   eventConsumers.register(runFeedConsumer(notificationStore));
   eventConsumers.register(scorecardFeedConsumer(notificationStore));
+  // E3 reactions: non-agent subscription reactions (webhook now, the T-d workflow executor when Temporal is
+  // wired below) ride the same durable cursor. Agent reactions stay the activation engine's jurisdiction.
+  eventConsumers.register(subscriptionReactionConsumer({ subscriptions: subscriptionStore }));
   eventConsumers.start();
 
   // Durable agent approvals (agent-automation A6): the agent service parks over the internal bridge, members

@@ -32,6 +32,11 @@ export {
   type PlatformEventConsumer,
 } from "./platform-event/event-consumer-runner.js";
 export { runFeedConsumer, scorecardFeedConsumer } from "./notification/feed-consumers.js";
+export {
+  signSubscriptionPayload,
+  type SubscriptionReactionDeps,
+  subscriptionReactionConsumer,
+} from "./platform-event/subscription-reaction-consumer.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type { OutboxEvent, RunListOptions, RunStore } from "./ports/run-store.js";
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";

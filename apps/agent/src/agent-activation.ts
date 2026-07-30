@@ -1,6 +1,6 @@
 import type { PermissionDecision, PermissionHook, PermissionRequest } from "@everdict/agent-runtime";
 import type { AgentRegistry, AgentSessionStore, TenantKeyStore } from "@everdict/application-control";
-import type { AgentSpec, AgentTrigger, TraceEvent } from "@everdict/contracts";
+import type { AgentSpec, AgentTrigger, SubscriptionRecord, TraceEvent } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import { eventSelectorMatches } from "@everdict/domain";
 import { isGuardedAction } from "./action-policy.js";
@@ -56,6 +56,8 @@ export interface AgentActivatorDeps {
   cooldownMs?: number;
   // Backpressure: activations queued per agent beyond this are dropped (logged), never piled up. Default 3.
   maxQueued?: number;
+  // E3 subscription source (reaction.kind="agent" rules) — absent = spec triggers only.
+  subscriptions?: { listEnabled(workspace: string): Promise<SubscriptionRecord[]> };
   // Report agent.run.* lifecycle FACTS back to the control plane (event log → fleet observability, agent-
   // automation A5). Best-effort — an unreachable control plane never affects the run.
   reportRunEvent?: (input: {
@@ -107,6 +109,7 @@ export class AgentActivator {
       return 0; // registry unreachable — the reconcile loop will retry this event later
     }
     let activated = 0;
+    const woken = new Set<string>(); // agent ids launched in THIS pass (spec triggers + subscriptions collapse)
     for (const entry of entries) {
       let spec: AgentSpec;
       try {
@@ -145,7 +148,74 @@ export class AgentActivator {
       }
       this.lastActivation.set(cooldownKey, nowMs);
       activated++;
+      woken.add(entry.id);
       this.enqueueRun(agentKey, event, entry.id, spec, creator);
+    }
+    activated += await this.onSubscriptions(event, entries, woken);
+    return activated;
+  }
+
+  // E3 subscriptions with reaction.kind="agent": the registry's rules wake agents through the SAME guards
+  // as spec triggers (self-cause skip, durable per-(agent,event) dedup, backpressure) — the cooldown is the
+  // subscription's own (governance.cooldownSec, keyed per rule), and an agent whose own trigger already
+  // fired on this event is never woken twice in one pass.
+  private async onSubscriptions(
+    event: ActivationEvent,
+    entries: Awaited<ReturnType<AgentRegistry["list"]>>,
+    woken: Set<string>,
+  ): Promise<number> {
+    if (!this.deps.subscriptions) return 0;
+    let subscriptions: SubscriptionRecord[];
+    try {
+      subscriptions = await this.deps.subscriptions.listEnabled(event.workspace);
+    } catch {
+      return 0; // store unreachable — the reconcile loop will retry this event later
+    }
+    let activated = 0;
+    for (const subscription of subscriptions) {
+      if (subscription.reaction.kind !== "agent") continue; // webhook/workflow ride the CP's reaction consumer
+      if (!eventSelectorMatches(subscription.selector, event)) continue;
+      const agentId = subscription.reaction.agentId;
+      if (woken.has(agentId)) continue;
+      let spec: AgentSpec;
+      try {
+        spec = await this.deps.registry.get(event.workspace, agentId, "latest");
+      } catch {
+        continue; // target vanished since the rule was written — nothing to wake
+      }
+      if (!spec.enabled) continue;
+      if (event.causedBy?.startsWith(`agent:${agentId}:`)) continue;
+      const creator = entries.find((entry) => entry.id === agentId)?.createdBy;
+      if (!creator) {
+        console.error(
+          `[agent] subscription ${subscription.id} skipped: agent ${agentId} has no creator to act as (seed/_shared).`,
+        );
+        continue;
+      }
+      const cooldownKey = `${event.workspace}:sub:${subscription.id}`;
+      const nowMs = Date.parse(this.deps.now());
+      const last = this.lastActivation.get(cooldownKey);
+      const cooldownMs =
+        subscription.governance.cooldownSec !== undefined
+          ? subscription.governance.cooldownSec * 1000
+          : this.cooldownMs;
+      if (last !== undefined && nowMs - last < cooldownMs) continue;
+      if (event.eventId !== undefined) {
+        try {
+          if (await this.deps.sessions.hasTriggerSession(event.workspace, agentId, event.eventId)) continue;
+        } catch {
+          continue;
+        }
+      }
+      const agentKey = `${event.workspace}:${agentId}`;
+      if ((this.pending.get(agentKey) ?? 0) >= this.maxQueued) {
+        console.error(`[agent] activation dropped for ${agentId}: ${this.maxQueued} runs already queued.`);
+        continue;
+      }
+      this.lastActivation.set(cooldownKey, nowMs);
+      activated++;
+      woken.add(agentId);
+      this.enqueueRun(agentKey, event, agentId, spec, creator);
     }
     return activated;
   }

@@ -5,6 +5,7 @@ import {
   type AnalysisArtifactStore,
   type CapabilityStore,
   type SecretStore,
+  type SubscriptionStore,
   type TenantKeyStore,
   WEBSEARCH_SECRET_NAME,
   registryLatestVersionResolver,
@@ -18,6 +19,7 @@ import {
   PgCapabilityStore,
   PgSecretStore,
   PgSkillStore,
+  PgSubscriptionStore,
   PgTenantKeyStore,
   PgWorkspaceSettingsStore,
   cipherFromEnv,
@@ -89,6 +91,8 @@ async function main(): Promise<void> {
   // Registry-driven trigger activation (agent-automation A3) — with a DB+KEK, platform events match enabled
   // crafted agents' triggers and launch headless runs.
   let activationRegistry: AgentRegistry | undefined;
+  // E3 subscription registry — reaction.kind="agent" rules matched next to spec triggers (needs only a DB).
+  let subscriptionStore: SubscriptionStore | undefined;
   // Code-tool try (check/run before publish/adopt) — the capability store resolves published refs (any DB), the
   // secret store binds requiredSecrets by name (needs the KEK).
   let tryCapabilityStore: CapabilityStore | undefined;
@@ -99,6 +103,7 @@ async function main(): Promise<void> {
     artifacts = new PgAnalysisArtifactStore(client);
     keyStore = new PgTenantKeyStore(client);
     tryCapabilityStore = new PgCapabilityStore(client);
+    subscriptionStore = new PgSubscriptionStore(client);
     const cipher = cipherFromEnv();
     if (cipher !== undefined) {
       // With the KEK we can decrypt the workspace's model + MCP-server secrets → full per-workspace customization.
@@ -177,6 +182,7 @@ async function main(): Promise<void> {
     ...(resolveModelById ? { resolveModelById } : {}),
     ...(keyStore ? { keyStore } : {}),
     ...(activationRegistry ? { agentRegistry: activationRegistry } : {}),
+    ...(subscriptionStore ? { subscriptions: subscriptionStore } : {}),
     // Code-tool verification (check/run before publish or adopt) — always available (the runtime exists even
     // without a DB; a missing store just disables ref targets / secret binding inside the try).
     codeTry: {
