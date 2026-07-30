@@ -145,8 +145,12 @@ running → completed|failed).
 
 ### A5. Lifecycle facts + fleet view (web)
 The agent service reports `agent.run.started|awaiting_approval|completed|failed` back to the control
-plane (internal route → event log + notifications feed; Mattermost opt-in). Web gets a top-level
-**Agents** area (this outgrows Settings):
+plane (internal route → event log + notifications feed; Mattermost opt-in). With `runId` the same
+report also maintains the universal Run ledger (execution-model P3), and a **terminal** report carries
+the turn's transcript projected as `TraceEvent[]` (`transcriptToTrace` — the same projection idiom as
+try-drive's B5) which the control plane seals as the run's OWN trajectory (`source: "run"`, first write
+wins; execution-model O2 "transcripts are traces") — `GET /runs/:id/trajectory` then serves agent runs
+with no extra surface. Web gets a top-level **Agents** area (this outgrows Settings):
 - **Fleet feed** — workspace-wide agent runs, live (reuse the `/messages?since=` polling + SSE
   patterns): agent, trigger, status, duration, cost; filter by agent/kind/status.
 - **Run detail** — the existing transcript components (tool activity, reasoning, todos) over the run's

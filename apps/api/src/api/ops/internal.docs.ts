@@ -156,6 +156,15 @@ const internal = {
         agentId: z.string().min(1),
         eventKind: z.string().min(1).describe("the platform-event kind that woke the run"),
         message: z.string().min(1),
+        runId: z.string().min(1).optional().describe("P3 ledger correlation — opens/settles Run{kind:agent}"),
+        agentVersion: z.string().min(1).optional(),
+        eventId: z.string().min(1).optional(),
+        creator: z.string().min(1).optional().describe("the member the activation acts as"),
+        budgetUsd: z.number().positive().optional().describe("the delegated envelope slice (A7/§5.2)"),
+        trace: z
+          .array(z.record(z.string(), z.unknown()))
+          .optional()
+          .describe("O2: the turn transcript as TraceEvent[] — sealed as the run's trajectory (terminal reports)"),
       }),
     ),
     response: {

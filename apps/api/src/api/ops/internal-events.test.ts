@@ -130,13 +130,14 @@ describe("GET /internal/events — platform-event reconcile cursor", () => {
 describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)", () => {
   function ledgerHarness() {
     const runStore = new InMemoryRunStore();
+    const trajectories = new InMemoryTrajectoryStore();
     const platformEvents = new PlatformEventService({ store: new InMemoryPlatformEventStore() });
     const app = buildServer({
-      service: new RunService({ dispatcher: unusedDispatcher, store: runStore }),
+      service: new RunService({ dispatcher: unusedDispatcher, store: runStore, trajectories }),
       platformEvents,
       internalToken: "itok",
     });
-    return { app, runStore };
+    return { app, runStore, trajectories };
   }
   const report = (over: Record<string, unknown>) => ({
     tenant: "acme",
@@ -227,6 +228,53 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
     const run = await runStore.get("run-a1");
     expect(run?.status).toBe("failed");
     expect(run?.error).toEqual({ code: "CANCELLED", message: "stopped by member" });
+  });
+
+  it("a terminal report's transcript trace seals as the run's OWN trajectory (O2) — first write wins", async () => {
+    const { app, trajectories } = ledgerHarness();
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({}),
+    });
+    const trace = [
+      { t: 0, kind: "message", role: "user", text: "[scorecard.completed] woke" },
+      { t: 1, kind: "tool_call", id: "c1", name: "get_scorecard", args: { id: "sc-1" } },
+      { t: 2, kind: "tool_result", id: "c1", ok: true, output: "ok" },
+    ];
+    const done = await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({ kind: "agent.run.completed", message: "run completed", trace }),
+    });
+    expect(done.statusCode).toBe(200);
+    const sealed = await trajectories.get("acme", "run-a1");
+    expect(sealed?.meta).toMatchObject({ source: "run", eventCount: 3 });
+    expect(sealed?.events).toEqual(trace);
+
+    // An at-least-once retry re-offers harmlessly — the sealed evidence never rewrites.
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({
+        kind: "agent.run.completed",
+        message: "late retry",
+        trace: [{ t: 0, kind: "message", role: "assistant", text: "rewritten" }],
+      }),
+    });
+    expect((await trajectories.get("acme", "run-a1"))?.events).toHaveLength(3);
+
+    // A malformed trace is a 400 at the boundary — never a silent partial seal.
+    const bad = await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({ kind: "agent.run.completed", message: "bad", trace: [{ t: 0, kind: "nope" }] }),
+    });
+    expect(bad.statusCode).toBe(400);
   });
 
   it("a report WITHOUT runId keeps the event-only behavior (an older agent service)", async () => {

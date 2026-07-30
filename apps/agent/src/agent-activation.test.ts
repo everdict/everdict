@@ -1,6 +1,6 @@
 import type { PermissionHook } from "@everdict/agent-runtime";
 import type { AgentRegistry, TenantKeyStore } from "@everdict/application-control";
-import type { AgentSessionRecord, AgentSpec, AgentTrigger } from "@everdict/contracts";
+import type { AgentMessageRecord, AgentSessionRecord, AgentSpec, AgentTrigger, TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { type ActivationEvent, AgentActivator, triggerMatches } from "./agent-activation.js";
 import { AgentMailbox } from "./agent-mailbox.js";
@@ -68,9 +68,11 @@ function keyStoreStub() {
 function sessionsStub() {
   const created: AgentSessionRecord[] = [];
   const statuses: Array<{ id: string; status: string }> = [];
+  const messages: AgentMessageRecord[] = [];
   return {
     created,
     statuses,
+    messages,
     async createSession(record: AgentSessionRecord) {
       created.push(record);
     },
@@ -97,9 +99,11 @@ function sessionsStub() {
       return created.filter((s) => s.origin !== undefined);
     },
     async deleteSession() {},
-    async appendMessages() {},
-    async listMessages() {
-      return [];
+    async appendMessages(records: AgentMessageRecord[]) {
+      messages.push(...records);
+    },
+    async listMessages(_tenant: string, sessionId: string, sinceSeq?: number) {
+      return messages.filter((m) => m.sessionId === sessionId && (sinceSeq === undefined || m.seq > sinceSeq));
     },
   };
 }
@@ -115,6 +119,7 @@ function activator(opts: {
   const keyStore = opts.keyStore ?? keyStoreStub();
   const mailbox = new AgentMailbox();
   const runs: Array<{ sessionId: string; token: string }> = [];
+  const reports: Array<{ kind: string; runId?: string; trace?: TraceEvent[] }> = [];
   const instance = new AgentActivator({
     registry: opts.registry,
     keyStore,
@@ -125,6 +130,13 @@ function activator(opts: {
       (async (sessionId, token) => {
         runs.push({ sessionId, token });
       }),
+    reportRunEvent: async (input) => {
+      reports.push({
+        kind: input.kind,
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(input.trace ? { trace: input.trace } : {}),
+      });
+    },
     now: () => new Date().toISOString(),
     newId: (() => {
       let n = 0;
@@ -132,7 +144,7 @@ function activator(opts: {
     })(),
     ...(opts.cooldownMs !== undefined ? { cooldownMs: opts.cooldownMs } : {}),
   });
-  return { instance, sessions, keyStore, mailbox, runs };
+  return { instance, sessions, keyStore, mailbox, runs, reports };
 }
 
 describe("triggerMatches", () => {
@@ -201,6 +213,62 @@ describe("AgentActivator", () => {
 
     const creatorless = activator({ registry: registryOf(spec(), null) });
     expect(await creatorless.instance.onEvent(event())).toBe(0);
+  });
+
+  it("the terminal report carries the turn transcript projected as TraceEvent — the run's trajectory (O2)", async () => {
+    const sessions = sessionsStub();
+    const { instance, reports } = activator({
+      registry: registryOf(spec()),
+      sessions,
+      runTurn: async (sessionId) => {
+        // The turn machinery persists the transcript rows — the wrapper projects them at settle.
+        await sessions.appendMessages([
+          {
+            id: "m-0",
+            tenant: "acme",
+            sessionId,
+            seq: 0,
+            role: "user",
+            content: "[scorecard.completed] Scorecard sc-1 succeeded",
+            createdAt: "t0",
+          },
+          {
+            id: "m-1",
+            tenant: "acme",
+            sessionId,
+            seq: 1,
+            role: "assistant",
+            content: "Checked the regression.",
+            toolCalls: [{ id: "call-1", name: "get_scorecard", arguments: '{"id":"sc-1"}' }],
+            createdAt: "t1",
+          },
+          {
+            id: "m-2",
+            tenant: "acme",
+            sessionId,
+            seq: 2,
+            role: "tool",
+            content: "ok",
+            toolCallId: "call-1",
+            createdAt: "t2",
+          },
+        ]);
+      },
+    });
+
+    await instance.onEvent(event());
+    await instance.idle();
+
+    const terminal = reports.find((r) => r.kind === "agent.run.completed");
+    expect(terminal?.runId).toBe("s-2"); // the activation minted session s-1, run s-2
+    expect(terminal?.trace).toEqual([
+      { t: 0, kind: "message", role: "user", text: "[scorecard.completed] Scorecard sc-1 succeeded" },
+      { t: 1, kind: "message", role: "assistant", text: "Checked the regression." },
+      { t: 2, kind: "tool_call", id: "call-1", name: "get_scorecard", args: { id: "sc-1" } },
+      { t: 3, kind: "tool_result", id: "call-1", ok: true, output: "ok" },
+    ]);
+    // started stays a light lifecycle ping — the transcript rides only the terminal report.
+    expect(reports.find((r) => r.kind === "agent.run.started")?.trace).toBeUndefined();
   });
 
   it("marks the run failed (and still revokes the token) when the turn throws", async () => {

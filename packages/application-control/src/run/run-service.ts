@@ -10,6 +10,7 @@ import {
   type RegistryAuth,
   type RunOrigin,
   type RunRecord,
+  type TraceEvent,
   type TraceSource,
   type TraceSourceConfig,
 } from "@everdict/contracts";
@@ -530,9 +531,22 @@ export class RunService {
     await this.deps.store.create(Run.newAgentRun({ ...input, now: this.now() }));
   }
 
-  async settleAgentRun(id: string, outcome: "completed" | "failed" | "cancelled", message: string): Promise<void> {
+  async settleAgentRun(
+    id: string,
+    outcome: "completed" | "failed" | "cancelled",
+    message: string,
+    trace?: TraceEvent[],
+  ): Promise<void> {
     const current = await this.deps.store.get(id);
     if (!current || current.kind !== "agent") return; // never settle an eval run through the agent bridge
+    // O2 (transcripts are traces): the terminal report carries the turn's transcript projected as TraceEvent —
+    // seal it as the run's OWN trajectory (source "run", first write wins). Offered BEFORE the terminal guard:
+    // at-least-once reports re-offer harmlessly (idempotent seal) and a retry can heal a seal the first report
+    // lost. Best-effort like every dual-write — the settle below is the durable half.
+    if (trace && trace.length > 0)
+      void this.deps.trajectories
+        ?.seal({ runId: id, tenant: current.tenant, source: "run", events: trace })
+        .catch(() => {});
     const run = Run.from(current);
     if (run.isTerminal()) return; // first terminal write wins (a retried terminal report)
     const { patch } = run.settleAgent(outcome, message, this.now());

@@ -1,3 +1,4 @@
+import { TraceEventSchema } from "@everdict/contracts";
 import { issueKey } from "@everdict/db";
 import { priceUsd } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
@@ -169,6 +170,9 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
         eventId: z.string().min(1).optional(),
         creator: z.string().min(1).optional(),
         budgetUsd: z.number().positive().optional(),
+        // O2 (transcripts are traces): a terminal report may carry the turn's transcript projected as
+        // TraceEvent[] — sealed as the run's own trajectory (source "run", first write wins).
+        trace: z.array(TraceEventSchema).optional(),
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
@@ -200,7 +204,7 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       } else if (kind !== "agent.run.awaiting_approval") {
         const outcome =
           kind === "agent.run.completed" ? "completed" : kind === "agent.run.cancelled" ? "cancelled" : "failed";
-        await deps.service.settleAgentRun(runId, outcome, message);
+        await deps.service.settleAgentRun(runId, outcome, message, body.data.trace);
       }
     }
     return reply.send({ ok: true });

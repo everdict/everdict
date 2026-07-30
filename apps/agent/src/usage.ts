@@ -1,3 +1,5 @@
+import type { TraceEvent } from "@everdict/contracts";
+
 // Report a conversation's LLM token usage to the control plane's internal meter bridge (POST /internal/usage,
 // x-internal-token). The control plane prices the tokens and records + settles them as source "agent", so agent
 // cost lands in the SAME meter + enforcement budget as evals. The caller (runChat) swallows failures — metering
@@ -47,6 +49,9 @@ export interface AgentRunEventReport {
   eventId?: string;
   creator?: string;
   budgetUsd?: number; // the delegated slice (A7/§5.2) — the CP stamps it as the run's envelope
+  // O2 (transcripts are traces): a terminal report's transcript projection — the CP seals it as the run's
+  // own trajectory (source "run", first write wins).
+  trace?: TraceEvent[];
 }
 
 export function runEventReporter(
@@ -70,6 +75,7 @@ export function runEventReporter(
         ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
         ...(input.creator !== undefined ? { creator: input.creator } : {}),
         ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}),
+        ...(input.trace !== undefined ? { trace: input.trace } : {}),
       }),
     });
     if (!res.ok) throw new Error(`agent-run event report failed: ${res.status}`);
