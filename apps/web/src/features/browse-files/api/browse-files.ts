@@ -3,14 +3,18 @@
 import { z } from 'zod'
 
 import {
+  fileExecutionResultSchema,
   fsEntrySchema,
   fsFileContentSchema,
   fsRemoveResultSchema,
+  fsRevisionDiffSchema,
   fsRevisionSchema,
   fsWriteConflictSchema,
+  type FileExecutionResultView,
   type FsEntryView,
   type FsFileContentView,
   type FsRemoveResultView,
+  type FsRevisionDiffView,
   type FsRevisionView,
   type FsWriteConflictView,
 } from '@/entities/workspace-file'
@@ -84,12 +88,55 @@ export async function writeFileAction(input: {
   }
 }
 
-export async function listRevisionsAction(path: string): Promise<FsActionResult<FsRevisionView[]>> {
+// Run the open file in a sandbox. The whole run happens inside this call (there is no execution record to poll),
+// so a long script holds the action open until its in-sandbox timeout — which is why that timeout is capped.
+export async function runFileAction(
+  path: string,
+  image?: string
+): Promise<FsActionResult<FileExecutionResultView>> {
   const ctx = await authContext()
   try {
     return {
       ok: true,
-      data: z.array(fsRevisionSchema).parse(await controlPlane.listFsRevisions(ctx, path)),
+      data: fileExecutionResultSchema.parse(
+        await controlPlane.runFsFile(ctx, { path, ...(image !== undefined ? { image } : {}) })
+      ),
+    }
+  } catch (e) {
+    return fail(e)
+  }
+}
+
+// `before` walks further back: the oldest revision already on screen is the cursor, so a file with a thousand
+// revisions stays browsable instead of stopping at the first page.
+export async function listRevisionsAction(
+  path: string,
+  opts?: { limit?: number; before?: number }
+): Promise<FsActionResult<FsRevisionView[]>> {
+  const ctx = await authContext()
+  try {
+    return {
+      ok: true,
+      data: z
+        .array(fsRevisionSchema)
+        .parse(await controlPlane.listFsRevisions(ctx, path, opts?.limit, opts?.before)),
+    }
+  } catch (e) {
+    return fail(e)
+  }
+}
+
+// What changed between a past revision and another one (default: the live file).
+export async function diffRevisionsAction(
+  path: string,
+  from: number,
+  to?: number
+): Promise<FsActionResult<FsRevisionDiffView>> {
+  const ctx = await authContext()
+  try {
+    return {
+      ok: true,
+      data: fsRevisionDiffSchema.parse(await controlPlane.diffFsRevisions(ctx, path, from, to)),
     }
   } catch (e) {
     return fail(e)

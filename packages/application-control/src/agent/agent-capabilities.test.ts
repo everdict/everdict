@@ -97,6 +97,7 @@ function skillRecord(over: Partial<SkillRecord> & Pick<SkillRecord, "id" | "name
     tenant: TENANT,
     description: `${over.name} procedure`,
     instructions: "1. …",
+    version: "1.0.0",
     files: [],
     refs: [],
     visibility: "workspace",
@@ -358,30 +359,19 @@ describe("resolveAgentCapabilities", () => {
     expect(skillKeyed(resolution, "skill:draft")?.scope).toBe("personal");
   });
 
-  it("offers a workspace-published skill PACKAGE nobody adopted — available, off until switched on", async () => {
+  it("does NOT put a skill-kind publication in the library — the store is a place to copy FROM", async () => {
+    // Publishing a skill hands other workspaces something to take a copy of (SkillService.importFromStore). It must
+    // not also appear as a second, uneditable entry in anyone's library — including the publisher's own, where the
+    // SkillRecord it was published from already lives.
     const pkg: CapabilityRecord = {
       ...codeCapability({ id: "runbook", name: "runbook" }),
       spec: { type: "skill", instructions: "do the thing", files: [] },
     };
-    const off = await resolveAgentCapabilities(deps({ capabilityStore: fakeCapabilities([pkg]) }), query);
-    expect(skillKeyed(off, "capability:acme/runbook")).toMatchObject({ enabled: false, baseline: false });
+    const published = await resolveAgentCapabilities(deps({ capabilityStore: fakeCapabilities([pkg]) }), query);
+    expect(published.skills).toEqual([]);
 
-    const on = await resolveAgentCapabilities(
-      deps({
-        capabilityStore: fakeCapabilities([pkg]),
-        preferences: fakePreferences({}, { "capability:acme/runbook": true }),
-      }),
-      query,
-    );
-    expect(skillKeyed(on, "capability:acme/runbook")?.enabled).toBe(true);
-  });
-
-  it("an ADOPTED skill package is on the table for everyone", async () => {
-    const pkg: CapabilityRecord = {
-      ...codeCapability({ id: "runbook", name: "runbook" }),
-      spec: { type: "skill", instructions: "do the thing", files: [] },
-    };
-    const resolution = await resolveAgentCapabilities(
+    // Not even an old adoption pin can attach one: those resolve as TOOLS, and a skill is not a tool.
+    const adopted = await resolveAgentCapabilities(
       deps({
         agentRegistry: fakeRegistry(
           agentSpec({
@@ -392,26 +382,17 @@ describe("resolveAgentCapabilities", () => {
       }),
       query,
     );
-    expect(skillKeyed(resolution, "capability:acme/runbook")).toMatchObject({ enabled: true, baseline: true });
-    // …and it is listed once, not also as an unadopted package.
-    expect(resolution.skills.filter((s) => s.key === "capability:acme/runbook")).toHaveLength(1);
+    expect(adopted.skills).toEqual([]);
+    expect(adopted.tools.some((t) => t.key === "capability:acme/runbook")).toBe(false);
   });
 
-  it("an authored skill shadows a same-named package (the runtime's own rule)", async () => {
-    const pkg: CapabilityRecord = {
-      ...codeCapability({ id: "triage-pkg", name: "triage" }),
-      spec: { type: "skill", instructions: "packaged", files: [] },
-    };
+  it("lists every skill the agent follows as an owned, editable record — one channel, no packages", async () => {
     const resolution = await resolveAgentCapabilities(
-      deps({
-        skillStore: fakeSkills([skillRecord({ id: "triage", name: "triage" })]),
-        capabilityStore: fakeCapabilities([pkg]),
-        preferences: fakePreferences({}, { "capability:acme/triage-pkg": true }),
-      }),
+      deps({ skillStore: fakeSkills([skillRecord({ id: "triage", name: "triage" })]) }),
       query,
     );
-    expect(skillKeyed(resolution, "skill:triage")?.enabled).toBe(true);
-    expect(skillKeyed(resolution, "capability:acme/triage-pkg")).toMatchObject({ shadowedBy: "skill:triage" });
+    expect(resolution.skills.map((s) => s.origin.channel)).toEqual(["authored"]);
+    expect(skillKeyed(resolution, "skill:triage")?.version).toBe("1.0.0"); // the last content the workspace stamped
   });
 
   it("gives two members of one workspace different skill sets", async () => {

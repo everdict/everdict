@@ -1,5 +1,12 @@
-import { FsService, RevisionedWorkspaceFs, RunService, SkillService } from "@everdict/application-control";
+import {
+  FileExecutionService,
+  FsService,
+  RevisionedWorkspaceFs,
+  RunService,
+  SkillService,
+} from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import type { ComputeHandle, Driver, ExecResult } from "@everdict/contracts";
 import { InMemoryFsRevisionStore, InMemoryRunStore, InMemorySkillStore } from "@everdict/db";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { describe, expect, it } from "vitest";
@@ -8,6 +15,29 @@ import { buildServer } from "../../server.js";
 const unusedDispatcher: Dispatcher = {
   async dispatch() {
     throw new Error("dispatcher is unused in fs tests");
+  },
+};
+
+// A sandbox that always prints "done" and leaves one produced file behind — enough to prove the route wires the
+// service through and that outputs land back on the filesystem. The real driver is docker (composition-gated).
+const scriptedDriver: Driver = {
+  id: "scripted",
+  async provision(): Promise<ComputeHandle> {
+    return {
+      async exec(cmd: string): Promise<ExecResult> {
+        if (cmd.startsWith("find")) return { exitCode: 0, stdout: "./chart.py\n./chart.png\n", stderr: "" };
+        if (cmd.startsWith("wc -c")) return { exitCode: 0, stdout: "4\n", stderr: "" };
+        if (cmd.startsWith("base64")) {
+          return { exitCode: 0, stdout: Buffer.from("PNG!").toString("base64"), stderr: "" };
+        }
+        return { exitCode: 0, stdout: "done\n", stderr: "" };
+      },
+      async writeFile(): Promise<void> {},
+      async readFile(): Promise<string> {
+        throw new Error("unused");
+      },
+      async dispose(): Promise<void> {},
+    };
   },
 };
 
@@ -146,11 +176,41 @@ describe("fs routes (the workspace filesystem HTTP surface)", () => {
       ]),
     );
 
+    // Published history is real storage the tree walk cannot see, so it is reported on its own
+    expect(body.history).toEqual({ revisions: 3, bytes: 7 });
+
     const cleared = await app.inject({ method: "DELETE", url: "/fs", headers: H }); // dev fallback = admin
     expect(cleared.statusCode).toBe(200);
-    expect(cleared.json().removed).toBe(3);
+    expect(cleared.json()).toMatchObject({ removed: 3, purgedRevisions: 3 });
     const after = await app.inject({ method: "GET", url: "/fs/entries", headers: H });
     expect(after.json()).toEqual([]);
+    // The wipe took the history with it — no orphaned revisions, no storage left behind
+    const history = await app.inject({ method: "GET", url: "/fs/revisions?path=reports/q3.md", headers: H });
+    expect(history.json()).toEqual([]);
+    const old = await app.inject({ method: "GET", url: "/fs/revisions/content?path=top.txt&revision=1", headers: H });
+    expect(old.statusCode).toBe(404);
+  });
+
+  it("keeps a deleted file's history so its content stays restorable", async () => {
+    // Given a file that was published twice and then deleted
+    const app = build();
+    await app.inject({ method: "PUT", url: "/fs/file", headers: H, payload: { path: "notes.md", content: "v1" } });
+    await app.inject({ method: "PUT", url: "/fs/file", headers: H, payload: { path: "notes.md", content: "v2" } });
+    await app.inject({ method: "DELETE", url: "/fs/entry?path=notes.md", headers: H });
+    // Then its history survives (unlike the whole-tree wipe) — "who deleted what" stays answerable…
+    const history = await app.inject({ method: "GET", url: "/fs/revisions?path=notes.md", headers: H });
+    expect(history.json()).toHaveLength(2);
+    // …and restoring brings the content back as a new revision
+    const restored = await app.inject({
+      method: "POST",
+      url: "/fs/revisions/restore",
+      headers: H,
+      payload: { path: "notes.md", revision: 1 },
+    });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().revision).toBe(3);
+    const live = await app.inject({ method: "GET", url: "/fs/file?path=notes.md", headers: H });
+    expect(live.json().content).toBe("v1");
   });
 
   it("feature-gates: without fsService every /fs route is 404", async () => {
@@ -191,6 +251,37 @@ describe("fs routes (the workspace filesystem HTTP surface)", () => {
     });
     const skill = await app.inject({ method: "GET", url: `/skills/${id}`, headers: H });
     expect(skill.json().instructions).toBe("# Edited via the shell");
+  });
+
+  it("credits the member who saved a skill in SKILL.md's history, not 'the system'", async () => {
+    // Given the skill service projecting onto the VERSIONED filesystem (the main.ts composition)
+    const ledger = new InMemoryFsRevisionStore();
+    const workspaceFs = new RevisionedWorkspaceFs(new InMemoryWorkspaceFs(), ledger);
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      fsService: new FsService(workspaceFs, ledger),
+      skillService: new SkillService({ store: new InMemorySkillStore(), fs: workspaceFs }),
+    });
+    // When a member creates a skill and then edits it
+    const created = await app.inject({
+      method: "POST",
+      url: "/skills",
+      headers: H,
+      payload: { name: "triage", description: "d", instructions: "v1" },
+    });
+    const id = created.json().id as string;
+    await app.inject({ method: "PATCH", url: `/skills/${id}`, headers: H, payload: { instructions: "v2" } });
+    // Then the file's history names them — the SKILL.md is editable from Settings, the shell and by agents, so
+    // all three have to land in one comparable history instead of an anonymous system write.
+    const history = await app.inject({
+      method: "GET",
+      url: `/fs/revisions?path=skills/${id}/SKILL.md`,
+      headers: H,
+    });
+    expect(history.json()).toMatchObject([
+      { revision: 2, actor: { kind: "member", subject: "dev" } },
+      { revision: 1, actor: { kind: "member", subject: "dev" } },
+    ]);
   });
 });
 
@@ -305,11 +396,119 @@ describe("fs revisions (who published what, and safe concurrent editing)", () =>
     expect(other.json()).toEqual([]);
   });
 
+  it("diffs a past revision against the live file, and against another revision", async () => {
+    // Given three revisions of a report
+    const app = build();
+    await write(app, { path: "notes.md", content: "intro\nbody\nend\n" });
+    await write(app, { path: "notes.md", content: "intro\nbody rewritten\nend\n", baseRevision: 1 });
+    await write(app, { path: "notes.md", content: "intro\nbody rewritten\nend\nappendix\n", baseRevision: 2 });
+    // When comparing revision 1 to the live file
+    const live = await app.inject({ method: "GET", url: "/fs/revisions/diff?path=notes.md&from=1", headers: H });
+    expect(live.statusCode).toBe(200);
+    expect(live.json()).toMatchObject({ path: "notes.md", from: 1, to: 3, diff: { added: 2, removed: 1 } });
+    // …and when pinning both ends, only that step's change shows
+    const step = await app.inject({ method: "GET", url: "/fs/revisions/diff?path=notes.md&from=2&to=3", headers: H });
+    expect(step.json()).toMatchObject({ from: 2, to: 3, diff: { added: 1, removed: 0 } });
+    const ops = step.json().diff.hunks.flatMap((h: { lines: { op: string; text: string }[] }) => h.lines);
+    expect(ops).toContainEqual(expect.objectContaining({ op: "add", text: "appendix" }));
+  });
+
+  it("declines to invent a text diff for binary content", async () => {
+    const app = build();
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]);
+    await write(app, { path: "logo.png", content: bytes.toString("base64"), encoding: "base64" });
+    await write(app, {
+      path: "logo.png",
+      content: Buffer.from([0x89, 0x50, 0x00]).toString("base64"),
+      encoding: "base64",
+    });
+    const diff = await app.inject({ method: "GET", url: "/fs/revisions/diff?path=logo.png&from=1", headers: H });
+    expect(diff.json().diff).toEqual({ hunks: [], added: 0, removed: 0, truncated: true });
+  });
+
+  it("pages back through a long history with the revision number as the cursor", async () => {
+    // Given more revisions than one page shows
+    const app = build();
+    for (let i = 1; i <= 5; i++) await write(app, { path: "log.md", content: `v${i}` });
+    // When taking the first page…
+    const first = await app.inject({ method: "GET", url: "/fs/revisions?path=log.md&limit=2", headers: H });
+    expect(first.json().map((r: { revision: number }) => r.revision)).toEqual([5, 4]);
+    // …and continuing from its oldest row
+    const next = await app.inject({ method: "GET", url: "/fs/revisions?path=log.md&limit=2&before=4", headers: H });
+    expect(next.json().map((r: { revision: number }) => r.revision)).toEqual([3, 2]);
+    const last = await app.inject({ method: "GET", url: "/fs/revisions?path=log.md&limit=2&before=2", headers: H });
+    expect(last.json().map((r: { revision: number }) => r.revision)).toEqual([1]);
+  });
+
   it("carries the history with the file when it is moved", async () => {
     const app = build();
     await write(app, { path: "draft.md", content: "v1" });
     await app.inject({ method: "POST", url: "/fs/move", headers: H, payload: { from: "draft.md", to: "final.md" } });
     const history = await app.inject({ method: "GET", url: "/fs/revisions?path=final.md", headers: H });
     expect(history.json()).toMatchObject([{ revision: 1 }]);
+  });
+
+  describe("POST /fs/executions", () => {
+    it("is absent — not broken — when the deployment composed no execution driver", async () => {
+      const app = build();
+
+      const res = await app.inject({ method: "POST", url: "/fs/executions", headers: H, payload: { path: "a.py" } });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({ code: "NOT_FOUND" });
+    });
+
+    it("runs a file through the composed service and publishes what it produced", async () => {
+      const ledger = new InMemoryFsRevisionStore();
+      const fs = new RevisionedWorkspaceFs(new InMemoryWorkspaceFs(), ledger);
+      const app = buildServer({
+        service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+        fsService: new FsService(fs, ledger),
+        fileExecutionService: new FileExecutionService(fs, scriptedDriver),
+      });
+      await app.inject({
+        method: "PUT",
+        url: "/fs/file",
+        headers: H,
+        payload: { path: "reports/chart.py", content: "…" },
+      });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/fs/executions",
+        headers: H,
+        payload: { path: "reports/chart.py" },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        exitCode: 0,
+        stdout: "done\n",
+        timedOut: false,
+        outputs: [{ path: "reports/chart.png", size: 4 }],
+      });
+      const produced = await app.inject({ method: "GET", url: "/fs/file?path=reports/chart.png", headers: H });
+      expect(produced.statusCode).toBe(200);
+    });
+
+    it("rejects a file it has no interpreter for", async () => {
+      const ledger = new InMemoryFsRevisionStore();
+      const fs = new RevisionedWorkspaceFs(new InMemoryWorkspaceFs(), ledger);
+      const app = buildServer({
+        service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+        fsService: new FsService(fs, ledger),
+        fileExecutionService: new FileExecutionService(fs, scriptedDriver),
+      });
+      await app.inject({ method: "PUT", url: "/fs/file", headers: H, payload: { path: "notes.md", content: "# hi" } });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/fs/executions",
+        headers: H,
+        payload: { path: "notes.md" },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
   });
 });

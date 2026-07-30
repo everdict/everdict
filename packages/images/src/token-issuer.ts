@@ -8,10 +8,19 @@ import { SignJWT, jwtVerify } from "jose";
 // Design: docs/architecture/managed-image-store.md
 
 // One entry of a Docker Registry v2 token's `access` claim.
+//
+// `type` is not always "repository": distribution guards the registry-WIDE `_catalog` endpoint with the
+// `registry:catalog:*` scope, and a repository-scoped token — however broad its name pattern — is refused there
+// with a 401. Listing a namespace therefore needs this second resource type. It is only ever minted for the
+// control plane's own calls (`mintRegistryToken`); a user GRANT carries repository entries exclusively, and
+// `narrowAccess` intersects, so no exchange can turn a grant into catalog access.
+// `delete` is likewise its own action in the v2 spec, not a flavour of `push`: distribution refuses a pull+push
+// token at manifest DELETE. Both extra members exist because a real registry said so — the fake registry the unit
+// tests hand the adapter accepts whatever we pass, so neither gap could surface before a live push/delete.
 export interface RegistryAccess {
-  type: "repository";
-  name: string; // "<namespace>/<repo>"
-  actions: Array<"pull" | "push">;
+  type: "repository" | "registry";
+  name: string; // "<namespace>/<repo>", or "catalog" for the registry-wide listing
+  actions: Array<"pull" | "push" | "delete" | "*">;
 }
 
 // The grant token's audience — a grant is NOT a registry token: docker presents it as the password in the

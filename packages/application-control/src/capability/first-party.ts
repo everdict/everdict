@@ -388,28 +388,28 @@ The PR body must let a reviewer judge the fix without re-running anything. Struc
 Never include secrets, API keys, or raw full logs — quote only the minimal excerpts that prove the diagnosis.
 `.trim();
 
-const SCORECARD_FIX_PR: FirstPartyDefault = {
-  requires: "github", // needs the workspace GitHub App (read the repo + open the PR) — off until it is installed
-  record: {
-    id: "scorecard-fix-pr",
-    tenant: FIRST_PARTY_TENANT,
-    version: "1.0.0",
-    name: "scorecard_fix_pr",
-    description:
-      "Diagnose a scorecard's failing cases down to the harness's source code and open a GitHub pull request with " +
-      "the fix, carrying the experiment context (failing cases, judge verdicts, evidence) in the PR body. Use when " +
-      "a member asks why an eval failed and wants a fix proposed on the repository.",
-    spec: {
-      type: "skill",
-      instructions: SCORECARD_FIX_PR_INSTRUCTIONS,
-      files: [{ path: "references/pr-body.md", content: SCORECARD_FIX_PR_BODY_TEMPLATE }],
-    },
-    visibility: "public",
-    sharedWith: [],
-    tags: ["scorecard", "github", "analysis", "built-in"],
-    createdBy: "everdict",
-    createdAt: "2026-07-27T00:00:00.000Z",
+// An Everdict-authored EXAMPLE skill. It is a store entry, not a tier of the product: a workspace takes a copy into
+// its own library and owns it from then on (edit it, stamp versions on it). Nothing here is auto-attached to anyone's
+// agent — see firstPartySkillExamples() below for why.
+const SCORECARD_FIX_PR: CapabilityRecord = {
+  id: "scorecard-fix-pr",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "scorecard_fix_pr",
+  description:
+    "Diagnose a scorecard's failing cases down to the harness's source code and open a GitHub pull request with " +
+    "the fix, carrying the experiment context (failing cases, judge verdicts, evidence) in the PR body. Use when " +
+    "a member asks why an eval failed and wants a fix proposed on the repository.",
+  spec: {
+    type: "skill",
+    instructions: SCORECARD_FIX_PR_INSTRUCTIONS,
+    files: [{ path: "references/pr-body.md", content: SCORECARD_FIX_PR_BODY_TEMPLATE }],
   },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["scorecard", "github", "analysis", "example"],
+  createdBy: "everdict",
+  createdAt: "2026-07-27T00:00:00.000Z",
 };
 
 // The trace-analysis skill body (SKILL.md-style instructions the agent loads on demand via use_skill). A SKILL — not
@@ -478,28 +478,27 @@ Give the member a scannable read, verdict first:
 Quote only minimal excerpts that prove each point — never paste the whole trace.
 `.trim();
 
-const TRACE_ANALYSIS: FirstPartyDefault = {
-  requires: null, // unconditional — uses the always-present trace-source reads (inspect_trace / list_trace_source_traces)
-  record: {
-    id: "trace-analysis",
-    tenant: FIRST_PARTY_TENANT,
-    version: "1.0.0",
-    name: "analyze_trace",
-    description:
-      "Analyze one observability trace pulled from a workspace trace source — summarize what the agent did, surface " +
-      "failures, flag cost/latency hotspots, and (for Everdict-produced traces) tie it back to the run/scorecard it " +
-      'came from. Use when a member attaches a trace ("analyze in chat") or asks about a trace in Settings › Observability.',
-    spec: {
-      type: "skill",
-      instructions: TRACE_ANALYSIS_INSTRUCTIONS,
-      files: [{ path: "references/report.md", content: TRACE_ANALYSIS_REPORT }],
-    },
-    visibility: "public",
-    sharedWith: [],
-    tags: ["trace", "observability", "analysis", "built-in"],
-    createdBy: "everdict",
-    createdAt: "2026-07-28T00:00:00.000Z",
+// The second Everdict-authored example skill — the "analyze in chat" companion to Settings › Observability. Same deal:
+// a store example a workspace copies and then owns.
+const TRACE_ANALYSIS: CapabilityRecord = {
+  id: "trace-analysis",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "analyze_trace",
+  description:
+    "Analyze one observability trace pulled from a workspace trace source — summarize what the agent did, surface " +
+    "failures, flag cost/latency hotspots, and (for Everdict-produced traces) tie it back to the run/scorecard it " +
+    'came from. Use when a member attaches a trace ("analyze in chat") or asks about a trace in Settings › Observability.',
+  spec: {
+    type: "skill",
+    instructions: TRACE_ANALYSIS_INSTRUCTIONS,
+    files: [{ path: "references/report.md", content: TRACE_ANALYSIS_REPORT }],
   },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["trace", "observability", "analysis", "example"],
+  createdBy: "everdict",
+  createdAt: "2026-07-28T00:00:00.000Z",
 };
 
 // --- First-party CATALOG (public + adoptable, but NOT auto-enabled defaults) ---
@@ -603,22 +602,35 @@ const POSTGRES_MCP: CapabilityRecord = {
   createdAt: "2026-07-28T00:00:00.000Z",
 };
 
+// Everdict's SKILL examples — store entries only. A skill is a procedure a workspace owns and edits, so shipping one
+// as a silent default would put a document in every workspace's agent that nobody there wrote, can edit, or can
+// version. Instead they sit in the store as worked examples of what a good skill looks like; taking one COPIES it into
+// the workspace's library (SkillService.importFromStore) where it becomes an ordinary workspace skill — editable in
+// conversation, stamped with its own versions. That is also why the GitHub gate that used to guard scorecard_fix_pr is
+// gone: nothing is auto-attached, so there is nothing to gate. The copy tells the agent to use the GitHub tools, and
+// those are gated on their own.
+export function firstPartySkillExamples(): CapabilityRecord[] {
+  return [SCORECARD_FIX_PR, TRACE_ANALYSIS];
+}
+
 // The first-party CATALOG-only entries — public + adoptable in the store, but absent from the default-enabled set
 // (they need per-user config). Merged into listPublic alongside the defaults' records. Containerized MCP servers
 // (image transport) live here — never auto-enabled, always explicitly adopted. Self-hosted servers without an official
 // image (ClickHouse, Qdrant, Chroma, …) are left for members to self-author via the wizard's container-image transport.
+// The skill examples ride along: to a browser they are catalog entries like any other.
 export function firstPartyCatalogExtras(): CapabilityRecord[] {
-  return [GRAFANA_MCP, PLAYWRIGHT_MCP, POSTGRES_MCP];
+  return [GRAFANA_MCP, PLAYWRIGHT_MCP, POSTGRES_MCP, ...firstPartySkillExamples()];
 }
 
-// The first-party default toolset, in the order they are offered — a web-reading trio then the skills: web search
-// (find; unconditional, key-gated) + fetch_url (read a page; unconditional, no key, HITL) + PDF read (read a PDF;
-// unconditional, no key, HITL) + the scorecard-fix-PR skill (github-gated — the first skill-kind default) + the
-// trace-analysis skill (unconditional — the "analyze in chat" companion to Settings › Observability). All are
-// portable Everdict-authored code/skill capabilities — NOT external MCP servers: the store's `mcp` kind + the agent
-// bridge are remote-Streamable-HTTP only, so a stdio/self-hosted server (ClickHouse, Playwright, Git, …) can't be a
-// universal first-party default; those are user-registered (their own endpoint). Rich integration adapters
-// (Mattermost / GitHub / image-registry) ship as control-plane MCP tools (credentials live server-side).
+// The first-party default TOOLSET, in the order they are offered — the web-reading trio: web search (find;
+// unconditional, key-gated) + fetch_url (read a page; unconditional, no key, HITL) + PDF read (read a PDF;
+// unconditional, no key, HITL). Tools only, by design: a tool is a capability of the product (nobody edits
+// `web_search`), whereas a skill is a document the workspace authors — Everdict's skills are store EXAMPLES
+// (firstPartySkillExamples), never silent defaults. All are portable Everdict-authored code capabilities — NOT
+// external MCP servers: the store's `mcp` kind + the agent bridge are remote-Streamable-HTTP only, so a
+// stdio/self-hosted server (ClickHouse, Playwright, Git, …) can't be a universal first-party default; those are
+// user-registered (their own endpoint). Rich integration adapters (Mattermost / GitHub / image-registry) ship as
+// control-plane MCP tools (credentials live server-side).
 export function firstPartyDefaults(): FirstPartyDefault[] {
-  return [WEB_SEARCH, FETCH_URL, PDF_READ, SCORECARD_FIX_PR, TRACE_ANALYSIS];
+  return [WEB_SEARCH, FETCH_URL, PDF_READ];
 }

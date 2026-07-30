@@ -1,6 +1,9 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
+import Link from 'next/link'
+import { useParams } from 'next/navigation'
+import { ChevronRight } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
@@ -22,6 +25,8 @@ const SCOPE_ORDER: AgentToolScope[] = ['personal', 'workspace', 'builtin']
 
 export function AgentToolsManager({ tools }: { tools: AgentToolEntry[] }) {
   const t = useTranslations('agentTools')
+  // 상세는 라우트다(다이얼로그 아님) — 우측 대화 패널에서 이 도구를 두고 실험/편집해야 하므로.
+  const workspace = String(useParams().workspace ?? '')
   const [state, setState] = useState(tools)
   const [pendingKey, setPendingKey] = useState<string | undefined>(undefined)
   const [, startTransition] = useTransition()
@@ -64,6 +69,7 @@ export function AgentToolsManager({ tools }: { tools: AgentToolEntry[] }) {
                 <ToolRow
                   key={tool.key}
                   tool={tool}
+                  href={`/${workspace}/settings/tools/${encodeURIComponent(tool.key)}`}
                   pending={pendingKey === tool.key}
                   onToggle={(enabled) => apply(tool, enabled)}
                   onReset={() => apply(tool, null)}
@@ -79,11 +85,13 @@ export function AgentToolsManager({ tools }: { tools: AgentToolEntry[] }) {
 
 function ToolRow({
   tool,
+  href,
   pending,
   onToggle,
   onReset,
 }: {
   tool: AgentToolEntry
+  href: string
   pending: boolean
   onToggle: (enabled: boolean) => void
   onReset: () => void
@@ -94,8 +102,15 @@ function ToolRow({
   return (
     <SettingsRow
       label={
-        <span className="flex flex-wrap items-center gap-1.5">
-          <span className="font-mono text-[13px]">{tool.name}</span>
+        // 이름이 상세로 가는 링크 — 행의 오른쪽은 토글이 차지하므로, 드릴인은 이름 자체가 맡는다.
+        <Link href={href} className="group flex flex-wrap items-center gap-1.5">
+          <span className="font-mono text-[13px] underline-offset-2 group-hover:underline">
+            {tool.name}
+          </span>
+          <ChevronRight
+            className="size-3.5 text-faint opacity-0 transition-opacity group-hover:opacity-100"
+            aria-hidden
+          />
           <Badge tone="outline">{t(`type_${tool.type}`)}</Badge>
           {tool.writes && <Badge tone="warning">{t('writes')}</Badge>}
           {tool.missingSecrets.length > 0 && (
@@ -104,7 +119,7 @@ function ToolRow({
             </Badge>
           )}
           {overridden && <Badge tone="info">{t('overridden')}</Badge>}
-        </span>
+        </Link>
       }
       hint={
         <>

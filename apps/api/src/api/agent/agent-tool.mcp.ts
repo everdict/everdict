@@ -40,6 +40,53 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   );
 
   server.registerTool(
+    "get_agent_tool",
+    {
+      description:
+        "ONE tool of YOUR toolset in full: which channel put it there (builtin | capability | mcpServer), how it is " +
+        "reached (remote MCP URL · stdio container · code script), the functions it contributes with the NAMESPACED " +
+        "names you actually call, the pinned source + worked examples of a code tool, and each declared secret with " +
+        "the secret name it reads and whether it resolves for this member. Use it to explain a tool, to debug 'why " +
+        "isn't this tool working', or before editing the capability behind it. Unknown key → NOT_FOUND.",
+      inputSchema: { key: z.string().describe("Key from list_agent_tools") },
+    },
+    ({ key }) => run(principal, "agents:read", async () => ok(await tooling.getTool(ws, principal.subject, key))),
+  );
+
+  server.registerTool(
+    "probe_agent_tool",
+    {
+      description:
+        "Test-connect one MCP tool with the secret THIS member's agent would use and list what the server really " +
+        "serves — the live answer to 'what functions does this tool have' and the first check when a tool misbehaves. " +
+        "A failure is a result (reachable:false + reason + unresolved secret names), never an error. Only a remote " +
+        "(HTTP) MCP tool is probeable; a container tool or a code tool is BAD_REQUEST (verify a code tool by running it).",
+      inputSchema: { key: z.string().describe("Key from list_agent_tools") },
+    },
+    ({ key }) => run(principal, "agents:read", async () => ok(await tooling.probeTool(ws, principal.subject, key))),
+  );
+
+  server.registerTool(
+    "bind_agent_tool_secrets",
+    {
+      description:
+        "Point one tool's declared secrets at real secret names in this workspace (names only — never values). This " +
+        "edits the WORKSPACE agent configuration, since that is where the binding lives (an adopted capability's " +
+        "pinned reference / a hand-wired server's authSecret), so it needs agents:write and cuts a new agent version. " +
+        "A built-in default or a published-but-unadopted capability reads its secret by the DECLARED name and has no " +
+        "binding to edit — create a secret with that name instead. Omitted entries keep their current binding.",
+      inputSchema: {
+        key: z.string().describe("Key from list_agent_tools"),
+        bindings: z.record(z.string()).describe("Declared secret name → the secret name it should read"),
+      },
+    },
+    ({ key, bindings }) =>
+      run(principal, "agents:write", async () =>
+        ok(await tooling.bindToolSecrets(ws, principal.subject, key, bindings)),
+      ),
+  );
+
+  server.registerTool(
     "list_agent_skills",
     {
       description:

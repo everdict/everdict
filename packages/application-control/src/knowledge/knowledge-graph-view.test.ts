@@ -43,6 +43,7 @@ const skill = (id: string, refs: SkillRecord["refs"]): SkillRecord => ({
   name: id,
   description: `${id} desc`,
   instructions: "…",
+  version: "1.0.0",
   files: [],
   refs,
   visibility: "workspace",

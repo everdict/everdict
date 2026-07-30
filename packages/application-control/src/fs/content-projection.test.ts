@@ -162,6 +162,7 @@ const LEGACY = {
   tenant: "acme",
   name: "old",
   description: "d",
+  version: "1.0.0",
   files: [],
   refs: [],
   visibility: "workspace" as const,

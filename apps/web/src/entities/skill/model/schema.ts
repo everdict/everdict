@@ -1,4 +1,7 @@
-import type { SkillRecord as ContractSkillRecord } from '@everdict/contracts'
+import type {
+  SkillRecord as ContractSkillRecord,
+  SkillVersionRecord as ContractSkillVersionRecord,
+} from '@everdict/contracts'
 import type { GenerateSkillResult as ContractGenerateSkillResult } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
@@ -24,8 +27,19 @@ export const skillRefSchema = z.object({
   verifiedVersion: z.string().optional(), // 시스템 소유 — verify 가 구간 [version, verifiedVersion]을 연장
 })
 
+// 스킬을 스토어에서 가져온 경우의 출처 — 사본이지 구독이 아니다(가져온 순간부터 워크스페이스가 소유·편집).
+// 카탈로그가 "이미 가져간 예제"를 감추고, 상세가 "무엇에서 출발했는지"를 말하는 데만 쓰인다.
+export const skillOriginSchema = z.object({
+  source: z.string(), // 발행 워크스페이스("_everdict" = everdict 매니지드 예제)
+  id: z.string(),
+  version: z.string(),
+  name: z.string(),
+})
+export type SkillOrigin = z.infer<typeof skillOriginSchema>
+
 // GET /skills · /skills/:id — 전체 SkillRecord. visibility: private(개인 초안)|workspace(공유). instructions=SKILL.md 본문 + files=부속 파일.
 // verifiedAt="아직 유효함" 마지막 확인 시각(updatedAt 과 별개 — 편집이 아님).
+// version = 마지막으로 "찍은" 버전(행 자체는 작업본 — 편집은 자유롭고, 스탬프가 그 내용을 불변 버전으로 고정한다).
 export const skillSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -35,6 +49,8 @@ export const skillSchema = z.object({
   files: z.array(skillFileSchema),
   refs: z.array(skillRefSchema).default([]),
   visibility: skillVisibilitySchema,
+  version: z.string(),
+  origin: skillOriginSchema.optional(),
   createdBy: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -42,6 +58,23 @@ export const skillSchema = z.object({
 })
 export const skillsSchema = z.array(skillSchema)
 export type Skill = z.infer<typeof skillSchema>
+
+// GET /skills/:id/versions — 찍힌 버전들(최신 우선). 불변 스냅샷이라 예전 버전은 그때 말하던 그대로 남는다.
+export const skillVersionSchema = z.object({
+  skillId: z.string(),
+  tenant: z.string(),
+  version: z.string(),
+  name: z.string(),
+  description: z.string(),
+  instructions: z.string(),
+  files: z.array(skillFileSchema),
+  refs: z.array(skillRefSchema).default([]),
+  note: z.string().optional(),
+  stampedBy: z.string(),
+  stampedAt: z.string(),
+})
+export const skillVersionsSchema = z.array(skillVersionSchema)
+export type SkillVersion = z.infer<typeof skillVersionSchema>
 
 // POST /skills/generate 200 — AI 초안(skill-generate). 저장 전 편집용 드래프트, 영속 안 됨.
 export const generateSkillResultSchema = z.object({
@@ -68,5 +101,7 @@ export type SkillTryResult = z.infer<typeof skillTryResultSchema>
 type AssertAssignable<A extends B, B> = A
 type _SkillFwd = AssertAssignable<Omit<Skill, 'refs'>, Omit<ContractSkillRecord, 'refs'>>
 type _SkillBack = AssertAssignable<ContractSkillRecord, Skill>
+type _VersionFwd = AssertAssignable<Omit<SkillVersion, 'refs'>, Omit<ContractSkillVersionRecord, 'refs'>>
+type _VersionBack = AssertAssignable<ContractSkillVersionRecord, SkillVersion>
 type _GenFwd = AssertAssignable<GenerateSkillResult, ContractGenerateSkillResult>
 type _GenBack = AssertAssignable<ContractGenerateSkillResult, GenerateSkillResult>

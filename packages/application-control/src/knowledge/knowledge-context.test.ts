@@ -26,6 +26,7 @@ const skill = (
   name: id,
   description: `${id} desc`,
   instructions: "SECRET-BODY", // must NOT appear in the assembled context (listing-level only)
+  version: "1.0.0",
   files: [],
   refs,
   visibility,

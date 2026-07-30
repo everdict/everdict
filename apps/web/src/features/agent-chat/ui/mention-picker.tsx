@@ -13,6 +13,7 @@ import {
   Scale,
   Server,
   Telescope,
+  Wrench,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -35,6 +36,7 @@ export const REFERENCE_TYPE_ICON: Record<AgentReferenceType, LucideIcon> = {
   skill: BookOpen,
   knowledge: Lightbulb,
   environment: Container,
+  tool: Wrench,
   trace: Telescope,
 }
 

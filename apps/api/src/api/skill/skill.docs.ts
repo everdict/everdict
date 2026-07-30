@@ -1,10 +1,12 @@
-import { SkillRecordSchema } from "@everdict/contracts";
+import { SkillRecordSchema, SkillVersionRecordSchema } from "@everdict/contracts";
 import { GenerateSkillResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CreateSkillBodySchema } from "./request/create-skill.js";
 import { GenerateSkillBodySchema } from "./request/generate-skill.js";
+import { ImportSkillBodySchema } from "./request/import-skill.js";
+import { StampSkillVersionBodySchema } from "./request/stamp-skill-version.js";
 import { UpdateSkillBodySchema } from "./request/update-skill.js";
 
 // OpenAPI descriptors for the skill routes — doc-only (rule api-layer): attaching these is behavior-free.
@@ -76,6 +78,63 @@ const docs = {
     params: idParams,
     response: {
       200: { description: "Verified skill", ...toJsonSchema(SkillRecordSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  importFromStore: {
+    summary: "Take a store skill into this workspace",
+    description:
+      "Copies a published skill — an Everdict example or one another workspace published — into this workspace's " +
+      "library as a skill the members OWN: editable here, with its own version line starting at the version copied. " +
+      "There is no live link back to the publication (`origin` records where it came from). Taking the same " +
+      "publication twice is 409; a non-skill capability is 400. Requires skills:write (member+).",
+    tags: ["skill"],
+    body: toJsonSchema(ImportSkillBodySchema),
+    response: {
+      200: { description: "The workspace's copy", ...toJsonSchema(SkillRecordSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  stamp: {
+    summary: "Stamp the skill's current content as a version",
+    description:
+      "Freezes what the skill says right now as an immutable version and moves the skill's version pointer to it. " +
+      "`bump` (default patch) or an explicit `version` that must order above the current one (else 400); a version " +
+      "already on the line is 409 — stamped versions are never rewritten. The content is read filesystem-first, so a " +
+      "body an agent rewrote is what gets frozen. Not an edit: updatedAt is untouched. Requires skills:write; manage " +
+      "= creator-or-admin (service-enforced).",
+    tags: ["skill"],
+    params: idParams,
+    body: toJsonSchema(StampSkillVersionBodySchema),
+    response: {
+      200: {
+        description: "The skill at its new version, plus the version stamped",
+        ...toJsonSchema(z.object({ skill: SkillRecordSchema, stamped: SkillVersionRecordSchema })),
+      },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  versions: {
+    summary: "List a skill's stamped versions",
+    description: "The skill's version line, newest first. Requires skills:read (viewer+).",
+    tags: ["skill"],
+    params: idParams,
+    response: {
+      200: { description: "Versions", ...toJsonSchema(z.array(SkillVersionRecordSchema)) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  version: {
+    summary: "Get one stamped version of a skill",
+    description: "The frozen content of one version — what the procedure said at that point. Requires skills:read.",
+    tags: ["skill"],
+    params: {
+      type: "object",
+      properties: { id: { type: "string", description: "Skill id" }, version: { type: "string" } },
+      required: ["id", "version"],
+    },
+    response: {
+      200: { description: "Version", ...toJsonSchema(SkillVersionRecordSchema) },
       ...errorResponses(401, 403, 404),
     },
   },

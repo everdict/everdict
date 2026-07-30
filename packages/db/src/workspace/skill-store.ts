@@ -48,6 +48,8 @@ interface SkillRow {
   files: unknown;
   refs: unknown;
   visibility: string;
+  version: string | null;
+  origin: unknown;
   created_by: string;
   created_at: string | Date;
   updated_at: string | Date;
@@ -66,6 +68,10 @@ function rowToRecord(row: SkillRow): SkillRecord {
     files: row.files ?? [],
     refs: row.refs ?? [],
     visibility: row.visibility,
+    // A row written before skills carried a version reads back as the schema default (1.0.0) — the first stamp
+    // starts its line from there.
+    ...(row.version !== null && row.version !== undefined ? { version: row.version } : {}),
+    ...(row.origin !== null && row.origin !== undefined ? { origin: row.origin } : {}),
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
@@ -79,8 +85,8 @@ export class PgSkillStore implements SkillStore {
 
   async create(record: SkillRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO everdict_skills (id, tenant, name, description, instructions, files, refs, visibility, created_by, created_at, updated_at, verified_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      `INSERT INTO everdict_skills (id, tenant, name, description, instructions, files, refs, visibility, version, origin, created_by, created_at, updated_at, verified_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         record.id,
         record.tenant,
@@ -90,6 +96,8 @@ export class PgSkillStore implements SkillStore {
         JSON.stringify(record.files),
         JSON.stringify(record.refs),
         record.visibility,
+        record.version,
+        record.origin === undefined ? null : JSON.stringify(record.origin),
         record.createdBy,
         record.createdAt,
         record.updatedAt,
@@ -121,7 +129,7 @@ export class PgSkillStore implements SkillStore {
     if (!current) return undefined;
     const next: SkillRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
     await this.client.query(
-      "UPDATE everdict_skills SET name=$3, description=$4, instructions=$5, files=$6, refs=$7, visibility=$8, updated_at=$9, verified_at=$10 WHERE tenant=$1 AND id=$2",
+      "UPDATE everdict_skills SET name=$3, description=$4, instructions=$5, files=$6, refs=$7, visibility=$8, version=$9, origin=$10, updated_at=$11, verified_at=$12 WHERE tenant=$1 AND id=$2",
       [
         tenant,
         id,
@@ -131,6 +139,8 @@ export class PgSkillStore implements SkillStore {
         JSON.stringify(next.files),
         JSON.stringify(next.refs),
         next.visibility,
+        next.version,
+        next.origin === undefined ? null : JSON.stringify(next.origin),
         next.updatedAt,
         next.verifiedAt ?? null,
       ],

@@ -65,6 +65,13 @@ export function isTabularPath(path: string): boolean {
   return ['csv', 'tsv'].includes(extensionOf(path))
 }
 
+// Which files the viewer offers a Run for. Mirrors the interpreter table in `@everdict/domain`
+// (`fileRunPlanFor`) — the web cannot import domain values, and the control plane refuses anything not in ITS
+// table anyway, so this list only decides whether the button appears.
+export function isRunnablePath(path: string): boolean {
+  return ['bash', 'cjs', 'cts', 'js', 'mjs', 'mts', 'py', 'sh', 'ts'].includes(extensionOf(path))
+}
+
 // The medium wins over the encoding: an svg is text (so it stays editable) but it is still a picture, and a
 // reader wants to see it. Everything else that came back as utf-8 is prose, a table, or code.
 export function previewKindFor(

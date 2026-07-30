@@ -1,5 +1,11 @@
 import type { CapabilityStore, SecretStore } from "@everdict/application-control";
-import type { CapabilityRecord, CodeToolSpec, ComputeHandle, ExecResult } from "@everdict/contracts";
+import {
+  type CapabilityRecord,
+  type CodeToolSpec,
+  type ComputeHandle,
+  type ExecResult,
+  FIRST_PARTY_TENANT,
+} from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { CodeToolRuntime } from "./code-tools.js";
 import { type CodeTryDeps, runCodeToolTry } from "./code-try.js";
@@ -164,6 +170,50 @@ describe("runCodeToolTry", () => {
       {},
     );
     expect(res.mode).toBe("run");
+  });
+
+  it("runs a FIRST-PARTY default by ref even though it is code, not a store row — and trusts it on a host runtime", async () => {
+    // Settings › Agent › Tools sends the built-in's own coordinates (_everdict/<id>). It has no CapabilityStore row,
+    // and Everdict authored it, so it must resolve from the shipped defaults AND skip the cross-workspace sandbox gate
+    // — otherwise the tool a member is most likely to want to try is the one they cannot.
+    let ranInput = "";
+    const f = fakeHandle(async (cmd) => {
+      ranInput = cmd;
+      return { exitCode: 0, stdout: JSON.stringify({ content: "ok", isError: false }), stderr: "" };
+    });
+    const deps: CodeTryDeps = {
+      runtime: { provision: async () => f.handle, isolated: false }, // a host runtime: an adopted-from-others tool would refuse
+      capabilityStore: capStore([]), // deliberately empty — a built-in is a code definition, not a row
+    };
+    const res = await runCodeToolTry(
+      deps,
+      principal,
+      "run",
+      { kind: "ref", source: FIRST_PARTY_TENANT, id: "web-search", version: "1.0.0" },
+      { query: "everdict" },
+    );
+    expect(res).toMatchObject({ mode: "run", ok: true, content: "ok" });
+    expect(ranInput).toContain("node");
+    expect(res.missingSecrets).toEqual(["TAVILY_API_KEY"]); // no secret tier wired → the gap is named, not hidden
+  });
+
+  it("an unknown first-party id is NOT_FOUND rather than falling through to the store", async () => {
+    const deps: CodeTryDeps = {
+      runtime: {
+        provision: async () => fakeHandle(async () => ({ exitCode: 0, stdout: "", stderr: "" })).handle,
+        isolated: true,
+      },
+      capabilityStore: capStore([record(FIRST_PARTY_TENANT, { id: "ghost" })]),
+    };
+    await expect(
+      runCodeToolTry(
+        deps,
+        principal,
+        "run",
+        { kind: "ref", source: FIRST_PARTY_TENANT, id: "ghost", version: "1.0.0" },
+        {},
+      ),
+    ).rejects.toThrow(/not found/);
   });
 
   it("an invisible or non-code capability ref is NOT_FOUND / BAD_REQUEST (no existence leak)", async () => {

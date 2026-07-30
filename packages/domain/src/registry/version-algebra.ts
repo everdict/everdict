@@ -28,6 +28,20 @@ export function sortVersions(versions: string[]): string[] {
   return [...versions].sort(compareVersions);
 }
 
+// How far a stamp moves the version — the author's own judgement of the change, not a computed diff.
+export type VersionBump = "major" | "minor" | "patch";
+
+// The version a bump produces. Unparseable input restarts the line at 1.0.0 rather than guessing, so a hand-typed
+// label can never make the next version compare BELOW the current one.
+export function bumpVersion(base: string, bump: VersionBump): string {
+  const parsed = parseSemver(base);
+  if (!parsed) return "1.0.0";
+  const [major, minor, patch] = parsed;
+  if (bump === "major") return `${major + 1}.0.0`;
+  if (bump === "minor") return `${major}.${minor + 1}.0`;
+  return `${major}.${minor}.${patch + 1}`;
+}
+
 // Key-order-independent comparison (Postgres jsonb does not preserve key order).
 function stableStringify(v: unknown): string {
   if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";

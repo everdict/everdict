@@ -78,7 +78,8 @@ function withEmbed(path: string): string {
 export function InfraPanel({
   user,
   canFilesWrite = false,
-}: { user?: ChatUser; canFilesWrite?: boolean } = {}) {
+  canFilesRun = false,
+}: { user?: ChatUser; canFilesWrite?: boolean; canFilesRun?: boolean } = {}) {
   const t = useTranslations('infraPanel')
   const router = useRouter()
   const {
@@ -340,7 +341,7 @@ export function InfraPanel({
                 <WorkTab onNavigate={onNavigate} />
               </div>
             )}
-            {tab === 'files' && <FilesTab canWrite={canFilesWrite} />}
+            {tab === 'files' && <FilesTab canWrite={canFilesWrite} canRun={canFilesRun} />}
             {tab === 'knowledge' && <KnowledgeTab />}
             {tab === 'agent' && (
               <div className="h-full">

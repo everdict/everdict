@@ -1,6 +1,6 @@
 import type { CapabilityRecord, ImageRefClass, ImageRegistryCoordinates, WorkspaceSettings } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
-import { canConsumeCapability, classifyImageRef } from "@everdict/domain";
+import { canConsumeCapability, classifyImageRef, parseImageRef } from "@everdict/domain";
 import type { CapabilityStore } from "../ports/capability-store.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
@@ -90,13 +90,13 @@ export class EnvironmentAdoptionService {
         { ...ref },
         `environment ${ref.id}@${ref.version} is not available to adopt`,
       );
-    const v = await this.deps.verifyImage(workspace, rec.spec.image);
+    const v = await this.verify(workspace, rec.spec.image);
     const entry: AdoptionEntry = {
       source: ref.source,
       id: ref.id,
       version: ref.version,
       adoptedAt: this.stamp(),
-      verify: { ...v, at: this.stamp() },
+      verify: v,
     };
     const next = [
       ...(await this.entries(workspace)).filter((e) => !(e.source === ref.source && e.id === ref.id)),
@@ -104,6 +104,17 @@ export class EnvironmentAdoptionService {
     ];
     await this.deps.settings.set(workspace, { adoptedEnvironments: next });
     return this.toView(entry, rec, await this.deps.registryCoordinates(workspace), this.managed(workspace));
+  }
+
+  // Pull-usability of the environment's image (M6). For a ref in everdict's OWN store the answer is POLICY, not a
+  // round trip: we only reach this line having resolved a capability this workspace may consume, and the grant that
+  // authorizes the actual pull is minted from that same fact. The HTTP probe would ask the registry anonymously and
+  // be told 401 — reporting "auth" for an image the workspace can demonstrably pull. BYO refs keep the HTTP check,
+  // which is the only thing that can answer them.
+  private async verify(workspace: string, image: string): Promise<AdoptedEnvironmentVerify> {
+    const managedHost = this.managed(workspace)?.host;
+    if (managedHost && hostOf(image) === managedHost) return { pullable: true, reason: "ok", at: this.stamp() };
+    return { ...(await this.deps.verifyImage(workspace, image)), at: this.stamp() };
   }
 
   // Remove an environment from the inventory (by source,id — version-agnostic; one adoption per source/id).
@@ -121,7 +132,7 @@ export class EnvironmentAdoptionService {
     const rec = await this.resolve(entry, { tenant: workspace, subject });
     let updated = entry;
     if (rec && rec.spec.type === "environment") {
-      updated = { ...entry, verify: { ...(await this.deps.verifyImage(workspace, rec.spec.image)), at: this.stamp() } };
+      updated = { ...entry, verify: await this.verify(workspace, rec.spec.image) };
       await this.deps.settings.set(workspace, {
         adoptedEnvironments: entries.map((e) => (e.source === source && e.id === id ? updated : e)),
       });
@@ -166,5 +177,14 @@ export class EnvironmentAdoptionService {
       ...(spec ? { imageClass: classifyImageRef(spec.image, coords, managed) } : {}),
       ...(entry.verify ? { verify: entry.verify } : {}),
     };
+  }
+}
+
+// The registry host of a ref, or undefined when it carries none (a docker.io shorthand — never our store).
+function hostOf(ref: string): string | undefined {
+  try {
+    return parseImageRef(ref).host;
+  } catch {
+    return undefined;
   }
 }

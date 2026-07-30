@@ -7,6 +7,7 @@ import {
   buildToolSearchTool,
   mcpToolToDefinition,
 } from "@everdict/agent-runtime";
+import { mcpBridgePrefix } from "@everdict/domain";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -203,7 +204,7 @@ export function mcpToolProvider(
                 requestInit: { headers: server.authorization ? { authorization: server.authorization } : {} },
               });
         await client.connect(transport);
-        const prefix = `mcp__${server.name.replace(/[^a-zA-Z0-9_]/g, "_")}__`;
+        const prefix = mcpBridgePrefix(server.name);
         const listed = (await client.listTools()).tools;
         const allowed = server.write ? listed : listed.filter((t) => isReadOnlyToolName(t.name));
         const invoke = makeInvoke(client, prefix);

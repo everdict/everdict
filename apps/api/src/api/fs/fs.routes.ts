@@ -6,6 +6,7 @@ import { fsDocs } from "./fs.docs.js";
 import { MakeFsDirectoryBodySchema } from "./request/make-fs-directory.js";
 import { MoveFsEntryBodySchema } from "./request/move-fs-entry.js";
 import { RestoreFsRevisionBodySchema } from "./request/restore-fs-revision.js";
+import { RunFsFileBodySchema } from "./request/run-fs-file.js";
 import { WriteFsFileBodySchema } from "./request/write-fs-file.js";
 
 const ListQuerySchema = z.object({ path: z.string().max(600).optional() });
@@ -15,16 +16,23 @@ const RemoveQuerySchema = z.object({
   recursive: z.enum(["true", "false"]).optional(),
 });
 // Query params arrive as strings — coerced after parsing, like the `recursive` flag above.
+const REVISION_NUMBER = /^\d{1,9}$/;
 const RevisionListQuerySchema = z.object({
   path: z.string().min(1).max(600),
   limit: z
     .string()
     .regex(/^\d{1,3}$/)
     .optional(),
+  before: z.string().regex(REVISION_NUMBER).optional(), // keyset cursor: the oldest revision of the page you have
 });
 const RevisionContentQuerySchema = z.object({
   path: z.string().min(1).max(600),
-  revision: z.string().regex(/^\d{1,9}$/),
+  revision: z.string().regex(REVISION_NUMBER),
+});
+const RevisionDiffQuerySchema = z.object({
+  path: z.string().min(1).max(600),
+  from: z.string().regex(REVISION_NUMBER),
+  to: z.string().regex(REVISION_NUMBER).optional(), // omitted = compare against the live file
 });
 
 // The workspace filesystem — a shared, workspace-isolated file tree (agent task outputs, artifacts, skill/knowledge
@@ -101,9 +109,36 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       const limit = parsed.data.limit !== undefined ? Number(parsed.data.limit) : undefined;
-      return reply.send(await deps.fsService.history(principal.workspace, parsed.data.path, limit));
+      const before = parsed.data.before !== undefined ? Number(parsed.data.before) : undefined;
+      return reply.send(await deps.fsService.history(principal.workspace, parsed.data.path, limit, before));
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // What changed between two revisions — the history panel's "compare" (omit `to` to compare against the live file).
+  app.get("/fs/revisions/diff", { schema: fsDocs.revisionDiff }, async (req, reply) => {
+    if (!deps.fsService) return reply.code(404).send({ code: "NOT_FOUND", message: "filesystem not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "files:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = RevisionDiffQuerySchema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await deps.fsService.diffRevisions(
+          principal.workspace,
+          parsed.data.path,
+          Number(parsed.data.from),
+          parsed.data.to !== undefined ? Number(parsed.data.to) : undefined,
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err); // unknown revision / missing file → 404
     }
   });
 
@@ -165,6 +200,30 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
       return reply.send(await deps.fsService.makeDirectory(principal.workspace, parsed.data.path));
     } catch (err) {
       return sendError(reply, err); // a file at the path → 409
+    }
+  });
+
+  // Run a file. Separate from the eval spine on purpose: no harness, no grading, no run record — a person is
+  // reading a script and wants to see what it does. 404 when no execution driver is composed, because "run it on
+  // the control-plane host" is not a fallback: without a sandbox the capability simply does not exist here.
+  app.post("/fs/executions", { schema: fsDocs.run }, async (req, reply) => {
+    if (!deps.fileExecutionService) {
+      return reply.code(404).send({ code: "NOT_FOUND", message: "file execution not configured" });
+    }
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "files:write"); // a run publishes whatever the script produced — that is a write
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = RunFsFileBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      const actor = fsActorFor(principal, agentAttributionFrom(req.headers));
+      return reply.send(await deps.fileExecutionService.run(principal.workspace, parsed.data, actor));
+    } catch (err) {
+      return sendError(reply, err); // no interpreter / not text → 400, missing file → 404, sandbox fault → 500
     }
   });
 

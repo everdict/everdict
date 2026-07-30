@@ -27,6 +27,8 @@ export default async function FilesPage() {
   }
 
   const canWrite = can(principal?.roles, 'files:write')
+  // Running a file needs BOTH the permission and a deployment that composed an execution driver (GET /me).
+  const canRun = canWrite && principal?.config?.fileExecution === true
 
   return (
     <div className="space-y-6">
@@ -34,7 +36,7 @@ export default async function FilesPage() {
       {error !== undefined ? (
         <EmptyState title={t('loadError')} hint={error} />
       ) : (
-        <FilesWorkbench initialEntries={entries} canWrite={canWrite} />
+        <FilesWorkbench initialEntries={entries} canWrite={canWrite} canRun={canRun} />
       )}
     </div>
   )

@@ -1,16 +1,20 @@
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { AgentSpec, CapabilityRecord, SkillRecord } from "@everdict/contracts";
-import type { AgentSkillEntry, AgentToolEntry } from "@everdict/contracts/wire";
+import type { AgentSkillEntry, AgentToolDetailResponse, AgentToolEntry } from "@everdict/contracts/wire";
 import {
   InMemoryAgentMemberPreferenceStore,
   InMemoryCapabilityStore,
   InMemoryRunStore,
+  InMemorySecretStore,
   InMemorySkillStore,
+  aesGcmCipher,
 } from "@everdict/db";
 import { InMemoryAgentRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { AgentMemberToolingService } from "../../core/agent/agent-member-tooling-service.js";
+import { AgentService } from "../../core/agent/agent-service.js";
+import type { McpProbeAuth, McpProbeResult } from "../../infrastructure/mcp/probe-mcp.js";
 import { buildServer } from "../../server.js";
 
 const unusedDispatcher: Dispatcher = {
@@ -53,23 +57,42 @@ const agentSpec = (over: Partial<AgentSpec> = {}): AgentSpec => ({
 });
 
 async function build(
-  opts: { wired?: boolean; spec?: AgentSpec; capabilities?: CapabilityRecord[]; skills?: SkillRecord[] } = {},
+  opts: {
+    wired?: boolean;
+    spec?: AgentSpec;
+    capabilities?: CapabilityRecord[];
+    skills?: SkillRecord[];
+    secrets?: Record<string, string>; // workspace-tier secret name → value
+    probe?: (url: string, auth?: McpProbeAuth) => Promise<McpProbeResult>;
+  } = {},
 ) {
   const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
   const agents = new InMemoryAgentRegistry();
   const capabilities = new InMemoryCapabilityStore();
   const skills = new InMemorySkillStore();
   const preferences = new InMemoryAgentMemberPreferenceStore();
+  const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 7)));
   if (opts.spec) await agents.register("acme", opts.spec, "dev");
   for (const record of opts.capabilities ?? []) await capabilities.register(record);
   for (const record of opts.skills ?? []) await skills.create(record);
+  for (const [name, value] of Object.entries(opts.secrets ?? {})) await secretStore.set("acme", name, value);
   const app = buildServer({
     service,
     ...(opts.wired === false
       ? {}
-      : { agentMemberToolingService: new AgentMemberToolingService({ agents, capabilities, preferences, skills }) }),
+      : {
+          agentMemberToolingService: new AgentMemberToolingService({
+            agents,
+            capabilities,
+            preferences,
+            skills,
+            secrets: secretStore,
+            agentService: new AgentService({ agents }),
+            ...(opts.probe ? { probeMcp: opts.probe } : {}),
+          }),
+        }),
   });
-  return { app, preferences };
+  return { app, preferences, agents };
 }
 
 const H = { "x-everdict-tenant": "acme" };
@@ -167,11 +190,155 @@ describe("agent tool routes", () => {
   });
 });
 
+describe("agent tool detail", () => {
+  const mcpCapability = (over: Partial<CapabilityRecord> = {}): CapabilityRecord => ({
+    ...codeCapability({ id: "grafana", name: "grafana" }),
+    spec: {
+      type: "mcp",
+      url: "https://mcp.grafana.test/mcp",
+      args: [],
+      provides: ["search_dashboards", "get_panel"],
+      requiredSecrets: [{ name: "API_KEY", description: "Grafana service-account token" }],
+      write: false,
+    },
+    ...over,
+  });
+  const adopted = (bindings: Record<string, string> = {}): AgentSpec =>
+    agentSpec({
+      capabilities: [{ source: "acme", id: "grafana", version: "1.0.0", secretBindings: bindings, enableWrite: false }],
+    });
+  const detail = (body: unknown): AgentToolDetailResponse => body as AgentToolDetailResponse;
+  const key = encodeURIComponent("capability:acme/grafana");
+
+  it("explains a built-in code tool: its transport, the function the model calls, and the secret it still needs", async () => {
+    const { app } = await build();
+    const res = await app.inject({ method: "GET", url: "/agent/tools/default%3Aweb-search", headers: H });
+    expect(res.statusCode).toBe(200);
+    const tool = detail(res.json());
+    expect(tool).toMatchObject({ origin: "builtin", transport: { kind: "code", language: "node" } });
+    // A code capability IS one function — and the model calls it by its NAMESPACED name, not the store name.
+    expect(tool.functions).toHaveLength(1);
+    expect(tool.functions[0]).toMatchObject({ name: "web_search", bridgedName: "code__web_search", readOnly: true });
+    expect(tool.code).toContain("api.tavily.com");
+    expect(tool.secrets).toEqual([
+      expect.objectContaining({ name: "TAVILY_API_KEY", boundTo: "TAVILY_API_KEY", resolved: false }),
+    ]);
+    // A default reads its secret by the declared name and belongs to Everdict — nothing here is the member's to edit.
+    expect(tool).toMatchObject({ bindable: false, editable: false, probeable: false });
+  });
+
+  it("lists an mcp tool's declared functions under the names the runtime namespaces them with", async () => {
+    const { app } = await build({ spec: adopted(), capabilities: [mcpCapability()] });
+    const res = await app.inject({ method: "GET", url: `/agent/tools/${key}`, headers: H });
+    const tool = detail(res.json());
+    expect(tool.transport).toEqual({ kind: "http", url: "https://mcp.grafana.test/mcp" });
+    expect(tool.functions.map((f) => f.bridgedName)).toEqual([
+      "mcp__grafana__search_dashboards",
+      "mcp__grafana__get_panel",
+    ]);
+    expect(tool).toMatchObject({ origin: "capability", bindable: true, editable: true, probeable: true });
+  });
+
+  it("reports a secret as resolved once the member holds one under the bound name", async () => {
+    const { app } = await build({
+      spec: adopted({ API_KEY: "GRAFANA_TOKEN" }),
+      capabilities: [mcpCapability()],
+      secrets: { GRAFANA_TOKEN: "Bearer abc" },
+    });
+    const res = await app.inject({ method: "GET", url: `/agent/tools/${key}`, headers: H });
+    expect(detail(res.json()).secrets).toEqual([
+      expect.objectContaining({ name: "API_KEY", boundTo: "GRAFANA_TOKEN", resolved: true }),
+    ]);
+  });
+
+  it("a tool that is not in the caller's toolset is 404, not 403", async () => {
+    const { app } = await build();
+    const res = await app.inject({ method: "GET", url: "/agent/tools/capability%3Aother%2Fghost", headers: H });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("binding a secret rewrites the adopted reference and cuts a new agent version", async () => {
+    const { app, agents } = await build({ spec: adopted(), capabilities: [mcpCapability()] });
+    const res = await app.inject({
+      method: "PUT",
+      url: `/agent/tools/${key}/secrets`,
+      headers: H,
+      payload: { bindings: { API_KEY: "GRAFANA_TOKEN" } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(detail(res.json()).secrets[0]).toMatchObject({ boundTo: "GRAFANA_TOKEN" });
+    const saved = await agents.get("acme", "default", "latest");
+    expect(saved.version).toBe("1.0.1"); // the edit is a new immutable version, as every agent edit is
+    expect(saved.capabilities[0]?.secretBindings).toEqual({ API_KEY: "GRAFANA_TOKEN" });
+  });
+
+  it("refuses to bind a name the tool never declared", async () => {
+    const { app } = await build({ spec: adopted(), capabilities: [mcpCapability()] });
+    const res = await app.inject({
+      method: "PUT",
+      url: `/agent/tools/${key}/secrets`,
+      headers: H,
+      payload: { bindings: { NOPE: "SOMETHING" } },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("refuses to bind a built-in default — it reads its secret by the declared name", async () => {
+    const { app } = await build();
+    const res = await app.inject({
+      method: "PUT",
+      url: "/agent/tools/default%3Aweb-search/secrets",
+      headers: H,
+      payload: { bindings: { TAVILY_API_KEY: "MY_KEY" } },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("probing an mcp tool sends the member's own bound secret and returns what the server serves", async () => {
+    let seen: McpProbeAuth | undefined;
+    const { app } = await build({
+      spec: adopted({ API_KEY: "GRAFANA_TOKEN" }),
+      capabilities: [mcpCapability()],
+      secrets: { GRAFANA_TOKEN: "Bearer abc" },
+      probe: async (_url, auth) => {
+        seen = auth;
+        return { reachable: true, detail: "Connected — 1 tool available.", tools: [{ name: "search_dashboards" }] };
+      },
+    });
+    const res = await app.inject({ method: "POST", url: `/agent/tools/${key}/probe`, headers: H });
+    expect(res.statusCode).toBe(200);
+    expect(seen).toEqual({ authorization: "Bearer abc" }); // verbatim, exactly as the agent runtime sends it
+    expect(res.json()).toMatchObject({
+      reachable: true,
+      functions: [{ name: "search_dashboards", bridgedName: "mcp__grafana__search_dashboards" }],
+      missingSecrets: [],
+    });
+  });
+
+  it("an unreachable server is a probe RESULT, and the unresolved secret is named", async () => {
+    const { app } = await build({
+      spec: adopted(),
+      capabilities: [mcpCapability()],
+      probe: async () => ({ reachable: false, detail: "401 Unauthorized", reason: "auth", tools: [] }),
+    });
+    const res = await app.inject({ method: "POST", url: `/agent/tools/${key}/probe`, headers: H });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ reachable: false, reason: "auth", missingSecrets: ["API_KEY"] });
+  });
+
+  it("refuses to probe a code tool — it is verified by running it, not by connecting", async () => {
+    const { app } = await build({ probe: async () => ({ reachable: true, detail: "", tools: [] }) });
+    const res = await app.inject({ method: "POST", url: "/agent/tools/default%3Aweb-search/probe", headers: H });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe("agent skill routes", () => {
   const skillRecord = (over: Partial<SkillRecord> & Pick<SkillRecord, "id" | "name">): SkillRecord => ({
     tenant: "acme",
     description: `${over.name} procedure`,
     instructions: "1. …",
+    version: "1.0.0",
     files: [],
     refs: [],
     visibility: "workspace",
@@ -191,8 +358,8 @@ describe("agent skill routes", () => {
     expect(findSkill(res.json(), "skill:triage")).toMatchObject({
       enabled: true,
       baseline: true,
-      origin: "authored",
       scope: "workspace",
+      version: "1.0.0",
     });
   });
 
@@ -227,25 +394,16 @@ describe("agent skill routes", () => {
     expect((await preferences.get("acme", "dev"))?.skills).toEqual({});
   });
 
-  it("offers a published skill package nobody adopted — off until the member switches it on", async () => {
+  it("keeps a skill-kind publication OUT of the library — a store skill joins it by being copied in", async () => {
+    // The library lists what the members own and can edit. A publication (theirs or another workspace's) is
+    // something to take a copy of via POST /skills/import, not a row that shows up here uneditable.
     const pkg: CapabilityRecord = {
       ...codeCapability({ id: "runbook", name: "runbook" }),
       spec: { type: "skill", instructions: "do the thing", files: [] },
     };
     const { app } = await build({ capabilities: [pkg] });
-    const before = await app.inject({ method: "GET", url: "/agent/skills", headers: H });
-    expect(findSkill(before.json(), "capability:acme/runbook")).toMatchObject({
-      enabled: false,
-      baseline: false,
-      origin: "packaged",
-    });
-    const put = await app.inject({
-      method: "PUT",
-      url: "/agent/skills",
-      headers: H,
-      payload: { key: "capability:acme/runbook", enabled: true },
-    });
-    expect(findSkill(put.json(), "capability:acme/runbook")?.enabled).toBe(true);
+    const res = await app.inject({ method: "GET", url: "/agent/skills", headers: H });
+    expect(res.json().skills).toEqual([]);
   });
 
   it("rejects a skill key that is not in this member's library (404, no orphan stored)", async () => {

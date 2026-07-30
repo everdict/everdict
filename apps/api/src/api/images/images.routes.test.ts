@@ -220,3 +220,90 @@ describe("GET /workspace/images/manifest — the digest a pushed image is pinned
     expect(res.statusCode).toBe(404);
   });
 });
+
+describe("GET /workspace/images — the catalog Settings › Images renders", () => {
+  it("lists the workspace's repositories with the coordinates their refs are built from", async () => {
+    // Given: two repositories published into acme's namespace
+    const { app, images } = build();
+    images.push("acme", "officeqa", "v1", { sizeBytes: 120 });
+    images.push("acme", "browser-env", "v2", { sizeBytes: 80 });
+    // When
+    const res = await app.inject({ method: "GET", url: "/workspace/images", headers: acme });
+    // Then
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.endpoint).toBe("images.everdict.test");
+    expect(body.namespace).toBe(images.namespaceFor("acme"));
+    expect(body.repositories.map((r: { name: string }) => r.name).sort()).toEqual(["browser-env", "officeqa"]);
+    expect(body.usage.repositories).toBe(2);
+  });
+
+  it("scopes to the caller's own namespace — another workspace's images are not listed", async () => {
+    const { app, images } = build();
+    images.push("rival", "secret", "v1");
+    const res = await app.inject({ method: "GET", url: "/workspace/images", headers: acme });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().repositories).toEqual([]);
+  });
+
+  it("is 404 when the deployment runs no managed store", async () => {
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+    });
+    const res = await app.inject({ method: "GET", url: "/workspace/images", headers: acme });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("GET /workspace/images/:repository/tags — the drill-in", () => {
+  it("resolves the tags of one repository", async () => {
+    const { app, images } = build();
+    images.push("acme", "officeqa", "v1");
+    images.push("acme", "officeqa", "v2");
+    const res = await app.inject({ method: "GET", url: "/workspace/images/officeqa/tags", headers: acme });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ repository: "officeqa", tags: ["v1", "v2"] });
+  });
+
+  it("reads an unknown repository as an empty tag list, like the registry itself", async () => {
+    const { app } = build();
+    const res = await app.inject({ method: "GET", url: "/workspace/images/nothing/tags", headers: acme });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().tags).toEqual([]);
+  });
+});
+
+describe("DELETE /workspace/images/:repository — unpublish", () => {
+  it("unlinks the repository's manifests and reports the count", async () => {
+    const { app, images } = build();
+    images.push("acme", "officeqa", "v1");
+    images.push("acme", "officeqa", "v2");
+    const res = await app.inject({ method: "DELETE", url: "/workspace/images/officeqa", headers: acme });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ repository: "officeqa", removed: 2 });
+    const after = await app.inject({ method: "GET", url: "/workspace/images", headers: acme });
+    expect(after.json().repositories).toEqual([]);
+  });
+
+  it("refuses a viewer — retracting an image takes the same images:push right as publishing it", async () => {
+    // Given: a viewer principal (the dev fallback is admin, so authZ needs a real authenticator)
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      images: new InMemoryImageStore({ endpoint: "images.everdict.test" }),
+      requireAuth: true,
+      authenticator: {
+        async authenticate() {
+          return { subject: "u", workspace: "acme", roles: ["viewer"], via: "oidc" as const };
+        },
+      },
+    });
+    // When
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/workspace/images/officeqa",
+      headers: { authorization: "Bearer t" },
+    });
+    // Then
+    expect(res.statusCode).toBe(403);
+  });
+});

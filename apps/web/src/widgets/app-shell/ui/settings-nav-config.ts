@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Boxes,
   Building2,
   Container,
   Cpu,
@@ -90,6 +91,9 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         icon: Container,
         requiredAction: 'capabilities:read',
       },
+      // 관리형 이미지 스토어의 워크스페이스 네임스페이스 — 우리가 저장하고 grant를 발급하는 이미지들.
+      // BYO 레지스트리(Integrations)와 다른 화면인 이유는 소유 관계가 다르기 때문이다.
+      { href: '/images', labelKey: 'images', icon: Boxes, requiredAction: 'harnesses:read' },
       // The workspace filesystem's governance view (usage + cleanup) — in-service, never the object-storage console.
       { href: '/files', labelKey: 'files', icon: HardDrive, requiredAction: 'files:read' },
       { href: '/ci', labelKey: 'ci', icon: GitBranch, requiredAction: 'settings:read' },

@@ -150,6 +150,41 @@ describe("MCP file-revision tools (BFF↔MCP parity)", () => {
     });
   });
 
+  it("hands an agent the delta instead of making it re-read both revisions", async () => {
+    // Given a file an agent published and a member then edited
+    const deps = makeDeps();
+    const client = await connect(deps);
+    await call(client, "write_file", { path: "notes.md", content: "intro\nbody\n" });
+    await call(client, "write_file", { path: "notes.md", content: "intro\nbody rewritten\n", base_revision: 1 });
+    // When the agent asks what changed since the revision it knew
+    const diff = jsonOf(await call(client, "diff_file_revisions", { path: "notes.md", from: 1 })) as {
+      to: number;
+      diff: { added: number; removed: number; hunks: Array<{ lines: Array<{ op: string; text: string }> }> };
+    };
+    // Then it gets the hunk, not the whole document
+    expect(diff.to).toBe(2);
+    expect({ added: diff.diff.added, removed: diff.diff.removed }).toEqual({ added: 1, removed: 1 });
+    expect(diff.diff.hunks.flatMap((h) => h.lines)).toContainEqual({
+      op: "add",
+      text: "body rewritten",
+      afterLine: 2,
+    });
+  });
+
+  it("walks a long history backwards with the revision cursor", async () => {
+    const deps = makeDeps();
+    const client = await connect(deps);
+    for (let i = 1; i <= 4; i++) await call(client, "write_file", { path: "log.md", content: `v${i}` });
+    const page = jsonOf(await call(client, "list_file_revisions", { path: "log.md", limit: 2 })) as unknown as Array<{
+      revision: number;
+    }>;
+    expect(page.map((r) => r.revision)).toEqual([4, 3]);
+    const older = jsonOf(
+      await call(client, "list_file_revisions", { path: "log.md", limit: 2, before: 3 }),
+    ) as unknown as Array<{ revision: number }>;
+    expect(older.map((r) => r.revision)).toEqual([2, 1]);
+  });
+
   it("404s an unknown revision", async () => {
     const deps = makeDeps();
     const client = await connect(deps);

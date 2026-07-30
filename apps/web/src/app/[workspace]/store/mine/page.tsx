@@ -27,6 +27,7 @@ export default async function MyPublishedPage({
   const canWrite = can(principal?.roles, 'capabilities:write')
   const canAdopt = can(principal?.roles, 'agents:write')
   const canImportEnvironment = can(principal?.roles, 'settings:write')
+  const canImportSkill = can(principal?.roles, 'skills:write') // 스킬 가져오기 = 라이브러리에 사본을 만드는 일
   const isAdmin = (principal?.roles ?? []).includes('admin')
   const allowMemberPublicPublish = principal?.config?.allowMemberPublicPublish === true
   const currentWorkspace = principal?.workspace ?? workspace
@@ -65,7 +66,9 @@ export default async function MyPublishedPage({
           canWrite={canWrite}
           canAdopt={canAdopt}
           canImportEnvironment={canImportEnvironment}
+          canImportSkill={canImportSkill}
           adoptedKeys={store.adoptedKeys}
+          importedSkillKeys={store.importedSkillKeys}
           adoptedEnvironments={store.adoptedEnvironments}
           secretNames={store.secretNames}
           myWorkspaces={store.myWorkspaces}

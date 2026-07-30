@@ -47,6 +47,16 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType): Promise<un
         return spec !== null && typeof spec === 'object' && (spec as Row).type === 'environment'
       })
     }
+    case 'tool': {
+      // 도구 = capability 스토어의 mcp|code kind — 환경과 같은 목록에서 그 두 kind 만 추린다.
+      const capabilities = await controlPlane.listCapabilities<Row[]>(ctx)
+      return (Array.isArray(capabilities) ? capabilities : []).filter((c) => {
+        const spec = (c as Row).spec
+        if (spec === null || typeof spec !== 'object') return false
+        const kind = (spec as Row).type
+        return kind === 'mcp' || kind === 'code'
+      })
+    }
     case 'trace':
       // trace references are attached from the observability browser (keyed by source+traceId), not @-picked here.
       return []

@@ -43,6 +43,7 @@ export type WebAction =
   | 'settings:write'
   | 'comments:read'
   | 'comments:write'
+  | 'images:push'
 
 const PERMS: Record<string, WebAction[]> = {
   viewer: [
@@ -91,6 +92,7 @@ const PERMS: Record<string, WebAction[]> = {
     'members:read',
     'comments:read',
     'comments:write', // comment creation is member+ (deletion is author-or-admin, the server decides)
+    'images:push', // publishing/retracting a workspace image is harness authoring → member+ (mirrors the control plane)
   ],
   admin: [
     'runs:read',
@@ -135,6 +137,7 @@ const PERMS: Record<string, WebAction[]> = {
     'settings:write',
     'comments:read',
     'comments:write',
+    'images:push',
   ],
 }
 

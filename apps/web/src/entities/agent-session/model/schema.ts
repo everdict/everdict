@@ -80,13 +80,16 @@ export const AGENT_REFERENCE_TYPES = [
   'skill',
   'knowledge', // reified claim(get_knowledge_entry) — 워크스페이스가 배운 것, 계보(supersedes/verifiedAt) 포함
   'environment', // environment kind 의 capability(get_capability) — 평가 환경 이미지 자산
+  'tool', // mcp|code kind 의 capability(get_capability) — 에이전트가 실제로 호출하는 도구. source=소유 워크스페이스
   'trace',
 ] as const
 export const agentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES)
 export type AgentReferenceType = z.infer<typeof agentReferenceTypeSchema>
 
-// `source` is set ONLY for a `trace` reference — the registered trace-source name the trace lives in (keyed by
-// (source, id=traceId), attached from the observability browser rather than the @-picker).
+// `source` carries the OWNER for the two references that can live outside this workspace: a `trace` (the registered
+// trace-source name it lives in, keyed by (source, id=traceId) and attached from the observability browser rather
+// than the @-picker) and a `tool` (the workspace that published the capability — a first-party default is
+// `_everdict`-owned).
 export const agentReferenceSchema = z.object({
   type: agentReferenceTypeSchema,
   id: z.string(),
@@ -99,7 +102,7 @@ export type AgentReference = z.infer<typeof agentReferenceSchema>
 // 대화 패널에 실리는 "임무" — 특정 도메인 상세의 전용 진입("대화로 편집하기" 등)으로 들어왔을 때, 패널의 구조는
 // 그대로 두고 빈 화면의 라이팅과 제안만 그 작업에 맞춘다(범용 "대화에서 분석" 진입은 임무 없음 = 기본 문구).
 // 값은 메시지 카탈로그 네임스페이스(agentChat.missions.<kind>)이기도 하므로 카탈로그 키와 1:1로 유지한다.
-export const AGENT_CHAT_MISSIONS = ['skillEdit'] as const
+export const AGENT_CHAT_MISSIONS = ['skillEdit', 'toolEdit'] as const
 export const agentChatMissionSchema = z.enum(AGENT_CHAT_MISSIONS)
 export type AgentChatMission = z.infer<typeof agentChatMissionSchema>
 

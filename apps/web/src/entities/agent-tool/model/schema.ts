@@ -1,4 +1,9 @@
-import type { AgentToolEntry as ContractAgentToolEntry } from '@everdict/contracts/wire'
+import type {
+  AgentToolDetailResponse as ContractAgentToolDetail,
+  AgentToolEntry as ContractAgentToolEntry,
+  AgentToolFunction as ContractAgentToolFunction,
+  AgentToolProbeResponse as ContractAgentToolProbe,
+} from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 // 에이전트 도구 — "이 워크스페이스의 어시스턴트가 쓸 수 있는 도구"를 로그인한 멤버 기준으로 본 행.
@@ -29,7 +34,78 @@ export type AgentToolEntry = z.infer<typeof agentToolEntrySchema>
 export const agentToolListSchema = z.object({ tools: z.array(agentToolEntrySchema) })
 export type AgentToolList = z.infer<typeof agentToolListSchema>
 
+// ── 상세 ─────────────────────────────────────────────────────────────────────────────────────────
+// 목록 행이 "켤까 말까"라면 상세는 "이게 뭔가"다: 어떻게 도달하고, 모델 앞에 어떤 function 을 놓고, 모델이 읽는
+// description 이 뭐고, 어떤 시크릿을 필요로 하며 그게 나에게 풀리는가.
+
+// 모델이 실제로 부르는 이름은 네임스페이스된 bridgedName 이다(스토어 이름이 아니라) — 두 서버가 이름으로 충돌하지
+// 않게 런타임이 붙인다.
+export const agentToolFunctionSchema = z.object({
+  name: z.string(),
+  bridgedName: z.string(),
+  description: z.string(),
+  parametersSchema: z.record(z.string(), z.unknown()).optional(),
+  readOnly: z.boolean(),
+})
+export type AgentToolFunction = z.infer<typeof agentToolFunctionSchema>
+
+// 런타임이 이 도구에 도달하는 방식 — 원격 MCP 세션 / stdio 컨테이너 / 코드 스크립트.
+export const agentToolTransportSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('http'), url: z.string() }),
+  z.object({ kind: z.literal('stdio'), image: z.string(), args: z.array(z.string()) }),
+  z.object({
+    kind: z.literal('code'),
+    language: z.enum(['python', 'node']),
+    timeoutSec: z.number().optional(),
+    image: z.string().optional(),
+  }),
+])
+export type AgentToolTransport = z.infer<typeof agentToolTransportSchema>
+
+// 선언된 시크릿 하나를 "나" 기준으로 본 것 — 도구가 부르는 논리 이름, 실제로 읽는 시크릿 이름, 내가 가진 것인지.
+export const agentToolSecretSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  boundTo: z.string(),
+  resolved: z.boolean(),
+})
+export type AgentToolSecret = z.infer<typeof agentToolSecretSchema>
+
+export const agentToolExampleSchema = z.object({
+  name: z.string().optional(),
+  input: z.record(z.string(), z.unknown()),
+  note: z.string().optional(),
+})
+
+export const agentToolDetailSchema = agentToolEntrySchema.extend({
+  origin: z.enum(['builtin', 'capability', 'mcpServer']),
+  transport: agentToolTransportSchema,
+  functions: z.array(agentToolFunctionSchema),
+  secrets: z.array(agentToolSecretSchema),
+  code: z.string().optional(), // code 도구의 고정된 소스 — 무엇이 실행되는지 감사 가능
+  parametersSchema: z.record(z.string(), z.unknown()).optional(),
+  examples: z.array(agentToolExampleSchema),
+  capability: z.object({ source: z.string(), id: z.string(), version: z.string() }).optional(),
+  tags: z.array(z.string()),
+  bindable: z.boolean(), // 시크릿 바인딩을 여기서 바꿀 수 있는가(채택된 capability · 직접 배선한 MCP 서버)
+  editable: z.boolean(), // 대화로 편집 + 버전업 가능한가(이 워크스페이스가 소유한 capability만)
+  probeable: z.boolean(), // 연결 테스트가 의미 있는가(원격 HTTP MCP 만)
+})
+export type AgentToolDetail = z.infer<typeof agentToolDetailSchema>
+
+export const agentToolProbeSchema = z.object({
+  reachable: z.boolean(),
+  detail: z.string(),
+  reason: z.enum(['auth', 'unreachable', 'protocol']).optional(),
+  functions: z.array(agentToolFunctionSchema),
+  missingSecrets: z.array(z.string()),
+})
+export type AgentToolProbe = z.infer<typeof agentToolProbeSchema>
+
 // 드리프트 가드 — 계약 wire 타입이 바뀌면 웹 타입체크가 깨진다(양방향).
 type AssertAssignable<A extends B, B> = A
 type _Fwd = AssertAssignable<AgentToolEntry, ContractAgentToolEntry>
 type _Back = AssertAssignable<ContractAgentToolEntry, AgentToolEntry>
+type _FnFwd = AssertAssignable<AgentToolFunction, ContractAgentToolFunction>
+type _DetailFwd = AssertAssignable<AgentToolDetail, ContractAgentToolDetail>
+type _ProbeFwd = AssertAssignable<AgentToolProbe, ContractAgentToolProbe>

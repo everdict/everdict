@@ -30,7 +30,18 @@ function readPem(path: string, what: string): string {
   }
 }
 
-export function buildManagedImages(env: NodeJS.ProcessEnv = process.env): ManagedImages {
+// M6 — the cross-tenant reach predicate the store consults for a ref outside the caller's namespace. Passed in
+// rather than built here because the answer comes from the capability layer (adoption), which in turn needs this
+// store's coordinates to classify an image: a real cycle between the two, resolved in the composition root by
+// binding this late (see main.ts) instead of pretending one of them can be constructed first.
+export interface ManagedImagesOptions {
+  crossTenantPull?: (tenant: string, ref: string) => Promise<boolean>;
+}
+
+export function buildManagedImages(
+  env: NodeJS.ProcessEnv = process.env,
+  opts: ManagedImagesOptions = {},
+): ManagedImages {
   // The address IMAGE REFS carry — every execution node must reach it (a self-hosted runner on someone's laptop
   // included), so it is an operator-set public host, never a container-network name.
   const endpoint = env.EVERDICT_IMAGE_STORE_ENDPOINT;
@@ -58,6 +69,7 @@ export function buildManagedImages(env: NodeJS.ProcessEnv = process.env): Manage
     endpoint,
     issuer,
     api: fetchManagedRegistryApi(apiBase, (access) => issuer.mintRegistryToken("everdict-control-plane", access)),
+    ...(opts.crossTenantPull ? { crossTenantPull: opts.crossTenantPull } : {}),
   });
   return {
     images,

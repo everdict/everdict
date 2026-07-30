@@ -16,10 +16,20 @@ export interface ManagedImageStoreOptions {
   endpoint: string;
   issuer: RegistryTokenIssuer;
   api: ManagedRegistryApi;
+  // M6 — cross-tenant pull. May `tenant` pull `ref`, which lives in ANOTHER workspace's namespace? The store does
+  // not answer this: reach is a capability question (canConsumeCapability over the environment that DECLARES the
+  // ref), and the capability layer sits above this adapter. Injected as a narrow predicate so the store stays a
+  // token minter that authorizes what it is told to, never a policy engine that decides on its own.
+  // Absent (BYO-only wiring, tests) → cross-tenant refs are omitted, which is the pre-M6 safe default.
+  crossTenantPull?: (tenant: string, ref: string) => Promise<boolean>;
 }
 
-const PULL: Array<"pull" | "push"> = ["pull"];
-const PULL_PUSH: Array<"pull" | "push"> = ["pull", "push"];
+const PULL: Array<"pull" | "push" | "delete"> = ["pull"];
+const PULL_PUSH: Array<"pull" | "push" | "delete"> = ["pull", "push"];
+// Distribution treats manifest deletion as its OWN action, not as a write: a pull+push token is refused at
+// DELETE /v2/<name>/manifests/<digest> with a 401. `pull` rides along because the same token resolves the tag
+// to the digest it deletes by.
+const PULL_DELETE: Array<"pull" | "push" | "delete"> = ["pull", "delete"];
 
 // A repository name a workspace may create: one path segment, the OCI grammar's lowercase alphanumerics with
 // single separators. Deliberately stricter than the spec's multi-segment form — a nested path would let a caller
@@ -53,17 +63,18 @@ export class ManagedImageStore implements WorkspaceImages {
     return `${namespace}/${name}`;
   }
 
-  private access(repository: string, actions: Array<"pull" | "push">): RegistryAccess[] {
+  private access(repository: string, actions: Array<"pull" | "push" | "delete">): RegistryAccess[] {
     return [{ type: "repository", name: repository, actions }];
   }
 
   async listRepositories(tenant: string): Promise<ImageRepo[]> {
     const namespace = this.namespaceFor(tenant);
-    // The catalog is a registry-wide listing, so the namespace prefix filter is what keeps a workspace inside
-    // its own tree; the token is scoped to catalog read, and the filter is applied to the result regardless.
-    const paths = await this.opts.api.catalog(namespace, [
-      { type: "repository", name: `${namespace}/*`, actions: PULL },
-    ]);
+    // `_catalog` is registry-WIDE, and distribution guards it with `registry:catalog:*` — a repository-scoped
+    // token is refused there with a 401 no matter how broad its name pattern (a `<ns>/*` scope 401s, which is
+    // how this was found: unit tests hand the adapter a fake registry, so only a live one can say). The scope is
+    // registry-wide, so the workspace boundary here is the PREFIX FILTER applied to the result, and it is applied
+    // unconditionally below rather than trusted to the token.
+    const paths = await this.opts.api.catalog(namespace, [{ type: "registry", name: "catalog", actions: ["*"] }]);
     // Tags are NOT resolved here — one call per repository would turn a listing into a fan-out. The caller asks
     // for the tags of the repository it opens (`listTags`), which is also the only place they are needed.
     return paths.map((path) => ({
@@ -102,10 +113,15 @@ export class ManagedImageStore implements WorkspaceImages {
         continue; // an unparseable ref is not ours to authorize; the pull will fail on its own terms
       }
       if (parsed.host !== this.endpoint) continue; // not a managed image at all (BYO/public — another adapter's job)
-      // Own namespace → granted. Another workspace's namespace → NOT granted here: cross-tenant pull is decided
-      // by the store's reach kernel (canConsumeCapability), which arrives with M6. Until then the omission is the
-      // safe default — the pull fails with the registry's own 401 rather than us inventing authorization.
-      if (parsed.path === namespace || parsed.path.startsWith(`${namespace}/`)) repositories.push(parsed.path);
+      // Own namespace → granted outright.
+      if (parsed.path === namespace || parsed.path.startsWith(`${namespace}/`)) {
+        repositories.push(parsed.path);
+        continue;
+      }
+      // Another workspace's namespace → granted ONLY when the reach policy says this consumer may pull it (M6).
+      // Without a policy the ref is omitted and the pull fails with the registry's own 401, which stays the safe
+      // default: an omission costs a failed pull, an invented grant costs cross-tenant isolation.
+      if (this.opts.crossTenantPull && (await this.opts.crossTenantPull(tenant, ref))) repositories.push(parsed.path);
     }
     const unique = [...new Set(repositories)];
     if (unique.length === 0) return [];
@@ -118,7 +134,7 @@ export class ManagedImageStore implements WorkspaceImages {
 
   async remove(tenant: string, repository: string, reference?: string): Promise<number> {
     const repo = this.resolve(tenant, repository);
-    const access = this.access(repo, PULL_PUSH); // deletion is a write on the repository
+    const access = this.access(repo, PULL_DELETE); // `delete` is its own registry action, not a flavour of push
     // Distribution deletes manifests by DIGEST only, so a tag is resolved to its digest first. Without a
     // reference the whole repository goes: every tag's digest, deduplicated (tags commonly share one manifest).
     const references = reference ? [reference] : await this.opts.api.tags(repo, this.access(repo, PULL));

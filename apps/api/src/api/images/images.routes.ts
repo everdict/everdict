@@ -63,6 +63,71 @@ export function registerImagesRoutes(app: FastifyInstance, deps: ServerDeps): vo
     }
   });
 
+  // The workspace's managed repositories — what Settings › Images lists. Read-gated with harnesses:read, the
+  // same action the BYO catalog uses: knowing which images a workspace published is provenance, not a credential.
+  // Usage rides along because the panel renders both in one header (see ImageCatalogResponseSchema).
+  app.get("/workspace/images", { schema: imagesDocs.catalog }, async (req, reply) => {
+    if (!deps.images) return reply.code(404).send({ code: "NOT_FOUND", message: "managed image store not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      const [repositories, usage] = await Promise.all([
+        deps.images.listRepositories(principal.workspace),
+        deps.images.usage(principal.workspace),
+      ]);
+      return reply.send({
+        endpoint: deps.images.endpoint,
+        namespace: deps.images.namespaceFor(principal.workspace),
+        repositories,
+        usage,
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // Tags of ONE repository. Separate from the catalog by design: resolving tags is a registry call per
+  // repository, so the listing stays one call and the drill-in pays for what it opens.
+  app.get<{ Params: { repository: string } }>(
+    "/workspace/images/:repository/tags",
+    { schema: imagesDocs.tags },
+    async (req, reply) => {
+      if (!deps.images)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "managed image store not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "harnesses:read");
+        const tags = await deps.images.listTags(principal.workspace, req.params.repository);
+        return reply.send({ repository: req.params.repository, tags });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Unpublish a repository from the caller's namespace. Gated with images:push, not settings:write: this is the
+  // inverse of publishing, and the member who may push their workspace's images is the one who may retract them —
+  // routing cleanup through an admin would leave authors unable to undo their own mistakes.
+  app.delete<{ Params: { repository: string } }>(
+    "/workspace/images/:repository",
+    { schema: imagesDocs.remove },
+    async (req, reply) => {
+      if (!deps.images)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "managed image store not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "images:push");
+        const removed = await deps.images.remove(principal.workspace, req.params.repository);
+        return reply.send({ repository: req.params.repository, removed });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // Manifest of a reference in the caller's namespace — the authoritative digest a just-pushed image should be
   // pinned by. Read-gated with harnesses:read like the BYO inspect: a manifest summary is provenance, not a credential.
   app.get<{ Querystring: { repository?: string; reference?: string } }>(

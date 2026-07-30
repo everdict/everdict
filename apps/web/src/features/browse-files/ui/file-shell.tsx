@@ -188,7 +188,9 @@ export function FileShell({ canWrite, onMutated }: { canWrite: boolean; onMutate
         const path = resolveFsPath(cwd, file)
         const existing = await readFileAction(path)
         if (existing.ok) return // touch on an existing file is a no-op here (no mtime bump)
-        const res = await writeFileAction({ path, content: '' })
+        // baseRevision 0 closes the gap between that check and this write: if someone (or an agent) created the
+        // file in between, touch is refused rather than blanking what they just wrote.
+        const res = await writeFileAction({ path, content: '', baseRevision: 0 })
         if (!res.ok) throw new Error(res.error ?? 'touch failed')
         onMutated()
         return

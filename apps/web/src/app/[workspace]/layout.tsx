@@ -56,6 +56,7 @@ export default async function WorkspaceLayout({
       subject={principal.subject}
       roles={principal.roles}
       authed={principal.via === 'oidc'}
+      fileExecution={principal.config?.fileExecution === true}
       showLogin={keycloakConfigured}
       {...(principal.email !== undefined ? { email: principal.email } : {})}
       {...(principal.profile !== undefined ? { profile: principal.profile } : {})}

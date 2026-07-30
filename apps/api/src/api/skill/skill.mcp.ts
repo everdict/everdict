@@ -98,6 +98,82 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   );
 
   server.registerTool(
+    "import_skill",
+    {
+      description:
+        "Take a published skill from the store — an Everdict example or one another workspace published — into this workspace as a skill the members OWN (editable here, with its own version line). Browse candidates with list_public_capabilities and pass its `tenant` as `source`. Taking the same publication twice fails with CONFLICT; a non-skill capability is a validation error. Requires skills:write.",
+      inputSchema: {
+        source: z.string(),
+        id: z.string(),
+        version: z.string().optional(),
+        visibility: SkillVisibilitySchema.optional(),
+      },
+    },
+    ({ source, id, version, visibility }) =>
+      run(principal, "skills:write", async () =>
+        ok(
+          await skills.importFromStore({
+            tenant: ws,
+            subject: principal.subject,
+            source,
+            id,
+            ...(version ? { version } : {}),
+            ...(visibility ? { visibility } : {}),
+          }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "stamp_skill_version",
+    {
+      description:
+        "Name the skill's CURRENT content as a version — do this after revising a skill with update_skill, when the member agrees the change is worth naming. `bump` (major|minor|patch, default patch) or an explicit `version` that must come after the current one. `note` is the changelog line. The stamped version is immutable, so an older one stays citable. Manage = creator-or-admin. Requires skills:write.",
+      inputSchema: {
+        id: z.string(),
+        bump: z.enum(["major", "minor", "patch"]).optional(),
+        version: z.string().optional(),
+        note: z.string().max(2_000).optional(),
+      },
+    },
+    ({ id, bump, version, note }) =>
+      run(principal, "skills:write", async () =>
+        ok(
+          await skills.stampVersion(
+            ws,
+            id,
+            {
+              ...(bump ? { bump } : {}),
+              ...(version ? { version } : {}),
+              ...(note !== undefined ? { note } : {}),
+            },
+            actor,
+          ),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "list_skill_versions",
+    {
+      description: "A skill's stamped versions, newest first (version, note, who stamped it and when)",
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) => run(principal, "skills:read", async () => ok(await skills.listVersions(ws, id, principal.subject))),
+  );
+
+  server.registerTool(
+    "get_skill_version",
+    {
+      description:
+        "The frozen content of one stamped version — what the procedure said at that point. Use to compare the current body against an earlier version before stamping the next one",
+      inputSchema: { id: z.string(), version: z.string() },
+    },
+    ({ id, version }) =>
+      run(principal, "skills:read", async () => ok(await skills.getVersion(ws, id, version, principal.subject))),
+  );
+
+  server.registerTool(
     "verify_skill",
     {
       description:

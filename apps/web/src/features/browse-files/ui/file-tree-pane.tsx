@@ -175,7 +175,9 @@ export function FileTreePane({
     setDialogError(undefined)
     const res =
       dialog.kind === 'new-file'
-        ? await writeFileAction({ path, content: '' })
+        ? // baseRevision 0 = "this file should not exist yet": creating over an existing path is refused (409)
+          // instead of silently replacing someone's file with an empty one.
+          await writeFileAction({ path, content: '', baseRevision: 0 })
         : await makeDirectoryAction(path)
     setDialogBusy(false)
     if (!res.ok) {

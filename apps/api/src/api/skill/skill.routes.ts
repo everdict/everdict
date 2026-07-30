@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { CreateSkillBodySchema } from "./request/create-skill.js";
 import { GenerateSkillBodySchema } from "./request/generate-skill.js";
+import { ImportSkillBodySchema } from "./request/import-skill.js";
+import { StampSkillVersionBodySchema } from "./request/stamp-skill-version.js";
 import { UpdateSkillBodySchema } from "./request/update-skill.js";
 import { skillDocs } from "./skill.docs.js";
 
@@ -36,6 +38,36 @@ export function registerSkillRoutes(app: FastifyInstance, deps: ServerDeps): voi
       );
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // Take a store publication into this workspace's library — the ONLY way an Everdict example or another workspace's
+  // published skill reaches an agent. The result is an ordinary workspace skill (editable, versionable here), which is
+  // why this needs skills:write and not an adoption permission. Static "import" resolves ahead of :id.
+  app.post("/skills/import", { schema: skillDocs.importFromStore }, async (req, reply) => {
+    if (!deps.skillService) return reply.code(404).send({ code: "NOT_FOUND", message: "skills not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "skills:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = ImportSkillBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await deps.skillService.importFromStore({
+          tenant: principal.workspace,
+          subject: principal.subject,
+          source: parsed.data.source,
+          id: parsed.data.id,
+          ...(parsed.data.version ? { version: parsed.data.version } : {}),
+          ...(parsed.data.visibility ? { visibility: parsed.data.visibility } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // not visible / missing → 404, not a skill → 400, already taken → 409
     }
   });
 
@@ -124,6 +156,64 @@ export function registerSkillRoutes(app: FastifyInstance, deps: ServerDeps): voi
       return sendError(reply, err);
     }
   });
+
+  // Name the skill's CURRENT content as a version — the second half of "edit it in conversation, then stamp it".
+  // Manage = creator-or-admin (service gate); a version that does not come after the current one is 400, and one
+  // already on the line is 409 (a stamped version is never rewritten).
+  app.post<{ Params: { id: string } }>("/skills/:id/versions", { schema: skillDocs.stamp }, async (req, reply) => {
+    if (!deps.skillService) return reply.code(404).send({ code: "NOT_FOUND", message: "skills not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "skills:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = StampSkillVersionBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await deps.skillService.stampVersion(principal.workspace, req.params.id, parsed.data, {
+          subject: principal.subject,
+          isAdmin: principal.roles.includes("admin"),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // The skill's stamped versions, newest first — readable by anyone who can read the skill.
+  app.get<{ Params: { id: string } }>("/skills/:id/versions", { schema: skillDocs.versions }, async (req, reply) => {
+    if (!deps.skillService) return reply.code(404).send({ code: "NOT_FOUND", message: "skills not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "skills:read");
+      return reply.send(await deps.skillService.listVersions(principal.workspace, req.params.id, principal.subject));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // One stamped version's frozen content — what the procedure said at that point.
+  app.get<{ Params: { id: string; version: string } }>(
+    "/skills/:id/versions/:version",
+    { schema: skillDocs.version },
+    async (req, reply) => {
+      if (!deps.skillService) return reply.code(404).send({ code: "NOT_FOUND", message: "skills not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "skills:read");
+        return reply.send(
+          await deps.skillService.getVersion(principal.workspace, req.params.id, req.params.version, principal.subject),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   // skill-generate — draft a skill (name + description + instructions) from a description via the workspace's model.
   // Nothing is persisted; the member edits the draft and saves via POST /skills. skills:write (a real billable call).

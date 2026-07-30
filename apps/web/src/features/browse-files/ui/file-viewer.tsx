@@ -1,20 +1,25 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Download, History, Loader2, Pencil, Save, X } from 'lucide-react'
+import { Download, History, Loader2, Pencil, Play, Save, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import type { FsFileContentView, FsWriteConflictView } from '@/entities/workspace-file'
+import type {
+  FileExecutionResultView,
+  FsFileContentView,
+  FsWriteConflictView,
+} from '@/entities/workspace-file'
 import { fmtDateTime } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { CodeEditor } from '@/shared/ui/code-editor'
 import { EmptyState } from '@/shared/ui/empty-state'
 
-import { readFileAction, writeFileAction } from '../api/browse-files'
+import { readFileAction, runFileAction, writeFileAction } from '../api/browse-files'
 import { downloadBlob, fileBlob } from '../lib/file-bytes'
-import { languageFor, previewKindFor, supportsRawView } from '../lib/file-kind'
+import { isRunnablePath, languageFor, previewKindFor, supportsRawView } from '../lib/file-kind'
 import { displayPath } from '../lib/fs-path'
 import { DocumentPreview } from './document-preview'
+import { ExecutionOutput } from './execution-output'
 import { FileHistory } from './file-history'
 import { MergeConflictDialog } from './merge-conflict-dialog'
 
@@ -27,11 +32,13 @@ import { MergeConflictDialog } from './merge-conflict-dialog'
 export function FileViewer({
   path,
   canWrite,
+  canRun = false,
   onMutated,
 }: {
   path: string
   canWrite: boolean
-  onMutated?: () => void // fired after a save so the host can refresh its tree
+  canRun?: boolean // the deployment can run a file AND the member may write — see GET /me config.fileExecution
+  onMutated?: () => void // fired after a save (or a run that produced files) so the host can refresh its tree
 }) {
   const t = useTranslations('files')
   const [file, setFile] = useState<FsFileContentView | undefined>(undefined)
@@ -44,10 +51,15 @@ export function FileViewer({
   const [showHistory, setShowHistory] = useState(false)
   // A save refused because someone published first — held here so the resolution dialog can offer the merge.
   const [conflict, setConflict] = useState<FsWriteConflictView | undefined>(undefined)
+  // The last run of this file. Cleared when the document changes — an output pane for a file you are no longer
+  // looking at is worse than no output pane.
+  const [running, setRunning] = useState(false)
+  const [execution, setExecution] = useState<FileExecutionResultView | undefined>(undefined)
 
   const load = useCallback(async () => {
     setEditing(false)
     setShowRaw(false)
+    setExecution(undefined)
     setFileError(undefined)
     setLoading(true)
     const res = await readFileAction(path)
@@ -100,6 +112,20 @@ export function FileViewer({
     downloadBlob(file.entry.name, fileBlob(file.content, file.encoding, file.entry.contentType))
   }
 
+  // Run it. The whole execution happens server-side inside this call, so the button stays busy until the
+  // sandbox is gone. A run that produced files changed the tree — tell the host so it refetches.
+  async function runFile() {
+    setRunning(true)
+    const res = await runFileAction(path)
+    setRunning(false)
+    if (res.ok && res.data) {
+      setExecution(res.data)
+      if (res.data.outputs.some((output) => output.skipped !== true)) onMutated?.()
+    } else {
+      setFileError(res.error)
+    }
+  }
+
   const isText = file?.encoding === 'utf8'
   const canToggleRaw =
     file !== undefined &&
@@ -130,6 +156,12 @@ export function FileViewer({
           {canToggleRaw && !editing && !showHistory && (
             <Button variant="ghost" size="xs" onClick={() => setShowRaw((v) => !v)}>
               {showRaw ? t('preview') : t('raw')}
+            </Button>
+          )}
+          {canRun && isRunnablePath(path) && isText && !editing && !showHistory && (
+            <Button variant="outline" size="xs" disabled={running} onClick={() => void runFile()}>
+              {running ? <Loader2 className="animate-spin" /> : <Play />}{' '}
+              {running ? t('running') : t('run')}
             </Button>
           )}
           {file !== undefined && !editing && !showHistory && (
@@ -195,6 +227,7 @@ export function FileViewer({
           ) : file === undefined ? null : (
             <DocumentPreview file={file} path={path} raw={showRaw} />
           )}
+          {execution !== undefined && !editing && <ExecutionOutput result={execution} />}
         </div>
       )}
       {conflict !== undefined && (

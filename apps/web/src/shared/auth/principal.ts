@@ -38,6 +38,7 @@ export interface WebPrincipal {
 // Read-only instance config the control plane surfaces on GET /me — display/UX-gating only, never an authz input.
 export interface WebInstanceConfig {
   allowMemberPublicPublish?: boolean // a member (not only an admin) may publish a capability to the public catalog
+  fileExecution?: boolean // this deployment can run a workspace file (an execution driver is composed) — gates the viewer's Run
 }
 
 // The control plane auth context for the current request. Logged-in user → Keycloak Bearer, dev (unset) → x-everdict-tenant=default.

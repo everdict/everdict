@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { BadgeCheck, History, Lock, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { FileHistory } from '@/features/browse-files'
 import {
   KNOWLEDGE_ENTRY_KINDS,
   type KnowledgeCoverage,
@@ -99,6 +100,7 @@ function EntryDetailDialog({
   onEdit: () => void
 }) {
   const t = useTranslations('knowledge')
+  const f = useTranslations('files') // the body's file history speaks the Files vocabulary
   const router = useRouter()
   const [error, setError] = useState<string | undefined>(undefined)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -170,6 +172,20 @@ function EntryDetailDialog({
         )}
 
         <Markdown content={entry.body} className="text-sm" />
+
+        {/* An entry's body IS a workspace file (knowledge/<id>.md — the content-projection SSOT), so it carries
+            the same publication history as any other file: edits here, from the Files shell and by agents land
+            in one list. Collapsed by default — the claim is what the reader came for; its provenance is a click
+            away when they ask "who changed this, and why". */}
+        <details className="group rounded-md border border-border">
+          <summary className="cursor-pointer list-none px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
+            <History className="mr-1.5 inline size-3.5" />
+            {f('historyTitle')}
+          </summary>
+          <div className="border-t border-border">
+            <FileHistory path={`knowledge/${entry.id}.md`} canWrite={manageable} />
+          </div>
+        </details>
 
         <RefChips label={t('detail.refs')} refs={entry.refs} />
         <RefChips label={t('detail.evidence')} refs={entry.evidence} />

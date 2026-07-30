@@ -1,7 +1,20 @@
-import { AgentSkillListResponseSchema, AgentToolListResponseSchema } from "@everdict/contracts/wire";
+import {
+  AgentSkillListResponseSchema,
+  AgentToolDetailResponseSchema,
+  AgentToolListResponseSchema,
+  AgentToolProbeResponseSchema,
+} from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { BindAgentToolSecretsBodySchema } from "./request/bind-agent-tool-secrets.js";
 import { SetAgentToolBodySchema } from "./request/set-agent-tool.js";
+
+// The percent-encoded tool key every :key route takes (`capability:<owner>/<id>` carries a slash).
+const KEY_PARAM = {
+  type: "object",
+  properties: { key: { type: "string", description: "Percent-encoded tool key from GET /agent/tools" } },
+  required: ["key"],
+} as const;
 
 // OpenAPI descriptors for /agent/tools + /agent/skills — doc-only (rule api-layer); validation stays in the handlers.
 
@@ -39,6 +52,60 @@ const docs = {
     response: {
       200: { description: "The refreshed toolset", ...toJsonSchema(AgentToolListResponseSchema) },
       ...errorResponses(400, 401, 404),
+    },
+  },
+  getTool: {
+    summary: "Read one tool of the caller's agent toolset in full",
+    description: [
+      "The detail behind the list row: which channel put the tool on the table (builtin | capability | mcpServer),",
+      "how the runtime reaches it (remote MCP URL · stdio container · code script), the functions it contributes to",
+      "the model's tool list with the NAMESPACED names the model actually calls, the description the model reads,",
+      "the pinned source + worked examples of a code tool, and each declared secret with the secret name it reads and",
+      "whether the caller can satisfy it. Also reports whether the tool can be rebound, edited, or probed.",
+      SELF_SCOPED,
+      "A key that is not in the caller's toolset is 404.",
+    ].join(" "),
+    tags: ["agent"],
+    params: KEY_PARAM,
+    response: {
+      200: { description: "The tool", ...toJsonSchema(AgentToolDetailResponseSchema) },
+      ...errorResponses(401, 404),
+    },
+  },
+  probeTool: {
+    summary: "Test-connect one MCP tool and list its functions",
+    description: [
+      "Opens a live MCP session to the tool AS THIS MEMBER — using the secret their agent would use — and returns",
+      "what the server really serves, so the declared function list can be checked against reality. A failure is a",
+      "RESULT (reachable:false + reason + the unresolved secret names), never an error. Only a remote (HTTP) MCP tool",
+      "can be probed from the control plane: a container tool is started by the agent and a code tool is verified by",
+      "running it, so either is 400.",
+      SELF_SCOPED,
+    ].join(" "),
+    tags: ["agent"],
+    params: KEY_PARAM,
+    response: {
+      200: { description: "The probe result", ...toJsonSchema(AgentToolProbeResponseSchema) },
+      ...errorResponses(400, 401, 404),
+    },
+  },
+  bindToolSecrets: {
+    summary: "Bind one tool's declared secrets to real secret names",
+    description: [
+      "Points each secret a tool declares at a secret name in this workspace (values are never sent — a spec",
+      "references a secret by NAME). Unlike the on/off overlay this edits the WORKSPACE agent configuration, because",
+      "that is where the binding lives: an adopted capability keeps it on its pinned reference, a hand-wired MCP",
+      "server on its authSecret. It therefore requires agents:write and produces a NEW agent version.",
+      "A built-in default and a published-but-unadopted capability read their secret by its declared name and have no",
+      "binding to edit — those are 400. An omitted entry keeps the current binding.",
+      "Returns the refreshed tool.",
+    ].join(" "),
+    tags: ["agent"],
+    params: KEY_PARAM,
+    body: toJsonSchema(BindAgentToolSecretsBodySchema),
+    response: {
+      200: { description: "The refreshed tool", ...toJsonSchema(AgentToolDetailResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   listSkills: {

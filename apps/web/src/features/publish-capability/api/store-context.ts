@@ -6,6 +6,7 @@ import {
 import { imageRegistriesResponseSchema } from '@/entities/image-registry'
 import { membersSchema } from '@/entities/member'
 import { secretsSchema } from '@/entities/secret'
+import { skillsSchema } from '@/entities/skill'
 import { workspacesSchema } from '@/entities/workspace'
 import { controlPlane, type AuthContext } from '@/shared/lib/control-plane'
 
@@ -14,6 +15,9 @@ export interface StoreContext {
   authors: Record<string, { name: string; avatarUrl?: string }>
   // 이미 채택한 capability 키(source/id) — 행에 "채택됨" 표시.
   adoptedKeys: string[]
+  // 이미 **가져온** 스킬 발행물의 출처 키(source/id) — 스킬은 채택 참조가 아니라 워크스페이스 스킬 **사본**이 되므로
+  // "이미 있는가"는 라이브러리의 origin 으로 판정한다(카탈로그가 가져간 예제를 감추는 기준).
+  importedSkillKeys: string[]
   // 워크스페이스가 가져온(import) 환경 이미지 인벤토리 — environment 의 "가져옴/사용가능" 표시용.
   adoptedEnvironments: AdoptedEnvironment[]
   // 채택 시 필요 시크릿을 바인딩할 후보(워크스페이스 시크릿 이름).
@@ -67,10 +71,27 @@ export async function loadStoreContext(ctx: AuthContext): Promise<StoreContext> 
     )
     .catch(() => [] as { name: string; host: string }[])
 
+  const importedSkillKeys = await controlPlane
+    .listSkills(ctx)
+    .then((r) =>
+      skillsSchema
+        .parse(r)
+        .flatMap((skill) => (skill.origin ? [`${skill.origin.source}/${skill.origin.id}`] : []))
+    )
+    .catch(() => [] as string[])
+
   const adoptedEnvironments = await controlPlane
     .listAdoptedEnvironments(ctx)
     .then((r) => adoptedEnvironmentsResponseSchema.parse(r).environments)
     .catch(() => [] as AdoptedEnvironment[])
 
-  return { authors, adoptedKeys, adoptedEnvironments, secretNames, myWorkspaces, imageRegistries }
+  return {
+    authors,
+    adoptedKeys,
+    importedSkillKeys,
+    adoptedEnvironments,
+    secretNames,
+    myWorkspaces,
+    imageRegistries,
+  }
 }

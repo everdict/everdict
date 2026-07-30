@@ -13,7 +13,7 @@ import { useInfraPanel } from '../model/infra-panel-context'
 // re-selecting in the Settings › Files tree swaps the content in place instead of reloading a document. A save
 // here bumps fsRevision so the tree on the left refetches; deleting is the TREE's job (it owns the list
 // actions), and it calls closeFile when the deletion carried away what this tab was showing.
-export function FilesTab({ canWrite }: { canWrite: boolean }) {
+export function FilesTab({ canWrite, canRun = false }: { canWrite: boolean; canRun?: boolean }) {
   const t = useTranslations('files')
   const { filePath, notifyFsMutation } = useInfraPanel()
 
@@ -26,7 +26,12 @@ export function FilesTab({ canWrite }: { canWrite: boolean }) {
   }
   return (
     <div className="h-full overflow-y-auto">
-      <FileViewer path={filePath} canWrite={canWrite} onMutated={notifyFsMutation} />
+      <FileViewer
+        path={filePath}
+        canWrite={canWrite}
+        canRun={canRun}
+        onMutated={notifyFsMutation}
+      />
     </div>
   )
 }

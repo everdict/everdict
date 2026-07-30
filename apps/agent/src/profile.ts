@@ -69,58 +69,34 @@ function composeSystemPrompt(
 }
 
 // The member's enabled skills → the `use_skill` library. The DECISION (which skills this member's agent follows,
-// including the workspace's opt-outs, the integration gate and name shadowing) was already made by
-// resolveAgentCapabilities; this only loads each one's body.
-// Freshness coverage (current | behind | unverified) is a property of an AUTHORED skill's pinned refs, so it is
-// computed for those records only — in ONE batched pass, as before. Best-effort: no resolver / a failed lookup means
+// including name shadowing) was already made by resolveAgentCapabilities; this only loads each one's body. Every
+// entry is a SkillRecord the workspace owns — a store skill becomes one by being copied in — so coverage (current |
+// behind | unverified) applies to all of them, in ONE batched pass. Best-effort: no resolver / a failed lookup means
 // the listing simply carries no badge.
 async function shapeSkills(
   enabled: readonly ResolvedAgentSkill[],
   workspace: string,
   latestVersionOf: LatestVersionResolver | undefined,
 ): Promise<SkillEntry[]> {
-  const authoredRecords: SkillRecord[] = [];
-  const authoredIndex = new Map<string, number>(); // key → its row in authoredRecords (and in the coverage result)
-  for (const skill of enabled) {
-    if (skill.origin.channel !== "authored") continue;
-    authoredIndex.set(skill.key, authoredRecords.length);
-    authoredRecords.push(skill.origin.record);
-  }
+  const records: SkillRecord[] = enabled.map((skill) => skill.origin.record);
   let coverage: Awaited<ReturnType<typeof resolveCoverage>> | undefined;
-  if (latestVersionOf && authoredRecords.length > 0) {
+  if (latestVersionOf && records.length > 0) {
     try {
-      coverage = await resolveCoverage(workspace, authoredRecords, latestVersionOf, new Date().toISOString());
+      coverage = await resolveCoverage(workspace, records, latestVersionOf, new Date().toISOString());
     } catch {
       coverage = undefined;
     }
   }
-
-  const library: SkillEntry[] = [];
-  for (const skill of enabled) {
-    if (skill.origin.channel === "authored") {
-      const record = skill.origin.record;
-      const index = authoredIndex.get(skill.key);
-      const c = index === undefined ? undefined : coverage?.[index];
-      library.push({
-        name: record.name,
-        description: record.description,
-        instructions: record.instructions,
-        files: record.files,
-        ...(c !== undefined ? { coverage: c } : {}),
-      });
-      continue;
-    }
-    // Packaged: an adopted / published / first-party skill capability — the body travels with the version.
-    const record = skill.origin.channel === "builtin" ? skill.origin.builtin.record : skill.origin.record;
-    if (record.spec.type !== "skill") continue;
-    library.push({
+  return records.map((record, i) => {
+    const c = coverage?.[i];
+    return {
       name: record.name,
       description: record.description,
-      instructions: record.spec.instructions,
-      files: record.spec.files,
-    });
-  }
-  return library;
+      instructions: record.instructions,
+      files: record.files,
+      ...(c !== undefined ? { coverage: c } : {}),
+    };
+  });
 }
 
 // One resolved tool → the runnable form the agent bridges. The DECISION of what belongs in this member's toolset was

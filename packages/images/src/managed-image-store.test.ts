@@ -156,3 +156,79 @@ describe("ManagedImageStore — usage", () => {
     await expect(store(api).usage("acme")).resolves.toEqual({ repositories: 2 });
   });
 });
+
+describe("ManagedImageStore — cross-tenant pull (M6)", () => {
+  // The store never decides reach itself; it authorizes what the injected policy allows. These cover both answers.
+  function storeWithReach(allow: (tenant: string, ref: string) => Promise<boolean>) {
+    return new ManagedImageStore({ endpoint: ENDPOINT, issuer: issuer(), api: fakeApi().api, crossTenantPull: allow });
+  }
+
+  it("grants a scope in another workspace's namespace when the reach policy allows it", async () => {
+    // Given: a policy that allows exactly the ref in question
+    const asked: string[] = [];
+    const s = storeWithReach(async (_t, ref) => {
+      asked.push(ref);
+      return true;
+    });
+    // When
+    const grants = await s.mintPullGrant("acme", [`${ENDPOINT}/${OTHER_NS}/officeqa:v1`]);
+    // Then: one grant, scoped to the publisher's repository
+    expect(grants).toHaveLength(1);
+    expect(grants[0]?.repositories).toEqual([`${OTHER_NS}/officeqa`]);
+    expect(grants[0]?.actions).toEqual(["pull"]);
+    expect(asked).toEqual([`${ENDPOINT}/${OTHER_NS}/officeqa:v1`]);
+  });
+
+  it("omits it when the policy refuses — an unauthorized pull fails at the registry, never with a grant we invented", async () => {
+    const s = storeWithReach(async () => false);
+    await expect(s.mintPullGrant("acme", [`${ENDPOINT}/${OTHER_NS}/secret:v1`])).resolves.toEqual([]);
+  });
+
+  it("still grants the caller's OWN namespace without consulting the policy", async () => {
+    let consulted = false;
+    const s = storeWithReach(async () => {
+      consulted = true;
+      return false; // even a refusing policy must not touch one's own images
+    });
+    const grants = await s.mintPullGrant("acme", [`${ENDPOINT}/${NS}/officeqa:v1`]);
+    expect(grants[0]?.repositories).toEqual([`${NS}/officeqa`]);
+    expect(consulted).toBe(false);
+  });
+
+  it("carries own and reachable cross-tenant repositories in ONE grant", async () => {
+    const s = storeWithReach(async () => true);
+    const grants = await s.mintPullGrant("acme", [`${ENDPOINT}/${NS}/mine:v1`, `${ENDPOINT}/${OTHER_NS}/theirs:v2`]);
+    expect(grants).toHaveLength(1);
+    expect(grants[0]?.repositories.sort()).toEqual([`${NS}/mine`, `${OTHER_NS}/theirs`].sort());
+  });
+});
+
+describe("ManagedImageStore — the catalog scope (regression: a repository scope 401s at _catalog)", () => {
+  it("asks for registry:catalog:*, not a repository pattern", async () => {
+    // Given: distribution guards the registry-wide listing with its own resource type
+    const { api, calls } = fakeApi({ [`${NS}/officeqa`]: { v1: "sha256:aa" } });
+    // When
+    await store(api).listRepositories("acme");
+    // Then: the token minted for the call carries the registry-wide catalog scope
+    const call = calls.find((c) => c.op === "catalog");
+    expect(call?.access).toEqual([{ type: "registry", name: "catalog", actions: ["*"] }]);
+  });
+
+  it("still keeps the workspace inside its own tree — the prefix filter, not the token, is the boundary", async () => {
+    const { api } = fakeApi({ [`${NS}/officeqa`]: { v1: "sha256:aa" }, [`${OTHER_NS}/secret`]: { v1: "sha256:bb" } });
+    const repos = await store(api).listRepositories("acme");
+    expect(repos.map((r) => r.repository)).toEqual([`${NS}/officeqa`]);
+  });
+});
+
+describe("ManagedImageStore — the delete scope (regression: a pull+push token 401s at manifest DELETE)", () => {
+  it("asks for the `delete` action, not push", async () => {
+    // Given: a repository with one tag
+    const { api, calls } = fakeApi({ [`${NS}/officeqa`]: { v1: "sha256:aa" } });
+    // When
+    await store(api).remove("acme", "officeqa");
+    // Then: the deletion carries `delete` (with pull, which resolves the tag to the digest it deletes by)
+    const del = calls.find((c) => c.op === "delete");
+    expect(del?.access).toEqual([{ type: "repository", name: `${NS}/officeqa`, actions: ["pull", "delete"] }]);
+  });
+});

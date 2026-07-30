@@ -85,6 +85,7 @@ function skillRecord(over: Partial<SkillRecord>): SkillRecord {
     files: [],
     refs: [],
     visibility: "workspace",
+    version: "1.0.0",
     createdBy: "u1",
     createdAt: "t",
     updatedAt: "t",
@@ -141,11 +142,11 @@ function spec(over: Partial<AgentSpec> = {}): AgentSpec {
 describe("registryProfileResolver", () => {
   it("falls back to the base profile when no agent is registered (+ the unconditional built-in defaults)", async () => {
     const profile = await resolver(undefined)(principal);
-    // The unconditional first-party analyze_trace SKILL rides along even with no workspace skills, so the
-    // base prompt gains the skills note; the workspace-authored set stays empty.
+    // Nothing is registered and the workspace owns no skill, so the library is empty: Everdict's own skills are
+    // store EXAMPLES a workspace copies in, never documents that attach themselves.
     expect(profile.systemPrompt.startsWith(BASE)).toBe(true);
     expect(profile.mcpServers).toEqual([]);
-    expect(profile.skills.map((s) => s.name)).toEqual(["analyze_trace"]);
+    expect(profile.skills).toEqual([]);
     // pdf_read is unconditional (no key); web_search needs a key (absent here) → omitted.
     expect(profile.codeTools.map((t) => t.name)).toEqual(["fetch_url", "pdf_read"]);
   });
@@ -156,7 +157,7 @@ describe("registryProfileResolver", () => {
       secretStore({}),
       skillStore([skillRecord({ name: "triage" })]),
     )(principal);
-    expect(profile.skills.map((s) => s.name)).toEqual(["triage", "analyze_trace"]);
+    expect(profile.skills.map((s) => s.name)).toEqual(["triage"]);
     expect(profile.skills[0]).toMatchObject({ name: "triage", description: "d", instructions: "1. …", files: [] });
     expect(profile.systemPrompt).toContain("use_skill");
   });
@@ -315,21 +316,17 @@ describe("registryProfileResolver", () => {
     expect(profile.mcpServers[0]?.write).toBe(false);
   });
 
-  it("resolves an adopted skill capability into a use_skill entry (deduped against the ambient library)", async () => {
-    const cap = capRecord({ type: "skill", instructions: "1. adopted step", files: [] }, { name: "adopted-skill" });
+  it("never turns a skill-kind capability into a use_skill entry — a store skill reaches the agent by being COPIED", async () => {
+    // A stale pin from before skills were copies must not smuggle an uneditable procedure into the library; the
+    // supported path is SkillService.importFromStore, which lands a SkillRecord the workspace owns.
+    const cap = capRecord({ type: "skill", instructions: "1. published step", files: [] }, { name: "published-skill" });
     const profile = await resolver(
       spec({ capabilities: [capRef()] }),
       secretStore({}),
       skillStore(),
       capabilityStore([cap]),
     )(principal);
-    expect(profile.skills).toContainEqual({
-      name: "adopted-skill",
-      description: "d",
-      instructions: "1. adopted step",
-      files: [],
-    });
-    expect(profile.systemPrompt).toContain("use_skill");
+    expect(profile.skills).toEqual([]);
   });
 
   it("skips a cross-tenant capability the consumer may not see (best-effort, turn survives)", async () => {
@@ -354,7 +351,7 @@ describe("registryProfileResolver", () => {
       capabilityStore([]), // getVersion returns undefined
     )(principal);
     expect(profile.mcpServers).toEqual([]);
-    expect(profile.skills.map((s) => s.name)).toEqual(["analyze_trace"]); // the first-party skill remains
+    expect(profile.skills).toEqual([]);
     expect(profile.codeTools.map((t) => t.name)).toEqual(["fetch_url", "pdf_read"]); // pin skipped; only the built-in defaults remain
   });
 
@@ -413,31 +410,12 @@ describe("registryProfileResolver", () => {
     expect(profile.codeTools.some((t) => t.name === "web_search")).toBe(false); // opted out even though the key is present
   });
 
-  it("adds the built-in scorecard_fix_pr SKILL default only when the GitHub integration is configured", async () => {
-    // Gated default + integration configured → the skill rides into the profile (use_skill), no adoption needed.
-    const withGithub = await resolver(undefined, secretStore({}), skillStore(), capabilityStore(), ["github"])(
+  it("offers no skill at all until the workspace owns one — not even with every integration configured", async () => {
+    const configured = await resolver(undefined, secretStore({}), skillStore(), capabilityStore(), ["github"])(
       principal,
     );
-    const skill = withGithub.skills.find((s) => s.name === "scorecard_fix_pr");
-    expect(skill).toBeDefined();
-    expect(skill?.instructions).toContain("open_github_pr");
-    // No GitHub App installed → the gated default stays off (unconditional defaults are unaffected).
-    const without = await resolver(undefined)(principal);
-    expect(without.skills.some((s) => s.name === "scorecard_fix_pr")).toBe(false);
-    expect(without.codeTools.map((t) => t.name)).toEqual(["fetch_url", "pdf_read"]);
-  });
-
-  it("a workspace-authored skill of the same name shadows the built-in skill default", async () => {
-    const profile = await resolver(
-      undefined,
-      secretStore({}),
-      skillStore([skillRecord({ name: "scorecard_fix_pr", instructions: "our own playbook" })]),
-      capabilityStore(),
-      ["github"],
-    )(principal);
-    const entries = profile.skills.filter((s) => s.name === "scorecard_fix_pr");
-    expect(entries).toHaveLength(1); // shadowed, not duplicated
-    expect(entries[0]?.instructions).toBe("our own playbook"); // the authored skill wins
+    expect(configured.skills).toEqual([]);
+    expect(configured.codeTools.map((t) => t.name)).toEqual(["fetch_url", "pdf_read"]); // tools still ride along
   });
 
   it("shadows a default when an adopted tool has the same name", async () => {
@@ -555,23 +533,5 @@ describe("registryProfileResolver", () => {
       memberPreferences({}, { "skill:s-triage": false }),
     )(principal);
     expect(optedOut.skills.map((s) => s.name)).not.toContain("triage");
-  });
-
-  it("lets a member re-enable a built-in skill their workspace opted out of", async () => {
-    const optedOut = spec({ disabledDefaults: ["scorecard-fix-pr"] });
-    const workspaceDefault = await resolver(optedOut, secretStore({}), skillStore(), capabilityStore(), ["github"])(
-      principal,
-    );
-    expect(workspaceDefault.skills.map((s) => s.name)).not.toContain("scorecard_fix_pr");
-
-    const mine = await resolver(
-      optedOut,
-      secretStore({}),
-      skillStore(),
-      capabilityStore(),
-      ["github"],
-      memberPreferences({}, { "default:scorecard-fix-pr": true }),
-    )(principal);
-    expect(mine.skills.map((s) => s.name)).toContain("scorecard_fix_pr");
   });
 });

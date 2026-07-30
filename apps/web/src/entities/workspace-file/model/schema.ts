@@ -1,10 +1,12 @@
 import type {
+  FileExecutionResult as ContractFileExecutionResult,
   FsEntry as ContractFsEntry,
   FsRevision as ContractFsRevision,
 } from '@everdict/contracts'
 import type {
   FsFileContent as ContractFsFileContent,
   FsRemoveResult as ContractFsRemoveResult,
+  FsRevisionDiff as ContractFsRevisionDiff,
   FsWriteConflict as ContractFsWriteConflict,
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
@@ -72,6 +74,35 @@ export const fsWriteConflictSchema = z.object({
 })
 export type FsWriteConflictView = z.infer<typeof fsWriteConflictSchema>
 
+// A line diff between two revisions — hunks with context, so the viewer shows the edited passages rather than
+// the whole document. `truncated` = binary or too large to compare; fall back to showing the contents.
+export const fsTextDiffLineSchema = z.object({
+  op: z.enum(['context', 'add', 'remove']),
+  text: z.string(),
+  beforeLine: z.number().int().positive().optional(),
+  afterLine: z.number().int().positive().optional(),
+})
+export type FsTextDiffLineView = z.infer<typeof fsTextDiffLineSchema>
+
+export const fsRevisionDiffSchema = z.object({
+  path: z.string(),
+  from: z.number().int().positive(),
+  to: z.number().int().nonnegative(),
+  diff: z.object({
+    hunks: z.array(
+      z.object({
+        beforeStart: z.number().int().nonnegative(),
+        afterStart: z.number().int().nonnegative(),
+        lines: z.array(fsTextDiffLineSchema),
+      })
+    ),
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+  }),
+})
+export type FsRevisionDiffView = z.infer<typeof fsRevisionDiffSchema>
+
 export const fsFileContentSchema = z.object({
   entry: fsEntrySchema,
   content: z.string(),
@@ -81,6 +112,30 @@ export type FsFileContentView = z.infer<typeof fsFileContentSchema>
 
 export const fsRemoveResultSchema = z.object({ removed: z.number().int().nonnegative() })
 export type FsRemoveResultView = z.infer<typeof fsRemoveResultSchema>
+
+// One run of a file: what it printed, how it ended, and what it left behind. A non-zero exitCode is a normal
+// result to render, not an error — the viewer shows it the way a terminal would.
+export const fileExecutionOutputSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  size: z.number().int().nonnegative(),
+  skipped: z.boolean().optional(), // something was already at that path — the run never overwrites
+})
+export type FileExecutionOutputView = z.infer<typeof fileExecutionOutputSchema>
+
+export const fileExecutionResultSchema = z.object({
+  path: z.string(),
+  image: z.string(),
+  command: z.string(),
+  exitCode: z.number().int(),
+  stdout: z.string(),
+  stderr: z.string(),
+  truncated: z.boolean(),
+  timedOut: z.boolean(),
+  durationMs: z.number().int().nonnegative(),
+  outputs: z.array(fileExecutionOutputSchema),
+})
+export type FileExecutionResultView = z.infer<typeof fileExecutionResultSchema>
 
 // Drift guards — the contract satisfies the local view (loose-consumer direction).
 type AssertAssignable<A extends B, B> = A
@@ -103,4 +158,12 @@ type _RevisionGuard = AssertAssignable<
 type _ConflictGuard = AssertAssignable<
   Pick<ContractFsWriteConflict, keyof FsWriteConflictView>,
   FsWriteConflictView
+>
+type _RevisionDiffGuard = AssertAssignable<
+  Pick<ContractFsRevisionDiff, keyof FsRevisionDiffView>,
+  FsRevisionDiffView
+>
+type _ExecutionGuard = AssertAssignable<
+  Pick<ContractFileExecutionResult, keyof FileExecutionResultView>,
+  FileExecutionResultView
 >

@@ -1,4 +1,9 @@
-import { ImagePushGrantResponseSchema } from "@everdict/contracts/wire";
+import {
+  ImageCatalogResponseSchema,
+  ImagePushGrantResponseSchema,
+  ImageRemoveResponseSchema,
+  ImageTagsResponseSchema,
+} from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -54,6 +59,49 @@ const docs = {
     response: {
       200: { description: "Push grant + image prefix", ...toJsonSchema(ImagePushGrantResponseSchema) },
       ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  catalog: {
+    summary: "List the workspace's managed image repositories",
+    description:
+      "Every repository in the caller's managed namespace, plus the usage counters Settings › Images leads " +
+      "with, plus the endpoint and namespace a ref is assembled from. Tags are NOT resolved here (one registry " +
+      "call per repository) — drill in with the tags endpoint. Read is harnesses:read: which images a workspace " +
+      "published is provenance, not a credential. Design: docs/architecture/managed-image-store.md.",
+    tags: ["images"],
+    response: {
+      200: { description: "The workspace's repositories and usage", ...toJsonSchema(ImageCatalogResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  tags: {
+    summary: "List the tags of one managed repository",
+    description:
+      "Tags of a single repository in the caller's namespace, resolved on demand — the drill-in the catalog " +
+      "listing deliberately does not fan out. A repository that does not exist reads as an empty tag list, " +
+      "matching the registry's own answer.",
+    tags: ["images"],
+    params: toJsonSchema(
+      z.object({ repository: z.string().min(1).describe("Repository name inside the workspace namespace") }),
+    ),
+    response: {
+      200: { description: "The repository's tags", ...toJsonSchema(ImageTagsResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  remove: {
+    summary: "Unpublish a repository from the workspace's image namespace",
+    description:
+      "Deletes every manifest of one repository in the caller's namespace and reports how many were unlinked " +
+      "(blobs are reclaimed by the registry's own garbage collection). Requires images:push — retracting an " +
+      "image is the inverse of publishing it, so it belongs to the same member who may push.",
+    tags: ["images"],
+    params: toJsonSchema(
+      z.object({ repository: z.string().min(1).describe("Repository name inside the workspace namespace") }),
+    ),
+    response: {
+      200: { description: "How many manifests were unlinked", ...toJsonSchema(ImageRemoveResponseSchema) },
+      ...errorResponses(401, 403, 404),
     },
   },
   manifest: {

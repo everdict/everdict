@@ -62,6 +62,7 @@ import { StatCard } from '@/shared/ui/stat-card'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import { adoptCapabilityAction, unadoptCapabilityAction } from '../api/adopt-capability'
+import { importSkillAction } from '../api/import-skill'
 import {
   adoptEnvironmentAction,
   unadoptEnvironmentAction,
@@ -131,7 +132,9 @@ export function CapabilityStore({
   canWrite,
   canAdopt,
   canImportEnvironment,
+  canImportSkill,
   adoptedKeys,
+  importedSkillKeys,
   adoptedEnvironments,
   secretNames,
   myWorkspaces,
@@ -147,7 +150,11 @@ export function CapabilityStore({
   canWrite: boolean
   canAdopt: boolean
   canImportEnvironment: boolean
+  // 스킬 가져오기 = 워크스페이스 스킬 라이브러리에 쓰기(skills:write) — 채택(에이전트 설정)과 권한 축이 다르다.
+  canImportSkill: boolean
   adoptedKeys: string[]
+  // 이미 가져온 스킬 예제의 출처 키(source/id) — 스킬은 참조가 아니라 워크스페이스 스킬 사본이 되므로 판정 기준이 다르다.
+  importedSkillKeys: string[]
   adoptedEnvironments: AdoptedEnvironment[]
   secretNames: string[]
   myWorkspaces: { id: string; name: string }[]
@@ -184,11 +191,17 @@ export function CapabilityStore({
     () => new Map(adoptedEnvironments.map((e) => [`${e.source}/${e.id}`, e])),
     [adoptedEnvironments]
   )
-  // 이미 워크스페이스에 있는가 — 환경은 가져옴(import), 그 외는 채택(adopt).
+  // 이미 가져온 스킬 예제 — 라이브러리의 사본이 그 출처를 기억한다(구독이 아니라 복사라 채택 목록에는 없다).
+  const importedSkills = useMemo(() => new Set(importedSkillKeys), [importedSkillKeys])
+  // 이미 워크스페이스에 있는가 — 환경은 인벤토리, 스킬은 라이브러리 사본, 그 외는 에이전트 채택.
   const inWorkspace = useCallback(
     (c: Capability): boolean =>
-      c.spec.type === 'environment' ? adoptedEnvMap.has(capKey(c)) : adopted.has(capKey(c)),
-    [adopted, adoptedEnvMap]
+      c.spec.type === 'environment'
+        ? adoptedEnvMap.has(capKey(c))
+        : c.spec.type === 'skill'
+          ? importedSkills.has(capKey(c))
+          : adopted.has(capKey(c)),
+    [adopted, adoptedEnvMap, importedSkills]
   )
 
   // public 발행 가능? admin 은 항상, 멤버는 인스턴스 정책이 열려 있을 때. (서버가 최종 강제 — 여기선 UX 게이팅)
@@ -277,6 +290,17 @@ export function CapabilityStore({
       const r = await unadoptCapabilityAction(c.tenant, c.id)
       if (r.ok) toast.success(t('removedFromWorkspace', { name: c.name }))
       else toast.error(r.error ?? t('addError'))
+    })
+
+  // 스킬 추가 — 참조를 pin 하는 게 아니라 **사본**을 만든다. 그 순간부터 Settings › Agent › Skills 의 워크스페이스
+  // 스킬이고, 편집도 버전 찍기도 거기서 한다(everdict 매니지드 스킬이 워크스페이스에 들어오는 유일한 경로).
+  const importSkill = (c: Capability) =>
+    startTransition(async () => {
+      const r = await importSkillAction({ source: c.tenant, id: c.id, version: c.version })
+      if (r.ok) {
+        toast.success(t('skillCopied', { name: c.name }))
+        setDetail(null)
+      } else toast.error(r.error ?? t('addError'))
     })
 
   // environment 추가/제거 — 워크스페이스 인벤토리에 넣고, 넣을 때 pull 가능성을 검증한다(warn-not-block).
@@ -575,9 +599,10 @@ export function CapabilityStore({
           adoptedEnv={adoptedEnvMap.get(capKey(detail))}
           canAdopt={canAdopt}
           canImportEnvironment={canImportEnvironment}
+          canImportSkill={canImportSkill}
           pending={pending}
           onClose={() => setDetail(null)}
-          onAdopt={() => startAdopt(detail)}
+          onAdopt={() => (detail.spec.type === 'skill' ? importSkill(detail) : startAdopt(detail))}
           onUnadopt={() => unadopt(detail)}
           onImport={() => importEnv(detail)}
           onRemoveEnv={() => removeEnv(detail)}
@@ -700,6 +725,7 @@ function CapabilityDetailDialog({
   adoptedEnv,
   canAdopt,
   canImportEnvironment,
+  canImportSkill,
   pending,
   onClose,
   onAdopt,
@@ -717,6 +743,7 @@ function CapabilityDetailDialog({
   adoptedEnv?: AdoptedEnvironment
   canAdopt: boolean
   canImportEnvironment: boolean
+  canImportSkill: boolean
   pending: boolean
   onClose: () => void
   onAdopt: () => void
@@ -730,8 +757,16 @@ function CapabilityDetailDialog({
   const VisIcon = VIS_ICON[capability.visibility]
   const managed = isBuiltInCapability(capability)
   const isEnv = capability.spec.type === 'environment'
-  // 환경은 워크스페이스 인벤토리(settings:write), 그 외는 내 에이전트(agents:write) — 권한은 다르고 문구는 하나다.
-  const canChange = isEnv ? canImportEnvironment : canAdopt
+  const isSkill = capability.spec.type === 'skill'
+  // 환경은 워크스페이스 인벤토리(settings:write), 스킬은 스킬 라이브러리(skills:write), 그 외는 내 에이전트
+  // (agents:write) — 저장되는 곳도 권한도 다르지만 사용자에게는 같은 한 가지 동작이라 문구는 하나다.
+  const canChange = isEnv ? canImportEnvironment : isSkill ? canImportSkill : canAdopt
+  // 스킬은 여기서 뺄 수 없다: 가져온 것은 참조가 아니라 우리 워크스페이스 스킬 사본이라, 지우는 일은
+  // Settings › Agent › Skills 에서 그 스킬을 지우는 일이다(스토어가 남의 편집물을 회수할 수는 없다).
+  const canRemoveHere = canChange && !isSkill
+  // 우리가 발행한 스킬을 우리가 다시 가져오는 것은 같은 이름의 사본을 하나 더 만드는 일일 뿐이다 — 원본 Skill 은
+  // 이미 라이브러리에 있다(발행은 남들에게 복사거리를 내주는 행위이지, 내 라이브러리에 뭔가를 더하는 게 아니다).
+  const ownPublication = isSkill && capability.tenant === currentWorkspace
   const verify = adoptedEnv?.verify
   return (
     <Dialog open onClose={onClose} align="top" className="max-w-2xl">
@@ -807,8 +842,14 @@ function CapabilityDetailDialog({
           {inWorkspace ? (
             <span className="inline-flex items-center gap-1.5 text-[12px] font-[510] text-success">
               <CircleCheck className="size-4" />
-              {t('detailInWorkspace')}
+              {isSkill ? t('detailSkillCopied') : t('detailInWorkspace')}
             </span>
+          ) : ownPublication ? (
+            <span className="text-[12px] text-muted-foreground">{t('skillOwnPublication')}</span>
+          ) : isSkill ? (
+            // 스킬만 결과가 다르다 — 참조가 붙는 게 아니라 우리가 고칠 수 있는 사본이 생긴다. InfoTip 이 아니라
+            // 버튼 옆 한 줄로 두는 이유: 누르기 전에 알아야 하는 사실이다.
+            <span className="text-[12px] text-muted-foreground">{t('skillCopyHint')}</span>
           ) : (
             <span />
           )}
@@ -816,22 +857,24 @@ function CapabilityDetailDialog({
             <Button variant="secondary" size="sm" onClick={onClose}>
               {t('close')}
             </Button>
-            {canChange &&
-              (inWorkspace ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={pending}
-                  onClick={isEnv ? onRemoveEnv : onUnadopt}
-                >
-                  {t('removeFromWorkspace')}
-                </Button>
-              ) : (
-                <Button size="sm" disabled={pending} onClick={isEnv ? onImport : onAdopt}>
-                  <Plus />
-                  {t('addToWorkspace')}
-                </Button>
-              ))}
+            {inWorkspace
+              ? canRemoveHere && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={pending}
+                    onClick={isEnv ? onRemoveEnv : onUnadopt}
+                  >
+                    {t('removeFromWorkspace')}
+                  </Button>
+                )
+              : canChange &&
+                !ownPublication && (
+                  <Button size="sm" disabled={pending} onClick={isEnv ? onImport : onAdopt}>
+                    <Plus />
+                    {t('addToWorkspace')}
+                  </Button>
+                )}
           </div>
         </div>
       </div>

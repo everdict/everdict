@@ -19,9 +19,11 @@ import { FileViewer } from './file-viewer'
 export function FilesWorkbench({
   initialEntries,
   canWrite,
+  canRun = false,
 }: {
   initialEntries: FsEntryView[]
   canWrite: boolean
+  canRun?: boolean
 }) {
   const t = useTranslations('files')
   const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined)
@@ -58,7 +60,12 @@ export function FilesWorkbench({
               <EmptyState title={t('selectFile')} icon={<FileIcon />} />
             </div>
           ) : (
-            <FileViewer path={selectedPath} canWrite={canWrite} onMutated={refreshTree} />
+            <FileViewer
+              path={selectedPath}
+              canWrite={canWrite}
+              canRun={canRun}
+              onMutated={refreshTree}
+            />
           )}
         </div>
       </div>

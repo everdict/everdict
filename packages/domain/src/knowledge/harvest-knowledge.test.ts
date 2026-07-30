@@ -21,6 +21,7 @@ const skill: SkillRecord = {
     { type: "dataset", key: "login-cases", version: "3.0.0" },
   ],
   visibility: "workspace",
+  version: "1.0.0",
   createdBy: "user-alice",
   createdAt: "2026-07-28T00:00:00Z",
   updatedAt: "2026-07-28T01:00:00Z",

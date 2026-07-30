@@ -13,6 +13,7 @@ import {
 import {
   canConsumeCapability,
   classifyImageRef,
+  compareVersions,
   diffCapabilitySpecs,
   imageWarnings,
   specsEqual,
@@ -271,12 +272,23 @@ export class CapabilityService {
     source?: string,
   ): Promise<CapabilityView> {
     const owner = source ?? viewerTenant;
-    const record = await this.deps.store.get(owner, id, ref);
+    // First-party entries are code definitions, not store rows, so the store cannot answer for them. Resolving them
+    // here is what lets anything address a managed example by (source, id) — importing one into a skill library, or
+    // opening its detail — instead of every caller re-deriving it from the public LIST.
+    const record = this.firstParty(owner, id, ref) ?? (await this.deps.store.get(owner, id, ref));
     if (!record || !canConsumeCapability(record, { tenant: viewerTenant, subject }))
       throw new NotFoundError("NOT_FOUND", { id, version: ref }, `capability '${id}' not found.`);
     const [view] = await this.annotate(viewerTenant, [record]);
     if (!view) throw new NotFoundError("NOT_FOUND", { id, version: ref }, `capability '${id}' not found.`);
     return view;
+  }
+
+  // A first-party record by (owner, id, ref) — "latest" takes the highest version. Undefined when the catalog is not
+  // injected or holds nothing under that id, which is the signal to ask the store instead.
+  private firstParty(owner: string, id: string, ref: string): CapabilityRecord | undefined {
+    const matches = (this.deps.firstPartyCatalog?.() ?? []).filter((r) => r.tenant === owner && r.id === id);
+    if (ref !== "latest") return matches.find((r) => r.version === ref);
+    return matches.sort((a, b) => compareVersions(a.version, b.version)).at(-1);
   }
 
   // Attach the viewer-relative image class to environment records — best-effort (a coordinates failure or an unset

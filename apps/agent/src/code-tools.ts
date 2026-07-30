@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolResult } from "@everdict/agent-runtime";
 import type { CodeToolExample, ComputeHandle, ComputeSpec } from "@everdict/contracts";
+import { codeBridgedName } from "@everdict/domain";
 
 // Code capabilities (type:'code') the conversational agent adopted from the Store, resolved to a runnable form. The
 // pinned source runs inside a provisioned ComputeHandle — reusing the exact script-grader execution contract (input
@@ -83,7 +84,7 @@ export function buildCodeTool(tool: ResolvedCodeTool, runtime: CodeToolRuntime):
   const parametersJsonSchema =
     Object.keys(tool.parametersSchema).length > 0 ? tool.parametersSchema : { type: "object", properties: {} };
   return {
-    name: `code__${tool.name}`,
+    name: codeBridgedName(tool.name),
     description: describeWithExamples(tool.description, tool.examples),
     parametersJsonSchema,
     isReadOnly: tool.isReadOnly,

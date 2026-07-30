@@ -1,6 +1,11 @@
 import { CapabilityRecordSchema, FIRST_PARTY_TENANT } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { WEBSEARCH_SECRET_NAME, firstPartyCatalogExtras, firstPartyDefaults } from "./first-party.js";
+import {
+  WEBSEARCH_SECRET_NAME,
+  firstPartyCatalogExtras,
+  firstPartyDefaults,
+  firstPartySkillExamples,
+} from "./first-party.js";
 
 describe("firstPartyDefaults", () => {
   const defaults = firstPartyDefaults();
@@ -36,44 +41,8 @@ describe("firstPartyDefaults", () => {
     expect(fetchUrl.record.spec.isReadOnly).toBe(false); // arbitrary URL fetch → HITL-gated (SSRF guardrail)
   });
 
-  it("ships the scorecard-fix-PR skill, gated on the GitHub integration (the first skill-kind default)", () => {
-    const skill = defaults.find((d) => d.record.id === "scorecard-fix-pr");
-    expect(skill).toBeDefined();
-    if (!skill) return;
-    expect(skill.requires).toBe("github"); // reads the repo + opens the PR via the workspace GitHub App
-    expect(skill.record.spec.type).toBe("skill");
-    if (skill.record.spec.type !== "skill") return;
-    // The procedure's load-bearing steps: diagnose from scorecard evidence, fix via a PR, and carry the experiment
-    // context in the PR body (the whole point of the skill — a reviewer judges the fix without re-running).
-    for (const anchor of ["get_scorecard", "get_github_file", "open_github_pr", "references/pr-body.md"]) {
-      expect(skill.record.spec.instructions).toContain(anchor);
-    }
-    // The mandatory PR-body structure lives in a supporting file (progressive disclosure: loaded via read_skill_file
-    // only at the PR step), keeping the body lean.
-    const prBody = skill.record.spec.files.find((f) => f.path === "references/pr-body.md");
-    expect(prBody).toBeDefined();
-    for (const anchor of ["What failed", "Failing cases", "Root cause", "Verification"]) {
-      expect(prBody?.content).toContain(anchor);
-    }
-  });
-
-  it("ships the trace-analysis skill, unconditional (the 'analyze in chat' observability companion)", () => {
-    const skill = defaults.find((d) => d.record.id === "trace-analysis");
-    expect(skill).toBeDefined();
-    if (!skill) return;
-    expect(skill.requires).toBeNull(); // unconditional — uses the always-present trace-source reads
-    expect(skill.record.spec.type).toBe("skill");
-    if (skill.record.spec.type !== "skill") return;
-    // The procedure's load-bearing steps: pull the trace, connect Everdict-produced traces to their eval, and report
-    // via the supporting file (progressive disclosure).
-    for (const anchor of ["inspect_trace", "list_trace_source_traces", "provenance", "references/report.md"]) {
-      expect(skill.record.spec.instructions).toContain(anchor);
-    }
-    const report = skill.record.spec.files.find((f) => f.path === "references/report.md");
-    expect(report).toBeDefined();
-    for (const anchor of ["Verdict", "Failures", "Cost & latency", "Next steps"]) {
-      expect(report?.content).toContain(anchor);
-    }
+  it("attaches TOOLS only — a skill is a document a workspace owns, so it is never a silent default", () => {
+    for (const d of defaults) expect(["code", "mcp"]).toContain(d.record.spec.type);
   });
 
   it("ships a pdf-read code tool that needs no secret and is HITL-gated (arbitrary-URL fetch)", () => {
@@ -85,6 +54,56 @@ describe("firstPartyDefaults", () => {
     if (pdf.record.spec.type !== "code") return;
     expect(pdf.record.spec.requiredSecrets).toEqual([]); // no key → always offered
     expect(pdf.record.spec.isReadOnly).toBe(false); // arbitrary URL fetch → HITL-gated
+  });
+});
+
+describe("firstPartySkillExamples", () => {
+  const examples = firstPartySkillExamples();
+
+  it("are store entries a workspace COPIES, never defaults attached to anyone's agent", () => {
+    const defaultIds = new Set(firstPartyDefaults().map((d) => d.record.id));
+    const catalogIds = new Set(firstPartyCatalogExtras().map((r) => r.id));
+    expect(examples.length).toBeGreaterThan(0);
+    for (const rec of examples) {
+      const parsed = CapabilityRecordSchema.parse(rec);
+      expect(parsed.spec.type).toBe("skill");
+      expect(parsed.tenant).toBe(FIRST_PARTY_TENANT);
+      expect(parsed.visibility).toBe("public"); // browsable by every workspace
+      expect(defaultIds.has(parsed.id)).toBe(false); // NOT auto-attached — the whole point
+      expect(catalogIds.has(parsed.id)).toBe(true); // reachable exactly one way: the store catalog
+    }
+  });
+
+  it("the scorecard-fix-PR example carries the diagnose→PR procedure and its PR-body reference file", () => {
+    const skill = examples.find((r) => r.id === "scorecard-fix-pr");
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    // The procedure's load-bearing steps: diagnose from scorecard evidence, fix via a PR, and carry the experiment
+    // context in the PR body (the whole point of the skill — a reviewer judges the fix without re-running).
+    for (const anchor of ["get_scorecard", "get_github_file", "open_github_pr", "references/pr-body.md"]) {
+      expect(skill.spec.instructions).toContain(anchor);
+    }
+    // The mandatory PR-body structure lives in a supporting file (progressive disclosure: loaded via read_skill_file
+    // only at the PR step), keeping the body lean.
+    const prBody = skill.spec.files.find((f) => f.path === "references/pr-body.md");
+    expect(prBody).toBeDefined();
+    for (const anchor of ["What failed", "Failing cases", "Root cause", "Verification"]) {
+      expect(prBody?.content).toContain(anchor);
+    }
+  });
+
+  it("the trace-analysis example carries the pull→attribute→report procedure and its report reference file", () => {
+    const skill = examples.find((r) => r.id === "trace-analysis");
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    for (const anchor of ["inspect_trace", "list_trace_source_traces", "provenance", "references/report.md"]) {
+      expect(skill.spec.instructions).toContain(anchor);
+    }
+    const report = skill.spec.files.find((f) => f.path === "references/report.md");
+    expect(report).toBeDefined();
+    for (const anchor of ["Verdict", "Failures", "Cost & latency", "Next steps"]) {
+      expect(report?.content).toContain(anchor);
+    }
   });
 });
 

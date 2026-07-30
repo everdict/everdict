@@ -8,7 +8,6 @@ import {
   Globe,
   Lock,
   MoreHorizontal,
-  Package,
   Pencil,
   Plus,
   Sparkles,
@@ -20,7 +19,6 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { AgentSkillEntry } from '@/entities/agent-skill'
-import { isBuiltInCapability, type Capability } from '@/entities/capability'
 import type { Skill, SkillFile, SkillVisibility } from '@/entities/skill'
 import { fmtSubject } from '@/shared/lib/format'
 import { Avatar } from '@/shared/ui/avatar'
@@ -45,19 +43,11 @@ import { TestSkillPanel } from './test-skill-panel'
 // subject → 표시 이름 + 아바타(있으면). 스킬 카드/편집화면의 "작성자" 표시에 쓰인다(멤버 프로필, 없으면 fmtSubject 폴백).
 type Author = { name: string; avatarUrl?: string }
 
-// 라이브러리 한 줄 — 여기서 저작하는 Skill 레코드이거나, 스킬 kind 로 발행/제공되는 capability 패키지다. 에이전트에게는
-// 둘 다 똑같이 use_skill 항목이므로 한 목록에 함께 서고, 카드 표현만 갈린다(패키지는 읽기 전용).
-type LibraryEntry =
-  | { key: string; kind: 'skill'; skill: Skill }
-  | { key: string; kind: 'packaged'; capability: Capability }
-
 // Workspace › Skills — 멤버가 함께 만들어가는 SKILL.md식 스킬 라이브러리. 목록 + AI 생성 위저드(설명→초안→편집→저장) +
 // 편집 + 비공개↔워크스페이스 공유 토글 + 삭제. 에이전트는 이 스킬들을 use_skill 로 발견·사용한다(웹은 저작 표면).
 export function SkillsManager({
   skills,
-  packaged = [],
   agentSkills = [],
-  currentWorkspace,
   modelIds,
   authors,
   canWrite,
@@ -66,15 +56,9 @@ export function SkillsManager({
   header,
 }: {
   skills: Skill[]
-  // 스킬 kind capability — 스토어에 발행됐거나 이 워크스페이스로 공유된 것, 그리고 Everdict 빌트인. 여기선 읽기 전용
-  // (저작·버전은 스토어 소관)이지만 에이전트가 실제로 따르는 스킬이라 같은 라이브러리에 선다. 개인 능력 페이지처럼
-  // capability 를 이미 따로 보여주는 화면에선 생략한다.
-  packaged?: Capability[]
-  // 내 에이전트가 실제로 따르는 스킬 — 워크스페이스 라이브러리(위 두 목록)가 "지원하는 절차"라면 이건 "내가 켠 절차".
+  // 내 에이전트가 실제로 따르는 스킬 — 워크스페이스 라이브러리가 "지원하는 절차"라면 이건 "내가 켠 절차".
   // 행마다 스위치를 달아 준다. 비면 스위치 없이 라이브러리로만 읽힌다(권한/서비스 미구성).
   agentSkills?: AgentSkillEntry[]
-  // capability 의 소유 워크스페이스를 판별해 스코프 섹션을 나누는 기준(빠진 경우 전부 "제공됨"으로 떨어진다).
-  currentWorkspace?: string
   modelIds: string[]
   authors: Record<string, Author>
   canWrite: boolean
@@ -94,9 +78,6 @@ export function SkillsManager({
   const [mySkills, setMySkills] = useState(agentSkills)
   const [switching, setSwitching] = useState<string | undefined>(undefined)
   const myEntry = (key: string): AgentSkillEntry | undefined => mySkills.find((e) => e.key === key)
-  // 패키지 스킬의 서버 키 — 발행물은 capability:<owner>/<id>, Everdict 빌트인은 default:<id> 로 온다(같은 카드, 두 채널).
-  const myPackagedEntry = (c: Capability): AgentSkillEntry | undefined =>
-    myEntry(`capability:${c.tenant}/${c.id}`) ?? myEntry(`default:${c.id}`)
   const setMine = (entry: AgentSkillEntry, enabled: boolean | null) => {
     const previous = mySkills
     const next = enabled === null ? entry.baseline : enabled
@@ -149,35 +130,16 @@ export function SkillsManager({
     </Button>
   ) : undefined
 
-  // 라이브러리는 스코프로 갈린다 — 개인(내 비공개 초안 + 내 비공개 발행물) · 워크스페이스(공유 스킬 + 이 워크스페이스가
-  // 소유한 패키지) · 제공됨(Everdict 빌트인 + 다른 워크스페이스가 이쪽으로 공유해 준 패키지). 저작 스킬과 패키지가 같은
-  // 섹션에 나란히 서므로 "이 스코프에서 에이전트가 따를 수 있는 스킬"이 한 눈에 읽힌다. 빈 섹션은 그리지 않는다.
-  const scopeOf = (c: Capability): 'private' | 'workspace' | 'provided' =>
-    c.visibility === 'private'
-      ? 'private'
-      : c.tenant === currentWorkspace
-        ? 'workspace'
-        : 'provided'
-  const entriesFor = (scope: 'private' | 'workspace' | 'provided'): LibraryEntry[] => [
-    ...(scope === 'provided'
-      ? []
-      : skills
-          .filter((s) => s.visibility === scope)
-          .map((s): LibraryEntry => ({ key: `skill:${s.id}`, kind: 'skill', skill: s }))),
-    ...packaged
-      .filter((c) => scopeOf(c) === scope)
-      .map(
-        (c): LibraryEntry => ({ key: `cap:${c.tenant}/${c.id}`, kind: 'packaged', capability: c })
-      ),
-  ]
+  // 라이브러리는 공개범위로 갈린다 — 내 비공개 초안 · 워크스페이스가 함께 쓰는 스킬. 두 섹션이 전부다:
+  // "기본 제공"이나 "공유받음" 같은 티어는 없다(스토어 발행물은 **가져오면 워크스페이스 스킬 사본이 되므로**
+  // 이 목록에 서는 순간 이미 우리 것이다). 빈 섹션은 그리지 않는다.
   const sections = (
     [
       { key: 'private', title: t('personalSection') },
       { key: 'workspace', title: t('workspaceSection') },
-      { key: 'provided', title: t('providedSection') },
     ] as const
   )
-    .map((section) => ({ ...section, entries: entriesFor(section.key) }))
+    .map((section) => ({ ...section, entries: skills.filter((s) => s.visibility === section.key) }))
     .filter((section) => section.entries.length > 0)
 
   return (
@@ -204,48 +166,30 @@ export function SkillsManager({
         <div className="space-y-5">
           {sections.map((section) => (
             <div key={section.key} className="space-y-2">
-              {/* 개인 초안 / 워크스페이스 공유 / 제공됨 — 스코프로 섹션을 나눈다(클러드코드 user/project 스킬 구분의 재해석) */}
+              {/* 개인 초안 / 워크스페이스 공유 — 공개범위로 섹션을 나눈다(클러드코드 user/project 스킬 구분의 재해석) */}
               <div className="text-[11.5px] font-medium uppercase tracking-wide text-faint">
                 {section.title}
               </div>
-              {section.entries.map((entry) =>
-                entry.kind === 'skill' ? (
-                  <SkillCard
-                    key={entry.key}
-                    skill={entry.skill}
-                    author={authorOf(entry.skill.createdBy)}
-                    href={`/${workspace}/settings/skills/${encodeURIComponent(entry.skill.id)}`}
-                    canManage={canManage(entry.skill)}
-                    pending={pending}
-                    onShare={share}
-                    onEdit={setEditing}
-                    onDelete={setConfirming}
-                    use={
-                      <UseSkillSwitch
-                        entry={myEntry(`skill:${entry.skill.id}`)}
-                        busy={switching === `skill:${entry.skill.id}`}
-                        onChange={setMine}
-                      />
-                    }
-                  />
-                ) : (
-                  <PackagedSkillCard
-                    key={entry.key}
-                    capability={entry.capability}
-                    author={authorOf(entry.capability.createdBy)}
-                    // 패키지 스킬도 저작 스킬과 같은 상세 라우트로 — ?source 가 소유 워크스페이스를 가리켜
-                    // 읽기 전용 문서를 연다(다이얼로그 아님: 상세는 항상 페이지여야 오른쪽 대화 패널을 함께 쓴다).
-                    href={`/${workspace}/settings/skills/${encodeURIComponent(entry.capability.id)}?source=${encodeURIComponent(entry.capability.tenant)}`}
-                    use={
-                      <UseSkillSwitch
-                        entry={myPackagedEntry(entry.capability)}
-                        busy={switching === myPackagedEntry(entry.capability)?.key}
-                        onChange={setMine}
-                      />
-                    }
-                  />
-                )
-              )}
+              {section.entries.map((skill) => (
+                <SkillCard
+                  key={skill.id}
+                  skill={skill}
+                  author={authorOf(skill.createdBy)}
+                  href={`/${workspace}/settings/skills/${encodeURIComponent(skill.id)}`}
+                  canManage={canManage(skill)}
+                  pending={pending}
+                  onShare={share}
+                  onEdit={setEditing}
+                  onDelete={setConfirming}
+                  use={
+                    <UseSkillSwitch
+                      entry={myEntry(`skill:${skill.id}`)}
+                      busy={switching === `skill:${skill.id}`}
+                      onChange={setMine}
+                    />
+                  }
+                />
+              ))}
             </div>
           ))}
         </div>
@@ -420,61 +364,6 @@ function SkillCard({
       <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">{skill.description}</p>
 
       {/* 하단 메타 — 이 스킬을 누가 만들었는지(아바타 + 이름) */}
-      <div className="mt-3 flex items-center gap-1.5 text-[11.5px] text-faint">
-        <Avatar name={author.name} url={author.avatarUrl} size="sm" className="rounded-full" />
-        <span>{t('createdBy', { name: author.name })}</span>
-      </div>
-    </div>
-  )
-}
-
-// 스킬 kind capability 한 장 — 발행물이라 여기서는 고칠 수 없다(저작·버전은 스토어 소관). 출처 배지로 빌트인/발행물을
-// 구분하고, 이름을 누르면 저작 스킬과 똑같이 상세 페이지로 간다(읽기 전용 문서).
-function PackagedSkillCard({
-  capability,
-  author,
-  href,
-  use,
-}: {
-  capability: Capability
-  author: Author
-  href: string
-  use?: ReactNode
-}) {
-  const t = useTranslations('skillsManager')
-  const builtIn = isBuiltInCapability(capability)
-  const files = capability.spec.type === 'skill' ? capability.spec.files : []
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <Package className="size-4 shrink-0 text-muted-foreground" />
-          <Link
-            href={href}
-            className="min-w-0 truncate font-mono text-[13px] font-medium hover:text-primary hover:underline"
-          >
-            {capability.name}
-          </Link>
-          <Badge tone={builtIn ? 'info' : 'outline'} className="shrink-0">
-            {builtIn ? t('builtInBadge') : t('packagedBadge')}
-          </Badge>
-          <Badge tone="outline" className="shrink-0 font-mono">
-            v{capability.version}
-          </Badge>
-          {files.length > 0 && (
-            <Badge tone="outline" className="shrink-0 gap-1">
-              <FileText className="size-3" />
-              {files.length}
-            </Badge>
-          )}
-        </div>
-        {use}
-      </div>
-
-      <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">
-        {capability.description}
-      </p>
-
       <div className="mt-3 flex items-center gap-1.5 text-[11.5px] text-faint">
         <Avatar name={author.name} url={author.avatarUrl} size="sm" className="rounded-full" />
         <span>{t('createdBy', { name: author.name })}</span>

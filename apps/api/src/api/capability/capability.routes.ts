@@ -73,7 +73,9 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: ServerDeps)
     }
     const parsed = ProbeCapabilityMcpBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    return reply.send(await deps.probeCapabilityMcp(parsed.data.url, parsed.data.token));
+    return reply.send(
+      await deps.probeCapabilityMcp(parsed.data.url, parsed.data.token ? { token: parsed.data.token } : {}),
+    );
   });
 
   app.get("/capabilities", { schema: capabilityDocs.list }, async (req, reply) => {

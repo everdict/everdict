@@ -334,6 +334,8 @@ function EnvironmentRowCard({
   const spec = c?.spec.type === 'environment' ? c.spec : undefined
   const inv = row.inventory
   const image = spec?.image ?? inv?.image
+  // 출처 분류는 컨트롤 플레인이 뷰어 기준으로 계산해 내려준다(웹에는 classifyImageRef 미러가 없다).
+  const imageClass = c?.imageClass ?? inv?.imageClass
   const benchmark = spec?.contents?.benchmark ?? inv?.benchmark
   const version = c?.version ?? inv?.version
   const author = c !== undefined ? authors[c.createdBy] : undefined
@@ -397,6 +399,13 @@ function EnvironmentRowCard({
                   {pullReasonLabel(t, inv.verify.reason)}
                 </Badge>
               ))}
+            {/* 이미지 출처 — 관리형 스토어(우리가 grant를 발급하는 것)만 표시한다. external은 기본값이라
+                배지를 달면 목록 전체가 배지밭이 되고, 정작 구분이 필요한 "우리 것"이 묻힌다. */}
+            {imageClass === 'managed' && (
+              <Badge tone="success" className="shrink-0">
+                {t('imgClass_managed')}
+              </Badge>
+            )}
           </div>
           <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
             {image ?? row.key}

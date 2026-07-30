@@ -83,7 +83,8 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
           "Test-connect to an MCP server URL (Streamable HTTP) and list its tools — verify reachability and discover the tool names before authoring an mcp capability. A failure is a result (reachable:false + reason), never an error. `token` is a transient bearer for the test only (never stored). Requires capabilities:write.",
         inputSchema: { url: z.string(), token: z.string().optional() },
       },
-      ({ url, token }) => run(principal, "capabilities:write", async () => ok(await probe(url, token))),
+      ({ url, token }) =>
+        run(principal, "capabilities:write", async () => ok(await probe(url, token ? { token } : {}))),
     );
   }
 

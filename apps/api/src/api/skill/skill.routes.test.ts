@@ -1,6 +1,7 @@
-import { RunService, SkillService } from "@everdict/application-control";
+import { CapabilityService, RunService, SkillService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { InMemoryRunStore, InMemorySkillStore } from "@everdict/db";
+import type { CapabilityRecord } from "@everdict/contracts";
+import { InMemoryCapabilityStore, InMemoryRunStore, InMemorySkillStore, InMemorySkillVersionStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 
@@ -10,11 +11,38 @@ const unusedDispatcher: Dispatcher = {
   },
 };
 
+// An Everdict-published example skill — a code definition, not a store row, exactly like the real first-party ones.
+const EXAMPLE: CapabilityRecord = {
+  id: "trace-analysis",
+  tenant: "_everdict",
+  version: "1.2.0",
+  name: "analyze_trace",
+  description: "Analyze one observability trace",
+  spec: { type: "skill", instructions: "1. inspect_trace", files: [{ path: "references/report.md", content: "#" }] },
+  visibility: "public",
+  sharedWith: [],
+  tags: [],
+  createdBy: "everdict",
+  createdAt: "2026-07-01T00:00:00.000Z",
+};
+
 function build(withSkills: boolean) {
   const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
+  const capabilityService = new CapabilityService({
+    store: new InMemoryCapabilityStore(),
+    firstPartyCatalog: () => [EXAMPLE],
+  });
   return buildServer({
     service,
-    ...(withSkills ? { skillService: new SkillService({ store: new InMemorySkillStore() }) } : {}),
+    ...(withSkills
+      ? {
+          skillService: new SkillService({
+            store: new InMemorySkillStore(),
+            versions: new InMemorySkillVersionStore(),
+            capabilities: capabilityService,
+          }),
+        }
+      : {}),
   });
 }
 
@@ -118,6 +146,93 @@ describe("skill routes", () => {
       });
       expect(res.statusCode).toBe(400);
     }
+  });
+
+  it("takes a store example into the workspace as an editable skill, and refuses a second copy", async () => {
+    const app = build(true);
+    const taken = await app.inject({
+      method: "POST",
+      url: "/skills/import",
+      headers: H,
+      payload: { source: "_everdict", id: "trace-analysis" },
+    });
+    expect(taken.statusCode).toBe(200);
+    const skill = taken.json() as { id: string; name: string; version: string; visibility: string; origin: unknown };
+    expect(skill).toMatchObject({ name: "analyze_trace", version: "1.2.0", visibility: "workspace" });
+    expect(skill.origin).toEqual({
+      source: "_everdict",
+      id: "trace-analysis",
+      version: "1.2.0",
+      name: "analyze_trace",
+    });
+
+    // It is an ordinary workspace skill now — it edits like one, and it is in the library.
+    const edited = await app.inject({
+      method: "PATCH",
+      url: `/skills/${skill.id}`,
+      headers: H,
+      payload: { instructions: "1. our own first step" },
+    });
+    expect((edited.json() as { instructions: string }).instructions).toBe("1. our own first step");
+    const list = await app.inject({ method: "GET", url: "/skills", headers: H });
+    expect((list.json() as Array<{ id: string }>).map((s) => s.id)).toEqual([skill.id]);
+
+    const again = await app.inject({
+      method: "POST",
+      url: "/skills/import",
+      headers: H,
+      payload: { source: "_everdict", id: "trace-analysis" },
+    });
+    expect(again.statusCode).toBe(409); // already here — the copy is theirs to edit, not to overwrite
+  });
+
+  it("404s an import of a publication that does not exist / is not visible", async () => {
+    const res = await build(true).inject({
+      method: "POST",
+      url: "/skills/import",
+      headers: H,
+      payload: { source: "_everdict", id: "no-such-skill" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("stamps the current content as a version, and keeps older versions frozen", async () => {
+    const app = build(true);
+    const created = await app.inject({
+      method: "POST",
+      url: "/skills",
+      headers: H,
+      payload: { name: "triage", description: "d", instructions: "1. first" },
+    });
+    const id = (created.json() as { id: string }).id;
+    expect((created.json() as { version: string }).version).toBe("1.0.0");
+
+    await app.inject({ method: "PATCH", url: `/skills/${id}`, headers: H, payload: { instructions: "1. revised" } });
+    const stamped = await app.inject({
+      method: "POST",
+      url: `/skills/${id}/versions`,
+      headers: H,
+      payload: { bump: "minor", note: "revised in conversation" },
+    });
+    expect(stamped.statusCode).toBe(200);
+    expect(stamped.json()).toMatchObject({
+      skill: { version: "1.1.0" },
+      stamped: { version: "1.1.0", instructions: "1. revised", note: "revised in conversation" },
+    });
+
+    const versions = await app.inject({ method: "GET", url: `/skills/${id}/versions`, headers: H });
+    expect((versions.json() as Array<{ version: string }>).map((v) => v.version)).toEqual(["1.1.0", "1.0.0"]);
+    const first = await app.inject({ method: "GET", url: `/skills/${id}/versions/1.0.0`, headers: H });
+    expect((first.json() as { instructions: string }).instructions).toBe("1. first"); // still says what it said
+
+    // A version that does not come after the current one is a 400 — the line only moves forward.
+    const backwards = await app.inject({
+      method: "POST",
+      url: `/skills/${id}/versions`,
+      headers: H,
+      payload: { version: "1.0.5" },
+    });
+    expect(backwards.statusCode).toBe(400);
   });
 
   it("rejects an empty PATCH body (at least one field required)", async () => {

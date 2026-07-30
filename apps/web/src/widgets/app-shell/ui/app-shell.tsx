@@ -27,6 +27,7 @@ export function AppShell({
   showLogin,
   email,
   profile,
+  fileExecution = false,
   children,
 }: {
   workspace: string
@@ -37,6 +38,7 @@ export function AppShell({
   showLogin: boolean
   email?: string
   profile?: { name?: string; username?: string; avatarUrl?: string }
+  fileExecution?: boolean // this deployment can run a workspace file (GET /me config) — gates the viewer's Run
   children: ReactNode
 }) {
   // 대화 패널의 사용자 턴 아바타 — 사이드바 계정 표시와 같은 해석(프로필 이름 > 사용자명 > 이메일 > subject).
@@ -69,6 +71,7 @@ export function AppShell({
             ...(profile?.avatarUrl !== undefined ? { avatarUrl: profile.avatarUrl } : {}),
           }}
           canFilesWrite={can(roles, 'files:write')}
+          canFilesRun={fileExecution && can(roles, 'files:write')}
         />
       </div>
       <CommandPalette workspace={workspace} />

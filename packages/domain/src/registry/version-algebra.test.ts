@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareVersions, resolveRef, sortVersions } from "./version-algebra.js";
+import { bumpVersion, compareVersions, resolveRef, sortVersions } from "./version-algebra.js";
 
 describe("version algebra — semver ordering + latest resolution", () => {
   it("orders semver versions numerically, not lexically", () => {
@@ -7,6 +7,19 @@ describe("version algebra — semver ordering + latest resolution", () => {
     expect(compareVersions("2.0.0", "10.0.0")).toBeLessThan(0); // 2 < 10 numerically (lexical would say otherwise)
     expect(compareVersions("1.2.0", "1.10.0")).toBeLessThan(0);
     expect(sortVersions(["1.10.0", "1.2.0", "1.0.0"])).toEqual(["1.0.0", "1.2.0", "1.10.0"]);
+  });
+
+  it("bumps a version by the author's chosen degree, and every bump orders above the base", () => {
+    expect(bumpVersion("1.4.2", "patch")).toBe("1.4.3");
+    expect(bumpVersion("1.4.2", "minor")).toBe("1.5.0"); // minor resets patch
+    expect(bumpVersion("1.4.2", "major")).toBe("2.0.0"); // major resets both
+    for (const bump of ["patch", "minor", "major"] as const)
+      expect(compareVersions(bumpVersion("1.4.2", bump), "1.4.2")).toBeGreaterThan(0);
+  });
+
+  it("restarts an unparseable version line at 1.0.0 so a bump can never order below its base", () => {
+    expect(bumpVersion("", "patch")).toBe("1.0.0");
+    expect(bumpVersion("draft", "major")).toBe("1.0.0");
   });
 
   it("resolveRef(latest) returns the highest semver version; a concrete ref returns itself", () => {

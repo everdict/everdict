@@ -1,5 +1,11 @@
-import type { CapabilityStore, SecretStore } from "@everdict/application-control";
-import { BadRequestError, type CodeToolSpec, NotFoundError, UpstreamError } from "@everdict/contracts";
+import { type CapabilityStore, type SecretStore, firstPartyDefaults } from "@everdict/application-control";
+import {
+  BadRequestError,
+  type CodeToolSpec,
+  FIRST_PARTY_TENANT,
+  NotFoundError,
+  UpstreamError,
+} from "@everdict/contracts";
 import { canConsumeCapability } from "@everdict/domain";
 import { type CodeToolRuntime, type ResolvedCodeTool, buildCodeTools } from "./code-tools.js";
 import type { Principal } from "./principal.js";
@@ -53,6 +59,15 @@ async function resolveTool(
 ): Promise<{ name: string; spec: CodeToolSpec; sandbox: boolean }> {
   if (target.kind === "spec") {
     return { name: target.name, spec: target.spec, sandbox: false }; // the caller's own draft — own-code semantics
+  }
+  // A first-party default is a code DEFINITION in this repo, not a store row, so the store lookup below would miss it
+  // — yet it is the tool a member is most likely to want to try. Everdict authored it, so it is trusted on any driver
+  // (sandbox:false), exactly as the runtime resolves it (profile.shapeTool).
+  if (target.source === FIRST_PARTY_TENANT) {
+    const found = firstPartyDefaults().find((d) => d.record.id === target.id);
+    if (!found || found.record.spec.type !== "code")
+      throw new NotFoundError("NOT_FOUND", { id: target.id }, `capability '${target.id}' not found.`);
+    return { name: found.record.name, spec: found.record.spec, sandbox: false };
   }
   if (!deps.capabilityStore) {
     throw new BadRequestError("BAD_REQUEST", {}, "Published-capability try is unavailable without a store.");

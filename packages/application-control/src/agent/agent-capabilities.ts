@@ -59,7 +59,8 @@ export interface ResolvedAgentTool {
 export interface AgentCapabilitiesDeps {
   agentRegistry: AgentRegistry;
   capabilityStore: CapabilityStore;
-  // The workspace's authored skill library. Absent ⇒ only packaged skills (adopted / published / built-in) resolve.
+  // The workspace's skill library (authored here or copied from a store example). Absent ⇒ no skills resolve:
+  // a skill reaches an agent only as a record this workspace owns.
   skillStore?: SkillStore;
   preferences?: AgentMemberPreferenceStore; // absent ⇒ everyone gets the workspace baseline (no personal layer)
   // Which integrations the workspace has configured — gates the integration-dependent first-party defaults.
@@ -111,12 +112,12 @@ function capabilityCandidate(
   };
 }
 
-// A skill in the member's library — a procedure their agent may follow. Either AUTHORED here (a SkillRecord the
-// members write and edit) or PACKAGED (a skill-kind capability: adopted, published in this workspace, or first-party).
-export type AgentSkillOrigin =
-  | { channel: "builtin"; builtin: FirstPartyDefault }
-  | { channel: "capability"; record: CapabilityRecord }
-  | { channel: "authored"; record: SkillRecord };
+// A skill in the member's library — a procedure their agent may follow. ONE channel, deliberately: every skill the
+// agent follows is a SkillRecord this workspace owns. A skill-kind capability in the store is an EXAMPLE to copy
+// (SkillService.importFromStore turns it into one of these), never a live attachment — so what Settings › Agent ›
+// Skills lists and what the agent actually follows are the same set, and every entry is editable and versionable by
+// the people it belongs to.
+export type AgentSkillOrigin = { channel: "authored"; record: SkillRecord };
 
 export interface ResolvedAgentSkill {
   key: string;
@@ -141,9 +142,8 @@ export interface AgentCapabilitiesResolution {
 
 // The two candidate pools, each in RUNTIME PRIORITY order — a contested name is won by the first ENABLED candidate:
 //  · tools  — hand-wired servers → adopted capabilities → merely available ones → first-party defaults
-//  · skills — authored skills → adopted skill capabilities → published-but-unadopted ones → first-party defaults
-// Order is load-bearing: it preserves the established "an authored/adopted entry shadows a built-in default" rule
-// (and, for skills, "an authored skill shadows a same-named package").
+//  · skills — the workspace's authored library, and nothing else (store skills arrive by being copied INTO it)
+// Order is load-bearing for tools: it preserves the established "an adopted entry shadows a built-in default" rule.
 async function candidatePools(
   deps: AgentCapabilitiesDeps,
   query: AgentCapabilitiesQuery,
@@ -176,8 +176,9 @@ async function candidatePools(
       description: record.description,
       scope: record.visibility === "private" ? "personal" : "workspace",
       enabled: false, // decided below
-      baseline: true, // authored here = the workspace supports it
+      baseline: true, // owned here = the workspace supports it
       owner: "",
+      version: record.version, // the last content the workspace stamped (the row itself is the working copy)
       origin: { channel: "authored", record },
     });
   }
@@ -210,11 +211,6 @@ async function candidatePools(
     }
     if (!record) continue;
     if (!canConsumeCapability(record, { tenant, subject })) continue;
-    if (record.spec.type === "skill") {
-      adoptedKeys.add(capabilityToolKey(record.tenant, record.id));
-      skills.push(skillCandidate(record, true));
-      continue;
-    }
     const candidate = capabilityCandidate(record, { tenant, ref, baseline: true });
     if (!candidate) continue;
     adoptedKeys.add(candidate.key);
@@ -230,12 +226,9 @@ async function candidatePools(
     visible = [];
   }
   for (const record of visible) {
-    if (record.spec.type === "skill") {
-      // A skill package published here that nobody adopted: the workspace supports it, so it is offered — off until
-      // the member switches it on (same rule as an unadopted tool).
-      if (!adoptedKeys.has(capabilityToolKey(record.tenant, record.id))) skills.push(skillCandidate(record, false));
-      continue;
-    }
+    // A skill-kind publication is skipped on purpose (capabilityCandidate returns undefined for it): publishing a
+    // skill to the store hands other workspaces something to COPY, it does not add a second, uneditable copy of it to
+    // the author's own library — the SkillRecord it was published from is already there.
     const candidate = capabilityCandidate(record, { tenant, baseline: false });
     if (!candidate || adoptedKeys.has(candidate.key)) continue; // an adopted pin already speaks for this capability
     pool.push(candidate);
@@ -257,21 +250,7 @@ async function candidatePools(
   );
   for (const { def } of gated) {
     const spec_ = def.record.spec;
-    if (spec_.type === "skill") {
-      skills.push({
-        key: builtinToolKey(def.record.id),
-        name: def.record.name,
-        description: def.record.description,
-        scope: "builtin",
-        enabled: false,
-        baseline: !disabledDefaults.includes(def.record.id),
-        owner: def.record.tenant,
-        version: def.record.version,
-        origin: { channel: "builtin", builtin: def },
-      });
-      continue;
-    }
-    if (spec_.type !== "mcp" && spec_.type !== "code") continue;
+    if (spec_.type !== "mcp" && spec_.type !== "code") continue; // the defaults are tools only — skills are examples
     pool.push({
       key: builtinToolKey(def.record.id),
       name: def.record.name,
@@ -288,22 +267,6 @@ async function candidatePools(
     });
   }
   return { tools: pool, skills };
-}
-
-// A skill-kind capability → a library candidate. `baseline` says whether the workspace already put it on the table
-// (adopted) or merely published it here (available, off until the member switches it on).
-function skillCandidate(record: CapabilityRecord, baseline: boolean): ResolvedAgentSkill {
-  return {
-    key: capabilityToolKey(record.tenant, record.id),
-    name: record.name,
-    description: record.description,
-    scope: record.visibility === "private" ? "personal" : "workspace",
-    enabled: false, // decided by the overlay
-    baseline,
-    owner: record.tenant,
-    version: record.version,
-    origin: { channel: "capability", record },
-  };
 }
 
 // The member's agent: the workspace baseline overlaid with their own decisions, for both channels. Every candidate is

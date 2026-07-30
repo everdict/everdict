@@ -242,9 +242,9 @@ describe("capability routes", () => {
     const app = buildServer({
       service,
       capabilityService: new CapabilityService({ store: new InMemoryCapabilityStore() }),
-      probeCapabilityMcp: async (url: string, token?: string) => ({
+      probeCapabilityMcp: async (url: string, auth?: { token?: string }) => ({
         reachable: true,
-        detail: `ok ${url}${token ? " (auth)" : ""}`,
+        detail: `ok ${url}${auth?.token ? " (auth)" : ""}`,
         tools: [{ name: "search" }, { name: "fetch", description: "get a url" }],
       }),
     });

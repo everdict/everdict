@@ -1,11 +1,17 @@
-import { FsEntrySchema, FsRevisionSchema } from "@everdict/contracts";
-import { FsFileContentSchema, FsRemoveResultSchema, FsUsageSchema } from "@everdict/contracts/wire";
+import { FileExecutionResultSchema, FsEntrySchema, FsRevisionSchema } from "@everdict/contracts";
+import {
+  FsFileContentSchema,
+  FsRemoveResultSchema,
+  FsRevisionDiffSchema,
+  FsUsageSchema,
+} from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { MakeFsDirectoryBodySchema } from "./request/make-fs-directory.js";
 import { MoveFsEntryBodySchema } from "./request/move-fs-entry.js";
 import { RestoreFsRevisionBodySchema } from "./request/restore-fs-revision.js";
+import { RunFsFileBodySchema } from "./request/run-fs-file.js";
 import { WriteFsFileBodySchema } from "./request/write-fs-file.js";
 
 // OpenAPI descriptors for the workspace-filesystem routes — doc-only (rule api-layer): attaching these is behavior-free.
@@ -68,9 +74,30 @@ const docs = {
     tags: ["fs"],
     querystring: pathQuery(true, {
       limit: { type: "string", description: "Max revisions to return (default 50)" },
+      before: {
+        type: "string",
+        description: "Keyset cursor — return revisions OLDER than this number (the last one of your current page)",
+      },
     }),
     response: {
       200: { description: "Revisions, newest first", ...toJsonSchema(z.array(FsRevisionSchema)) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  revisionDiff: {
+    summary: "Diff two revisions",
+    description:
+      "Line diff between two revisions of a file — hunks with surrounding context, plus added/removed counts. " +
+      "Omit `to` to compare against the LIVE file (the usual question: what did this revision change from what I " +
+      "see now). A binary or over-sized comparison returns `diff.truncated` with no hunks rather than a fabricated " +
+      "text diff. An unknown revision is 404. Requires files:read (viewer+).",
+    tags: ["fs"],
+    querystring: pathQuery(true, {
+      from: { type: "string", description: "The older revision number" },
+      to: { type: "string", description: "The newer revision number (default: the live file)" },
+    }),
+    response: {
+      200: { description: "Revision diff", ...toJsonSchema(FsRevisionDiffSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },
@@ -123,11 +150,30 @@ const docs = {
       ...errorResponses(400, 401, 403, 404, 409),
     },
   },
+  run: {
+    summary: "Run a file",
+    description:
+      "Runs one file in an isolated sandbox and returns what it printed, its exit code, and any files it " +
+      "produced (carried back next to the script — an existing path is reported as `skipped`, never overwritten). " +
+      "The interpreter follows the extension (.py/.sh/.js/.ts); `image` swaps the container it runs in, e.g. a " +
+      "workspace environment image. A non-zero exit is a RESULT, not an error; `timedOut` means the in-sandbox " +
+      "limit killed it (exit 124). No interpreter for the extension, or a non-text file, is 400. This is not an " +
+      "eval — no harness, no grading, no run record. 404 when the deployment has no execution driver configured. " +
+      "Requires files:write (member+).",
+    tags: ["fs"],
+    body: toJsonSchema(RunFsFileBodySchema),
+    response: {
+      200: { description: "Execution result", ...toJsonSchema(FileExecutionResultSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
   usage: {
     summary: "Filesystem storage usage",
     description:
       "Totals plus a per-top-level-entry breakdown (files/bytes) — the Settings › Files overview. `truncated` " +
-      "means the sweep hit its walk cap and the counts are a floor. Requires files:read (viewer+).",
+      "means the sweep hit its walk cap and the counts are a floor. `history` reports what published revisions " +
+      "cost on top of the visible tree (retention is unlimited, so it grows with editing activity). Requires " +
+      "files:read (viewer+).",
     tags: ["fs"],
     response: {
       200: { description: "Usage", ...toJsonSchema(FsUsageSchema) },
@@ -137,8 +183,10 @@ const docs = {
   clear: {
     summary: "Empty the workspace filesystem",
     description:
-      "Removes EVERY top-level entry recursively — the Settings danger-zone action. The tree itself stays, ready " +
-      "for new writes. Requires settings:write (admin) — a whole-tree wipe is governance, not ordinary content mutation.",
+      "Removes EVERY top-level entry recursively AND purges the workspace's publication history (revision rows " +
+      "plus their stored content — `purgedRevisions` reports how many). Deleting a single entry keeps its history " +
+      "on purpose; this is the wipe. The tree itself stays, ready for new writes. Requires settings:write (admin) " +
+      "— a whole-tree wipe is governance, not ordinary content mutation.",
     tags: ["fs"],
     response: {
       200: { description: "Removal result", ...toJsonSchema(FsRemoveResultSchema) },
