@@ -26,6 +26,8 @@ export {
   type OtelTraceSourceOptions,
   parseJaegerSpans,
   parseOtlpSpans,
+  EVERDICT_SEMCONV,
+  groupOtlpExportByRun,
 } from "./sources/otel.js";
 export {
   MlflowTraceSource,

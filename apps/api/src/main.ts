@@ -58,6 +58,7 @@ import { buildPlacementPreflight } from "./core/execution/placement-preflight.js
 import { JudgePreviewService } from "./core/judge/judge-preview-service.js";
 import { KnowledgeExtractionService } from "./core/knowledge/knowledge-extraction-service.js";
 import { ModelService } from "./core/model/model-service.js";
+import { OtlpIngestService } from "./core/observability/otlp-ingest-service.js";
 import { DriverOpsService } from "./core/ops/driver-ops-service.js";
 import { TemporalBatchDriver } from "./core/scorecard/temporal-batch-driver.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
@@ -652,6 +653,7 @@ async function main(): Promise<void> {
       ? { driverOps: new DriverOpsService({ address: process.env.EVERDICT_TEMPORAL_ADDRESS }) }
       : {}),
     approvalService, // durable agent approvals (A6) — members list/decide; the agent service parks/settles
+    otlpIngest: new OtlpIngestService(trajectoryStore), // the OTLP/HTTP door (N0) — traces seal in the owned store
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path
     schedulingControl, // PUT/GET /internal/scheduling — runtime fairness dials (env stays the boot baseline)
     usageMeter, // meter-only billing usage — GET /usage

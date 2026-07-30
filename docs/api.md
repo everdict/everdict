@@ -13,6 +13,7 @@ arrives by polling or webhook.
 | `GET`  | `/runs/:id` | `RunRecord` (200) or 404 (`runs:read`) |
 | `GET`  | `/runs` | `RunRecord[]` for the caller's workspace (`runs:read`) |
 | `GET`  | `/runs/:id/trajectory` | the run's **owned trajectory** (P5 rung 1): sealed `TraceEvent[]` from `everdict_trajectories`, embed fallback during dual-read — `meta.source` says which copy served (`runs:read`) |
+| `POST` | `/v1/traces` | **OTLP/HTTP door** (N0): standard OTLP JSON; spans group by `everdict.run_id` and seal in the owned TrajectoryStore — point `OTEL_EXPORTER_OTLP_ENDPOINT` here with a tenant API key in the headers (`runs:submit`) |
 | `POST` | `/datasets` | register a `Dataset` (immutable → `409`) (`datasets:write`, member+) |
 | `POST` | `/datasets/validate` | dry-run: schema + existing versions/conflict, no write (`datasets:write`) |
 | `GET`  | `/datasets` | workspace-owned + `_shared` datasets (`datasets:read`) |

@@ -113,6 +113,7 @@ import { BundleSchema, type BundleService, requiredActionsForBundle } from "../c
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { KnowledgeExtractionService } from "../core/knowledge/knowledge-extraction-service.js";
 import type { ModelService } from "../core/model/model-service.js";
+import type { OtlpIngestService } from "../core/observability/otlp-ingest-service.js";
 import type { DriverOpsService } from "../core/ops/driver-ops-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
@@ -128,6 +129,8 @@ export interface ServerDeps {
   driverOps?: DriverOpsService;
   // Durable agent approvals (agent-automation A6) — members list/decide; the agent service parks/settles.
   approvalService?: ApprovalService;
+  // The OTLP/HTTP door (native-observability N0) — external/own traces seal in the owned TrajectoryStore.
+  otlpIngest?: OtlpIngestService;
   usageMeter?: UsageMeter; // meter-only billing usage (GET /usage) — never blocks (route disabled if absent)
   budget?: BudgetAdmin; // enforcement budget config (GET/PUT /budget) — usage + per-tenant limit (route disabled if absent)
   // Settle-only capability of the enforcement budget for the internal usage bridge (agent cost → the 402-cap total).

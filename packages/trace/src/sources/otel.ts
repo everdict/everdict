@@ -45,6 +45,53 @@ function nanoToMs(v: string | number | undefined): number {
   return Math.floor(n / 1e6);
 }
 
+// The published everdict.* semantic conventions (native-observability N0): instrumentation is standard OTel;
+// these attribute keys are the CONTRACT — everdict.run_id correlates spans to the run ledger (resource-level
+// via the injected OTEL_RESOURCE_ATTRIBUTES, span-level override wins), the rest carry execution identity.
+// Scores/verdicts stay platform-layer records referencing trace ids — never span data.
+export const EVERDICT_SEMCONV = {
+  runId: "everdict.run_id",
+  kind: "everdict.kind",
+  caseId: "everdict.case_id",
+  groupId: "everdict.group_id",
+} as const;
+
+// OTLP/HTTP ExportTraceServiceRequest (JSON) → spans grouped by their everdict.run_id (the N0 receiver's
+// core). Resource attributes merge INTO each span's bag (resource attrs correlate whole processes; a
+// span-level attribute overrides). Spans with no run id anywhere cannot join the ledger — counted, never
+// silently dropped.
+interface OtlpResourceSpans {
+  resource?: { attributes?: OtlpAttr[] };
+  scopeSpans?: Array<{ spans?: OtlpSpan[] }>;
+  // pre-1.0 exporters spell it instrumentationLibrarySpans — accept both.
+  instrumentationLibrarySpans?: Array<{ spans?: OtlpSpan[] }>;
+}
+
+export function groupOtlpExportByRun(body: unknown): { groups: Map<string, Span[]>; missingRunId: number } {
+  const groups = new Map<string, Span[]>();
+  let missingRunId = 0;
+  const resourceSpans = (body as { resourceSpans?: OtlpResourceSpans[] })?.resourceSpans ?? [];
+  for (const rs of resourceSpans) {
+    const resourceAttrs: Record<string, unknown> = {};
+    for (const at of rs.resource?.attributes ?? []) resourceAttrs[at.key] = attrValue(at.value);
+    const scopes = [...(rs.scopeSpans ?? []), ...(rs.instrumentationLibrarySpans ?? [])];
+    for (const scope of scopes) {
+      for (const span of parseOtlpSpans(scope.spans ?? [])) {
+        const merged = { ...span, attrs: { ...resourceAttrs, ...span.attrs } };
+        const runId = merged.attrs[EVERDICT_SEMCONV.runId];
+        if (typeof runId !== "string" || runId === "") {
+          missingRunId++;
+          continue;
+        }
+        const bucket = groups.get(runId) ?? [];
+        bucket.push(merged);
+        groups.set(runId, bucket);
+      }
+    }
+  }
+  return { groups, missingRunId };
+}
+
 export function parseOtlpSpans(spans: OtlpSpan[]): Span[] {
   return spans.map((s) => {
     const attrs: Record<string, unknown> = {};
