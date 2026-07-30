@@ -8,6 +8,7 @@ import {
   CalendarClock,
   ChevronsRight,
   FileText,
+  FlaskConical,
   Network,
   Play,
   Server,
@@ -17,6 +18,7 @@ import {
 import { useTranslations } from 'next-intl'
 
 import { AgentChatPanel, type ChatUser } from '@/features/agent-chat'
+import { HarnessPlaygroundPanel } from '@/features/harness-playground'
 import { agentChatMissionSchema, agentReferenceSchema } from '@/entities/agent-session'
 import { RELOAD_INFRA_FRAMES_EVENT } from '@/shared/lib/reload-infra-frames'
 import { cn } from '@/shared/lib/utils'
@@ -24,6 +26,7 @@ import { cn } from '@/shared/lib/utils'
 import {
   MENTION_IN_CHAT_MESSAGE,
   OPEN_AGENT_SESSION_MESSAGE,
+  OPEN_PLAYGROUND_MESSAGE,
   useInfraPanel,
   type InfraTab,
 } from '../model/infra-panel-context'
@@ -53,6 +56,7 @@ const TAB_META: Record<InfraTab, { icon: LucideIcon }> = {
   agent: { icon: Sparkles },
   files: { icon: FileText },
   knowledge: { icon: Network },
+  playground: { icon: FlaskConical },
 }
 
 // The page tabs and their iframe home paths (workspace-relative).
@@ -79,7 +83,13 @@ export function InfraPanel({
   user,
   canFilesWrite = false,
   canFilesRun = false,
-}: { user?: ChatUser; canFilesWrite?: boolean; canFilesRun?: boolean } = {}) {
+  canPlaygroundSubmit = false,
+}: {
+  user?: ChatUser
+  canFilesWrite?: boolean
+  canFilesRun?: boolean
+  canPlaygroundSubmit?: boolean
+} = {}) {
   const t = useTranslations('infraPanel')
   const router = useRouter()
   const {
@@ -95,6 +105,9 @@ export function InfraPanel({
     openAgentSession,
     pendingSession,
     consumePendingSession,
+    openPlayground,
+    pendingPlaygroundTarget,
+    consumePendingPlaygroundTarget,
   } = useInfraPanel()
   const frames = useRef<Partial<Record<PageTab, HTMLIFrameElement | null>>>({})
   // Tabs whose iframe is currently open — kept mounted (hidden) across TAB SWITCHES so a tab's in-iframe
@@ -203,6 +216,8 @@ export function InfraPanel({
         prompt?: unknown
         mission?: unknown
         sessionId?: unknown
+        harnessId?: unknown
+        version?: unknown
       } | null
       // A detail page inside an iframe (run / runtime) asked to mention its entity in the parent's agent chat
       // — optionally with a draft prompt pre-typed (the ask-agent variant) or a mission framing the chat for a
@@ -222,6 +237,18 @@ export function InfraPanel({
       if (data?.type === OPEN_AGENT_SESSION_MESSAGE) {
         if (typeof data.sessionId === 'string' && data.sessionId.length > 0)
           openAgentSession(data.sessionId)
+        return
+      }
+      // A harness detail page inside an iframe asked to open the playground on itself — a prefill, never a boot.
+      if (data?.type === OPEN_PLAYGROUND_MESSAGE) {
+        if (typeof data.harnessId === 'string' && data.harnessId.length > 0)
+          openPlayground({
+            harnessId: data.harnessId,
+            ...(typeof data.version === 'string' && data.version.length > 0
+              ? { version: data.version }
+              : {}),
+          })
+        else openPlayground()
         return
       }
       // An iframe landed on an infra route (EmbedShell report) — record it on that tab's back stack.
@@ -260,7 +287,16 @@ export function InfraPanel({
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [router, onNavigate, workspace, mentionInChat, askAgent, openAgentSession, toRelative])
+  }, [
+    router,
+    onNavigate,
+    workspace,
+    mentionInChat,
+    askAgent,
+    openAgentSession,
+    openPlayground,
+    toRelative,
+  ])
 
   // A server-resolved per-device preference (locale / timezone) changed in the parent. The mounted iframes read
   // it server-side off the cookie and stay frozen, so router.refresh() in the switcher never reaches their
@@ -343,6 +379,16 @@ export function InfraPanel({
             )}
             {tab === 'files' && <FilesTab canWrite={canFilesWrite} canRun={canFilesRun} />}
             {tab === 'knowledge' && <KnowledgeTab />}
+            {tab === 'playground' && (
+              <div className="h-full">
+                <HarnessPlaygroundPanel
+                  pendingTarget={pendingPlaygroundTarget}
+                  onConsumeTarget={consumePendingPlaygroundTarget}
+                  canSubmit={canPlaygroundSubmit}
+                  workspace={workspace}
+                />
+              </div>
+            )}
             {tab === 'agent' && (
               <div className="h-full">
                 <AgentChatPanel

@@ -1,4 +1,5 @@
 import type {
+  RunSession,
   RunUsageSummary,
   RunStatus as WireRunStatus,
   Score as WireScore,
@@ -94,6 +95,19 @@ export const runSchema = z.object({
   // executable family (universal-run shape, execution-model P0) — unset = a legacy eval run. Readers treat
   // undefined as "eval"; the console badges only the non-eval families (agent/command/sandbox/analysis).
   kind: z.enum(['eval', 'agent', 'command', 'sandbox', 'analysis']).optional(),
+  // task (ends by itself) | session (held open until closed/expired). Unset = a task run.
+  lifetime: z.enum(['task', 'session']).optional(),
+  // The session half of a `lifetime: "session"` run — the booted image, the hard deadline the reaper enforces
+  // (the playground's countdown reads it) and, once torn down, why. computeId stays off the web view: it is a
+  // driver-internal container id no member surface shows.
+  session: z
+    .object({
+      image: z.string(),
+      ttlSec: z.number(),
+      expiresAt: z.string(),
+      closedReason: z.enum(['closed', 'expired', 'orphaned']).optional(),
+    })
+    .optional(),
   result: resultSchema.optional(),
   usage: usageSchema.optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
@@ -142,6 +156,9 @@ type _usageKeysMatch = AssertAssignable<keyof z.infer<typeof usageSchema>, keyof
 // Score.detail is `unknown` on the wire (structured verdict objects, not just prose) — the local view must
 // accept it, or a single object detail rejects the whole run result at parse time. Regression guard.
 type _scoreDetailAccepts = AssertAssignable<WireScore['detail'], Score['detail']>
+// The session block is the playground's contract with the control plane (image · TTL · teardown reason), and the
+// web models a SUBSET of it — so anchor it on RunSession directly: renaming/retyping any modelled field breaks here.
+type _sessionGuard = AssertAssignable<WebRun['session'], RunSession | undefined>
 
 export type __runDriftGuard = [
   _flatGuard,
@@ -149,4 +166,5 @@ export type __runDriftGuard = [
   _statusGuard,
   _usageKeysMatch,
   _scoreDetailAccepts,
+  _sessionGuard,
 ]

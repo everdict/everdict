@@ -72,6 +72,7 @@ export function AppShell({
           }}
           canFilesWrite={can(roles, 'files:write')}
           canFilesRun={fileExecution && can(roles, 'files:write')}
+          canPlaygroundSubmit={can(roles, 'runs:submit')}
         />
       </div>
       <CommandPalette workspace={workspace} />

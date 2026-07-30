@@ -23,7 +23,15 @@ import { queueSnapshotSchema, type QueueSnapshot } from '@/entities/queue'
 
 export type WorkAuthor = { name: string; avatarUrl?: string }
 
-export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work' | 'agent' | 'files' | 'knowledge'
+export type InfraTab =
+  | 'schedules'
+  | 'runtimes'
+  | 'runs'
+  | 'work'
+  | 'agent'
+  | 'files'
+  | 'knowledge'
+  | 'playground'
 
 // A deep-open request into a page tab's iframe — e.g. openRun() points the runs tab at that run's REAL detail
 // page. seq forces re-application even for a repeated identical target (the user may have navigated away inside
@@ -56,6 +64,15 @@ export const OPEN_AGENT_SESSION_MESSAGE = 'everdict:open-agent-session'
 // discussion session) in watch mode. Buffered like PendingMention — the panel consumes it on mount.
 export type PendingSession = { id: string }
 
+// postMessage `type` a harness detail page rendered INSIDE an infra iframe sends to the PARENT shell to open the
+// playground on that harness. Same-origin only (mirrors MENTION_IN_CHAT_MESSAGE).
+export const OPEN_PLAYGROUND_MESSAGE = 'everdict:open-playground'
+
+// A request to prefill the playground's boot form with a specific harness (a detail page's "test this harness").
+// Buffered exactly like PendingMention because the playground tab mounts lazily — and deliberately a PREFILL, not
+// a boot: spending a container is the member's call, so the panel never boots on arrival.
+export type PendingPlaygroundTarget = { harnessId: string; version?: string }
+
 type InfraPanelValue = {
   workspace: string
   open: boolean
@@ -82,6 +99,11 @@ type InfraPanelValue = {
   openAgentSession: (sessionId: string) => void
   pendingSession: PendingSession | null
   consumePendingSession: () => void
+  // The playground tab — boot a harness into a warm sandbox and throw ad-hoc test cases at it. A target
+  // (from a harness detail page) only prefills the boot form; the member presses boot.
+  openPlayground: (target?: PendingPlaygroundTarget) => void
+  pendingPlaygroundTarget: PendingPlaygroundTarget | null
+  consumePendingPlaygroundTarget: () => void
   // The files tab — a workspace-filesystem file rendered interactively in the panel (Settings › Files selects
   // it; the tab has no rail button). openFile re-points an open viewer; closeFile clears it (after a delete).
   filePath: string | null
@@ -259,6 +281,17 @@ export function InfraPanelProvider({
   }, [])
   const consumePendingSession = useCallback(() => setPendingSession(null), [])
 
+  // The playground tab. Opening WITHOUT a target is the plain rail entry (the panel discovers a live session or
+  // shows the boot form); opening WITH one prefills that harness.
+  const [pendingPlaygroundTarget, setPendingPlaygroundTarget] =
+    useState<PendingPlaygroundTarget | null>(null)
+  const openPlayground = useCallback((target?: PendingPlaygroundTarget) => {
+    if (target) setPendingPlaygroundTarget(target)
+    setTab('playground')
+    setOpen(true)
+  }, [])
+  const consumePendingPlaygroundTarget = useCallback(() => setPendingPlaygroundTarget(null), [])
+
   // The files tab — Settings › Files selects a path, the panel renders it. State lives here so the viewer
   // survives left-side navigation and the tree (a separate surface) can mirror the selection.
   const [filePath, setFilePath] = useState<string | null>(null)
@@ -303,6 +336,9 @@ export function InfraPanelProvider({
         openAgentSession,
         pendingSession,
         consumePendingSession,
+        openPlayground,
+        pendingPlaygroundTarget,
+        consumePendingPlaygroundTarget,
         filePath,
         openFile,
         closeFile,
@@ -354,6 +390,27 @@ export function useMentionInChat(): (
         return
       }
       infra?.mentionInChat(reference, mission)
+    },
+    [infra]
+  )
+}
+
+// The "test this harness" dispatch — same two-path shape as useMentionInChat: the panel context directly on a
+// left-shell page, a same-origin postMessage up to the parent when the caller is rendered inside an infra iframe
+// (where no provider is mounted).
+export function useOpenPlayground(): (target?: PendingPlaygroundTarget) => void {
+  const infra = useInfraPanelOptional()
+  return useCallback(
+    (target?: PendingPlaygroundTarget) => {
+      const framed = typeof window !== 'undefined' && window.self !== window.top
+      if (framed) {
+        window.parent.postMessage(
+          { type: OPEN_PLAYGROUND_MESSAGE, ...target },
+          window.location.origin
+        )
+        return
+      }
+      infra?.openPlayground(target)
     },
     [infra]
   )

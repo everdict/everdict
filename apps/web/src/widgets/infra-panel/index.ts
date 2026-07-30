@@ -2,9 +2,12 @@ export {
   InfraPanelProvider,
   useInfraPanel,
   useInfraPanelOptional,
+  useOpenPlayground,
   MENTION_IN_CHAT_MESSAGE,
+  OPEN_PLAYGROUND_MESSAGE,
   type InfraTab,
   type PendingMention,
+  type PendingPlaygroundTarget,
   type WorkAuthor,
 } from './model/infra-panel-context'
 export { InfraPanel } from './ui/infra-panel'

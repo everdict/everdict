@@ -303,6 +303,31 @@ export const controlPlane = {
     call<T>(auth, '/budget', { method: 'PUT', body: JSON.stringify(body) }),
   submitRun: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/runs', { method: 'POST', body: JSON.stringify(body) }),
+  // Sandbox sessions (the harness playground) — a held-open container the member submits ad-hoc test cases into.
+  // create/list/submitTask keep the ENVELOPE because their statuses are the UI's state machine, not just errors:
+  // 404 on create/list means "this deployment composed no sandbox driver" (a friendly callout, never a red toast),
+  // and 409 on submit means another task is still running (restore the input, don't lose it).
+  createSandbox: (auth: AuthContext, body: unknown) =>
+    callWithEnvelope(auth, '/sandboxes', { method: 'POST', body: JSON.stringify(body) }),
+  listSandboxes: (auth: AuthContext) => callWithEnvelope(auth, '/sandboxes'),
+  getSandbox: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/sandboxes/${encodeURIComponent(id)}`),
+  submitSandboxTask: (auth: AuthContext, id: string, body: unknown) =>
+    callWithEnvelope(auth, `/sandboxes/${encodeURIComponent(id)}/tasks`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  // The 2s poll: events since a cursor into the task's append-only buffer (since omitted = full replay, which is
+  // how a remounted panel reconstructs the feed). Serves the sealed trajectory once the task settled.
+  readSandboxTaskTrace: <T>(auth: AuthContext, id: string, taskId: string, since?: number) =>
+    call<T>(
+      auth,
+      `/sandboxes/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}/trace${
+        since !== undefined && since > 0 ? `?since=${since}` : ''
+      }`
+    ),
+  closeSandbox: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/close`, { method: 'POST' }),
   listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),
   // GET /harnesses/:id — a harness's instance version tag list.
   getHarness: <T>(auth: AuthContext, id: string) =>
