@@ -11,6 +11,7 @@ import {
   type BudgetStore,
   type CallbackStore,
   type CapabilityStore,
+  ClickHouseTrajectoryStore,
   type CommentStore,
   InMemoryAgentMemberPreferenceStore,
   InMemoryApprovalStore,
@@ -200,6 +201,20 @@ function resolveSecretCipher(): SecretCipher {
 // auto-generated — safe in-memory since it's volatile, but persistent Pg operation must pin the key via EVERDICT_SECRETS_KEY (restart decryption).
 export async function makePersistence(): Promise<Persistence> {
   const cipher = resolveSecretCipher();
+  // The trajectory store's ops-scale rung (native-observability N-O1 rung 2): EVERDICT_CLICKHOUSE_URL swaps
+  // ONLY this store to ClickHouse — the port makes the swap invisible to every consumer (door, browse,
+  // quota meter, retention, perception). Everything else keeps its DATABASE_URL choice.
+  const clickhouseTrajectories = await (async () => {
+    const chUrl = process.env.EVERDICT_CLICKHOUSE_URL;
+    if (!chUrl) return undefined;
+    const store = new ClickHouseTrajectoryStore({
+      url: chUrl,
+      ...(process.env.EVERDICT_CLICKHOUSE_DATABASE ? { database: process.env.EVERDICT_CLICKHOUSE_DATABASE } : {}),
+    });
+    await store.ensureSchema();
+    console.log("▶ trajectory store: ClickHouse (ops-scale rung)");
+    return store;
+  })();
   // Refresh-grant client for offline_token secrets — injected into the SecretStore so it can exchange a stored
   // refresh token for a fresh access token on read (OAuth I/O stays out of @everdict/db).
   const offlineTokenMinter = httpOfflineTokenMinter();
@@ -237,7 +252,7 @@ export async function makePersistence(): Promise<Persistence> {
       approvalStore: new InMemoryApprovalStore(platformEventStore),
       envelopeStore: new InMemoryEnvelopeStore(),
       eventConsumerStateStore: new InMemoryEventConsumerStateStore(),
-      trajectoryStore: new InMemoryTrajectoryStore(),
+      trajectoryStore: clickhouseTrajectories ?? new InMemoryTrajectoryStore(),
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
@@ -286,7 +301,7 @@ export async function makePersistence(): Promise<Persistence> {
     approvalStore: new PgApprovalStore(client),
     envelopeStore: new PgEnvelopeStore(client),
     eventConsumerStateStore: new PgEventConsumerStateStore(client),
-    trajectoryStore: new PgTrajectoryStore(client),
+    trajectoryStore: clickhouseTrajectories ?? new PgTrajectoryStore(client),
     commentStore: new PgCommentStore(client),
     knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),

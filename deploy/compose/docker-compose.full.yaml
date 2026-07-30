@@ -107,6 +107,29 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # ── One-shot: seed the bucket the managed registry stores its blobs in (profile `images`) ────────────────────
+  # distribution's S3 driver does NOT create its bucket — it surfaces the miss as a 500 on the first push instead.
+  # Our own S3 users (workspace filesystem, artifact offload) create theirs lazily in code; a third-party container
+  # cannot, so the bucket is seeded here. `mc mb --ignore-existing` keeps it idempotent and the container exits as
+  # soon as it is done, which is what lets the registry gate on it with service_completed_successfully. Reuses the
+  # MinIO image because `mc` already ships in it (the minio healthcheck above calls it) — no second pinned tag.
+  registry-bucket:
+    profiles: ["images"]
+    image: minio/minio:${MINIO_VERSION:-RELEASE.2024-12-18T13-15-44Z}
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        mc alias set everdict http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        && mc mb --ignore-existing "everdict/$${IMAGE_STORE_S3_BUCKET}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-everdict}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD (openssl rand -hex 16)}
+      IMAGE_STORE_S3_BUCKET: ${IMAGE_STORE_S3_BUCKET:-everdict-images}
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
   # ── Managed image store (optional, profile `images`) — everdict's OWN registry for environment images ─────────
   # Auth is delegated to the control plane: this registry holds no user database, it trusts JWTs signed by the
   # key in ./certs and honors exactly the access they carry (docs/architecture/managed-image-store.md).
@@ -134,11 +157,20 @@ services:
       REGISTRY_STORAGE_S3_SECRETKEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD (openssl rand -hex 16)}
       # Deletion is off by default in distribution; the store's remove() needs it (405 otherwise, named in the error).
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      # Serve blobs through the registry instead of 307-ing to a presigned S3 URL. Same trap as the auth realm: the
+      # redirect is followed by the DOCKER CLIENT, and the only address we can put in it is `http://minio:9000`,
+      # which resolves on the compose network and nowhere else — a push dies with `lookup minio: no such host`
+      # after the token exchange has already succeeded. Proxying costs the registry the blob bytes; a redirect that
+      # no client outside this network can follow costs it every push.
+      REGISTRY_STORAGE_REDIRECT_DISABLE: "true"
     volumes:
       - ./certs:/certs:ro
     depends_on:
       minio:
         condition: service_healthy
+      # The bucket must exist before the first blob upload, not merely before the first pull.
+      registry-bucket:
+        condition: service_completed_successfully
     ports:
       - "${IMAGE_STORE_PORT:-5001}:5000"
     restart: unless-stopped
@@ -327,6 +359,23 @@ services:
       - "9222"
     restart: unless-stopped
 
+  # ── ClickHouse — the trajectory store's OPS-SCALE rung (native-observability N-O1 rung 2) — `--profile clickhouse` ──
+  # Opt-in by measurement, never by default: rung 1 (Postgres jsonb) fits the compose stack as-is. With the
+  # profile on, set EVERDICT_CLICKHOUSE_URL=http://clickhouse:8123 on the api service — ONLY the trajectory
+  # store swaps engines (the port makes it invisible); everything else stays on Postgres.
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    profiles: ["clickhouse"]
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1" # single-node, in-network only — the api reaches it as clickhouse:8123
+    ulimits:
+      nofile: 262144
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    expose:
+      - "8123"
+    restart: unless-stopped
+
   # ── Temporal worker — polls the task queue; batch/schedule activities bridge back to the API over /internal ──
   worker:
     image: everdict-worker:${EVERDICT_VERSION:-latest}
@@ -468,3 +517,4 @@ volumes:
   pgdata:
   minio-data:
   keycloak-data:
+  clickhouse-data:

@@ -142,8 +142,13 @@ collector and the store**.
   is the meter via `ingestedSince`, so no counter drifts), refused at 429 with the arithmetic and
   announced as `trace.ingestion_throttled` (cooldown-bounded, trigger-matchable) — plus retention:
   `EVERDICT_TRAJECTORY_RETENTION_DAYS` drives an hourly `deleteOlderThan` sweep (logged, never silent;
-  unset = keep forever). Remaining: the ClickHouse adapter (entered by measurement — real infra), byte
-  quotas, and sampling policy.
+  unset = keep forever). The ClickHouse adapter also SHIPPED (entered on the
+  maintainer's measurement call): `ClickHouseTrajectoryStore` — the SAME port over ClickHouse's HTTP
+  interface (SDK-free; parameterized queries, JSONEachRow inserts), swapped by
+  `EVERDICT_CLICKHOUSE_URL` alone (ONLY the trajectory store moves; everything else keeps Postgres), with
+  the opt-in `--profile clickhouse` compose service. Rung-2 honesties documented in the adapter:
+  `sealed_at` as ISO String, first-write-wins resolved at READ (earliest row / argMin) over
+  check-then-insert. Remaining: byte quotas and sampling policy.
 - **N4 — Mirror consolidation.** Collector-level exporters subsume raw-trace mirroring; score-attach
   sinks remain API-side.
 
