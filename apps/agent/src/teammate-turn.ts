@@ -28,12 +28,24 @@ export async function runTeammateTurn(
     // The incoming messages (peer/event, attribution-rendered) are this turn's prompt; further messages that arrive
     // mid-turn are pulled by the loop's own drainInput at each turn boundary.
     const prompt = drained.map((m) => contentToString(m.content)).join("\n\n");
-    await runChat(deps, principal, headers, sessionId, prompt, undefined, undefined, signal, {
-      drainInput: () => mailbox.drain(principal.workspace, sessionId),
-      // Activation runs carry a mode-derived approval hook (agent-automation A6); a plain teammate turn has
-      // none (its autonomy boundary is consent at spawn time).
-      ...(permit ? { permit } : {}),
-    });
+    // persistentRetry: an unattended turn has no user waiting on it — surviving a capacity dip (429/529 waited
+    // out, Retry-After honored) beats failing fast and losing the reaction.
+    await runChat(
+      { ...deps, persistentRetry: true },
+      principal,
+      headers,
+      sessionId,
+      prompt,
+      undefined,
+      undefined,
+      signal,
+      {
+        drainInput: () => mailbox.drain(principal.workspace, sessionId),
+        // Activation runs carry a mode-derived approval hook (agent-automation A6); a plain teammate turn has
+        // none (its autonomy boundary is consent at spawn time).
+        ...(permit ? { permit } : {}),
+      },
+    );
   } catch (err) {
     console.error(`[agent] teammate turn failed for ${sessionId}:`, err instanceof Error ? err.message : err);
   }

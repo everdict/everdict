@@ -128,6 +128,29 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   history menu shows a running badge, and the panel auto-re-attaches when it opens a live session (a send that
   409s restores the input and re-attaches instead of erroring). A parked write-tool approval survives navigation
   — deny now comes only from timeout or /stop, and the re-attach replay re-renders the prompt.
+- **Long-run resilience (landed — the "frequent disconnects" hardening, gap-analyzed file-by-file against
+  `workspaces/claude-code`)** — four layers. (1) **Transport senses** (`@everdict/llm`, Anthropic): `timeoutMs` is
+  actually enforced (time-to-headers; it was declared and unused), a **90s stream-idle watchdog** cancels a
+  silently-dead SSE body (a dropped connection must not pin the turn forever), a stream that ends with no
+  content/tool_calls/stop_reason fails as a retryable error instead of posing as a completed empty turn, and a
+  rate-limited response surfaces `Retry-After`/`anthropic-ratelimit-unified-reset` as `extra.retryAfterMs`.
+  (2) **Retry policy** (kernel `runAgentLoop`): exponential backoff + jitter (500ms base → 32s cap, default 6
+  retries — was 2 fixed), the server's own pacing honored over the computed backoff, retryability decided by the
+  TRUE upstream status (`extra.status` — a provider 400 is no longer retried just because UpstreamError maps to
+  502), `retry` events surfaced per wait, and **`persistentRetry`** for unattended turns (teammate / discussion /
+  report set it via a deps spread): capacity errors (429/529/overloaded) are waited out indefinitely (5min-cap
+  backoff) instead of failing the reaction. (3) **Transcript repair** (`normalizeHistory` — Claude Code's
+  `ensureToolResultPairing` reinterpreted): a crash-dangling assistant `tool_calls` is answered with a synthetic
+  tool result on replay and orphan tool results are dropped, so a mid-turn host death no longer bricks the
+  conversation with provider 400s forever. (4) **Failure is a conversation citizen** (`runChat`): a failed turn
+  persists WHY as an assistant record before rethrowing (the transcript shows it; the next message just
+  continues), usage metering moved to a `finally` (a failed/aborted turn's consumed tokens still bill), and the
+  chat MCP invoke now **reconnects a dead session** (`makeInvoke` over a client box; shared in-flight reconnect —
+  reads auto-retry once on the fresh session, mutations return an explicit outcome-unknown error instead of
+  risking a silent double-fire). Also in this pass: a turn's write tools run **serially in call order** while
+  consecutive read-only calls stay concurrent (the isConcurrencySafe partition, over `isReadOnly`); the default
+  output cap rose 4096→8192 with `finishReason` truncation surfaced as a `truncated` event; `outputTokens` is a
+  loop/stream option end-to-end.
 - **P9 (per-workspace customization, landed — Phase 1)** — each workspace can enhance its own agent, plugging its
   context + tools into the shared framework the way Claude Code takes a per-project CLAUDE.md + MCP servers. A new
   **registered, versioned `AgentSpec` entity** (`(tenant, id, version) → AgentSpec`, same immutable-version SSOT as

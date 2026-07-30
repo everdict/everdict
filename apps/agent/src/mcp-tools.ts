@@ -111,24 +111,74 @@ export type ToolProvider = (
 
 const EMPTY_SESSION: ToolSession = { registry: new ToolRegistry([]), call: null, close: async () => {} };
 
-// One MCP call → ToolResult, bound to a specific client. An MCP result is a content-block array — join the text blocks
-// and carry any image blocks through as base64 (the kernel surfaces them to the model as multimodal content).
-function makeInvoke(client: Client, prefix?: string): McpInvoke {
+// The mutable client slot a resilient invoke reconnects through. `current` is what calls go to; `refresh` shares
+// one in-flight reconnect across concurrently-failing calls (no reconnect storm). close() must close `current`,
+// not the client that happened to exist at connect time.
+export interface McpClientBox {
+  current: Client;
+  refresh?: Promise<Client>;
+}
+
+function toToolResult(r: Awaited<ReturnType<Client["callTool"]>>): Awaited<ReturnType<McpInvoke>> {
+  const blocks =
+    (r.content as Array<{ type?: string; text?: string; data?: string; mimeType?: string }> | undefined) ?? [];
+  const text = blocks
+    .filter((b) => typeof b.text === "string")
+    .map((b) => b.text)
+    .join("\n");
+  const images = blocks
+    .filter((b) => b.type === "image" && typeof b.data === "string")
+    .map((b) => ({ data: b.data as string, mediaType: b.mimeType ?? "image/png" }));
+  return { content: text, isError: r.isError === true, ...(images.length > 0 ? { images } : {}) };
+}
+
+// One MCP call → ToolResult, RECONNECTING through a dead session (ResilientMcpSession's fix, reinterpreted for the
+// chat path: it lived only in the self-hosted runner while a mid-turn control-plane restart made every remaining
+// tool call of the turn fail). A tool-level failure comes back as an isError RESULT (no reconnect); a THROW is a
+// transport/session death → discard the session, connect fresh (shared in-flight, so concurrent failures don't
+// stampede), and then:
+//   · a READ call is retried once on the fresh session — reads are safe to re-issue;
+//   · a MUTATING call is NOT auto-retried (the first attempt may have reached the server — a silent double-fire
+//     is worse than an error): the healed session serves the FOLLOWING calls, and the model gets an error result
+//     telling it the call's outcome is unknown so it can verify/re-issue deliberately.
+// An MCP result is a content-block array — join the text blocks and carry image blocks through as base64.
+// Exported for direct unit testing of the reconnect semantics.
+export function makeInvoke(
+  box: McpClientBox,
+  connect: () => Promise<Client>,
+  canRetry: (bareToolName: string) => boolean,
+  prefix?: string,
+): McpInvoke {
+  const reconnect = (): Promise<Client> => {
+    if (!box.refresh) {
+      box.refresh = (async () => {
+        await box.current.close().catch(() => {});
+        const fresh = await connect();
+        box.current = fresh;
+        return fresh;
+      })().finally(() => {
+        box.refresh = undefined;
+      });
+    }
+    return box.refresh;
+  };
   return async (name, args) => {
     // A namespaced workspace tool is exposed to the model as `mcp__<server>__<tool>`; strip the prefix before calling
     // the server, which only knows the bare tool name.
     const toolName = prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
-    const r = await client.callTool({ name: toolName, arguments: args });
-    const blocks =
-      (r.content as Array<{ type?: string; text?: string; data?: string; mimeType?: string }> | undefined) ?? [];
-    const text = blocks
-      .filter((b) => typeof b.text === "string")
-      .map((b) => b.text)
-      .join("\n");
-    const images = blocks
-      .filter((b) => b.type === "image" && typeof b.data === "string")
-      .map((b) => ({ data: b.data as string, mediaType: b.mimeType ?? "image/png" }));
-    return { content: text, isError: r.isError === true, ...(images.length > 0 ? { images } : {}) };
+    try {
+      return toToolResult(await box.current.callTool({ name: toolName, arguments: args }));
+    } catch (err) {
+      const fresh = await reconnect(); // throws when the server is really gone → invokeTool turns it into an error result
+      if (canRetry(toolName)) {
+        return toToolResult(await fresh.callTool({ name: toolName, arguments: args }));
+      }
+      const detail = err instanceof Error ? err.message : String(err);
+      return {
+        content: `The tool server connection dropped while "${toolName}" was in flight (${detail}). The session was re-established, but the call was NOT retried automatically because it may mutate state and its outcome is unknown. Verify the current state with a read tool and re-issue the call if appropriate.`,
+        isError: true,
+      };
+    }
   };
 }
 
@@ -144,13 +194,20 @@ export function mcpToolProvider(
   const allowStdio = opts.allowStdio ?? false;
   const allowedImages = opts.allowedImages ?? [];
   return async (headers, extraServers = [], skills = [], codeTools = []) => {
-    const clients: Client[] = [];
+    const boxes: McpClientBox[] = [];
     const bridged: ToolDefinition[] = [];
     let baseCall: McpInvoke | null = null;
 
     // 1. Base everdict MCP — the whole catalog minus the runner protocol tools, forwarding the caller's bearer
     // (dogfooding the control plane's own tools). Mutations are bridged isReadOnly:false so each call is decided by
     // the session's permission mode (see action-policy.ts).
+    const connectBase = async (): Promise<Client> => {
+      const c = new Client({ name: "everdict-agent", version: "0.1.0" });
+      await c.connect(
+        new StreamableHTTPClientTransport(baseUrl, { requestInit: { headers: forwardHeaderRecord(headers) } }),
+      );
+      return c;
+    };
     const baseClient = new Client({ name: "everdict-agent", version: "0.1.0" });
     try {
       const transport = new StreamableHTTPClientTransport(baseUrl, {
@@ -159,8 +216,10 @@ export function mcpToolProvider(
       await baseClient.connect(transport);
       const baseTools = (await baseClient.listTools()).tools.filter((t) => isDefaultBaseTool(t.name));
       if (baseTools.length > 0) {
-        clients.push(baseClient);
-        const invoke = makeInvoke(baseClient);
+        const baseBox: McpClientBox = { current: baseClient };
+        boxes.push(baseBox);
+        // Auto-retry after a reconnect only for pure reads — a mutating call's first attempt may have landed.
+        const invoke = makeInvoke(baseBox, connectBase, (tool) => isBaseToolReadOnly(tool));
         baseCall = invoke;
         for (const t of baseTools) {
           bridged.push(
@@ -190,6 +249,22 @@ export function mcpToolProvider(
       // Containerized stdio servers spawn a `docker run` process — only when the operator has opted in AND (if an
       // allowlist is set) the image is on it; else skip (degrade).
       if (server.kind === "stdio" && (!allowStdio || !imageAllowed(server.image, allowedImages))) continue;
+      const connectServer = async (): Promise<Client> => {
+        const c = new Client({ name: "everdict-agent", version: "0.1.0" });
+        const t =
+          server.kind === "stdio"
+            ? new StdioClientTransport({
+                command: "docker",
+                args: dockerRunArgs(server),
+                env: stdioEnv(server.env),
+                stderr: "pipe",
+              })
+            : new StreamableHTTPClientTransport(new URL(server.url), {
+                requestInit: { headers: server.authorization ? { authorization: server.authorization } : {} },
+              });
+        await c.connect(t);
+        return c;
+      };
       const client = new Client({ name: "everdict-agent", version: "0.1.0" });
       try {
         const transport =
@@ -207,7 +282,9 @@ export function mcpToolProvider(
         const prefix = mcpBridgePrefix(server.name);
         const listed = (await client.listTools()).tools;
         const allowed = server.write ? listed : listed.filter((t) => isReadOnlyToolName(t.name));
-        const invoke = makeInvoke(client, prefix);
+        const box: McpClientBox = { current: client };
+        // A read-only-bridged server may auto-retry everything it exposes; a write-allowed server only its reads.
+        const invoke = makeInvoke(box, connectServer, (tool) => !server.write || isReadOnlyToolName(tool), prefix);
         const toAdd: ToolDefinition[] = [];
         for (const t of allowed) {
           const name = `${prefix}${t.name}`;
@@ -228,7 +305,7 @@ export function mcpToolProvider(
           await client.close().catch(() => {});
           continue;
         }
-        clients.push(client);
+        boxes.push(box);
         bridged.push(...toAdd);
       } catch {
         await client.close().catch(() => {}); // an unreachable workspace server is skipped, not fatal
@@ -255,7 +332,8 @@ export function mcpToolProvider(
       registry,
       call: baseCall,
       close: async () => {
-        for (const c of clients) await c.close().catch(() => {});
+        // Close through the boxes — a reconnect may have swapped the live client since connect time.
+        for (const b of boxes) await b.current.close().catch(() => {});
       },
     };
   };

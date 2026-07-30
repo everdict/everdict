@@ -81,7 +81,8 @@ export async function runReportTurn(
   try {
     const principal = await deps.authenticate({ authorization: `Bearer ${token}` });
     await runChat(
-      { ...deps, maxTurns: REPORT_MAX_TURNS },
+      // persistentRetry: a scheduled report is unattended — wait out capacity dips instead of losing the run.
+      { ...deps, maxTurns: REPORT_MAX_TURNS, persistentRetry: true },
       principal,
       { authorization: `Bearer ${token}` },
       sessionId,

@@ -111,7 +111,8 @@ export async function runDiscussionTurn(
       return decision;
     };
     const result = await runChat(
-      { ...deps, maxTurns: DISCUSSION_MAX_TURNS },
+      // persistentRetry: a discussion turn is unattended — wait out capacity dips instead of failing the thread.
+      { ...deps, maxTurns: DISCUSSION_MAX_TURNS, persistentRetry: true },
       principal,
       { authorization: `Bearer ${token}` },
       input.sessionId,

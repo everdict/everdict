@@ -1,5 +1,14 @@
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { describe, expect, it, vi } from "vitest";
-import { dockerRunArgs, imageAllowed, isBaseToolReadOnly, isDefaultBaseTool, stdioEnv } from "./mcp-tools.js";
+import {
+  type McpClientBox,
+  dockerRunArgs,
+  imageAllowed,
+  isBaseToolReadOnly,
+  isDefaultBaseTool,
+  makeInvoke,
+  stdioEnv,
+} from "./mcp-tools.js";
 
 // The base control-plane surface is bridge-all: every entity's reads AND mutations reach the agent, and safety lives
 // in the layers (RBAC + the session's permission mode over the gate), not in surface shaping. These predicates are
@@ -177,5 +186,114 @@ describe("stdioEnv — the docker CLI process environment", () => {
     expect(env.SECRET_ON_AGENT).toBeUndefined();
     expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
     vi.unstubAllEnvs();
+  });
+});
+
+describe("makeInvoke — resilient MCP invocation (reconnect through a dead session)", () => {
+  // A minimal fake with the two members makeInvoke touches. Cast once at the seam.
+  type FakeClient = {
+    callTool: (req: { name: string; arguments?: unknown }) => Promise<unknown>;
+    close: () => Promise<void>;
+  };
+  const asClient = (c: FakeClient): Client => c as unknown as Client;
+  const ok = (text: string) => ({ content: [{ type: "text", text }], isError: false });
+
+  it("retries a READ call once on a fresh session after a transport death", async () => {
+    // Given a live client whose session dies mid-turn, and a connect() that yields a healthy replacement
+    const dead: FakeClient = {
+      callTool: async () => {
+        throw new Error("Not connected");
+      },
+      close: async () => {},
+    };
+    const healthy: FakeClient = { callTool: async () => ok("fresh answer"), close: async () => {} };
+    const box: McpClientBox = { current: asClient(dead) };
+    const invoke = makeInvoke(
+      box,
+      async () => asClient(healthy),
+      () => true,
+    );
+    // When a read tool is invoked, Then the call transparently succeeds on the reconnected session
+    const result = await invoke("get_run", { id: "r1" });
+    expect(result).toEqual({ content: "fresh answer", isError: false });
+    expect(box.current).toBe(asClient(healthy)); // the box now serves the fresh session
+  });
+
+  it("does NOT auto-retry a MUTATING call — the healed session serves later calls, the model gets an explicit error", async () => {
+    let freshCalls = 0;
+    const dead: FakeClient = {
+      callTool: async () => {
+        throw new Error("Not connected");
+      },
+      close: async () => {},
+    };
+    const healthy: FakeClient = {
+      callTool: async () => {
+        freshCalls += 1;
+        return ok("should not run for the failed mutation");
+      },
+      close: async () => {},
+    };
+    const box: McpClientBox = { current: asClient(dead) };
+    const invoke = makeInvoke(
+      box,
+      async () => asClient(healthy),
+      () => false,
+    );
+    // When a mutating tool call dies in flight
+    const result = await invoke("create_dataset", { id: "d1" });
+    // Then it is NOT silently re-fired (its first attempt may have landed) — the model is told to verify
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("NOT retried automatically");
+    expect(freshCalls).toBe(0);
+    // …but the session IS healed for the calls that follow
+    expect(box.current).toBe(asClient(healthy));
+    expect(await invoke("create_dataset", { id: "d2" })).toEqual({
+      content: "should not run for the failed mutation",
+      isError: false,
+    });
+  });
+
+  it("shares ONE in-flight reconnect across concurrently-failing calls (no reconnect storm)", async () => {
+    let connects = 0;
+    const dead: FakeClient = {
+      callTool: async () => {
+        throw new Error("fetch failed");
+      },
+      close: async () => {},
+    };
+    const healthy: FakeClient = { callTool: async () => ok("x"), close: async () => {} };
+    const box: McpClientBox = { current: asClient(dead) };
+    const invoke = makeInvoke(
+      box,
+      async () => {
+        connects += 1;
+        await new Promise((r) => setTimeout(r, 5)); // keep the reconnect in flight while both calls fail
+        return asClient(healthy);
+      },
+      () => true,
+    );
+    await Promise.all([invoke("get_a", {}), invoke("get_b", {})]);
+    expect(connects).toBe(1);
+  });
+
+  it("a tool-level isError RESULT does not trigger a reconnect (only a transport throw does)", async () => {
+    let connects = 0;
+    const client: FakeClient = {
+      callTool: async () => ({ content: [{ type: "text", text: "no such run" }], isError: true }),
+      close: async () => {},
+    };
+    const box: McpClientBox = { current: asClient(client) };
+    const invoke = makeInvoke(
+      box,
+      async () => {
+        connects += 1;
+        return asClient(client);
+      },
+      () => true,
+    );
+    const result = await invoke("get_run", { id: "nope" });
+    expect(result).toEqual({ content: "no such run", isError: true });
+    expect(connects).toBe(0);
   });
 });

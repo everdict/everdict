@@ -186,6 +186,10 @@ export interface ChatDeps {
   subagentModelRef?: string;
   // Per-tool wall-clock deadline (ms) forwarded to the loop; a hung tool can't pin a turn forever. Absent → no deadline.
   toolTimeoutMs?: number;
+  // Unattended-run resilience (forwarded to the loop): capacity errors (429/529) are waited out indefinitely
+  // instead of exhausting the retry budget. Set by the headless callers (teammate/discussion/report turns) via a
+  // deps spread — interactive chat stays fail-fast. See AgentLoopOptions.persistentRetry.
+  persistentRetry?: boolean;
   // Extended-thinking budget (tokens). Set → the loop asks the model to reason before answering (Anthropic `thinking`;
   // reasoning models reason regardless). Reasoning is captured + streamed either way; absent → thinking off.
   thinkingBudgetTokens?: number;
@@ -538,41 +542,61 @@ export async function runChat(
     // Accumulate this conversation's token usage across turns (the loop reports tokens; the control plane prices them).
     let inputTokens = 0;
     let outputTokens = 0;
-    await runAgentLoop({
-      transport: model.transport,
-      model: model.model,
-      systemPrompt: systemWithEnv,
-      history,
-      registry,
-      onMessage: persist,
-      onUsage: (u) => {
-        inputTokens += u.inputTokens;
-        outputTokens += u.outputTokens;
-      },
-      ...(summarize ? { summarize } : {}),
-      ...(fallback ? { fallback } : {}),
-      ...(subagentModel ? { subagentModel } : {}),
-      subagentTypes: BUILTIN_SUBAGENT_TYPES,
-      ...(deps.toolTimeoutMs !== undefined ? { toolTimeoutMs: deps.toolTimeoutMs } : {}),
-      ...(deps.thinkingBudgetTokens !== undefined ? { thinking: { budgetTokens: deps.thinkingBudgetTokens } } : {}),
-      ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
-      ...(hooks?.permit ? { permit: hooks.permit } : {}),
-      ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
-      ...(hooks?.planMode ? { planMode: hooks.planMode } : {}),
-      ...(hooks?.onPlan ? { onPlan: hooks.onPlan } : {}),
-      ...(hooks?.sendMessage ? { sendMessage: hooks.sendMessage } : {}),
-      ...(hooks?.spawnTeammate ? { spawnTeammate: hooks.spawnTeammate } : {}),
-      ...(hooks?.listTeammates ? { listTeammates: hooks.listTeammates } : {}),
-      ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
-      ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
-      ...(signal ? { signal } : {}),
-    });
-    // Meter the conversation's LLM cost against the workspace when it ran on a workspace-billed model — the same rule
-    // as the harness (own-pays/personal-key/dev conversations are not metered). Best-effort: never fail the chat.
-    if (model.billed && deps.reportUsage && inputTokens + outputTokens > 0) {
-      try {
-        await deps.reportUsage({ workspace, model: model.model, inputTokens, outputTokens });
-      } catch {}
+    try {
+      await runAgentLoop({
+        transport: model.transport,
+        model: model.model,
+        systemPrompt: systemWithEnv,
+        history,
+        registry,
+        onMessage: persist,
+        onUsage: (u) => {
+          inputTokens += u.inputTokens;
+          outputTokens += u.outputTokens;
+        },
+        ...(summarize ? { summarize } : {}),
+        ...(fallback ? { fallback } : {}),
+        ...(subagentModel ? { subagentModel } : {}),
+        subagentTypes: BUILTIN_SUBAGENT_TYPES,
+        ...(deps.toolTimeoutMs !== undefined ? { toolTimeoutMs: deps.toolTimeoutMs } : {}),
+        ...(deps.persistentRetry === true ? { persistentRetry: true } : {}),
+        ...(deps.thinkingBudgetTokens !== undefined ? { thinking: { budgetTokens: deps.thinkingBudgetTokens } } : {}),
+        ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
+        ...(hooks?.permit ? { permit: hooks.permit } : {}),
+        ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
+        ...(hooks?.planMode ? { planMode: hooks.planMode } : {}),
+        ...(hooks?.onPlan ? { onPlan: hooks.onPlan } : {}),
+        ...(hooks?.sendMessage ? { sendMessage: hooks.sendMessage } : {}),
+        ...(hooks?.spawnTeammate ? { spawnTeammate: hooks.spawnTeammate } : {}),
+        ...(hooks?.listTeammates ? { listTeammates: hooks.listTeammates } : {}),
+        ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
+        ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
+        ...(signal ? { signal } : {}),
+      });
+    } catch (err) {
+      // Failure is a conversation CITIZEN, not just an exception (Claude Code parity): persist why the turn died
+      // as an assistant record before rethrowing, so the transcript shows the failure and the conversation stays
+      // continuable — the next turn replays a balanced history (normalizeHistory pairs any dangling tool_calls).
+      // A user abort is not a failure. Best-effort: a store write must not mask the original error.
+      if (signal?.aborted !== true) {
+        const detail = err instanceof Error ? err.message : String(err);
+        try {
+          await persist({
+            role: "assistant",
+            content: `[The turn failed: ${detail}] The conversation is intact — send a message to continue.`,
+          });
+        } catch {}
+      }
+      throw err;
+    } finally {
+      // Meter the conversation's LLM cost against the workspace when it ran on a workspace-billed model — the same
+      // rule as the harness (own-pays/personal-key/dev conversations are not metered). In a finally so a FAILED or
+      // aborted turn's consumed tokens are still billed. Best-effort: never fail the chat.
+      if (model.billed && deps.reportUsage && inputTokens + outputTokens > 0) {
+        try {
+          await deps.reportUsage({ workspace, model: model.model, inputTokens, outputTokens });
+        } catch {}
+      }
     }
   } finally {
     await tools.close();
