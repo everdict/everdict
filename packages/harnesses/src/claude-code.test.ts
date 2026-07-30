@@ -77,6 +77,10 @@ describe("ClaudeCodeHarness", () => {
     for await (const ev of new ClaudeCodeHarness("cli").run(compute, "do it", ctx)) events.push(ev);
 
     expect(compute.lastEnv?.CLAUDE_CODE_OAUTH_TOKEN).toBe("tok-123");
+    // Regression (live-found in the playground's docker session): the claude binary refuses
+    // --dangerously-skip-permissions as root unless IS_SANDBOX is set — and this harness only ever runs
+    // inside a Driver-provisioned sandbox, so the flag is forced.
+    expect(compute.lastEnv?.IS_SANDBOX).toBe("1");
     expect(compute.lastCmd).toContain("--output-format stream-json");
     expect(events.map((e) => e.kind)).toEqual(["message", "tool_call", "llm_call", "tool_result", "llm_call"]);
     const agg = events.find((e) => e.kind === "llm_call" && e.model === "aggregate");

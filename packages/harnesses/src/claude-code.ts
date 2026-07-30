@@ -25,7 +25,10 @@ export class ClaudeCodeHarness implements EvaluableHarness {
 
   async *run(compute: ComputeHandle, task: string, ctx: RunContext): AsyncIterable<TraceEvent> {
     // The claude CLI runs on the machine's subscription login — apiKeyEnv is usually empty (keys are injected only in a sandbox).
-    const env: Record<string, string> = { ...ctx.apiKeyEnv };
+    // IS_SANDBOX: the claude binary refuses --dangerously-skip-permissions as root unless it is told it runs
+    // inside a sandbox — which is exactly this harness's contract (a Driver-provisioned compute; containers
+    // run as root). Live-found in the playground's docker session; forced, not overridable.
+    const env: Record<string, string> = { ...ctx.apiKeyEnv, IS_SANDBOX: "1" };
     const cwd = this.opts.workDir ?? "work";
     const cmd = `claude -p ${shq(task)} --output-format stream-json --verbose --dangerously-skip-permissions`;
 
