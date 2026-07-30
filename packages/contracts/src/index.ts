@@ -13,6 +13,7 @@ export * from "./execution/file-execution.js";
 export * from "./execution/case-failure.js";
 export * from "./execution/environment.js";
 export * from "./harness/harness.js";
+export * from "./harness/auth-env.js";
 export * from "./execution/grader.js";
 export * from "./execution/eval-case.js";
 export * from "./execution/recording.js";

@@ -24,12 +24,23 @@ export interface ExecOpts {
   env?: Record<string, string>;
 }
 
+// One incremental piece of a streaming exec's output, in arrival order per stream.
+export interface ExecChunk {
+  stream: "stdout" | "stderr";
+  data: string;
+}
+
 // An isolated execution unit. Extended with `computer?: Computer` (screenshot/click/type) at the OS-use stage.
 export interface ComputeHandle {
   // The driver-level identity of this compute (a container id), when the driver has one. Session runs
   // persist it on the row so a reaper in a LATER process can still tear the compute down (see Driver.reap).
   readonly id?: string;
   exec(cmd: string, opts?: ExecOpts): Promise<ExecResult>;
+  // Streaming exec: the SAME result contract as exec (a non-zero exit resolves, a timeout resolves 124),
+  // with output chunks ALSO delivered incrementally as they arrive. Optional so callers can DETECT support
+  // and pick an incremental parse path (an ignored option flag would force fragile double-parse dedup);
+  // absent = buffered only.
+  execStream?(cmd: string, onChunk: (chunk: ExecChunk) => void, opts?: ExecOpts): Promise<ExecResult>;
   writeFile(path: string, data: string): Promise<void>;
   readFile(path: string): Promise<string>;
   dispose(): Promise<void>;

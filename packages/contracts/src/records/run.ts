@@ -61,7 +61,8 @@ export const RunPlacementSchema = z.object({
 export type RunPlacement = z.infer<typeof RunPlacementSchema>;
 
 // Channels this run exposes while alive (the live-observability attach surfaces, generalized).
-export const RunAttachChannelSchema = z.enum(["logs", "exec", "terminal", "screen", "cdp"]);
+// "tasks" = a harness session accepts ad-hoc test-case submissions (the playground channel).
+export const RunAttachChannelSchema = z.enum(["logs", "exec", "terminal", "screen", "cdp", "tasks"]);
 export type RunAttachChannel = z.infer<typeof RunAttachChannelSchema>;
 
 // The orchestration this run belongs to — a scorecard's case, a conversation's turn, a generic child.
