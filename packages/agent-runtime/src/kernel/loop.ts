@@ -49,6 +49,8 @@ export type AgentEvent =
   | { type: "subagent"; id: string; phase: "launched" | "done"; ok?: boolean } // a background (fire-and-forget) sub-agent
   | { type: "fallback"; from: string; to: string } // switched to the fallback model after sustained upstream failure
   | { type: "compaction"; droppedMessages: number; mode?: "microcompact" | "summarize" | "drop" }
+  | { type: "retry"; attempt: number; delayMs: number; persistent?: boolean } // waiting out a transient model-call failure
+  | { type: "truncated"; finishReason: string } // the turn hit the output-token cap (max_tokens/length) — output may be cut off
   | { type: "done"; stopReason: StopReason };
 
 export interface AgentLoopOptions {
@@ -64,8 +66,18 @@ export interface AgentLoopOptions {
   registry: ToolRegistry;
   maxTurns?: number;
   maxTokens?: number;
-  // Retries of a single model call on a transient upstream error (429/5xx/network), same model, fixed backoff.
+  // Retries of a single model call on a transient upstream error (429/5xx/network), same model, exponential
+  // backoff + jitter capped at 32s; the server's own Retry-After / rate-limit-reset pacing (surfaced by the
+  // transport as extra.retryAfterMs) is honored over the computed backoff.
   maxRetries?: number;
+  // Unattended-run resilience: when true, CAPACITY errors (429/529/overloaded) never exhaust the retry budget —
+  // the loop keeps waiting (backoff capped at 5min, Retry-After honored) until the run signal aborts, emitting a
+  // `retry` event per wait so the host can surface/heartbeat it. For headless paths (teammates, activations)
+  // where surviving a capacity dip beats failing fast; interactive chat stays fail-fast. Non-capacity transients
+  // still follow maxRetries + the fallback ladder.
+  persistentRetry?: boolean;
+  // Output-token cap per model call (the provider's max_tokens). Absent → the transport's default.
+  outputTokens?: number;
   // Resilience: a cheaper/alternate model to fall back to when the primary keeps failing transiently (sustained
   // 429/overloaded) even after retries. Switched to for the rest of the run; a fallback is both a cost tier and an SLA.
   fallback?: { transport: LlmTransport; model: string };
@@ -142,7 +154,9 @@ export interface AgentLoopResult {
 // A high safety cap, not a task budget — the token budget (+ compaction) is the primary limiter for long tasks. 12
 // was too low for multi-step goals; compaction keeps the context bounded so more turns don't blow the window.
 const DEFAULT_MAX_TURNS = 50;
-const DEFAULT_MAX_RETRIES = 2;
+// 6 retries with exponential backoff (500ms base, 32s cap) ≈ half a minute of patience before the fallback model /
+// failure — 2 fixed-backoff attempts died on any real capacity dip (Claude Code ships 10).
+const DEFAULT_MAX_RETRIES = 6;
 // Circuit breaker: if compaction fires this many times in one run without the context ever fitting, stop instead of
 // hammering the summariser forever on an irrecoverably-oversized context. Shared by the proactive + reactive paths.
 const MAX_COMPACTIONS = 12;
@@ -153,21 +167,68 @@ const DEFAULT_MAX_CONCURRENT_SUBAGENTS = 4;
 // No-progress guard: stop if the model asks for the EXACT same tool-call batch this many turns in a row (it has already
 // seen the identical result twice and repeated anyway → it's stuck, not progressing). Prevents silent token burn.
 const NO_PROGRESS_LIMIT = 3;
-const RETRY_BACKOFF_MS = [500, 1500];
+const RETRY_BASE_DELAY_MS = 500;
+const RETRY_MAX_DELAY_MS = 32_000;
+// Persistent (unattended) capacity waits back off further — up to 5 minutes between attempts.
+const PERSISTENT_RETRY_MAX_DELAY_MS = 5 * 60_000;
+// A pathological server Retry-After must not park the loop unbounded — cap honoring it at 1 hour.
+const RETRY_AFTER_CAP_MS = 60 * 60_000;
 
-// A transient upstream failure worth a retry on the same model: HTTP 429/5xx or a network hiccup.
-function isTransient(err: unknown): boolean {
+// The retry delay for the attempt: the server's own pacing (Retry-After / rate-limit reset, surfaced by the
+// transport) wins when present; else exponential backoff + up-to-25% jitter (herd-splitting), capped. Exported for
+// direct unit testing (the loop's sleeps are real timers).
+export function retryDelayMs(
+  attempt: number,
+  retryAfterMs?: number,
+  maxDelayMs = RETRY_MAX_DELAY_MS,
+  random: () => number = Math.random,
+): number {
+  if (retryAfterMs !== undefined && retryAfterMs > 0) return Math.min(retryAfterMs, RETRY_AFTER_CAP_MS);
+  const base = Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, maxDelayMs);
+  return base + Math.floor(random() * base * 0.25);
+}
+
+// The true UPSTREAM status of a failure. An AppError carries the provider's status in extra.status (the error's own
+// .status is OUR HTTP mapping — 502 for every UpstreamError — which made a provider 400 look retryable); a raw
+// SDK/network error may carry .status directly.
+function upstreamStatusOf(err: unknown): number | undefined {
+  const extra = (err as { extra?: { status?: unknown } }).extra;
+  if (extra !== null && typeof extra === "object" && typeof extra.status === "number") return extra.status;
   const status = (err as { status?: unknown }).status;
-  if (typeof status === "number" && (status === 429 || status >= 500)) return true;
+  return typeof status === "number" ? status : undefined;
+}
+
+// The server's own retry pacing, when the transport surfaced it (extra.retryAfterMs from Retry-After / reset headers).
+function retryAfterMsOf(err: unknown): number | undefined {
+  const extra = (err as { extra?: { retryAfterMs?: unknown } }).extra;
+  if (extra !== null && typeof extra === "object" && typeof extra.retryAfterMs === "number") return extra.retryAfterMs;
+  return undefined;
+}
+
+// A transient upstream failure worth a retry on the same model: HTTP 408/429/5xx or a network hiccup. The upstream
+// status is authoritative when present (a provider 400 is NOT retryable — before extra.status was consulted, every
+// UpstreamError looked like a 502 and got retried); the message regex covers status-less network failures.
+function isTransient(err: unknown): boolean {
+  const status = upstreamStatusOf(err);
+  if (status !== undefined) return status === 408 || status === 429 || status >= 500;
   const message = err instanceof Error ? err.message : String(err);
-  return /\b(429|5\d\d)\b|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|fetch failed|timeout/i.test(message);
+  return /\b(429|5\d\d)\b|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|fetch failed|timeout|stream ended prematurely/i.test(
+    message,
+  );
+}
+
+// A capacity error (rate limit / overload) — the class persistentRetry waits out indefinitely.
+function isCapacityError(err: unknown): boolean {
+  const status = upstreamStatusOf(err);
+  if (status === 429 || status === 529) return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return /\b(429|529)\b|overloaded/i.test(message);
 }
 
 // A context-overflow failure (the prompt itself is too long) — NOT transient: retrying the same request can't help, but
 // compacting the context once and retrying CAN. Both providers surface it as a 400/413 with a recognisable message.
 function isContextOverflow(err: unknown): boolean {
-  const status = (err as { status?: unknown }).status;
-  if (status === 413) return true;
+  if (upstreamStatusOf(err) === 413) return true;
   const message = err instanceof Error ? err.message : String(err);
   return /context.{0,20}(length|window|too long|exceed)|prompt is too long|maximum.{0,12}context|too many tokens|context_length_exceeded|reduce the length|input length/i.test(
     message,
@@ -329,6 +390,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         depth: depth + 1,
         ...(drainSub ? { drainInput: drainSub } : {}),
         ...(opts.fallback ? { fallback: opts.fallback } : {}),
+        ...(opts.persistentRetry !== undefined ? { persistentRetry: opts.persistentRetry } : {}),
+        ...(opts.outputTokens !== undefined ? { outputTokens: opts.outputTokens } : {}),
         ...(opts.toolTimeoutMs !== undefined ? { toolTimeoutMs: opts.toolTimeoutMs } : {}),
         ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
         ...(opts.signal ? { signal: opts.signal } : {}),
@@ -486,6 +549,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     // valid transcript. On a context-overflow (413), callModel compacts `messages` in place and retries — recovery,
     // not a crash. Returns undefined when the caller aborts.
     const callModel = async (): Promise<StreamResult | undefined> => {
+      // Persistent capacity waits count separately: the backoff keeps growing to its 5-min cap while the regular
+      // transient budget (attempt) is never consumed by them.
+      let persistentAttempt = 0;
       for (let attempt = 0; ; attempt++) {
         const turnMessages: ChatMessage[] =
           reminder.length > 0 ? [...messages, { role: "user", content: reminder }] : messages;
@@ -499,6 +565,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             // the provider's own prompt/KV caching (Anthropic cache_control; OpenAI caches automatically).
             cache: { system: true, tools: true },
             ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+            ...(opts.outputTokens !== undefined ? { maxTokens: opts.outputTokens } : {}),
             ...(opts.thinking ? { thinking: opts.thinking } : {}),
             ...(opts.signal ? { signal: opts.signal } : {}),
             onContentDelta: (delta) => emit({ type: "text_delta", delta }),
@@ -519,8 +586,23 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             }
             // Nothing left to reclaim — fall through to the error.
           }
+          const retryAfter = retryAfterMsOf(err);
+          // Unattended resilience: capacity errors never exhaust the budget — wait (Retry-After honored, backoff
+          // capped at 5min) and try again until the run signal aborts. The fallback ladder is deliberately NOT
+          // taken for these: an unattended run prefers waiting out the dip on its own model.
+          if (opts.persistentRetry && isCapacityError(err)) {
+            persistentAttempt += 1;
+            const delayMs = retryDelayMs(persistentAttempt, retryAfter, PERSISTENT_RETRY_MAX_DELAY_MS);
+            emit({ type: "retry", attempt: persistentAttempt, delayMs, persistent: true });
+            await sleep(delayMs, opts.signal);
+            if (opts.signal?.aborted) return undefined;
+            attempt -= 1; // a capacity wait doesn't consume the transient budget
+            continue;
+          }
           if (isTransient(err) && attempt < maxRetries) {
-            await sleep(RETRY_BACKOFF_MS[attempt] ?? 1500, opts.signal);
+            const delayMs = retryDelayMs(attempt, retryAfter);
+            emit({ type: "retry", attempt: attempt + 1, delayMs });
+            await sleep(delayMs, opts.signal);
             if (opts.signal?.aborted) return undefined;
             continue;
           }
@@ -546,6 +628,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
     // Meter this turn's token usage (the host prices it into USD). Fired before the budget bookkeeping below.
     if (result.usage) opts.onUsage?.(result.usage);
+
+    // The turn hit the output-token cap — the text (or a tool call's JSON args) may be cut off mid-way. Surfaced
+    // as an event so the host can show/log it; a truncated tool arg then fails JSON parsing below and comes back
+    // to the model as an error result it can react to.
+    if (result.finishReason === "max_tokens" || result.finishReason === "length") {
+      emit({ type: "truncated", finishReason: result.finishReason });
+    }
 
     // The latest turn's total_tokens is the context footprint the MODEL saw; tool results appended after its turn are
     // added as an estimate (hybrid) before the budget check below.
@@ -604,33 +693,54 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const turnImages: ToolResultImage[] = []; // images returned by this turn's tools → one follow-up multimodal turn
     for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments });
 
-    // Dispatch the turn's tool calls CONCURRENTLY (Claude Code parity — the model asks for independent tools together),
-    // then append the results in call order so the assistant.tool_calls ↔ tool pairing stays ordered.
-    const outputs: ToolResult[] = await Promise.all(
-      result.toolCalls.map(async (tc): Promise<ToolResult> => {
-        const tool = registry.get(tc.name);
-        const parsed = parseArgs(tc.arguments);
-        if (!tool) return { content: `Unknown tool: ${tc.name}`, isError: true };
-        if (!parsed.ok) return { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
-        if (tool.isReadOnly !== true && inPlanMode) {
+    const dispatchOne = async (tc: { name: string; arguments: string }): Promise<ToolResult> => {
+      const tool = registry.get(tc.name);
+      const parsed = parseArgs(tc.arguments);
+      if (!tool) return { content: `Unknown tool: ${tc.name}`, isError: true };
+      if (!parsed.ok) return { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
+      if (tool.isReadOnly !== true && inPlanMode) {
+        return {
+          content: `In plan mode — the write tool "${tool.name}" is blocked until your plan is approved. Present a plan with present_plan first.`,
+          isError: true,
+        };
+      }
+      if (tool.isReadOnly !== true && opts.permit) {
+        // Write tool + a permission hook → gate it (read-only tools + no hook auto-allow).
+        const decision = await opts.permit({ name: tool.name, isReadOnly: false, input: parsed.value });
+        emit({ type: "permission", name: tool.name, decision });
+        if (decision === "deny")
           return {
-            content: `In plan mode — the write tool "${tool.name}" is blocked until your plan is approved. Present a plan with present_plan first.`,
+            content: `Permission denied: the tool "${tool.name}" was not approved by the user.`,
             isError: true,
           };
+      }
+      return invokeWithTimeout(tool, parsed.value, activeModel, opts.toolTimeoutMs ?? 0, opts.signal);
+    };
+    // Dispatch the turn's tool calls with WRITE-SAFETY partitioning (Claude Code's isConcurrencySafe partition,
+    // reinterpreted over isReadOnly): consecutive read-only calls run CONCURRENTLY (the model asks for independent
+    // reads together), while a non-read-only call runs ALONE, in request order — two writes in one turn (or a write
+    // and the reads around it) must never race each other. An unknown tool runs no code, so it groups as read-only.
+    // Results are appended in call order either way, so the assistant.tool_calls ↔ tool pairing stays ordered.
+    const isReadOnlyCall = (tc: { name: string }): boolean => {
+      const tool = registry.get(tc.name);
+      return tool === undefined || tool.isReadOnly === true;
+    };
+    const outputs: ToolResult[] = [];
+    for (let start = 0; start < result.toolCalls.length; ) {
+      const head = result.toolCalls[start];
+      if (!head) break;
+      let end = start + 1;
+      if (isReadOnlyCall(head)) {
+        while (end < result.toolCalls.length) {
+          const next = result.toolCalls[end];
+          if (!next || !isReadOnlyCall(next)) break;
+          end += 1;
         }
-        if (tool.isReadOnly !== true && opts.permit) {
-          // Write tool + a permission hook → gate it (read-only tools + no hook auto-allow).
-          const decision = await opts.permit({ name: tool.name, isReadOnly: false, input: parsed.value });
-          emit({ type: "permission", name: tool.name, decision });
-          if (decision === "deny")
-            return {
-              content: `Permission denied: the tool "${tool.name}" was not approved by the user.`,
-              isError: true,
-            };
-        }
-        return invokeWithTimeout(tool, parsed.value, activeModel, opts.toolTimeoutMs ?? 0, opts.signal);
-      }),
-    );
+      }
+      const batch = await Promise.all(result.toolCalls.slice(start, end).map((tc) => dispatchOne(tc)));
+      outputs.push(...batch);
+      start = end;
+    }
     for (let i = 0; i < result.toolCalls.length; i++) {
       const tc = result.toolCalls[i];
       const output = outputs[i];

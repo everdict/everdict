@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../messages.js";
 import type { PermissionDecision, PermissionRequest, ToolDefinition } from "../tools/definition.js";
 import { ToolRegistry } from "../tools/registry.js";
-import { type AgentEvent, runAgentLoop } from "./loop.js";
+import { type AgentEvent, retryDelayMs, runAgentLoop } from "./loop.js";
 
 // A fake transport that returns a pre-scripted StreamResult per successive call and records each request, so the loop
 // can be driven deterministically without a provider. Fires onContentDelta once so text_delta emission is exercised.
@@ -458,6 +458,162 @@ describe("runAgentLoop", () => {
     expect(result.stopReason).toBe("end_turn");
     expect(result.content).toBe("recovered");
     expect(events.some((e) => e.type === "compaction")).toBe(true);
+  });
+
+  it("computes retry delays: server Retry-After wins, else exponential backoff + jitter capped at 32s", () => {
+    // Server pacing is honored verbatim (capped at 1h so a pathological header can't park the loop unbounded)
+    expect(retryDelayMs(0, 7_000)).toBe(7_000);
+    expect(retryDelayMs(5, 10 * 60 * 60_000)).toBe(60 * 60_000);
+    // No hint → exponential base with up-to-25% jitter
+    expect(retryDelayMs(0, undefined, undefined, () => 0)).toBe(500);
+    expect(retryDelayMs(3, undefined, undefined, () => 0)).toBe(4_000);
+    expect(retryDelayMs(3, undefined, undefined, () => 0.999)).toBeLessThan(4_000 * 1.25 + 1);
+    // The cap holds for deep attempts
+    expect(retryDelayMs(20, undefined, undefined, () => 0)).toBe(32_000);
+  });
+
+  it("honors the server's Retry-After pacing surfaced by the transport (extra.retryAfterMs)", async () => {
+    let calls = 0;
+    const rateLimitedThenOk: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        calls += 1;
+        if (calls === 1)
+          throw Object.assign(new Error("model 429: rate limited"), { extra: { status: 429, retryAfterMs: 5 } });
+        return { content: "recovered", toolCalls: [], finishReason: "stop", usage: usage7 };
+      },
+    };
+    const events: AgentEvent[] = [];
+    const result = await runAgentLoop({
+      transport: rateLimitedThenOk,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      onEvent: (e) => events.push(e),
+    });
+    expect(result.content).toBe("recovered");
+    // The wait used the server's own pacing, not the computed backoff — and was surfaced as a retry event.
+    expect(events).toContainEqual({ type: "retry", attempt: 1, delayMs: 5 });
+  });
+
+  it("does NOT retry a provider 400 (the upstream status in extra.status is authoritative, not our 502 mapping)", async () => {
+    let calls = 0;
+    const badRequest: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        calls += 1;
+        // The shape the AnthropicTransport throws: an UpstreamError whose OWN status is 502 (our HTTP mapping)
+        // but whose extra.status carries the provider's 400 — retrying an invalid request can never help.
+        throw Object.assign(new Error("model 400: invalid_request_error"), {
+          status: 502,
+          extra: { status: 400 },
+        });
+      },
+    };
+    await expect(
+      runAgentLoop({
+        transport: badRequest,
+        model: "test-model",
+        systemPrompt: "sys",
+        history,
+        registry: new ToolRegistry([]),
+      }),
+    ).rejects.toThrow(/model provider call failed/i);
+    expect(calls).toBe(1); // one attempt, no retries burned on a permanent error
+  });
+
+  it("waits out capacity errors indefinitely under persistentRetry instead of exhausting the budget", async () => {
+    let calls = 0;
+    const overloadedTwiceThenOk: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        calls += 1;
+        if (calls <= 2) throw Object.assign(new Error("overloaded"), { extra: { status: 529, retryAfterMs: 1 } });
+        return { content: "survived", toolCalls: [], finishReason: "stop", usage: usage7 };
+      },
+    };
+    const events: AgentEvent[] = [];
+    const result = await runAgentLoop({
+      transport: overloadedTwiceThenOk,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      maxRetries: 0, // without persistentRetry these two failures would end the run
+      persistentRetry: true,
+      onEvent: (e) => events.push(e),
+    });
+    expect(result.content).toBe("survived");
+    expect(events.filter((e) => e.type === "retry" && e.persistent === true)).toHaveLength(2);
+  });
+
+  it("runs write tools serially (in call order) while read-only tools stay concurrent", async () => {
+    // Given two write tools that record overlap: a slow one requested FIRST and a fast one second
+    let active = 0;
+    let overlapped = false;
+    const writeTool = (name: string, delayMs: number): ToolDefinition => ({
+      name,
+      description: name,
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: false,
+      call: async () => {
+        active += 1;
+        if (active > 1) overlapped = true;
+        await new Promise((r) => setTimeout(r, delayMs));
+        active -= 1;
+        return { content: `${name}-done`, isError: false };
+      },
+    });
+    const { transport } = fakeTransport([
+      toolCallsResult([
+        { id: "w1", name: "write_slow", args: "{}" },
+        { id: "w2", name: "write_fast", args: "{}" },
+      ]),
+      textResult("done"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([writeTool("write_slow", 10), writeTool("write_fast", 0)]),
+    });
+    // Then the writes never ran at the same time (a mutation race), and pairing order is preserved
+    expect(overlapped).toBe(false);
+    const toolContents = result.produced
+      .filter((m) => m.role === "tool")
+      .map((m) => (m as { content: string }).content);
+    expect(toolContents).toEqual(["write_slow-done", "write_fast-done"]);
+  });
+
+  it("emits a truncated event when the turn hits the output-token cap", async () => {
+    const { transport } = fakeTransport([
+      { content: "cut off mid-", toolCalls: [], finishReason: "max_tokens", usage: usage7 },
+    ]);
+    const events: AgentEvent[] = [];
+    await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      onEvent: (e) => events.push(e),
+    });
+    expect(events).toContainEqual({ type: "truncated", finishReason: "max_tokens" });
+  });
+
+  it("forwards outputTokens to the transport as the per-call max_tokens", async () => {
+    const { transport, requests } = fakeTransport([textResult("ok")]);
+    await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      outputTokens: 16_000,
+    });
+    expect(requests[0]?.maxTokens).toBe(16_000);
   });
 
   it("switches to the fallback model after the primary keeps failing transiently", async () => {
