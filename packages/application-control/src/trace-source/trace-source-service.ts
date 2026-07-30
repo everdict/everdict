@@ -1,6 +1,7 @@
 import {
   BadRequestError,
   type BrowsableTraceSource,
+  EVERDICT_TRACE_SOURCE,
   type ListTracesOptions,
   NotFoundError,
   type SpanAttrMapping,
@@ -121,6 +122,13 @@ export class TraceSourceService {
       artifactBaseUrl?: string;
     },
   ): Promise<TraceSourceConfigView> {
+    // The owned store's reserved name (N2 continuous evaluation) — a workspace platform may not shadow it.
+    if (input.name === EVERDICT_TRACE_SOURCE)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { name: input.name },
+        `'${EVERDICT_TRACE_SOURCE}' is reserved — it names everdict's own trace store.`,
+      );
     const correlate = input.correlate ?? "id";
     // mlflow/phoenix are unusable without their scope — traces live inside an experiment/project. Fail fast at register
     // time (a meaningful "Test connection" picks the scope from the platform) rather than a silent runtime pull error.

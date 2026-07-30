@@ -175,6 +175,14 @@ the same `spansToTraceEvents` seam — per-harness span variance is absorbed by 
 `finishIngest` pipeline as push (re-derive `tool_calls`/`usd`/`span`, apply judges, store). So push and pull converge
 on one scoring path; only the *acquisition* differs.
 
+**Continuous evaluation over the OWNED store (N2).** The reserved source name `everdict` points the same
+pull machinery at everdict's own trajectory store: `POST /scorecards/ingest/pull` with
+`source: {name: "everdict"}` judges sealed trajectories by their run ids (read straight from the store — no
+external platform, no re-upload, and no materialize duplicate: the evidence already lives there under its own
+runId, kept as `externalIdByCase` provenance). A pull-mode **schedule** with `pull.source: "everdict"` judges a
+rolling window of the store on every fire — "every hour, judge the last hour of production traces" with zero
+platform integration. The name is reserved (a workspace trace source may not take it).
+
 **Materialize-on-import (owned evidence).** Before anything grades or judges an ingested trace, `finishIngest`
 seals it as **our copy** in the owned `TrajectoryStore` (`source: "import"`, keyed `ingest:<scorecardId>:<caseId>`)
 and everything downstream — trace graders, judges, the record embed, export — reads the **sealed copy** (first write

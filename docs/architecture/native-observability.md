@@ -126,7 +126,12 @@ collector and the store**.
   reference (zero new contract); a dedicated internal waterfall + `LiveTraceRef` internal rewrite arrive
   with the N2 ingestion surfaces.
 - **N2 — Libraries + production ingestion.** `everdict-otel` (TS/Py) + migration recipes; continuous
-  evaluation (judges over live traces; platform events from trace facts).
+  evaluation (judges over live traces; platform events from trace facts). **Continuous-evaluation rung
+  SHIPPED (master-plan W6)**: the reserved trace source `everdict` points the pull machinery at the owned
+  store — one-off (`ingest/pull` with `source:{name:"everdict"}`) and periodic (a pull-mode schedule with
+  `pull.source:"everdict"` judges a rolling window each fire). No external platform, no re-upload, no
+  materialize duplicate. Trace facts already flow (E4 thresholds). Remaining: the `everdict-otel` TS/Py
+  convenience libraries + migration recipes.
 - **N3 — Scale rung.** ClickHouse adapter; retention/quota surfaces; ingestion admission in the §5 gate.
 - **N4 — Mirror consolidation.** Collector-level exporters subsume raw-trace mirroring; score-attach
   sinks remain API-side.

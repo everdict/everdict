@@ -60,3 +60,58 @@ describe("wireScheduleService — report-runner adapter wire shape", () => {
     });
   });
 });
+
+describe("wireScheduleService — the reserved 'everdict' source windows the OWNED store (N2 continuous evaluation)", () => {
+  it("a pull-mode fire lists the window's sealed runIds newest-first and hands them to ingestPull", async () => {
+    const seen: Array<{ source: unknown; runs: Array<{ caseId: string; runId: string }> }> = [];
+    // Fixture times ride the REAL clock (the composition's window is now − windowHours): three sealed
+    // trajectories, newest first like the real store — only the two inside the 24h window belong to the fire.
+    const iso = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3600_000).toISOString();
+    const trajectoryStore = {
+      async seal(): Promise<never> {
+        throw new Error("unused");
+      },
+      async get() {
+        return undefined;
+      },
+      async list() {
+        return {
+          items: [
+            { runId: "r-new", tenant: "acme", source: "otlp" as const, eventCount: 1, sealedAt: iso(1) },
+            { runId: "r-mid", tenant: "acme", source: "otlp" as const, eventCount: 1, sealedAt: iso(20) },
+            { runId: "r-old", tenant: "acme", source: "otlp" as const, eventCount: 1, sealedAt: iso(40) },
+          ],
+        };
+      },
+    };
+    const service = wireScheduleService(new ScheduleServiceRef(), {
+      scheduleStore: new InMemoryScheduleStore(),
+      scorecardService: {
+        submit: async () => {
+          throw new Error("unused");
+        },
+        ingestPull: async (input: { source: unknown; runs: Array<{ caseId: string; runId: string }> }) => {
+          seen.push({ source: input.source, runs: input.runs });
+          return { id: "sc-cont", status: "queued" };
+        },
+        get: async () => undefined,
+      } as unknown as ScorecardService,
+      trajectoryStore,
+    });
+
+    await service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      name: "continuous",
+      cron: "0 * * * *",
+      runTemplate: { pull: { source: "everdict", windowHours: 24 }, judges: [] },
+    });
+    const created = (await service.list("acme"))[0];
+    if (!created) throw new Error("schedule missing");
+    await service.fire("acme", created.id);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.runs.map((r) => r.runId)).toEqual(["r-new", "r-mid"]); // the window's ids, newest first
+    expect(seen[0]?.source).toMatchObject({ name: "everdict" }); // ingestPull's own-store branch takes it from here
+  });
+});

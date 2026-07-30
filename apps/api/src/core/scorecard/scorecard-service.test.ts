@@ -784,6 +784,43 @@ describe("materialize-on-import — imported traces seal as OUR copy and are jud
     expect(done.scorecard?.results[0]?.scores.find((s) => s.metric === "tool_calls")?.value).toBe(1);
   });
 
+  it("the reserved source 'everdict' evaluates OWN trajectories — read from the store, judged, and NEVER duplicated", async () => {
+    const trajectories = new InMemoryTrajectoryStore();
+    await trajectories.seal({ runId: "run-prod-1", tenant: "acme", source: "otlp", events: pulled });
+    const { store, datasets, service } = build(trajectories, {
+      fetch: async () => {
+        throw new Error("the owned store never builds an external TraceSource");
+      },
+    });
+    await datasets.register("acme", datasetWithCase());
+
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      source: { name: "everdict" }, // N2 continuous evaluation — the pull machinery pointed at OUR store
+      runs: [{ caseId: "c1", runId: "run-prod-1" }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("succeeded");
+    expect(done.scorecard?.results[0]?.trace).toEqual(pulled); // judged from the sealed store copy
+    expect(done.scorecard?.results[0]?.scores.some((s) => s.metric === "tool_calls")).toBe(true);
+    // No ingest:* duplicate — the evidence already lives in the owned store under its own runId.
+    expect(await trajectories.get("acme", `ingest:${created.id}:c1`)).toBeUndefined();
+
+    // A runId with no sealed trajectory fails the batch loudly, never judges emptiness.
+    const missing = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      source: { name: "everdict" },
+      runs: [{ caseId: "c1", runId: "ghost" }],
+      judges: [],
+    });
+    const failed = await waitTerminal(store, missing.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.error?.message).toContain("ghost");
+  });
+
   it("push ingest materializes through the same door (both ingest paths converge on finishIngest)", async () => {
     const trajectories = new InMemoryTrajectoryStore();
     const { store, datasets, service } = build(trajectories, {

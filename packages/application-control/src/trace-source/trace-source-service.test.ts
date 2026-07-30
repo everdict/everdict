@@ -78,6 +78,13 @@ describe("TraceSourceService", () => {
     await expect(svc.upsert(WS, { name: "p", kind: "phoenix", endpoint: "http://phoenix" })).rejects.toThrow(/project/);
   });
 
+  it("reserves 'everdict' — the owned store's name can never be shadowed by a workspace platform (N2)", async () => {
+    const svc = new TraceSourceService(fakeSettings());
+    await expect(svc.upsert(WS, { name: "everdict", kind: "otel", endpoint: "http://jaeger" })).rejects.toThrow(
+      /reserved/,
+    );
+  });
+
   it("rejects an incoherent otel tag-correlation config (tag without service)", async () => {
     const svc = new TraceSourceService(fakeSettings());
     await expect(

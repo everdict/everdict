@@ -10,7 +10,7 @@ export type ScheduleOverlapPolicy = z.infer<typeof ScheduleOverlapPolicySchema>;
 // observability source (a rolling window ending at the fire moment) and judges them directly (the "evaluate existing
 // traces" path — no harness run). This is what powers "every day, judge the last 24h of production traces".
 export const SchedulePullConfigSchema = z.object({
-  source: z.string().min(1), // a registered workspace trace source name (Settings › Observability)
+  source: z.string().min(1), // a registered workspace trace source name — or the reserved "everdict" (judge the OWNED store's window: N2 continuous evaluation)
   correlate: z.enum(["id", "tag"]).optional(), // fetch-by-trace-id (default for listed ids) vs everdict.run_id tag search
   scope: z.string().min(1).optional(), // platform scope (mlflow experiment / phoenix|langfuse|langsmith project / otel service)
   windowHours: z

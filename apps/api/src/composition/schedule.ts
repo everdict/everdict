@@ -5,9 +5,10 @@ import type {
   PlatformEventService,
   ScorecardService,
   TraceSourceService,
+  TrajectoryStore,
   ViewSnapshotService,
 } from "@everdict/application-control";
-import { UpstreamError } from "@everdict/contracts";
+import { BadRequestError, EVERDICT_TRACE_SOURCE, UpstreamError } from "@everdict/contracts";
 import type { ScheduleStore } from "@everdict/db";
 import { TemporalScheduleDriver } from "../core/schedule/temporal-schedule-driver.js";
 
@@ -49,6 +50,9 @@ export function wireScheduleService(
     viewSnapshotService?: ViewSnapshotService;
     // Optional — schedule.fired time events onto the platform log (E3). Absent = fires stay silent.
     platformEventService?: PlatformEventService;
+    // Optional — the OWNED trajectory store: a pull-mode schedule whose source is the reserved "everdict"
+    // name judges a rolling window of the store itself (N2 continuous evaluation over production traces).
+    trajectoryStore?: TrajectoryStore;
   },
 ): ScheduleService {
   const {
@@ -121,10 +125,32 @@ export function wireScheduleService(
     // Pull-mode fire — judge the recent traces of a rolling window (no harness run). listTraceIds enumerates the window
     // via the trace-source pool; only wired when that service is configured (else a pull-mode fire cleanly 400s).
     ingestPull: (input) => scorecardService.ingestPull(input),
-    ...(traceSourceService
+    ...(traceSourceService || deps.trajectoryStore
       ? {
-          listTraceIds: async (tenant, source, opts) =>
-            (await traceSourceService.listTraces(tenant, source, opts)).traces.map((t) => t.id),
+          listTraceIds: async (tenant, source, opts) => {
+            // The owned store's window (N2): newest-first pages until the window's lower bound — the ids a
+            // continuous-evaluation fire judges. External sources keep the platform enumeration below.
+            if (source === EVERDICT_TRACE_SOURCE) {
+              const store = deps.trajectoryStore;
+              if (!store) throw new BadRequestError("BAD_REQUEST", {}, "The owned trace store is not configured.");
+              const ids: string[] = [];
+              let cursor: string | undefined;
+              do {
+                const page = await store.list(tenant, { limit: 200, ...(cursor ? { cursor } : {}) });
+                for (const meta of page.items) {
+                  if (meta.sealedAt < opts.since) return ids; // newest-first — below the window, stop
+                  if (opts.until !== undefined && meta.sealedAt > opts.until) continue;
+                  ids.push(meta.runId);
+                  if (opts.limit !== undefined && ids.length >= opts.limit) return ids;
+                }
+                cursor = page.nextCursor;
+              } while (cursor !== undefined);
+              return ids;
+            }
+            if (!traceSourceService)
+              throw new BadRequestError("BAD_REQUEST", { source }, "Named trace sources are not configured.");
+            return (await traceSourceService.listTraces(tenant, source, opts)).traces.map((t) => t.id);
+          },
         }
       : {}),
     // Terminal status recorded on the schedule at finalize; the creator's completion notification is emitted by the

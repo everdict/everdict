@@ -554,6 +554,7 @@ async function main(): Promise<void> {
     notificationService, // report-mode fire completion fan-out (analysis-studio V4)
     viewSnapshotService, // report fires also accumulate the View's numbers on the workspace filesystem
     platformEventService, // E3: every fire lands schedule.fired on the log (time-driven agents subscribe to it)
+    trajectoryStore, // N2: pull.source "everdict" = continuous evaluation over the OWNED store's rolling window
   });
 
   const queueService = buildQueue({

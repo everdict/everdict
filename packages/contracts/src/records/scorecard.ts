@@ -137,6 +137,11 @@ export type ScorecardExport = z.infer<typeof ScorecardExportSchema>;
 // real datasetId. docs/scorecards.md
 export const TRACE_EVAL_REF = "_traces";
 
+// The reserved trace-source name that points the PULL machinery at everdict's OWN trajectory store
+// (native-observability N2, continuous evaluation): pull-ingest and pull-mode schedules read the sealed
+// trajectories directly — no external platform, no re-upload. A workspace source may not take this name.
+export const EVERDICT_TRACE_SOURCE = "everdict";
+
 // Reserved sentinel dataset ref for an EXPERIMENT over an ad-hoc task (execution-model.md P1) — "drive this
 // harness on a one-off prompt, N times" has no registrable dataset, so the NOT-NULL dataset columns carry
 // this sentinel (same convention as TRACE_EVAL_REF). An ad-hoc experiment is NOT re-drivable after a

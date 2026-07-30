@@ -3,6 +3,7 @@ import {
   BadRequestError,
   type CaseResult,
   type Dataset,
+  EVERDICT_TRACE_SOURCE,
   type EvalCase,
   type GradeContext,
   type Scorecard,
@@ -153,6 +154,40 @@ export class ScorecardIngestService {
     const id = record.id;
     await this.deps.store.update(id, ScorecardBatch.from(record).start(this.now()).patch);
     try {
+      // Continuous evaluation over the OWNED store (native-observability N2): the reserved source name
+      // points the pull machinery at everdict's own trajectories — each runId reads straight from the
+      // store (no external platform, no re-upload) and is judged like any pulled trace. attach carries the
+      // original runIds as provenance; finishIngest skips materialize for this kind (the evidence ALREADY
+      // lives in the owned store under its own runId — a second copy would add nothing).
+      if ("name" in source && source.name === EVERDICT_TRACE_SOURCE) {
+        if (!this.deps.trajectories)
+          throw new BadRequestError("BAD_REQUEST", {}, "The owned trace store is not configured.");
+        const perCase: IngestScorecardBody["traces"] = [];
+        for (const r of runs) {
+          const sealed = await this.deps.trajectories.get(tenant, r.runId);
+          if (!sealed)
+            throw new BadRequestError(
+              "BAD_REQUEST",
+              { runId: r.runId },
+              `No sealed trajectory '${r.runId}' in this workspace.`,
+            );
+          perCase.push({ caseId: r.caseId, trace: sealed.events });
+        }
+        await this.finishIngest(
+          id,
+          tenant,
+          dataset,
+          harnessLabel,
+          perCase,
+          judges,
+          {
+            sourceKind: EVERDICT_TRACE_SOURCE,
+            externalIdByCase: Object.fromEntries(runs.map((r) => [r.caseId, r.runId])),
+          },
+          record.createdBy,
+        );
+        return;
+      }
       if (!this.deps.buildTraceSource)
         throw new BadRequestError("BAD_REQUEST", {}, "trace source builder is not configured (pull disabled).");
       // Source config — EITHER a registered workspace source (by name, "register once, pull by name") whose whole
@@ -256,7 +291,12 @@ export class ScorecardIngestService {
     for (const up of perCase) {
       const evalCase = caseById.get(up.caseId);
       if (!evalCase) continue; // skip caseIds not in the dataset (can't align)
-      const trace = await this.materialize(id, tenant, up.caseId, up.trace);
+      // Own-store pulls skip materialize: the evidence already lives in the owned store under its own runId
+      // (attach.externalIdByCase is that provenance) — a second sealed copy per scorecard would add nothing.
+      const trace =
+        attach?.sourceKind === EVERDICT_TRACE_SOURCE
+          ? up.trace
+          : await this.materialize(id, tenant, up.caseId, up.trace);
       const snapshot = up.snapshot ?? { kind: "repo", diff: "", changedFiles: [], headSha: "ingested" };
       const ctx: GradeContext = { case: evalCase, trace, snapshot };
       // Re-derive trace-only graders (steps/cost/latency) — same metrics as a live run for diff alignment. The
