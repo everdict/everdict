@@ -32,6 +32,7 @@ import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
+import type { TrajectoryStore } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 
@@ -96,6 +97,9 @@ export interface RunServiceDeps {
   // Cascade cancel (§5.5, O8) — wired by the composition to ScorecardService.cancelCausedBy (late-bound:
   // the scorecard service is built after the run service). Fired when an agent run settles cancelled.
   onAgentRunCancelled?: (tenant: string, runId: string) => Promise<unknown>;
+  // The OWNED trajectory store (P5 rung 1) — dual-write: the run row keeps its embed for now, and the
+  // trajectory ALSO seals here (first write wins). Reads that want the owned copy go through this store.
+  trajectories?: TrajectoryStore;
   usage?: UsageMeter; // meter-only billing usage — itemized per (source × model), attributed via billingCharges
   // Resolve a declarative harness spec from the registry and embed it in the job (if absent, built-in id branching). An unknown harness is rejected → undefined fallback.
   resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
@@ -470,6 +474,11 @@ export class RunService {
         } catch {}
       }
       await this.finalize(id, (run) => run.succeed(result, this.now()));
+      // P5 dual-write: seal the trajectory in the OWNED store (best-effort, idempotent — evidence, not lifecycle).
+      if (result.trace.length > 0)
+        void this.deps.trajectories
+          ?.seal({ runId: id, tenant: input.tenant, source: "run", events: result.trace })
+          .catch(() => {});
     } catch (err) {
       const error =
         err instanceof AppError
@@ -531,6 +540,28 @@ export class RunService {
     // Cascade cancel (§5.5, O8): a member stopping the agent run revokes its whole caused tree — one
     // cancel, not a hunt across N batches. Best-effort: the settle above is already durable.
     if (outcome === "cancelled") void this.deps.onAgentRunCancelled?.(current.tenant, id)?.catch?.(() => {});
+  }
+
+  // The OWNED trajectory (P5): workspace-scoped read — a foreign/missing run reads undefined (the route
+  // maps it to 404, no existence leak). The run row's embed stays the fallback during the dual-read window.
+  async trajectory(
+    tenant: string,
+    runId: string,
+  ): Promise<{ meta: { source: string; eventCount: number; sealedAt: string }; events: unknown[] } | undefined> {
+    const record = await this.deps.store.get(runId);
+    if (!record || record.tenant !== tenant) return undefined;
+    const sealed = await this.deps.trajectories?.get(tenant, runId);
+    if (sealed) {
+      const { runId: _r, tenant: _t, ...meta } = sealed.meta;
+      return { meta, events: sealed.events };
+    }
+    // Dual-read fallback: the pre-P5 embed — served in the same shape so consumers never care which copy.
+    if (record.result && record.result.trace.length > 0)
+      return {
+        meta: { source: "embed", eventCount: record.result.trace.length, sealedAt: record.updatedAt },
+        events: record.result.trace,
+      };
+    return undefined;
   }
 
   // Read-then-update is not atomic, but the tracker and boot recovery share one control-plane process.

@@ -26,6 +26,7 @@ export { ApprovalService, type ApprovalServiceDeps } from "./approval/approval-s
 export type { EnvelopeSpend, EnvelopeStore } from "./ports/envelope-store.js";
 export { admitCausedWork } from "./admission/admission.js";
 export type { EventConsumerStateStore } from "./ports/event-consumer-store.js";
+export type { TrajectoryMeta, TrajectoryStore } from "./ports/trajectory-store.js";
 export {
   EventConsumerRunner,
   type PlatformEventConsumer,

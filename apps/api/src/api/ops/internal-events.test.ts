@@ -1,6 +1,6 @@
 import { PlatformEventService, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { InMemoryPlatformEventStore, InMemoryRunStore } from "@everdict/db";
+import { InMemoryPlatformEventStore, InMemoryRunStore, InMemoryTrajectoryStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 
@@ -246,5 +246,43 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
     });
     expect(res.statusCode).toBe(200);
     expect(await runStore.list("acme", { includeChildren: true })).toEqual([]);
+  });
+});
+
+// P5 dual-read: the owned trajectory serves first; the run row's embed answers in the same shape until the
+// embeds retire (O10 — no backfill, dual-read is the bridge).
+describe("RunService.trajectory — the owned copy with the embed fallback (P5)", () => {
+  it("prefers the sealed store copy, falls back to the embed, and scopes by workspace", async () => {
+    const store = new InMemoryRunStore();
+    const trajectories = new InMemoryTrajectoryStore();
+    const service = new RunService({ dispatcher: unusedDispatcher, store, trajectories });
+    const trace = [
+      { t: 0, kind: "llm_call" as const, model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } },
+    ];
+    await store.create({
+      id: "r-embed",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "succeeded",
+      result: {
+        caseId: "c1",
+        harness: "h@1",
+        trace,
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "x" },
+        scores: [],
+      },
+      createdAt: "t",
+      updatedAt: "t",
+    });
+    // No sealed copy yet → the embed answers, marked as such.
+    const viaEmbed = await service.trajectory("acme", "r-embed");
+    expect(viaEmbed?.meta.source).toBe("embed");
+    expect(viaEmbed?.events).toHaveLength(1);
+    // Sealed copy present → it serves (the owned record outranks the row embed).
+    await trajectories.seal({ runId: "r-embed", tenant: "acme", source: "run", events: trace });
+    expect((await service.trajectory("acme", "r-embed"))?.meta.source).toBe("run");
+    // Workspace scoping — a foreign tenant reads nothing.
+    expect(await service.trajectory("rival", "r-embed")).toBeUndefined();
   });
 });

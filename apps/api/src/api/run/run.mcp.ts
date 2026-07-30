@@ -8,6 +8,23 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws, agent } = ctx;
 
   server.registerTool(
+    "get_run_trajectory",
+    {
+      description:
+        "A run's OWNED trajectory (the sealed copy every judgment stands on — P5): meta.source tells which " +
+        "copy served (run | otlp | import | embed) plus the normalized TraceEvent[]. Falls back to the run " +
+        "row's embed during the dual-read window.",
+      inputSchema: { id: z.string().describe("run id") },
+    },
+    ({ id }: { id: string }) =>
+      run(principal, "runs:read", async () => {
+        const trajectory = await deps.service.trajectory(ws, id);
+        if (!trajectory) return fail("NOT_FOUND: trajectory not found.");
+        return ok(trajectory);
+      }),
+  );
+
+  server.registerTool(
     "list_runs",
     {
       description:

@@ -1,4 +1,4 @@
-import type { EnvelopeStore, GithubAppService } from "@everdict/application-control";
+import type { EnvelopeStore, GithubAppService, TrajectoryStore } from "@everdict/application-control";
 import type { ImageRegistryService } from "@everdict/application-control";
 import type { NotificationService, PlatformEventService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
@@ -49,6 +49,7 @@ export interface RuntimeAccessReaders {
 export function buildRun(deps: {
   store: RunStore;
   envelopes: EnvelopeStore; // envelope spend ledger (§5.2 P4)
+  trajectories: TrajectoryStore; // the owned trajectory store (P5 rung 1)
   // Cascade cancel (§5.5 O8) — late-bound to ScorecardService.cancelCausedBy (built after the run service).
   onAgentRunCancelled?: (tenant: string, runId: string) => Promise<unknown>;
   meteredDispatcher: CoreDispatcher;
@@ -105,6 +106,7 @@ export function buildRun(deps: {
 
   const service = new RunService({
     envelopes: deps.envelopes, // envelope spend ledger (§5.2 P4) — the causal admission leg + per-case draw-down
+    trajectories: deps.trajectories, // P5 dual-write — every settled trace seals in the owned store
     ...(deps.onAgentRunCancelled ? { onAgentRunCancelled: deps.onAgentRunCancelled } : {}),
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
     readCaseLogs: (tenant, runtimeList, caseId, stream) => readCaseLogsFn(tenant, runtimeList, caseId, stream),

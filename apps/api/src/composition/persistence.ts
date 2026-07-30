@@ -4,6 +4,7 @@ import type {
   EnvelopeStore,
   EventConsumerStateStore,
   FsRevisionStore,
+  TrajectoryStore,
 } from "@everdict/application-control";
 import {
   type BrowserProfileStore,
@@ -36,6 +37,7 @@ import {
   InMemorySkillStore,
   InMemorySkillVersionStore,
   InMemoryTenantKeyStore,
+  InMemoryTrajectoryStore,
   InMemoryUsageStore,
   InMemoryUserProfileStore,
   InMemoryViewStore,
@@ -71,6 +73,7 @@ import {
   PgSkillStore,
   PgSkillVersionStore,
   PgTenantKeyStore,
+  PgTrajectoryStore,
   PgUsageStore,
   PgUserProfileStore,
   PgViewStore,
@@ -160,6 +163,7 @@ export interface Persistence {
   approvalStore: ApprovalStore; // durable agent approvals (A6) — the parked ask survives an agent-service restart
   envelopeStore: EnvelopeStore; // envelope spend ledger (§5.2 P4) — headroom reads + caused-cost settles
   eventConsumerStateStore: EventConsumerStateStore; // durable consumer cursors + dead letters (E1)
+  trajectoryStore: TrajectoryStore; // the OWNED trajectory store (P5 rung 1) — sealed evidence per run
   commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
   knowledgeStore: KnowledgeStore; // workspace knowledge graph — append-only mention/edge + upsert node projection
   knowledgeEntryStore: KnowledgeEntryStore; // knowledge entries (reified claims) — dual-scoped private|workspace
@@ -233,6 +237,7 @@ export async function makePersistence(): Promise<Persistence> {
       approvalStore: new InMemoryApprovalStore(platformEventStore),
       envelopeStore: new InMemoryEnvelopeStore(),
       eventConsumerStateStore: new InMemoryEventConsumerStateStore(),
+      trajectoryStore: new InMemoryTrajectoryStore(),
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
@@ -281,6 +286,7 @@ export async function makePersistence(): Promise<Persistence> {
     approvalStore: new PgApprovalStore(client),
     envelopeStore: new PgEnvelopeStore(client),
     eventConsumerStateStore: new PgEventConsumerStateStore(client),
+    trajectoryStore: new PgTrajectoryStore(client),
     commentStore: new PgCommentStore(client),
     knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),

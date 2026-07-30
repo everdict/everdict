@@ -36,6 +36,27 @@ const docs = {
       ...errorResponses(401, 403, 404),
     },
   },
+  trajectory: {
+    summary: "Get a run's owned trajectory",
+    description:
+      "The sealed trajectory from the OWNED store (execution-model P5 — the copy every judgment stands on), " +
+      "falling back to the run row's embed in the same shape during the dual-read window. meta.source says " +
+      "which copy served (run | otlp | import | embed). Workspace-scoped; requires runs:read.",
+    tags: ["run"],
+    params: toJsonSchema(z.object({ id: z.string().describe("Run id") })),
+    response: {
+      200: {
+        description: "The trajectory (meta + normalized TraceEvent[])",
+        ...toJsonSchema(
+          z.object({
+            meta: z.object({ source: z.string(), eventCount: z.number(), sealedAt: z.string() }),
+            events: z.array(z.unknown()),
+          }),
+        ),
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
   list: {
     summary: "List runs",
     description:

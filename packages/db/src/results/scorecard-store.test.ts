@@ -5,6 +5,7 @@ import { InMemoryPlatformEventStore } from "../activity/platform-event-store.js"
 import type { SqlClient } from "../client.js";
 import { PgScorecardStore } from "./pg-scorecard-store.js";
 import { InMemoryScorecardStore } from "./scorecard-store.js";
+import { InMemoryTrajectoryStore, PgTrajectoryStore } from "./trajectory-store.js";
 
 const SCORECARD: Scorecard = {
   suiteId: "repo-smoke",
@@ -369,5 +370,48 @@ describe("PgScorecardStore", () => {
 
     const miss = fakeClient(() => ({ rows: [] }));
     await expect(new PgScorecardStore(miss.client).delete("nope")).resolves.toBe(false);
+  });
+});
+
+describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
+  const events = [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } }];
+
+  it("seals once and NEVER rewrites — the first seal wins, cross-tenant reads miss", async () => {
+    const store = new InMemoryTrajectoryStore();
+    const first = await store.seal({ runId: "r1", tenant: "acme", source: "run", events: events as never });
+    expect(first.eventCount).toBe(1);
+    const second = await store.seal({ runId: "r1", tenant: "acme", source: "import", events: [] });
+    expect(second).toEqual(first); // idempotent — evidence is never rewritten
+    expect((await store.get("acme", "r1"))?.events).toHaveLength(1);
+    expect(await store.get("rival", "r1")).toBeUndefined(); // tenant-scoped
+  });
+
+  it("Pg impl seals with ON CONFLICT DO NOTHING (first write wins at the row level)", async () => {
+    const calls: Array<{ text: string; params?: unknown[] }> = [];
+    const client: SqlClient = {
+      async query(text: string, params?: unknown[]) {
+        calls.push({ text, params });
+        if (text.startsWith("SELECT"))
+          return {
+            rows: [
+              {
+                run_id: "r1",
+                tenant: "acme",
+                source: "run",
+                event_count: 1,
+                body: events,
+                sealed_at: "2026-07-30T00:00:00.000Z",
+              },
+            ],
+          } as never;
+        return { rows: [] } as never;
+      },
+    };
+    const store = new PgTrajectoryStore(client);
+    const meta = await store.seal({ runId: "r1", tenant: "acme", source: "run", events: events as never });
+    expect(calls[0]?.text).toMatch(/INSERT INTO everdict_trajectories/);
+    expect(calls[0]?.text).toMatch(/ON CONFLICT \(run_id\) DO NOTHING/);
+    expect(meta.source).toBe("run"); // read back — a lost race returns the FIRST seal's meta
+    expect((await store.get("acme", "r1"))?.meta.eventCount).toBe(1);
   });
 });

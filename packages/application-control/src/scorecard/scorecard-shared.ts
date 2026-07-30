@@ -47,6 +47,7 @@ import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
+import type { TrajectoryStore } from "../ports/trajectory-store.js";
 import type { CaseExportStream } from "../trace-sink/trace-sink-service.js";
 
 // Resolving a registered harness's declarative spec fails two very different ways, and the caller must NOT treat them
@@ -409,6 +410,8 @@ export interface ScorecardServiceDeps {
   runStore?: RunStore;
   // Envelope spend ledger (§5.2, P4) — the submit gate reads headroom, the per-case settle meters cost.
   envelopes?: EnvelopeStore;
+  // The OWNED trajectory store (P5 rung 1) — every settled case's trace seals here too (dual-write).
+  trajectories?: TrajectoryStore;
   // Durable replay recording (optional) — at child write-back, seal the frames/logs teed under the child's runId and attach the ref.
   recordingStore?: RecordingStore;
   concurrency?: number;

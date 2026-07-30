@@ -144,6 +144,7 @@ async function main(): Promise<void> {
     approvalStore,
     envelopeStore,
     eventConsumerStateStore,
+    trajectoryStore,
     commentStore,
     knowledgeStore,
     knowledgeEntryStore,
@@ -433,6 +434,7 @@ async function main(): Promise<void> {
   const cascadeCancel: { fn?: (tenant: string, runId: string) => Promise<number> } = {};
   const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
     envelopes: envelopeStore,
+    trajectories: trajectoryStore,
     onAgentRunCancelled: async (tenant, runId) => cascadeCancel.fn?.(tenant, runId),
     store,
     meteredDispatcher,
@@ -460,6 +462,7 @@ async function main(): Promise<void> {
 
   const scorecardService = buildScorecard({
     envelopes: envelopeStore,
+    trajectories: trajectoryStore,
     scorecardStore,
     runStore: store,
     ...(recordingStore ? { recordingStore } : {}),

@@ -604,6 +604,11 @@ export class ScorecardBatchService {
       }
       // Envelope draw-down (§5.2 O7 meter): the full caused cost charges the delegating envelope.
       if (caseEnvelope && caseUsd > 0) void this.deps.envelopes?.settle(caseEnvelope.id, ctx.tenant, caseUsd);
+      // P5 dual-write: the case's trajectory seals in the OWNED store under its child run id (idempotent).
+      if (child && result.trace.length > 0)
+        void this.deps.trajectories
+          ?.seal({ runId: child.id, tenant: ctx.tenant, source: "run", events: result.trace })
+          .catch(() => {});
       // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
       if (ctx.judges.length > 0) {
         await this.scoring
@@ -1135,6 +1140,11 @@ export class ScorecardBatchService {
         }
         // Envelope draw-down (§5.2 O7 meter): the full caused cost charges the delegating envelope.
         if (childEnv && caseUsd > 0) void this.deps.envelopes?.settle(childEnv.id, tenant, caseUsd);
+        // P5 dual-write: the case's trajectory seals in the OWNED store under its child run id (idempotent).
+        if (child && result.trace.length > 0)
+          void this.deps.trajectories
+            ?.seal({ runId: child.id, tenant, source: "run", events: result.trace })
+            .catch(() => {});
         // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         if (runStore && child)
           await runStore.update(child.id, {

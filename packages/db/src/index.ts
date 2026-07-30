@@ -158,6 +158,7 @@ export { InMemoryPlatformEventStore, PgPlatformEventStore } from "./activity/pla
 export { InMemoryApprovalStore } from "./activity/approval-store.js";
 export { InMemoryEnvelopeStore, PgEnvelopeStore } from "./results/envelope-store.js";
 export { InMemoryEventConsumerStateStore, PgEventConsumerStateStore } from "./activity/event-consumer-store.js";
+export { InMemoryTrajectoryStore, PgTrajectoryStore } from "./results/trajectory-store.js";
 export { PgApprovalStore } from "./activity/pg-approval-store.js";
 export { InMemoryCommentStore, PgCommentStore } from "./activity/comment-store.js";
 export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent-session-store.js";

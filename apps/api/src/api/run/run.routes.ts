@@ -40,6 +40,21 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     }
   });
 
+  // The OWNED trajectory (P5 dual-read): the sealed copy from the trajectory store, falling back to the
+  // run row's embed in the same shape — consumers never care which copy served.
+  app.get<{ Params: { id: string } }>("/runs/:id/trajectory", { schema: runDocs.trajectory }, async (req, reply) => {
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runs:read");
+      const trajectory = await deps.service.trajectory(principal.workspace, req.params.id);
+      if (!trajectory) return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
+      return reply.send(trajectory);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.get<{
     Querystring: { scorecardId?: string; scope?: string; runner?: string; limit?: string; offset?: string };
   }>("/runs", { schema: runDocs.list }, async (req, reply) => {

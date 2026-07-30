@@ -466,6 +466,7 @@ describe("MCP tools", () => {
       "get_run",
       "get_run_logs",
       "get_run_recording",
+      "get_run_trajectory",
       "get_runtime",
       "get_schedule",
       "get_scorecard",
