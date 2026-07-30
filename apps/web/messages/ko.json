@@ -2809,7 +2809,8 @@
     "files": "파일",
     "filesDesc": "워크스페이스 파일시스템 — 폴더를 탐색하고, 파일을 선택하면 우측 패널에 표시됩니다.",
     "images": "이미지",
-    "imagesDesc": "everdict 자체 스토어에 발행한 이미지"
+    "imagesDesc": "everdict 자체 스토어에 발행한 이미지",
+    "subscriptions": "구독 규칙"
   },
   "knowledge": {
     "title": "지식",
@@ -4260,5 +4261,38 @@
     "source_run": "run",
     "source_otlp": "otlp",
     "source_import": "import"
+  },
+  "subscriptions": {
+    "title": "구독 규칙",
+    "description": "이벤트 → 반응 규칙: 플랫폼 사실이 에이전트를 깨우거나, 서명된 웹훅을 보내거나, 다단계 체인을 시작합니다.",
+    "lede": "규칙은 워크스페이스 이벤트 로그 위에서 발화합니다. 수정·삭제는 생성자 또는 관리자만 할 수 있습니다.",
+    "create": "새 구독 규칙",
+    "creating": "만드는 중…",
+    "createTitle": "새 구독 규칙",
+    "nameLabel": "이름",
+    "namePlaceholder": "예: 회귀를 온콜 웹훅으로",
+    "kindsLabel": "이벤트 종류",
+    "reactionLabel": "반응",
+    "reaction_agent": "에이전트",
+    "reaction_webhook": "웹훅",
+    "reaction_workflow": "체인",
+    "agentLabel": "에이전트",
+    "urlLabel": "엔드포인트 URL",
+    "secretLabel": "서명 시크릿 (선택)",
+    "secretPlaceholder": "전송마다 HMAC 서명을 붙입니다",
+    "instructionPlaceholder": "스텝 지시 (선택)",
+    "addStep": "스텝 추가",
+    "removeStep": "스텝 제거",
+    "filterCount": "필터 {count}개",
+    "enabled": "켜짐",
+    "disabled": "꺼짐",
+    "enable": "켜기",
+    "disable": "끄기",
+    "delete": "삭제",
+    "deleteTitle": "구독 규칙 삭제",
+    "deleteBody": "“{name}” 규칙이 더 이상 발화하지 않습니다. 이미 시작된 실행에는 영향이 없습니다.",
+    "cancel": "취소",
+    "emptyTitle": "아직 구독 규칙이 없습니다",
+    "emptyDescription": "워크스페이스 이벤트에 반응하는 규칙을 만들어 보세요 — 에이전트 기상, 웹훅 전송, 체인 실행."
   }
 }

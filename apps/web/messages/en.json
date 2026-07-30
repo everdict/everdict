@@ -2809,7 +2809,8 @@
     "files": "Files",
     "filesDesc": "The workspace filesystem — browse folders and open a file in the side panel.",
     "images": "Images",
-    "imagesDesc": "Images published to everdict's own store"
+    "imagesDesc": "Images published to everdict's own store",
+    "subscriptions": "Subscriptions"
   },
   "knowledge": {
     "title": "Knowledge",
@@ -4260,5 +4261,38 @@
     "source_run": "run",
     "source_otlp": "otlp",
     "source_import": "import"
+  },
+  "subscriptions": {
+    "title": "Subscriptions",
+    "description": "Event → reaction rules: a platform fact wakes an agent, delivers a signed webhook, or starts a durable multi-step chain.",
+    "lede": "Rules fire on the workspace event log. Edit and delete are creator-or-admin.",
+    "create": "New subscription",
+    "creating": "Creating…",
+    "createTitle": "New subscription",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. Regressions to the on-call hook",
+    "kindsLabel": "Event kinds",
+    "reactionLabel": "Reaction",
+    "reaction_agent": "Agent",
+    "reaction_webhook": "Webhook",
+    "reaction_workflow": "Chain",
+    "agentLabel": "Agent",
+    "urlLabel": "Endpoint URL",
+    "secretLabel": "Signing secret (optional)",
+    "secretPlaceholder": "HMAC-signs each delivery",
+    "instructionPlaceholder": "Step instruction (optional)",
+    "addStep": "Add step",
+    "removeStep": "Remove step",
+    "filterCount": "{count} filters",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "enable": "Enable",
+    "disable": "Disable",
+    "delete": "Delete",
+    "deleteTitle": "Delete subscription",
+    "deleteBody": "“{name}” will stop firing. Runs it already started are unaffected.",
+    "cancel": "Cancel",
+    "emptyTitle": "No subscriptions yet",
+    "emptyDescription": "Create a rule to react to workspace events — wake an agent, deliver a webhook, or run a chain."
   }
 }

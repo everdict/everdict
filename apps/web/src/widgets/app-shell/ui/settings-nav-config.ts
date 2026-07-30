@@ -20,6 +20,7 @@ import {
   Users,
   Wallet,
   Wrench,
+  Zap,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -115,6 +116,8 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         icon: Network,
         requiredAction: 'scorecards:read',
       },
+      // The E3 registry — event → reaction rules (wake an agent · signed webhook · durable chain).
+      { href: '/subscriptions', labelKey: 'subscriptions', icon: Zap, requiredAction: 'agents:read' },
     ],
   },
   {

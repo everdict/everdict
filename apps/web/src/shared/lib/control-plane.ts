@@ -612,6 +612,17 @@ export const controlPlane = {
   // A workspace registers an agent (under a stable id, "default") to plug its own context + tools into the shared agent
   // framework. Read agents:read (viewer+); save/register agents:write (member+). saveAgent = version-free upsert (PUT).
   listAgents: <T>(auth: AuthContext) => call<T>(auth, '/agents'),
+  // Subscriptions — the E3 registry (event → reaction rules under governance).
+  listSubscriptions: <T>(auth: AuthContext) => call<T>(auth, '/subscriptions'),
+  createSubscription: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/subscriptions', { method: 'POST', body: JSON.stringify(body) }),
+  updateSubscription: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/subscriptions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteSubscription: (auth: AuthContext, id: string) =>
+    call<void>(auth, `/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getAgent: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/agents/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   // 플랫폼 이벤트 로그(라이프사이클 사실, 최신순) — 크래프팅 스튜디오의 리플레이 피커. events:read(viewer+).
