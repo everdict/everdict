@@ -20,6 +20,7 @@
     "@everdict/datasets": "workspace:*",
     "@everdict/db": "workspace:*",
     "@everdict/domain": "workspace:*",
+    "@everdict/drivers": "workspace:*",
     "@everdict/graders": "workspace:*",
     "@everdict/images": "workspace:*",
     "@everdict/job-runner": "workspace:*",
