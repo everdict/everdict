@@ -7,6 +7,16 @@ dist
 **/.turbo
 coverage
 *.log
+# Next build output — every image runs its own `next build` in the builder stage, so a host .next is dead weight
+# that also risks a stale artifact winning. Includes the NEXT_DIST_DIR variants a side-by-side dev server writes
+# (.next-dev, .next-verify, …), which grow to tens of GB and otherwise ride into EVERY image's context.
+.next
+**/.next
+**/.next-*
+# Packaging artifacts (electron installers, CLI SEA bundle) — output of a build, never an input to one.
+apps/desktop/release
+apps/desktop/bundle
+apps/cli/bundle
 # Never bake env files (root + nested) into the image — secret leakage + Next loading a dev .env.local at
 # runtime and changing behavior (e.g. keycloakConfigured). Inject runtime env only via compose `environment:`.
 .env
