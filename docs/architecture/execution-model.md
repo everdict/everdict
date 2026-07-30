@@ -418,9 +418,14 @@ can be discussed like any other entity, and the knowledge layer can promote what
   `EVERDICT_SANDBOX_DRIVER=docker`). **The durable reaper also SHIPPED (T-b)**: `sessionReaperWorkflow`
   (`everdict-reaper-<runId>`) started at create, signalled on close, deadline → the internal reap bridge —
   a CP dying with the live handle no longer leaks: the row's `session.computeId` lets `Driver.reap` remove
-  the stray container and the ledger settles `orphaned` (see docs/orchestration.md item 2). Remaining
-  rungs: the WS terminal (`ExecStreamHandle` over `DockerComputeHandle`), idle metering (O5),
-  private-registry pull auth, and the O6 browser fold.
+  the stray container and the ledger settles `orphaned` (see docs/orchestration.md item 2). **The harness
+  playground also SHIPPED on this rung**: `POST /sandboxes {harness}` boots a REGISTERED harness into the
+  session (warm-install-before-record) and `…/:id/tasks` drives ad-hoc test cases through it one at a
+  time, each its own grouped child run with a live trace cursor — the interactive half of the P1 symptom
+  ("a harness cannot be experimented with"), on the session machinery instead of a cold dispatch per try.
+  See [harness-playground.md](./harness-playground.md). Remaining rungs: the WS terminal
+  (`ExecStreamHandle` over `DockerComputeHandle`), idle metering (O5), private-registry pull auth, and the
+  O6 browser fold.
 - **P7 — Subscriptions converge.** Schedules emit `schedule.fired`; the three trigger engines converge on
   one subscription registry if the shape holds.
 

@@ -38,6 +38,18 @@ only where a container runtime exists (`EVERDICT_FILE_EXECUTION_DRIVER=docker`);
 is for code already inside a sandbox (agent, job runner), and the control plane is not one. Interpreter/image
 policy is pure domain (`fileRunPlanFor`). See `docs/architecture/workspace-filesystem.md` (Running a file).
 
+## Streaming exec (`execStream`) — one spawn core
+
+`ComputeHandle.execStream?(cmd, onChunk, opts)` is the OPTIONAL streaming twin of `exec`: same result
+contract (non-zero exit resolves; timeout resolves 124; spawn failure 127 — never a throw), with
+`ExecChunk{stream, data}` delivered incrementally. It is an optional MEMBER (not an `ExecOpts` flag) so
+callers can DETECT support and pick an incremental parse path — a decorator that wraps a handle must
+forward it only when the inner handle has it (presence stays detectable). Local + Docker implement it over
+the shared `runSpawn` core (`packages/drivers/src/spawn.ts`), which owns the hardened settle semantics the
+echo paths evolved: settle on 'close' (full stdio), 'exit' + 250ms grace against pipe-holding detached
+grandchildren, group-kill on timeout. The echo tee paths are thin wrappers over the same core — the
+live-log feed and execStream can never drift. First consumer: the harness playground's live task feed.
+
 ## Driver vs Backend
 - **Backend** (`@everdict/backends`) = *placement*: dispatches the job-runner job to an orchestrator; isolation
   = the orchestrator runtime. It never runs the harness itself (see skill `backends`).

@@ -51,6 +51,17 @@ resolves the spec from the registry and embeds it in the `CaseJob`; `makeHarness
   dispatch, so the agent server gets its whole connection from one id instead of a hand-wired env combo. An
   unregistered bare string stays a literal (legacy). `command.ts` only ever sees the resolved `{{model}}` string.
 
+## Incremental yield (live sessions)
+
+`run()` is an `AsyncIterable` — yield events AS THEY HAPPEN when the compute allows it. Convention: when
+`compute.execStream` is present (see skill `drivers`), parse the native output incrementally and yield per
+unit (ClaudeCodeHarness: per stream-json line via `ChunkLineQueue`, `packages/harnesses/src/line-stream.ts`);
+when absent, keep the buffered path BYTE-FOR-BYTE unchanged — the eval lane must not drift. The event
+sequence must be identical on both paths (same mapper); only arrival time moves. A hard CLI failure
+(non-zero exit) on the streaming path yields a trace-visible `error` event. Consumer: the harness
+playground (`docs/architecture/harness-playground.md`) — a live session shows tool calls mid-run.
+`makeHarness(..., {sandboxInstall: true})` makes built-ins install their CLI into a bare session container.
+
 ## Trace normalization (`stream-json.ts`)
 Graders only read the normalized event stream, so every harness converts its native output to `TraceEvent[]`
 (`packages/core/src/execution/trace.ts`: `message` / `llm_call` / `tool_call` / `tool_result` / `env_action` / `error`).
