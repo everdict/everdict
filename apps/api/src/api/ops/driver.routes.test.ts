@@ -1,6 +1,6 @@
-import { RunService, ScorecardService } from "@everdict/application-control";
+import { RunService, ScorecardService, SubscriptionService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
+import { InMemoryRunStore, InMemoryScorecardStore, InMemorySubscriptionStore } from "@everdict/db";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import type { DriverOpsService } from "../../core/ops/driver-ops-service.js";
@@ -99,5 +99,36 @@ describe("Driver ops surface v0 (/ops/driver — ledger-vocabulary addressing)",
     const res = await bare.inject({ method: "GET", url: "/ops/driver/batch/sc-1", headers: H });
     expect(res.statusCode).toBe(404);
     expect(res.json().message).toMatch(/not configured/);
+  });
+});
+
+describe("reaction family ownership (fix: the guard knew every family but reaction)", () => {
+  it("describes a reaction chain by <eventId>-<subscriptionId> when the rule is the tenant's — another tenant reads 404", async () => {
+    const { app, calls } = await build();
+    const subscriptionService = new SubscriptionService({ store: new InMemorySubscriptionStore() });
+    const rule = await subscriptionService.create({
+      tenant: "acme",
+      createdBy: "member",
+      name: "chain",
+      selector: { kinds: ["dataset.registered"], filters: [] },
+      reaction: { kind: "workflow", steps: [{ agentId: "triage" }] },
+    });
+    // Rebuild with the subscription service present (the guard resolves the rule id from the ledger id's tail).
+    const withSubs = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      subscriptionService,
+      driverOps: stubOps(calls),
+    });
+    const eventId = "11111111-2222-3333-4444-555555555555";
+    const ok = await withSubs.inject({ method: "GET", url: `/ops/driver/reaction/${eventId}-${rule.id}`, headers: H });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().workflowId).toBe(`everdict-reaction-${eventId}-${rule.id}`);
+
+    const rival = await withSubs.inject({
+      method: "GET",
+      url: `/ops/driver/reaction/${eventId}-${rule.id}`,
+      headers: { "x-everdict-tenant": "rival" },
+    });
+    expect(rival.statusCode).toBe(404); // the rule is acme's — no existence leak
   });
 });

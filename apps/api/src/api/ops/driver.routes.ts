@@ -22,6 +22,12 @@ export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps):
       const run = await deps.service.get(id).catch(() => undefined);
       return run !== undefined && run.tenant === tenant && run.kind === "sandbox";
     }
+    if (family === "reaction") {
+      // Ledger id = `<eventId>-<subscriptionId>`; the rule's row is the tenant's ownership proof (a deleted
+      // rule hides its historical chains from the wrap — the coarse tradeoff of pointer-based scoping).
+      const rule = await deps.subscriptionService?.get(tenant, id.slice(-36)).catch(() => undefined);
+      return rule !== undefined;
+    }
     const record = await deps.scorecardService?.get(id);
     return record !== undefined && record?.tenant === tenant;
   };
@@ -44,7 +50,7 @@ export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps):
         if (err instanceof z.ZodError)
           return reply
             .code(400)
-            .send({ code: "BAD_REQUEST", message: "family must be batch | score | approval | reaper" });
+            .send({ code: "BAD_REQUEST", message: "family must be batch | score | approval | reaper | reaction" });
         return sendError(reply, err);
       }
     },
@@ -69,7 +75,7 @@ export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps):
         if (err instanceof z.ZodError)
           return reply
             .code(400)
-            .send({ code: "BAD_REQUEST", message: "family must be batch | score | approval | reaper" });
+            .send({ code: "BAD_REQUEST", message: "family must be batch | score | approval | reaper | reaction" });
         return sendError(reply, err);
       }
     },
