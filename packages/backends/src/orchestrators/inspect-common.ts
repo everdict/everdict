@@ -9,6 +9,13 @@ export const SHARED_STORE_PREFIX = "everdict-shared-";
 export const EVERDICT_PREFIX = "everdict-";
 // Cap on the live-workload list so a busy cluster can't balloon the response; the overflow is surfaced as a warning.
 export const WORKLOAD_CAP = 100;
+
+// Cap for the failure-evidence log tail (CaseFailure.logTail) — captured at throw time, before the dead job is
+// deleted/GC'd. Big enough to carry a crash's last screens, small enough to ride on the case record.
+export const FAILURE_LOG_TAIL_CAP = 16_384;
+
+// Cap for the failure-evidence event lines (CaseFailure.placement.events) — the newest ones carry the cause.
+export const FAILURE_EVENT_CAP = 10;
 // Cap on per-node detail reads (Nomad /v1/node/:id + allocations; K8s kubelet fs-stats summary) — bounds the extra
 // calls per inspect poll on a big cluster. Nodes past the cap simply omit the detail fields.
 export const NODE_DETAIL_CAP = 30;

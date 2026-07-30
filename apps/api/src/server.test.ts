@@ -1833,6 +1833,111 @@ describe("API — run live logs (observability: snapshot + SSE tail)", () => {
     expect(bad.statusCode).toBe(400);
   });
 
+  it("GET /runs/:id/placement serves the case's live placement read (blocked verdict); cross-workspace reads 404", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      inspectCasePlacement: async (_t, _r, caseId) => ({
+        phase: "blocked" as const,
+        job: `everdict-${caseId}-abc`,
+        blockedReason: "memory exhausted on 2 node(s)",
+        events: [],
+      }),
+    });
+    const app = buildServer({
+      service: svc,
+      authenticator: compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
+      keyStore,
+    });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/placement`,
+      headers: { "x-everdict-tenant": "acme" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      found: true,
+      placement: { phase: "blocked", job: "everdict-c1-abc", blockedReason: "memory exhausted on 2 node(s)" },
+    });
+    const other = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/placement`,
+      headers: { "x-everdict-tenant": "beta" },
+    });
+    expect(other.statusCode).toBe(404); // another workspace's run is invisible, not forbidden
+  });
+
+  it("GET /runs/:id/placement without a placement reader reads found=false (never an error)", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store });
+    const app = buildServer({
+      service: svc,
+      authenticator: compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
+      keyStore,
+    });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/placement`,
+      headers: { "x-everdict-tenant": "acme" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ found: false, placement: null });
+  });
+
+  it("GET /runs/:id/topology serves the warm stack's roster; :service/logs tails one service; cross-workspace 404", async () => {
+    const keyStore = new InMemoryTenantKeyStore();
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      inspectTopology: async (_t, _r, harness) => ({
+        deployed: true,
+        runtime: "nomad",
+        services: [
+          { name: "agent-server", status: "running", ready: true },
+          { name: `${harness.id}-postgres`, status: "pending", ready: false },
+        ],
+      }),
+      readTopologyServiceLogs: async (_t, _r, _h, service) => (service === "agent-server" ? "srv log tail" : undefined),
+    });
+    const app = buildServer({
+      service: svc,
+      authenticator: compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
+      keyStore,
+    });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "bu", version: "1" }, case: CASE });
+    const h = { "x-everdict-tenant": "acme" };
+    const topo = await app.inject({ method: "GET", url: `/runs/${rec.id}/topology`, headers: h });
+    expect(topo.statusCode).toBe(200);
+    expect(topo.json()).toMatchObject({
+      found: true,
+      topology: { deployed: true, services: [{ name: "agent-server", ready: true }, { name: "bu-postgres" }] },
+    });
+    const logs = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/topology/services/agent-server/logs`,
+      headers: h,
+    });
+    expect(logs.json()).toMatchObject({ found: true, text: "srv log tail" });
+    const miss = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/topology/services/nope/logs`,
+      headers: h,
+    });
+    expect(miss.json()).toMatchObject({ found: false, text: "" });
+    const other = await app.inject({
+      method: "GET",
+      url: `/runs/${rec.id}/topology`,
+      headers: { "x-everdict-tenant": "beta" },
+    });
+    expect(other.statusCode).toBe(404); // another workspace's run is invisible, not forbidden
+  });
+
   it("GET /runs/:id/logs/stream emits SSE chunks and closes with event:end once the run is terminal", async () => {
     const keyStore = new InMemoryTenantKeyStore();
     const store = new InMemoryRunStore();

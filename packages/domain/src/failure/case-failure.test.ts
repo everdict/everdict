@@ -43,6 +43,31 @@ describe("classifyFailure (failure taxonomy: where it died × whose fault)", () 
     const f = classifyFailure(new Error("socket hang up"), "dispatch");
     expect(f).toMatchObject({ class: "infra", code: "INTERNAL", retryable: true });
   });
+
+  it("lifts the backend's failure evidence (extra.placement + extra.logTail) onto the CaseFailure", () => {
+    // Regression: only signal/runnerId used to survive out of extra — the alloc/pod identity, events, and the
+    // log tail (captured before the job vanished) were dropped at this boundary.
+    const err = new UpstreamError(
+      "UPSTREAM_ERROR",
+      {
+        alloc: "a1",
+        placement: { unit: "a1", node: "worker-2", events: ["Driver Failure: Failed to pull image"] },
+        logTail: "panic: boom",
+      },
+      "alloc failed — Driver Failure: Failed to pull image",
+    );
+    const f = classifyFailure(err, "dispatch");
+    expect(f.placement).toEqual({ unit: "a1", node: "worker-2", events: ["Driver Failure: Failed to pull image"] });
+    expect(f.logTail).toBe("panic: boom");
+  });
+
+  it("ignores a malformed evidence extra (never breaks classification)", () => {
+    const err = new UpstreamError("UPSTREAM_ERROR", { placement: "not-an-object", logTail: 42 }, "alloc failed");
+    const f = classifyFailure(err, "dispatch");
+    expect(f.placement).toBeUndefined();
+    expect(f.logTail).toBeUndefined();
+    expect(f).toMatchObject({ class: "infra", retryable: true });
+  });
 });
 
 describe("stageForError (which pipeline stage an error code names)", () => {

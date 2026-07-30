@@ -5,6 +5,7 @@ import { RunService } from "@everdict/application-control";
 import type { RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
 import type { GradeContext, JudgeSpec, RegistryAuth } from "@everdict/contracts";
+import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { UsageMeter } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
@@ -43,6 +44,22 @@ export interface RuntimeAccessReaders {
     runtimeList: string | undefined,
     caseId: string,
   ) => Promise<ExecStreamHandle | undefined>;
+  inspectCasePlacementFn: (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+  ) => Promise<CasePlacement | undefined>;
+  inspectTopologyFn: (
+    tenant: string,
+    runtimeList: string | undefined,
+    harness: { id: string; version: string },
+  ) => Promise<TopologyStatus | undefined>;
+  topologyServiceLogsFn: (
+    tenant: string,
+    runtimeList: string | undefined,
+    harness: { id: string; version: string },
+    service: string,
+  ) => Promise<string | undefined>;
 }
 
 // Single-run service + its judge runner. The judge runner is returned too because ScorecardService reuses it.
@@ -102,7 +119,15 @@ export function buildRun(deps: {
     liveLogs,
     recordingStore,
   } = deps;
-  const { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn } = readers;
+  const {
+    readCaseLogsFn,
+    execInSandboxFn,
+    captureBrowserScreenFn,
+    openTerminalStreamFn,
+    inspectCasePlacementFn,
+    inspectTopologyFn,
+    topologyServiceLogsFn,
+  } = readers;
 
   const service = new RunService({
     envelopes: deps.envelopes, // envelope spend ledger (§5.2 P4) — the causal admission leg + per-case draw-down
@@ -118,6 +143,12 @@ export function buildRun(deps: {
     // Pushed log (self-hosted) — RunService.logs() prefers this over the backend tail for unreachable runners.
     pushLogs: (runId) => liveLogs.get(runId),
     openTerminalStream: (tenant, runtimeList, caseId) => openTerminalStreamFn(tenant, runtimeList, caseId),
+    // Case-scoped placement read (runtime debugging) — where the case's job stands inside its cluster.
+    inspectCasePlacement: (tenant, runtimeList, caseId) => inspectCasePlacementFn(tenant, runtimeList, caseId),
+    // Topology health roster + service logs (runtime debugging) — the warm service stack behind a service harness.
+    inspectTopology: (tenant, runtimeList, harness) => inspectTopologyFn(tenant, runtimeList, harness),
+    readTopologyServiceLogs: (tenant, runtimeList, harness, service) =>
+      topologyServiceLogsFn(tenant, runtimeList, harness, service),
     dispatcher: meteredDispatcher,
     store,
     // Grader factory (@everdict/graders) for executeCase's control-plane collection-mode scoring — the application

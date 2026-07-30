@@ -14,6 +14,8 @@ import {
   type TraceSource,
   type TraceSourceConfig,
 } from "@everdict/contracts";
+// Type-only wire reuse (same package's DTO subpath): the placement/topology read models the backends produce.
+import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import {
   type BudgetTracker,
   type HarnessSecretMaps,
@@ -160,6 +162,28 @@ export interface RunServiceDeps {
     caseId: string,
     command: string,
   ) => Promise<{ stdout: string; stderr: string; exitCode: number } | undefined>;
+  // Case-scoped placement read (runtime debugging): where the case's orchestrator job stands INSIDE the cluster —
+  // queued/blocked (capacity verdict)/starting/running/dead, node, and the orchestrator event feed. Resolves the
+  // run's runtime lane to a CaseInspectable backend. Best-effort — absent/miss = no placement info, never an error.
+  inspectCasePlacement?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+  ) => Promise<CasePlacement | undefined>;
+  // Topology health roster (runtime debugging, service harnesses): the warm topology's per-service state behind
+  // the run's runtime lane. Best-effort — absent/miss = no topology info, never an error.
+  inspectTopology?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    harness: { id: string; version: string },
+  ) => Promise<TopologyStatus | undefined>;
+  // One deployed topology service's current log tail — the service-level twin of readCaseLogs.
+  readTopologyServiceLogs?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    harness: { id: string; version: string },
+    service: string,
+  ) => Promise<string | undefined>;
   // Completion callback (succeeded/failed) — completion notifications (Mattermost etc.). Failure is independent of the run result (the service swallows it). Separate from webhook.
   onComplete?: (tenant: string, record: RunRecord) => Promise<void>;
   // Platform-event emit seam (agent-automation A1) — run.submitted only; completion facts flow through
@@ -317,6 +341,44 @@ export class RunService {
       .catch(() => undefined);
     const b64 = out && out.exitCode === 0 ? out.stdout.trim() : "";
     return { record, dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined, supported: true };
+  }
+
+  // Case-scoped placement read (runtime debugging) — the record (for authz/scoping) + where the case's job stands
+  // inside its runtime cluster. placement=undefined = nothing to describe (pre-dispatch, GC'd, or no backend support).
+  async placement(id: string): Promise<{ record: RunRecord; placement: CasePlacement | undefined } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const placement = this.deps.inspectCasePlacement
+      ? await this.deps.inspectCasePlacement(record.tenant, record.runtime, record.caseId).catch(() => undefined)
+      : undefined;
+    return { record, placement };
+  }
+
+  // Topology health roster (runtime debugging) — the record (for authz/scoping) + the per-service state of the
+  // warm topology the run's service harness drives. topology=undefined = not a service harness / no topology
+  // runtime behind the lane / the read degraded.
+  async topology(id: string): Promise<{ record: RunRecord; topology: TopologyStatus | undefined } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const topology = this.deps.inspectTopology
+      ? await this.deps.inspectTopology(record.tenant, record.runtime, record.harness).catch(() => undefined)
+      : undefined;
+    return { record, topology };
+  }
+
+  // One deployed topology service's current log tail (runtime debugging) — the record + the service's log text.
+  async topologyServiceLogs(
+    id: string,
+    service: string,
+  ): Promise<{ record: RunRecord; text: string | undefined } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const text = this.deps.readTopologyServiceLogs
+      ? await this.deps
+          .readTopologyServiceLogs(record.tenant, record.runtime, record.harness, service)
+          .catch(() => undefined)
+      : undefined;
+    return { record, text };
   }
 
   // Open an interactive terminal on a run's live sandbox (observability ⑥). Returns the record (for authz) + a

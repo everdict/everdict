@@ -32,6 +32,25 @@ export function stageForError(err: unknown): CaseFailure["stage"] {
   }
 }
 
+// Failure evidence a backend attached to the thrown error's extra (extra.placement / extra.logTail) — validated
+// loosely here so a malformed extra never breaks classification. Captured at throw time because the orchestrator
+// job (and its raw log) is deleted/GC'd right after settlement.
+function failureEvidence(extra: Record<string, unknown> | undefined): Partial<CaseFailure> {
+  const out: Partial<CaseFailure> = {};
+  const p = extra?.placement;
+  if (p !== null && typeof p === "object") {
+    const { unit, node, events } = p as { unit?: unknown; node?: unknown; events?: unknown };
+    const placement: NonNullable<CaseFailure["placement"]> = {
+      ...(typeof unit === "string" ? { unit } : {}),
+      ...(typeof node === "string" ? { node } : {}),
+      ...(Array.isArray(events) && events.every((e) => typeof e === "string") ? { events } : {}),
+    };
+    if (Object.keys(placement).length > 0) out.placement = placement;
+  }
+  if (typeof extra?.logTail === "string" && extra.logTail !== "") out.logTail = extra.logTail;
+  return out;
+}
+
 // Error → classified failure. Unknown throws default to retryable infra — the safe reading for an
 // uncategorized crash (matches the previous behavior where every dispatch throw earned a retry).
 export function classifyFailure(err: unknown, stage: CaseFailure["stage"]): CaseFailure {
@@ -43,11 +62,15 @@ export function classifyFailure(err: unknown, stage: CaseFailure["stage"]): Case
     // A self-hosted dispatch failure (no_runner / capability_mismatch) names the runner it waited on in extra.runnerId —
     // carry it onto the failure so the result links to that runner's health. Absent for managed backends.
     const runner = typeof err.extra?.runnerId === "string" ? { runnerId: err.extra.runnerId } : {};
-    if (INFRA_FATAL.has(code)) return { stage, class: "infra", code, message, retryable: false, ...runner };
-    if (INFRA_RETRYABLE.has(code)) return { stage, class: "infra", code, message, retryable: true, ...runner };
-    if (CONFIG.has(code)) return { stage, class: "config", code, message, retryable: false, ...runner };
-    if (HARNESS.has(code)) return { stage, class: "harness", code, message, retryable: false, ...runner };
-    return { stage, class: "infra", code, message, retryable: true, ...runner };
+    // Post-mortem evidence (unit/node/events + the job's log tail) the backend captured before the job vanishes.
+    const evidence = failureEvidence(err.extra);
+    if (INFRA_FATAL.has(code))
+      return { stage, class: "infra", code, message, retryable: false, ...runner, ...evidence };
+    if (INFRA_RETRYABLE.has(code))
+      return { stage, class: "infra", code, message, retryable: true, ...runner, ...evidence };
+    if (CONFIG.has(code)) return { stage, class: "config", code, message, retryable: false, ...runner, ...evidence };
+    if (HARNESS.has(code)) return { stage, class: "harness", code, message, retryable: false, ...runner, ...evidence };
+    return { stage, class: "infra", code, message, retryable: true, ...runner, ...evidence };
   }
   return { stage, class: "infra", code: "INTERNAL", message, retryable: true };
 }

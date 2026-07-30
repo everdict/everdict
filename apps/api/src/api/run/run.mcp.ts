@@ -101,6 +101,63 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   );
 
   server.registerTool(
+    "get_run_placement",
+    {
+      description:
+        "Where a run's case job stands INSIDE its runtime cluster (runtime debugging): phase " +
+        "queued | blocked | starting | running | dead, the placed node/unit, the scheduler's capacity verdict when " +
+        "blocked (Nomad exhausted dimensions / K8s FailedScheduling), and the orchestrator event feed (image pulls, " +
+        "OOM kills, restarts). Use it to tell 'the cluster cannot place this' from 'placed but failing'. " +
+        "found=false = nothing to describe (pre-dispatch / GC'd / unsupported backend)",
+      inputSchema: { id: z.string().describe("run id") },
+    },
+    ({ id }: { id: string }) =>
+      run(principal, "runs:read", async () => {
+        const out = await deps.service.placement(id);
+        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        return ok({ status: out.record.status, found: out.placement !== undefined, placement: out.placement ?? null });
+      }),
+  );
+
+  server.registerTool(
+    "get_run_topology",
+    {
+      description:
+        "The live per-service health roster of the warm topology a service-harness run drives (runtime " +
+        "debugging): per service the orchestrator state, readiness, restart churn, OOM verdicts, and the last " +
+        "notable event. Answers 'the case was placed, but is the SERVICE stack actually up'. found=false = not a " +
+        "service harness / no topology runtime behind the lane",
+      inputSchema: { id: z.string().describe("run id") },
+    },
+    ({ id }: { id: string }) =>
+      run(principal, "runs:read", async () => {
+        const out = await deps.service.topology(id);
+        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        return ok({ status: out.record.status, found: out.topology !== undefined, topology: out.topology ?? null });
+      }),
+  );
+
+  server.registerTool(
+    "get_topology_service_logs",
+    {
+      description:
+        "Current log tail of ONE deployed service of a run's warm topology — the service-level twin of " +
+        "get_run_logs ('the stack is up but the case fails: what is the service saying'). found=false = no live " +
+        "unit for that service",
+      inputSchema: {
+        id: z.string().describe("run id"),
+        service: z.string().describe("declared service name (see get_run_topology)"),
+      },
+    },
+    ({ id, service }: { id: string; service: string }) =>
+      run(principal, "runs:read", async () => {
+        const out = await deps.service.topologyServiceLogs(id, service);
+        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        return ok({ found: out.text !== undefined, text: out.text ?? "" });
+      }),
+  );
+
+  server.registerTool(
     "get_run_recording",
     {
       description:

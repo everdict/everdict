@@ -62,6 +62,9 @@ function mockApi(
     unreachable?: boolean;
     failureReason?: string;
     labeledJobs?: Array<{ selector: string; name: string; namespace: string; creationTimestamp?: string }>;
+    // Case-scoped placement reads (inspectCase) — the job's pods + one pod's namespace events.
+    jobPods?: Array<{ name: string; phase?: string; node?: string; reason?: string; restarts?: number }>;
+    podEvents?: Array<{ reason?: string; message: string; at?: string }>;
     nodes?: Array<{ name: string; ready: boolean; status: string; os?: string; diskMbTotal?: number }> | undefined;
     workloadPods?:
       | Array<{
@@ -106,6 +109,12 @@ function mockApi(
     },
     async podFailureReason() {
       return opts.failureReason;
+    },
+    async podsForJob() {
+      return opts.jobPods;
+    },
+    async objectEvents() {
+      return opts.podEvents;
     },
     async deleteJob(name) {
       deleted.push(name);
@@ -546,6 +555,25 @@ describe("K8s harness resources + OOM classification", () => {
     expect(err.extra?.signal).toBe("OOM_KILLED");
     expect(err.message).toContain("resources.memoryMb");
   });
+
+  it("a failed K8s job's throw carries the failure evidence in extra (pod/node/events + log tail)", async () => {
+    // Regression: dispatch's finally deletes the Job right after the throw — the pod identity, its events, and
+    // the pod log tail must be captured at throw time or they are unreachable exactly when someone asks "why".
+    const { api } = mockApi({
+      failed: true,
+      failureReason: "Error",
+      jobPods: [{ name: "everdict-c1-x-pod", phase: "Failed", node: "n2" }],
+      podEvents: [{ reason: "BackOff", message: "Back-off restarting failed container" }],
+      logs: "boom stacktrace line",
+    });
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
+    const err = await backend.dispatch(JOB).catch((e) => e);
+    expect(err).toBeInstanceOf(UpstreamError);
+    const extra = err.extra as { placement?: { unit?: string; node?: string; events?: string[] }; logTail?: string };
+    expect(extra.placement).toMatchObject({ unit: "everdict-c1-x-pod", node: "n2" });
+    expect(extra.placement?.events).toEqual(["BackOff: Back-off restarting failed container"]);
+    expect(extra.logTail).toBe("boom stacktrace line");
+  });
 });
 
 // Regression: a Failed-only job must never read as Succeeded. The old whitespace-split parsing shifted the failed
@@ -590,6 +618,75 @@ describe("K8sBackend.exec — one-shot exec into a live case pod", () => {
     const { api } = mockApi({ labeledJobs: [] });
     const backend = new K8sBackend({ image: "img", api });
     expect(await backend.exec("gone", "ls")).toBeUndefined();
+  });
+});
+
+describe("K8sBackend.inspectCase (case-scoped placement view)", () => {
+  const caseJob = [
+    {
+      selector: "everdict.dev/case=c1",
+      name: "everdict-c1-x",
+      namespace: "everdict-t1",
+      creationTimestamp: "2026-01-02",
+    },
+  ];
+
+  it("no job for the case → undefined (pre-dispatch / GC'd)", async () => {
+    const backend = new K8sBackend({ image: "img", api: mockApi({ labeledJobs: [] }).api });
+    expect(await backend.inspectCase("c1")).toBeUndefined();
+  });
+
+  it("a Pending pod with a FailedScheduling event → phase 'blocked' carrying the scheduler's own verdict", async () => {
+    const { api } = mockApi({
+      labeledJobs: caseJob,
+      jobPods: [{ name: "everdict-c1-x-abc", phase: "Pending" }],
+      podEvents: [
+        {
+          reason: "FailedScheduling",
+          message: "0/3 nodes are available: 3 Insufficient memory.",
+          at: "2026-01-02T00:00:01Z",
+        },
+      ],
+    });
+    const placement = await new K8sBackend({ image: "img", api }).inspectCase("c1");
+    expect(placement?.phase).toBe("blocked");
+    expect(placement?.blockedReason).toContain("Insufficient memory");
+    expect(placement?.namespace).toBe("everdict-t1");
+  });
+
+  it("a Running pod → phase 'running' with the node and the event feed", async () => {
+    const { api } = mockApi({
+      labeledJobs: caseJob,
+      jobPods: [{ name: "everdict-c1-x-abc", phase: "Running", node: "worker-3" }],
+      podEvents: [
+        { reason: "Pulled", message: "Successfully pulled image", at: "2026-01-02T00:00:02Z" },
+        { reason: "Started", message: "Started container agent", at: "2026-01-02T00:00:03Z" },
+      ],
+    });
+    const placement = await new K8sBackend({ image: "img", api }).inspectCase("c1");
+    expect(placement?.phase).toBe("running");
+    expect(placement?.unit).toBe("everdict-c1-x-abc");
+    expect(placement?.node).toBe("worker-3");
+    expect(placement?.events.map((e) => e.type)).toEqual(["Pulled", "Started"]);
+  });
+
+  it("a Failed pod with the OOMKilled reason → phase 'dead' with oom=true", async () => {
+    const { api } = mockApi({
+      labeledJobs: caseJob,
+      jobPods: [{ name: "everdict-c1-x-abc", phase: "Failed", node: "worker-1", reason: "OOMKilled", restarts: 2 }],
+      podEvents: [],
+    });
+    const placement = await new K8sBackend({ image: "img", api }).inspectCase("c1");
+    expect(placement?.phase).toBe("dead");
+    expect(placement?.oom).toBe(true);
+    expect(placement?.restarts).toBe(2);
+  });
+
+  it("a job with no pod yet → phase 'queued'", async () => {
+    const { api } = mockApi({ labeledJobs: caseJob, jobPods: [] });
+    const placement = await new K8sBackend({ image: "img", api }).inspectCase("c1");
+    expect(placement?.phase).toBe("queued");
+    expect(placement?.job).toBe("everdict-c1-x");
   });
 });
 

@@ -209,6 +209,43 @@ describe("K8sTopologyRuntime", () => {
     expect(deploys).toBe(2);
   });
 
+  it("describeTopology rosters each declared service's pod state; serviceLogs tails its pod (topology observability)", async () => {
+    const { kubectl } = fakeKubectl();
+    kubectl.podStatuses = async (selector: string) =>
+      selector.includes("app=agent-server")
+        ? [{ name: "bu-agent-server-abc", phase: "Running", ready: true, restarts: 2, node: "n1" }]
+        : [];
+    kubectl.logs = async (target: string) => `logs of ${target}`;
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    const topo = await rt.describeTopology(SPEC, ZONE("acme"));
+    expect(topo?.deployed).toBe(true);
+    expect(topo?.runtime).toBe("k8s");
+    expect(topo?.namespace).toBe("everdict-acme");
+    expect(topo?.services[0]).toMatchObject({
+      name: "agent-server",
+      status: "Running",
+      ready: true,
+      restarts: 2,
+      node: "n1",
+    });
+    const logs = await rt.serviceLogs(SPEC, "agent-server", ZONE("acme"));
+    expect(logs).toMatch(/^logs of .*agent-server-pod$/);
+  });
+
+  it("describeTopology surfaces an OOM-killed service and reads absent pods honestly", async () => {
+    const { kubectl } = fakeKubectl();
+    kubectl.podStatuses = async (selector: string) =>
+      selector.includes("app=agent-server")
+        ? [{ name: "bu-agent-server-abc", phase: "Pending", ready: false, restarts: 5, reason: "OOMKilled" }]
+        : [];
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    const topo = await rt.describeTopology(SPEC, ZONE("acme"));
+    expect(topo?.services[0]).toMatchObject({ status: "Pending", ready: false, oom: true, restarts: 5 });
+    // A Kubectl without the optional podStatuses read → the topology is simply not inspectable (no throw).
+    const bare = new K8sTopologyRuntime({ kubectl: fakeKubectl().kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    expect(await bare.describeTopology(SPEC, ZONE("acme"))).toBeUndefined();
+  });
+
   it("multi-tenant: separates the warm topology into a different namespace per zone", async () => {
     const { kubectl, calls } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });

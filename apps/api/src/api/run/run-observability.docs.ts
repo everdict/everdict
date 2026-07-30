@@ -1,7 +1,9 @@
 import { CaseRecordingSchema } from "@everdict/contracts";
 import { RunExecResponseSchema } from "@everdict/contracts/wire";
 import { RunLogsResponseSchema } from "@everdict/contracts/wire";
+import { RunPlacementResponseSchema } from "@everdict/contracts/wire";
 import { RunScreenResponseSchema } from "@everdict/contracts/wire";
+import { RunTopologyResponseSchema, ServiceLogsResponseSchema } from "@everdict/contracts/wire";
 import { TerminalTicketResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
@@ -32,6 +34,51 @@ const docs = {
     querystring: logStreamQuery,
     response: {
       200: { description: "Log snapshot", ...toJsonSchema(RunLogsResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  placement: {
+    summary: "Get a run's case placement inside its runtime",
+    description:
+      "Case-scoped placement introspection (runtime debugging): where the run's case job stands INSIDE its " +
+      "runtime cluster — phase queued | blocked | starting | running | dead, the placed node/unit, the " +
+      "scheduler's capacity verdict when blocked (Nomad exhausted dimensions / K8s FailedScheduling), and the " +
+      "orchestrator event feed (image pulls, OOM kills, restarts). Workspace-scoped (other workspace = 404); " +
+      "requires runs:read. found=false means there is nothing to describe (pre-dispatch / GC'd / unsupported backend).",
+    tags: ["run"],
+    params: runIdParams,
+    response: {
+      200: { description: "Placement read", ...toJsonSchema(RunPlacementResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  topology: {
+    summary: "Get a run's service-topology health roster",
+    description:
+      "The live per-service state of the warm topology a service-harness run drives: per service the " +
+      "orchestrator state, readiness, restart churn, OOM verdicts, and the last notable event. Answers 'the case " +
+      "was placed, but is the SERVICE stack actually up'. Workspace-scoped (other workspace = 404); requires " +
+      "runs:read. found=false means the run's harness is not a service topology, the lane has no topology " +
+      "runtime, or the read degraded.",
+    tags: ["run"],
+    params: runIdParams,
+    response: {
+      200: { description: "Topology roster", ...toJsonSchema(RunTopologyResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  topologyServiceLogs: {
+    summary: "Get one topology service's log tail",
+    description:
+      "Current log tail of ONE deployed service of the run's warm topology — the service-level twin of " +
+      "/runs/:id/logs ('the stack is up but the case fails: what is the service saying'). Workspace-scoped " +
+      "(other workspace = 404); requires runs:read. found=false means no live unit for that service.",
+    tags: ["run"],
+    params: toJsonSchema(
+      z.object({ id: z.string().describe("Run id"), service: z.string().describe("Declared service name") }),
+    ),
+    response: {
+      200: { description: "Service log tail", ...toJsonSchema(ServiceLogsResponseSchema) },
       ...errorResponses(401, 403, 404),
     },
   },

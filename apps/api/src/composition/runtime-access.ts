@@ -4,12 +4,15 @@ import type { ScorecardService } from "@everdict/application-control";
 import {
   type Backend,
   type LogStream,
+  isCaseInspectable,
   isObservable,
   isRecoverable,
   isScreenCapturable,
   isShellable,
+  isTopologyInspectable,
 } from "@everdict/backends";
 import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/contracts";
+import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { RuntimeRegistry } from "@everdict/registry";
 
@@ -132,6 +135,54 @@ export function buildRuntimeAccess(deps: {
     return out;
   };
 
+  // Case-scoped placement read (runtime debugging) — same lane resolution as logs; the first backend that can
+  // describe the case's job wins. Answers "is my case blocked on capacity / stuck pulling / OOM-looping" live.
+  const inspectCasePlacementFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+  ): Promise<CasePlacement | undefined> => {
+    let placement: CasePlacement | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isCaseInspectable(backend)) return false;
+      placement = await backend.inspectCase(caseId).catch(() => undefined);
+      return placement !== undefined;
+    });
+    return placement;
+  };
+
+  // Topology health roster (runtime debugging) — resolve the run's runtime lane to a topology-capable backend
+  // and read the harness's warm-topology per-service status. Only ServiceTopologyBackend answers.
+  const inspectTopologyFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    harness: { id: string; version: string },
+  ): Promise<TopologyStatus | undefined> => {
+    let status: TopologyStatus | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isTopologyInspectable(backend)) return false;
+      status = await backend.inspectTopology(harness, tenant).catch(() => undefined);
+      return status !== undefined;
+    });
+    return status;
+  };
+
+  // One deployed topology service's log tail — same lane resolution as the roster read.
+  const topologyServiceLogsFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    harness: { id: string; version: string },
+    service: string,
+  ): Promise<string | undefined> => {
+    let text: string | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isTopologyInspectable(backend)) return false;
+      text = await backend.topologyServiceLogs(harness, service, tenant).catch(() => undefined);
+      return text !== undefined;
+    });
+    return text;
+  };
+
   // Supersede / speculation-loser force-kill of an in-flight case — every runtime of the shard list gets the kill
   // (the case may live on any of them), so this never stops early (each fn returns false). Best-effort.
   const killCase = async (tenant: string, runtimeList: string | undefined, caseId: string): Promise<void> => {
@@ -148,6 +199,9 @@ export function buildRuntimeAccess(deps: {
     openTerminalStreamFn,
     captureBrowserScreenFn,
     execInSandboxFn,
+    inspectCasePlacementFn,
+    inspectTopologyFn,
+    topologyServiceLogsFn,
     killCase,
   };
 }

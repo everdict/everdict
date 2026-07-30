@@ -68,6 +68,9 @@ export interface Docker {
   removeNetwork(name: string): Promise<void>;
   running(names: string[]): Promise<string[]>; // the subset of these exact names currently running (adopt-don't-kill gate)
   networkCreatedAt(name: string): Promise<number | undefined>; // epoch ms (undefined = missing) — stale-heal-lock detection
+  // Current log tail of one container (topology observability). Optional + best-effort: a minimal fake without it
+  // simply reads as "no service logs"; undefined = the container is gone / logs unreadable.
+  logs?(container: string, tailLines?: number): Promise<string | undefined>;
 }
 
 // Default impl — execFile("docker", …). A stopped daemon / lack of permission makes execFile reject → the runtime maps it to UpstreamError.
@@ -121,6 +124,16 @@ export function dockerCli(bin = "docker"): Docker {
           .filter(Boolean),
       );
       return names.filter((n) => up.has(n));
+    },
+    async logs(container, tailLines = 400) {
+      try {
+        // docker logs writes the container's stdout AND stderr — capture both merged (execFile splits them).
+        const { stdout, stderr } = await sh(["logs", "--tail", String(tailLines), container]);
+        const text = stderr.trim() !== "" ? `${stdout}${stdout !== "" ? "\n" : ""}${stderr}` : stdout;
+        return text === "" ? undefined : text;
+      } catch {
+        return undefined;
+      }
     },
     async networkCreatedAt(name) {
       try {

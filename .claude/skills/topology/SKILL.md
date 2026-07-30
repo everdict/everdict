@@ -117,6 +117,16 @@ failures in `service-backend` (message + `extra.topologyHealth`) — a service O
 agent did not finish within the budget". The batch-path twin: backends' `eventsIndicateOom` now also matches a bare
 exit 137, K8s `podFailureReason` maps exit 137 → OOMKilled, and a missing `__EVERDICT_RESULT__` sentinel is explained
 from the alloc task events (OOM → `OOM_KILLED` fatal-infra verdict) instead of the bare "could not find the agent result".
+**Topology observability (structured, live).** `diagnose`'s STRUCTURED siblings on the port:
+`TopologyRuntime.describeTopology?(spec, zone) → TopologyStatus` (wire SSOT `@everdict/contracts/wire` — the live
+per-service roster: state/readiness/restart churn/OOM/last event; Nomad = topology-job alloc TaskStates [404 = an
+honest `deployed:false`], K8s = `Kubectl.podStatuses?` per declared service, Docker = `docker ps` binary
+running/absent) and `TopologyRuntime.serviceLogs?(spec, service, zone)` (one service's log tail; Nomad alloc task
+logs stdout+stderr, K8s `Kubectl.logs?` on the service pod, Docker `Docker.logs?`). `ServiceTopologyBackend`
+exposes them as the `TopologyInspectable` capability (`@everdict/backends` — harness-keyed, tenant→zone), served as
+`GET /runs/:id/topology`(+`/services/:service/logs`) + MCP `get_run_topology`/`get_topology_service_logs` + the web
+run detail's "Service topology" panel. All reads best-effort, never throw — readable WHILE a run drives the stack,
+not only inside a timeout error. See `docs/architecture/live-observability.md` ⑧.
 **Warm-topology idle reclamation (A9).** `teardown()` is now ON the `TopologyRuntime` port and actually called: every
 runtime (Nomad/K8s/Docker — isomorphic) stamps `lastUsedAt` on its warm entries (touched on each ensure) and
 self-schedules an unref'd `sweepIdle(ttl)` interval (lazy-started on first ensure; defaults

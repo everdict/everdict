@@ -183,6 +183,28 @@ describe("runSuite failure classification", () => {
     expect(sc.results[0]?.failure).toMatchObject({ class: "infra", code: "UPSTREAM_ERROR", retryable: true });
     expect(String(sc.results[0]?.scores[0]?.detail)).toContain("[infra]");
   });
+
+  it("failure evidence (log tail) rides the synthesized trace as a log event, so the sealed trajectory keeps it", async () => {
+    // Regression: the failed case's trace used to carry ONE error line — the backend-captured log tail (already
+    // gone from the cluster) must be preserved as evidence on the result itself.
+    const dispatch = async (): Promise<CaseResult> => {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { placement: { unit: "a1", node: "n1", events: ["Terminated: Exit Code: 1"] }, logTail: "panic: boom" },
+        "alloc failed",
+      );
+    };
+    const sc = await runSuite(suite, "1", dispatch, {});
+    const result = sc.results[0];
+    expect(result?.failure).toMatchObject({
+      placement: { unit: "a1", node: "n1", events: ["Terminated: Exit Code: 1"] },
+      logTail: "panic: boom",
+    });
+    expect(result?.trace).toEqual([
+      { t: 0, kind: "log", stream: "stderr", text: "panic: boom" },
+      { t: 1, kind: "error", message: "alloc failed" },
+    ]);
+  });
 });
 
 // N-trial fan-out — run each case multiple times so the scorecard can compute pass@k / flakiness.

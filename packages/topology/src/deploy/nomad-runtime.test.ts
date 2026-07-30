@@ -678,6 +678,98 @@ describe("NomadTopologyRuntime.diagnose", () => {
   });
 });
 
+describe("NomadTopologyRuntime.describeTopology / serviceLogs (topology observability)", () => {
+  it("rosters every task of the topology job with state/restarts/OOM verdict and the placed node", async () => {
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path.includes("/allocations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              {
+                ClientStatus: "running",
+                DesiredStatus: "run",
+                CreateIndex: 5,
+                NodeName: "worker-1",
+                TaskStates: {
+                  "agent-server": {
+                    State: "running",
+                    Restarts: 0,
+                    Events: [{ Type: "Started", DisplayMessage: "Task started by client" }],
+                  },
+                  "aegra-postgres": {
+                    State: "pending",
+                    Restarts: 4,
+                    Events: [{ Type: "Terminated", DisplayMessage: "Exit Code: 137" }],
+                  },
+                },
+              },
+            ]),
+          };
+        return { status: 404, text: "" };
+      },
+    };
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http });
+    const topo = await rt.describeTopology(SPEC);
+    expect(topo?.deployed).toBe(true);
+    expect(topo?.runtime).toBe("nomad");
+    expect(topo?.services.find((s) => s.name === "agent-server")).toMatchObject({
+      status: "running",
+      ready: true,
+      node: "worker-1",
+    });
+    expect(topo?.services.find((s) => s.name === "aegra-postgres")).toMatchObject({
+      status: "pending",
+      ready: false,
+      restarts: 4,
+      oom: true,
+      lastEvent: "Exit Code: 137",
+    });
+  });
+
+  it("a 404 job reads as an honest deployed:false; another API failure reads as undefined", async () => {
+    const gone = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http: {
+        async request() {
+          return { status: 404, text: "job not found" };
+        },
+      },
+    });
+    expect(await gone.describeTopology(SPEC)).toMatchObject({ deployed: false, services: [] });
+    const erroring = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http: {
+        async request() {
+          return { status: 500, text: "" };
+        },
+      },
+    });
+    expect(await erroring.describeTopology(SPEC)).toBeUndefined();
+  });
+
+  it("serviceLogs tails the task's stdout and appends its stderr when present", async () => {
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path.includes("/allocations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { ID: "a1", DesiredStatus: "run", CreateIndex: 1, TaskStates: { "agent-server": { State: "running" } } },
+            ]),
+          };
+        if (path.includes("/logs/a1") && path.includes("type=stdout")) return { status: 200, text: "srv out" };
+        if (path.includes("/logs/a1") && path.includes("type=stderr")) return { status: 200, text: "srv err" };
+        return { status: 404, text: "" };
+      },
+    };
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http });
+    expect(await rt.serviceLogs(SPEC, "agent-server")).toBe("srv out\n--- stderr ---\nsrv err");
+    // A task no alloc carries → undefined (nothing to read), never a throw.
+    expect(await rt.serviceLogs(SPEC, "no-such-service")).toBeUndefined();
+  });
+});
+
 // B5 — store probe demotion: over the CLI, "store not ready" and a broken exec path (no nomad binary / no ACL /
 // no probe binary in the image) reject identically, and the old hard fail bricked healthy deploys.
 describe("NomadTopologyRuntime — store probe is best-effort", () => {

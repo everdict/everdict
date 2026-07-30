@@ -4,6 +4,8 @@ import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { MentionInChatButton } from '@/widgets/infra-panel'
 import { LiveLogs } from '@/widgets/live-logs'
+import { RunPlacement } from '@/widgets/run-placement'
+import { RunTopology } from '@/widgets/run-topology'
 import { ReplayPlayer } from '@/widgets/replay-player'
 import { LiveScreen, SandboxTerminal } from '@/widgets/sandbox-terminal'
 import { TraceTimeline } from '@/widgets/trace-timeline'
@@ -299,6 +301,12 @@ export default async function RunDetailPage({
               </a>
             </Callout>
           )}
+          {/* 케이스 배치(런타임 디버깅) — 클러스터가 케이스를 어디까지 받아들였는지(blocked 용량 판정·노드·
+              오케스트레이터 이벤트 피드)를 폴링; 배치 정보가 없는 run이면 위젯이 self-null (빈 섹션 없음) */}
+          <RunPlacement runId={run.id} initialStatus={run.status} />
+          {/* 토폴로지 헬스(서비스 하네스) — 웜 토폴로지의 서비스별 상태(재시작·OOM·최근 이벤트)+행별 로그 펼침;
+              서비스 하네스가 아니면 위젯이 self-null */}
+          <RunTopology runId={run.id} initialStatus={run.status} />
           {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시 프레임으로
               2초마다 폴링; 라이브 화면이 없는 run이면 위젯이 self-null (빈 섹션 없음) */}
           <LiveScreen runId={run.id} initialStatus={run.status} />

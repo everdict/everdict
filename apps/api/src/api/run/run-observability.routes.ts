@@ -35,6 +35,76 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
     },
   );
 
+  // Case-scoped placement (runtime debugging): where the run's case job stands INSIDE its runtime cluster —
+  // queued / blocked (with the scheduler's capacity verdict) / starting / running / dead, the node, and the
+  // orchestrator event feed. found=false = nothing to describe (pre-dispatch / GC'd / no backend support).
+  app.get<{ Params: { id: string } }>(
+    "/runs/:id/placement",
+    { schema: runObservabilityDocs.placement },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        const out = await deps.service.placement(req.params.id);
+        if (!out || out.record.tenant !== principal.workspace)
+          return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+        return reply.send({
+          status: out.record.status,
+          found: out.placement !== undefined,
+          placement: out.placement ?? null,
+        });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Topology health roster (runtime debugging, service harnesses): the live per-service state of the warm
+  // topology the run drives — restart churn, OOM kills, last notable event per service. found=false = not a
+  // service harness / no topology runtime behind the lane / the read degraded.
+  app.get<{ Params: { id: string } }>(
+    "/runs/:id/topology",
+    { schema: runObservabilityDocs.topology },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        const out = await deps.service.topology(req.params.id);
+        if (!out || out.record.tenant !== principal.workspace)
+          return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+        return reply.send({
+          status: out.record.status,
+          found: out.topology !== undefined,
+          topology: out.topology ?? null,
+        });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // One deployed topology service's current log tail — the service-level twin of /runs/:id/logs ("the stack is
+  // up but the case fails: what is the SERVICE saying"). found=false = no live unit for that service.
+  app.get<{ Params: { id: string; service: string } }>(
+    "/runs/:id/topology/services/:service/logs",
+    { schema: runObservabilityDocs.topologyServiceLogs },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        const out = await deps.service.topologyServiceLogs(req.params.id, req.params.service);
+        if (!out || out.record.tenant !== principal.workspace)
+          return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+        return reply.send({ found: out.text !== undefined, text: out.text ?? "" });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // One-shot exec into a run's live sandbox (observability ④ — web terminal). Runs `sh -c command` in the case
   // container. The sandbox is untrusted+isolated, so WHO may exec is tightened beyond runs:read: the run's
   // creator or a workspace admin only. found=false = no live container to exec into.

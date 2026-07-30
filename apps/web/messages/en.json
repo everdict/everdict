@@ -3746,6 +3746,30 @@
     "label": "Live screen",
     "waiting": "Waiting for the first frame…"
   },
+  "runTopology": {
+    "title": "Service topology",
+    "notDeployed": "No warm topology is standing on the cluster right now.",
+    "restarts": "restarts {count}",
+    "showLogs": "logs",
+    "hideLogs": "hide",
+    "noLogs": "No logs available for this service."
+  },
+  "runPlacement": {
+    "title": "Runtime placement",
+    "phase": {
+      "queued": "Waiting for the scheduler to place it",
+      "blocked": "The cluster cannot place it right now",
+      "starting": "Placed — starting up",
+      "running": "Running on the cluster",
+      "dead": "The unit has ended"
+    },
+    "blocked": "Placement blocked — the scheduler's verdict:",
+    "node": "Node",
+    "unit": "Unit",
+    "job": "Job",
+    "namespace": "Namespace",
+    "restarts": "Restarts"
+  },
   "replay": {
     "title": "Replay",
     "play": "Play",

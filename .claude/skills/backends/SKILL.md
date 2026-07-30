@@ -26,6 +26,19 @@ a runtime `backend.logs?.()` returning `undefined` on backends that never had it
 - `Shellable` (`execStream`) — interactive PTY-over-WS. **Nomad only** (`nomad alloc exec -i`); K8s has no stream exec.
 - `ScreenCapturable` (`captureScreen(runId)`) — topology backends' per-RUN browser frame (keyed by runId, not caseId).
 - `Probeable` (`probe`) — connection test without a job.
+- `CaseInspectable` (`inspectCase(caseId)`) — CASE-scoped placement introspection (runtime debugging): the case's
+  newest orchestrator job normalized to `CasePlacement` (wire SSOT, `@everdict/contracts/wire`) — `phase queued |
+  blocked | starting | running | dead`, the placed unit/node, the scheduler's capacity verdict when blocked (Nomad
+  blocked-evaluation exhausted dimensions / K8s FailedScheduling), OOM verdict, restarts, and the orchestrator event
+  feed. The case-scoped sibling of `Inspectable` — answers "is MY case blocked/stuck/OOM-looping" while it is alive
+  instead of only inside a thrown error. Nomad + K8s. undefined = no job (pre-dispatch/GC'd); best-effort, never
+  throws. Served as `GET /runs/:id/placement` + MCP `get_run_placement`.
+- `TopologyInspectable` (`inspectTopology(harness, tenant)` + `topologyServiceLogs(harness, service, tenant)`) —
+  service-topology health (runtime debugging): the warm topology's per-service roster (`TopologyStatus` wire SSOT:
+  state/readiness/restart churn/OOM/last event) + one service's log tail. Keyed by HARNESS (the topology is a warm
+  per-(harness,version,zone) deployment, not a per-case unit); the tenant resolves the same trust zone dispatch
+  uses. Only `ServiceTopologyBackend` implements it (backed by `TopologyRuntime.describeTopology`/`serviceLogs` —
+  Nomad/K8s/Docker). Served as `GET /runs/:id/topology`(+`/services/:service/logs`) + MCP twins.
 - `Inspectable` (`inspect`) — read-only live cluster view for the runtime detail screen: composition (nodes/DCs, plus
   each node's OS/arch/kernel/container-runtime/agent-version/IP/disk, best-effort), concurrent capacity, the live
   workload placed on it — everdict units AND external (`role:"other"`) services co-resident on the nodes, with
@@ -46,8 +59,17 @@ a runtime `backend.logs?.()` returning `undefined` on backends that never had it
   `RuntimeControlResult` in `@everdict/contracts/wire`. See `docs/architecture/runtime-inspection.md`.
 
 Guards live next to the interfaces: `isRecoverable` / `isObservable` / `isShellable` / `isScreenCapturable` /
-`isProbeable` / `isInspectable` / `isReclaimable`. A consumer does `if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
+`isProbeable` / `isInspectable` / `isCaseInspectable` / `isTopologyInspectable` / `isReclaimable`. A consumer does
+`if (!isObservable(backend)) return; backend.logs(caseId)` — no `?.`, no `undefined`
 overload for "not implemented". If your new backend can't do a capability, just don't implement its interface.
+
+**Failure evidence rides the throw.** The orchestrator job (and its raw log) is deleted/GC'd right after
+settlement, so a dispatch-failure throw is the LAST moment the evidence is reachable: Nomad (`waitForAlloc`
+failure paths, `parseResultOrExplain`) and K8s (`waitForJob`) attach `extra.placement {unit, node, events[]}` +
+`extra.logTail` (stderr-preferred, sentinel-stripped, `FAILURE_LOG_TAIL_CAP`=16 KB tail) to the thrown
+`UpstreamError`; `classifyFailure` (`@everdict/domain`) lifts both onto `CaseFailure.placement`/`logTail`, and
+`runSuite`'s synthesized failed result carries the tail as a `log` trace event (sealed into the trajectory).
+A new backend's failure paths should do the same — capture before throwing, best-effort.
 
 `Recoverable.adopt` returns a three-valued `AdoptOutcome` (`adopted` | `absent` | `unknown`), NOT `CaseResult |
 undefined` — `absent` (listing succeeded, no job → safe to re-dispatch) must stay distinct from `unknown` (an

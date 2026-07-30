@@ -15,13 +15,20 @@ import {
   judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
-import type { InspectNode, InspectRuntimeResult, InspectStore, InspectWorkload } from "@everdict/contracts/wire";
+import type {
+  CasePlacement,
+  InspectNode,
+  InspectRuntimeResult,
+  InspectStore,
+  InspectWorkload,
+} from "@everdict/contracts/wire";
 import { assertHardenedIsolation, dockerAuthConfigJson, pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
 import {
   type AdoptOutcome,
   type Backend,
   type BackendCapacity,
+  type CaseInspectable,
   type DispatchOptions,
   type Inspectable,
   type LogStream,
@@ -34,7 +41,14 @@ import {
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
 import { abortableDelay } from "./abortable-delay.js";
-import { NODE_DETAIL_CAP, SHARED_STORE_PREFIX, WORKLOAD_CAP, classifyWorkloadRole } from "./inspect-common.js";
+import {
+  FAILURE_EVENT_CAP,
+  FAILURE_LOG_TAIL_CAP,
+  NODE_DETAIL_CAP,
+  SHARED_STORE_PREFIX,
+  WORKLOAD_CAP,
+  classifyWorkloadRole,
+} from "./inspect-common.js";
 
 // --- kubectl abstraction (mockable in tests; the K8s version of NomadHttp) ---
 export interface K8sApi {
@@ -53,6 +67,15 @@ export interface K8sApi {
   ): Promise<Array<{ name: string; namespace: string; creationTimestamp?: string }> | undefined>;
   // Termination reason of the job's (failed) pod — e.g. "OOMKilled". Best-effort: undefined when unavailable.
   podFailureReason(name: string, ns: string): Promise<string | undefined>;
+  // The job's pods with their live placement status (phase/node/restarts + the waiting|terminated reason) —
+  // the case-scoped placement read (CaseInspectable). undefined when the query itself fails (best-effort).
+  podsForJob(
+    name: string,
+    ns: string,
+  ): Promise<Array<{ name: string; phase?: string; node?: string; reason?: string; restarts?: number }> | undefined>;
+  // Namespace events attached to one object (a pod) — FailedScheduling / image-pull failures / kills, the WHY
+  // feed behind a stuck placement. undefined when the query itself fails (best-effort).
+  objectEvents(name: string, ns: string): Promise<Array<{ reason?: string; message: string; at?: string }> | undefined>;
   countActiveJobs(): Promise<number | undefined>; // capacity probe (in-flight app=everdict jobs across all namespaces)
   serverVersion(): Promise<string>; // connection test — API server /version (gitVersion). Throws on reachability/auth failure.
   // --- Read-only inspection (runtime detail screen). Each returns undefined when the query itself fails (best-effort). ---
@@ -215,6 +238,75 @@ export function kubectlApi(
       if (tokens.includes("OOMKilled") || tokens.includes("137")) return "OOMKilled";
       const reason = tokens.find((t) => !/^\d+$/.test(t)); // named reasons win over bare non-137 exit codes
       return reason || undefined;
+    },
+    async podsForJob(name, ns) {
+      const res = await run(bin, [...ctx, "-n", ns, "get", "pods", "-l", `job-name=${name}`, "-o", "json"]);
+      if (res.code !== 0) return undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          metadata?: { name?: string };
+          spec?: { nodeName?: string };
+          status?: {
+            phase?: string;
+            containerStatuses?: Array<{
+              restartCount?: number;
+              state?: { waiting?: { reason?: string }; terminated?: { reason?: string; exitCode?: number } };
+              lastState?: { terminated?: { reason?: string; exitCode?: number } };
+            }>;
+          };
+        }>;
+        return items
+          .filter((p) => p.metadata?.name)
+          .map((p) => {
+            const cs = p.status?.containerStatuses?.[0];
+            const terminated = cs?.state?.terminated ?? cs?.lastState?.terminated;
+            // A bare exit 137 is the OOM killer's signature — some nodes report it without the OOMKilled reason.
+            const reason =
+              terminated?.reason ??
+              (terminated?.exitCode === 137 ? "OOMKilled" : undefined) ??
+              cs?.state?.waiting?.reason;
+            return {
+              name: p.metadata?.name as string,
+              ...(p.status?.phase ? { phase: p.status.phase } : {}),
+              ...(p.spec?.nodeName ? { node: p.spec.nodeName } : {}),
+              ...(reason ? { reason } : {}),
+              ...(cs?.restartCount !== undefined ? { restarts: cs.restartCount } : {}),
+            };
+          });
+      } catch {
+        return undefined;
+      }
+    },
+    async objectEvents(name, ns) {
+      const res = await run(bin, [
+        ...ctx,
+        "-n",
+        ns,
+        "get",
+        "events",
+        "--field-selector",
+        `involvedObject.name=${name}`,
+        "-o",
+        "json",
+      ]);
+      if (res.code !== 0) return undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          reason?: string;
+          message?: string;
+          lastTimestamp?: string | null;
+          eventTime?: string | null;
+        }>;
+        return items
+          .filter((e) => (e.message ?? "").trim() !== "")
+          .map((e) => ({
+            ...(e.reason ? { reason: e.reason } : {}),
+            message: (e.message ?? "").trim(),
+            ...(e.lastTimestamp || e.eventTime ? { at: (e.lastTimestamp || e.eventTime) as string } : {}),
+          }));
+      } catch {
+        return undefined;
+      }
     },
     async deleteJob(name, ns) {
       await run(bin, [
@@ -797,7 +889,9 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
 
 // Launch the job-runner as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
 // Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
-export class K8sBackend implements Backend, Recoverable, Observable, Probeable, Inspectable, Reclaimable {
+export class K8sBackend
+  implements Backend, Recoverable, Observable, Probeable, Inspectable, CaseInspectable, Reclaimable
+{
   // A long-lived api from an injected api (test) or non-kubeconfig auth (context/server/token).
   // With kubeconfig auth, build a fresh api from a temp kubeconfig per dispatch so the credential isn't left on disk for long (withApi).
   private readonly staticApi?: K8sApi;
@@ -902,6 +996,53 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
       });
     } catch {
       return undefined;
+    }
+  }
+
+  // Case-scoped placement introspection (CaseInspectable): where the case's newest Job stands inside the cluster.
+  // An unschedulable pod (Pending + a FailedScheduling event) reads as phase "blocked" with the scheduler's own
+  // verdict ("0/3 nodes are available: insufficient memory") — the capacity answer that previously collapsed into
+  // a bare dispatch timeout. undefined = no job for the case. Best-effort, never throws (observability read).
+  async inspectCase(caseId: string): Promise<CasePlacement | undefined> {
+    try {
+      return await this.withApi(async (api): Promise<CasePlacement | undefined> => {
+        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+        const newest = (jobs ?? []).sort((a, b) =>
+          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
+        )[0];
+        if (!newest) return undefined;
+        const base = { job: newest.name, namespace: newest.namespace };
+        const pods = (await api.podsForJob(newest.name, newest.namespace)) ?? [];
+        // backoffLimit 0 ⇒ normally one pod; prefer a live one over a leftover terminal sibling.
+        const pod = pods.find((p) => p.phase === "Running" || p.phase === "Pending") ?? pods.at(-1);
+        if (!pod) return { ...base, phase: "queued", events: [] };
+        const events = (await api.objectEvents(pod.name, newest.namespace)) ?? [];
+        const scheduling = events.filter((e) => e.reason === "FailedScheduling").at(-1);
+        const phase =
+          pod.phase === "Running"
+            ? ("running" as const)
+            : pod.phase === "Succeeded" || pod.phase === "Failed"
+              ? ("dead" as const)
+              : scheduling
+                ? ("blocked" as const)
+                : ("starting" as const);
+        return {
+          ...base,
+          phase,
+          unit: pod.name,
+          ...(pod.node ? { node: pod.node } : {}),
+          ...(phase === "blocked" && scheduling ? { blockedReason: scheduling.message } : {}),
+          ...(pod.restarts !== undefined && pod.restarts > 0 ? { restarts: pod.restarts } : {}),
+          ...(pod.reason === "OOMKilled" ? { oom: true } : {}),
+          events: events.slice(-20).map((e) => ({
+            ...(e.reason ? { type: e.reason } : {}),
+            message: e.message,
+            ...(e.at ? { at: e.at } : {}),
+          })),
+        };
+      });
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
     }
   }
 
@@ -1266,16 +1407,19 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
       if (failed > 0) {
         // OOM-killed reads as fatal infra (raise the harness resources), never as an agent failure.
         const reason = await api.podFailureReason(name, ns).catch(() => undefined);
+        // Failure evidence, captured NOW — the Job (and its pod log) is deleted in dispatch's finally right
+        // after this throw. classifyFailure lifts extra.placement/logTail onto the CaseFailure.
+        const evidence = await this.failureEvidence(api, name, ns, reason);
         if (reason === "OOMKilled")
           throw new UpstreamError(
             "UPSTREAM_ERROR",
-            { name, ns, signal: OOM_KILLED },
+            { name, ns, signal: OOM_KILLED, ...evidence },
             "task OOM-killed — raise the harness's resources.memoryMb (infra, not an agent failure)",
           );
         // Carry the pod's termination reason so the CaseResult explains itself (e.g. Error, ContainerCannotRun).
         throw new UpstreamError(
           "UPSTREAM_ERROR",
-          { name, ns, ...(reason ? { reason } : {}) },
+          { name, ns, ...(reason ? { reason } : {}), ...evidence },
           `K8s Job failed${reason ? ` — pod: ${reason}` : ""}`,
         );
       }
@@ -1283,10 +1427,44 @@ export class K8sBackend implements Backend, Recoverable, Observable, Probeable, 
     }
     // A job that never progressed usually has a waiting pod (ImagePullBackOff, …) — name the cause, best-effort.
     const stuck = await api.podFailureReason(name, ns).catch(() => undefined);
+    const evidence = await this.failureEvidence(api, name, ns, stuck);
     throw new UpstreamError(
       "UPSTREAM_ERROR",
-      { name, ns, ...(stuck ? { reason: stuck } : {}) },
+      { name, ns, ...(stuck ? { reason: stuck } : {}), ...evidence },
       `timed out waiting for K8s Job completion${stuck ? ` — pod: ${stuck}` : ""}`,
     );
+  }
+
+  // Failure evidence at the last reachable moment (dispatch's finally deletes the Job right after the throw):
+  // the pod's identity/node + its scheduling/kubelet events + the pod log tail (sentinel-stripped, tail-capped).
+  // Best-effort and TOTAL — an unreadable sub-read simply contributes nothing.
+  private async failureEvidence(
+    api: K8sApi,
+    name: string,
+    ns: string,
+    reason: string | undefined,
+  ): Promise<{ placement?: { unit?: string; node?: string; events?: string[] }; logTail?: string }> {
+    const pods = await api.podsForJob(name, ns).catch(() => undefined);
+    const pod = pods?.at(-1);
+    const eventLines = pod
+      ? ((await api.objectEvents(pod.name, ns).catch(() => undefined)) ?? [])
+          .map((e) => `${e.reason ? `${e.reason}: ` : ""}${e.message}`.trim())
+          .filter((line) => line !== "")
+          .slice(-FAILURE_EVENT_CAP)
+      : [];
+    const events = eventLines.length > 0 ? eventLines : reason ? [reason] : [];
+    const placement = {
+      ...(pod?.name ? { unit: pod.name } : {}),
+      ...(pod?.node ? { node: pod.node } : {}),
+      ...(events.length > 0 ? { events } : {}),
+    };
+    const logText = await api
+      .podLogs(name, ns)
+      .then((t) => stripSentinel(t).trim())
+      .catch(() => "");
+    return {
+      ...(Object.keys(placement).length > 0 ? { placement } : {}),
+      ...(logText !== "" ? { logTail: logText.slice(-FAILURE_LOG_TAIL_CAP) } : {}),
+    };
   }
 }

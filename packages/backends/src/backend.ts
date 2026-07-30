@@ -1,7 +1,8 @@
 import { type CaseJob, type CaseResult, InternalError } from "@everdict/contracts";
-// Type-only reuse of the inspection wire schema as the SSOT for Inspectable.inspect's return (no drift, no runtime
-// edge). backends → contracts is the allowed direction; /wire is the same package's DTO surface.
-import type { InspectRuntimeResult } from "@everdict/contracts/wire";
+// Type-only reuse of the inspection wire schemas as the SSOT for Inspectable.inspect's / CaseInspectable.
+// inspectCase's returns (no drift, no runtime edge). backends → contracts is the allowed direction; /wire is the
+// same package's DTO surface.
+import type { CasePlacement, InspectRuntimeResult, TopologyStatus } from "@everdict/contracts/wire";
 
 // Which job output stream a log read targets (Observable.logs). Harnesses often log progress to stderr
 // while stdout carries only the final result block — the live tail needs both to be reachable.
@@ -141,6 +142,29 @@ export interface Inspectable {
   inspect(): Promise<InspectRuntimeResult>;
 }
 
+// CaseInspectable — case-scoped placement introspection: where does THIS case's orchestrator job stand inside the
+// cluster (placed or not, on which node, and why not). The case-scoped sibling of the runtime-scoped Inspectable —
+// it answers "is my case blocked on capacity / stuck pulling an image / OOM-looping" while the case is still alive,
+// instead of that verdict surfacing only inside a thrown error after the dispatch has already failed. undefined =
+// no orchestrator job for the case (pre-dispatch / GC'd). Best-effort and MUST NOT throw (observability read).
+export interface CaseInspectable {
+  inspectCase(caseId: string): Promise<CasePlacement | undefined>;
+}
+
+// TopologyInspectable — service-topology health introspection: the live roster of a service harness's deployed
+// stack (per-service state/restarts/OOM) + one service's log tail. Keyed by the HARNESS (the topology is a warm
+// per-(harness,version,zone) deployment, not a per-case unit) with the tenant resolving the trust zone. Only
+// ServiceTopologyBackend implements it; the topology runtime behind it (Nomad/K8s/Docker) does the actual read.
+// undefined = not a service harness / no live topology / the runtime can't tell. Best-effort, MUST NOT throw.
+export interface TopologyInspectable {
+  inspectTopology(harness: { id: string; version: string }, tenant?: string): Promise<TopologyStatus | undefined>;
+  topologyServiceLogs(
+    harness: { id: string; version: string },
+    service: string,
+    tenant?: string,
+  ): Promise<string | undefined>;
+}
+
 // Reclaimable — DESTRUCTIVE live-cluster control paired with Inspectable, for the runtime detail screen's admin
 // actions (gated runtimes:control at the control plane). Nomad/K8s implement it; local does not. The reclaim
 // methods are best-effort and idempotent (acting on an already-gone target is a no-op, not an error) — the caller
@@ -191,6 +215,15 @@ export function isProbeable(backend: Backend): backend is Backend & Probeable {
 
 export function isInspectable(backend: Backend): backend is Backend & Inspectable {
   return typeof (backend as Partial<Inspectable>).inspect === "function";
+}
+
+export function isCaseInspectable(backend: Backend): backend is Backend & CaseInspectable {
+  return typeof (backend as Partial<CaseInspectable>).inspectCase === "function";
+}
+
+export function isTopologyInspectable(backend: Backend): backend is Backend & TopologyInspectable {
+  const b = backend as Partial<TopologyInspectable>;
+  return typeof b.inspectTopology === "function" && typeof b.topologyServiceLogs === "function";
 }
 
 export function isReclaimable(backend: Backend): backend is Backend & Reclaimable {

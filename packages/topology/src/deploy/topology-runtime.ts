@@ -1,4 +1,5 @@
 import type { EnvSnapshot, ServiceHarnessSpec, StoreReadQuery, TrustZone } from "@everdict/contracts";
+import type { TopologyStatus } from "@everdict/contracts/wire";
 import type { StoreSeedPlan } from "./store-seed.js";
 
 // warm topology handle: service name → base URL (front-door etc.).
@@ -49,6 +50,14 @@ export interface TopologyRuntime {
   // while a service was OOM-looping (exit 137) the whole time; nothing surfaced the restarts anywhere. Optional +
   // best-effort: undefined = nothing notable / not inspectable.
   diagnose?(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<string | undefined>;
+  // The STRUCTURED sibling of diagnose — the live per-service health roster of the warm topology (state, restart
+  // churn, OOM kills, last notable event), readable WHILE a run drives it instead of only inside a timeout error
+  // message. undefined = no live topology / the runtime can't tell. Optional + best-effort, never throws.
+  describeTopology?(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyStatus | undefined>;
+  // One deployed service's current log tail (the service-level twin of the case job's Backend.logs) — the read
+  // that answers "the stack is up but the case fails: what is the SERVICE saying". undefined = no live unit for
+  // that service. Optional + best-effort, never throws.
+  serviceLogs?(spec: ServiceHarnessSpec, service: string, zone?: TrustZone): Promise<string | undefined>;
   // Reclaim warm topologies idle past idleMs (best-effort per entry; never throws). The runtimes self-schedule this
   // on an unref'd interval, so superseded versions' warm jobs stop exhausting the cluster even with no new dispatch.
   // Returns the reclaimed warm keys (observability/tests).

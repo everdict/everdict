@@ -9,6 +9,7 @@ import {
   type TrustZone,
   UpstreamError,
 } from "@everdict/contracts";
+import type { TopologyServiceStatus, TopologyStatus } from "@everdict/contracts/wire";
 import {
   type ConsulClient,
   buildSharedStoreIntention,
@@ -674,6 +675,97 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       }
     }
     return notes.length > 0 ? [...new Set(notes)].join("; ") : undefined;
+  }
+
+  // The structured sibling of diagnose (topology observability): the live per-service roster of the warm topology —
+  // task state, restart churn, OOM verdicts, and the last notable event — readable WHILE a run drives it. Each task
+  // of the topology job (services AND provisioned dependency stores) is one roster row; the newest desired-run
+  // alloc's view of a task wins. 404 = no topology deployed (an honest "deployed:false", not an error).
+  async describeTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyStatus | undefined> {
+    try {
+      const ns = zone?.namespace ?? this.opts.namespace;
+      const res = await this.http.request(
+        "GET",
+        `/v1/job/${topologyJobId(spec, zone?.id)}/allocations${this.nsq(ns, "?")}`,
+      );
+      if (res.status === 404)
+        return { deployed: false, runtime: "nomad", ...(ns ? { namespace: ns } : {}), services: [] };
+      if (res.status >= 300) return undefined;
+      const allocs = JSON.parse(res.text) as Array<{
+        ClientStatus?: string;
+        CreateIndex?: number;
+        DesiredStatus?: string;
+        NodeName?: string;
+        TaskStates?: Record<string, { State?: string; Restarts?: number; Events?: TaskEventLike[] }>;
+      }>;
+      const services: TopologyServiceStatus[] = [];
+      const seen = new Set<string>();
+      const sorted = [...allocs].sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0));
+      // Desired-run allocs first so a superseded alloc's dead tasks don't shadow the live replacement.
+      for (const a of [...sorted.filter((x) => x.DesiredStatus === "run"), ...sorted]) {
+        for (const [task, st] of Object.entries(a.TaskStates ?? {})) {
+          if (seen.has(task)) continue;
+          seen.add(task);
+          const events = st.Events ?? [];
+          const oom = events.some(eventLooksOom);
+          const last = [...events].reverse().find((e) => (e.DisplayMessage ?? "").trim().length > 0);
+          services.push({
+            name: task,
+            status: st.State ?? a.ClientStatus ?? "unknown",
+            ready: st.State === "running",
+            ...(st.Restarts !== undefined && st.Restarts > 0 ? { restarts: st.Restarts } : {}),
+            ...(oom ? { oom: true } : {}),
+            ...(a.NodeName ? { node: a.NodeName } : {}),
+            ...(last?.DisplayMessage ? { lastEvent: last.DisplayMessage.slice(0, 200) } : {}),
+          });
+        }
+      }
+      return {
+        deployed: services.some((s) => s.ready === true),
+        runtime: "nomad",
+        ...(ns ? { namespace: ns } : {}),
+        services,
+      };
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
+  }
+
+  // One deployed service's current log tail (topology observability) — the task's stdout, with its stderr appended
+  // when non-empty (services commonly log to either). undefined = no live alloc carrying that task.
+  async serviceLogs(spec: ServiceHarnessSpec, service: string, zone?: TrustZone): Promise<string | undefined> {
+    try {
+      const ns = zone?.namespace ?? this.opts.namespace;
+      const res = await this.http.request(
+        "GET",
+        `/v1/job/${topologyJobId(spec, zone?.id)}/allocations${this.nsq(ns, "?")}`,
+      );
+      if (res.status >= 300) return undefined;
+      const allocs = JSON.parse(res.text) as Array<{
+        ID?: string;
+        CreateIndex?: number;
+        DesiredStatus?: string;
+        TaskStates?: Record<string, unknown>;
+      }>;
+      const sorted = [...allocs].sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0));
+      const alloc =
+        sorted.find((a) => a.DesiredStatus === "run" && a.TaskStates?.[service] !== undefined) ??
+        sorted.find((a) => a.TaskStates?.[service] !== undefined);
+      if (!alloc?.ID) return undefined;
+      const read = async (stream: "stdout" | "stderr"): Promise<string> => {
+        const logs = await this.http.request(
+          "GET",
+          `/v1/client/fs/logs/${alloc.ID}?task=${encodeURIComponent(service)}&type=${stream}&plain=true${this.nsq(ns, "&")}`,
+        );
+        return logs.status < 300 ? logs.text : "";
+      };
+      const stdout = await read("stdout");
+      const stderr = await read("stderr");
+      const text = stderr.trim() !== "" ? `${stdout}${stdout !== "" ? "\n" : ""}--- stderr ---\n${stderr}` : stdout;
+      return text === "" ? undefined : text;
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
   }
 
   // Tear down the warm topology (for teardown after a live run). Given a zone, tear down only that zone's warm entry.

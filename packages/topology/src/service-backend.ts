@@ -4,6 +4,7 @@ import {
   type BackendCapacity,
   type DispatchOptions,
   type ScreenCapturable,
+  type TopologyInspectable,
   dispatchAborted,
 } from "@everdict/backends";
 import {
@@ -21,6 +22,7 @@ import {
   type TraceEvidence,
   type TrustZone,
 } from "@everdict/contracts";
+import type { TopologyStatus } from "@everdict/contracts/wire";
 import { type TrustZonePolicy, assertHardenedIsolation } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
@@ -109,8 +111,40 @@ export interface ServiceTopologyBackendOptions {
 
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
 // ensure warm topology → per-case browser → drive (front-door, per-run wiring) → collectTrace → observe → grade.
-export class ServiceTopologyBackend implements Backend, ScreenCapturable {
+export class ServiceTopologyBackend implements Backend, ScreenCapturable, TopologyInspectable {
   constructor(private readonly opts: ServiceTopologyBackendOptions) {}
+
+  // Topology observability (TopologyInspectable): the live per-service health roster of this harness's warm
+  // topology, via the runtime's structured read. Keyed by harness (the topology is a warm per-(harness,version,
+  // zone) deployment); the tenant resolves the same trust zone dispatch would use, so the read targets the
+  // same cluster job/namespace. undefined = not a service harness / runtime can't tell. Best-effort.
+  async inspectTopology(
+    harness: { id: string; version: string },
+    tenant?: string,
+  ): Promise<TopologyStatus | undefined> {
+    try {
+      const spec = await this.opts.specFor(tenant ?? "default", harness.id, harness.version);
+      const zone = this.opts.trustZones?.resolve(tenant ?? "default");
+      return await this.opts.runtime.describeTopology?.(spec, zone);
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
+  }
+
+  // One deployed service's current log tail (TopologyInspectable) — the service-level twin of Backend.logs.
+  async topologyServiceLogs(
+    harness: { id: string; version: string },
+    service: string,
+    tenant?: string,
+  ): Promise<string | undefined> {
+    try {
+      const spec = await this.opts.specFor(tenant ?? "default", harness.id, harness.version);
+      const zone = this.opts.trustZones?.resolve(tenant ?? "default");
+      return await this.opts.runtime.serviceLogs?.(spec, service, zone);
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
+  }
 
   // Resolve any artifact-ref seed to inline bytes (via the injected resolver) so the runtime only handles inline seeds.
   // A ref fixture with no resolver configured fails loud — the required world-state can't be materialized.

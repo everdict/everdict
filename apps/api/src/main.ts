@@ -470,8 +470,17 @@ async function main(): Promise<void> {
 
   // Per-runtime backend access for already-dispatched cases (adoption/kill + live-observability lane reads). Built
   // before run/scorecard because their live-observability + supersede-kill wiring closes over these functions.
-  const { adoptCaseFn, readCaseLogsFn, openTerminalStreamFn, captureBrowserScreenFn, execInSandboxFn, killCase } =
-    buildRuntimeAccess({ runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend });
+  const {
+    adoptCaseFn,
+    readCaseLogsFn,
+    openTerminalStreamFn,
+    captureBrowserScreenFn,
+    execInSandboxFn,
+    inspectCasePlacementFn,
+    inspectTopologyFn,
+    topologyServiceLogsFn,
+    killCase,
+  } = buildRuntimeAccess({ runtimeRegistry, runtimeSecretsFor, runtimeBuildBackend });
 
   // Submit-time placement capability gate — reject a run/scorecard (400) whose chosen runtime can't run the harness
   // (e.g. a Windows-service topology on a Linux-only cluster) before any case is dispatched (RuntimeDispatcher is the
@@ -510,7 +519,15 @@ async function main(): Promise<void> {
     platformEventService,
     envMeterPolicy,
     preflightPlacement,
-    readers: { readCaseLogsFn, execInSandboxFn, captureBrowserScreenFn, openTerminalStreamFn },
+    readers: {
+      readCaseLogsFn,
+      execInSandboxFn,
+      captureBrowserScreenFn,
+      openTerminalStreamFn,
+      inspectCasePlacementFn,
+      inspectTopologyFn,
+      topologyServiceLogsFn,
+    },
     liveFrames,
     liveLogs,
     ...(recordingStore ? { recordingStore } : {}),

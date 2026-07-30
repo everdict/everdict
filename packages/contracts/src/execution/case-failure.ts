@@ -21,6 +21,19 @@ export const CaseFailureSchema = z.object({
   // UpstreamError extra.runnerId). Present for no_runner / capability_mismatch failures so the UI can link the failure
   // to that runner's health (online? last seen?); "*" = the owner pool (no specific runner). Absent for managed backends.
   runnerId: z.string().optional(),
+  // Where the case's unit actually stood when it died (from the backend's orchestrator read at throw time) —
+  // the alloc/pod identity + node + the last orchestrator events. Post-mortem placement identity that used to be
+  // dropped at the classify boundary (only `signal`/`runnerId` survived out of extra).
+  placement: z
+    .object({
+      unit: z.string().optional(), // Nomad allocation id / K8s pod name
+      node: z.string().optional(),
+      events: z.array(z.string()).optional(), // "Type: DisplayMessage" / "Reason: message" lines, newest last
+    })
+    .optional(),
+  // The tail of the job's own log at death (sentinel-stripped, tail-capped by the backend). Captured BEFORE the
+  // orchestrator job is deleted/GC'd — after settlement the raw log is unreachable exactly when someone asks "why".
+  logTail: z.string().optional(),
 });
 export type CaseFailure = z.infer<typeof CaseFailureSchema>;
 

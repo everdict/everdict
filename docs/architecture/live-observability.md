@@ -125,3 +125,41 @@ Live-verified against real MLflow: mid-run `GET /runs/:id` returned
 `liveTrace {mlflow, http://…:5501, evd-run-<id>}`, the live log tail printed
 `my-correlation=evd-run-<id>` from INSIDE the job (`$EVERDICT_RUN_ID` — zero coordination), and the
 field disappeared once the run settled.
+
+## ⑧ Runtime debugging — placement · topology health · failure evidence
+
+The reads above answer "what is the AGENT doing"; this trio answers "what is the RUNTIME doing WITH MY
+CASE" — the gap where a scorecard sat silently `queued`/`running` while the cluster couldn't place it, a
+service was OOM-looping, or the evidence vanished with the deleted job.
+
+### Case placement (`CaseInspectable`)
+
+`Backend.inspectCase(caseId) → CasePlacement` (wire SSOT `@everdict/contracts/wire`): the case's newest
+orchestrator job normalized to `phase queued | blocked | starting | running | dead` + the placed unit/node,
+the scheduler's capacity verdict when blocked (Nomad blocked-evaluation exhausted dimensions / K8s
+`FailedScheduling` message), an OOM verdict, restarts, and the orchestrator event feed (image pulls, kills).
+Nomad + K8s implement it; the fan-out (`runtime-access.ts`) picks the first lane that answers. Surfaces:
+`GET /runs/:id/placement` + MCP `get_run_placement` + the run detail's "Runtime placement" panel
+(self-null when nothing to describe — e.g. self-hosted lanes). The Nomad dispatch wait loop also fires
+`onWaiting("placement blocked — …")` the moment a blocked evaluation is first seen, so a batch child shows
+the verdict as a step instead of silent queueing (managed twin of the self-hosted offline-runner reason).
+
+### Topology health (`TopologyInspectable`)
+
+For service harnesses the case job is only the driver — the thing that actually fails is the warm topology.
+`ServiceTopologyBackend` implements `inspectTopology(harness, tenant) → TopologyStatus` (per-service state,
+readiness, restart churn, OOM, last notable event — the STRUCTURED promotion of the old timeout-only
+`diagnose()` string) and `topologyServiceLogs(harness, service, tenant)` (one service's log tail), backed by
+new optional `TopologyRuntime` reads implemented by all three runtimes (Nomad alloc TaskStates · K8s pod
+statuses via `Kubectl.podStatuses`/`logs` · Docker `ps`/`logs`). Surfaces: `GET /runs/:id/topology` +
+`GET /runs/:id/topology/services/:service/logs` + MCP `get_run_topology`/`get_topology_service_logs` + the
+run detail's "Service topology" panel (roster + per-row on-demand log fold; self-null for non-service runs).
+
+### Failure evidence retention (`CaseFailure.placement`/`logTail`)
+
+The orchestrator job (and its raw log) is deleted/GC'd right after settlement — post-mortem evidence must be
+captured AT THROW TIME. Nomad (`waitForAlloc` failure paths, `parseResultOrExplain`) and K8s (`waitForJob`)
+now attach `extra.placement {unit, node, events[]}` + `extra.logTail` (stderr-preferred, sentinel-stripped,
+16 KB tail cap) to the thrown `UpstreamError`; `classifyFailure` lifts both onto the `CaseFailure`, and the
+batch path's synthesized failed `CaseResult` carries the log tail as a `log` trace event — so the sealed
+trajectory keeps the evidence after the cluster has long forgotten the job.

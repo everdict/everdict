@@ -207,6 +207,10 @@ export const controlPlane = {
   // The run's OWNED trajectory (sealed evidence; embed fallback during dual-read — meta.source says which copy served).
   getRunTrajectory: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/trajectory`),
+  // One sealed trajectory from the owned ledger (meta + events). Opens every source — an otlp arrival or a
+  // materialized import has no run row, so the run-scoped read above cannot reach it.
+  getTrajectory: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/trajectories/${encodeURIComponent(id)}`),
   // Browse the workspace's sealed trajectories (the owned evidence ledger, N1 look-inward) — metas only, cursor-paginated.
   listTrajectories: <T>(auth: AuthContext, query: { limit?: number; cursor?: string } = {}) => {
     const qs = new URLSearchParams()
@@ -222,6 +226,15 @@ export const controlPlane = {
       auth,
       `/runs/${encodeURIComponent(id)}/logs${stream ? `?stream=${encodeURIComponent(stream)}` : ''}`
     ),
+  // 케이스 배치 조회(런타임 디버깅) — 케이스 잡이 클러스터 안에서 어디까지 갔는지(blocked 용량 판정·노드·이벤트 피드).
+  getRunPlacement: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/placement`),
+  // 토폴로지 헬스 로스터(서비스 하네스) — 웜 토폴로지의 서비스별 상태(재시작·OOM·최근 이벤트).
+  getRunTopology: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/topology`),
+  // 토폴로지 서비스 1개의 로그 테일 — "스택은 떠 있는데 케이스가 실패한다"의 서비스 쪽 답.
+  getTopologyServiceLogs: <T>(auth: AuthContext, id: string, service: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/topology/services/${encodeURIComponent(service)}/logs`),
   // One-shot exec inside a run's live sandbox (SandboxTerminal). Creator-or-admin, enforced by the control plane.
   execInRun: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/exec`, {

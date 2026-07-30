@@ -3746,6 +3746,30 @@
     "label": "라이브 화면",
     "waiting": "첫 프레임을 기다리는 중…"
   },
+  "runTopology": {
+    "title": "서비스 토폴로지",
+    "notDeployed": "지금 클러스터에 떠 있는 웜 토폴로지가 없어요.",
+    "restarts": "재시작 {count}",
+    "showLogs": "로그",
+    "hideLogs": "접기",
+    "noLogs": "이 서비스의 로그가 없어요."
+  },
+  "runPlacement": {
+    "title": "런타임 배치",
+    "phase": {
+      "queued": "스케줄러 배치 대기 중",
+      "blocked": "지금은 클러스터가 배치할 수 없어요",
+      "starting": "배치됨 — 기동 중",
+      "running": "클러스터에서 실행 중",
+      "dead": "유닛이 종료됐어요"
+    },
+    "blocked": "배치가 막혔어요 — 스케줄러의 판정:",
+    "node": "노드",
+    "unit": "유닛",
+    "job": "잡",
+    "namespace": "네임스페이스",
+    "restarts": "재시작"
+  },
   "replay": {
     "title": "리플레이",
     "play": "재생",

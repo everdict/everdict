@@ -2326,6 +2326,94 @@ describe("buildNomadTopologyJob — host-exec services (raw_exec)", () => {
   });
 });
 
+// Topology observability — the backend exposes the runtime's structured health roster + service log tail,
+// keyed by harness with the tenant resolving the same trust zone dispatch would use.
+describe("ServiceTopologyBackend — inspectTopology / topologyServiceLogs (TopologyInspectable)", () => {
+  const observableRuntime = (
+    seen: Array<{ what: string; zone?: string }>,
+  ): TopologyRuntime & Required<Pick<TopologyRuntime, "describeTopology" | "serviceLogs">> => ({
+    id: "mock",
+    async ensureTopology() {
+      return { endpoints: {} };
+    },
+    async provisionBrowserEnv() {
+      return {
+        wiring: {},
+        async snapshot(): Promise<BrowserSnapshot> {
+          return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+        },
+        async dispose() {},
+      };
+    },
+    async describeTopology(_spec, zone) {
+      seen.push({ what: "describe", ...(zone ? { zone: zone.id } : {}) });
+      return {
+        deployed: true,
+        runtime: "nomad",
+        services: [{ name: "agent-server", status: "running", ready: true }],
+      };
+    },
+    async serviceLogs(_spec, service, zone) {
+      seen.push({ what: `logs:${service}`, ...(zone ? { zone: zone.id } : {}) });
+      return `logs of ${service}`;
+    },
+  });
+
+  it("resolves the harness spec + tenant zone and returns the runtime's roster / log tail", async () => {
+    const seen: Array<{ what: string; zone?: string }> = [];
+    const backend = new ServiceTopologyBackend({
+      runtime: observableRuntime(seen),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC,
+      trustZones: perTenantTrustZones(),
+    });
+    const topo = await backend.inspectTopology({ id: "browser-use-langgraph", version: "1.0.0" }, "acme");
+    expect(topo).toMatchObject({ deployed: true, services: [{ name: "agent-server", ready: true }] });
+    const logs = await backend.topologyServiceLogs(
+      { id: "browser-use-langgraph", version: "1.0.0" },
+      "agent-server",
+      "acme",
+    );
+    expect(logs).toBe("logs of agent-server");
+    // The SAME zone dispatch would use — the reads target the tenant's own cluster job/namespace.
+    expect(seen.every((s) => s.zone === "acme")).toBe(true);
+  });
+
+  it("a runtime without the optional reads / a failing specFor reads as undefined (never a throw)", async () => {
+    const bare = new ServiceTopologyBackend({
+      runtime: {
+        id: "mock",
+        async ensureTopology() {
+          return { endpoints: {} };
+        },
+        async provisionBrowserEnv() {
+          return {
+            wiring: {},
+            async snapshot(): Promise<BrowserSnapshot> {
+              return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+            },
+            async dispose() {},
+          };
+        },
+      },
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => {
+        throw new Error("no such harness");
+      },
+    });
+    expect(await bare.inspectTopology({ id: "x", version: "1" }, "acme")).toBeUndefined();
+    expect(await bare.topologyServiceLogs({ id: "x", version: "1" }, "svc", "acme")).toBeUndefined();
+  });
+});
+
 // A6 — a completion timeout with a sick topology must name the sickness (OOM/exit 137/restarts), not just
 // "the agent did not finish": that bare message hid a 30-minute service OOM loop downstream.
 describe("ServiceTopologyBackend — completion timeout carries the topology diagnosis", () => {

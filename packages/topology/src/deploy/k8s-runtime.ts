@@ -8,6 +8,7 @@ import {
   type TrustZone,
   UpstreamError,
 } from "@everdict/contracts";
+import type { TopologyServiceStatus, TopologyStatus } from "@everdict/contracts/wire";
 import { STORE_DEFS, buildSharedStoreManifests, dependencyStores, storeName } from "./dependencies.js";
 import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./k8s-topology.js";
 import { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
@@ -443,6 +444,58 @@ export class K8sTopologyRuntime implements TopologyRuntime {
         await this.kubectl.deleteResources(browserTargets, ns).catch(() => {});
       },
     };
+  }
+
+  // The live per-service health roster of the warm topology (topology observability) — pod phase/readiness,
+  // restart churn, OOM verdicts per declared service. Requires the injected Kubectl to support podStatuses
+  // (the real CLI does; a minimal fake reads as not inspectable). Best-effort, never throws.
+  async describeTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyStatus | undefined> {
+    const read = this.kubectl.podStatuses?.bind(this.kubectl);
+    if (!read) return undefined;
+    try {
+      const ns = this.nsFor(zone);
+      const services: TopologyServiceStatus[] = [];
+      let anyPod = false;
+      for (const svc of spec.services) {
+        const pods = await read(`everdict/harness=${spec.id},everdict/version=${spec.version},app=${svc.name}`, ns);
+        if (pods === undefined) return undefined; // the query itself failed — degrade honestly
+        const pod = pods.find((p) => p.phase === "Running" || p.phase === "Pending") ?? pods.at(-1);
+        if (!pod) {
+          services.push({ name: svc.name, status: "absent", ready: false });
+          continue;
+        }
+        anyPod = true;
+        services.push({
+          name: svc.name,
+          status: pod.phase ?? "unknown",
+          ready: pod.phase === "Running" && pod.ready !== false,
+          ...(pod.restarts !== undefined && pod.restarts > 0 ? { restarts: pod.restarts } : {}),
+          ...(pod.reason === "OOMKilled" ? { oom: true } : {}),
+          ...(pod.node ? { node: pod.node } : {}),
+          ...(pod.reason ? { lastEvent: pod.reason } : {}),
+        });
+      }
+      return { deployed: anyPod, runtime: "k8s", namespace: ns, services };
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
+  }
+
+  // One deployed service's current log tail (topology observability) — the service pod's kubectl logs.
+  // undefined = no live pod for that service / the Kubectl doesn't support log reads. Best-effort.
+  async serviceLogs(spec: ServiceHarnessSpec, service: string, zone?: TrustZone): Promise<string | undefined> {
+    const read = this.kubectl.logs?.bind(this.kubectl);
+    if (!read) return undefined;
+    try {
+      const ns = this.nsFor(zone);
+      const pod = await this.kubectl
+        .podFor(`everdict/harness=${spec.id},everdict/version=${spec.version},app=${service}`, ns)
+        .catch(() => undefined);
+      if (!pod) return undefined;
+      return await read(pod, ns);
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
   }
 
   async teardown(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<void> {

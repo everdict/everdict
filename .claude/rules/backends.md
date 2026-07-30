@@ -25,12 +25,20 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
 - **Capabilities are typed, not optional methods.** `Backend` is the CORE (`dispatch`+`capacity`+`id`) — anything
   beyond it (`Recoverable`=adopt/kill, `Observable`=logs/exec, `Shellable`=execStream, `ScreenCapturable`=
   captureScreen, `Probeable`=probe, `Inspectable`=inspect [read-only live cluster view: nodes/capacity/workload/
-  stores, best-effort→`warnings`], `Reclaimable`=stopWorkload/reclaimIdle/purgeTerminal/setNodeSchedulable
+  stores, best-effort→`warnings`], `CaseInspectable`=inspectCase [case-scoped placement: phase queued|blocked|
+  starting|running|dead + blocked capacity verdict + unit/node/events — wire SSOT `CasePlacement`],
+  `TopologyInspectable`=inspectTopology/topologyServiceLogs [service-topology health roster + service log tail,
+  harness-keyed; ServiceTopologyBackend only], `Reclaimable`=stopWorkload/reclaimIdle/purgeTerminal/setNodeSchedulable
   [DESTRUCTIVE control, admin-only `runtimes:control`, best-effort/idempotent, stores never reclaimed]) is a SEPARATE
   interface the backend also `implements`, and consumers narrow
   with the matching guard (`isObservable(backend)`), never a `backend.logs?.()` feature-detect. Don't add a new
   optional method to `Backend`; add/extend a capability interface + its `is*` guard. If a backend can't do a
   capability, it simply doesn't implement that interface (e.g. K8s is not `Shellable` — no interactive stream exec).
+- **Failure evidence rides the throw.** The orchestrator job + raw log are deleted/GC'd right after settlement, so
+  dispatch-failure paths capture evidence AT THROW TIME: attach `extra.placement {unit,node,events[]}` +
+  `extra.logTail` (stderr-preferred, sentinel-stripped, 16 KB tail) to the thrown `UpstreamError` —
+  `classifyFailure` lifts them onto `CaseFailure.placement`/`logTail` and the batch path seals the tail into the
+  trajectory as a `log` trace event. A new backend's failure paths must do the same (best-effort, never mask the error).
 - Do NOT run the harness here. Dispatch the `@everdict/job-runner` image with the job as
   `EVERDICT_CASE_JOB` (base64 JSON) env; the agent runs `runCase` and prints the `__EVERDICT_RESULT__`
   sentinel. Parse the CaseResult from job logs (v1) — keep transport swappable (HTTP callback later).

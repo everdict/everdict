@@ -7,6 +7,7 @@ import {
   UpstreamError,
   serviceIsHostExec,
 } from "@everdict/contracts";
+import type { TopologyStatus } from "@everdict/contracts/wire";
 import { type CdpSocket, captureCdpDom, captureCdpScreenshot } from "../front-door/capture-cdp.js";
 import { DEFAULT_BROWSER_IMAGE } from "./browser-image.js";
 import {
@@ -182,6 +183,45 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       { network },
       "Could not deploy, adopt, or heal the topology after repeated attempts — inspect the docker daemon state.",
     );
+  }
+
+  // The live per-service roster of the warm topology (topology observability) — docker has no restart/event
+  // history in `ps`, so the roster is a binary running/absent per deterministic container name. Best-effort.
+  async describeTopology(spec: ServiceHarnessSpec): Promise<TopologyStatus | undefined> {
+    try {
+      const network = netName(spec);
+      const rows = [
+        ...dependencyStores(spec).map(({ name }) => ({ name, container: `${network}-${name}` })),
+        ...spec.services.map((svc) => ({ name: svc.name, container: `${network}-${sanitize(svc.name)}` })),
+      ];
+      const up = new Set(await this.docker.running(rows.map((r) => r.container)));
+      const services = rows.map((r) => ({
+        name: r.name,
+        status: up.has(r.container) ? "running" : "absent",
+        ready: up.has(r.container),
+      }));
+      return { deployed: services.some((s) => s.ready), runtime: "docker", services };
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
+  }
+
+  // One deployed service's (or store's) current log tail — `docker logs` on the deterministic container name.
+  async serviceLogs(spec: ServiceHarnessSpec, service: string): Promise<string | undefined> {
+    const read = this.docker.logs?.bind(this.docker);
+    if (!read) return undefined;
+    try {
+      const network = netName(spec);
+      const container = spec.services.some((s) => s.name === service)
+        ? `${network}-${sanitize(service)}`
+        : dependencyStores(spec).some(({ name }) => name === service)
+          ? `${network}-${service}`
+          : undefined;
+      if (!container) return undefined;
+      return await read(container);
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
   }
 
   // All this topology's deterministic container names (stores + services) — adoption/heal targets.

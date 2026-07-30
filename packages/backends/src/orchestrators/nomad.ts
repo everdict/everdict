@@ -12,13 +12,21 @@ import {
   judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
-import type { InspectNode, InspectRuntimeResult, InspectStore, InspectWorkload } from "@everdict/contracts/wire";
+import type {
+  CasePlacement,
+  InspectNode,
+  InspectRuntimeResult,
+  InspectStore,
+  InspectWorkload,
+  PlacementEvent,
+} from "@everdict/contracts/wire";
 import { assertHardenedIsolation, pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
 import type { TrustZonePolicy } from "@everdict/domain";
 import {
   type AdoptOutcome,
   type Backend,
   type BackendCapacity,
+  type CaseInspectable,
   type DispatchOptions,
   type ExecStreamHandle,
   type Inspectable,
@@ -33,7 +41,14 @@ import {
 } from "../backend.js";
 import type { SecretProvider } from "../policy/secrets.js";
 import { abortableDelay } from "./abortable-delay.js";
-import { EVERDICT_PREFIX, NODE_DETAIL_CAP, WORKLOAD_CAP, classifyWorkloadRole } from "./inspect-common.js";
+import {
+  EVERDICT_PREFIX,
+  FAILURE_EVENT_CAP,
+  FAILURE_LOG_TAIL_CAP,
+  NODE_DETAIL_CAP,
+  WORKLOAD_CAP,
+  classifyWorkloadRole,
+} from "./inspect-common.js";
 
 // --- Nomad HTTP abstraction (mockable in tests) ---
 export interface NomadHttp {
@@ -133,11 +148,37 @@ export function nomadJobId(job: CaseJob, suffix?: string): string {
   return `everdict-${job.evalCase.id}${suffix ? `-${suffix}` : ""}`;
 }
 
-// One task event as the alloc API reports it (Type = short phase, DisplayMessage = the human cause).
+// One task event as the alloc API reports it (Type = short phase, DisplayMessage = the human cause,
+// Time = nanoseconds since epoch).
 export interface NomadTaskEvent {
   Type?: string;
   DisplayMessage?: string;
   Details?: Record<string, string>;
+  Time?: number;
+}
+
+// How many orchestrator events a CasePlacement carries (the newest ones — the tail is where the live cause is).
+const PLACEMENT_EVENT_CAP = 20;
+
+// Nomad task events → the failure-evidence lines (CaseFailure.placement.events): "Type: DisplayMessage",
+// newest FAILURE_EVENT_CAP, empty ones dropped.
+export function placementEventLines(events: NomadTaskEvent[]): string[] {
+  return events
+    .map((e) => `${e.Type ? `${e.Type}: ` : ""}${e.DisplayMessage ?? ""}`.trim())
+    .filter((line) => line !== "")
+    .slice(-FAILURE_EVENT_CAP);
+}
+
+// Nomad task events → the wire PlacementEvent feed (newest PLACEMENT_EVENT_CAP, empty ones dropped, ns → ISO).
+export function nomadEventsToPlacement(events: NomadTaskEvent[]): PlacementEvent[] {
+  return events
+    .filter((e) => (e.DisplayMessage ?? "").trim() !== "" || (e.Type ?? "").trim() !== "")
+    .slice(-PLACEMENT_EVENT_CAP)
+    .map((e) => ({
+      ...(e.Type ? { type: e.Type } : {}),
+      message: (e.DisplayMessage ?? e.Type ?? "").trim(),
+      ...(typeof e.Time === "number" && e.Time > 0 ? { at: new Date(Math.floor(e.Time / 1e6)).toISOString() } : {}),
+    }));
 }
 
 // The CURRENT alloc of a dispatch job — desired-run allocs first, newest CreateIndex wins. A task restart or
@@ -482,7 +523,9 @@ export function streamHandleFor(child: StreamChild): ExecStreamHandle {
 
 // Launch the job-runner as a Nomad batch alloc, poll for completion, then
 // parse the CaseResult from the sentinel in the stdout log.
-export class NomadBackend implements Backend, Recoverable, Observable, Shellable, Probeable, Inspectable, Reclaimable {
+export class NomadBackend
+  implements Backend, Recoverable, Observable, Shellable, Probeable, Inspectable, CaseInspectable, Reclaimable
+{
   private readonly http: NomadHttp;
 
   constructor(private readonly opts: NomadBackendOptions) {
@@ -704,7 +747,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
     try {
-      const allocId = await this.waitForAlloc(jobId, ns, options?.signal);
+      const allocId = await this.waitForAlloc(jobId, ns, options?.signal, options?.onWaiting);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
       const logs = await this.http.request(
         "GET",
@@ -721,7 +764,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
             ? "alloc log fetch failed (alloc dir already GC'd — raise the Nomad client's gc_max_allocs for eval churn)"
             : "alloc log fetch failed",
         );
-      return await this.parseResultOrExplain(logs.text, allocId);
+      return await this.parseResultOrExplain(logs.text, allocId, ns);
     } catch (err) {
       // If the wait was aborted, reclaim the submitted job so it doesn't keep running (best-effort, never masks err).
       if (options?.signal?.aborted) {
@@ -779,7 +822,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
         `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
       );
       if (logs.status >= 300) return { status: "unknown" };
-      return { status: "adopted", result: await this.parseResultOrExplain(logs.text, allocId) };
+      return { status: "adopted", result: await this.parseResultOrExplain(logs.text, allocId, ns) };
     } catch {
       return { status: "unknown" };
     }
@@ -789,15 +832,23 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
   // the mushy generic. A bare crash (OOM SIGKILL) bypasses the in-process result guard entirely — the sentinel is
   // simply missing — so an OOM here becomes the fatal-infra OOM_KILLED verdict (never an "agent failure"), and any
   // other death carries its task-event cause. This is the batch-path twin of the topology drive diagnosis (A6).
-  private async parseResultOrExplain(logsText: string, allocId: string): Promise<CaseResult> {
+  private async parseResultOrExplain(logsText: string, allocId: string, namespace?: string): Promise<CaseResult> {
     try {
       return parseResult(logsText);
     } catch (err) {
       const events = await this.allocTaskEvents(allocId).catch(() => [] as NomadTaskEvent[]);
+      // Failure evidence at the last reachable moment (the dead job is purged/GC'd after settlement): the alloc's
+      // event lines + its log tail (stderr preferred; the in-hand sentinel-less stdout is the fallback).
+      const stdoutTail = stripSentinel(logsText).trim().slice(-FAILURE_LOG_TAIL_CAP);
+      const tail = await this.allocLogTailEvidence(allocId, namespace);
+      const evidence = {
+        placement: { unit: allocId, events: placementEventLines(events) },
+        ...(tail.logTail !== undefined ? tail : stdoutTail !== "" ? { logTail: stdoutTail } : {}),
+      };
       if (eventsIndicateOom(events)) {
         throw new UpstreamError(
           "UPSTREAM_ERROR",
-          { alloc: allocId, signal: OOM_KILLED },
+          { alloc: allocId, signal: OOM_KILLED, ...evidence },
           "task OOM-killed (exit 137) — raise the harness's resources.memoryMb (infra, not an agent failure)",
         );
       }
@@ -805,7 +856,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       if (err instanceof AppError && cause) {
         throw new UpstreamError(
           "UPSTREAM_ERROR",
-          { ...(err.extra ?? {}), alloc: allocId },
+          { ...(err.extra ?? {}), alloc: allocId, ...evidence },
           `${err.message} — ${cause}`,
         );
       }
@@ -916,6 +967,68 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
       );
       if (logs.status >= 300) return undefined;
       return stripSentinel(logs.text);
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
+  }
+
+  // Case-scoped placement introspection (CaseInspectable): where the case's newest job stands INSIDE the cluster —
+  // placed or not, on which node, and why not. Unplaced + blocked evaluation = phase "blocked" with the exhausted-
+  // dimension verdict (the same read the dispatch wait loop uses to fail, HERE exposed while the case is alive).
+  // undefined = no job for the case (pre-dispatch / GC'd). Best-effort, never throws (observability read).
+  async inspectCase(caseId: string): Promise<CasePlacement | undefined> {
+    try {
+      const prefix = `everdict-${caseId}-`;
+      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
+      if (res.status >= 300) return undefined;
+      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
+      const newest = jobs
+        .filter((j) => j.ID?.startsWith(prefix))
+        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+      if (!newest?.ID) return undefined;
+      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
+      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
+      if (allocsRes.status >= 300) return undefined;
+      const alloc = currentAlloc(
+        JSON.parse(allocsRes.text) as Array<{
+          ID: string;
+          ClientStatus?: string;
+          CreateIndex?: number;
+          DesiredStatus?: string;
+          NodeName?: string;
+        }>,
+      );
+      const base = { job: newest.ID, ...(ns ? { namespace: ns } : {}) };
+      if (!alloc?.ID) {
+        // No alloc: either the scheduler simply hasn't placed it yet (queued) or it CANNOT place it (blocked) —
+        // the blocked-evaluation read tells them apart, with the exhausted dimensions as the reason.
+        const blocked = await this.blockedPlacement(newest.ID, nsq);
+        return {
+          ...base,
+          phase: blocked ? "blocked" : "queued",
+          ...(blocked ? { blockedReason: blocked } : {}),
+          events: [],
+        };
+      }
+      const events = await this.allocTaskEvents(alloc.ID);
+      const status = alloc.ClientStatus ?? "pending";
+      const phase =
+        status === "running"
+          ? ("running" as const)
+          : status === "complete" || status === "failed" || status === "lost"
+            ? ("dead" as const)
+            : ("starting" as const);
+      const restarts = events.filter((e) => e.Type === "Restarting").length;
+      return {
+        ...base,
+        phase,
+        unit: alloc.ID,
+        ...(alloc.NodeName ? { node: alloc.NodeName } : {}),
+        ...(eventsIndicateOom(events) ? { oom: true } : {}),
+        ...(restarts > 0 ? { restarts } : {}),
+        events: nomadEventsToPlacement(events),
+      };
     } catch {
       return undefined; // best-effort — observability must never fail a run
     }
@@ -1079,6 +1192,26 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
     }
   }
 
+  // The failed alloc's log tail as failure evidence ({ logTail } or {}) — stderr preferred (crashes land there),
+  // stdout fallback, sentinel-stripped + tail-capped. Best-effort: an unreadable log is simply no evidence.
+  private async allocLogTailEvidence(allocId: string, namespace?: string): Promise<{ logTail?: string }> {
+    const nsq = namespace ? `&namespace=${encodeURIComponent(namespace)}` : "";
+    const read = async (stream: "stderr" | "stdout"): Promise<string> => {
+      try {
+        const res = await this.http.request(
+          "GET",
+          `/v1/client/fs/logs/${allocId}?task=agent&type=${stream}&plain=true${nsq}`,
+        );
+        return res.status < 300 ? stripSentinel(res.text).trim() : "";
+      } catch {
+        return "";
+      }
+    };
+    const err = await read("stderr");
+    const text = err !== "" ? err : await read("stdout");
+    return text === "" ? {} : { logTail: text.slice(-FAILURE_LOG_TAIL_CAP) };
+  }
+
   // The alloc's task events, flattened across tasks (one fetch feeds OOM detection AND the failure summary).
   private async allocTaskEvents(allocId: string): Promise<NomadTaskEvent[]> {
     try {
@@ -1106,7 +1239,12 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
     }
   }
 
-  private async waitForAlloc(jobId: string, namespace?: string, signal?: AbortSignal): Promise<string> {
+  private async waitForAlloc(
+    jobId: string,
+    namespace?: string,
+    signal?: AbortSignal,
+    onWaiting?: (reason: string) => void,
+  ): Promise<string> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 900;
     const blockedBudgetMs = this.opts.failOnBlockedEvalMs ?? 120_000;
@@ -1121,6 +1259,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
           ClientStatus: string;
           CreateIndex?: number;
           DesiredStatus?: string;
+          NodeName?: string;
         }>;
         // The CURRENT alloc only — the unique per-dispatch job id shields against CROSS-dispatch staleness, but an
         // in-job restart/reschedule still lists the previous dead alloc, and allocs[0] could judge (and later read
@@ -1134,6 +1273,16 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
         if (!alloc) {
           const blocked = await this.blockedPlacement(jobId, nsq);
           if (blocked) {
+            // Surface the blocked verdict IMMEDIATELY (once per blocked spell) — the caller shows it as a
+            // waiting step ("placement blocked — cpu exhausted on 2 node(s)") instead of a silent "queued"
+            // while the patience window runs. Managed-lane twin of the self-hosted offline-runner onWaiting.
+            if (blockedSinceMs === undefined) {
+              try {
+                onWaiting?.(`placement blocked — ${blocked}`);
+              } catch {
+                // best-effort; a listener throw must not break dispatch
+              }
+            }
             blockedSinceMs ??= Date.now();
             if (Date.now() - blockedSinceMs >= blockedBudgetMs) {
               throw new UpstreamError(
@@ -1150,11 +1299,22 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
           if (alloc.ClientStatus === "complete") return alloc.ID;
           if (alloc.ClientStatus === "failed" || alloc.ClientStatus === "lost") {
             const events = await this.allocTaskEvents(alloc.ID);
+            // Failure evidence, captured NOW — the dead job (and its raw log) is deleted/GC'd right after
+            // settlement, so this throw is the last moment the unit/node/events/log-tail are reachable.
+            // classifyFailure lifts extra.placement/logTail onto the CaseFailure.
+            const evidence = {
+              placement: {
+                unit: alloc.ID,
+                ...(alloc.NodeName ? { node: alloc.NodeName } : {}),
+                events: placementEventLines(events),
+              },
+              ...(await this.allocLogTailEvidence(alloc.ID, namespace)),
+            };
             // OOM-killed reads as fatal infra (raise the harness resources), never as an agent failure.
             if (eventsIndicateOom(events)) {
               throw new UpstreamError(
                 "UPSTREAM_ERROR",
-                { alloc: alloc.ID, signal: OOM_KILLED },
+                { alloc: alloc.ID, signal: OOM_KILLED, ...evidence },
                 "task OOM-killed — raise the harness's resources.memoryMb (infra, not an agent failure)",
               );
             }
@@ -1162,7 +1322,7 @@ export class NomadBackend implements Backend, Recoverable, Observable, Shellable
             const cause = summarizeAllocFailure(events);
             throw new UpstreamError(
               "UPSTREAM_ERROR",
-              { alloc: alloc.ID, status: alloc.ClientStatus },
+              { alloc: alloc.ID, status: alloc.ClientStatus, ...evidence },
               `alloc failed${cause ? ` — ${cause}` : ""}`,
             );
           }

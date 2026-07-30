@@ -15,7 +15,14 @@ function failedCaseResult(job: CaseJob, error: unknown): CaseResult {
     caseId: job.evalCase.id,
     harness: `${job.harness.id}@${job.harness.version}`,
     ...(job.trial !== undefined ? { trial: job.trial } : {}), // carry the trial index so pass@k/flakiness sees this failure
-    trace: [{ t: 0, kind: "error", message }],
+    // Failure evidence rides the trace: the backend-captured log tail (already gone from the cluster by the time
+    // anyone reads this) as a `log` event, then the error itself — so the sealed trajectory carries the post-mortem.
+    trace: [
+      ...(failure.logTail !== undefined
+        ? [{ t: 0, kind: "log" as const, stream: "stderr" as const, text: failure.logTail }]
+        : []),
+      { t: failure.logTail !== undefined ? 1 : 0, kind: "error", message },
+    ],
     snapshot: { kind: "prompt", output: "" },
     // Carry the reason in detail — the web/CLI surface score.detail as-is, so "why it failed" is visible per case.
     scores: [{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: `[${failure.class}] ${message}` }],

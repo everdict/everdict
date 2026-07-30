@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { RESULT_SENTINEL } from "@everdict/contracts";
-import { BadRequestError, type CaseJob, type CaseResult } from "@everdict/contracts";
+import { BadRequestError, type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
 import { perTenantTrustZones, staticTrustZones } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 import { staticSecrets } from "../policy/secrets.js";
@@ -209,6 +209,34 @@ describe("NomadBackend.dispatch", () => {
     await expect(backend.dispatch(JOB)).rejects.toThrow(/placement blocked.*exhausted/i);
   });
 
+  it("a blocked placement fires onWaiting ONCE with the verdict (visible waiting, not a silent 'queued')", async () => {
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path.includes("/allocations")) return { status: 200, text: "[]" };
+        if (path.includes("/evaluations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { Status: "blocked", FailedTGAllocs: { eval: { NodesEvaluated: 1, DimensionExhausted: { cpu: 1 } } } },
+            ]),
+          };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      pollIntervalMs: 1,
+      failOnBlockedEvalMs: 10, // several polls stay blocked before the failure — onWaiting must still fire once
+    });
+    const onWaiting = vi.fn();
+    await expect(backend.dispatch(JOB, { onWaiting })).rejects.toThrow(/placement blocked/i);
+    expect(onWaiting).toHaveBeenCalledTimes(1);
+    expect(onWaiting.mock.calls[0]?.[0]).toMatch(/placement blocked.*cpu exhausted/i);
+  });
+
   it("submit job → poll alloc completion → parse CaseResult from the stdout sentinel", async () => {
     const calls: string[] = [];
     const http: NomadHttp = {
@@ -340,6 +368,43 @@ describe("NomadBackend.dispatch", () => {
     };
     const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http, pollIntervalMs: 1 });
     await expect(backend.dispatch(JOB)).rejects.toThrow(/alloc failed — .*Failed to pull/);
+  });
+
+  it("a failed alloc's throw carries the failure evidence in extra (unit/node/events + the log tail)", async () => {
+    // Regression: the raw job log is deleted/GC'd right after settlement, and CaseFailure used to keep only a
+    // one-line message — the evidence must be captured AT THROW TIME and ride the error's extra.
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path.includes("/allocations"))
+          return {
+            status: 200,
+            text: JSON.stringify([{ ID: "alloc1", ClientStatus: "failed", NodeName: "worker-9" }]),
+          };
+        if (path.startsWith("/v1/allocation/alloc1"))
+          return {
+            status: 200,
+            text: JSON.stringify({
+              TaskStates: {
+                agent: { Events: [{ Type: "Driver Failure", DisplayMessage: "Failed to pull image" }] },
+              },
+            }),
+          };
+        if (path.includes("/logs/alloc1") && path.includes("type=stderr"))
+          return { status: 200, text: "panic: something exploded\n  at main.go:12" };
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http, pollIntervalMs: 1 });
+    const err = await backend.dispatch(JOB).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UpstreamError);
+    const extra = (err as UpstreamError).extra as {
+      placement?: { unit?: string; node?: string; events?: string[] };
+      logTail?: string;
+    };
+    expect(extra.placement).toMatchObject({ unit: "alloc1", node: "worker-9" });
+    expect(extra.placement?.events).toEqual(["Driver Failure: Failed to pull image"]);
+    expect(extra.logTail).toContain("panic: something exploded");
   });
 
   it("trustZones: applies the tenant zone per job (namespace + strong-isolation runtime)", async () => {
@@ -831,6 +896,113 @@ describe("NomadBackend.logs (live tail stream selection)", () => {
     const text = await backend.logs("c1", "stderr");
     expect(text).toBe("INFO progress line");
     expect(calls.some((c) => c.includes("type=stderr"))).toBe(true);
+  });
+});
+
+describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
+  const backendWith = (http: NomadHttp) => new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
+
+  it("no orchestrator job for the case → undefined (pre-dispatch / GC'd)", async () => {
+    const http: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix=")) return { status: 200, text: "[]" };
+        return { status: 404, text: "" };
+      },
+    };
+    expect(await backendWith(http).inspectCase("c1")).toBeUndefined();
+  });
+
+  it("job with no alloc + a blocked evaluation → phase 'blocked' with nomad's exhausted-dimension verdict", async () => {
+    const http: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-abc", SubmitTime: 1 }]) };
+        if (path.includes("/allocations")) return { status: 200, text: "[]" };
+        if (path.includes("/evaluations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { Status: "blocked", FailedTGAllocs: { eval: { NodesEvaluated: 2, DimensionExhausted: { memory: 2 } } } },
+            ]),
+          };
+        return { status: 404, text: "" };
+      },
+    };
+    const placement = await backendWith(http).inspectCase("c1");
+    expect(placement?.phase).toBe("blocked");
+    expect(placement?.blockedReason).toMatch(/memory exhausted on 2 node/);
+    expect(placement?.job).toBe("everdict-c1-abc");
+  });
+
+  it("job with no alloc and no blocked eval → phase 'queued' (normal scheduler warm-up)", async () => {
+    const http: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-abc", SubmitTime: 1 }]) };
+        if (path.includes("/allocations")) return { status: 200, text: "[]" };
+        if (path.includes("/evaluations")) return { status: 200, text: "[]" };
+        return { status: 404, text: "" };
+      },
+    };
+    expect((await backendWith(http).inspectCase("c1"))?.phase).toBe("queued");
+  });
+
+  it("running alloc → phase 'running' with the unit id, node, and the task-event feed", async () => {
+    const http: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-abc", SubmitTime: 1 }]) };
+        if (path.includes("/allocations"))
+          return {
+            status: 200,
+            text: JSON.stringify([{ ID: "a1", ClientStatus: "running", NodeName: "worker-2", DesiredStatus: "run" }]),
+          };
+        if (path === "/v1/allocation/a1")
+          return {
+            status: 200,
+            text: JSON.stringify({
+              TaskStates: {
+                agent: {
+                  Events: [
+                    { Type: "Received", DisplayMessage: "Task received by client", Time: 1_700_000_000_000 * 1e6 },
+                    { Type: "Driver", DisplayMessage: "Downloading image", Time: 1_700_000_001_000 * 1e6 },
+                    { Type: "Started", DisplayMessage: "Task started by client", Time: 1_700_000_002_000 * 1e6 },
+                  ],
+                },
+              },
+            }),
+          };
+        return { status: 404, text: "" };
+      },
+    };
+    const placement = await backendWith(http).inspectCase("c1");
+    expect(placement?.phase).toBe("running");
+    expect(placement?.unit).toBe("a1");
+    expect(placement?.node).toBe("worker-2");
+    expect(placement?.events.map((e) => e.type)).toEqual(["Received", "Driver", "Started"]);
+    expect(placement?.events[0]?.at).toBe(new Date(1_700_000_000_000).toISOString());
+  });
+
+  it("failed alloc whose events indicate an OOM kill → phase 'dead' with oom=true", async () => {
+    const http: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-abc", SubmitTime: 1 }]) };
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "a1", ClientStatus: "failed", NodeName: "worker-1" }]) };
+        if (path === "/v1/allocation/a1")
+          return {
+            status: 200,
+            text: JSON.stringify({
+              TaskStates: { agent: { Events: [{ Type: "Terminated", Details: { oom_killed: "true" } }] } },
+            }),
+          };
+        return { status: 404, text: "" };
+      },
+    };
+    const placement = await backendWith(http).inspectCase("c1");
+    expect(placement?.phase).toBe("dead");
+    expect(placement?.oom).toBe(true);
   });
 });
 

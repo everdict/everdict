@@ -17,6 +17,18 @@ export interface Kubectl {
   // Run a command inside a pod (for store admin DDL/ACL). Resolve the pod name via a selector → exec.
   exec(pod: string, ns: string, command: string[], stdin?: string): Promise<string>;
   podFor(selector: string, ns: string): Promise<string>; // label selector (e.g. app=x) → first pod name
+  // Live pod status roster for a label selector (topology observability) — phase/readiness/restarts/reason/node.
+  // Optional + best-effort: a runtime without it simply reports the topology as not inspectable; undefined = the
+  // query itself failed.
+  podStatuses?(
+    selector: string,
+    ns: string,
+  ): Promise<
+    | Array<{ name: string; phase?: string; ready?: boolean; restarts?: number; reason?: string; node?: string }>
+    | undefined
+  >;
+  // Current log tail of a target (pod or deployment/x) — the service-level log read. Optional + best-effort.
+  logs?(target: string, ns: string, tailLines?: number): Promise<string | undefined>;
 }
 
 interface RunResult {
@@ -137,6 +149,50 @@ export function kubectlCli(opts: { context?: string; bin?: string } = {}): Kubec
       const res = await run(bin, args, stdin);
       if (res.code !== 0) throw new Error(`exec ${command[0]} in ${pod} failed: ${res.stderr || res.stdout}`);
       return res.stdout;
+    },
+    async podStatuses(selector, ns) {
+      const res = await run(bin, [...ctx, "-n", ns, "get", "pods", "-l", selector, "-o", "json"]);
+      if (res.code !== 0) return undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          metadata?: { name?: string };
+          spec?: { nodeName?: string };
+          status?: {
+            phase?: string;
+            containerStatuses?: Array<{
+              ready?: boolean;
+              restartCount?: number;
+              state?: { waiting?: { reason?: string }; terminated?: { reason?: string; exitCode?: number } };
+              lastState?: { terminated?: { reason?: string; exitCode?: number } };
+            }>;
+          };
+        }>;
+        return items
+          .filter((p) => p.metadata?.name)
+          .map((p) => {
+            const cs = p.status?.containerStatuses?.[0];
+            const terminated = cs?.state?.terminated ?? cs?.lastState?.terminated;
+            // A bare exit 137 is the OOM killer's signature — surface it as OOMKilled like the eval-job path does.
+            const reason =
+              terminated?.reason ??
+              (terminated?.exitCode === 137 ? "OOMKilled" : undefined) ??
+              cs?.state?.waiting?.reason;
+            return {
+              name: p.metadata?.name as string,
+              ...(p.status?.phase ? { phase: p.status.phase } : {}),
+              ...(cs?.ready !== undefined ? { ready: cs.ready } : {}),
+              ...(cs?.restartCount !== undefined ? { restarts: cs.restartCount } : {}),
+              ...(reason ? { reason } : {}),
+              ...(p.spec?.nodeName ? { node: p.spec.nodeName } : {}),
+            };
+          });
+      } catch {
+        return undefined;
+      }
+    },
+    async logs(target, ns, tailLines = 400) {
+      const res = await run(bin, [...ctx, "-n", ns, "logs", target, `--tail=${tailLines}`]);
+      return res.code === 0 ? res.stdout : undefined;
     },
   };
 }
