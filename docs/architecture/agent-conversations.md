@@ -156,6 +156,24 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   picker applies MID-TURN: the permit hook re-reads the session's mode per ask (an explicit per-turn body.mode
   still pins the whole turn; plan stays turn-scoped), and PATCHing the mode resolves already-parked asks the new
   mode would never have asked (bypass → all, auto → the non-guarded).
+- **Gap round 2 — unwired assets (landed)**: the second claude-code parity pass found the loop itself at parity
+  and the gaps OUTSIDE it — mostly existing everdict assets never wired into the conversation. Three wirings +
+  one kernel addition: (1) **knowledge auto-recall** — a turn carrying @-references asks `get_task_context` ONCE
+  with the references mapped to knowledge-node refs (the reference IS the anchor; its version IS the as-of
+  coordinate) and folds the workspace's claims/decisions/conventions into the preamble (Claude Code's
+  relevant_memories, reinterpreted as anchored recall instead of embedding search; best-effort, no-reference
+  turns recall nothing). (2) **Crafted agents as spawnable sub-agent types** — `registrySubagentTypes` maps the
+  workspace's registered agents (instructions = role prompt) into `spawn_agent(subagent_type)` roles, merged
+  after the builtins (name collision keeps the builtin; the chat's own config agent excluded; tools stay the
+  read-only sub-agent surface; model tier defers to subagentModel). (3) A **`verify` builtin sub-agent type** —
+  Claude Code's verification agent reinterpreted: refute-first, verdicts must cite read-tool outputs, and the
+  read-only toolset is framed as the verifier's qualification. (4) **Structured output** (kernel): `outputSchema`
+  registers a `structured_output` tool whose parameters ARE the schema; the submission ends the run with the
+  value on `AgentLoopResult.structuredOutput` (one nudge if the model finishes without submitting) — for
+  programmatic hosts (activations, reactions, evals). Deferred from the same analysis: session running memory
+  (store schema), task ledger (agent-teams), stale-file reminders (revision-ledger events), soft interrupt,
+  streaming tool execution (deliberately last — Claude Code's inc-4258 double-execution scar interacts with our
+  non-streaming retry ladder).
 - **P9 (per-workspace customization, landed — Phase 1)** — each workspace can enhance its own agent, plugging its
   context + tools into the shared framework the way Claude Code takes a per-project CLAUDE.md + MCP servers. A new
   **registered, versioned `AgentSpec` entity** (`(tenant, id, version) → AgentSpec`, same immutable-version SSOT as

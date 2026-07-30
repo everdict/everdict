@@ -62,6 +62,46 @@ function referenceArgs(ref: AgentReference): Record<string, unknown> {
 
 const MAX_REFERENCE_CHARS = 4_000;
 
+// Auto-recall (Claude Code's relevant_memories reinterpreted): map each @-reference to its knowledge-graph node
+// ref and ask get_task_context ONCE for what the workspace already knows about those anchors — claims/decisions/
+// conventions + skill candidates, projected onto the reference's own version coordinate (the anchor-relative
+// as-of model). Precision-first: no embedding search — the user's references ARE the anchors; a message with no
+// references recalls nothing. `trace` has no knowledge node type (external observability id) — skipped.
+const KNOWLEDGE_NODE_TYPE: Partial<Record<AgentReferenceType, string>> = {
+  harness: "harness",
+  runtime: "runtime",
+  run: "run",
+  dataset: "dataset",
+  scorecard: "scorecard",
+  judge: "judge",
+  view: "view",
+  skill: "skill",
+  knowledge: "knowledge",
+  environment: "capability", // an environment IS a capability of kind `environment` (same node identity)
+  tool: "capability",
+};
+const MAX_KNOWLEDGE_CHARS = 4_000;
+
+// Recall the workspace's knowledge about the referenced anchors into a turn preamble. Best-effort like reference
+// resolution: an unreachable knowledge layer (or zero mappable refs) recalls nothing rather than failing the turn.
+async function recallKnowledge(call: McpInvoke, references: AgentReference[]): Promise<string | undefined> {
+  const refs = references.flatMap((ref) => {
+    const type = KNOWLEDGE_NODE_TYPE[ref.type];
+    if (!type) return [];
+    return [{ type, key: ref.id, ...(ref.version ? { version: ref.version } : {}) }];
+  });
+  if (refs.length === 0) return undefined;
+  try {
+    const r = await call("get_task_context", { refs });
+    if (r.isError || r.content.trim().length === 0) return undefined;
+    const detail =
+      r.content.length > MAX_KNOWLEDGE_CHARS ? `${r.content.slice(0, MAX_KNOWLEDGE_CHARS)}\n… [truncated]` : r.content;
+    return `The workspace already KNOWS things about the referenced entities (claims/decisions/conventions from the knowledge layer, projected onto each reference's own version). Inherit them — do not re-derive or contradict them without saying so:\n\n${detail}`;
+  } catch {
+    return undefined;
+  }
+}
+
 // Resolve each @-reference via its read tool and assemble a context preamble the model reads before the user's
 // words. Best-effort: an unresolved reference degrades to a note rather than failing the turn.
 async function resolveReferences(call: McpInvoke, references: AgentReference[]): Promise<string> {
@@ -190,6 +230,9 @@ export interface ChatDeps {
   // instead of exhausting the retry budget. Set by the headless callers (teammate/discussion/report turns) via a
   // deps spread — interactive chat stays fail-fast. See AgentLoopOptions.persistentRetry.
   persistentRetry?: boolean;
+  // The workspace's registered (crafted) agents as spawnable sub-agent types (registrySubagentTypes) — merged
+  // after the builtins (a name collision keeps the builtin). Absent → builtins only (dev / no registry).
+  listSubagentTypes?: (principal: Principal) => Promise<SubagentType[]>;
   // Extended-thinking budget (tokens). Set → the loop asks the model to reason before answering (Anthropic `thinking`;
   // reasoning models reason regardless). Reasoning is captured + streamed either way; absent → thinking off.
   thinkingBudgetTokens?: number;
@@ -272,6 +315,24 @@ const BUILTIN_SUBAGENT_TYPES: SubagentType[] = [
     description: "a careful, deep analysis of one entity (a scorecard, a judge trace, a harness) and its details",
     instructions:
       "Analyze the specified entity carefully and thoroughly — inspect its details, failures, and edge cases before summarizing",
+  },
+  // Adversarial verification (Claude Code's built-in verification agent, reinterpreted for the eval domain). The
+  // read-only sub-agent toolset is a QUALIFICATION here, not a limitation: a verifier must not mutate what it
+  // verifies. Verification avoidance is the documented failure mode the role prompt counters — verdicts must cite
+  // actual tool outputs, never narration of what would be checked.
+  {
+    name: "verify",
+    description:
+      "an adversarial verification pass over a claim or finished work — it tries to REFUTE, not confirm, and every verdict must cite read-tool evidence",
+    instructions:
+      "You are a verification specialist: try to BREAK the claim or work you were handed, not to confirm it. " +
+      "Your documented failure mode is verification avoidance — narrating what you would check and writing PASS " +
+      "without running anything. Actually call the read tools and cite their outputs as evidence for every point. " +
+      "The polished first 80% is not the job: hunt the last 20% — edge cases, empty and error states, numbers " +
+      "that don't reconcile, claims the underlying records contradict. End with a verdict of CONFIRMED, REFUTED, " +
+      "or INSUFFICIENT EVIDENCE, each backed by the specific tool outputs (or naming exactly what evidence is " +
+      "missing). Your read-only toolset is a qualification, not a limitation — a verifier must not mutate what " +
+      "it verifies. Do the work with your (read-only) tools",
   },
 ];
 
@@ -496,6 +557,9 @@ export async function runChat(
     }
     if (references && references.length > 0 && tools.call) {
       preambles.push(await resolveReferences(tools.call, references));
+      // Auto-recall: what the workspace already knows about those anchors rides along (best-effort, one call).
+      const recalled = await recallKnowledge(tools.call, references);
+      if (recalled) preambles.push(recalled);
     }
     const userForModel =
       preambles.length > 0 ? `${preambles.join("\n\n")}\n\n---\n\nUser message:\n${userText}` : userText;
@@ -539,6 +603,12 @@ export async function runChat(
         ? await byId(principal, deps.subagentModelRef).then((sm) => ({ transport: sm.transport, model: sm.model }))
         : undefined;
 
+    // Spawnable sub-agent types: the builtins + the workspace's crafted agents (name collisions keep the
+    // builtin — explore/analyze/verify are the stable vocabulary the base prompt teaches). Best-effort.
+    const crafted = deps.listSubagentTypes ? await deps.listSubagentTypes(principal) : [];
+    const builtinNames = new Set(BUILTIN_SUBAGENT_TYPES.map((t) => t.name));
+    const subagentTypes = [...BUILTIN_SUBAGENT_TYPES, ...crafted.filter((t) => !builtinNames.has(t.name))];
+
     // Accumulate this conversation's token usage across turns (the loop reports tokens; the control plane prices them).
     let inputTokens = 0;
     let outputTokens = 0;
@@ -557,7 +627,7 @@ export async function runChat(
         ...(summarize ? { summarize } : {}),
         ...(fallback ? { fallback } : {}),
         ...(subagentModel ? { subagentModel } : {}),
-        subagentTypes: BUILTIN_SUBAGENT_TYPES,
+        subagentTypes,
         ...(deps.toolTimeoutMs !== undefined ? { toolTimeoutMs: deps.toolTimeoutMs } : {}),
         ...(deps.persistentRetry === true ? { persistentRetry: true } : {}),
         ...(deps.thinkingBudgetTokens !== undefined ? { thinking: { budgetTokens: deps.thinkingBudgetTokens } } : {}),

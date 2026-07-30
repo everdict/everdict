@@ -16,7 +16,7 @@ import {
 } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { Principal } from "./principal.js";
-import { registryProfileResolver } from "./profile.js";
+import { registryProfileResolver, registrySubagentTypes } from "./profile.js";
 
 const principal: Principal = { subject: "u1", workspace: "acme", roles: ["member"] };
 const BASE = "BASE PROMPT";
@@ -533,5 +533,48 @@ describe("registryProfileResolver", () => {
       memberPreferences({}, { "skill:s-triage": false }),
     )(principal);
     expect(optedOut.skills.map((s) => s.name)).not.toContain("triage");
+  });
+});
+
+describe("registrySubagentTypes — crafted agents as spawnable sub-agent roles", () => {
+  const spec = (id: string, extra: Partial<AgentSpec> = {}): AgentSpec =>
+    ({ id, version: "1.0.0", mcpServers: [], capabilities: [], disabledDefaults: [], ...extra }) as AgentSpec;
+  const principal = { subject: "u-1", workspace: "acme", roles: ["member"] };
+
+  function listingRegistry(specs: AgentSpec[]): AgentRegistry {
+    return {
+      list: async () => specs.map((s) => ({ id: s.id, versions: [s.version], owner: "acme" })),
+      get: async (_tenant: string, id: string) => {
+        const found = specs.find((s) => s.id === id);
+        if (!found) throw new Error("not found");
+        return found;
+      },
+    } as unknown as AgentRegistry;
+  }
+
+  it("maps registered agents with instructions to spawnable types, excluding the chat's own config agent", async () => {
+    const lister = registrySubagentTypes(
+      listingRegistry([
+        spec("default", { instructions: "the chat persona itself" }),
+        spec("triage-bot", { instructions: "Triage regressions by severity", description: "regression triager" }),
+        spec("no-role"), // instruction-less → not a spawnable role
+      ]),
+      "default",
+    );
+    const types = await lister(principal);
+    expect(types).toEqual([
+      { name: "triage-bot", description: "regression triager", instructions: "Triage regressions by severity" },
+    ]);
+  });
+
+  it("caps the listing and degrades to no types when the registry is unreachable", async () => {
+    const many = Array.from({ length: 20 }, (_, i) => spec(`a-${i}`, { instructions: `role ${i}` }));
+    expect(await registrySubagentTypes(listingRegistry(many), "default", 3)(principal)).toHaveLength(3);
+    const broken = {
+      list: async () => {
+        throw new Error("db down");
+      },
+    } as unknown as AgentRegistry;
+    expect(await registrySubagentTypes(broken, "default")(principal)).toEqual([]);
   });
 });

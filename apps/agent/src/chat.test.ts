@@ -28,6 +28,50 @@ async function seededDeps(transport: LlmTransport): Promise<{ deps: ChatDeps; se
   return { deps, sessions };
 }
 
+describe("runChat knowledge auto-recall", () => {
+  it("recalls workspace knowledge about @-referenced anchors via ONE get_task_context call (no reference → no recall)", async () => {
+    // Given a tool session whose call channel records invocations and answers get_task_context with a claim
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const requests: StreamRequest[] = [];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: async (req) => {
+        requests.push(req);
+        return {
+          content: "ok",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      },
+    };
+    const { deps } = await seededDeps(transport);
+    deps.toolProvider = async () => ({
+      registry: new ToolRegistry([]),
+      call: async (name, args) => {
+        calls.push({ name, args });
+        if (name === "get_task_context")
+          return { content: "Known: web@2.1.0 fails case-7 under judge strictness", isError: false };
+        return { content: `resolved:${name}`, isError: false };
+      },
+      close: async () => {},
+    });
+    // When the user sends a message carrying a harness reference (with its version coordinate)
+    await runChat(deps, PRINCIPAL, {}, "s-1", "why did it dip?", [
+      { type: "harness", id: "web", version: "2.1.0", label: "web" },
+    ]);
+    // Then get_task_context was asked once with the mapped node ref (the reference IS the anchor)
+    const recall = calls.filter((c) => c.name === "get_task_context");
+    expect(recall).toHaveLength(1);
+    expect(recall[0]?.args).toEqual({ refs: [{ type: "harness", key: "web", version: "2.1.0" }] });
+    // …and the model's user turn carries the recalled knowledge preamble before the user's words
+    const sent = requests[0]?.messages ?? [];
+    const userTurn = sent[sent.length - 1] as { content: string };
+    expect(userTurn.content).toContain("web@2.1.0 fails case-7");
+    expect(userTurn.content).toContain("why did it dip?");
+  });
+});
+
 describe("runChat failure handling", () => {
   it("persists the turn's failure as an assistant record so the conversation survives (failure is a citizen)", async () => {
     // Given a model that fails permanently (a provider 400 — not retryable)

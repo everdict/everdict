@@ -1,4 +1,4 @@
-import type { SkillEntry } from "@everdict/agent-runtime";
+import type { SkillEntry, SubagentType } from "@everdict/agent-runtime";
 import {
   type AgentCapabilitiesResolution,
   type AgentMemberPreferenceStore,
@@ -299,4 +299,46 @@ export function registryProfileResolver(opts: {
 // Dev / no-DB fallback: always the base profile (no per-workspace customization without a registry + stores).
 export function baseProfileResolver(baseSystemPrompt: string): ProfileResolver {
   return async () => ({ systemPrompt: baseSystemPrompt, mcpServers: [], skills: [], codeTools: [] });
+}
+
+// Registered (crafted) agents as spawnable sub-agent TYPES — Claude Code's `.claude/agents` registry
+// reinterpreted over the workspace agent registry: each registered agent with instructions becomes a role the
+// model can pick via spawn_agent(subagent_type). The instructions ARE the role prompt; the tools stay the
+// kernel's read-only sub-agent surface (the isolation invariant — a delegated spawn researches/verifies, it does
+// not run the crafted agent's full activation), and the model tier defers to the workspace's subagentModel (no
+// per-type model resolution — that would resolve N providers per turn for roles that rarely run). The chat's own
+// config agent is excluded: spawning yourself as your own sub-agent is noise, not delegation. Best-effort — an
+// unreachable registry means no crafted types, never a failed turn.
+export function registrySubagentTypes(
+  agentRegistry: AgentRegistry,
+  configId: string,
+  maxTypes = 12,
+): (principal: Principal) => Promise<SubagentType[]> {
+  return async (principal) => {
+    try {
+      const listed = await agentRegistry.list(principal.workspace);
+      const out: SubagentType[] = [];
+      for (const { id } of listed) {
+        if (id === configId) continue;
+        if (out.length >= maxTypes) break; // keep the spawn tool's type listing bounded
+        try {
+          const spec = await agentRegistry.get(principal.workspace, id);
+          if (!spec.instructions || spec.instructions.trim().length === 0) continue;
+          out.push({
+            name: spec.id,
+            description:
+              spec.description && spec.description.trim().length > 0
+                ? spec.description
+                : `the workspace's registered agent "${spec.id}"`,
+            instructions: spec.instructions,
+          });
+        } catch {
+          // a broken/tombstoned spec is skipped, never fatal
+        }
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  };
 }

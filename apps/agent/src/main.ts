@@ -51,7 +51,12 @@ import {
   registryModelResolver,
 } from "./model.js";
 import { meAuthenticate, viewAccessChecker } from "./principal.js";
-import { type ProfileResolver, baseProfileResolver, registryProfileResolver } from "./profile.js";
+import {
+  type ProfileResolver,
+  baseProfileResolver,
+  registryProfileResolver,
+  registrySubagentTypes,
+} from "./profile.js";
 import { installProxyDispatcher } from "./proxy-dispatcher.js";
 import { buildServer } from "./server.js";
 import { EVERDICT_AGENT_SYSTEM_PROMPT } from "./system-prompt.js";
@@ -86,6 +91,8 @@ async function main(): Promise<void> {
   // resolveModelById is only available with a DB + secrets key (needed to resolve an AgentSpec.model override's key).
   let resolveProfile: ProfileResolver = baseProfileResolver(EVERDICT_AGENT_SYSTEM_PROMPT);
   let resolveModelById: ModelByIdResolver | undefined;
+  // The workspace's crafted agents as spawnable sub-agent types (needs the agent registry — DB only).
+  let listSubagentTypes: ReturnType<typeof registrySubagentTypes> | undefined;
   // Teammate execution tokens (S3) are issued into the shared tenant-key table — only with a DB (else spawn is 404).
   let keyStore: TenantKeyStore | undefined;
   // Registry-driven trigger activation (agent-automation A3) — with a DB+KEK, platform events match enabled
@@ -149,6 +156,8 @@ async function main(): Promise<void> {
         // (GitHub App installed / Mattermost set / image registry registered). Best-effort inside the resolver.
         integrationsConfigured: async (workspace) => configuredIntegrations(await settingsStore.get(workspace)),
       });
+      // Crafted agents become spawn_agent(subagent_type) roles (builtins keep name precedence in the chat).
+      listSubagentTypes = registrySubagentTypes(agentRegistry, config.AGENT_CONFIG_ID);
     } else {
       // No KEK: sessions persist, but a registered model / secret-backed customization can't be decrypted → env model + base agent.
       if (config.AGENT_MODEL !== undefined) {
@@ -179,6 +188,7 @@ async function main(): Promise<void> {
     ...(process.env.AGENT_ALLOW_RUN_ANALYSIS === "true" ? { analysisScriptRuntime: codeRuntime } : {}),
     resolveModel,
     resolveProfile,
+    ...(listSubagentTypes ? { listSubagentTypes } : {}),
     ...(resolveModelById ? { resolveModelById } : {}),
     ...(keyStore ? { keyStore } : {}),
     ...(activationRegistry ? { agentRegistry: activationRegistry } : {}),
