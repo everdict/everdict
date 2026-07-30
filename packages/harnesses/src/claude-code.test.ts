@@ -1,4 +1,4 @@
-import type { ComputeHandle, ExecOpts, ExecResult, RunContext, TraceEvent } from "@everdict/contracts";
+import type { ComputeHandle, ExecChunk, ExecOpts, ExecResult, RunContext, TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ClaudeCodeHarness } from "./claude-code.js";
 
@@ -11,6 +11,36 @@ class MockCompute implements ComputeHandle {
     this.lastCmd = cmd;
     this.lastEnv = opts?.env;
     return { exitCode: 0, stdout: this.stdout, stderr: "" };
+  }
+  async writeFile(): Promise<void> {}
+  async readFile(): Promise<string> {
+    return "";
+  }
+  async dispose(): Promise<void> {}
+}
+
+// A compute WITH execStream: delivers the given chunks one macrotask apart (so line boundaries and event
+// interleaving are real), then resolves with the exec result — the streaming-session shape of the driver.
+class StreamingMockCompute implements ComputeHandle {
+  lastEnv: Record<string, string> | undefined;
+  lastCmd = "";
+  constructor(
+    private readonly chunks: string[],
+    private readonly result: Omit<ExecResult, "stdout"> = { exitCode: 0, stderr: "" },
+  ) {}
+  async exec(): Promise<ExecResult> {
+    throw new Error("streaming mock: exec must not be used when execStream is present");
+  }
+  async execStream(cmd: string, onChunk: (chunk: ExecChunk) => void, opts?: ExecOpts): Promise<ExecResult> {
+    this.lastCmd = cmd;
+    this.lastEnv = opts?.env;
+    let stdout = "";
+    for (const data of this.chunks) {
+      await new Promise((r) => setTimeout(r, 0));
+      stdout += data;
+      onChunk({ stream: "stdout", data });
+    }
+    return { ...this.result, stdout };
   }
   async writeFile(): Promise<void> {}
   async readFile(): Promise<string> {
@@ -51,6 +81,63 @@ describe("ClaudeCodeHarness", () => {
     expect(events.map((e) => e.kind)).toEqual(["message", "tool_call", "llm_call", "tool_result", "llm_call"]);
     const agg = events.find((e) => e.kind === "llm_call" && e.model === "aggregate");
     expect(agg?.kind === "llm_call" && agg.cost?.usd).toBe(0.01);
+  });
+
+  it("on a streaming compute, yields events incrementally per line and identical to the buffered parse", async () => {
+    // Given the same stream-json split across chunk boundaries MID-LINE
+    const lines = STREAM.split("\n");
+    const chunks = [`${lines[0]?.slice(0, 25)}`, `${lines[0]?.slice(25)}\n${lines[1]}\n`, `${lines[2]}\n`];
+    const streaming = new StreamingMockCompute(chunks);
+    const ctx: RunContext = { apiKeyEnv: { CLAUDE_CODE_OAUTH_TOKEN: "tok-123" }, timeoutSec: 60 };
+
+    // When the harness runs, record how many chunks had been delivered when each event arrived
+    const events: TraceEvent[] = [];
+    for await (const ev of new ClaudeCodeHarness("cli").run(streaming, "do it", ctx)) events.push(ev);
+
+    // Then: identical event sequence to the buffered path (same mapper), auth env still injected
+    expect(streaming.lastEnv?.CLAUDE_CODE_OAUTH_TOKEN).toBe("tok-123");
+    expect(events.map((e) => e.kind)).toEqual(["message", "tool_call", "llm_call", "tool_result", "llm_call"]);
+    const agg = events.find((e) => e.kind === "llm_call" && e.model === "aggregate");
+    expect(agg?.kind === "llm_call" && agg.cost?.usd).toBe(0.01);
+  });
+
+  it("streams the first event BEFORE the exec settles (live monitoring, not a post-exit replay)", async () => {
+    // A compute whose exec result is gated on a flag the test controls: the final chunk (and settle)
+    // only happens after we have observed the first yielded event.
+    let releaseTail: (() => void) | undefined;
+    const tailGate = new Promise<void>((r) => {
+      releaseTail = r;
+    });
+    const lines = STREAM.split("\n");
+    class GatedCompute extends StreamingMockCompute {
+      override async execStream(
+        cmd: string,
+        onChunk: (chunk: ExecChunk) => void,
+        opts?: ExecOpts,
+      ): Promise<ExecResult> {
+        onChunk({ stream: "stdout", data: `${lines[0]}\n` });
+        await tailGate;
+        onChunk({ stream: "stdout", data: `${lines[1]}\n${lines[2]}\n` });
+        return { exitCode: 0, stdout: STREAM, stderr: "" };
+      }
+    }
+    const ctx: RunContext = { apiKeyEnv: {}, timeoutSec: 60 };
+    const events: TraceEvent[] = [];
+    for await (const ev of new ClaudeCodeHarness("cli").run(new GatedCompute([]), "do it", ctx)) {
+      events.push(ev);
+      // First events arrive while the exec is still gated open — release the tail only now.
+      if (events.length === 1) releaseTail?.();
+    }
+    expect(events.length).toBeGreaterThan(3); // the full sequence still completed after release
+  });
+
+  it("surfaces a hard CLI failure on the streaming path as a trace error event", async () => {
+    const streaming = new StreamingMockCompute([""], { exitCode: 2, stderr: "boom: claude broke" });
+    const ctx: RunContext = { apiKeyEnv: {}, timeoutSec: 60 };
+    const events: TraceEvent[] = [];
+    for await (const ev of new ClaudeCodeHarness("cli").run(streaming, "do it", ctx)) events.push(ev);
+    const err = events.find((e) => e.kind === "error");
+    expect(err?.kind === "error" && err.message).toContain("boom");
   });
 
   it("stamps wall-clock event times from the injected clock, not a synthetic 0-based counter", async () => {
