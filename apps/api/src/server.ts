@@ -138,6 +138,7 @@ import { registerRunnerInstallRoutes } from "./api/runner/install.routes.js";
 import { registerRunnerRoutes } from "./api/runner/runner.routes.js";
 import { registerWorkspaceRunnerRoutes } from "./api/runner/workspace-runner.routes.js";
 import { registerRuntimeRoutes } from "./api/runtime/runtime.routes.js";
+import { registerSandboxRoutes } from "./api/sandbox/sandbox.routes.js";
 import { registerScheduleRoutes } from "./api/schedule/schedule.routes.js";
 import { registerScorecardRoutes } from "./api/scorecard/scorecard.routes.js";
 import { registerSecretRoutes } from "./api/secret/secret.routes.js";
@@ -258,6 +259,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerQueueRoutes(routes, deps);
     registerBillingRoutes(routes, deps);
     registerBrowserSessionRoutes(routes, deps);
+    registerSandboxRoutes(routes, deps);
     registerBrowserProfileRoutes(routes, deps);
     registerProxyRoutes(routes, deps);
     registerInternalRoutes(routes, deps);

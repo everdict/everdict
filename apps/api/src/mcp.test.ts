@@ -3,7 +3,7 @@ import { KnowledgeEntryService } from "@everdict/application-control";
 import { KnowledgeService } from "@everdict/application-control";
 import { MattermostService } from "@everdict/application-control";
 import { MembershipService } from "@everdict/application-control";
-import { RunService } from "@everdict/application-control";
+import { RunService, SandboxSessionService } from "@everdict/application-control";
 import { RunnerHub } from "@everdict/application-control";
 import { RunnerService } from "@everdict/application-control";
 import { ScheduleService } from "@everdict/application-control";
@@ -26,6 +26,7 @@ import {
   InMemoryScorecardStore,
   InMemorySkillStore,
   InMemoryTenantKeyStore,
+  InMemoryTrajectoryStore,
   InMemoryUserProfileStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
@@ -96,6 +97,8 @@ const DATASET = JSON.stringify({
 let n = 0;
 
 function harness() {
+  const sharedRunStore = new InMemoryRunStore();
+  const sharedTrajectories = new InMemoryTrajectoryStore();
   const datasetRegistry = new InMemoryDatasetRegistry();
   const workspaceStore = new InMemoryWorkspaceStore();
   const harnessTemplates = new InMemoryHarnessTemplateRegistry();
@@ -148,7 +151,28 @@ function harness() {
       config: { host: "https://mm.corp.io" },
     }),
     traceSourceService: new TraceSourceService(new InMemoryWorkspaceSettingsStore()),
-    service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
+    service: new RunService({
+      dispatcher: okDispatcher,
+      store: sharedRunStore,
+      trajectories: sharedTrajectories,
+      newId: () => `run-${n++}`,
+    }),
+    // Sandbox session runs (P6) — a stub driver so the MCP surface is testable; shares the run/trajectory
+    // stores with RunService so get_run_trajectory serves a closed session's sealed evidence (parity roundtrip).
+    sandboxSessions: new SandboxSessionService({
+      store: sharedRunStore,
+      trajectories: sharedTrajectories,
+      driver: {
+        id: "stub",
+        provision: async () => ({
+          exec: async (command: string) => ({ stdout: `ran:${command}`, stderr: "", exitCode: 0 }),
+          writeFile: async () => {},
+          readFile: async () => "",
+          dispose: async () => {},
+        }),
+      },
+      newId: () => `sbx-${n++}`,
+    }),
     harnessTemplates,
     harnessInstances,
     datasetRegistry,
@@ -422,6 +446,7 @@ describe("MCP tools", () => {
       "assign_harness_trace_source",
       "backfill_scorecard_models",
       "cancel_scorecard",
+      "close_sandbox",
       "comment_on_github_issue",
       "control_runtime",
       "create_agent",
@@ -433,6 +458,7 @@ describe("MCP tools", () => {
       "create_model",
       "create_rubric",
       "create_runtime",
+      "create_sandbox",
       "create_schedule",
       "create_skill",
       "delete_agent",
@@ -532,6 +558,7 @@ describe("MCP tools", () => {
       "revoke_workspace_runner",
       "run_experiment",
       "run_scorecard",
+      "sandbox_exec",
       "score_group",
       "set_dataset_version_tags",
       "set_harness_version_tags",
@@ -2143,5 +2170,38 @@ describe("MCP knowledge tools", () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names).not.toContain("get_knowledge_entry");
     expect(names).not.toContain("get_knowledge_node");
+  });
+});
+
+describe("sandbox session tools — BFF↔MCP parity (P6)", () => {
+  it("create_sandbox → sandbox_exec → close_sandbox, and get_run_trajectory serves the sealed session evidence", async () => {
+    const deps = harness();
+    const client = await connect(deps, ["member"]);
+
+    const created = JSON.parse(
+      text(await client.callTool({ name: "create_sandbox", arguments: { image: "python:3.12-slim" } })),
+    );
+    expect(created).toMatchObject({ kind: "sandbox", lifetime: "session", status: "running" });
+
+    const exec = JSON.parse(
+      text(await client.callTool({ name: "sandbox_exec", arguments: { id: created.id, command: "echo hi" } })),
+    );
+    expect(exec).toEqual({ stdout: "ran:echo hi", stderr: "", exitCode: 0 });
+
+    const closed = JSON.parse(text(await client.callTool({ name: "close_sandbox", arguments: { id: created.id } })));
+    expect(closed).toMatchObject({ status: "succeeded", session: { closedReason: "closed" } });
+
+    // The same ledger, the same evidence surface — no sandbox-specific read tool needed.
+    const trajectory = JSON.parse(
+      text(await client.callTool({ name: "get_run_trajectory", arguments: { id: created.id } })),
+    );
+    expect(trajectory.meta).toMatchObject({ source: "run", eventCount: 4 });
+  });
+
+  it("a viewer role cannot open a sandbox (runs:submit gate)", async () => {
+    const deps = harness();
+    const viewer = await connect(deps, ["viewer"]);
+    const res = await viewer.callTool({ name: "create_sandbox", arguments: { image: "img" } });
+    expect(res.isError).toBe(true);
   });
 });

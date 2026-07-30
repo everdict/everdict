@@ -29,6 +29,7 @@ interface RunRow {
   group_ref: unknown | null;
   lineage: unknown | null;
   outputs: unknown | null;
+  session: unknown | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -60,6 +61,7 @@ function rowToRecord(row: RunRow): RunRecord {
     ...(row.group_ref ? { group: row.group_ref } : {}),
     ...(row.lineage ? { lineage: row.lineage } : {}),
     ...(row.outputs ? { outputs: row.outputs } : {}),
+    ...(row.session ? { session: row.session } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -67,8 +69,8 @@ function rowToRecord(row: RunRow): RunRecord {
 }
 
 const RUN_COLUMNS =
-  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at)";
-const RUN_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)";
+  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, session, created_at, updated_at)";
+const RUN_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)";
 
 function runInsertParams(r: RunRecord): unknown[] {
   return [
@@ -95,6 +97,7 @@ function runInsertParams(r: RunRecord): unknown[] {
     r.group ? JSON.stringify(r.group) : null,
     r.lineage ? JSON.stringify(r.lineage) : null,
     r.outputs ? JSON.stringify(r.outputs) : null,
+    r.session ? JSON.stringify(r.session) : null,
     r.createdAt,
     r.updatedAt,
   ];
@@ -150,6 +153,12 @@ export class PgRunStore implements RunStore {
     if (patch.lineage !== undefined) {
       sets.push(`lineage = $${i++}`);
       vals.push(JSON.stringify(patch.lineage));
+    }
+    // Session close stamps closedReason on the session half (P6) — a dropped key here would settle the
+    // row while silently losing WHY it closed.
+    if (patch.session !== undefined) {
+      sets.push(`session = $${i++}`);
+      vals.push(JSON.stringify(patch.session));
     }
     if (patch.updatedAt !== undefined) {
       sets.push(`updated_at = $${i++}`);

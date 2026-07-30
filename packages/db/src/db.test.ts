@@ -138,6 +138,25 @@ describe("PgRunStore", () => {
     });
   });
 
+  it("update persists a session patch (P6 close) — pre-fix the key was silently dropped and closedReason never landed", async () => {
+    // Caught live: the InMemory store spreads any patch, so only the Pg lane lost `session` — the sandbox
+    // row settled succeeded with an empty closedReason.
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    const session = {
+      image: "alpine:3.20",
+      ttlSec: 300,
+      expiresAt: "2026-07-30T00:05:00.000Z",
+      closedReason: "closed" as const,
+    };
+    await new PgRunStore(client).update("r9", {
+      status: "succeeded",
+      session,
+      updatedAt: "2026-07-30T00:04:00.000Z",
+    });
+    expect(calls[0]?.text).toMatch(/session = \$/);
+    expect(calls[0]?.params).toContain(JSON.stringify(session));
+  });
+
   it("persists outbox events in the SAME STATEMENT as the write (E0 — data-modifying CTE, no tx seam needed)", async () => {
     const event = {
       id: "ev-1",

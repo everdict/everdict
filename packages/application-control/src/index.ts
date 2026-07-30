@@ -212,6 +212,12 @@ export type {
 export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";
 export { PlatformEventService, type PlatformEventServiceDeps } from "./platform-event/platform-event-service.js";
 export { withRegisteredFact } from "./platform-event/registry-facts.js";
+export {
+  SandboxSessionService,
+  type CreateSandboxInput,
+  type SandboxActor,
+  type SandboxSessionServiceDeps,
+} from "./session/sandbox-session-service.js";
 export { FIRST_PARTY_AGENT_TEMPLATES, seedFirstPartyAgents } from "./agent/first-party-agents.js";
 export type {
   GithubFileContent,

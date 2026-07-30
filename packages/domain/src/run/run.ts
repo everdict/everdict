@@ -126,6 +126,64 @@ export class Run {
     };
   }
 
+  // A session run enters the ledger (execution-model.md P6): "run this environment image and shell in".
+  // Born RUNNING — the container is provisioned before the record exists (no orphan record on a failed
+  // provision), so there is no queued phase. The HARNESS column names what the user ASKED for (an
+  // environment capability id@version, or the ad-hoc image@`adhoc`); `session.image` is the concrete
+  // container image; caseId carries the image too (the console's "what is this" answer). Disposal is the
+  // invariant: `session.expiresAt` lives ON THE ROW, so a reaper can tear down on time from the row alone.
+  static newSandboxSession(input: {
+    id: string;
+    tenant: string;
+    harness: { id: string; version: string }; // environment ref, or {image, "adhoc"}
+    image: string;
+    ttlSec: number;
+    createdBy: string;
+    origin?: RunOrigin;
+    envelope?: RunEnvelope;
+    now: string;
+  }): RunRecord {
+    return {
+      id: input.id,
+      tenant: input.tenant,
+      harness: input.harness,
+      caseId: input.image,
+      status: "running",
+      trigger: "sandbox", // the activity view's legacy source axis (dual-stamped, like eval runs)
+      createdBy: input.createdBy,
+      kind: "sandbox",
+      class: "interactive", // a person is at the shell
+      lifetime: "session", // held open until closed/expired — `running` means "alive", not "in progress"
+      origin: input.origin ?? { cause: "member", actor: input.createdBy },
+      placement: { where: "driver", isolation: "container" },
+      attach: ["exec"],
+      ...(input.envelope !== undefined ? { envelope: input.envelope } : {}),
+      session: {
+        image: input.image,
+        ttlSec: input.ttlSec,
+        expiresAt: new Date(new Date(input.now).getTime() + input.ttlSec * 1000).toISOString(),
+      },
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+  }
+
+  // Close a session run (member close, TTL expiry, or orphan adoption by the reaper). A session ending is
+  // its NORMAL completion — expiry included — so every reason settles as succeeded; the reason is stamped
+  // on `session.closedReason` for the console. First terminal write wins (close vs expiry race).
+  closeSession(reason: "closed" | "expired" | "orphaned", now: string): RunTransition {
+    this.assertNotTerminal("closeSession");
+    const session = this.record.session;
+    return {
+      patch: {
+        status: "succeeded",
+        ...(session !== undefined ? { session: { ...session, closedReason: reason } } : {}),
+        updatedAt: now,
+      },
+      facts: terminalFact(this.record, "succeeded"),
+    };
+  }
+
   // Settle an agent run (reported by the agent service). Facts stay DELIBERATELY empty in this slice: the
   // agent.run.* family still carries the lifecycle events — flipping the emit to run.* requires the
   // subject-aware trigger-matcher guard first (the alias charter in contracts/platform-event.ts), or agent

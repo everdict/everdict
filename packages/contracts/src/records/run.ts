@@ -88,6 +88,18 @@ export const RunOutputsSchema = z.object({
 });
 export type RunOutputs = z.infer<typeof RunOutputsSchema>;
 
+// The session half of a `lifetime: "session"` run (execution-model.md P6, mig 0099): disposal is the
+// invariant, so every session carries its hard deadline ON THE RECORD — a reaper that finds the process
+// gone can still tear down on time from the row alone. `image` is the concrete container image the session
+// booted (the harness column names what the user ASKED for — an environment capability or an ad-hoc image).
+export const RunSessionSchema = z.object({
+  image: z.string(),
+  ttlSec: z.number().int().positive(),
+  expiresAt: z.string(), // hard deadline — extended by touch, never removed
+  closedReason: z.enum(["closed", "expired", "orphaned"]).optional(), // stamped at teardown
+});
+export type RunSession = z.infer<typeof RunSessionSchema>;
+
 export const RunRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -123,6 +135,7 @@ export const RunRecordSchema = z.object({
   group: RunGroupRefSchema.optional(), // the orchestration this run belongs to (generalizes parentScorecardId)
   lineage: RunLineageSchema.optional(), // retry/rescore/fork relations to earlier runs
   outputs: RunOutputsSchema.optional(), // what it left behind (artifacts/files/summary)
+  session: RunSessionSchema.optional(), // session runs only (P6, mig 0099): image + hard deadline + teardown reason
   createdAt: z.string(),
   updatedAt: z.string(),
 });

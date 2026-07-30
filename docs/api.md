@@ -14,6 +14,9 @@ arrives by polling or webhook.
 | `GET`  | `/runs` | `RunRecord[]` for the caller's workspace (`runs:read`) |
 | `GET`  | `/runs/:id/trajectory` | the run's **owned trajectory** (P5 rung 1): sealed `TraceEvent[]` from `everdict_trajectories`, embed fallback during dual-read — `meta.source` says which copy served (`runs:read`) |
 | `POST` | `/v1/traces` | **OTLP/HTTP door** (N0): standard OTLP JSON; spans group by `everdict.run_id` and seal in the owned TrajectoryStore — point `OTEL_EXPORTER_OTLP_ENDPOINT` here with a tenant API key in the headers (`runs:submit`) |
+| `POST` | `/sandboxes` | **sandbox session run** (P6): boot an environment image (or an adopted environment capability) as a long-lived container — a Run{kind:sandbox, lifetime:session} born running with a hard TTL on the row; opt-in via `EVERDICT_SANDBOX_DRIVER=docker`, per-tenant caps → 429 (`runs:submit`; MCP `create_sandbox`) |
+| `POST` | `/sandboxes/:id/exec` | one `sh -c` command into the live session, creator-or-admin BEFORE it runs; every exec lands on the session trajectory, sealed at teardown and served by `GET /runs/:id/trajectory` (`runs:read`; MCP `sandbox_exec`) |
+| `POST` | `/sandboxes/:id/close` | tear down (dispose in a `finally`), seal the trajectory, settle succeeded with `session.closedReason` — idempotent; a handle lost to a restart settles as `orphaned` (`runs:read`; MCP `close_sandbox`) |
 | `POST` | `/datasets` | register a `Dataset` (immutable → `409`) (`datasets:write`, member+) |
 | `POST` | `/datasets/validate` | dry-run: schema + existing versions/conflict, no write (`datasets:write`) |
 | `GET`  | `/datasets` | workspace-owned + `_shared` datasets (`datasets:read`) |

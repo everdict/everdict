@@ -41,6 +41,7 @@ import { registerRunnerLeaseTools } from "./api/runner/runner-lease.mcp.js";
 import { registerRunnerTools } from "./api/runner/runner.mcp.js";
 import { registerWorkspaceRunnerTools } from "./api/runner/workspace-runner.mcp.js";
 import { registerRuntimeTools } from "./api/runtime/runtime.mcp.js";
+import { registerSandboxTools } from "./api/sandbox/sandbox.mcp.js";
 import { registerScheduleTools } from "./api/schedule/schedule.mcp.js";
 import { registerScorecardTools } from "./api/scorecard/scorecard.mcp.js";
 import { registerSecretTools } from "./api/secret/secret.mcp.js";
@@ -91,6 +92,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerNotificationTools(server, ctx);
   registerEventTools(server, ctx);
   registerBrowserSessionTools(server, ctx);
+  registerSandboxTools(server, ctx);
   registerBrowserProfileTools(server, ctx);
   registerProxyTools(server, ctx);
   registerCommentTools(server, ctx);

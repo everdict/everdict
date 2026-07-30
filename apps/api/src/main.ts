@@ -39,6 +39,7 @@ import { lateBoundEmitter } from "./composition/late-events.js";
 import { makePersistence } from "./composition/persistence.js";
 import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
+import { buildSandboxSessions } from "./composition/sandbox.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
 import { buildScorecard } from "./composition/scorecard.js";
 import {
@@ -603,6 +604,16 @@ async function main(): Promise<void> {
       })
     : undefined;
   if (browserSessionService) setInterval(() => browserSessionService.sweep(), 60_000).unref(); // TTL teardown
+  // Sandbox session runs (execution-model P6) — opt-in where the api can reach a container runtime
+  // (EVERDICT_SANDBOX_DRIVER=docker). Facts + trajectory ride the same stores as every run; the interval is
+  // the in-process TTL reaper half (the durable reaper rung survives a process death).
+  const sandboxSessions = buildSandboxSessions({
+    store,
+    trajectories: trajectoryStore,
+    events: lateEvents,
+    capabilities: capabilityStore,
+  });
+  if (sandboxSessions) setInterval(() => sandboxSessions.sweep(), 30_000).unref();
   // Capture a session login into a profile (browser-profiles S3) — only when interactive sessions exist (it needs
   // a session's reachable CDP base). Encrypts the storageState blob with the shared at-rest cipher.
   const browserProfileCaptureService = browserSessionService
@@ -657,6 +668,7 @@ async function main(): Promise<void> {
   const app = buildServer({
     terminalTickets,
     ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
+    ...(sandboxSessions ? { sandboxSessions } : {}), // sandbox session runs (P6) — routes/tools absent without a driver
     browserProfileService, // saved authenticated browser profiles (browser-profiles S2) — workspace-scoped metadata CRUD
     ...(browserProfileCaptureService ? { browserProfileCaptureService } : {}), // S3 capture (needs browser sessions)
     proxyService, // workspace BYO egress proxies (browser-profiles S4) — per-country pool + session geo

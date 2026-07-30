@@ -408,7 +408,16 @@ can be discussed like any other entity, and the knowledge layer can promote what
   what puts agent runs inside judges, trace sink, replay and analysis — and takes traces out of row embeds.
 - **P6 — Session runs.** `kind:"sandbox"` ships as "run this environment image and shell in", reusing the
   existing exec/terminal/ticket routes; reaper + session cap pool + idle metering. Browser sessions fold
-  in behind their current API later (O6).
+  in behind their current API later (O6). **First rung SHIPPED (master-plan W5)**: `SandboxSessionService`
+  — the record on the universal ledger (`Run.newSandboxSession`: born running, `session{image,ttlSec,
+  expiresAt}` ON THE ROW, mig 0099), only the live `ComputeHandle` in a process-local map (the
+  BrowserSessionService split); provision-before-record (no orphan rows), dispose in a `finally` on every
+  path, per-tenant/global caps (429), every exec appended to the session trajectory and sealed at teardown
+  (`GET /runs/:id/trajectory` serves it — no new read surface). Surfaces: `POST /sandboxes` /
+  `…/:id/exec` / `…/:id/close` + `create_sandbox`/`sandbox_exec`/`close_sandbox` (opt-in:
+  `EVERDICT_SANDBOX_DRIVER=docker`). Remaining rungs: the durable reaper (T-b `reaper:<runId>` — W5's
+  Temporal leg), the WS terminal (`ExecStreamHandle` over `DockerComputeHandle`), idle metering (O5),
+  private-registry pull auth, and the O6 browser fold.
 - **P7 — Subscriptions converge.** Schedules emit `schedule.fired`; the three trigger engines converge on
   one subscription registry if the shape holds.
 
