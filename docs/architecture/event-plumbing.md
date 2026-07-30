@@ -233,7 +233,14 @@ resume from their own cursor/history.
 - **E0 — Grammar + structural emission.** Kind taxonomy registered; aggregate transitions return
   `{patch, facts[]}`; same-tx outbox on Pg stores; `agent.run.*` → `run.*` aliasing.
 - **E1 — Consumers as cursors.** Consumer runtime (cursor/dedup/dead-letter/lag); notifications,
-  Mattermost, webhooks re-based onto the log; LISTEN/NOTIFY nudge.
+  Mattermost, webhooks re-based onto the log; LISTEN/NOTIFY nudge. **First rung SHIPPED (W3)**:
+  `EventConsumerRunner` (one log, N durable cursors — per-event cursor persistence, retry-then-dead-letter
+  so a poison fact never dams the log, `lag()` as the backpressure observable, mig 0097) + the personal
+  FEED re-based (`feed:runs`/`feed:scorecards` — the completion facts carry exactly the old feed gate, and
+  rows key on `nf-<eventId>` so a cursor rewind replays with zero duplicate effects, the W3 acceptance).
+  Remaining rungs: Mattermost (its coverage is wider than the facts — machine-fired completions post too,
+  so re-basing it is an E2 coverage decision), webhooks, and the Pg LISTEN/NOTIFY nudge (in-process poll at
+  3s is the single-CP correctness path today).
 - **E2 — Coverage W2+W3.** Content/registry/fs/knowledge/ops facts; the "transition ⇒ fact" review rule.
 - **E3 — Convergence.** Subscription registry; `schedule.fired`; CI events; reactions admitted through
   the §5 gate (needs execution-model P4).

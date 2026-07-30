@@ -25,6 +25,12 @@ export type { ApprovalListFilter, ApprovalStore } from "./ports/approval-store.j
 export { ApprovalService, type ApprovalServiceDeps } from "./approval/approval-service.js";
 export type { EnvelopeSpend, EnvelopeStore } from "./ports/envelope-store.js";
 export { admitCausedWork } from "./admission/admission.js";
+export type { EventConsumerStateStore } from "./ports/event-consumer-store.js";
+export {
+  EventConsumerRunner,
+  type PlatformEventConsumer,
+} from "./platform-event/event-consumer-runner.js";
+export { runFeedConsumer, scorecardFeedConsumer } from "./notification/feed-consumers.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type { OutboxEvent, RunListOptions, RunStore } from "./ports/run-store.js";
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";

@@ -9,6 +9,9 @@ export class InMemoryNotificationStore implements NotificationStore {
   private readonly rows: NotificationRecord[] = [];
 
   async add(record: NotificationRecord): Promise<void> {
+    // Idempotent by id (E1): feed rows written by log consumers use a natural key (nf-<eventId>), so a
+    // redelivery or a cursor rewind writes zero duplicates.
+    if (this.rows.some((r) => r.id === record.id)) return;
     this.rows.push(record);
   }
 
@@ -68,7 +71,8 @@ export class PgNotificationStore implements NotificationStore {
   async add(record: NotificationRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO everdict_notifications (id, workspace, recipient, kind, title, body, link, created_at, read_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (id) DO NOTHING`,
       [
         record.id,
         record.workspace,

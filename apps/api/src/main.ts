@@ -5,6 +5,7 @@ import {
   seedFirstPartyAgents,
 } from "@everdict/application-control";
 import { ApprovalService } from "@everdict/application-control";
+import { EventConsumerRunner, runFeedConsumer, scorecardFeedConsumer } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import { FsService, RevisionedWorkspaceFs, SkillService } from "@everdict/application-control";
 import {
@@ -142,6 +143,7 @@ async function main(): Promise<void> {
     platformEventStore,
     approvalStore,
     envelopeStore,
+    eventConsumerStateStore,
     commentStore,
     knowledgeStore,
     knowledgeEntryStore,
@@ -331,6 +333,19 @@ async function main(): Promise<void> {
     membershipService,
     runtimeSecretsFor,
   });
+  // E1 — one log, N durable cursors: the personal feed (bell) re-based onto the event log. The completion
+  // facts carry exactly the old feed gate; the consumers write rows idempotently (nf-<eventId>), so replay
+  // (cursor rewind) produces zero duplicate effects. Poll is the correctness path; dead letters are logged.
+  const eventConsumers = new EventConsumerRunner({
+    events: platformEventStore,
+    state: eventConsumerStateStore,
+    onDeadLetter: (consumer, event, error) =>
+      console.error(`[events] dead-letter ${consumer} ← ${event.kind} ${event.id}: ${error}`),
+  });
+  eventConsumers.register(runFeedConsumer(notificationStore));
+  eventConsumers.register(scorecardFeedConsumer(notificationStore));
+  eventConsumers.start();
+
   // Durable agent approvals (agent-automation A6): the agent service parks over the internal bridge, members
   // decide via /approvals, and a decision is DELIVERED back to the live in-process wait through the agent
   // service's own internal surface. Delivery absent (no agent service configured) = record-only.

@@ -2,6 +2,7 @@ import type {
   AgentMemberPreferenceStore,
   ApprovalStore,
   EnvelopeStore,
+  EventConsumerStateStore,
   FsRevisionStore,
 } from "@everdict/application-control";
 import {
@@ -18,6 +19,7 @@ import {
   InMemoryCapabilityStore,
   InMemoryCommentStore,
   InMemoryEnvelopeStore,
+  InMemoryEventConsumerStateStore,
   InMemoryFsRevisionStore,
   InMemoryKnowledgeEntryStore,
   InMemoryKnowledgeStore,
@@ -52,6 +54,7 @@ import {
   PgCapabilityStore,
   PgCommentStore,
   PgEnvelopeStore,
+  PgEventConsumerStateStore,
   PgFsRevisionStore,
   PgKnowledgeEntryStore,
   PgKnowledgeStore,
@@ -156,6 +159,7 @@ export interface Persistence {
   platformEventStore: PlatformEventStore; // append-only platform-event log (agent-automation A1) — durable facts + reconcile cursor
   approvalStore: ApprovalStore; // durable agent approvals (A6) — the parked ask survives an agent-service restart
   envelopeStore: EnvelopeStore; // envelope spend ledger (§5.2 P4) — headroom reads + caused-cost settles
+  eventConsumerStateStore: EventConsumerStateStore; // durable consumer cursors + dead letters (E1)
   commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
   knowledgeStore: KnowledgeStore; // workspace knowledge graph — append-only mention/edge + upsert node projection
   knowledgeEntryStore: KnowledgeEntryStore; // knowledge entries (reified claims) — dual-scoped private|workspace
@@ -228,6 +232,7 @@ export async function makePersistence(): Promise<Persistence> {
       platformEventStore,
       approvalStore: new InMemoryApprovalStore(platformEventStore),
       envelopeStore: new InMemoryEnvelopeStore(),
+      eventConsumerStateStore: new InMemoryEventConsumerStateStore(),
       commentStore: new InMemoryCommentStore(),
       knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
@@ -275,6 +280,7 @@ export async function makePersistence(): Promise<Persistence> {
     platformEventStore: new PgPlatformEventStore(client),
     approvalStore: new PgApprovalStore(client),
     envelopeStore: new PgEnvelopeStore(client),
+    eventConsumerStateStore: new PgEventConsumerStateStore(client),
     commentStore: new PgCommentStore(client),
     knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),

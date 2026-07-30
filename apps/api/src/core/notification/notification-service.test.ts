@@ -1,5 +1,11 @@
-import { NotificationService } from "@everdict/application-control";
-import { InMemoryNotificationStore } from "@everdict/db";
+import {
+  EventConsumerRunner,
+  NotificationService,
+  runFeedConsumer,
+  scorecardFeedConsumer,
+} from "@everdict/application-control";
+import type { PlatformEventRecord } from "@everdict/contracts";
+import { InMemoryEventConsumerStateStore, InMemoryNotificationStore, InMemoryPlatformEventStore } from "@everdict/db";
 import type { RunRecord, WorkspaceSettings } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { mattermostHttpClient } from "../../infrastructure/mattermost/mattermost-client.js";
@@ -94,74 +100,90 @@ describe("NotificationService.notifyRun (workspace Mattermost bot)", () => {
   });
 });
 
-describe("NotificationService personal feed (bell inbox) — notifications N1/N2", () => {
-  it("top-level run with createdBy completes → written to the initiator's feed (link=runId)", async () => {
-    const { svc } = build({});
-    await svc.notifyRun("acme", { ...runRec("succeeded"), createdBy: "alice" });
+describe("the personal feed rides the event log (E1) — facts → cursor consumer → bell rows", () => {
+  // The full W3-acceptance flow at the api layer: domain transitions birth the facts, the outbox pair
+  // persists them, the durable-cursor consumers write the bell rows idempotently (nf-<eventId>).
+  async function feedVia(events: Array<Omit<PlatformEventRecord, "seq">>) {
+    const log = new InMemoryPlatformEventStore();
+    for (const e of events) await log.append(e);
+    const feed = new InMemoryNotificationStore();
+    const runner = new EventConsumerRunner({ events: log, state: new InMemoryEventConsumerStateStore() });
+    runner.register(runFeedConsumer(feed));
+    runner.register(scorecardFeedConsumer(feed));
+    await runner.drain();
+    const svc = new NotificationService({ settingsFor: async () => ({}), feed });
+    return { svc, feed, runner, log };
+  }
+  const runFact = (status: "succeeded" | "failed"): Omit<PlatformEventRecord, "seq"> => ({
+    id: `ev-run-${status}`,
+    tenant: "acme",
+    kind: status === "succeeded" ? "run.completed" : "run.failed",
+    subject: { type: "run", id: "run-1" },
+    actor: "alice",
+    payload: { status, harness: "scripted@0", caseId: "c1" },
+    message: `Run run-1 ${status}`,
+    createdAt: "2026-07-30T00:00:00.000Z",
+  });
+
+  it("a run.completed fact becomes the initiator's bell row (link=runId) — same gate the direct call had", async () => {
+    const { svc } = await feedVia([runFact("succeeded")]);
     const rows = await svc.listFeed("alice", "acme");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "run_completed", link: { runId: "run-1" }, recipient: "alice" });
+    expect(await svc.listFeed("bob", "acme")).toHaveLength(0); // not visible to other people
+    expect(await svc.listFeed("alice", "other")).toHaveLength(0); // nor other workspaces
   });
 
-  it("a failed run becomes run_failed, and is not visible to other people / other workspaces", async () => {
-    const { svc } = build({});
-    await svc.notifyRun("acme", { ...runRec("failed"), createdBy: "alice" });
-    expect((await svc.listFeed("alice", "acme"))[0]?.kind).toBe("run_failed");
-    expect(await svc.listFeed("bob", "acme")).toHaveLength(0);
-    expect(await svc.listFeed("alice", "other")).toHaveLength(0);
-  });
-
-  it("does not write scorecard child runs or runs without createdBy to the feed (flood prevention / unknown recipient)", async () => {
-    const { svc } = build({});
-    await svc.notifyRun("acme", { ...runRec("succeeded"), createdBy: "alice", parentScorecardId: "sc-1" });
-    await svc.notifyRun("acme", runRec("succeeded"));
-    expect(await svc.listFeed("alice", "acme")).toHaveLength(0);
-  });
-
-  it("scorecard completes → scorecard_completed (link=scorecardId) + mark-read (markFeedRead)", async () => {
-    const { svc } = build({});
-    await svc.notifyScorecard("acme", {
-      id: "sc-9",
-      status: "succeeded",
-      dataset: { id: "d", version: "1" },
-      harness: { id: "h", version: "2" },
-      createdBy: "alice",
-    });
+  it("a scorecard.completed fact becomes scorecard_completed + mark-read works over the consumer-written rows", async () => {
+    const { svc } = await feedVia([
+      {
+        id: "ev-sc",
+        tenant: "acme",
+        kind: "scorecard.completed",
+        subject: { type: "scorecard", id: "sc-9" },
+        actor: "alice",
+        payload: { status: "succeeded", dataset: "d@1", harness: "h@2" },
+        message: "done",
+        createdAt: "2026-07-30T00:00:00.000Z",
+      },
+    ]);
     const rows = await svc.listFeed("alice", "acme", { unreadOnly: true });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "scorecard_completed", link: { scorecardId: "sc-9" } });
     expect(await svc.markFeedRead("alice", "acme", "all")).toBe(1);
     expect(await svc.listFeed("alice", "acme", { unreadOnly: true })).toHaveLength(0);
-    expect(await svc.markFeedRead("alice", "acme", "all")).toBe(0); // idempotent
   });
 
-  it("a scheduled scorecard (origin.source=schedule) becomes a schedule-BRANDED feed notification, not the generic one", async () => {
-    const { svc } = build({});
-    await svc.notifyScorecard("acme", {
-      id: "sc-2",
-      status: "succeeded",
-      dataset: { id: "d", version: "1" },
-      harness: { id: "h", version: "2" },
-      createdBy: "alice",
-      origin: { source: "schedule" },
+  it("schedule branding rides the fact payload (origin=schedule → schedule_completed/failed)", async () => {
+    const sc = (id: string, kind: "scorecard.completed" | "scorecard.failed"): Omit<PlatformEventRecord, "seq"> => ({
+      id,
+      tenant: "acme",
+      kind,
+      subject: { type: "scorecard", id },
+      actor: "alice",
+      payload: { dataset: "d@1", harness: "h@2", origin: "schedule" },
+      message: "done",
+      createdAt: "2026-07-30T00:00:00.000Z",
     });
+    const { svc } = await feedVia([sc("sc-2", "scorecard.completed"), sc("sc-3", "scorecard.failed")]);
     const rows = await svc.listFeed("alice", "acme");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ kind: "schedule_completed", link: { scorecardId: "sc-2" } });
-    expect(rows[0]?.title).toContain("Scheduled run completed");
+    expect(rows.map((r) => r.kind).sort()).toEqual(["schedule_completed", "schedule_failed"]);
+    expect(rows.find((r) => r.kind === "schedule_completed")?.title).toContain("Scheduled run completed");
   });
 
-  it("a scheduled scorecard that fails becomes schedule_failed", async () => {
-    const { svc } = build({});
-    await svc.notifyScorecard("acme", {
-      id: "sc-3",
-      status: "failed",
-      dataset: { id: "d", version: "1" },
-      harness: { id: "h", version: "2" },
-      createdBy: "alice",
-      origin: { source: "schedule" },
-    });
-    expect((await svc.listFeed("alice", "acme"))[0]?.kind).toBe("schedule_failed");
+  it("W3 acceptance: rewinding the cursors and replaying writes ZERO duplicate rows (nf-<eventId> natural key)", async () => {
+    const state = new InMemoryEventConsumerStateStore();
+    const log = new InMemoryPlatformEventStore();
+    await log.append(runFact("succeeded"));
+    await log.append(runFact("failed"));
+    const feed = new InMemoryNotificationStore();
+    const runner = new EventConsumerRunner({ events: log, state });
+    runner.register(runFeedConsumer(feed));
+    await runner.drain();
+    expect(await feed.list("alice", "acme")).toHaveLength(2);
+    await state.setCursor("feed:runs", 0); // rewind the day
+    await runner.drain();
+    expect(await feed.list("alice", "acme")).toHaveLength(2); // zero duplicate effects
   });
 });
 

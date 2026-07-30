@@ -37,24 +37,9 @@ export class NotificationService {
   }
 
   async notifyRun(tenant: string, record: RunRecord): Promise<void> {
-    // Feed (N2): only top-level runs with a known initiator — scorecard child runs are represented by the single batch entry (flood prevention).
-    if (
-      record.createdBy &&
-      !record.parentScorecardId &&
-      (record.status === "succeeded" || record.status === "failed")
-    ) {
-      await this.pushFeed({
-        workspace: tenant,
-        recipient: record.createdBy,
-        kind: record.status === "succeeded" ? "run_completed" : "run_failed",
-        title: `Run ${record.status === "succeeded" ? "completed" : "failed"} — ${record.harness.id}@${record.harness.version}`,
-        body: `case ${record.caseId}`,
-        link: { runId: record.id },
-      });
-      // The run.completed/failed FACT now rides the E0 outbox: the Run aggregate's terminal transition
-      // computes it and the store persists it atomically with the terminal write (run-service.finalize).
-      // This service keeps only the user-facing feed entry above + the Mattermost post below.
-    }
+    // The FEED moved to the event log (E1): the run.completed/failed fact carries exactly the old feed gate
+    // (initiator-only, children silent), and the feed:runs cursor consumer writes the bell row idempotently
+    // (nf-<eventId>). This path keeps only the Mattermost channel post below.
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
     await this.post(
       tenant,
@@ -75,25 +60,9 @@ export class NotificationService {
       origin?: { source?: string };
     },
   ): Promise<void> {
-    const scheduled = record.origin?.source === "schedule";
-    if (record.createdBy && (record.status === "succeeded" || record.status === "failed")) {
-      await this.pushFeed({
-        workspace: tenant,
-        recipient: record.createdBy,
-        kind: scheduled
-          ? record.status === "succeeded"
-            ? "schedule_completed"
-            : "schedule_failed"
-          : record.status === "succeeded"
-            ? "scorecard_completed"
-            : "scorecard_failed",
-        title: `${scheduled ? "Scheduled run" : "Scorecard"} ${record.status === "succeeded" ? "completed" : "failed"} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
-        link: { scorecardId: record.id },
-      });
-    }
-    // The scorecard.completed/failed platform event moved to the E0 outbox: ScorecardBatch.succeed/fail
-    // compute the fact (same createdBy gate, passRate pointer included) and the settle persists it
-    // atomically with the terminal write — this path keeps only the feed + Mattermost channels.
+    // The FEED moved to the event log (E1): the scorecard.completed/failed fact carries the old feed gate
+    // (createdBy-only) AND the schedule branding (payload.origin) — the feed:scorecards cursor consumer
+    // writes the bell row idempotently. This path keeps only the Mattermost channel post below.
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
     await this.post(
       tenant,

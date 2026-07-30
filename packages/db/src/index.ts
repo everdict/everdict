@@ -157,6 +157,7 @@ export { InMemoryNotificationStore, PgNotificationStore } from "./activity/notif
 export { InMemoryPlatformEventStore, PgPlatformEventStore } from "./activity/platform-event-store.js";
 export { InMemoryApprovalStore } from "./activity/approval-store.js";
 export { InMemoryEnvelopeStore, PgEnvelopeStore } from "./results/envelope-store.js";
+export { InMemoryEventConsumerStateStore, PgEventConsumerStateStore } from "./activity/event-consumer-store.js";
 export { PgApprovalStore } from "./activity/pg-approval-store.js";
 export { InMemoryCommentStore, PgCommentStore } from "./activity/comment-store.js";
 export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent-session-store.js";
