@@ -1,3 +1,4 @@
+import type { ExecChunk } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { LocalDriver } from "./local.js";
 
@@ -14,6 +15,51 @@ describe("LocalDriver", () => {
     } finally {
       await handle.dispose();
     }
+  });
+});
+
+describe("LocalDriver — execStream (incremental exec for live harness sessions)", () => {
+  it("is present on the handle and returns the same result contract as exec", async () => {
+    const compute = await new LocalDriver().provision({ os: "linux", needs: ["shell"] });
+    try {
+      expect(compute.execStream).toBeDefined();
+      const chunks: ExecChunk[] = [];
+      if (!compute.execStream) throw new Error("execStream missing");
+      const res = await compute.execStream("echo streamed && exit 5", (c) => chunks.push(c), { cwd: "work" });
+      expect(res.exitCode).toBe(5);
+      expect(res.stdout).toContain("streamed");
+      expect(chunks.map((c) => c.data).join("")).toContain("streamed");
+    } finally {
+      await compute.dispose();
+    }
+  });
+
+  it("delivers chunks while the command is still running (a live feed, not a replay at settle)", async () => {
+    const compute = await new LocalDriver().provision({ os: "linux", needs: [] });
+    try {
+      if (!compute.execStream) throw new Error("execStream missing");
+      let resolved = false;
+      let live = false;
+      const p = compute.execStream("echo tick; sleep 0.3", (c) => {
+        if (!resolved && c.data.includes("tick")) live = true;
+      });
+      const res = await p;
+      resolved = true;
+      expect(res.exitCode).toBe(0);
+      expect(live).toBe(true);
+    } finally {
+      await compute.dispose();
+    }
+  });
+
+  it("dispose() during a stream kills the in-flight child (cancellation tears the compute down)", async () => {
+    const compute = await new LocalDriver().provision({ os: "linux", needs: [] });
+    if (!compute.execStream) throw new Error("execStream missing");
+    const p = compute.execStream("echo started && sleep 30", () => {}, { timeoutSec: 60 });
+    await new Promise((r) => setTimeout(r, 300)); // let the child start
+    await compute.dispose();
+    const res = await p; // settles from the kill, not the 60s timeout
+    expect(res.stdout).toContain("started");
   });
 });
 

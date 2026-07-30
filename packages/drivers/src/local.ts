@@ -1,4 +1,4 @@
-import { exec, spawn } from "node:child_process";
+import { exec, type spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,10 +7,12 @@ import {
   type ComputeHandle,
   type ComputeSpec,
   type Driver,
+  type ExecChunk,
   type ExecOpts,
   type ExecResult,
   InternalError,
 } from "@everdict/contracts";
+import { chunkSinks, runSpawn, teeSinks } from "./spawn.js";
 
 const pexec = promisify(exec);
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -18,8 +20,9 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 // A dev Driver that runs on the local host (temp directory + child_process).
 // Isolation is weak (shared host) — for dev/test and inside the agent. Real isolation is the Backend's job (Nomad/K8s/Windows).
 class LocalComputeHandle implements ComputeHandle {
-  // The in-flight echo child (if any) — kept so dispose() can kill it: a cancelled run disposes the compute, and a
-  // host-native child would otherwise linger orphaned (unlike the container path where docker rm -f ends everything).
+  // The in-flight spawned child (echo tee or execStream, if any) — kept so dispose() can kill it: a cancelled run
+  // disposes the compute, and a host-native child would otherwise linger orphaned (unlike the container path where
+  // docker rm -f ends everything).
   private activeChild: ReturnType<typeof spawn> | undefined;
 
   constructor(
@@ -37,8 +40,16 @@ class LocalComputeHandle implements ComputeHandle {
       // job log then carries the harness's output AS IT RUNS, which is what the live log tail reads
       // (Backend.logs). The quiet path stays on the battle-tested buffered exec.
       if (this.echo)
-        return await execEcho(cmd, cwd, { ...process.env, ...opts?.env }, (opts?.timeoutSec ?? 600) * 1000, (child) => {
-          this.activeChild = child;
+        return await runSpawn(cmd, {
+          cwd,
+          env: { ...process.env, ...opts?.env },
+          detached: true,
+          timeoutMs: (opts?.timeoutSec ?? 600) * 1000,
+          timeoutNote: `[everdict] exec timed out after ${Math.round(opts?.timeoutSec ?? 600)}s`,
+          sinks: teeSinks(),
+          register: (child) => {
+            this.activeChild = child;
+          },
         });
       const { stdout, stderr } = await pexec(cmd, {
         cwd,
@@ -55,6 +66,25 @@ class LocalComputeHandle implements ComputeHandle {
       }
       throw new InternalError("COMPUTE_EXEC_FAILED", { cmd }, e.message);
     }
+  }
+
+  // Streaming exec (ComputeHandle.execStream): same result contract as exec, chunks delivered as they
+  // arrive. Rides the shared spawn core (detached group + close-first settle), so dispose() during a
+  // stream kills the child exactly like the echo path.
+  async execStream(cmd: string, onChunk: (chunk: ExecChunk) => void, opts?: ExecOpts): Promise<ExecResult> {
+    const cwd = opts?.cwd ? join(this.root, opts.cwd) : this.root;
+    await mkdir(cwd, { recursive: true });
+    return runSpawn(cmd, {
+      cwd,
+      env: { ...process.env, ...opts?.env },
+      detached: true,
+      timeoutMs: (opts?.timeoutSec ?? 600) * 1000,
+      timeoutNote: `[everdict] exec timed out after ${Math.round(opts?.timeoutSec ?? 600)}s`,
+      sinks: this.echo ? teeSinks(onChunk) : chunkSinks(onChunk),
+      register: (child) => {
+        this.activeChild = child;
+      },
+    });
   }
 
   async writeFile(path: string, data: string): Promise<void> {
@@ -82,70 +112,6 @@ class LocalComputeHandle implements ComputeHandle {
     }
     await rm(this.root, { recursive: true, force: true });
   }
-}
-
-// Buffered + teed spawn — same result contract as the pexec path (non-zero exit resolves, never throws).
-// On timeout the child is killed and the captured output is returned with exit 124 (GNU-timeout convention).
-function execEcho(
-  cmd: string,
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-  timeoutMs: number,
-  register?: (child: ReturnType<typeof spawn>) => void,
-): Promise<ExecResult> {
-  return new Promise((resolve) => {
-    // detached → own process group, so a timeout kill reaches the shell's children too (a lingering child
-    // like `sleep` also holds the stdio pipes open — which is why settlement is on 'exit', not 'close').
-    const child = spawn(cmd, { cwd, env, shell: true, detached: true });
-    register?.(child); // hand the child to the handle so dispose() can kill it on cancellation
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    let settled = false;
-    let exitGrace: ReturnType<typeof setTimeout> | undefined;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      if (child.pid !== undefined) {
-        try {
-          process.kill(-child.pid, "SIGKILL"); // the whole group
-        } catch {
-          child.kill("SIGKILL");
-        }
-      }
-    }, timeoutMs);
-    child.stdout.on("data", (d: Buffer) => {
-      if (stdout.length < MAX_BUFFER) stdout += String(d);
-      process.stdout.write(d);
-    });
-    child.stderr.on("data", (d: Buffer) => {
-      if (stderr.length < MAX_BUFFER) stderr += String(d);
-      process.stderr.write(d);
-    });
-    const settle = (exitCode: number): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (exitGrace) clearTimeout(exitGrace);
-      resolve({
-        exitCode,
-        stdout,
-        stderr: timedOut ? `${stderr}\n[everdict] exec timed out after ${Math.round(timeoutMs / 1000)}s` : stderr,
-      });
-    };
-    child.on("error", () => settle(127));
-    // Settle on 'close' — it fires after 'exit' AND all stdio has flushed, so the full stdout is captured. Settling
-    // on 'exit' directly races the final stdout 'data' event: a fast command (e.g. `echo`) can fire 'exit' before its
-    // output is delivered, dropping stdout — under concurrency that surfaced as an EMPTY harness trace for ~1 case.
-    child.on("close", (code) => settle(timedOut ? 124 : (code ?? 1)));
-    // 'exit' fallback: a DETACHED grandchild (e.g. `sleep &`) can inherit the stdio pipes and hold them open so
-    // 'close' never fires — the original reason this settled on 'exit'. Arm a short grace after exit: 'close'
-    // normally wins with complete output; if a lingering pipe-holder blocks it, force-settle with what's buffered
-    // (no hang), without the lost-output race of settling on 'exit' immediately.
-    child.on("exit", (code) => {
-      if (settled) return;
-      exitGrace = setTimeout(() => settle(timedOut ? 124 : (code ?? 1)), 250);
-    });
-  });
 }
 
 export interface LocalDriverOptions {

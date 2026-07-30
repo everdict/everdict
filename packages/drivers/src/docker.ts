@@ -8,12 +8,14 @@ import {
   type ComputeHandle,
   type ComputeSpec,
   type Driver,
+  type ExecChunk,
   type ExecOpts,
   type ExecResult,
   InternalError,
   type RegistryAuth,
 } from "@everdict/contracts";
 import { dockerAuthConfigJson, pickRegistryAuth } from "@everdict/domain";
+import { chunkSinks, runSpawn, teeSinks } from "./spawn.js";
 
 const pexecFile = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -40,14 +42,25 @@ class DockerComputeHandle implements ComputeHandle {
     return p.startsWith("/") ? p : `${this.base}/${p}`;
   }
 
-  async exec(cmd: string, opts?: ExecOpts): Promise<ExecResult> {
+  private execArgs(cmd: string, opts?: ExecOpts): string[] {
     const args = ["exec", "-w", opts?.cwd ? this.resolve(opts.cwd) : this.base];
     for (const [k, v] of Object.entries(opts?.env ?? {})) args.push("-e", `${k}=${v}`);
     args.push(this.cid, "sh", "-c", cmd);
+    return args;
+  }
+
+  async exec(cmd: string, opts?: ExecOpts): Promise<ExecResult> {
+    const args = this.execArgs(cmd, opts);
     // echo mode (in-job): TEE the container command's output to this process's stdio while buffering — so the
     // orchestrator job log carries a case.image harness's output AS IT RUNS (the live log tail reads it), the
     // same contract as LocalDriver({echo}). The quiet path stays on the battle-tested buffered execFile.
-    if (this.echo) return execEchoDocker(args, (opts?.timeoutSec ?? 600) * 1000, cmd);
+    if (this.echo)
+      return runSpawn("docker", {
+        args,
+        timeoutMs: (opts?.timeoutSec ?? 600) * 1000,
+        timeoutNote: `[everdict] docker exec timed out (${cmd.slice(0, 40)}…)`,
+        sinks: teeSinks(),
+      });
     try {
       const { stdout, stderr } = await pexecFile("docker", args, {
         timeout: (opts?.timeoutSec ?? 600) * 1000,
@@ -62,6 +75,17 @@ class DockerComputeHandle implements ComputeHandle {
       }
       throw new InternalError("COMPUTE_EXEC_FAILED", { cmd }, e.message);
     }
+  }
+
+  // Streaming exec (ComputeHandle.execStream): same result contract as exec, chunks delivered as they
+  // arrive over the shared spawn core. Echo mode additionally tees to this process's stdio.
+  async execStream(cmd: string, onChunk: (chunk: ExecChunk) => void, opts?: ExecOpts): Promise<ExecResult> {
+    return runSpawn("docker", {
+      args: this.execArgs(cmd, opts),
+      timeoutMs: (opts?.timeoutSec ?? 600) * 1000,
+      timeoutNote: `[everdict] docker exec timed out (${cmd.slice(0, 40)}…)`,
+      sinks: this.echo ? teeSinks(onChunk) : chunkSinks(onChunk),
+    });
   }
 
   // Write a file inside the container — passed via stdin (safe for arbitrary size/escaping). Creates the parent directory.
@@ -120,41 +144,6 @@ export async function pullWithRegistryAuth(image: string, auth: RegistryAuth): P
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
-}
-
-// Buffered + teed `docker exec` — same result contract as the pexecFile path (a non-zero container exit
-// resolves, never throws). On timeout the docker exec child is killed and exit 124 is returned (GNU convention).
-function execEchoDocker(args: string[], timeoutMs: number, cmd: string): Promise<ExecResult> {
-  return new Promise((resolve) => {
-    const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs);
-    child.stdout.on("data", (d: Buffer) => {
-      if (stdout.length < MAX_BUFFER) stdout += String(d);
-      process.stdout.write(d);
-    });
-    child.stderr.on("data", (d: Buffer) => {
-      if (stderr.length < MAX_BUFFER) stderr += String(d);
-      process.stderr.write(d);
-    });
-    child.on("error", (e) => {
-      clearTimeout(timer);
-      resolve({ exitCode: 1, stdout, stderr: stderr + String(e) });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({
-        exitCode: timedOut ? 124 : (code ?? 1),
-        stdout,
-        stderr: timedOut ? `${stderr}\n[everdict] docker exec timed out (${cmd.slice(0, 40)}…)` : stderr,
-      });
-    });
-  });
 }
 
 // A Driver that launches a container from an env image. Isolation is docker (the container) — for local/simple execution, separate from the strong isolation of a Backend (Nomad/K8s).
