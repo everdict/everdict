@@ -953,6 +953,60 @@ describe("runAgentLoop", () => {
     expect(toolMsg?.content).toContain("scorecard.regressed");
   });
 
+  it("ends the run with the value submitted via structured_output (outputSchema)", async () => {
+    const { transport } = fakeTransport([toolCallResult("s1", "structured_output", '{"verdict":"pass","score":0.9}')]);
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      outputSchema: {
+        type: "object",
+        properties: { verdict: { type: "string" }, score: { type: "number" } },
+        required: ["verdict"],
+      },
+    });
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.structuredOutput).toEqual({ verdict: "pass", score: 0.9 });
+    // The submission is a normal tool exchange — the transcript stays balanced.
+    expect(result.toolCalls).toEqual([{ name: "structured_output", ok: true }]);
+  });
+
+  it("nudges ONCE when the model finishes without submitting structured output, then accepts", async () => {
+    const { transport, requests } = fakeTransport([
+      textResult("here is my answer in prose"), // finishes without submitting → nudged
+      toolCallResult("s1", "structured_output", '{"verdict":"fail"}'),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      outputSchema: { type: "object", properties: { verdict: { type: "string" } } },
+    });
+    expect(result.structuredOutput).toEqual({ verdict: "fail" });
+    // The second call saw the nudge as a user turn.
+    const secondMessages = requests[1]?.messages ?? [];
+    const last = secondMessages[secondMessages.length - 1] as { role: string; content: string };
+    expect(last.role).toBe("user");
+    expect(last.content).toContain("structured_output");
+  });
+
+  it("a run without outputSchema has no structured_output tool and no structuredOutput", async () => {
+    const { transport, requests } = fakeTransport([textResult("done")]);
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+    });
+    expect(result.structuredOutput).toBeUndefined();
+    expect((requests[0]?.tools ?? []).map((t) => t.name)).not.toContain("structured_output");
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({

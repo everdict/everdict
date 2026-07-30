@@ -78,6 +78,12 @@ export interface AgentLoopOptions {
   persistentRetry?: boolean;
   // Output-token cap per model call (the provider's max_tokens). Absent → the transport's default.
   outputTokens?: number;
+  // Structured output (Claude Code's --json-schema StructuredOutput tool, reinterpreted for programmatic hosts —
+  // activations, reactions, evals): when set, the loop registers a `structured_output` tool whose parameters ARE
+  // this JSON Schema; the model submits its final result through it and the run ends with the value on
+  // AgentLoopResult.structuredOutput. A run that tries to finish without submitting is nudged ONCE, then accepted
+  // (the host can treat a missing value as a soft failure).
+  outputSchema?: Record<string, unknown>;
   // Resilience: a cheaper/alternate model to fall back to when the primary keeps failing transiently (sustained
   // 429/overloaded) even after retries. Switched to for the rest of the run; a fallback is both a cost tier and an SLA.
   fallback?: { transport: LlmTransport; model: string };
@@ -149,6 +155,9 @@ export interface AgentLoopResult {
   // The new messages produced this run (assistant + tool turns) for persistence; excludes the input history.
   produced: ChatMessage[];
   toolCalls: { name: string; ok: boolean }[];
+  // The value the model submitted via the structured_output tool (only with opts.outputSchema; absent when the
+  // model never submitted — the nudge is best-effort, not a hard guarantee).
+  structuredOutput?: unknown;
 }
 
 // A high safety cap, not a task budget — the token budget (+ compaction) is the primary limiter for long tasks. 12
@@ -470,6 +479,27 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         }),
       ]
     : [];
+  // Structured output: the submission tool + its state. isReadOnly — it mutates nothing and must not be parked
+  // behind the permission gate or plan mode. TURN registry only: sub-agents (built from opts.registry) never see it.
+  let structuredOutput: unknown;
+  let hasStructuredOutput = false;
+  let structuredNudged = false;
+  const structuredTools: ToolDefinition[] = opts.outputSchema
+    ? [
+        {
+          name: "structured_output",
+          description:
+            "Submit your FINAL result as a structured object matching the required schema. Call this exactly once, when the task is complete — it ends the run.",
+          parametersJsonSchema: opts.outputSchema,
+          isReadOnly: true,
+          call: async (input) => {
+            structuredOutput = input;
+            hasStructuredOutput = true;
+            return { content: "Structured output recorded.", isError: false };
+          },
+        },
+      ]
+    : [];
   const registry = new ToolRegistry([
     ...opts.registry.list(),
     buildTodoTool((t) => {
@@ -478,6 +508,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     buildReadResultTool(resultStore),
     ...spawnTools,
     ...planTools,
+    ...structuredTools,
   ]);
   let finalText = "";
   let compactionCount = 0;
@@ -498,6 +529,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       tokensConsumed: budget.consumed,
       produced,
       toolCalls,
+      ...(hasStructuredOutput ? { structuredOutput } : {}),
     };
   };
 
@@ -682,6 +714,20 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         await Promise.all(backgroundTasks);
         if (await injectBackgroundResults()) continue;
       }
+      // Structured output was required but never submitted — nudge ONCE, then accept the plain finish (the host
+      // treats a missing structuredOutput as its own soft failure).
+      if (opts.outputSchema && !hasStructuredOutput && !structuredNudged) {
+        structuredNudged = true;
+        const nudge: ChatMessage = {
+          role: "user",
+          content:
+            "You have not submitted your final result. Call the structured_output tool now with an object matching the required schema.",
+        };
+        messages = [...messages, nudge];
+        produced.push(nudge);
+        await opts.onMessage?.(nudge);
+        continue;
+      }
       return finish("end_turn", turn);
     }
 
@@ -758,6 +804,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       emit({ type: "tool_result", name: tc.name, isError: output.isError });
       await opts.onMessage?.(toolMessage);
     }
+
+    // The model submitted its structured result — the run is complete (every tool_call above is answered, so the
+    // transcript ends balanced). Still-running background sub-agents are abandoned: the submission is final.
+    if (hasStructuredOutput) return finish("end_turn", turn);
 
     // Multimodal tool results: after ALL tool_calls are answered (pairing intact), surface any images the tools
     // returned in ONE follow-up user turn so the model can actually SEE them (chat.completions image_url content).
