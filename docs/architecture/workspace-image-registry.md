@@ -1,5 +1,14 @@
 # Workspace-scoped image registry — classify + publish harness images
 
+> **Scope note (post-M6/M7):** this is now the **BYO adapter chapter** — registries the workspace hosts
+> ELSEWHERE (GHCR, Harbor, a generic v2) and tells us about. Everdict also runs a registry of its own, where
+> we store the bytes and mint the pull grants; that one is `docs/architecture/managed-image-store.md`, and it
+> owns Settings › Images, `GET /v2/token`, and the `managed` class. Read this file for the "a registry you
+> told us about" half: registration, credential resolution, `classifyImageRef`'s `workspace`/`external`/
+> `local`/`unqualified` classes, and `verifyImage` — which stays HTTP here precisely because a registry we do
+> not operate can only be answered by asking it. Everything below predates the managed store and remains true
+> of the BYO path.
+
 > **Status:** ALL SLICES SHIPPED + LIVE-VERIFIED — S1 registration+classification `bd979a4` ·
 > S2 `everdict image push` `921f93a` · S3 web `79ad895` · S4 pull auth at dispatch `9d14595`.
 > Live e2e `scripts/live/image-registry-push-pull.mjs` (local authenticated `registry:2`):

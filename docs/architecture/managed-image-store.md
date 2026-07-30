@@ -149,7 +149,7 @@ grant at an arbitrary repository in someone else's namespace is not a request we
 | Surface | What |
 | --- | --- |
 | HTTP (`apps/api` `api/images/`) | `GET /workspace/images` (repositories + usage) · `GET /workspace/images/:repo/tags` · `POST /workspace/images/push-grant` (`images:push`) · `DELETE /workspace/images/:repo` · `GET /v2/token` (the registry's auth realm — unauthenticated by Fastify's normal chain, it authenticates the docker client's basic credentials itself) |
-| MCP (parity) | `list_workspace_images` · `list_image_tags` (managed-aware) · `inspect_image` · `push_image_grant` |
+| MCP (parity) | `list_workspace_images` · `list_managed_image_tags` · `inspect_managed_image` · `push_image_grant` · `remove_workspace_image`. **Managed-specific names, not a managed-aware overload of the BYO `list_image_tags`/`inspect_image`**: the two read different stores ("ours, we mint the grant" vs "a registry you told us about"), a tool name is unique across the server, and a single tool would have had to guess between them from a bare repository name. Distinct names let each description say which store it reads. |
 | CLI | `everdict image push <ref>` mints a push grant instead of push credentials; `--register-environment <id>` registers with the registry-reported digest in the same call |
 | Web | Settings › Images — managed repositories (tags, size, last push, delete) as the primary panel, BYO registries demoted to a secondary "external registries" section |
 | Agent | unchanged tool names; the system prompt's authoring recipe loses the "register a registry first" precondition |
@@ -182,6 +182,21 @@ grant at an arbitrary repository in someone else's namespace is not a request we
     it by failing that way first. Same class of setting as `CONTROL_PLANE_WS_URL`, and the reason
     `IMAGE_STORE_ENDPOINT`/`IMAGE_STORE_REALM` are surfaced in `full.sh`'s output with a warning
     instead of buried in compose.
+  - **The S3 redirect is followed by the docker CLIENT too** — the same trap one layer down, and it bites
+    only after the token exchange has already succeeded, so it reads as a storage fault rather than a
+    reachability one. distribution answers a blob with a 307 to a presigned URL, and the only address it
+    can build is `http://minio:9000`, which resolves on the compose network and nowhere else; a push dies
+    with `lookup minio: no such host`. `REGISTRY_STORAGE_REDIRECT_DISABLE` makes the registry proxy the
+    bytes instead. Proxying costs it the blob traffic; a redirect no outside client can follow costs it
+    every push.
+  - **The blob bucket is not created for us.** Our own S3 users (workspace filesystem, artifact offload)
+    create their buckets lazily in code; distribution is a third-party container that cannot, and reports
+    the miss as a 500 on first push. The `registry-bucket` one-shot in the compose profile seeds it with
+    `mc mb --ignore-existing`, and the registry gates on it with `service_completed_successfully`.
+  - **`./certs` is mounted by the api on every profile**, so the directory has to exist before compose
+    runs at all — a bind mount with a missing source is created by the docker DAEMON, i.e. owned by root,
+    and `full.sh` can then never write the key pair into it. `full.sh` therefore creates it unconditionally
+    as the invoking user, and refuses with a `chown` instruction when it finds one it cannot write.
   - The exchange logic lives in `@everdict/images` (`ImageTokenService`), not in `apps/api/core`:
     nothing in it knows about HTTP frameworks, and keeping it beside the issuer is what lets the live
     check exercise the real code path instead of a re-implementation of it.
@@ -206,11 +221,39 @@ grant at an arbitrary repository in someone else's namespace is not a request we
   what it sent; the docker `RepoDigests` scrape stays as the BYO path's only option. **Verified live** —
   the live script's step 6 publishes through the CLI's own `pushImage` against the real registry, so the
   code path under test is the shipped one.
-- **M6 — cross-tenant pull.** Scope authorization over `canConsumeCapability`; `adopt` verification
-  becomes a policy answer for managed refs and keeps the HTTP check for BYO refs.
-- **M7 — web.** Settings › Images; BYO demoted; managed badges in the harness/environment surfaces.
-- **M8 — docs + skills.** Rewrite `workspace-image-registry.md` as the BYO adapter chapter, close the
-  `environment-image-store.md` non-goal, update the plugin skill + agent system prompt recipe.
+- **M6 — cross-tenant pull.** ✅ Reach is injected into the store, not decided by it: `ManagedImageStore` takes a
+  `crossTenantPull(tenant, ref)` predicate and authorizes a scope outside the caller's namespace only when that
+  predicate says yes. The predicate is `adoptedImageReach` (application-control), which answers from the consumer's
+  **adopted-environment inventory** — `EnvironmentAdoptionService.list` recomputes `available` through
+  `canConsumeCapability` on every read, so revoked reach stops authorizing pulls with nothing to invalidate here.
+  That inventory IS the design's "a ref a consumable capability declares"; an arbitrary repository in someone
+  else's namespace stays unrequestable. Matching is by host+repository, so a digest pull of an adopted tag still
+  reaches. No policy wired (BYO-only deployments, tests) → the pre-M6 omission, unchanged.
+  - **The reach question carries no subject.** `canConsumeCapability` wants `{tenant, subject}`, but the only tiers
+    that cross a workspace boundary are `public` and `subset`, and neither reads `createdBy` — so cross-tenant
+    reach is a property of the WORKSPACE and a placeholder subject cannot widen it. That is what lets this run on
+    the pull path, where only the tenant is known, instead of threading a subject through dispatch.
+  - **`adopt`/`reverify` verification is a policy answer for managed refs** (`EnvironmentAdoptionService.verify`):
+    a ref under our own endpoint is `pullable: true` because we only got there having resolved a consumable
+    capability, and the grant that authorizes the real pull is minted from that same fact. The HTTP probe would ask
+    the registry anonymously, be told 401, and report `auth` for an image the workspace can demonstrably pull. BYO
+    refs keep the HTTP check — it is the only thing that can answer them.
+  - **The composition has a real cycle**: the store needs reach, and reach needs the store's coordinates to
+    classify an image. `main.ts` binds the predicate through a holder AFTER the adoption service exists; until then
+    it denies, which is the same answer as running without M6.
+- **M7 — web.** ✅ Settings › Images (`/[workspace]/settings/images`) lists the workspace's managed repositories
+  with the endpoint/namespace their refs are built from, expands a row to resolve its tags on demand, and retracts
+  one with `images:push` (added to the web's `WebAction` mirror). A deployment with no managed store answers 404 on
+  the route, and the panel says "not configured" rather than showing an empty list — nothing published and no store
+  are different states. BYO is reframed as "external image registries" in Settings › Integrations, pointing here.
+  The environment workbench now badges a `managed` image; `external` deliberately stays unbadged, since it is the
+  default and badging it would bury the distinction that matters.
+- **M8 — docs + skills.** ✅ `workspace-image-registry.md` opens with a scope note making it the BYO adapter
+  chapter (and says why `verifyImage` stays HTTP there); `environment-image-store.md`'s "hosting images"
+  non-goal is struck through and closed, leaving only "building"; the plugin skill's tool reference gains the
+  managed family and frames the two stores; the agent system prompt's authoring recipe checks
+  `list_workspace_images` FIRST and only falls back to "an admin must register a registry" when no managed
+  store is present.
 
 ## Non-goals
 

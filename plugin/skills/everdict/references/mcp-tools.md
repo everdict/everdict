@@ -72,12 +72,20 @@ for parameterized / service-topology harnesses.
 | `ingest_scorecard` | member | upload externally-run `TraceEvent[]` → scorecard (no harness run; **push**). |
 | `pull_scorecard` | member | pull traces from OTel/MLflow/Langfuse/LangSmith/Phoenix (`source` + `runs:[{caseId,runId}]`, `authSecret`) → scorecard (**pull**). |
 
-## Environments & the image registry (bring your own eval image)
+## Environments & image stores (bring your own eval image)
 
 An **environment** is a capability (`spec.type: "environment"`) that gives an image ref an identity —
-what is baked in, how to wire it (`preset`), how to use it (`instructions`), who published it. The
-bytes live in the workspace's **own** registry (BYO: GHCR, Harbor, a plain `registry:2`, …);
-`everdict image push` is the publish path (see workflows §7). Everdict never builds or hosts images.
+what is baked in, how to wire it (`preset`), how to use it (`instructions`), who published it.
+Everdict never BUILDS images; the bytes come from the author's own `docker build`, and
+`everdict image push` is the publish path (see workflows §7).
+
+Where the bytes land depends on the deployment, and there are two stores:
+
+- **Managed** — everdict's own registry, one namespace per workspace. `list_workspace_images` reports the
+  namespace prefix; pulls (including a consumer's, after they adopt the environment) are authorized by
+  short-lived grants everdict mints, so nobody exchanges credentials. Prefer it when it is available.
+- **BYO** — a registry the workspace hosts elsewhere and registers with us. Used when the deployment runs
+  no managed store, or when the image must live somewhere specific.
 
 | Tool | Role | Effect |
 |---|---|---|
@@ -91,7 +99,12 @@ bytes live in the workspace's **own** registry (BYO: GHCR, Harbor, a plain `regi
 | `set_workspace_image_registry` | admin | register/update one by name (put the token in the SecretStore first). |
 | `probe_workspace_image_registry` | admin | test a registry connection before registering it. Nothing is stored. |
 | `get_image_push_credentials` | member | mint one-shot push credentials. `everdict image push` calls this for you — doing it by hand means you own keeping the value out of shell history and `~/.docker/config.json`. |
-| `list_image_tags` | viewer | a repository's tags in a workspace registry. |
+| `list_image_tags` | viewer | a repository's tags in a BYO workspace registry. |
+| `list_workspace_images` | viewer | the workspace's repositories in the MANAGED store + the endpoint/namespace refs are built from. Absent → this deployment runs no managed store. |
+| `list_managed_image_tags` | viewer | tags of one repository in the managed namespace (the managed twin of `list_image_tags`). |
+| `inspect_managed_image` | viewer | a managed manifest by tag or digest → the digest the REGISTRY stored. Digest-pin with this, not the local daemon's record. |
+| `push_image_grant` | member | mint a grant to push one repository into the managed namespace. `everdict image push` calls it for you. |
+| `remove_workspace_image` | member | unpublish a managed repository → how many manifests were unlinked. |
 | `verify_image` | viewer | can THIS workspace pull a full ref? → `{pullable, reason, digest?}`. A failure is a result, not an error. Run it before registering an environment and pin the digest it returns. |
 | `inspect_image` | viewer | a manifest by tag or digest → digest + platforms. Use it to **digest-pin** an environment. |
 | `adopt_environment` / `list_adopted_environments` | member | bring a published environment into this workspace's inventory. |

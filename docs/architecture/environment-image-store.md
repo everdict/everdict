@@ -244,10 +244,15 @@ Reused verbatim: `capabilities:read` (browse/resolve), `capabilities:write` (pub
 
 ## Non-goals
 
-- **Building or hosting images** — unchanged from `workspace-image-registry.md`: Everdict references
-  images; `everdict image push` remains the publish path for bytes (its `--register-environment <id>`
-  flag registers the pushed ref as an environment in the same step — the *bytes* still come from the
-  author's own `docker build`).
+- **Building images** — Everdict never runs `docker build`; the bytes come from the author's own build.
+  `everdict image push` remains the publish path (its `--register-environment <id>` flag registers the pushed
+  ref as an environment in the same step).
+  - ~~**Hosting images**~~ — **CLOSED by `docs/architecture/managed-image-store.md`.** This file was written
+    when every environment image had to live in a registry the workspace ran itself, which made "adopt a
+    published environment" mean "and also go get pull access to a stranger's registry". Everdict now hosts a
+    registry of its own: a published environment's image can live in the publisher's managed namespace, and a
+    consumer that adopts it gets a short-lived pull grant we mint (M6) instead of a credential exchange we
+    cannot broker. Hosting is no longer a non-goal — only building is.
 - **Rewriting refs at dispatch** — specs keep verbatim strings; the store informs authoring only.
 - **Cross-tenant pull-credential brokering** — later option (see above).
 - **Multi-service environment bundles** — that is a harness template; one environment = one image.
