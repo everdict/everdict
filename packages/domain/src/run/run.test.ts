@@ -125,6 +125,69 @@ describe("Run — the run lifecycle domain model", () => {
   });
 });
 
+describe("Run — playground session cases (a test case inside a live harness session)", () => {
+  const sessionCase = () =>
+    Run.newSessionCase({
+      id: "run-c1",
+      tenant: "acme",
+      harness: { id: "claude-code", version: "2.1.0" },
+      sessionRunId: "sess-run-9",
+      caseId: "task-1",
+      task: "add a README",
+      timeoutSec: 600,
+      createdBy: "user-1",
+      now: "2026-07-31T00:00:00.000Z",
+    });
+
+  it("stamps the universal-run shape: eval/interactive/task, grouped to the session, driver-placed, born running", () => {
+    const record = sessionCase();
+    expect(record).toMatchObject({
+      status: "running",
+      kind: "eval",
+      class: "interactive",
+      lifetime: "task",
+      trigger: "playground",
+      harness: { id: "claude-code", version: "2.1.0" },
+      caseId: "task-1",
+      group: { id: "sess-run-9", role: "case" },
+      placement: { where: "driver", isolation: "container" },
+      origin: { cause: "member", actor: "user-1" },
+    });
+    // The persisted case is the prompt shape — what was asked, never any secret value.
+    expect(record.caseSpec).toEqual({
+      id: "task-1",
+      env: { kind: "prompt" },
+      task: "add a README",
+      graders: [],
+      timeoutSec: 600,
+      tags: [],
+    });
+  });
+
+  it("announces run.submitted at creation (no parent scorecard — the standalone fact gate)", () => {
+    const facts = Run.creationFacts(sessionCase());
+    expect(facts.map((f) => f.kind)).toEqual(["run.submitted"]);
+    expect(facts[0]?.recipient).toBe("user-1");
+  });
+
+  it("a driver-placed run is NEVER re-dispatched by boot recovery, even with a persisted caseSpec", () => {
+    // Regression guard: recovery ② re-drives every active standalone run with a caseSpec through the
+    // BACKEND lane — a playground case's compute was this process's own container, so re-dispatching its
+    // prompt case to a backend would be wrong twice (no such job, and a duplicate run). Tombstone instead.
+    expect(Run.from(sessionCase()).canRedispatch()).toBe(false);
+    expect(() => Run.from(sessionCase()).redispatch("t")).toThrow(ConflictError);
+  });
+
+  it("settles through the standard terminal transitions with facts (succeed/fail)", () => {
+    const done = Run.from(sessionCase()).succeed(RESULT, "t1");
+    expect(done.patch.status).toBe("succeeded");
+    expect(done.facts.map((f) => f.kind)).toEqual(["run.completed"]);
+    const failed = Run.from(sessionCase()).fail({ code: "CANCELLED", message: "session closed" }, "t2");
+    expect(failed.patch.status).toBe("failed");
+    expect(failed.facts.map((f) => f.kind)).toEqual(["run.failed"]);
+  });
+});
+
 describe("Run — agent activations on the ledger (P3)", () => {
   const agentRun = () =>
     Run.newAgentRun({

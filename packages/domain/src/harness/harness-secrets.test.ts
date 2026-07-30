@@ -1,7 +1,7 @@
 import { BadRequestError } from "@everdict/contracts";
 import { CommandHarnessSpecSchema, ServiceHarnessSpecSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { flattenEnv, referencesUserSecret, resolveHarnessSecrets } from "./harness-secrets.js";
+import { flattenEnv, harnessAuthEnv, referencesUserSecret, resolveHarnessSecrets } from "./harness-secrets.js";
 
 describe("flattenEnv", () => {
   it("passes literals through and resolves refs from lookup", () => {
@@ -140,5 +140,19 @@ describe("referencesUserSecret", () => {
       env: { A: "lit", K: { secretRef: "K" }, W: { secretRef: "W", scope: "workspace" } },
     });
     expect(referencesUserSecret(spec)).toBe(false);
+  });
+});
+
+describe("harnessAuthEnv", () => {
+  it("picks only the auth-env vocabulary from the tiers, workspace first with user fallback", () => {
+    const env = harnessAuthEnv({
+      workspace: { ANTHROPIC_API_KEY: "ws-key", UNRELATED_SECRET: "nope" },
+      user: { ANTHROPIC_API_KEY: "user-key", OPENAI_API_KEY: "user-openai" },
+    });
+    expect(env).toEqual({ ANTHROPIC_API_KEY: "ws-key", OPENAI_API_KEY: "user-openai" });
+  });
+
+  it("is empty when neither tier carries an auth var (the container will run loginless and fail honestly)", () => {
+    expect(harnessAuthEnv({ workspace: { OTHER: "x" } })).toEqual({});
   });
 });

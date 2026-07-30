@@ -171,6 +171,49 @@ export class Run {
     };
   }
 
+  // A test case submitted into a live harness session (the playground): its own ledger run, grouped to the
+  // session the way agent turns group to their conversation (role "case"). Born RUNNING — the warm container
+  // starts the work synchronously, there is no queued phase (provision happened at session create). The
+  // HARNESS column names the real harness under test; caseSpec persists the prompt case so the run detail
+  // shows what was asked (never any secret — the auth env lives only in the session process).
+  static newSessionCase(input: {
+    id: string;
+    tenant: string;
+    harness: { id: string; version: string };
+    sessionRunId: string;
+    caseId: string; // "task-<n>" within the session
+    task: string;
+    timeoutSec: number;
+    createdBy: string;
+    now: string;
+  }): RunRecord {
+    return {
+      id: input.id,
+      tenant: input.tenant,
+      harness: input.harness,
+      caseId: input.caseId,
+      status: "running",
+      trigger: "playground", // the activity view's legacy source axis (dual-stamped, like eval runs)
+      createdBy: input.createdBy,
+      caseSpec: {
+        id: input.caseId,
+        env: { kind: "prompt" },
+        task: input.task,
+        graders: [],
+        timeoutSec: input.timeoutSec,
+        tags: [],
+      },
+      kind: "eval",
+      class: "interactive", // a person is at the composer, watching
+      lifetime: "task",
+      origin: { cause: "member", actor: input.createdBy },
+      group: { id: input.sessionRunId, role: "case" },
+      placement: { where: "driver", isolation: "container" },
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+  }
+
   // Close a session run (member close, TTL expiry, or orphan adoption by the reaper). A session ending is
   // its NORMAL completion — expiry included — so every reason settles as succeeded; the reason is stamped
   // on `session.closedReason` for the console. First terminal write wins (close vs expiry race).
@@ -234,9 +277,11 @@ export class Run {
     return !this.isTerminal();
   }
 
-  // Boot recovery may re-drive only runs that persisted their case body (legacy records keep the tombstone path).
+  // Boot recovery may re-drive only runs that persisted their case body (legacy records keep the tombstone
+  // path). A driver-placed run (a playground session case) has NO backend to re-dispatch to — its compute
+  // was this process's docker container; recovery must tombstone it, never send a prompt case to a backend.
   canRedispatch(): boolean {
-    return !this.isTerminal() && this.record.caseSpec !== undefined;
+    return !this.isTerminal() && this.record.caseSpec !== undefined && this.record.placement?.where !== "driver";
   }
 
   // queued → running — compute actually began (managed: the backend dispatched it; self-hosted: a runner leased it).

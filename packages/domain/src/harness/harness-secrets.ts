@@ -1,4 +1,4 @@
-import { BadRequestError, type EnvValue, type HarnessSpec } from "@everdict/contracts";
+import { BadRequestError, type EnvValue, HARNESS_AUTH_ENV_VARS, type HarnessSpec } from "@everdict/contracts";
 
 // Harness secret-resolution semantics — the {secretRef} env vocabulary is defined by the HarnessSpec
 // shape (@everdict/contracts); the resolution/visibility rules live here (single owner).
@@ -76,6 +76,20 @@ export function resolveHarnessSecrets(spec: HarnessSpec, secrets: HarnessSecretM
     );
   }
   return next;
+}
+
+// Pick the harness model-auth env vars (the HARNESS_AUTH_ENV_VARS vocabulary) from the tenant's secret
+// tiers — workspace value first, the submitter's personal secret as fallback. This is the backend
+// secret-injection discipline applied to the driver lane: a fresh session container has no machine login,
+// so `claude` (or any CLI agent) auths from these values via RunContext.apiKeyEnv. Values stay in process
+// memory — never on a record, a trace, or a spec.
+export function harnessAuthEnv(secrets: HarnessSecretMaps): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of HARNESS_AUTH_ENV_VARS) {
+    const val = secrets.workspace[name] ?? secrets.user?.[name];
+    if (val !== undefined) out[name] = val;
+  }
+  return out;
 }
 
 // Does any env reference a user-scoped secret — if so, this harness can only be run/viewed by that user (private).

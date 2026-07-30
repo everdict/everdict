@@ -99,6 +99,7 @@ export { classifyFailure, stageForError } from "./failure/case-failure.js";
 // harness — secret-resolution/visibility rules (from @everdict/core)
 export {
   flattenEnv,
+  harnessAuthEnv,
   type HarnessSecretMaps,
   referencesUserSecret,
   resolveHarnessSecrets,
