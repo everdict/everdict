@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AnthropicTransport } from "./anthropic-transport.js";
+import { AnthropicTransport, retryAfterMsOf } from "./anthropic-transport.js";
 import type { StreamRequest } from "./transport.js";
 
 function sseStream(frames: string[]): ReadableStream<Uint8Array> {
@@ -62,7 +62,10 @@ describe("AnthropicTransport", () => {
   });
 
   it("folds a tool result into a user turn and renders an image_url as a native image block", async () => {
-    const { fetchImpl, body } = fakeFetch([frame({ type: "message_stop" })]);
+    const { fetchImpl, body } = fakeFetch([
+      frame({ type: "message_delta", delta: { stop_reason: "end_turn" } }),
+      frame({ type: "message_stop" }),
+    ]);
     const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
     await transport.stream({
       ...base,
@@ -87,7 +90,10 @@ describe("AnthropicTransport", () => {
   });
 
   it("places cache_control breakpoints on system, the last tool, and the last turn", async () => {
-    const { fetchImpl, body } = fakeFetch([frame({ type: "message_stop" })]);
+    const { fetchImpl, body } = fakeFetch([
+      frame({ type: "message_delta", delta: { stop_reason: "end_turn" } }),
+      frame({ type: "message_stop" }),
+    ]);
     const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
     await transport.stream({
       ...base,
@@ -128,17 +134,23 @@ describe("AnthropicTransport", () => {
   });
 
   it("enables extended thinking: sends a thinking budget, bumps max_tokens, and drops temperature", async () => {
-    const { fetchImpl, body } = fakeFetch([frame({ type: "message_stop" })]);
+    const { fetchImpl, body } = fakeFetch([
+      frame({ type: "message_delta", delta: { stop_reason: "end_turn" } }),
+      frame({ type: "message_stop" }),
+    ]);
     const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
     await transport.stream({ ...base, temperature: 0.7, maxTokens: 1000, thinking: { budgetTokens: 2048 } });
     const b = body();
     expect(b.thinking).toEqual({ type: "enabled", budget_tokens: 2048 });
     expect(b.temperature).toBeUndefined(); // Anthropic rejects a non-default temperature with thinking
-    expect(b.max_tokens).toBe(2048 + 4096); // bumped above the budget to leave room for output
+    expect(b.max_tokens).toBe(2048 + 8192); // bumped above the budget to leave room for output
   });
 
   it("replays a prior assistant turn's thinking blocks as the leading content block", async () => {
-    const { fetchImpl, body } = fakeFetch([frame({ type: "message_stop" })]);
+    const { fetchImpl, body } = fakeFetch([
+      frame({ type: "message_delta", delta: { stop_reason: "end_turn" } }),
+      frame({ type: "message_stop" }),
+    ]);
     const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
     await transport.stream({
       ...base,
@@ -164,6 +176,56 @@ describe("AnthropicTransport", () => {
     const fetchImpl = (async () => new Response("nope", { status: 401 })) as unknown as typeof fetch;
     const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
     await expect(transport.stream(base)).rejects.toThrow(/model 401/);
+  });
+
+  it("surfaces the server's Retry-After (and rate-limit reset) as retryAfterMs on the UpstreamError", async () => {
+    // Given a 429 whose Retry-After says 7 seconds
+    const fetchImpl = (async () =>
+      new Response("rate limited", { status: 429, headers: { "retry-after": "7" } })) as unknown as typeof fetch;
+    const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
+    // When the call fails, Then the error carries the server's own pacing for the caller's retry policy
+    const err = await transport.stream(base).catch((e: unknown) => e);
+    expect(err).toMatchObject({ extra: { status: 429, retryAfterMs: 7000 } });
+  });
+
+  it("retryAfterMsOf falls back to the unified rate-limit reset timestamp", () => {
+    const now = 1_700_000_000_000;
+    const headers = new Headers({ "anthropic-ratelimit-unified-reset": String((now + 90_000) / 1000) });
+    expect(retryAfterMsOf(headers, now)).toBe(90_000);
+    expect(retryAfterMsOf(new Headers(), now)).toBeUndefined();
+  });
+
+  it("fails a stream that ends prematurely (no events, no stop_reason) instead of returning an empty turn", async () => {
+    // Given a proxy-style 200 whose body ends without a single meaningful event
+    const { fetchImpl } = fakeFetch([]);
+    const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
+    // Then the call fails as a retryable upstream error rather than a silent empty "answer"
+    await expect(transport.stream(base)).rejects.toThrow(/stream ended prematurely/);
+  });
+
+  it("aborts a silently hung stream via the idle watchdog and fails as a retryable timeout", async () => {
+    // Given a stream that sends message_start and then goes silent forever
+    const enc = new TextEncoder();
+    const hung = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode(frame({ type: "message_start", message: { usage: { input_tokens: 1 } } })));
+        // …and never closes or enqueues again (a dropped connection the network never reports)
+      },
+    });
+    const fetchImpl = (async () => new Response(hung, { status: 200 })) as unknown as typeof fetch;
+    const transport = new AnthropicTransport({ apiKey: "k", fetchImpl, streamIdleTimeoutMs: 30 });
+    // Then the watchdog frees the caller instead of pinning the agent turn forever
+    await expect(transport.stream(base)).rejects.toThrow(/stream idle timeout/);
+  });
+
+  it("times out a request that never responds (timeoutMs is enforced, not just declared)", async () => {
+    // Given a fetch that hangs forever before returning headers, but honors its abort signal
+    const fetchImpl = ((_url: string, init: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      })) as unknown as typeof fetch;
+    const transport = new AnthropicTransport({ apiKey: "k", fetchImpl, timeoutMs: 30 });
+    await expect(transport.stream(base)).rejects.toThrow(/timed out after 30ms/);
   });
 
   it("complete() reads a non-streaming Messages response (first text block + tool_use)", async () => {

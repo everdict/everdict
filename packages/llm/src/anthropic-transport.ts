@@ -13,14 +13,46 @@ import type {
 export interface AnthropicTransportConfig {
   apiKey: string;
   baseUrl?: string;
+  // Deadline for the request to RESPOND (time-to-headers). The streaming body is covered separately by
+  // streamIdleTimeoutMs. <= 0 disables. Default 10 minutes (the API's own non-streaming boundary).
   timeoutMs?: number;
+  // Watchdog on the SSE body: if no chunk arrives for this long the stream is considered dead and the call fails
+  // with a retryable UpstreamError — a silently dropped connection must not pin the agent loop forever. <= 0
+  // disables (tests). Default 90s (Claude Code's stream-idle watchdog parity).
+  streamIdleTimeoutMs?: number;
   // Injectable for tests; defaults to global fetch.
   fetchImpl?: typeof fetch;
 }
 
 const ANTHROPIC_VERSION = "2023-06-01";
-const DEFAULT_MAX_TOKENS = 4096;
+// Output cap when the caller doesn't set one. 4096 silently truncated long tool arguments (a cut-off input_json
+// surfaces only as a JSON parse failure downstream); 8192 is supported across current Claude models.
+const DEFAULT_MAX_TOKENS = 8192;
+const DEFAULT_TIMEOUT_MS = 600_000;
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const EPHEMERAL = { type: "ephemeral" } as const;
+
+// Parse the server's retry hints into a delay: `retry-after` (seconds or an HTTP date) wins, else the unified
+// rate-limit reset timestamp. Undefined when the response carries neither. Surfaced on the UpstreamError so the
+// agent loop can honor the server's own pacing instead of guessing with backoff.
+export function retryAfterMsOf(headers: Headers, nowMs = Date.now()): number | undefined {
+  const retryAfter = headers.get("retry-after");
+  if (retryAfter !== null) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+    const dateMs = Date.parse(retryAfter);
+    if (!Number.isNaN(dateMs) && dateMs > nowMs) return dateMs - nowMs;
+  }
+  const reset = headers.get("anthropic-ratelimit-unified-reset");
+  if (reset !== null) {
+    const resetSec = Number(reset);
+    if (Number.isFinite(resetSec)) {
+      const delta = resetSec * 1000 - nowMs;
+      if (delta > 0) return delta;
+    }
+  }
+  return undefined;
+}
 
 // --- Anthropic wire shapes (only the fields we send/read) ---
 interface TextBlock {
@@ -218,6 +250,21 @@ export class AnthropicTransport implements LlmTransport {
   }
 
   private async post(body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
+    // The request deadline covers time-to-headers only: the timer is cleared once the response arrives, so a long
+    // SSE body is never killed by it (the idle watchdog in consume() owns the body). The caller's signal is
+    // forwarded through the same controller, so a run abort still cancels the in-flight body.
+    const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const controller = new AbortController();
+    const onCallerAbort = (): void => controller.abort();
+    signal?.addEventListener("abort", onCallerAbort, { once: true });
+    let timedOut = false;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+          }, timeoutMs)
+        : undefined;
     let res: Response;
     try {
       res = await this.f(`${this.base}/v1/messages`, {
@@ -228,18 +275,31 @@ export class AnthropicTransport implements LlmTransport {
           "anthropic-version": ANTHROPIC_VERSION,
         },
         body: JSON.stringify(body),
-        ...(signal ? { signal } : {}),
+        signal: controller.signal,
       });
     } catch (err) {
+      if (timedOut) {
+        throw new UpstreamError("UPSTREAM_ERROR", {}, `model call timed out after ${timeoutMs}ms with no response`);
+      }
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         {},
         `model call failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    } finally {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onCallerAbort);
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new UpstreamError("UPSTREAM_ERROR", { status: res.status }, `model ${res.status}: ${text.slice(0, 200)}`);
+      // Surface the server's own retry pacing (Retry-After / rate-limit reset) so the caller's retry policy can
+      // honor it instead of guessing.
+      const retryAfterMs = retryAfterMsOf(res.headers);
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: res.status, ...(retryAfterMs !== undefined ? { retryAfterMs } : {}) },
+        `model ${res.status}: ${text.slice(0, 200)}`,
+      );
     }
     return res;
   }
@@ -247,7 +307,18 @@ export class AnthropicTransport implements LlmTransport {
   async stream(req: StreamRequest): Promise<StreamResult> {
     const res = await this.post({ ...this.buildBody(req), stream: true }, req.signal);
     if (res.body === null) throw new UpstreamError("UPSTREAM_ERROR", {}, "The model stream response has no body.");
-    return this.consume(res.body, req.onContentDelta, req.onReasoningDelta);
+    const result = await this.consume(res.body, req.onContentDelta, req.onReasoningDelta, req.signal);
+    // Completeness check (Claude Code parity): a proxy can return 200 and end the body early — no events at all,
+    // or a message_start with no completed content and no stop_reason. Treating that as a finished turn corrupts
+    // the run (an empty/truncated "answer"); failing makes it a retryable upstream error instead.
+    if (result.content === null && result.toolCalls.length === 0 && result.finishReason === null) {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        {},
+        "model stream ended prematurely: no content and no stop_reason received",
+      );
+    }
+    return result;
   }
 
   // One-shot, non-streaming completion (judges / probes) — the final Messages response instead of an SSE stream.
@@ -316,6 +387,7 @@ export class AnthropicTransport implements LlmTransport {
     stream: ReadableStream<Uint8Array>,
     onDelta: StreamRequest["onContentDelta"],
     onReasoning: StreamRequest["onReasoningDelta"],
+    signal?: AbortSignal,
   ): Promise<StreamResult> {
     let content = "";
     const toolBlocks = new Map<number, { id: string; name: string; args: string }>();
@@ -382,8 +454,35 @@ export class AnthropicTransport implements LlmTransport {
       }
     };
 
+    // Idle watchdog: each read races a fresh idle timer. A silently dropped connection makes reader.read() pend
+    // forever — without this the whole agent turn hangs until someone kills it from outside. On fire the reader is
+    // cancelled and the call fails as a retryable timeout. A caller abort surfaces as reader.read() rejecting.
+    const idleMs = this.config.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+    const IDLE = Symbol("stream-idle");
+    const readWithIdleWatchdog = async (): Promise<Awaited<ReturnType<typeof reader.read>>> => {
+      if (idleMs <= 0) return reader.read();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const idle = new Promise<typeof IDLE>((resolve) => {
+        timer = setTimeout(() => resolve(IDLE), idleMs);
+      });
+      try {
+        const r = await Promise.race([reader.read(), idle]);
+        if (r === IDLE) {
+          await reader.cancel().catch(() => {});
+          throw new UpstreamError("UPSTREAM_ERROR", {}, `model stream idle timeout: no data received for ${idleMs}ms`);
+        }
+        return r;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+
     for (;;) {
-      const { done, value } = await reader.read();
+      if (signal?.aborted) {
+        await reader.cancel().catch(() => {});
+        throw new UpstreamError("UPSTREAM_ERROR", {}, "model stream aborted by the caller");
+      }
+      const { done, value } = await readWithIdleWatchdog();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let boundary = buffer.indexOf("\n\n");
