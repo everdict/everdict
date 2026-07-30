@@ -210,6 +210,25 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     return reply.send({ ok: true });
   });
 
+  // --- internal: activation admission (agent service → CP, §5.1 "reactions pass the gate") — the
+  // activation itself is admitted against the tenant's enforcement budget BEFORE the run launches, exactly
+  // like an eval dispatch (402 past the cap; a pass reserves one run, settled later via the usage bridge).
+  app.post("/internal/activations/admit", { schema: internalDocs.admitActivation }, async (req, reply) => {
+    if (!deps.internalToken || !deps.admitActivation)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const body = z.object({ tenant: z.string().min(1) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      deps.admitActivation(body.data.tenant);
+      return reply.send({ admitted: true });
+    } catch (err) {
+      return sendError(reply, err); // 402 BUDGET_EXCEEDED — the activator skips visibly
+    }
+  });
+
   // --- internal: schedule fire (called by the Temporal workflow, x-internal-token guard) ---
   // The worker doesn't hold a ScorecardService, so a schedule fire goes workflow→activity→this route→ScheduleService.fire.
   // tenant is baked in as a workflow argument at schedule creation and arrives in a trusted body (already trusted via the internal token).

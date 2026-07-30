@@ -161,6 +161,7 @@ export class ScorecardService {
           runStore: this.deps.runStore,
           ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
           ...(this.deps.events ? { events: this.deps.events } : {}),
+          ...(this.deps.admissionMaxInFlight !== undefined ? { maxInFlight: this.deps.admissionMaxInFlight } : {}),
         },
         input.tenant,
         input.origin.causedByRunId,

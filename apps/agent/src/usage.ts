@@ -82,6 +82,34 @@ export function runEventReporter(
   };
 }
 
+// Activation-admission bridge (§5.1 "reactions pass the gate"): ask the control plane's tenant budget
+// before a headless run launches. An explicit 402 denies (the activator skips VISIBLY); a transport
+// failure fails OPEN — the reconcile loop only delivers events while the CP is reachable anyway, and a
+// budget must never be enforced by an outage.
+export function admissionBridge(
+  controlPlaneUrl: string,
+  internalToken: string,
+): (workspace: string) => Promise<{ admitted: boolean; reason?: string }> {
+  const url = `${controlPlaneUrl.replace(/\/$/, "")}/internal/activations/admit`;
+  return async (workspace) => {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-internal-token": internalToken },
+        body: JSON.stringify({ tenant: workspace }),
+      });
+      if (res.ok) return { admitted: true };
+      if (res.status === 402) {
+        const body = (await res.json().catch(() => ({}))) as { message?: unknown };
+        return { admitted: false, reason: typeof body.message === "string" ? body.message : "budget exceeded" };
+      }
+      return { admitted: true }; // 404 = gate not wired on this CP — never a silent lockout
+    } catch {
+      return { admitted: true }; // CP unreachable — fail open (see header)
+    }
+  };
+}
+
 // Durable-approval bridge (A6): register a park on the control plane (POST /internal/approvals — the ask
 // survives an agent-service restart) and settle the ledger after the in-process wait resolves (the legacy
 // fleet channel and local expiry converge through the same settle; an already-decided record skips there).

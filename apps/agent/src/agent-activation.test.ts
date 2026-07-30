@@ -125,6 +125,7 @@ function activator(opts: {
   keyStore?: ReturnType<typeof keyStoreStub>;
   cooldownMs?: number;
   subscriptions?: SubscriptionRecord[];
+  admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
 }) {
   const sessions = opts.sessions ?? sessionsStub();
   const keyStore = opts.keyStore ?? keyStoreStub();
@@ -157,6 +158,7 @@ function activator(opts: {
     ...(opts.subscriptions !== undefined
       ? { subscriptions: { listEnabled: async () => opts.subscriptions ?? [] } }
       : {}),
+    ...(opts.admitRun !== undefined ? { admitRun: opts.admitRun } : {}),
   });
   return { instance, sessions, keyStore, mailbox, runs, reports };
 }
@@ -567,5 +569,43 @@ describe("activateDirect — the T-d reaction step entry", () => {
     const sessionId = "sessionId" in started ? started.sessionId : "";
     for (const m of mailbox.drain("acme", sessionId)) if (typeof m.content === "string") seen.push(m.content);
     expect(seen.some((c) => c.includes("[reaction step] Re-run the smoke scorecard"))).toBe(true);
+  });
+});
+
+describe("activation admission (§5.1 — every launch path asks the tenant budget)", () => {
+  const denied = async () => ({ admitted: false, reason: "cost budget exceeded" });
+
+  it("a 402 refusal skips the spec-trigger activation visibly (no session, no run)", async () => {
+    const { instance, sessions } = activator({ registry: registryOf(spec()), admitRun: denied });
+    expect(await instance.onEvent(event())).toBe(0);
+    await instance.idle();
+    expect(sessions.created).toHaveLength(0);
+  });
+
+  it("a 402 refusal answers a reaction step with {skipped} — the chain stops instead of retrying forever", async () => {
+    const { instance } = activator({ registry: registryOf(spec()), admitRun: denied });
+    const result = await instance.activateDirect({
+      workspace: "acme",
+      agentId: "sentinel",
+      eventId: "ev-b#s0",
+      eventKind: "scorecard.completed",
+      message: "m",
+    });
+    expect(result).toMatchObject({ skipped: expect.stringContaining("402") });
+  });
+
+  it("an admitted ask launches exactly as before (the gate is invisible on the pass path)", async () => {
+    const asks: string[] = [];
+    const { instance, sessions } = activator({
+      registry: registryOf(spec()),
+      admitRun: async (workspace) => {
+        asks.push(workspace);
+        return { admitted: true };
+      },
+    });
+    expect(await instance.onEvent(event())).toBe(1);
+    await instance.idle();
+    expect(asks).toEqual(["acme"]);
+    expect(sessions.created).toHaveLength(1);
   });
 });

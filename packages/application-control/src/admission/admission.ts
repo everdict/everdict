@@ -13,6 +13,13 @@ import type { RunStore } from "../ports/run-store.js";
 // recursive automation walks into this long before it walks into money. Env-tunable, never per-request.
 const MAX_CAUSAL_DEPTH = 8;
 
+// O7's third knob: the maximum OUTSTANDING (non-terminal) runs one envelope may hold at once. Deliberately
+// generous — born-queued stands (§5.3: a 500-case agent batch queues, never bounces), so this is the
+// runaway-flood backstop the meter can't be: capUsd/capRuns bound totals, this bounds how much of the
+// total may be unsettled simultaneously (a loop that never lets work finish walks into it). Counted from
+// the run ledger, never a counter to reconcile — a tombstoned run frees its slot by being terminal.
+const MAX_IN_FLIGHT = 1000;
+
 export interface AdmitCausedWorkDeps {
   runStore: RunStore;
   envelopes?: EnvelopeStore; // absent = envelopes unenforced (dev wiring) — depth guard still applies
@@ -20,6 +27,7 @@ export interface AdmitCausedWorkDeps {
   // already computed the refusal, so the fact costs nothing and is never inferred elsewhere.
   events?: PlatformEventEmitter;
   maxCausalDepth?: number;
+  maxInFlight?: number; // EVERDICT_ENVELOPE_MAX_INFLIGHT at the composition root
 }
 
 // Admit `countRuns` new runs caused by `causedByRunId`. Returns the envelope the caused work must STAMP
@@ -65,6 +73,17 @@ export async function admitCausedWork(
   // it inherited. Caps live on the ROOT record (envelope.id names it); inherited stamps carry only {id}.
   const envelope = causer.envelope;
   if (!envelope) return undefined;
+
+  // In-flight cap (429, O7's third knob): refusal is retryable by nature — slots free as caused runs
+  // settle — so it is a rate limit, never a budget verdict.
+  const maxInFlight = deps.maxInFlight ?? MAX_IN_FLIGHT;
+  const inFlight = await deps.runStore.countActiveByEnvelope(tenant, envelope.id);
+  if (inFlight + countRuns > maxInFlight)
+    throw new RateLimitError(
+      "RATE_LIMITED",
+      { envelope: envelope.id, inFlight, countRuns, maxInFlight },
+      `Envelope in-flight cap reached (${inFlight}+${countRuns} > ${maxInFlight}) — retry as caused runs settle.`,
+    );
   const root = envelope.id === causer.id ? causer : await deps.runStore.get(envelope.id);
   const caps = root?.envelope;
   if (deps.envelopes && caps && (caps.capUsd !== undefined || caps.capRuns !== undefined)) {

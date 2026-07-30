@@ -58,6 +58,9 @@ export interface AgentActivatorDeps {
   maxQueued?: number;
   // E3 subscription source (reaction.kind="agent" rules) — absent = spec triggers only.
   subscriptions?: { listEnabled(workspace: string): Promise<SubscriptionRecord[]> };
+  // §5.1 activation admission (the CP tenant budget) — absent = unadmitted (dev wiring). An explicit deny
+  // skips the run VISIBLY; the bridge itself fails open on transport errors.
+  admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
   // Report agent.run.* lifecycle FACTS back to the control plane (event log → fleet observability, agent-
   // automation A5). Best-effort — an unreachable control plane never affects the run.
   reportRunEvent?: (input: {
@@ -146,6 +149,7 @@ export class AgentActivator {
         console.error(`[agent] activation dropped for ${entry.id}: ${this.maxQueued} runs already queued.`);
         continue;
       }
+      if (!(await this.admitted(event.workspace, entry.id))) continue;
       this.lastActivation.set(cooldownKey, nowMs);
       activated++;
       woken.add(entry.id);
@@ -212,6 +216,7 @@ export class AgentActivator {
         console.error(`[agent] activation dropped for ${agentId}: ${this.maxQueued} runs already queued.`);
         continue;
       }
+      if (!(await this.admitted(event.workspace, agentId))) continue;
       this.lastActivation.set(cooldownKey, nowMs);
       activated++;
       woken.add(agentId);
@@ -404,6 +409,10 @@ export class AgentActivator {
     const agentKey = `${input.workspace}:${input.agentId}`;
     if ((this.pending.get(agentKey) ?? 0) >= this.maxQueued)
       throw new Error(`agent ${input.agentId} has ${this.maxQueued} runs queued — retry later`);
+    // §5.1: a budget refusal is a PERMANENT answer for this chain (skipped, the workflow stops) — unlike a
+    // busy queue, retrying an exhausted budget forever would be the runaway the gate exists to stop.
+    if (!(await this.admitted(input.workspace, input.agentId)))
+      return { skipped: "workspace budget refused the activation (402)" };
     const sessionId = this.deps.newId();
     const event: ActivationEvent = {
       workspace: input.workspace,
@@ -419,6 +428,16 @@ export class AgentActivator {
       ...(input.instruction !== undefined ? { instruction: input.instruction } : {}),
     });
     return { sessionId, started: true };
+  }
+
+  // The §5.1 ask, shared by every launch path. True when no gate is wired (dev) — refusals are logged
+  // (the CP side already emitted/recorded the 402), never silent.
+  private async admitted(workspace: string, agentId: string): Promise<boolean> {
+    if (!this.deps.admitRun) return true;
+    const verdict = await this.deps.admitRun(workspace);
+    if (!verdict.admitted)
+      console.error(`[agent] activation refused for ${agentId}: ${verdict.reason ?? "budget exceeded"} (402).`);
+    return verdict.admitted;
   }
 
   private enqueueRun(

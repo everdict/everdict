@@ -119,6 +119,7 @@ export function buildScorecard(deps: {
 
   return new ScorecardService({
     envelopes: deps.envelopes, // §5.2 — submit-gate headroom + per-case draw-down
+    ...(envelopeMaxInFlight() !== undefined ? { admissionMaxInFlight: envelopeMaxInFlight() } : {}),
     trajectories: deps.trajectories, // P5 dual-write — child-case traces seal in the owned store
     dispatcher: meteredDispatcher,
     store: scorecardStore,
@@ -206,4 +207,12 @@ export function buildScorecard(deps: {
     // A live batch streams the export the moment a case completes (after judging) (D5) — ingest keeps the batched exportResults above.
     exportStreamFor: (tenant, ctx) => traceSinkService.exportStream(tenant, ctx),
   });
+}
+
+// O7 in-flight cap override — one env knob for the gate's outstanding-runs backstop (default lives in the gate).
+function envelopeMaxInFlight(): number | undefined {
+  const raw = process.env.EVERDICT_ENVELOPE_MAX_INFLIGHT;
+  if (raw === undefined || raw === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
 }

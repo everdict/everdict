@@ -410,6 +410,7 @@ export interface ScorecardServiceDeps {
   runStore?: RunStore;
   // Envelope spend ledger (§5.2, P4) — the submit gate reads headroom, the per-case settle meters cost.
   envelopes?: EnvelopeStore;
+  admissionMaxInFlight?: number; // O7 in-flight cap override (EVERDICT_ENVELOPE_MAX_INFLIGHT)
   // The OWNED trajectory store (P5 rung 1) — every settled case's trace seals here too (dual-write).
   trajectories?: TrajectoryStore;
   // Durable replay recording (optional) — at child write-back, seal the frames/logs teed under the child's runId and attach the ref.

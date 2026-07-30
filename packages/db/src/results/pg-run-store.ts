@@ -227,4 +227,13 @@ export class PgRunStore implements RunStore {
     );
     return res.rows.length;
   }
+
+  async countActiveByEnvelope(tenant: string, envelopeId: string): Promise<number> {
+    const res = await this.client.query<{ n: string | number }>(
+      `SELECT count(*) AS n FROM everdict_runs
+       WHERE tenant = $1 AND envelope->>'id' = $2 AND status IN ('queued', 'running')`,
+      [tenant, envelopeId],
+    );
+    return Number(res.rows[0]?.n ?? 0);
+  }
 }

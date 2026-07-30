@@ -37,6 +37,8 @@ export interface AgentServerDeps extends ChatDeps {
   // E3 subscription registry — with the activator, reaction.kind="agent" rules wake their target agent
   // through the same guards as spec triggers. Absent → spec triggers only.
   subscriptions?: SubscriptionStore;
+  // §5.1 activation admission — the CP tenant-budget ask every launch path passes (absent = unadmitted dev).
+  admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
   // Test seam: the activation run executor. Default = the teammate-turn machinery (one request-less loop turn).
   activationRunTurn?: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<void>;
   // agent.run.* lifecycle facts → the control plane's event log (fleet observability, agent-automation A5).
@@ -249,6 +251,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           sessions: deps.sessions,
           mailbox,
           ...(deps.subscriptions ? { subscriptions: deps.subscriptions } : {}),
+          ...(deps.admitRun ? { admitRun: deps.admitRun } : {}),
           runTurn:
             deps.activationRunTurn ??
             ((sessionId, agentToken, signal, permit) =>

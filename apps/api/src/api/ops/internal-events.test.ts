@@ -1,5 +1,6 @@
 import { PlatformEventService, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { PaymentRequiredError } from "@everdict/contracts";
 import { InMemoryPlatformEventStore, InMemoryRunStore, InMemoryTrajectoryStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
@@ -332,5 +333,65 @@ describe("RunService.trajectory — the owned copy with the embed fallback (P5)"
     expect((await service.trajectory("acme", "r-embed"))?.meta.source).toBe("run");
     // Workspace scoping — a foreign tenant reads nothing.
     expect(await service.trajectory("rival", "r-embed")).toBeUndefined();
+  });
+});
+
+describe("POST /internal/activations/admit — the §5.1 activation gate bridge", () => {
+  function withGate(exhausted: Set<string>) {
+    const app = buildServer({
+      service: svc(),
+      internalToken: "itok",
+      admitActivation: (tenant: string) => {
+        if (exhausted.has(tenant))
+          throw new PaymentRequiredError("BUDGET_EXCEEDED", { tenant }, "cost budget exceeded");
+      },
+    });
+    return app;
+  }
+
+  it("admits within budget and answers 402 BUDGET_EXCEEDED past it (the activator skips visibly)", async () => {
+    const app = withGate(new Set(["broke"]));
+    const ok = await app.inject({
+      method: "POST",
+      url: "/internal/activations/admit",
+      headers: { "x-internal-token": "itok" },
+      payload: { tenant: "acme" },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ admitted: true });
+
+    const refused = await app.inject({
+      method: "POST",
+      url: "/internal/activations/admit",
+      headers: { "x-internal-token": "itok" },
+      payload: { tenant: "broke" },
+    });
+    expect(refused.statusCode).toBe(402);
+    expect(refused.json()).toMatchObject({ code: "BUDGET_EXCEEDED" });
+  });
+
+  it("is token-guarded and absent without the capability", async () => {
+    const app = withGate(new Set());
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/internal/activations/admit",
+          headers: { "x-internal-token": "wrong" },
+          payload: { tenant: "acme" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    const bare = buildServer({ service: svc(), internalToken: "itok" });
+    expect(
+      (
+        await bare.inject({
+          method: "POST",
+          url: "/internal/activations/admit",
+          headers: { "x-internal-token": "itok" },
+          payload: { tenant: "acme" },
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 });

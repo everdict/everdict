@@ -138,6 +138,9 @@ export interface ServerDeps {
   // Settle-only capability of the enforcement budget for the internal usage bridge (agent cost → the 402-cap total).
   // Deliberately narrow (BudgetAdmin withholds settle from user routes; the Scheduler/services own the run settle).
   settleBudget?: (tenant: string, cost: { usd: number; tokens: number }) => void;
+  // Admit-only capability for agent ACTIVATIONS (§5.1 — an activation answers the same gate questions as an
+  // eval run before it exists): throws 402 past the tenant budget, reserves one run on pass.
+  admitActivation?: (tenant: string) => void;
   scheduleService?: ScheduleService; // scheduled (cron) scorecard CRUD (route disabled if absent)
   queueService?: QueueService; // work-queue snapshot (running/waiting/next-scheduled per runtime lane) (route disabled if absent)
   metrics?: { render(): string }; // Prometheus text exposition (GET /metrics) (route disabled if absent)

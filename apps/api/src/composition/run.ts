@@ -106,6 +106,7 @@ export function buildRun(deps: {
 
   const service = new RunService({
     envelopes: deps.envelopes, // envelope spend ledger (§5.2 P4) — the causal admission leg + per-case draw-down
+    ...(envelopeMaxInFlight() !== undefined ? { admissionMaxInFlight: envelopeMaxInFlight() } : {}),
     trajectories: deps.trajectories, // P5 dual-write — every settled trace seals in the owned store
     ...(deps.onAgentRunCancelled ? { onAgentRunCancelled: deps.onAgentRunCancelled } : {}),
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
@@ -185,4 +186,12 @@ export function codeJudgeRunSubmitter(service: RunService) {
       ...(built.judge ? { judge: built.judge } : {}),
     });
   };
+}
+
+// O7 in-flight cap override — one env knob for the gate's outstanding-runs backstop (default lives in the gate).
+function envelopeMaxInFlight(): number | undefined {
+  const raw = process.env.EVERDICT_ENVELOPE_MAX_INFLIGHT;
+  if (raw === undefined || raw === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
 }

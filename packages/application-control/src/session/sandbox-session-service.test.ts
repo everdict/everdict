@@ -31,6 +31,9 @@ function fakeRunStore() {
     async deleteByScorecard() {
       return 0;
     },
+    async countActiveByEnvelope() {
+      return 0;
+    },
   };
   return { store, rows, events };
 }

@@ -767,6 +767,9 @@ async function main(): Promise<void> {
     queueService,
     viewService,
     subscriptionService,
+    // §5.1 activation admission — the agent service asks this before launching a run (402 past the tenant
+    // budget; a pass reserves one run, settled later via the usage bridge below).
+    admitActivation: (tenant: string) => budget.admit(tenant),
     // T-d bridge (activity → CP → agent service): mirror the agent service's answer so the workflow's retry
     // semantics ride HTTP honestly (503 = retry later; 200 {skipped}/{sessionId} = the workflow decides).
     ...(approvalAgentUrl && approvalAgentToken

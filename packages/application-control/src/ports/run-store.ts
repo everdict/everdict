@@ -34,4 +34,7 @@ export interface RunStore {
   // Remove every child run a scorecard fanned out (scorecard hard-delete cascade — orphaned children would
   // otherwise linger in the "all executions" view). Returns the number of runs removed.
   deleteByScorecard(scorecardId: string): Promise<number>;
+  // O7's third knob (the in-flight cap): how many NON-TERMINAL runs currently draw from this envelope.
+  // Read from the ledger itself — never a counter to reconcile — so a tombstoned run can't leak a slot.
+  countActiveByEnvelope(tenant: string, envelopeId: string): Promise<number>;
 }

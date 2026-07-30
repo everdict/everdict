@@ -74,4 +74,13 @@ export class InMemoryRunStore implements RunStore {
     }
     return removed;
   }
+
+  async countActiveByEnvelope(tenant: string, envelopeId: string): Promise<number> {
+    let active = 0;
+    for (const r of this.runs.values()) {
+      if (r.tenant !== tenant || r.envelope?.id !== envelopeId) continue;
+      if (r.status === "queued" || r.status === "running") active++;
+    }
+    return active;
+  }
 }

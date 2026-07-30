@@ -55,7 +55,7 @@ import { type ProfileResolver, baseProfileResolver, registryProfileResolver } fr
 import { installProxyDispatcher } from "./proxy-dispatcher.js";
 import { buildServer } from "./server.js";
 import { EVERDICT_AGENT_SYSTEM_PROMPT } from "./system-prompt.js";
-import { approvalBridge, runEventReporter, usageReporter } from "./usage.js";
+import { admissionBridge, approvalBridge, runEventReporter, usageReporter } from "./usage.js";
 
 function envModelFallback(config: AgentConfig): ModelResolver {
   if (config.AGENT_LLM_API_KEY === undefined || config.AGENT_LLM_MODEL === undefined) {
@@ -183,6 +183,10 @@ async function main(): Promise<void> {
     ...(keyStore ? { keyStore } : {}),
     ...(activationRegistry ? { agentRegistry: activationRegistry } : {}),
     ...(subscriptionStore ? { subscriptions: subscriptionStore } : {}),
+    // §5.1: activations ask the CP's tenant budget before launching (fail-open on transport, deny on 402).
+    ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
+      ? { admitRun: admissionBridge(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
+      : {}),
     // Code-tool verification (check/run before publish or adopt) — always available (the runtime exists even
     // without a DB; a missing store just disables ref targets / secret binding inside the try).
     codeTry: {

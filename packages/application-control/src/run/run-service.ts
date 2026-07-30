@@ -95,6 +95,7 @@ export interface RunServiceDeps {
   // Envelope spend ledger (§5.2, P4): caused runs draw from their causer's delegated envelope — the gate
   // reads headroom here, the settle meters real cost. Absent = envelopes unenforced (dev wiring).
   envelopes?: EnvelopeStore;
+  admissionMaxInFlight?: number; // O7 in-flight cap override (EVERDICT_ENVELOPE_MAX_INFLIGHT)
   // Cascade cancel (§5.5, O8) — wired by the composition to ScorecardService.cancelCausedBy (late-bound:
   // the scorecard service is built after the run service). Fired when an agent run settles cancelled.
   onAgentRunCancelled?: (tenant: string, runId: string) => Promise<unknown>;
@@ -199,6 +200,7 @@ export class RunService {
             runStore: this.deps.store,
             ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
             ...(this.deps.events ? { events: this.deps.events } : {}),
+            ...(this.deps.admissionMaxInFlight !== undefined ? { maxInFlight: this.deps.admissionMaxInFlight } : {}),
           },
           input.tenant,
           input.causedByRunId,

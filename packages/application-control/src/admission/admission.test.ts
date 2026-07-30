@@ -4,12 +4,19 @@ import type { EnvelopeSpend, EnvelopeStore } from "../ports/envelope-store.js";
 import type { RunStore } from "../ports/run-store.js";
 import { admitCausedWork } from "./admission.js";
 
-// Minimal in-memory doubles — the gate only reads get() and the spend row.
+// Minimal in-memory doubles — the gate reads get(), the ledger's in-flight count, and the spend row.
 function runStoreOf(records: RunRecord[]): RunStore {
   const byId = new Map(records.map((r) => [r.id, r]));
   return {
     async get(id: string) {
       return byId.get(id);
+    },
+    async countActiveByEnvelope(tenant: string, envelopeId: string) {
+      let n = 0;
+      for (const r of byId.values())
+        if (r.tenant === tenant && r.envelope?.id === envelopeId && (r.status === "queued" || r.status === "running"))
+          n++;
+      return n;
     },
   } as unknown as RunStore;
 }
@@ -158,5 +165,32 @@ describe("admitCausedWork — the admission gate's causal leg (§5.1)", () => {
       5,
     );
     expect(unbudgeted).toBeUndefined(); // no envelope = the tenant budget still gates globally, as before P4
+  });
+});
+
+describe("in-flight cap — O7's third knob (outstanding runs per envelope)", () => {
+  it("refuses (429) when the envelope's non-terminal runs would exceed the cap, and frees as they settle", async () => {
+    const root = agentRun(); // the envelope root itself is running — it holds one in-flight slot too
+    const child = (id: string, status: RunRecord["status"]) =>
+      agentRun({ id, status, envelope: { id: "run-agent" }, origin: { cause: "run", causedByRunId: "run-agent" } });
+    // Two live children + the running root itself carry the envelope → 3 in flight.
+    const busy = runStoreOf([root, child("c1", "running"), child("c2", "queued"), child("c3", "succeeded")]);
+    await expect(admitCausedWork({ runStore: busy, maxInFlight: 3 }, "acme", "run-agent", 1)).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+      status: 429,
+    });
+
+    // The settled child freed its slot — a cap of 4 admits the same ask.
+    await expect(admitCausedWork({ runStore: busy, maxInFlight: 4 }, "acme", "run-agent", 1)).resolves.toEqual({
+      id: "run-agent",
+    });
+  });
+
+  it("keeps born-queued intact by default: a 500-case burst passes the generous backstop", async () => {
+    const { store } = envelopesOf({ "run-agent": { usd: 0, runs: 0 } });
+    const uncapped = agentRun({ envelope: { id: "run-agent", capUsd: 100 } }); // no capRuns — the burst is affordable
+    await expect(
+      admitCausedWork({ runStore: runStoreOf([uncapped]), envelopes: store }, "acme", "run-agent", 500),
+    ).resolves.toEqual({ id: "run-agent" });
   });
 });

@@ -134,6 +134,19 @@ const internal = {
       ...errorResponses(400, 403, 404),
     },
   },
+  admitActivation: {
+    summary: "Admit an agent activation against the tenant budget (internal)",
+    description:
+      "Agent service → gate bridge (execution-model §5.1): the activation itself is admitted before the run " +
+      "launches, exactly like an eval dispatch — 402 BUDGET_EXCEEDED past the tenant cap, a pass reserves one " +
+      "run (settled later through the usage bridge). Guarded by x-internal-token.",
+    tags: ["internal"],
+    body: toJsonSchema(z.object({ tenant: z.string().min(1) })),
+    response: {
+      200: { description: "Admitted", ...toJsonSchema(z.object({ admitted: z.literal(true) })) },
+      ...errorResponses(400, 402, 403, 404),
+    },
+  },
   agentRunEvents: {
     summary: "Record an agent-run lifecycle fact (internal)",
     description:
