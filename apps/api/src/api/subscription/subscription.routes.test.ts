@@ -113,3 +113,82 @@ describe("subscriptions — event → reaction rules (E3 §6)", () => {
     expect((await app.inject({ method: "GET", url: "/subscriptions", headers: H })).statusCode).toBe(404);
   });
 });
+
+describe("reaction internal bridge (T-d — worker activity → CP → agent service)", () => {
+  function buildWithBridge() {
+    const started: unknown[] = [];
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      internalToken: "shhh",
+      reactionBridge: {
+        start: async (input) => {
+          started.push(input);
+          return { status: 200, body: { sessionId: "sess-1", started: true } };
+        },
+        status: async (_ws, sessionId) => ({
+          status: 200,
+          body: { status: sessionId === "sess-1" ? "completed" : "pending" },
+        }),
+      },
+    });
+    return { app, started };
+  }
+
+  const stepBody = {
+    tenant: "acme",
+    agentId: "triage",
+    eventId: "ev-1#s0",
+    subscriptionId: "sub-1",
+    eventKind: "scorecard.completed",
+    message: "Scorecard regressed",
+  };
+
+  it("forwards a step start to the agent bridge (workspace renamed from tenant) and mirrors the answer", async () => {
+    const { app, started } = buildWithBridge();
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/reactions/step",
+      headers: { "x-internal-token": "shhh" },
+      payload: stepBody,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ sessionId: "sess-1", started: true });
+    expect(started[0]).toMatchObject({ workspace: "acme", agentId: "triage", eventId: "ev-1#s0" });
+
+    const status = await app.inject({
+      method: "GET",
+      url: "/internal/reactions/step-status?tenant=acme&sessionId=sess-1",
+      headers: { "x-internal-token": "shhh" },
+    });
+    expect(status.json()).toEqual({ status: "completed" });
+  });
+
+  it("is token-guarded (403 on mismatch) and absent (404) without a configured bridge", async () => {
+    const { app } = buildWithBridge();
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/internal/reactions/step",
+          headers: { "x-internal-token": "wrong" },
+          payload: stepBody,
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    const bare = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      internalToken: "shhh",
+    });
+    expect(
+      (
+        await bare.inject({
+          method: "POST",
+          url: "/internal/reactions/step",
+          headers: { "x-internal-token": "shhh" },
+          payload: stepBody,
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+});

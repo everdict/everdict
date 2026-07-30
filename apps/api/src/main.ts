@@ -385,9 +385,20 @@ async function main(): Promise<void> {
   });
   eventConsumers.register(runFeedConsumer(notificationStore));
   eventConsumers.register(scorecardFeedConsumer(notificationStore));
-  // E3 reactions: non-agent subscription reactions (webhook now, the T-d workflow executor when Temporal is
-  // wired below) ride the same durable cursor. Agent reactions stay the activation engine's jurisdiction.
-  eventConsumers.register(subscriptionReactionConsumer({ subscriptions: subscriptionStore }));
+  // One Temporal client driver serves every CP-started workflow family (batch cancel aside): approvals'
+  // durable WAIT, the session reaper, and the T-d reaction executor below.
+  const workflowTemporal = process.env.EVERDICT_TEMPORAL_ADDRESS
+    ? new TemporalBatchDriver({ address: process.env.EVERDICT_TEMPORAL_ADDRESS })
+    : undefined;
+  // E3 reactions: non-agent subscription reactions ride the same durable cursor — webhooks deliver inline,
+  // reaction.kind="workflow" starts the durable T-d executor (skipped VISIBLY without Temporal). Agent
+  // reactions stay the activation engine's jurisdiction.
+  eventConsumers.register(
+    subscriptionReactionConsumer({
+      subscriptions: subscriptionStore,
+      ...(workflowTemporal ? { startReactionWorkflow: (input) => workflowTemporal.startReaction(input) } : {}),
+    }),
+  );
   eventConsumers.start();
 
   // Durable agent approvals (agent-automation A6): the agent service parks over the internal bridge, members
@@ -395,9 +406,7 @@ async function main(): Promise<void> {
   // service's own internal surface. Delivery absent (no agent service configured) = record-only.
   const approvalAgentUrl = process.env.AGENT_SERVICE_URL;
   const approvalAgentToken = process.env.AGENT_INTERNAL_TOKEN;
-  const approvalTemporal = process.env.EVERDICT_TEMPORAL_ADDRESS
-    ? new TemporalBatchDriver({ address: process.env.EVERDICT_TEMPORAL_ADDRESS })
-    : undefined;
+  const approvalTemporal = workflowTemporal;
   const approvalService = new ApprovalService({
     store: approvalStore,
     events: platformEventService,
@@ -758,6 +767,38 @@ async function main(): Promise<void> {
     queueService,
     viewService,
     subscriptionService,
+    // T-d bridge (activity → CP → agent service): mirror the agent service's answer so the workflow's retry
+    // semantics ride HTTP honestly (503 = retry later; 200 {skipped}/{sessionId} = the workflow decides).
+    ...(approvalAgentUrl && approvalAgentToken
+      ? {
+          reactionBridge: {
+            start: async (input: {
+              workspace: string;
+              agentId: string;
+              eventId: string;
+              subscriptionId: string;
+              eventKind: string;
+              message: string;
+              payload?: Record<string, unknown>;
+              subject?: { type: string; id: string };
+              instruction?: string;
+            }) => {
+              const res = await fetch(new URL("/internal/activations", approvalAgentUrl), {
+                method: "POST",
+                headers: { "content-type": "application/json", "x-internal-token": approvalAgentToken },
+                body: JSON.stringify(input),
+              });
+              return { status: res.status, body: await res.json().catch(() => ({})) };
+            },
+            status: async (workspace: string, sessionId: string) => {
+              const url = new URL(`/internal/activations/${encodeURIComponent(sessionId)}/status`, approvalAgentUrl);
+              url.searchParams.set("workspace", workspace);
+              const res = await fetch(url, { headers: { "x-internal-token": approvalAgentToken } });
+              return { status: res.status, body: await res.json().catch(() => ({})) };
+            },
+          },
+        }
+      : {}),
     viewSnapshotService,
     benchmarkService,
     bundleService,

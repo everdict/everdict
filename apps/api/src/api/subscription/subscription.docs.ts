@@ -10,7 +10,27 @@ import { UpdateSubscriptionBodySchema } from "./request/update-subscription.js";
 // selector (kinds + payload filters) → reaction (agent | webhook | workflow) under governance
 // (enabled + cooldown). Authz reuses the agent actions (no new action): read = agents:read,
 // write = agents:write; edit/delete additionally require creator-or-admin (decided in the service).
-export const subscriptionDocs: Record<"create" | "list" | "update" | "delete", FastifySchema> = {
+export const subscriptionDocs: Record<
+  "create" | "list" | "update" | "delete" | "internalStep" | "internalStepStatus",
+  FastifySchema
+> = {
+  internalStep: {
+    summary: "Start one reaction step (internal)",
+    description:
+      "Worker activity → CP → agent service: run ONE agent for ONE reaction-step key. Guarded by " +
+      "x-internal-token; idempotent by the durable (agent, step-key) dedup. 503 = busy (the activity " +
+      "retries), {skipped} = permanently unrunnable (the chain stops).",
+    tags: ["subscription"],
+    response: { ...errorResponses(400, 403, 404) },
+  },
+  internalStepStatus: {
+    summary: "Poll one reaction step's run (internal)",
+    description:
+      "The reaction workflow's watch: the step session's status (pending until the queued run opens its " +
+      "session row). Guarded by x-internal-token.",
+    tags: ["subscription"],
+    response: { ...errorResponses(400, 403, 404) },
+  },
   create: {
     summary: "Create a subscription",
     description:

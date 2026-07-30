@@ -24,6 +24,11 @@ export interface SubscriptionReactionDeps {
     tenant: string;
     subscriptionId: string;
     steps: Array<{ agentId: string; instruction?: string }>;
+    // The fact as the chain's agents will read it — pointers only, exactly what the log holds.
+    eventKind: string;
+    message: string;
+    payload?: Record<string, unknown>;
+    subject?: { type: string; id: string };
   }) => Promise<void>;
   requestTimeoutMs?: number; // per-webhook POST budget (default 10s)
   now?: () => number; // cooldown clock (epoch ms)
@@ -61,6 +66,10 @@ export function subscriptionReactionConsumer(deps: SubscriptionReactionDeps): Pl
             tenant: event.tenant,
             subscriptionId: subscription.id,
             steps: subscription.reaction.steps,
+            eventKind: event.kind,
+            message: event.message,
+            ...(Object.keys(event.payload).length > 0 ? { payload: event.payload } : {}),
+            subject: event.subject,
           });
         } else {
           // No executor wired (Temporal absent) — skip visibly; a durable chain must not degrade to a

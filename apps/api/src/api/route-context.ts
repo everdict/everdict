@@ -217,6 +217,22 @@ export interface ServerDeps {
   authenticator?: Authenticator; // authentication owned by the control plane (OIDC + API keys)
   keyStore?: TenantKeyStore; // for /internal/tenant-keys issuance
   internalToken?: string; // /internal/** guard (fail-closed if absent)
+  // T-d bridge: the reaction workflow's activities reach the agent service THROUGH the CP (one bridge, the
+  // reaper/approval discipline). Mirrors the agent service's HTTP answer so retry semantics ride honestly.
+  reactionBridge?: {
+    start(input: {
+      workspace: string;
+      agentId: string;
+      eventId: string;
+      subscriptionId: string;
+      eventKind: string;
+      message: string;
+      payload?: Record<string, unknown>;
+      subject?: { type: string; id: string };
+      instruction?: string;
+    }): Promise<{ status: number; body: unknown }>;
+    status(workspace: string, sessionId: string): Promise<{ status: number; body: unknown }>;
+  };
   // Runtime fairness dials (operator plane) — read/patch per-tenant quota/weight overrides without a restart.
   schedulingControl?: {
     effective(): { quotas: Record<string, number>; weights: Record<string, number> };

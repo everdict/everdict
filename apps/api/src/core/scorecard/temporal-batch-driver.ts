@@ -155,6 +155,40 @@ export class TemporalBatchDriver {
     }
   }
 
+  // Durable multi-step reaction (orchestration.md T-d): one reaction:<eventId>:<subscriptionId> workflow per
+  // (fact, rule). The deterministic id IS the dedup — the E1 consumer redelivers at-least-once, and a second
+  // start maps to AlreadyStarted, swallowed here (an idempotent no-op, unlike score's client-visible 409:
+  // nobody is waiting on this call to be told "already running").
+  reactionWorkflowIdFor(eventId: string, subscriptionId: string): string {
+    return `everdict-reaction-${eventId}-${subscriptionId}`;
+  }
+
+  async startReaction(input: {
+    eventId: string;
+    tenant: string;
+    subscriptionId: string;
+    steps: Array<{ agentId: string; instruction?: string }>;
+    eventKind: string;
+    message: string;
+    payload?: Record<string, unknown>;
+    subject?: { type: string; id: string };
+  }): Promise<void> {
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      await client.workflow.start("reactionWorkflow", {
+        taskQueue: this.opts.taskQueue ?? TASK_QUEUE,
+        workflowId: this.reactionWorkflowIdFor(input.eventId, input.subscriptionId),
+        args: [input],
+      });
+    } catch (err) {
+      if (err instanceof WorkflowExecutionAlreadyStartedError) return; // redelivery — the chain is already running
+      throw err;
+    } finally {
+      await connection.close();
+    }
+  }
+
   // Cooperative cancellation for a superseded batch — best-effort (the record is already terminal; in-queue
   // activities also skip on the CP-side superseded guard).
   async cancel(scorecardId: string): Promise<void> {

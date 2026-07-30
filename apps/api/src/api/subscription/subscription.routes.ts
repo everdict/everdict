@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import type { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { z } from "zod";
+import { type ServerDeps, constantTimeEq, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { CreateSubscriptionBodySchema } from "./request/create-subscription.js";
 import { UpdateSubscriptionBodySchema } from "./request/update-subscription.js";
 import { subscriptionDocs } from "./subscription.docs.js";
@@ -83,6 +83,51 @@ export function registerSubscriptionRoutes(app: FastifyInstance, deps: ServerDep
       } catch (err) {
         return sendError(reply, err);
       }
+    },
+  );
+
+  // --- T-d internal bridge (worker activity → CP → agent service) — the reaction workflow's two verbs. ---
+  // The CP is the ONE bridge activities talk to (the reaper/approval discipline); it forwards to the agent
+  // service and mirrors the answer's status, so the activity's retry semantics ride HTTP honestly:
+  // 503 = transiently busy (retry), 200 {skipped} = permanent (the chain stops), 200 {sessionId} = watch.
+  const stepBodySchema = z.object({
+    tenant: z.string().min(1),
+    agentId: z.string().min(1),
+    eventId: z.string().min(1),
+    subscriptionId: z.string().min(1),
+    eventKind: z.string().min(1),
+    message: z.string().min(1),
+    payload: z.record(z.unknown()).optional(),
+    subject: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
+    instruction: z.string().min(1).optional(),
+  });
+  app.post("/internal/reactions/step", { schema: subscriptionDocs.internalStep }, async (req, reply) => {
+    if (!deps.internalToken || !deps.reactionBridge)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const body = stepBodySchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    const { tenant, ...step } = body.data;
+    const forwarded = await deps.reactionBridge.start({ workspace: tenant, ...step });
+    return reply.code(forwarded.status).send(forwarded.body);
+  });
+
+  app.get<{ Querystring: { tenant?: string; sessionId?: string } }>(
+    "/internal/reactions/step-status",
+    { schema: subscriptionDocs.internalStepStatus },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.reactionBridge)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      const { tenant, sessionId } = req.query;
+      if (!tenant || !sessionId)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "tenant and sessionId queries are required." });
+      const forwarded = await deps.reactionBridge.status(tenant, sessionId);
+      return reply.code(forwarded.status).send(forwarded.body);
     },
   );
 

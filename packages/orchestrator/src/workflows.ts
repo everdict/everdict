@@ -221,6 +221,61 @@ export async function sessionReaperWorkflow(input: {
   if (!closedInTime) await reaperActivities.reapSession({ runId: input.runId, tenant: input.tenant });
 }
 
+// Reaction activities: the step START must not give up while the control plane or the agent service is
+// down — the durable chain exists exactly for those outages. Capped-backoff unlimited retry; the poll is
+// cheap and frequent, so its failures just ride the next attempt.
+const reactionActivities = proxyActivities<Activities>({
+  startToCloseTimeout: "1 minute",
+  retry: { initialInterval: "5s", maximumInterval: "5 minutes" },
+});
+
+// Durable multi-step reaction (orchestration.md T-d, workflowId `everdict-reaction-<eventId>-<subscriptionId>`):
+// walk the subscription's steps — start ONE agent run per step over the internal bridge, wait out its
+// session (poll under a per-step budget; awaiting_approval counts as alive — a HITL park mid-chain is
+// exactly what durability is for), and only then advance. A failed/cancelled/timed-out step ends the chain
+// (the runs themselves already narrate the outcome on the event log — the workflow adds no judgment).
+export async function reactionWorkflow(input: {
+  eventId: string;
+  tenant: string;
+  subscriptionId: string;
+  steps: Array<{ agentId: string; instruction?: string }>;
+  eventKind: string;
+  message: string;
+  payload?: Record<string, unknown>;
+  subject?: { type: string; id: string };
+  pollSeconds?: number; // default 30s
+  stepTimeoutMs?: number; // per-step watch budget (default 2h)
+}): Promise<{ completed: number; outcome: "completed" | "step_skipped" | "step_failed" | "step_timeout" }> {
+  const pollMs = Math.max(1000, (input.pollSeconds ?? 30) * 1000);
+  const budgetMs = input.stepTimeoutMs ?? 7_200_000;
+  for (let i = 0; i < input.steps.length; i++) {
+    const step = input.steps[i];
+    if (!step) break;
+    const started = await reactionActivities.startReactionStep({
+      tenant: input.tenant,
+      agentId: step.agentId,
+      eventId: `${input.eventId}#s${i}`,
+      subscriptionId: input.subscriptionId,
+      eventKind: input.eventKind,
+      message: input.message,
+      ...(input.payload !== undefined ? { payload: input.payload } : {}),
+      ...(input.subject !== undefined ? { subject: input.subject } : {}),
+      ...(step.instruction !== undefined ? { instruction: step.instruction } : {}),
+    });
+    if ("skipped" in started) return { completed: i, outcome: "step_skipped" };
+    let status = "pending";
+    for (let waitedMs = 0; waitedMs < budgetMs; waitedMs += pollMs) {
+      await sleep(pollMs);
+      status = (await reactionActivities.reactionStepStatus({ tenant: input.tenant, sessionId: started.sessionId }))
+        .status;
+      if (status === "completed" || status === "failed" || status === "cancelled") break;
+    }
+    if (status !== "completed")
+      return { completed: i, outcome: status === "failed" || status === "cancelled" ? "step_failed" : "step_timeout" };
+  }
+  return { completed: input.steps.length, outcome: "completed" };
+}
+
 export async function scheduledScorecardWorkflow(input: { scheduleId: string; tenant: string }): Promise<void> {
   const { scorecardId } = await fireScheduledScorecard(input);
   // A report-mode fire completes synchronously inside the fire activity (no scorecard) — nothing to poll/finalize.

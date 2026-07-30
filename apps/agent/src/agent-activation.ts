@@ -375,11 +375,64 @@ export class AgentActivator {
     return true;
   }
 
-  private enqueueRun(agentKey: string, event: ActivationEvent, agentId: string, spec: AgentSpec, creator: string) {
+  // T-d step entry (the reaction workflow's activity): run ONE agent for ONE synthetic step key, now.
+  // Idempotent by the durable (agent, eventId) dedup — a retry hands back the EXISTING session so the
+  // executor keeps watching instead of double-running. Outcomes: {sessionId} = watch it; {skipped} =
+  // permanently not runnable (chain should stop); THROW = transiently busy (activity retries later).
+  async activateDirect(input: {
+    workspace: string;
+    agentId: string;
+    eventId: string; // the step's dedup key (`<eventId>#s<i>`)
+    eventKind: string;
+    message: string;
+    payload?: Record<string, unknown>;
+    subject?: { type: string; id: string };
+    instruction?: string;
+  }): Promise<{ sessionId: string; started: boolean } | { skipped: string }> {
+    const existing = await this.deps.sessions.findTriggerSession(input.workspace, input.agentId, input.eventId);
+    if (existing) return { sessionId: existing.id, started: false };
+    let spec: AgentSpec;
+    try {
+      spec = await this.deps.registry.get(input.workspace, input.agentId, "latest");
+    } catch {
+      return { skipped: `agent ${input.agentId} not found` };
+    }
+    if (!spec.enabled) return { skipped: `agent ${input.agentId} is disabled` };
+    const entries = await this.deps.registry.list(input.workspace).catch(() => []);
+    const creator = entries.find((entry) => entry.id === input.agentId)?.createdBy;
+    if (!creator) return { skipped: `agent ${input.agentId} has no creator to act as (seed/_shared)` };
+    const agentKey = `${input.workspace}:${input.agentId}`;
+    if ((this.pending.get(agentKey) ?? 0) >= this.maxQueued)
+      throw new Error(`agent ${input.agentId} has ${this.maxQueued} runs queued — retry later`);
+    const sessionId = this.deps.newId();
+    const event: ActivationEvent = {
+      workspace: input.workspace,
+      kind: input.eventKind,
+      message: input.message,
+      eventId: input.eventId,
+      ...(input.subject !== undefined ? { subject: input.subject } : {}),
+      ...(input.payload !== undefined ? { payload: input.payload } : {}),
+      source: "reaction",
+    };
+    this.enqueueRun(agentKey, event, input.agentId, spec, creator, {
+      sessionId,
+      ...(input.instruction !== undefined ? { instruction: input.instruction } : {}),
+    });
+    return { sessionId, started: true };
+  }
+
+  private enqueueRun(
+    agentKey: string,
+    event: ActivationEvent,
+    agentId: string,
+    spec: AgentSpec,
+    creator: string,
+    opts?: { sessionId?: string; instruction?: string },
+  ) {
     this.pending.set(agentKey, (this.pending.get(agentKey) ?? 0) + 1);
     const prev = this.chains.get(agentKey) ?? Promise.resolve();
     const next = prev
-      .then(() => this.activate(event, agentId, spec, creator))
+      .then(() => this.activate(event, agentId, spec, creator, opts))
       .catch((err) => {
         console.error(`[agent] activation failed for ${agentId}:`, err instanceof Error ? err.message : err);
       })
@@ -389,8 +442,14 @@ export class AgentActivator {
     this.chains.set(agentKey, next);
   }
 
-  private async activate(event: ActivationEvent, agentId: string, spec: AgentSpec, creator: string): Promise<void> {
-    const sessionId = this.deps.newId();
+  private async activate(
+    event: ActivationEvent,
+    agentId: string,
+    spec: AgentSpec,
+    creator: string,
+    opts?: { sessionId?: string; instruction?: string },
+  ): Promise<void> {
+    const sessionId = opts?.sessionId ?? this.deps.newId();
     // P3: one activation = one Run{kind:"agent"} on the CP's universal ledger — minted here, threaded
     // through every report (started opens it, the terminal report settles it), stamped on the session.
     const runId = this.deps.newId();
@@ -441,6 +500,15 @@ export class AgentActivator {
         sender: event.source ?? event.kind,
         content: renderActivationPrompt(spec, event),
       });
+      // A reaction step's standing instruction rides as a second mailbox message — the step tells this agent
+      // what its link in the chain is FOR, on top of the fact itself.
+      if (opts?.instruction !== undefined) {
+        this.deps.mailbox.enqueue(event.workspace, sessionId, {
+          from: "event",
+          sender: "reaction",
+          content: `[reaction step] ${opts.instruction}`,
+        });
+      }
       const permit = this.buildPermit(event, agentId, sessionId, spec, controller.signal, runRef);
       await this.deps.runTurn(sessionId, token, controller.signal, permit);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";

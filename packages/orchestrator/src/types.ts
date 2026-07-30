@@ -48,4 +48,22 @@ export interface Activities {
   // settled row skips; a row whose handle died with an earlier CP settles as orphaned and its stray
   // container is removed by the recorded compute id. ---
   reapSession(input: { runId: string; tenant: string }): Promise<void>;
+
+  // --- Durable multi-step reactions (orchestration.md T-d, `reaction:<eventId>:<subscriptionId>`) — the
+  // workflow owns the CHAIN (start step N, wait out its run, then N+1); each step is one agent activation
+  // over the CP → agent-service internal bridge. startReactionStep is idempotent (the durable
+  // (agent, step-key) dedup returns the existing session on a retry); a busy agent queue is a THROWN
+  // transient (Temporal retries), a permanently unrunnable step returns {skipped}. ---
+  startReactionStep(input: {
+    tenant: string;
+    agentId: string;
+    eventId: string; // the step's dedup key (`<eventId>#s<i>`)
+    subscriptionId: string;
+    eventKind: string;
+    message: string;
+    payload?: Record<string, unknown>;
+    subject?: { type: string; id: string };
+    instruction?: string;
+  }): Promise<{ sessionId: string } | { skipped: string }>;
+  reactionStepStatus(input: { tenant: string; sessionId: string }): Promise<{ status: string }>;
 }

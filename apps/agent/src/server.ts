@@ -915,6 +915,52 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     return reply.send(await activator.resumeApproval(parsed.data));
   });
 
+  // CP → agent (T-d): run ONE agent for ONE reaction-step key, now. Idempotent — a retry returns the
+  // EXISTING session (durable (agent, eventId) dedup), so the workflow keeps watching instead of
+  // double-running. 200 {sessionId} = watch it; 200 {skipped} = permanently not runnable (chain stops);
+  // 503 = transiently busy (the activity retries later).
+  const directActivationSchema = z.object({
+    workspace: z.string().min(1),
+    agentId: z.string().min(1),
+    eventId: z.string().min(1),
+    eventKind: z.string().min(1),
+    message: z.string().min(1),
+    payload: z.record(z.unknown()).optional(),
+    subject: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
+    instruction: z.string().min(1).optional(),
+  });
+  app.post("/internal/activations", async (req, reply) => {
+    const presented = req.headers["x-internal-token"];
+    if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))
+      return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
+    if (!activator) return reply.code(404).send({ code: "NOT_FOUND", message: "Activations are not configured." });
+    const parsed = directActivationSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(await activator.activateDirect(parsed.data));
+    } catch (err) {
+      return reply
+        .code(503)
+        .send({ code: "UNAVAILABLE", message: err instanceof Error ? err.message : "activation busy" });
+    }
+  });
+
+  // CP → agent (T-d): a reaction step's watch poll. "pending" = the session row does not exist yet (the run
+  // is still queued behind the per-agent chain) — the workflow keeps polling under its own step budget.
+  app.get<{ Params: { sessionId: string }; Querystring: { workspace?: string } }>(
+    "/internal/activations/:sessionId/status",
+    async (req, reply) => {
+      const presented = req.headers["x-internal-token"];
+      if (typeof presented !== "string" || !constantTimeEq(presented, deps.internalToken))
+        return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
+      const workspace = req.query.workspace;
+      if (workspace === undefined || workspace === "")
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "workspace query is required." });
+      const session = await deps.sessions.getVisibleSession(workspace, "everdict", req.params.sessionId);
+      return reply.send({ status: session?.status ?? "pending" });
+    },
+  );
+
   // Acks 202 and runs the turn DETACHED (a HITL approval can park it for minutes — never a held request);
   // progress lands on the placeholder comment via the /internal/comment-activity bridge, not this response.
   app.post("/internal/discussion-turn", async (req, reply) => {

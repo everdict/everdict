@@ -79,6 +79,12 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     );
   }
 
+  async findTriggerSession(tenant: string, agentId: string, eventId: string): Promise<AgentSessionRecord | undefined> {
+    return this.sessions.find(
+      (s) => s.tenant === tenant && s.origin?.agentId === agentId && s.origin?.eventId === eventId,
+    );
+  }
+
   async listRuns(tenant: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
     return this.sessions
       .filter((s) => s.tenant === tenant && s.origin !== undefined)
@@ -278,12 +284,17 @@ export class PgAgentSessionStore implements AgentSessionStore {
   }
 
   async hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean> {
-    const res = await this.client.query<{ id: string }>(
-      `SELECT id FROM everdict_agent_sessions
+    return (await this.findTriggerSession(tenant, agentId, eventId)) !== undefined;
+  }
+
+  async findTriggerSession(tenant: string, agentId: string, eventId: string): Promise<AgentSessionRecord | undefined> {
+    const res = await this.client.query<SessionRow>(
+      `SELECT ${SESSION_COLUMNS} FROM everdict_agent_sessions
        WHERE tenant = $1 AND origin->>'agentId' = $2 AND origin->>'eventId' = $3 LIMIT 1`,
       [tenant, agentId, eventId],
     );
-    return res.rows.length > 0;
+    const row = res.rows[0];
+    return row ? sessionRowToRecord(row) : undefined;
   }
 
   async listRuns(tenant: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]> {

@@ -33,6 +33,9 @@ export interface AgentSessionStore {
   // Durable activation dedup (agent-automation A3): has this crafted agent already run for this platform event?
   // At-least-once delivery (push + reconcile) collapses here, surviving agent-service restarts.
   hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean>;
+  // The dedup's read side (T-d): a reaction-step retry needs the EXISTING run back, not just a boolean —
+  // the returned session's id/status let the durable executor keep watching instead of double-running.
+  findTriggerSession(tenant: string, agentId: string, eventId: string): Promise<AgentSessionRecord | undefined>;
   deleteSession(tenant: string, owner: string, id: string): Promise<void>;
   appendMessages(records: AgentMessageRecord[]): Promise<void>;
   // Oldest first (seq ascending). With sinceSeq, only messages whose seq is strictly greater (polling).

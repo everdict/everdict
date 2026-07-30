@@ -102,6 +102,9 @@ function sessionsStub() {
     async hasTriggerSession(_tenant: string, agentId: string, eventId: string) {
       return created.some((s) => s.origin?.agentId === agentId && s.origin?.eventId === eventId);
     },
+    async findTriggerSession(_tenant: string, agentId: string, eventId: string) {
+      return created.find((s) => s.origin?.agentId === agentId && s.origin?.eventId === eventId);
+    },
     async listRuns() {
       return created.filter((s) => s.origin !== undefined);
     },
@@ -495,5 +498,74 @@ describe("subscription-driven activation (E3 — reaction.kind=agent)", () => {
     });
     const activated = await instance.onEvent(event({ kind: "run.failed", causedBy: "agent:sentinel:some-session" }));
     expect(activated).toBe(0);
+  });
+});
+
+describe("activateDirect — the T-d reaction step entry", () => {
+  it("starts one run for the step key, and a retry hands back the EXISTING session instead of a second run", async () => {
+    const sessions = sessionsStub();
+    const { instance } = activator({ registry: registryOf(spec()), sessions });
+    const first = await instance.activateDirect({
+      workspace: "acme",
+      agentId: "sentinel",
+      eventId: "ev-9#s0",
+      eventKind: "scorecard.completed",
+      message: "Scorecard sc-9 regressed",
+    });
+    await instance.idle();
+    expect(first).toMatchObject({ started: true });
+    expect(sessions.created).toHaveLength(1);
+    expect(sessions.created[0]?.origin).toMatchObject({ agentId: "sentinel", eventId: "ev-9#s0" });
+
+    const retry = await instance.activateDirect({
+      workspace: "acme",
+      agentId: "sentinel",
+      eventId: "ev-9#s0",
+      eventKind: "scorecard.completed",
+      message: "Scorecard sc-9 regressed",
+    });
+    expect(retry).toMatchObject({ started: false, sessionId: sessions.created[0]?.id });
+    expect(sessions.created).toHaveLength(1); // never a duplicate run
+  });
+
+  it("answers {skipped} for a disabled or creator-less target, and the step instruction rides into the mailbox", async () => {
+    const disabled = activator({ registry: registryOf(spec({ enabled: false })) });
+    expect(
+      await disabled.instance.activateDirect({
+        workspace: "acme",
+        agentId: "sentinel",
+        eventId: "e#s0",
+        eventKind: "run.failed",
+        message: "m",
+      }),
+    ).toMatchObject({ skipped: expect.stringContaining("disabled") });
+
+    const orphan = activator({ registry: registryOf(spec(), null) });
+    expect(
+      await orphan.instance.activateDirect({
+        workspace: "acme",
+        agentId: "sentinel",
+        eventId: "e#s0",
+        eventKind: "run.failed",
+        message: "m",
+      }),
+    ).toMatchObject({ skipped: expect.stringContaining("creator") });
+
+    const sessions = sessionsStub();
+    const { instance, mailbox } = activator({ registry: registryOf(spec()), sessions });
+    const seen: string[] = [];
+    const started = await instance.activateDirect({
+      workspace: "acme",
+      agentId: "sentinel",
+      eventId: "e#s1",
+      eventKind: "run.failed",
+      message: "the fact",
+      instruction: "Re-run the smoke scorecard and open a fix PR if it still regresses.",
+    });
+    await instance.idle();
+    expect(started).toMatchObject({ started: true });
+    const sessionId = "sessionId" in started ? started.sessionId : "";
+    for (const m of mailbox.drain("acme", sessionId)) if (typeof m.content === "string") seen.push(m.content);
+    expect(seen.some((c) => c.includes("[reaction step] Re-run the smoke scorecard"))).toBe(true);
   });
 });

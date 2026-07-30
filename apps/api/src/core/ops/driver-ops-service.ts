@@ -7,7 +7,7 @@ import { Client, Connection, WorkflowNotFoundError } from "@temporalio/client";
 // unexposed). Families per ledger id: the batch driver loop, the detached scoring pass, and the durable
 // approval WAIT (ledger id = the approval id), and the durable session reaper (ledger id = the sandbox
 // run id — W5's T-b). reaction: joins with its wave.
-export const DRIVER_WORKFLOW_FAMILIES = ["batch", "score", "approval", "reaper"] as const;
+export const DRIVER_WORKFLOW_FAMILIES = ["batch", "score", "approval", "reaper", "reaction"] as const;
 export type DriverWorkflowFamily = (typeof DRIVER_WORKFLOW_FAMILIES)[number];
 
 // The diagnostic slice an ops agent (or the web) needs to answer "where is this stuck, and why": lifecycle
@@ -37,6 +37,7 @@ export class DriverOpsService {
     if (family === "batch") return `everdict-batch-${ledgerId}`;
     if (family === "score") return `everdict-score-${ledgerId}`;
     if (family === "reaper") return `everdict-reaper-${ledgerId}`;
+    if (family === "reaction") return `everdict-reaction-${ledgerId}`; // ledgerId = `<eventId>-<subscriptionId>`
     return `everdict-approval-${ledgerId}`;
   }
 

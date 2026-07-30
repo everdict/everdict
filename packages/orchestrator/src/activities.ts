@@ -168,6 +168,41 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       );
       if (!res.ok) throw new Error(`Session reap failed: ${res.status} ${await res.text()}`);
     },
+    // --- Durable multi-step reactions (T-d) — one agent activation per step over the same internal bridge.
+    // The CP forwards to the agent service; a 503 (busy queue / service down) THROWS so Temporal retries,
+    // while a 200 {skipped} is a terminal answer the workflow acts on. ---
+    async startReactionStep(input: {
+      tenant: string;
+      agentId: string;
+      eventId: string;
+      subscriptionId: string;
+      eventKind: string;
+      message: string;
+      payload?: Record<string, unknown>;
+      subject?: { type: string; id: string };
+      instruction?: string;
+    }): Promise<{ sessionId: string } | { skipped: string }> {
+      if (!schedule)
+        throw new Error("Reaction activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const res = await fetch(`${schedule.apiUrl.replace(/\/$/, "")}/internal/reactions/step`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) throw new Error(`Reaction step start failed: ${res.status} ${await res.text()}`);
+      return (await res.json()) as { sessionId: string } | { skipped: string };
+    },
+    async reactionStepStatus(input: { tenant: string; sessionId: string }): Promise<{ status: string }> {
+      if (!schedule)
+        throw new Error("Reaction activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const url = new URL(
+        `/internal/reactions/step-status?tenant=${encodeURIComponent(input.tenant)}&sessionId=${encodeURIComponent(input.sessionId)}`,
+        schedule.apiUrl,
+      );
+      const res = await fetch(url, { headers: { "x-internal-token": schedule.internalToken } });
+      if (!res.ok) throw new Error(`Reaction step status failed: ${res.status} ${await res.text()}`);
+      return (await res.json()) as { status: string };
+    },
     // --- Durable approvals (T-a) — deny-on-expiry over the same internal bridge. ---
     async expireApproval(input: { approvalId: string; tenant: string }): Promise<void> {
       if (!schedule)
