@@ -85,6 +85,20 @@ export interface AgentServerDeps extends ChatDeps {
   commentActivity?: CommentActivityReporter;
 }
 
+// SSE heartbeat: a comment frame every 15s so intermediary proxies/LBs never see an idle stream and cut it — a
+// long tool execution produces no events for minutes, and "long task → silent connection → severed connection"
+// was a top disconnect cause for long-running turns. Comment frames (leading ':') are invisible to SSE parsers
+// (the web's frame loop only reads `event:`/`data:` lines). Returns the stop fn; unref'd so it never holds the
+// process open.
+const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
+function startSseHeartbeat(raw: { destroyed: boolean; write: (chunk: string) => unknown }): () => void {
+  const timer = setInterval(() => {
+    if (!raw.destroyed) raw.write(":hb\n\n");
+  }, SSE_HEARTBEAT_INTERVAL_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 // Constant-time equality for the internal token (fail-closed: no secret configured OR length mismatch → false).
 function constantTimeEq(a: string | undefined, b: string | undefined): boolean {
   if (!a || !b) return false;
@@ -548,8 +562,12 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       if (reply.raw.destroyed) return;
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
+    const stopHeartbeat = startSseHeartbeat(reply.raw);
     const detach = session ? liveTurns.attach(principal.workspace, id, subscriber) : null;
-    req.raw.on("close", () => detach?.());
+    req.raw.on("close", () => {
+      stopHeartbeat();
+      detach?.();
+    });
     const write = (event: string, data: unknown): void => {
       // Unknown session → no registered turn (broadcast no-ops): write the error tail directly instead.
       if (session) liveTurns.broadcast(principal.workspace, id, event, data);
@@ -637,6 +655,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     } catch (err) {
       write("error", { message: err instanceof AppError ? err.message : "Internal error" });
     } finally {
+      stopHeartbeat();
       liveTurns.end(principal.workspace, id);
       if (!reply.raw.destroyed) reply.raw.end();
     }
@@ -666,6 +685,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       if (reply.raw.destroyed) return;
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
+    const stopHeartbeat = startSseHeartbeat(reply.raw);
     if (snapshot.streamingReasoning.length > 0) write("reasoning", { text: snapshot.streamingReasoning });
     if (snapshot.streamingText.length > 0) write("delta", { text: snapshot.streamingText });
     // Parked write-tool asks (a plan ask parks nameless — it is replayed from the snapshot instead).
@@ -673,15 +693,22 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (snapshot.pendingPlan) write("plan", snapshot.pendingPlan);
     const detach = liveTurns.attach(principal.workspace, id, (event, data) => {
       write(event, data);
-      if (event === "done" || event === "error") reply.raw.end();
+      if (event === "done" || event === "error") {
+        stopHeartbeat();
+        reply.raw.end();
+      }
     });
     if (!detach) {
       // The turn settled between the snapshot and the subscribe — nothing more will come.
       write("done", {});
+      stopHeartbeat();
       reply.raw.end();
       return;
     }
-    req.raw.on("close", detach);
+    req.raw.on("close", () => {
+      stopHeartbeat();
+      detach();
+    });
   });
 
   // Explicitly stop the session's live turn — the web's Stop button (a client disconnect no longer aborts the
