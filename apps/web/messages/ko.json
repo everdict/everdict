@@ -3700,7 +3700,10 @@
       "trace": "트레이스",
       "knowledge": "지식",
       "tool": "도구"
-    }
+    },
+    "retryNotice": "모델 응답 오류 — {seconds}초 후 재시도합니다 (시도 {attempt}회)",
+    "retryNoticePersistent": "용량 제한 대기 중 — {seconds}초 후 재시도합니다 (시도 {attempt}회)",
+    "fallbackNotice": "예비 모델로 전환했습니다: {model}"
   },
   "workspaceSettings": {
     "meterUsage": "사용량 계측",

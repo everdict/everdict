@@ -78,3 +78,25 @@ describe("PermissionRegistry", () => {
     }
   });
 });
+
+describe("resolveWhere — mid-turn permission-mode relaxation", () => {
+  it("resolves only the parked asks the predicate decides, leaving the rest parked", async () => {
+    // Given two asks parked in one session (a routine write + a guarded one) and one in another session
+    const registry = new PermissionRegistry(60_000);
+    const routine = registry.wait("r-1", "s-1", undefined, { name: "create_dataset", input: {} });
+    const guarded = registry.wait("r-2", "s-1", undefined, { name: "delete_harness", input: {} });
+    const other = registry.wait("r-3", "s-2", undefined, { name: "create_dataset", input: {} });
+    // When the session's mode relaxes to auto (allow non-guarded only)
+    const resolved = registry.resolveWhere("s-1", (name) => (name === "create_dataset" ? "allow" : undefined));
+    // Then the routine ask is allowed, the guarded one stays parked, the other session is untouched
+    expect(resolved).toBe(1);
+    await expect(routine).resolves.toBe("allow");
+    expect(registry.pendingFor("s-1").map((p) => p.name)).toEqual(["delete_harness"]);
+    expect(registry.pendingFor("s-2")).toHaveLength(1);
+    // Clean up the still-parked asks so no timers leak past the test
+    registry.respond("r-2", "s-1", "deny");
+    registry.respond("r-3", "s-2", "deny");
+    await expect(guarded).resolves.toBe("deny");
+    await expect(other).resolves.toBe("deny");
+  });
+});

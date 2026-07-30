@@ -15,6 +15,10 @@ export interface LiveTurnSnapshot {
   streamingText: string;
   streamingReasoning: string;
   pendingPlan?: { requestId: string; plan: string };
+  // An in-progress retry wait (the loop is backing off a transient model failure — up to minutes under
+  // persistent mode). Replayed so a late attacher sees WHY the turn is quiet instead of a frozen panel;
+  // cleared by the next progress event (delta/reasoning/message).
+  pendingRetry?: { attempt: number; delayMs: number; persistent?: boolean };
 }
 
 interface LiveTurn {
@@ -24,6 +28,7 @@ interface LiveTurn {
   streamingReasoning: string;
   // 명시적 undefined 리셋(plan 결정 후)을 위해 required | undefined 로 둔다 (delete 금지 규칙).
   pendingPlan: { requestId: string; plan: string } | undefined;
+  pendingRetry: { attempt: number; delayMs: number; persistent?: boolean } | undefined;
 }
 
 function textOf(data: unknown): string {
@@ -53,6 +58,7 @@ export class LiveTurnRegistry {
       streamingText: "",
       streamingReasoning: "",
       pendingPlan: undefined,
+      pendingRetry: undefined,
     });
     return controller;
   }
@@ -69,6 +75,7 @@ export class LiveTurnRegistry {
       streamingText: turn.streamingText,
       streamingReasoning: turn.streamingReasoning,
       ...(turn.pendingPlan ? { pendingPlan: turn.pendingPlan } : {}),
+      ...(turn.pendingRetry ? { pendingRetry: turn.pendingRetry } : {}),
     };
   }
 
@@ -90,14 +97,29 @@ export class LiveTurnRegistry {
     if (!turn) return;
     if (event === "delta") {
       turn.streamingText += textOf(data);
+      turn.pendingRetry = undefined; // progress — the wait is over
     } else if (event === "reasoning") {
       turn.streamingReasoning += textOf(data);
+      turn.pendingRetry = undefined;
     } else if (event === "message") {
       const record = data as { role?: unknown; content?: unknown };
+      turn.pendingRetry = undefined;
       if (record.role === "assistant") {
         turn.streamingReasoning = "";
         if (typeof record.content === "string" && record.content.trim().length > 0) turn.streamingText = "";
       }
+    } else if (event === "retry") {
+      // Park the in-progress wait for replay (the latest ask wins — attempts supersede each other).
+      const wait = data as { attempt?: unknown; delayMs?: unknown; persistent?: unknown };
+      if (typeof wait.attempt === "number" && typeof wait.delayMs === "number")
+        turn.pendingRetry = {
+          attempt: wait.attempt,
+          delayMs: wait.delayMs,
+          ...(wait.persistent === true ? { persistent: true } : {}),
+        };
+    } else if (event === "fallback") {
+      // The fallback call starts immediately — the retry wait it superseded is no longer in progress.
+      turn.pendingRetry = undefined;
     } else if (event === "plan") {
       const ask = data as { requestId?: unknown; plan?: unknown };
       if (typeof ask.requestId === "string" && typeof ask.plan === "string")

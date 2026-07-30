@@ -10,6 +10,7 @@ import {
   MessageCircleQuestion,
   MessageSquarePlus,
   Pencil,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
@@ -161,6 +162,7 @@ export function ConversationView({
   sending,
   streamingText,
   streamingReasoning,
+  streamNotice,
   input,
   references,
   attachments,
@@ -199,6 +201,11 @@ export function ConversationView({
   sending: boolean
   streamingText: string
   streamingReasoning: string
+  // 일시 장애 안내: 재시도 대기(retry — 조용한 턴의 이유) 또는 예비 모델 전환(fallback). null → 없음.
+  streamNotice?:
+    | { kind: 'retry'; attempt: number; delayMs: number; persistent?: boolean }
+    | { kind: 'fallback'; to: string }
+    | null
   input: string
   references: AgentReference[]
   attachments: AgentAttachmentInput[]
@@ -355,6 +362,19 @@ export function ConversationView({
               {streamingReasoning.length > 0 && (
                 <ReasoningBlock text={streamingReasoning} streaming />
               )}
+              {streamNotice && (
+                <div className="animate-in fade-in-0 px-3 py-1.5 duration-200">
+                  <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[11.5px] leading-none text-amber-600 dark:text-amber-400">
+                    <RefreshCw className="size-3 animate-spin [animation-duration:2.5s]" />
+                    {streamNotice.kind === 'retry'
+                      ? t(streamNotice.persistent ? 'retryNoticePersistent' : 'retryNotice', {
+                          seconds: Math.max(1, Math.ceil(streamNotice.delayMs / 1000)),
+                          attempt: streamNotice.attempt,
+                        })
+                      : t('fallbackNotice', { model: streamNotice.to })}
+                  </span>
+                </div>
+              )}
               {streamingText.length > 0 ? (
                 <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
                   <Markdown
@@ -362,7 +382,7 @@ export function ConversationView({
                     className="text-[13px] leading-relaxed text-foreground"
                   />
                 </div>
-              ) : sending && streamingReasoning.length === 0 ? (
+              ) : sending && streamingReasoning.length === 0 && !streamNotice ? (
                 <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
                   <span className="flex gap-1" aria-label={t('thinking')}>
                     {[0, 1, 2].map((i) => (

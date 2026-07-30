@@ -63,4 +63,19 @@ export class PermissionRegistry {
       .filter(([, p]) => p.sessionId === sessionId)
       .map(([requestId, p]) => ({ requestId, name: p.name, input: p.input }));
   }
+
+  // Resolve every parked ask of the session that `decide` maps to a decision (undefined = leave parked). Used when
+  // the session's permission mode is RELAXED mid-turn (→ bypass/auto): an ask parked under the old mode would
+  // otherwise stay stuck even though the new mode would never have asked. Returns how many were resolved.
+  resolveWhere(sessionId: string, decide: (name: string) => PermissionDecision | undefined): number {
+    let resolved = 0;
+    for (const [, p] of [...this.pending.entries()]) {
+      if (p.sessionId !== sessionId) continue;
+      const decision = decide(p.name);
+      if (decision === undefined) continue;
+      p.resolve(decision);
+      resolved += 1;
+    }
+    return resolved;
+  }
 }

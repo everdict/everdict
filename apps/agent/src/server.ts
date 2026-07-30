@@ -2,7 +2,13 @@ import { timingSafeEqual } from "node:crypto";
 import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
 import type { AgentRegistry, SubscriptionStore, TenantKeyStore } from "@everdict/application-control";
 import type { AgentSessionRecord } from "@everdict/contracts";
-import { AgentPermissionModeSchema, AgentReferenceSchema, AppError, CodeToolSpecSchema } from "@everdict/contracts";
+import {
+  type AgentPermissionMode,
+  AgentPermissionModeSchema,
+  AgentReferenceSchema,
+  AppError,
+  CodeToolSpecSchema,
+} from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -398,8 +404,17 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (body.data.title !== undefined) await deps.sessions.touchSession(principal.workspace, id, now, body.data.title);
     if (body.data.model !== undefined)
       await deps.sessions.setSessionModel(principal.workspace, id, body.data.model, now);
-    if (body.data.permissionMode !== undefined)
+    if (body.data.permissionMode !== undefined) {
       await deps.sessions.setSessionPermissionMode(principal.workspace, id, body.data.permissionMode, now);
+      // Mid-turn application, part 2 (part 1 = the live permit hook consulting the record per ask): an ask that
+      // is ALREADY parked was created under the old mode — if the new mode would never have asked, resolve it
+      // now (bypass → allow everything; auto → allow the non-guarded). The resolution flows through the loop's
+      // permission event → SSE permission_resolved, so an attached panel dismisses its prompt.
+      const nextMode = body.data.permissionMode;
+      if (nextMode === "bypass") permissions.resolveWhere(id, () => "allow");
+      else if (nextMode === "auto")
+        permissions.resolveWhere(id, (name) => (name.length > 0 && !isGuardedAction(name) ? "allow" : undefined));
+    }
     // Return the fresh persisted record — the single source of truth after the write(s).
     const fresh = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     return reply.send(fresh ?? session);
@@ -473,12 +488,21 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     const headers = forwardHeaders(req);
     const { message, references, attachments, canvas, agentDraft } = body.data;
-    // The turn's effective mode: an explicit body.mode (API callers / one-off overrides) wins, else the session's
-    // standing mode (the chat-header picker, persisted on the record), else "default" (ask). A missing session is
-    // left to runChat's own NotFound so this stays a pure mode lookup. Visibility-aware: any member may continue a
-    // workspace-visible (discussion) session.
+    // The turn's effective mode: an explicit body.mode (API callers / one-off overrides) pins the WHOLE turn,
+    // else the session's standing mode (the chat-header picker, persisted on the record), else "default" (ask).
+    // The session-picker half is LIVE: each write-tool ask re-reads the record via liveMode(), so flipping the
+    // picker mid-turn applies to the very next tool call — not just the next turn. (Plan mode is the exception:
+    // it shapes the loop from the start, so picking it mid-turn takes effect on the next turn.) A missing session
+    // is left to runChat's own NotFound so this stays a pure mode lookup. Visibility-aware: any member may
+    // continue a workspace-visible (discussion) session.
     const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
-    const mode = body.data.mode ?? session?.permissionMode ?? "default";
+    const modeOverride = body.data.mode;
+    const mode = modeOverride ?? session?.permissionMode ?? "default";
+    const liveMode = async (): Promise<AgentPermissionMode> => {
+      if (modeOverride !== undefined) return modeOverride;
+      const fresh = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
+      return fresh?.permissionMode ?? "default";
+    };
     // One live turn per session (the duplicate-turn guard): claim the slot BEFORE starting the loop; a concurrent
     // /chat is refused with 409, so a panel that lost its stream re-attaches via GET /stream instead of
     // double-running the loop. The turn is NOT tied to this request — a client disconnect only detaches the SSE
@@ -583,9 +607,15 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       write("permission", { requestId, name: request.name, input: request.input });
       return permissions.wait(requestId, id, controller.signal, request);
     };
-    const permit: PermissionHook = withRules((request) =>
-      mode === "auto" && !isGuardedAction(request.name) ? "allow" : ask(request),
-    );
+    // The hook consults the CURRENT mode per ask (liveMode) — bypass auto-allows, auto asks only for guarded
+    // (destructive/governance/credential) actions, default/plan ask. Wired unconditionally (see below): a turn
+    // started under bypass could otherwise never regain the gate when the member flips the picker back mid-turn.
+    const permit: PermissionHook = withRules(async (request) => {
+      const current = await liveMode();
+      if (current === "bypass") return "allow";
+      if (current === "auto" && !isGuardedAction(request.name)) return "allow";
+      return ask(request);
+    });
     // Plan approval reuses the same park-and-await channel: emit a `plan` ask, resolve via POST /permission.
     const onPlan = async (plan: string): Promise<boolean> => {
       const requestId = deps.newId();
@@ -612,6 +642,16 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
             // registry's timeout/disconnect default rather than a click.
             else if (e.type === "permission") write("permission_resolved", { name: e.name, decision: e.decision });
             else if (e.type === "plan") write("plan_presented", { plan: e.plan });
+            // The loop is waiting out a transient model failure — surface it so the panel can say WHY the turn
+            // is quiet instead of looking frozen (the wait can be minutes under persistentRetry).
+            else if (e.type === "retry")
+              write("retry", {
+                attempt: e.attempt,
+                delayMs: e.delayMs,
+                ...(e.persistent === true ? { persistent: true } : {}),
+              });
+            // The run switched to the fallback model after sustained failure — one informational line.
+            else if (e.type === "fallback") write("fallback", { from: e.from, to: e.to });
           },
           // An emitted analysis artifact (chart/table/report) — push the record so the web renders it live.
           onArtifact: (artifact) => write("artifact", artifact),
@@ -639,9 +679,10 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
               }
             : {}),
           onRecord: (r) => write("message", r),
-          // bypass → no permit (auto-allow writes); default/plan → HITL + rules; auto → ask only guarded actions
-          // (folded into `permit` above). plan → planMode + onPlan approval.
-          ...(mode === "bypass" ? {} : { permit }),
+          // The permit hook is ALWAYS wired — it reads the live mode per ask (bypass auto-allow · auto → ask
+          // only guarded · default/plan → HITL + rules), so the chat-header picker applies mid-turn in both
+          // directions. plan → planMode + onPlan approval (turn-scoped by construction).
+          permit,
           ...(mode === "plan" ? { planMode: true, onPlan } : {}),
           drainInput,
           sendMessage,
@@ -691,6 +732,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // Parked write-tool asks (a plan ask parks nameless — it is replayed from the snapshot instead).
     for (const p of permissions.pendingFor(id)) if (p.name.length > 0) write("permission", p);
     if (snapshot.pendingPlan) write("plan", snapshot.pendingPlan);
+    // An in-progress retry wait — the attacher should see WHY the turn is quiet, not a frozen panel.
+    if (snapshot.pendingRetry) write("retry", snapshot.pendingRetry);
     const detach = liveTurns.attach(principal.workspace, id, (event, data) => {
       write(event, data);
       if (event === "done" || event === "error") {

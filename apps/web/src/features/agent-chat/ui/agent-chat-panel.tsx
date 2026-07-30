@@ -121,6 +121,13 @@ export function AgentChatPanel({
   const [attachments, setAttachments] = useState<AgentAttachmentInput[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [streamingReasoning, setStreamingReasoning] = useState('')
+  // 일시 장애 배너: 루프가 모델 실패를 재시도 대기 중(`retry`)이거나 예비 모델로 전환(`fallback`)했음을
+  // 알린다 — 없으면 긴 대기가 "얼어붙은 패널"로 보인다. 진행 이벤트(delta/reasoning/message)가 지운다.
+  const [streamNotice, setStreamNotice] = useState<
+    | { kind: 'retry'; attempt: number; delayMs: number; persistent?: boolean }
+    | { kind: 'fallback'; to: string }
+    | null
+  >(null)
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([])
   const [modelIds, setModelIds] = useState<string[]>([])
   // 드래프트(세션 미생성) 상태에서 고른 모델 — 첫 전송의 세션 생성에 실려 간다.
@@ -404,6 +411,7 @@ export function AgentChatPanel({
           ? (data as { text?: unknown }).text
           : undefined
       if (typeof delta === 'string' && delta.length > 0) setStreamingText((prev) => prev + delta)
+      setStreamNotice(null) // progress — the retry wait is over
     } else if (event === 'reasoning') {
       // Live extended-thinking tokens — grow the in-flight reasoning block until this turn's record lands.
       const delta =
@@ -412,16 +420,37 @@ export function AgentChatPanel({
           : undefined
       if (typeof delta === 'string' && delta.length > 0)
         setStreamingReasoning((prev) => prev + delta)
+      setStreamNotice(null)
     } else if (event === 'message') {
       const parsed = agentMessageSchema.safeParse(data)
       if (!parsed.success) return
       setMessages((prev) => mergeMessages(prev, [parsed.data]))
+      setStreamNotice(null)
       if (parsed.data.role === 'user') setPendingUser(null)
       // Each assistant record carries this turn's finalized reasoning + text, so retire the live buffers when it lands.
       if (parsed.data.role === 'assistant') {
         setStreamingReasoning('')
         if (parsed.data.content.trim().length > 0) setStreamingText('')
       }
+    } else if (event === 'retry') {
+      // 루프가 일시 장애를 대기 중 — 조용한 턴의 이유를 배너로. 최신 시도가 이전 배너를 대체한다.
+      if (data !== null && typeof data === 'object' && 'attempt' in data && 'delayMs' in data) {
+        const d = data as { attempt?: unknown; delayMs?: unknown; persistent?: unknown }
+        if (typeof d.attempt === 'number' && typeof d.delayMs === 'number')
+          setStreamNotice({
+            kind: 'retry',
+            attempt: d.attempt,
+            delayMs: d.delayMs,
+            ...(d.persistent === true ? { persistent: true } : {}),
+          })
+      }
+    } else if (event === 'fallback') {
+      // 예비 모델로 전환 — 한 줄 안내(다음 진행 이벤트가 지운다).
+      const to =
+        data !== null && typeof data === 'object' && 'to' in data
+          ? (data as { to?: unknown }).to
+          : undefined
+      if (typeof to === 'string' && to.length > 0) setStreamNotice({ kind: 'fallback', to })
     } else if (event === 'view_config') {
       // The agent drove the analysis canvas (apply_view_config) — same-window broadcast; the analyze
       // dashboard / open View listens and applies the stored-form config live.
@@ -478,6 +507,7 @@ export function AgentChatPanel({
       abortRef.current = null
       setStreamingText('')
       setStreamingReasoning('')
+      setStreamNotice(null)
       setPendingUser(null)
       setSending(false)
       // The turn is over; any approval still parked was denied server-side (timeout/stop), so clear the strip.
@@ -849,6 +879,7 @@ export function AgentChatPanel({
       sending={sending}
       streamingText={streamingText}
       streamingReasoning={streamingReasoning}
+      streamNotice={streamNotice}
       input={input}
       references={references}
       attachments={attachments}

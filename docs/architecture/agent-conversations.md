@@ -150,7 +150,12 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   risking a silent double-fire). Also in this pass: a turn's write tools run **serially in call order** while
   consecutive read-only calls stay concurrent (the isConcurrencySafe partition, over `isReadOnly`); the default
   output cap rose 4096→8192 with `finishReason` truncation surfaced as a `truncated` event; `outputTokens` is a
-  loop/stream option end-to-end.
+  loop/stream option end-to-end. The panel RENDERS the resilience: `retry`/`fallback` flow through the SSE feed
+  (the live-turn snapshot replays an in-progress wait to re-attachers) as an amber notice, so a minutes-long
+  backoff reads as "waiting out a capacity limit, attempt N" instead of a frozen turn. And the permission-mode
+  picker applies MID-TURN: the permit hook re-reads the session's mode per ask (an explicit per-turn body.mode
+  still pins the whole turn; plan stays turn-scoped), and PATCHing the mode resolves already-parked asks the new
+  mode would never have asked (bypass → all, auto → the non-guarded).
 - **P9 (per-workspace customization, landed — Phase 1)** — each workspace can enhance its own agent, plugging its
   context + tools into the shared framework the way Claude Code takes a per-project CLAUDE.md + MCP servers. A new
   **registered, versioned `AgentSpec` entity** (`(tenant, id, version) → AgentSpec`, same immutable-version SSOT as

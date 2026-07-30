@@ -78,6 +78,23 @@ describe("LiveTurnRegistry", () => {
     expect(healthySeen).toBe(2);
   });
 
+  it("parks an in-progress retry wait for late attachers and clears it on the next progress event", () => {
+    const reg = new LiveTurnRegistry();
+    reg.begin("acme", "s1");
+    // Given the loop is backing off a transient model failure
+    reg.broadcast("acme", "s1", "retry", { attempt: 2, delayMs: 4000, persistent: true });
+    // Then a late attacher's snapshot replays the wait (it would otherwise see a frozen, silent turn)
+    expect(reg.snapshot("acme", "s1")).toMatchObject({
+      pendingRetry: { attempt: 2, delayMs: 4000, persistent: true },
+    });
+    // A newer attempt supersedes the parked one
+    reg.broadcast("acme", "s1", "retry", { attempt: 3, delayMs: 8000 });
+    expect(reg.snapshot("acme", "s1")?.pendingRetry).toEqual({ attempt: 3, delayMs: 8000 });
+    // When the model call finally makes progress, the wait is over — no stale banner for attachers
+    reg.broadcast("acme", "s1", "delta", { text: "recovered" });
+    expect(reg.snapshot("acme", "s1")?.pendingRetry).toBeUndefined();
+  });
+
   it("snapshot and attach report nothing for a session with no live turn (the 204 path)", () => {
     const reg = new LiveTurnRegistry();
     expect(reg.snapshot("acme", "missing")).toBeNull();

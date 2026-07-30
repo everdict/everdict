@@ -3700,7 +3700,10 @@
       "trace": "Trace",
       "knowledge": "Knowledge",
       "tool": "Tool"
-    }
+    },
+    "retryNotice": "Provider hiccup — retrying in {seconds}s (attempt {attempt})",
+    "retryNoticePersistent": "Waiting out a capacity limit — retrying in {seconds}s (attempt {attempt})",
+    "fallbackNotice": "Switched to the fallback model: {model}"
   },
   "workspaceSettings": {
     "meterUsage": "Meter usage",
