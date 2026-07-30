@@ -7,6 +7,7 @@ import {
 import { ApprovalService } from "@everdict/application-control";
 import {
   EventConsumerRunner,
+  mattermostConsumer,
   runFeedConsumer,
   scorecardFeedConsumer,
   subscriptionReactionConsumer,
@@ -385,6 +386,9 @@ async function main(): Promise<void> {
   });
   eventConsumers.register(runFeedConsumer(notificationStore));
   eventConsumers.register(scorecardFeedConsumer(notificationStore));
+  // The Mattermost channel rides the log too (the last direct notification path, re-based): completion +
+  // report facts → workspace channel posts. E2's widened facts keep machine-fired coverage intact.
+  eventConsumers.register(mattermostConsumer(notificationService));
   // One Temporal client driver serves every CP-started workflow family (batch cancel aside): approvals'
   // durable WAIT, the session reaper, and the T-d reaction executor below.
   const workflowTemporal = process.env.EVERDICT_TEMPORAL_ADDRESS

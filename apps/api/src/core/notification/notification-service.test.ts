@@ -1,23 +1,27 @@
 import {
   EventConsumerRunner,
   NotificationService,
+  mattermostConsumer,
   runFeedConsumer,
   scorecardFeedConsumer,
 } from "@everdict/application-control";
 import type { PlatformEventRecord } from "@everdict/contracts";
 import { InMemoryEventConsumerStateStore, InMemoryNotificationStore, InMemoryPlatformEventStore } from "@everdict/db";
-import type { RunRecord, WorkspaceSettings } from "@everdict/db";
+import type { WorkspaceSettings } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { mattermostHttpClient } from "../../infrastructure/mattermost/mattermost-client.js";
 
-const runRec = (status: "succeeded" | "failed"): RunRecord => ({
-  id: "run-1",
+// The completion FACT as the log carries it — the mm:completions consumer is the only Mattermost writer
+// since the re-base, so these tests drive the channel through it (fact → consumer → poster → transport).
+const runFactFor = (status: "succeeded" | "failed"): PlatformEventRecord => ({
+  id: `ev-run-${status}`,
+  seq: 1,
   tenant: "acme",
-  harness: { id: "scripted", version: "0" },
-  caseId: "c1",
-  status,
+  kind: status === "succeeded" ? "run.completed" : "run.failed",
+  subject: { type: "run", id: "run-1" },
+  payload: { status, harness: "scripted@0", caseId: "c1" },
+  message: `Run run-1 ${status}`,
   createdAt: "2026-01-01T00:00:00Z",
-  updatedAt: "2026-01-01T00:00:00Z",
 });
 
 interface PostCall {
@@ -58,12 +62,12 @@ function build(opts: {
   return { svc, calls, feed };
 }
 
-describe("NotificationService.notifyRun (workspace Mattermost bot)", () => {
+describe("mm:completions → workspace Mattermost bot (the re-based channel)", () => {
   const mm = { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch-ops" };
 
   it("workspace registration (bot token + defaultChannelId) → posts to the channel with the bot token", async () => {
     const { svc, calls } = build({ mattermost: mm, secrets: { MM_BOT: "botxyz" } });
-    await svc.notifyRun("acme", runRec("succeeded"));
+    await mattermostConsumer(svc).handle(runFactFor("succeeded"));
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("https://mm.corp.io/api/v4/posts");
     expect(calls[0]?.auth).toBe("Bearer botxyz");
@@ -74,13 +78,13 @@ describe("NotificationService.notifyRun (workspace Mattermost bot)", () => {
 
   it("Mattermost unset → does not post", async () => {
     const { svc, calls } = build({});
-    await svc.notifyRun("acme", runRec("succeeded"));
+    await mattermostConsumer(svc).handle(runFactFor("succeeded"));
     expect(calls).toHaveLength(0);
   });
 
   it("does not post if the bot token is missing from the SecretStore (graceful skip)", async () => {
     const { svc, calls } = build({ mattermost: mm, secrets: {} });
-    await svc.notifyRun("acme", runRec("succeeded"));
+    await mattermostConsumer(svc).handle(runFactFor("succeeded"));
     expect(calls).toHaveLength(0);
   });
 
@@ -89,14 +93,14 @@ describe("NotificationService.notifyRun (workspace Mattermost bot)", () => {
       mattermost: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT" },
       secrets: { MM_BOT: "botxyz" },
     });
-    await svc.notifyRun("acme", runRec("succeeded"));
+    await mattermostConsumer(svc).handle(runFactFor("succeeded"));
     expect(calls).toHaveLength(0);
   });
 
-  it("swallows post failures (no throw — unrelated to the run result)", async () => {
+  it("swallows post failures (no throw — an MM outage never dams the log)", async () => {
     const failing = (() => Promise.reject(new Error("network"))) as unknown as typeof fetch;
     const { svc } = build({ mattermost: mm, secrets: { MM_BOT: "botxyz" }, fetchImpl: failing });
-    await expect(svc.notifyRun("acme", runRec("succeeded"))).resolves.toBeUndefined();
+    await expect(mattermostConsumer(svc).handle(runFactFor("succeeded"))).resolves.toBeUndefined();
   });
 });
 
@@ -187,12 +191,16 @@ describe("the personal feed rides the event log (E1) — facts → cursor consum
   });
 });
 
-describe("NotificationService — interactive Rerun button on scorecard completion posts", () => {
-  const scorecard = {
-    id: "sc-1",
-    status: "succeeded",
-    dataset: { id: "webvoyager", version: "1.0.0" },
-    harness: { id: "browser-use", version: "2.0.0" },
+describe("mm:completions — interactive Rerun button on scorecard completion posts", () => {
+  const scorecardFact: PlatformEventRecord = {
+    id: "ev-sc-1",
+    seq: 2,
+    tenant: "acme",
+    kind: "scorecard.completed",
+    subject: { type: "scorecard", id: "sc-1" },
+    payload: { status: "succeeded", dataset: "webvoyager@1.0.0", harness: "browser-use@2.0.0" },
+    message: "Scorecard sc-1 succeeded",
+    createdAt: "2026-01-01T00:00:00Z",
   };
 
   it("with inbound configured (commandTokenSecretName) + a public URL, the post carries a Rerun action with the embedded context", async () => {
@@ -206,7 +214,7 @@ describe("NotificationService — interactive Rerun button on scorecard completi
       secrets: { MM_BOT: "botxyz", MM_CMD: "cmd-secret" },
       apiPublicUrl: "https://everdict.corp.io/",
     });
-    await svc.notifyScorecard("acme", scorecard);
+    await mattermostConsumer(svc).handle(scorecardFact);
     const action = calls[0]?.body.props?.attachments?.[0]?.actions?.[0];
     expect(action?.name).toBe("Rerun");
     expect(action?.integration?.url).toBe("https://everdict.corp.io/integrations/mattermost/action?ws=acme");
@@ -225,7 +233,7 @@ describe("NotificationService — interactive Rerun button on scorecard completi
       secrets: { MM_BOT: "botxyz" },
       apiPublicUrl: "https://everdict.corp.io",
     });
-    await noInbound.svc.notifyScorecard("acme", scorecard);
+    await mattermostConsumer(noInbound.svc).handle(scorecardFact);
     expect(noInbound.calls[0]?.body.props).toBeUndefined();
 
     const noUrl = build({
@@ -237,7 +245,7 @@ describe("NotificationService — interactive Rerun button on scorecard completi
       },
       secrets: { MM_BOT: "botxyz", MM_CMD: "cmd-secret" },
     });
-    await noUrl.svc.notifyScorecard("acme", scorecard);
+    await mattermostConsumer(noUrl.svc).handle(scorecardFact);
     expect(noUrl.calls[0]?.body.props).toBeUndefined();
   });
 });

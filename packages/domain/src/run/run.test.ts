@@ -69,12 +69,16 @@ describe("Run — the run lifecycle domain model", () => {
     expect(failed.facts[0]?.kind).toBe("run.failed");
   });
 
-  it("keeps the inherited emission gates as domain law: children and initiator-less runs stay silent", () => {
+  it("keeps the child gate as domain law, and announces initiator-less completions without personal targeting (E2 widening)", () => {
     // A scorecard child is represented by the batch's own facts (flood prevention).
     const child = Run.from({ ...queued({ submittedBy: "alice" }), parentScorecardId: "sc-1" });
     expect(child.succeed(RESULT, "t1").facts).toEqual([]);
-    // No known initiator → no terminal fact (today's notification-path behavior, preserved; widening = E2).
-    expect(Run.from(queued()).succeed(RESULT, "t1").facts).toEqual([]);
+    // A machine-fired completion is workspace news (the Mattermost consumer posts it) — but with no known
+    // initiator there is nobody to bell: the fact carries no actor/recipient, so the feed consumer skips it.
+    const machineFact = Run.from(queued()).succeed(RESULT, "t1").facts[0];
+    expect(machineFact?.kind).toBe("run.completed");
+    expect(machineFact?.actor).toBeUndefined();
+    expect(machineFact?.recipient).toBeUndefined();
     // Creation: standalone announces run.submitted; a child does not.
     expect(Run.creationFacts(queued({ submittedBy: "alice" }))[0]?.kind).toBe("run.submitted");
     expect(Run.creationFacts({ ...queued(), parentScorecardId: "sc-1" })).toEqual([]);

@@ -30,18 +30,19 @@ export interface NewQueuedRunInput {
   now: string;
 }
 
-// The inherited emission gate, now domain law: scorecard children are represented by the batch's own facts
-// (flood prevention), and — as today's notification path behaved — a terminal fact needs a known initiator.
-// Widening coverage (machine-fired runs, adopted settles) is an E2 taxonomy decision, not a silent change here.
+// The emission gate, domain law: scorecard children stay represented by the batch's own facts (flood
+// prevention). The initiator gate was WIDENED (E2 coverage decision, master-plan W6 backlog close-out):
+// a machine-fired completion is workspace news too — the Mattermost channel always posted it, and re-basing
+// that channel onto the log required the log to know. Personal targeting stays conditional (the feed
+// consumer skips actor-less facts), so widening adds facts, never ghost bell rows.
 function terminalFact(record: RunRecord, status: "succeeded" | "failed"): PlatformFact[] {
-  if (!record.createdBy || record.parentScorecardId) return [];
+  if (record.parentScorecardId) return [];
   const kind = status === "succeeded" ? ("run.completed" as const) : ("run.failed" as const);
   return [
     {
       kind,
       subject: { type: "run", id: record.id },
-      actor: record.createdBy,
-      recipient: record.createdBy,
+      ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
       payload: {
         status,
         harness: `${record.harness.id}@${record.harness.version}`,

@@ -1,12 +1,13 @@
-import type { NotificationRecord, RunRecord, WorkspaceSettings } from "@everdict/contracts";
+import type { NotificationRecord, WorkspaceSettings } from "@everdict/contracts";
 import type { MattermostClient } from "../ports/mattermost-client.js";
 import type { NotificationListOptions, NotificationStore } from "../ports/notification-store.js";
 import type { EmitPlatformEventInput, PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 
-// Completion notifications — one completion event fans out to two channels [personal feed, Mattermost] (docs/architecture/notifications.md N5).
-// Feed: the personal (recipient = record.createdBy) inbox — consumed by the web bell / desktop native notifications (N1/N2).
-// Mattermost: posts to a channel if the workspace has notify settings (the existing connected-account consumer slice).
-// Notification failure never affects the run/scorecard result (fire-and-forget — the store is the source of truth, and can also be polled).
+// Completion notifications (docs/architecture/notifications.md N5) — BOTH channels now ride the event log
+// (event-plumbing E1, one log · N cursors): the personal feed via feed:runs/feed:scorecards, the Mattermost
+// channel via mm:completions driving postChannelMessage below. This service keeps the feed store surface
+// (bell reads/acks), the report fan-out, and the Mattermost transport itself.
+// Notification failure never affects the run/scorecard result (fire-and-forget — the store is the source of truth).
 export interface NotificationServiceDeps {
   settingsFor: (tenant: string) => Promise<WorkspaceSettings | undefined>;
   // Workspace Mattermost (bot token) — resolves settings.mattermost.botTokenSecretName from the workspace SecretStore.
@@ -28,47 +29,18 @@ export interface NotificationServiceDeps {
   now?: () => string;
 }
 
-export class NotificationService {
+// The narrow capability the mm:completions consumer needs — kept as an interface so the consumer's tests
+// stay a two-line fake.
+export interface ChannelPoster {
+  postChannelMessage(tenant: string, message: string, rerun?: { dataset: string; harness: string }): Promise<void>;
+}
+
+export class NotificationService implements ChannelPoster {
   private readonly newId: () => string;
   private readonly nowIso: () => string;
   constructor(private readonly deps: NotificationServiceDeps) {
     this.newId = deps.newId ?? (() => crypto.randomUUID());
     this.nowIso = deps.now ?? (() => new Date().toISOString());
-  }
-
-  async notifyRun(tenant: string, record: RunRecord): Promise<void> {
-    // The FEED moved to the event log (E1): the run.completed/failed fact carries exactly the old feed gate
-    // (initiator-only, children silent), and the feed:runs cursor consumer writes the bell row idempotently
-    // (nf-<eventId>). This path keeps only the Mattermost channel post below.
-    const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
-    await this.post(
-      tenant,
-      `${icon} **Run \`${record.id}\`** ${record.status} — \`${record.harness.id}@${record.harness.version}\` (case ${record.caseId})`,
-    );
-  }
-
-  async notifyScorecard(
-    tenant: string,
-    record: {
-      id: string;
-      status: string;
-      dataset: { id: string; version: string };
-      harness: { id: string; version: string };
-      createdBy?: string;
-      // Provenance — a scorecard fired by a schedule (cron tick or manual "run now") gets a schedule-BRANDED feed
-      // notification ("Scheduled run …") in place of the generic one, so the bell reads as "my scheduled job ran".
-      origin?: { source?: string };
-    },
-  ): Promise<void> {
-    // The FEED moved to the event log (E1): the scorecard.completed/failed fact carries the old feed gate
-    // (createdBy-only) AND the schedule branding (payload.origin) — the feed:scorecards cursor consumer
-    // writes the bell row idempotently. This path keeps only the Mattermost channel post below.
-    const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
-    await this.post(
-      tenant,
-      `${icon} **Scorecard \`${record.id}\`** ${record.status} — dataset \`${record.dataset.id}@${record.dataset.version}\` × \`${record.harness.id}@${record.harness.version}\``,
-      { dataset: record.dataset.id, harness: record.harness.id },
-    );
   }
 
   // A scheduled analysis report was produced (analysis-studio V4) — called by the report-runner adapter after the
@@ -107,10 +79,18 @@ export class NotificationService {
       },
       message: `Scheduled report "${input.scheduleName}" is ready on view ${input.viewId}${input.artifactId ? ` (artifact ${input.artifactId})` : " (no artifact produced)"}.`,
     });
-    await this.post(
-      tenant,
-      `📈 **Report ready — ${input.scheduleName}** (view \`${input.viewId}\`)${input.artifactId ? "" : " — no report artifact was produced"}`,
-    );
+    // The Mattermost channel rides the report.completed fact above (the mm:completions cursor consumer) —
+    // one log, N cursors; this path keeps only the personal feed + the fact.
+  }
+
+  // The channel-post capability the mm:completions cursor consumer drives (the ONLY Mattermost writer since
+  // the re-base) — same fire-and-forget contract as the old direct path: a transport failure skips the post.
+  async postChannelMessage(
+    tenant: string,
+    message: string,
+    rerun?: { dataset: string; harness: string },
+  ): Promise<void> {
+    await this.post(tenant, message, rerun);
   }
 
   // --- Personal feed (bell inbox) — self-scoped (same as connections/runners), no role gate ---

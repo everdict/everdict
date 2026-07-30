@@ -1,33 +1,44 @@
 import { describe, expect, it, vi } from "vitest";
 import { NotificationService } from "./notification-service.js";
 
-// The scorecard/run FEED moved to the event log (E1 — see feed-consumers.test.ts): this service now owns
-// only the Mattermost channel post for completions (plus the report/mention feeds, which have no facts yet).
-const scorecard = {
-  id: "sc_9",
-  status: "succeeded",
-  createdBy: "alice",
-  dataset: { id: "d", version: "1" },
-  harness: { id: "h", version: "1" },
-};
-
-describe("NotificationService — completion channels after the E1 re-base", () => {
-  it("no longer writes the feed directly (the feed:scorecards cursor consumer owns the bell row)", async () => {
+// BOTH completion channels now ride the event log (E1): the feed via feed:runs/feed:scorecards, the
+// Mattermost channel via the mm:completions consumer driving postChannelMessage. This service keeps the
+// feed store surface, the report fan-out, and the Mattermost transport behind that one poster.
+describe("NotificationService — the channel poster after the full E1 re-base", () => {
+  it("postChannelMessage never writes the feed (the cursor consumers own the bell rows)", async () => {
     const add = vi.fn(async () => undefined);
     const svc = new NotificationService({
       settingsFor: async () => undefined,
       feed: { add, list: vi.fn(async () => []), markRead: vi.fn(async () => 0) },
     });
-    await svc.notifyScorecard("acme", scorecard);
+    await svc.postChannelMessage("acme", "✅ **Scorecard `sc_9`** succeeded");
     expect(add).not.toHaveBeenCalled();
   });
 
-  it("swallows a channel failure so it never affects the result", async () => {
+  it("swallows a channel failure so a Mattermost outage never affects the caller (fire-and-forget mirror)", async () => {
     const svc = new NotificationService({
       settingsFor: async () => {
         throw new Error("settings down");
       },
     });
-    await expect(svc.notifyScorecard("acme", scorecard)).resolves.toBeUndefined();
+    await expect(svc.postChannelMessage("acme", "boom test")).resolves.toBeUndefined();
+  });
+
+  it("posts to the workspace channel when the transport, host, channel and bot token are all configured", async () => {
+    const post = vi.fn(async () => undefined);
+    const svc = new NotificationService({
+      settingsFor: async () => ({
+        mattermost: { defaultChannelId: "ch-1", botTokenSecretName: "MM_BOT" },
+      }),
+      secretsFor: async () => ({ MM_BOT: "xoxb-test" }),
+      mattermostHost: "https://mm.corp.io",
+      mattermost: { post, verify: vi.fn(), listChannels: vi.fn(), getChannelPosts: vi.fn() } as never,
+    });
+    await svc.postChannelMessage("acme", "✅ **Run `r1`** succeeded — `h@1` (case c1)");
+    expect(post).toHaveBeenCalledWith(
+      "https://mm.corp.io",
+      "xoxb-test",
+      expect.objectContaining({ channelId: "ch-1", message: expect.stringContaining("Run `r1`") }),
+    );
   });
 });

@@ -94,14 +94,15 @@ function batchLabels(record: ScorecardRecord): { dataset: string; harness: strin
   };
 }
 
-// Terminal fact (scorecard.completed/failed) — only for batches with an initiator (createdBy), the gate the
-// notification path always applied: machine-fired batches settle silently. Widening that is an E2 decision.
+// Terminal fact (scorecard.completed/failed). The initiator gate was WIDENED (E2 coverage decision):
+// machine-fired batches announce their completion too — the Mattermost channel always posted them, and
+// re-basing that channel onto the log required the log to know. Personal targeting stays conditional
+// (actor/recipient only with a known initiator; the feed consumer skips actor-less facts).
 function batchTerminalFact(
   record: ScorecardRecord,
   status: "succeeded" | "failed",
   extras: ScorecardOutcomeExtras,
 ): PlatformFact[] {
-  if (!record.createdBy) return [];
   const { dataset, harness } = batchLabels(record);
   // passRate from the summary this terminal write persists (extras wins; a bare failure keeps the record's) —
   // the pointer an agent trigger can filter on (`passRate < 1`) without re-reading the full results.
@@ -111,8 +112,7 @@ function batchTerminalFact(
     {
       kind: status === "succeeded" ? "scorecard.completed" : "scorecard.failed",
       subject: { type: "scorecard", id: record.id },
-      actor: record.createdBy,
-      recipient: record.createdBy,
+      ...(record.createdBy !== undefined ? { actor: record.createdBy, recipient: record.createdBy } : {}),
       payload: {
         status,
         dataset,

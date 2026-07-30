@@ -241,7 +241,7 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
     });
   });
 
-  it("succeed/fail emit the completion fact for an initiated batch — passRate pointer included, machine-fired silent", () => {
+  it("succeed/fail emit the completion fact — passRate pointer included; machine-fired announces without personal targeting (E2 widening)", () => {
     const summary = [{ metric: "tests-pass", count: 2, mean: 0.5, passRate: 0.5 }];
     const initiated = ScorecardBatch.from({ ...queued({ createdBy: "alice" }), status: "running" });
     expect(initiated.succeed({ summary }, "t2").facts).toEqual([
@@ -258,8 +258,12 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
     const failed = initiated.fail({ code: "INTERNAL", message: "boom" }, {}, "t2").facts;
     expect(failed).toHaveLength(1);
     expect(failed[0]).toMatchObject({ kind: "scorecard.failed", payload: { status: "failed" } });
-    // Machine-fired (no createdBy): settles silently — the gate the notification path always applied.
-    expect(ScorecardBatch.from({ ...queued(), status: "running" }).succeed({ summary }, "t2").facts).toEqual([]);
+    // Machine-fired (no createdBy): the completion still announces (the Mattermost consumer posts it), but
+    // with nobody to bell — no actor/recipient, so the feed consumer skips it.
+    const machine = ScorecardBatch.from({ ...queued(), status: "running" }).succeed({ summary }, "t2").facts[0];
+    expect(machine?.kind).toBe("scorecard.completed");
+    expect(machine?.actor).toBeUndefined();
+    expect(machine?.recipient).toBeUndefined();
   });
 
   it("every terminal state rejects succeed/fail/start/supersede/cancel — first terminal write wins", () => {

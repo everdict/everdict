@@ -199,7 +199,6 @@ export function buildScorecard(deps: {
     // Image pull credentials — batch cases authorize exactly like a single run (one resolver, one behavior).
     registryAuthsFor,
     // Completion notification (Mattermost) — batch-eval completion posts to the channel just like a run.
-    onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
     // Lifecycle facts (agent-automation A1) — scorecard.submitted / case.completed / cancelled.
     events: platformEventService,
     // Trace sink export — export judged detail results to the workspace observability platform (outcome recorded on record.export).

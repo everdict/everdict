@@ -145,7 +145,6 @@ export function buildRun(deps: {
     buildTraceSource,
     secretsFor: runtimeSecretsFor, // pull auth for collection (re-resolve traceRef.authSecret)
     // Completion notification (Mattermost) — post to the channel when workspace notify settings exist. Failure is independent of the run result.
-    onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
     // Lifecycle facts (agent-automation A1) — run.submitted; completion facts flow through onComplete above.
     events: platformEventService,
   });
