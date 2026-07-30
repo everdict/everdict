@@ -242,6 +242,18 @@ resume from their own cursor/history.
   so re-basing it is an E2 coverage decision), webhooks, and the Pg LISTEN/NOTIFY nudge (in-process poll at
   3s is the single-CP correctness path today).
 - **E2 — Coverage W2+W3.** Content/registry/fs/knowledge/ops facts; the "transition ⇒ fact" review rule.
+  **First rung SHIPPED (master-plan W4)**: content/registry facts — `harness.registered` /
+  `dataset.registered` / `judge.registered` via the `withRegisteredFact` composition-root decorator (one
+  choke point covers routes, MCP, bundle apply, benchmark import, CI re-pin; `_shared` seeds never emit) ·
+  `file.published` from the `RevisionedWorkspaceFs` choke point (agent writes stamp the loop guard's
+  `causedBy agent:<id>:<conversation>`) · `knowledge.created/proposed/approved` (the S14 HITL loop's
+  observable half) · ops fact `budget.exceeded` emitted by the admission gate's 402 refusal (the gate
+  already computed it). All are trigger-matchable (`TRIGGERABLE_EVENT_KINDS`). The review rule is codified
+  in `.claude/rules/events.md`. **Deferred rungs**: `runner.online/offline` (needs a presence sweeper —
+  lease-TTL expiry detection, not a clean existing transition), budget *threshold* facts (80%-crossed needs
+  a meter hook; the refusal fact ships first), queue-depth bands (a W7 measurement concern), and the
+  Mattermost re-base (its coverage is wider than the facts — machine-fired completions post too; it stays
+  direct until the E3 subscription registry makes reactions one mechanism).
 - **E3 — Convergence.** Subscription registry; `schedule.fired`; CI events; reactions admitted through
   the §5 gate (needs execution-model P4).
 - **E4 — Trace-derived facts.** Thresholds/anomalies over the owned trace store (needs native-obs N2) —

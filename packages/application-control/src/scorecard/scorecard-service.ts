@@ -157,7 +157,11 @@ export class ScorecardService {
     if (input.origin?.causedByRunId && this.deps.runStore) {
       const trialsForCount = input.trials !== undefined ? Math.max(1, Math.floor(input.trials)) : 1;
       await admitCausedWork(
-        { runStore: this.deps.runStore, ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}) },
+        {
+          runStore: this.deps.runStore,
+          ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
+          ...(this.deps.events ? { events: this.deps.events } : {}),
+        },
         input.tenant,
         input.origin.causedByRunId,
         selectedCases.length * trialsForCount,

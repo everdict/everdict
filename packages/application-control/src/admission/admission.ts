@@ -1,5 +1,6 @@
 import { BadRequestError, PaymentRequiredError, RateLimitError, type RunEnvelope } from "@everdict/contracts";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
+import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
 
 // The single admission gate's CAUSAL leg (execution-model §5.1): work that names a causer
@@ -15,6 +16,9 @@ const MAX_CAUSAL_DEPTH = 8;
 export interface AdmitCausedWorkDeps {
   runStore: RunStore;
   envelopes?: EnvelopeStore; // absent = envelopes unenforced (dev wiring) — depth guard still applies
+  // E2 ops fact (event-plumbing.md §3, coverage wave 3): a 402 refusal emits budget.exceeded — the gate
+  // already computed the refusal, so the fact costs nothing and is never inferred elsewhere.
+  events?: PlatformEventEmitter;
   maxCausalDepth?: number;
 }
 
@@ -64,19 +68,35 @@ export async function admitCausedWork(
   const root = envelope.id === causer.id ? causer : await deps.runStore.get(envelope.id);
   const caps = root?.envelope;
   if (deps.envelopes && caps && (caps.capUsd !== undefined || caps.capRuns !== undefined)) {
+    // A refusal is a state the workspace should SEE, not only an error the caller swallows: budget.exceeded
+    // announces it on the log (subject = the delegating run whose envelope refused). Agent causers stamp the
+    // loop guard's causedBy key so the exhausted agent never wakes itself on its own refusal.
+    const refuse = (message: string, detail: Record<string, unknown>): never => {
+      void deps.events?.emit({
+        workspace: tenant,
+        kind: "budget.exceeded",
+        subject: { type: "run", id: envelope.id },
+        payload: { ...detail, causedByRunId, refusedRuns: countRuns },
+        ...(causer.kind === "agent" && causer.group?.id !== undefined
+          ? { causedBy: `agent:${causer.harness.id}:${causer.group.id}` }
+          : {}),
+        message,
+      });
+      throw new PaymentRequiredError("BUDGET_EXCEEDED", detail, message);
+    };
     const spend = await deps.envelopes.spend(envelope.id);
     if (caps.capUsd !== undefined && spend.usd >= caps.capUsd)
-      throw new PaymentRequiredError(
-        "BUDGET_EXCEEDED",
-        { envelope: envelope.id, spentUsd: spend.usd, capUsd: caps.capUsd },
+      refuse(
         `Agent envelope exhausted: $${spend.usd.toFixed(4)} of $${caps.capUsd} spent — the delegated budget refuses new work.`,
+        { envelope: envelope.id, spentUsd: spend.usd, capUsd: caps.capUsd },
       );
     if (caps.capRuns !== undefined && spend.runs + countRuns > caps.capRuns)
-      throw new PaymentRequiredError(
-        "BUDGET_EXCEEDED",
-        { envelope: envelope.id, admittedRuns: spend.runs, countRuns, capRuns: caps.capRuns },
-        `Agent envelope run cap reached: ${spend.runs}+${countRuns} > ${caps.capRuns} caused runs.`,
-      );
+      refuse(`Agent envelope run cap reached: ${spend.runs}+${countRuns} > ${caps.capRuns} caused runs.`, {
+        envelope: envelope.id,
+        admittedRuns: spend.runs,
+        countRuns,
+        capRuns: caps.capRuns,
+      });
     await deps.envelopes.admit(envelope.id, tenant, countRuns);
   }
   return { id: envelope.id };

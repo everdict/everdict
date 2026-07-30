@@ -1,6 +1,7 @@
 import { ConflictError, type FsEntry, type FsRevision } from "@everdict/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { FsRevisionStore } from "../ports/fs-revision-store.js";
+import type { EmitPlatformEventInput } from "../ports/platform-event-emitter.js";
 import type { FsFile, FsWriteOptions, WorkspaceFs } from "../ports/workspace-fs.js";
 import { RevisionedWorkspaceFs, memberActor } from "./revisioned-workspace-fs.js";
 
@@ -266,5 +267,52 @@ describe("RevisionedWorkspaceFs", () => {
   it("attributes a write with no actor to the system rather than to nobody", async () => {
     await fs.write("acme", "skills/s1/SKILL.md", utf8("body"));
     expect(await ledger.head("acme", "skills/s1/SKILL.md")).toMatchObject({ actor: { kind: "system" } });
+  });
+
+  describe("file.published fact (E2) — a publish is a transition, so it emits", () => {
+    it("a member publish emits file.published with the revision; an agent publish stamps the loop guard's causedBy", async () => {
+      const emitted: EmitPlatformEventInput[] = [];
+      const evented = new RevisionedWorkspaceFs(inner, ledger, () => "2026-07-29T00:00:00.000Z", {
+        async emit(input) {
+          emitted.push(input);
+          return undefined;
+        },
+      });
+
+      await evented.write("acme", "reports/q3.md", utf8("draft"), undefined, { actor: memberActor("user-a") });
+      expect(emitted[0]).toMatchObject({
+        workspace: "acme",
+        kind: "file.published",
+        subject: { type: "file", id: "reports/q3.md" },
+        actor: "user-a",
+        payload: { path: "reports/q3.md", revision: 1, actorKind: "member" },
+      });
+      expect(emitted[0]).not.toHaveProperty("causedBy"); // a member publish has no causal chain
+
+      await evented.write("acme", "data/out.csv", utf8("a,b"), undefined, {
+        actor: { kind: "agent", subject: "user-a", agentId: "analyst", conversationId: "sess-9", onBehalfOf: "user-a" },
+      });
+      // The agent's own writes carry the loop guard's key — a folder-watching agent never wakes on itself.
+      expect(emitted[1]).toMatchObject({
+        kind: "file.published",
+        causedBy: "agent:analyst:sess-9",
+        payload: { actorKind: "agent", agentId: "analyst" },
+      });
+    });
+
+    it("a refused optimistic write (409) emits nothing — no revision was published", async () => {
+      const emitted: unknown[] = [];
+      const evented = new RevisionedWorkspaceFs(inner, ledger, () => "2026-07-29T00:00:00.000Z", {
+        async emit(input) {
+          emitted.push(input);
+          return undefined;
+        },
+      });
+      await evented.write("acme", "notes.md", utf8("v1"), undefined, { actor: memberActor("user-a") });
+      await expect(
+        evented.write("acme", "notes.md", utf8("stale"), undefined, { actor: memberActor("user-b"), baseRevision: 0 }),
+      ).rejects.toThrow(ConflictError);
+      expect(emitted).toHaveLength(1); // only the successful publish emitted
+    });
   });
 });

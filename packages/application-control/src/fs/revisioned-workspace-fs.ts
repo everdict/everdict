@@ -8,6 +8,7 @@ import {
   guessFsContentType,
 } from "@everdict/contracts";
 import type { FsRevisionStore } from "../ports/fs-revision-store.js";
+import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { FsFile, FsWriteOptions, WorkspaceFs } from "../ports/workspace-fs.js";
 
 // The workspace filesystem, versioned — a WorkspaceFs that publishes a REVISION on every write and refuses a
@@ -27,6 +28,9 @@ export class RevisionedWorkspaceFs implements WorkspaceFs {
     private readonly inner: WorkspaceFs,
     private readonly revisions: FsRevisionStore,
     private readonly now: () => string = () => new Date().toISOString(),
+    // E2 (event-plumbing.md §3): a publish is a state transition, so it emits its fact — file.published rides
+    // the same choke point as the revision itself. Absent = ledger-only (tests, minimal wirings).
+    private readonly events?: PlatformEventEmitter,
   ) {}
 
   list(tenant: string, dir: string): Promise<FsEntry[]> {
@@ -117,6 +121,29 @@ export class RevisionedWorkspaceFs implements WorkspaceFs {
         continue; // a blind writer simply takes the next number
       }
       const entry = await this.inner.write(tenant, path, data, type, opts);
+      // The publish fact — emitted only once the revision is durably claimed AND the head caught up. An
+      // agent-authored publish stamps causedBy with the loop guard's key, so an agent watching a folder
+      // never wakes on its own writes.
+      const actor = record.actor;
+      const actorName = actor.kind === "agent" ? (actor.onBehalfOf ?? actor.subject) : actor.subject;
+      void this.events?.emit({
+        workspace: tenant,
+        kind: "file.published",
+        subject: { type: "file", id: path },
+        ...(actorName !== "" ? { actor: actorName } : {}),
+        ...(actor.kind === "agent" && actor.agentId !== undefined && actor.conversationId !== undefined
+          ? { causedBy: `agent:${actor.agentId}:${actor.conversationId}` }
+          : {}),
+        payload: {
+          path,
+          revision,
+          size: data.byteLength,
+          contentType: type,
+          actorKind: actor.kind,
+          ...(actor.agentId !== undefined ? { agentId: actor.agentId } : {}),
+        },
+        message: `${path} published as revision ${revision}`,
+      });
       return { ...entry, revision };
     }
     throw new ConflictError("CONFLICT", { path }, `'${path}' is being written too fast to publish a revision`);

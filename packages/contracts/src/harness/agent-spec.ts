@@ -24,6 +24,18 @@ export const TRIGGERABLE_EVENT_KINDS = [
   "scorecard.cancelled",
   "report.completed",
   "comment.created",
+  // E2 coverage (event-plumbing.md §3): content/registry, fs, knowledge, and ops facts are automation
+  // hooks ("new dataset version → run the baseline", "watch this folder", "review proposed knowledge",
+  // "an agent hit its budget"). Loop safety holds: agent-caused publishes carry causedBy agent:<id>:<conv>
+  // (loop guard #1), activation cooldowns bound re-fires, and budget.exceeded creates no run by definition.
+  "harness.registered",
+  "dataset.registered",
+  "judge.registered",
+  "file.published",
+  "knowledge.created",
+  "knowledge.proposed",
+  "knowledge.approved",
+  "budget.exceeded",
 ] as const;
 // Compile-time subset guarantee: every triggerable kind is a real platform-event kind.
 const _triggerableAreKinds: readonly PlatformEventKind[] = TRIGGERABLE_EVENT_KINDS;

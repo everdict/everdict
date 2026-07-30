@@ -39,6 +39,15 @@ export const TRIGGERABLE_EVENT_KINDS = [
   'scorecard.cancelled',
   'report.completed',
   'comment.created',
+  // E2 coverage (event-plumbing.md §3) — content/registry, fs, knowledge, and ops facts are automation hooks too (same vocabulary as the server list).
+  'harness.registered',
+  'dataset.registered',
+  'judge.registered',
+  'file.published',
+  'knowledge.created',
+  'knowledge.proposed',
+  'knowledge.approved',
+  'budget.exceeded',
 ] as const
 
 // 이벤트 payload 에 대한 선언적 필터 하나 — filters 는 AND 결합(예: passRate < 1 = 실패 케이스 있는 배치).

@@ -1,0 +1,21 @@
+# Platform-event rules (push) — facts from transitions
+
+SSOT: `docs/architecture/event-plumbing.md` (E0 grammar + same-tx outbox · E1 cursor consumers · E2 coverage).
+
+- **A PR that adds a state transition adds its fact — in the same PR.** Any new lifecycle transition (a
+  status change, a version registered, a publish, a gate refusal) emits a platform event: through the E0
+  outbox (`{patch, facts[]}` transitions + the store's `events` param) when the aggregate store is ours,
+  or through the `PlatformEventEmitter.emit` seam (best-effort by contract — never wrap it) for
+  adapter-backed state (registries, the workspace fs, knowledge).
+- Kinds are a **closed vocabulary**: `<subject>.<verb>`, registered in `PLATFORM_EVENT_KINDS`
+  (`@everdict/contracts`) — never emit an ad-hoc string. A kind exists only with a live emit point.
+  Trigger-matchable kinds are the separate `TRIGGERABLE_EVENT_KINDS` allowlist (mirrored in
+  `apps/web/src/entities/agent-spec` — update both). Facts only, never judgments ("failed", not "flaky").
+- **Transitions must never be spread**: `{...transition}` typechecks and silently drops both halves
+  (`patch` AND `facts`). Destructure explicitly.
+- Agent-caused facts stamp `causedBy: agent:<agentId>:<sessionOrConversationId>` — loop guard #1 keys on
+  that exact prefix, so an agent never wakes on its own effects.
+- **Choke points over call sites**: emit where the state changes ONCE — a store decorator
+  (`RevisionedWorkspaceFs`, `withRegisteredFact`), the gate (`admitCausedWork`), the domain transition —
+  never per-route/per-tool (that forks BFF↔MCP and misses headless callers).
+- `_shared` (seed) writes never emit — boot seeding is not workspace news.

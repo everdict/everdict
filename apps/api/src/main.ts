@@ -7,7 +7,7 @@ import {
 import { ApprovalService } from "@everdict/application-control";
 import { EventConsumerRunner, runFeedConsumer, scorecardFeedConsumer } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
-import { FsService, RevisionedWorkspaceFs, SkillService } from "@everdict/application-control";
+import { FsService, RevisionedWorkspaceFs, SkillService, withRegisteredFact } from "@everdict/application-control";
 import {
   CapabilityService,
   EnvironmentAdoptionService,
@@ -35,6 +35,7 @@ import {
 import { buildFileExecutionService } from "./composition/file-execution.js";
 import { buildManagedImages } from "./composition/images.js";
 import { buildIntegrations } from "./composition/integrations.js";
+import { lateBoundEmitter } from "./composition/late-events.js";
 import { makePersistence } from "./composition/persistence.js";
 import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
@@ -123,10 +124,10 @@ async function main(): Promise<void> {
     scorecardStore,
     keyStore,
     harnessTemplateRegistry,
-    harnessInstanceRegistry,
-    datasetRegistry,
+    harnessInstanceRegistry: rawHarnessInstanceRegistry,
+    datasetRegistry: rawDatasetRegistry,
     benchmarkRegistry,
-    judgeRegistry,
+    judgeRegistry: rawJudgeRegistry,
     rubricRegistry,
     modelRegistry,
     agentRegistry,
@@ -162,6 +163,20 @@ async function main(): Promise<void> {
     cipher,
   } = await makePersistence();
 
+  // E2 content/registry facts (event-plumbing.md §3): registration is a state transition, so it emits its fact.
+  // Decorated ONCE here — every caller (routes, MCP tools, bundle apply, benchmark import, CI re-pin) goes
+  // through the same decorated instance; _shared seeds never emit. The platform-event service is built later
+  // (buildIntegrations), so the decorators emit through a late-bound forwarder connected below.
+  const lateEvents = lateBoundEmitter();
+  const harnessInstanceRegistry = withRegisteredFact(
+    rawHarnessInstanceRegistry,
+    "harness.registered",
+    "harness",
+    lateEvents,
+  );
+  const datasetRegistry = withRegisteredFact(rawDatasetRegistry, "dataset.registered", "dataset", lateEvents);
+  const judgeRegistry = withRegisteredFact(rawJudgeRegistry, "judge.registered", "judge", lateEvents);
+
   // First-party agent templates (agent-automation B4) — seed the two flagship automation agents into _shared
   // (idempotent; disabled + creator-less by design: a workspace adopts one by saving its own copy).
   await seedFirstPartyAgents(agentRegistry);
@@ -190,7 +205,7 @@ async function main(): Promise<void> {
   // Versioning is wired ONCE, here: every consumer below (the Files surfaces, the agent's fs tools, the skill and
   // knowledge content projections) writes through this decorator, so each write publishes an attributed revision
   // and a write that declares its base can never silently overwrite a concurrent one. Nothing downstream opts in.
-  const workspaceFs = new RevisionedWorkspaceFs(rawWorkspaceFs, fsRevisionStore);
+  const workspaceFs = new RevisionedWorkspaceFs(rawWorkspaceFs, fsRevisionStore, undefined, lateEvents);
 
   // Knowledge entries — reified claims (the knowledge layer's record). CRUD + verify; freshness-decorated reads.
   // Bodies live on the workspace filesystem (knowledge/<id>.md) with the DB row as the replica.
@@ -198,6 +213,7 @@ async function main(): Promise<void> {
     store: knowledgeEntryStore,
     latestVersionOf,
     fs: workspaceFs,
+    events: lateEvents, // E2 knowledge facts (created/proposed/approved)
   });
 
   // Workspace knowledge graph — the query surface over the harvested graph + a pull reindex that harvests the
@@ -335,6 +351,8 @@ async function main(): Promise<void> {
     membershipService,
     runtimeSecretsFor,
   });
+  // E2: connect the early-built fact producers (registries / fs / knowledge) to the real event service.
+  lateEvents.bind(platformEventService);
   // E1 — one log, N durable cursors: the personal feed (bell) re-based onto the event log. The completion
   // facts carry exactly the old feed gate; the consumers write rows idempotently (nf-<eventId>), so replay
   // (cursor rewind) produces zero duplicate effects. Poll is the correctness path; dead letters are logged.

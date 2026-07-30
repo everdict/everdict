@@ -25,6 +25,25 @@ export const PLATFORM_EVENT_KINDS = [
   "scorecard.scored",
   "report.completed", // a scheduled analysis report was produced (analysis-studio V4)
   "comment.created",
+  // E2 content/registry facts (event-plumbing.md §3, coverage wave 2): a new immutable version landed in a
+  // tenant registry — subject is the capability id, payload carries the version. Emitted by the composition-root
+  // registry decorator (one choke point covers routes, MCP, bundle apply, benchmark import, CI re-pin);
+  // _shared seeds never emit (boot seeding is not workspace news).
+  "harness.registered",
+  "dataset.registered",
+  "judge.registered",
+  // A workspace-filesystem write published an attributed revision — the revision ledger is the state, this is
+  // its fact (emitted by the RevisionedWorkspaceFs choke point). Agent-authored publishes stamp
+  // causedBy agent:<agentId>:<conversationId>, the loop guard's key.
+  "file.published",
+  // Knowledge lifecycle (knowledge-graph S14 HITL): created = member-authored (born active), proposed = an
+  // extraction candidate awaiting review, approved = proposed → active with authorship transferred.
+  "knowledge.created",
+  "knowledge.proposed",
+  "knowledge.approved",
+  // E2 ops facts (coverage wave 3): a delegated envelope REFUSED caused work at the admission gate (402) —
+  // the "agent hit its budget" signal, emitted by the gate that already computed the refusal (never silently).
+  "budget.exceeded",
   // Agent-run lifecycle facts (reported BY the agent service) — observable in the feed/fleet view, but NEVER
   // trigger-matchable in v1 (agents watching agents is a runaway vector; see the loop-prevention guardrails).
   "agent.run.started",

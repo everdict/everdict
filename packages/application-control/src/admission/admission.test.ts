@@ -67,6 +67,45 @@ describe("admitCausedWork — the admission gate's causal leg (§5.1)", () => {
     ).rejects.toMatchObject({ code: "BUDGET_EXCEEDED", status: 402 });
   });
 
+  it("a 402 refusal emits budget.exceeded (E2 ops fact) with the loop guard's causedBy — never silently", async () => {
+    const emitted: Array<{ kind: string; subject: { type: string; id: string }; causedBy?: string }> = [];
+    const events = {
+      async emit(input: { kind: string; subject: { type: string; id: string }; causedBy?: string }) {
+        emitted.push({
+          kind: input.kind,
+          subject: input.subject,
+          ...(input.causedBy ? { causedBy: input.causedBy } : {}),
+        });
+        return undefined;
+      },
+    };
+    const { store } = envelopesOf({ "run-agent": { usd: 1.0, runs: 2 } });
+    await expect(
+      admitCausedWork(
+        { runStore: runStoreOf([agentRun({ group: { id: "sess-1", role: "turn" } })]), envelopes: store, events },
+        "acme",
+        "run-agent",
+        1,
+      ),
+    ).rejects.toMatchObject({ status: 402 });
+    expect(emitted).toEqual([
+      {
+        kind: "budget.exceeded",
+        subject: { type: "run", id: "run-agent" }, // the delegating run whose envelope refused
+        causedBy: "agent:sentinel:sess-1", // the exhausted agent never wakes itself on its own refusal
+      },
+    ]);
+    // A successful admission emits nothing.
+    const roomy = envelopesOf({ "run-agent": { usd: 0, runs: 0 } });
+    await admitCausedWork(
+      { runStore: runStoreOf([agentRun({ group: { id: "sess-1", role: "turn" } })]), envelopes: roomy.store, events },
+      "acme",
+      "run-agent",
+      1,
+    );
+    expect(emitted).toHaveLength(1);
+  });
+
   it("refuses at 402 when the run cap cannot fit the requested fan-out (capRuns = the fan-out bound)", async () => {
     const { store } = envelopesOf({ "run-agent": { usd: 0, runs: 8 } });
     await expect(

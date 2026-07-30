@@ -187,4 +187,30 @@ describe("extraction proposals — the HITL promotion", () => {
     await svc.reject("acme", p.id);
     await expect(svc.get("acme", p.id, "alice")).rejects.toMatchObject({ status: 404 });
   });
+
+  it("the lifecycle emits its facts (E2): created / proposed / approved land on the log with actor + title", async () => {
+    const emitted: Array<{ kind: string; subject: { type: string; id: string }; actor?: string }> = [];
+    const svc = new KnowledgeEntryService({
+      store: fakeStore(),
+      newId: () => `kn-ev-${n++}`,
+      now: () => "2026-07-28T00:00:00.000Z",
+      events: {
+        async emit(input) {
+          emitted.push({ kind: input.kind, subject: input.subject, ...(input.actor ? { actor: input.actor } : {}) });
+          return undefined;
+        },
+      },
+    });
+
+    await svc.create({ ...base, createdBy: "alice", visibility: "workspace" });
+    const p = await svc.propose({ ...base, extraction });
+    await svc.approve("acme", p.id, { subject: "bob", isAdmin: false });
+
+    expect(emitted.map((e) => [e.kind, e.actor])).toEqual([
+      ["knowledge.created", "alice"],
+      ["knowledge.proposed", KNOWLEDGE_EXTRACTION_AUTHOR],
+      ["knowledge.approved", "bob"], // authorship transferred — the approver is the acting subject
+    ]);
+    expect(emitted[2]?.subject).toEqual({ type: "knowledge", id: p.id });
+  });
 });

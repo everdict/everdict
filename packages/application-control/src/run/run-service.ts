@@ -195,7 +195,11 @@ export class RunService {
     // 429 past the depth guard) and is stamped with it; only then the tenant-level budget gate.
     const causedEnvelope = input.causedByRunId
       ? await admitCausedWork(
-          { runStore: this.deps.store, ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}) },
+          {
+            runStore: this.deps.store,
+            ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
+            ...(this.deps.events ? { events: this.deps.events } : {}),
+          },
           input.tenant,
           input.causedByRunId,
           1,

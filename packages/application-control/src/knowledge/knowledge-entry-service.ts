@@ -13,6 +13,7 @@ import type { Coverage } from "@everdict/domain";
 import { readKnowledgeBody, removeKnowledgeBody, writeKnowledgeBody } from "../fs/content-projection.js";
 import { memberActor } from "../fs/revisioned-workspace-fs.js";
 import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
+import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { WorkspaceFs } from "../ports/workspace-fs.js";
 import {
   type LatestVersionResolver,
@@ -80,6 +81,9 @@ export interface KnowledgeEntryServiceDeps {
   // migration of legacy rows + DB re-sync after an out-of-band edit). The DB keeps a full replica so `list`
   // stays one query. Same discipline as SkillService — see that class.
   fs?: WorkspaceFs;
+  // E2 knowledge facts (event-plumbing.md §3): created / proposed / approved are the lifecycle transitions the
+  // log announces — the S14 HITL loop's observable half. Absent = silent (minimal wirings).
+  events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => string;
 }
@@ -114,6 +118,14 @@ export class KnowledgeEntryService {
     if (this.deps.fs)
       await writeKnowledgeBody(this.deps.fs, input.tenant, record.id, record.body, memberActor(input.createdBy));
     await this.deps.store.create(record);
+    void this.deps.events?.emit({
+      workspace: input.tenant,
+      kind: "knowledge.created",
+      subject: { type: "knowledge", id: record.id },
+      actor: input.createdBy,
+      payload: { kind: record.kind, title: record.title, visibility: record.visibility },
+      message: `Knowledge entry "${record.title}" created`,
+    });
     return record;
   }
 
@@ -137,6 +149,14 @@ export class KnowledgeEntryService {
       updatedAt: ts,
     };
     await this.deps.store.create(record);
+    void this.deps.events?.emit({
+      workspace: input.tenant,
+      kind: "knowledge.proposed",
+      subject: { type: "knowledge", id: record.id },
+      actor: KNOWLEDGE_EXTRACTION_AUTHOR,
+      payload: { kind: record.kind, title: record.title },
+      message: `Knowledge entry "${record.title}" proposed for review`,
+    });
     return record;
   }
 
@@ -154,6 +174,14 @@ export class KnowledgeEntryService {
       updatedAt: this.now(),
     });
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `knowledge entry '${id}' not found.`);
+    void this.deps.events?.emit({
+      workspace: tenant,
+      kind: "knowledge.approved",
+      subject: { type: "knowledge", id },
+      actor: actor.subject,
+      payload: { kind: updated.kind, title: updated.title },
+      message: `Knowledge entry "${updated.title}" approved`,
+    });
     return updated;
   }
 
