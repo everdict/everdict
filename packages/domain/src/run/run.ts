@@ -139,6 +139,7 @@ export class Run {
     image: string;
     ttlSec: number;
     createdBy: string;
+    computeId?: string; // driver-level compute id (container id) — the reaper's teardown key after a crash
     origin?: RunOrigin;
     envelope?: RunEnvelope;
     now: string;
@@ -162,6 +163,7 @@ export class Run {
         image: input.image,
         ttlSec: input.ttlSec,
         expiresAt: new Date(new Date(input.now).getTime() + input.ttlSec * 1000).toISOString(),
+        ...(input.computeId !== undefined ? { computeId: input.computeId } : {}),
       },
       createdAt: input.now,
       updatedAt: input.now,

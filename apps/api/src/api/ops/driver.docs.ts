@@ -5,8 +5,10 @@ import { errorResponses, toJsonSchema } from "../openapi.js";
 const driverParams = toJsonSchema(
   z.object({
     family: z
-      .enum(["batch", "score", "approval"])
-      .describe("workflow family — batch (driver loop) | score (detached scoring) | approval (durable WAIT)"),
+      .enum(["batch", "score", "approval", "reaper"])
+      .describe(
+        "workflow family — batch (driver loop) | score (detached scoring) | approval (durable WAIT) | reaper (session teardown timer)",
+      ),
     id: z.string().describe("LEDGER id (the scorecard/group/approval id) — never a raw workflowId"),
   }),
 );

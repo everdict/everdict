@@ -26,6 +26,9 @@ export interface ExecOpts {
 
 // An isolated execution unit. Extended with `computer?: Computer` (screenshot/click/type) at the OS-use stage.
 export interface ComputeHandle {
+  // The driver-level identity of this compute (a container id), when the driver has one. Session runs
+  // persist it on the row so a reaper in a LATER process can still tear the compute down (see Driver.reap).
+  readonly id?: string;
   exec(cmd: string, opts?: ExecOpts): Promise<ExecResult>;
   writeFile(path: string, data: string): Promise<void>;
   readFile(path: string): Promise<string>;
@@ -37,4 +40,8 @@ export interface ComputeHandle {
 export interface Driver {
   readonly id: string;
   provision(spec: ComputeSpec): Promise<ComputeHandle>;
+  // Tear down a compute this process no longer holds a handle to, by its recorded id (P6: the durable
+  // reaper after a crash — the row remembers the compute id, the driver knows how to remove it). Optional:
+  // only drivers whose computes can outlive the process (docker) implement it.
+  reap?(id: string): Promise<void>;
 }

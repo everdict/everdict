@@ -15,6 +15,10 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
       const approval = await deps.approvalService?.get(ws, id).catch(() => undefined);
       return approval !== undefined;
     }
+    if (family === "reaper") {
+      const run = await deps.service.get(id).catch(() => undefined);
+      return run !== undefined && run.tenant === ws && run.kind === "sandbox";
+    }
     const record = await deps.scorecardService?.get(id);
     return record !== undefined && record?.tenant === ws;
   };
@@ -25,7 +29,7 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
       description:
         "Diagnose a durable driver workflow by LEDGER id (a scorecard/group id): lifecycle status, history " +
         "pressure, and each pending activity's retry state with its last failure — answers 'where is this " +
-        "stuck, and why'. family: batch (driver loop) | score (detached scoring) | approval (durable WAIT).",
+        "stuck, and why'. family: batch (driver loop) | score (detached scoring) | approval (durable WAIT) | reaper (session teardown timer).",
       inputSchema: {
         family: z.enum(DRIVER_WORKFLOW_FAMILIES),
         id: z.string().describe("the scorecard/group id (ledger vocabulary — never a raw workflowId)"),

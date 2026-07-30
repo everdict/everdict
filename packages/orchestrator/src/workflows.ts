@@ -67,6 +67,13 @@ const batchActivities = proxyActivities<Activities>({
   retry: { maximumAttempts: 10, initialInterval: "5s", maximumInterval: "1 minute" },
 });
 
+// The reaper's teardown must not give up while the control plane is down — that outage is exactly the case
+// the durable reaper exists for. Unlimited attempts, capped backoff: the leak ends when a CP is back.
+const reaperActivities = proxyActivities<Activities>({
+  startToCloseTimeout: "1 minute",
+  retry: { initialInterval: "5s", maximumInterval: "5 minutes" },
+});
+
 // Workflow-side lane cap — the CP's own concurrency figure drives lanes (bounded, deterministic counter pattern).
 const MAX_BATCH_LANES = 64;
 
@@ -192,6 +199,26 @@ export async function approvalWorkflow(input: {
   });
   const settledInTime = await condition(() => decided, Math.max(1, input.timeoutMs));
   if (!settledInTime) await batchActivities.expireApproval({ approvalId: input.approvalId, tenant: input.tenant });
+}
+
+// Durable session reaper (orchestration.md T-b, workflowId `everdict-reaper-<runId>`): sleep to the hard
+// deadline, then tear the session down over the internal bridge — "the reaper is the finally", made
+// crash-proof (a control plane dying with the live handle no longer leaks the container or the row: the
+// activity retries until a control plane is back to serve it). The close path signals for a prompt
+// completion; correctness never depends on it — reap skips an already-settled record.
+export const reaperClosedSignal = defineSignal("closed");
+
+export async function sessionReaperWorkflow(input: {
+  runId: string;
+  tenant: string;
+  timeoutMs: number;
+}): Promise<void> {
+  let closed = false;
+  setHandler(reaperClosedSignal, () => {
+    closed = true;
+  });
+  const closedInTime = await condition(() => closed, Math.max(1, input.timeoutMs));
+  if (!closedInTime) await reaperActivities.reapSession({ runId: input.runId, tenant: input.tenant });
 }
 
 export async function scheduledScorecardWorkflow(input: { scheduleId: string; tenant: string }): Promise<void> {

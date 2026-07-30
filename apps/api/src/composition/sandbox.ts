@@ -1,4 +1,10 @@
-import type { CapabilityStore, PlatformEventEmitter, RunStore, TrajectoryStore } from "@everdict/application-control";
+import type {
+  CapabilityStore,
+  PlatformEventEmitter,
+  RunStore,
+  SandboxSessionServiceDeps,
+  TrajectoryStore,
+} from "@everdict/application-control";
 import { SandboxSessionService } from "@everdict/application-control";
 import { canConsumeCapability } from "@everdict/domain";
 import { DockerDriver } from "@everdict/drivers";
@@ -13,6 +19,9 @@ export function buildSandboxSessions(opts: {
   trajectories?: TrajectoryStore;
   events?: PlatformEventEmitter;
   capabilities?: CapabilityStore;
+  // The durable reaper (T-b) — main wires it to the Temporal driver when EVERDICT_TEMPORAL_ADDRESS is set;
+  // absent = the in-process sweep is the only expiry (a process death can leak until a reaper exists).
+  reaper?: SandboxSessionServiceDeps["reaper"];
 }): SandboxSessionService | undefined {
   const driver = process.env.EVERDICT_SANDBOX_DRIVER;
   if (driver === undefined || driver === "") return undefined;
@@ -27,6 +36,7 @@ export function buildSandboxSessions(opts: {
     driver: new DockerDriver(),
     ...(opts.trajectories ? { trajectories: opts.trajectories } : {}),
     ...(opts.events ? { events: opts.events } : {}),
+    ...(opts.reaper ? { reaper: opts.reaper } : {}),
     ...(capabilities
       ? {
           // environment ref → the concrete image, through the same consume gate as adoption (a cross-tenant

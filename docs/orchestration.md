@@ -82,7 +82,13 @@ record; the agent loop stays in the agent service — the workflow owns ONLY the
 2. **Session/warm reapers as durable per-entity timers** — `reaperWorkflow(runId)`: `sleep(ttl)` +
    extend/close signals → teardown activity. Done = torn down. *Unlocks:* execution-model P6 ("the reaper
    is the `finally`" made crash-proof for sandbox runs); browser sessions fold in later (O6); warm-pool
-   idle teardown is the same pattern.
+   idle teardown is the same pattern. **SHIPPED (W5)** as `sessionReaperWorkflow`
+   (`everdict-reaper-<runId>`): started at sandbox create, `closed` signal on close (prompt no-op),
+   deadline → `reapSession` activity → `POST /internal/sandboxes/:id/reap` — a live handle expires
+   normally; a handle lost to a CP death settles the row as `orphaned` and removes the stray container by
+   the row's `session.computeId` (`Driver.reap`). The reap activity retries UNBOUNDED (capped backoff):
+   a CP outage is exactly the case the reaper exists for, so it never gives up while one is down. Ops
+   family `reaper` (ledger id = the run id) on `/ops/driver`.
 3. **Phase-2 scoring** — `scoreWorkflow(groupId, spec)`: judge N×M with per-case retries → aggregate →
    persist. Done = scored + aggregated. *Unlocks:* execution-model P2 — re-scoring a 500-case group
    survives restarts instead of dying with the process. **SHIPPED (W2)** as `scoreGroupWorkflow` — see

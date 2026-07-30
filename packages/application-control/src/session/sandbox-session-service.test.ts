@@ -62,15 +62,20 @@ function fakeTrajectories() {
 function fakeDriver(opts: { failProvision?: boolean } = {}) {
   const provisioned: ComputeSpec[] = [];
   const disposed: string[] = [];
+  const reaped: string[] = [];
   const execs: string[] = [];
   let seq = 0;
   const driver: Driver = {
     id: "fake",
+    async reap(id) {
+      reaped.push(id);
+    },
     async provision(spec) {
       if (opts.failProvision) throw new Error("docker daemon unreachable");
       provisioned.push(spec);
       const cid = `c-${++seq}`;
       const handle: ComputeHandle = {
+        id: cid,
         async exec(command) {
           execs.push(command);
           return command.includes("boom")
@@ -88,7 +93,7 @@ function fakeDriver(opts: { failProvision?: boolean } = {}) {
       return handle;
     },
   };
-  return { driver, provisioned, disposed, execs };
+  return { driver, provisioned, disposed, reaped, execs };
 }
 
 function build(over: Partial<SandboxSessionServiceDeps> = {}) {
@@ -244,5 +249,47 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
     const reborn = new SandboxSessionService({ store: runStore.store, driver: fakeDriver().driver });
     const settled = await reborn.close(creator, record.id);
     expect(settled).toMatchObject({ status: "succeeded", session: { closedReason: "orphaned" } });
+  });
+
+  it("create starts reaper:<runId> with the row's deadline and persists the compute id; close signals it", async () => {
+    const started: Array<{ runId: string; tenant: string; expiresAt: string }> = [];
+    const signalled: string[] = [];
+    const { service } = build({
+      reaper: {
+        start: async (input) => {
+          started.push(input);
+        },
+        signalClosed: async (runId) => {
+          signalled.push(runId);
+        },
+      },
+    });
+    const record = await service.create({ tenant: "acme", createdBy: "alice", image: "img", ttlSec: 60 });
+    expect(record.session?.computeId).toBe("c-1"); // the row alone suffices for a later process to reap
+    expect(started).toEqual([{ runId: record.id, tenant: "acme", expiresAt: "2026-07-30T00:01:00.000Z" }]);
+    await service.close(creator, record.id);
+    expect(signalled).toEqual([record.id]);
+  });
+
+  it("reap(): a live handle tears down as expired; a crash-orphaned row reaps the stray container by computeId; a settled row is a no-op", async () => {
+    // Live handle — the reaper fired while this process still holds the session.
+    const live = build();
+    const first = await live.service.create({ tenant: "acme", createdBy: "alice", image: "img" });
+    await expect(live.service.reap("acme", first.id)).resolves.toEqual({ reaped: true });
+    expect(live.driver.disposed).toEqual(["c-1"]);
+    expect((await live.runStore.store.get(first.id))?.session?.closedReason).toBe("expired");
+
+    // Crash case — a NEW process (fresh service, fresh driver double) finds only the row.
+    const before = build();
+    const second = await before.service.create({ tenant: "acme", createdBy: "alice", image: "img" });
+    const rebornDriver = fakeDriver();
+    const reborn = new SandboxSessionService({ store: before.runStore.store, driver: rebornDriver.driver });
+    await expect(reborn.reap("acme", second.id)).resolves.toEqual({ reaped: true });
+    expect(rebornDriver.reaped).toEqual(["c-1"]); // the stray container removed by the RECORDED compute id
+    expect((await before.runStore.store.get(second.id))?.session?.closedReason).toBe("orphaned");
+
+    // Idempotent — a settled row (close won the race) skips; a foreign tenant reads absence.
+    await expect(reborn.reap("acme", second.id)).resolves.toEqual({ reaped: false });
+    await expect(reborn.reap("rival", second.id)).resolves.toEqual({ reaped: false });
   });
 });

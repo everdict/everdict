@@ -96,6 +96,7 @@ export const RunSessionSchema = z.object({
   image: z.string(),
   ttlSec: z.number().int().positive(),
   expiresAt: z.string(), // hard deadline — extended by touch, never removed
+  computeId: z.string().optional(), // driver-level compute id (container id) — the reaper's teardown key after a crash
   closedReason: z.enum(["closed", "expired", "orphaned"]).optional(), // stamped at teardown
 });
 export type RunSession = z.infer<typeof RunSessionSchema>;

@@ -44,4 +44,8 @@ export interface Activities {
   // WAIT; park/decide/deliver live on the CP. expireApproval is the deny-on-expiry (idempotent: an
   // already-decided record skips silently on the CP side). ---
   expireApproval(input: { approvalId: string; tenant: string }): Promise<void>;
+  // --- Durable session reaper (T-b): teardown-on-deadline for a sandbox session run. Idempotent: a
+  // settled row skips; a row whose handle died with an earlier CP settles as orphaned and its stray
+  // container is removed by the recorded compute id. ---
+  reapSession(input: { runId: string; tenant: string }): Promise<void>;
 }

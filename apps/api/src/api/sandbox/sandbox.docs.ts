@@ -38,6 +38,19 @@ export const sandboxDocs: Record<string, FastifySchema> = {
       ...errorResponses(400, 401, 403, 404, 502),
     },
   },
+  reap: {
+    summary: "Reap a sandbox session at its deadline (internal)",
+    description:
+      "The durable reaper's teardown (reaper:<runId> workflow timer → this route, x-internal-token). A live " +
+      "handle tears down as expired; a running row whose handle died with an earlier control plane settles as " +
+      "orphaned and its stray container is removed by session.computeId. Idempotent over a settled row.",
+    tags: ["internal"],
+    params: idParams,
+    response: {
+      200: { description: "{ reaped: boolean }" },
+      ...errorResponses(400, 403, 404),
+    },
+  },
   close: {
     summary: "Close a sandbox session",
     description:

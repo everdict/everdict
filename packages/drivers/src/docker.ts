@@ -24,11 +24,17 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 // base (default /everdict); absolute paths are left as-is — so both RepoEnvironment's "work" and SWE-bench's
 // "/testbed" work naturally.
 class DockerComputeHandle implements ComputeHandle {
+  // Exposed as the handle's identity (ComputeHandle.id): session runs persist it so a reaper in a later
+  // process can still `docker rm -f` the container this process died holding.
+  readonly id: string;
+
   constructor(
     private readonly cid: string,
     private readonly base: string,
     private readonly echo: boolean = false,
-  ) {}
+  ) {
+    this.id = cid;
+  }
 
   private resolve(p: string): string {
     return p.startsWith("/") ? p : `${this.base}/${p}`;
@@ -209,5 +215,11 @@ export class DockerDriver implements Driver {
       throw new InternalError("DRIVER_PROVISION_FAILED", { image }, e.stderr || e.message);
     });
     return new DockerComputeHandle(stdout.trim(), this.base, this.opts.echo ?? false);
+  }
+
+  // Tear down a container this process holds no handle to (Driver.reap — the durable session reaper after
+  // a crash). Same force-remove as dispose(); a container already gone is a no-op, not an error.
+  async reap(id: string): Promise<void> {
+    await pexecFile("docker", ["rm", "-f", id], { maxBuffer: MAX_BUFFER }).catch(() => undefined);
   }
 }

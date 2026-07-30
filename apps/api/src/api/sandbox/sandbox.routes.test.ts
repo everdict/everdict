@@ -53,6 +53,7 @@ function build() {
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store, trajectories }),
     sandboxSessions,
+    internalToken: "itok",
   });
   return { app, disposed };
 }
@@ -140,6 +141,41 @@ describe("sandbox session routes — run an environment image and shell in (P6)"
     expect(
       (await app.inject({ method: "POST", url: "/sandboxes", headers: H, payload: { image: "img" } })).statusCode,
     ).toBe(429);
+  });
+
+  it("the reaper's internal teardown: token-guarded; expires a live session and no-ops a settled one (T-b)", async () => {
+    const { app, disposed } = build();
+    const created = await app.inject({ method: "POST", url: "/sandboxes", headers: H, payload: { image: "img" } });
+    const id = created.json().id;
+
+    const unauthenticated = await app.inject({
+      method: "POST",
+      url: `/internal/sandboxes/${id}/reap`,
+      headers: { "content-type": "application/json", "x-internal-token": "wrong" },
+      payload: { tenant: "acme" },
+    });
+    expect(unauthenticated.statusCode).toBe(403);
+
+    const reap = await app.inject({
+      method: "POST",
+      url: `/internal/sandboxes/${id}/reap`,
+      headers: { "content-type": "application/json", "x-internal-token": "itok" },
+      payload: { tenant: "acme" },
+    });
+    expect(reap.statusCode).toBe(200);
+    expect(reap.json()).toEqual({ reaped: true });
+    expect(disposed).toEqual(["c-1"]);
+    const record = await app.inject({ method: "GET", url: `/runs/${id}`, headers: H });
+    expect(record.json()).toMatchObject({ status: "succeeded", session: { closedReason: "expired" } });
+
+    // The timer firing after a close (or a second delivery) is a visible no-op.
+    const again = await app.inject({
+      method: "POST",
+      url: `/internal/sandboxes/${id}/reap`,
+      headers: { "content-type": "application/json", "x-internal-token": "itok" },
+      payload: { tenant: "acme" },
+    });
+    expect(again.json()).toEqual({ reaped: false });
   });
 
   it("without a configured driver the routes are absent (404 not configured)", async () => {

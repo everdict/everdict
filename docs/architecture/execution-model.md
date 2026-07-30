@@ -415,8 +415,11 @@ can be discussed like any other entity, and the knowledge layer can promote what
   path, per-tenant/global caps (429), every exec appended to the session trajectory and sealed at teardown
   (`GET /runs/:id/trajectory` serves it — no new read surface). Surfaces: `POST /sandboxes` /
   `…/:id/exec` / `…/:id/close` + `create_sandbox`/`sandbox_exec`/`close_sandbox` (opt-in:
-  `EVERDICT_SANDBOX_DRIVER=docker`). Remaining rungs: the durable reaper (T-b `reaper:<runId>` — W5's
-  Temporal leg), the WS terminal (`ExecStreamHandle` over `DockerComputeHandle`), idle metering (O5),
+  `EVERDICT_SANDBOX_DRIVER=docker`). **The durable reaper also SHIPPED (T-b)**: `sessionReaperWorkflow`
+  (`everdict-reaper-<runId>`) started at create, signalled on close, deadline → the internal reap bridge —
+  a CP dying with the live handle no longer leaks: the row's `session.computeId` lets `Driver.reap` remove
+  the stray container and the ledger settles `orphaned` (see docs/orchestration.md item 2). Remaining
+  rungs: the WS terminal (`ExecStreamHandle` over `DockerComputeHandle`), idle metering (O5),
   private-registry pull auth, and the O6 browser fold.
 - **P7 — Subscriptions converge.** Schedules emit `schedule.fired`; the three trigger engines converge on
   one subscription registry if the shape holds.

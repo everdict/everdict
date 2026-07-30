@@ -67,6 +67,13 @@ export interface SandboxSessionServiceDeps {
     subject: string,
     ref: { source?: string; id: string; version?: string },
   ) => Promise<{ image: string; version: string } | undefined>;
+  // The durable reaper (orchestration.md T-b): start reaper:<runId> at create (a deadline timer that
+  // survives every process), signal it on close (prompt completion — correctness never depends on it,
+  // reap skips a settled record). Absent = the in-process sweep is the only expiry (rung-1 behavior).
+  reaper?: {
+    start(input: { runId: string; tenant: string; expiresAt: string }): Promise<void>;
+    signalClosed(runId: string): Promise<void>;
+  };
   defaultTtlSec?: number;
   maxTtlSec?: number;
   maxPerTenant?: number; // undefined = unlimited (dev); production sets both
@@ -111,6 +118,7 @@ export class SandboxSessionService {
         image: resolved.image,
         ttlSec,
         createdBy: input.createdBy,
+        ...(handle.id !== undefined ? { computeId: handle.id } : {}),
         now: this.now(),
       });
       const stamped = stampFacts(input.tenant, Run.creationFacts(record), { newId: this.newId, now: this.now });
@@ -128,6 +136,12 @@ export class SandboxSessionService {
         t: 1,
         execCount: 0,
       });
+      // Durable expiry (T-b): best-effort — a Temporal outage never blocks the session (the in-process
+      // sweep still bounds the TTL while this process lives).
+      if (record.session !== undefined) {
+        const expiresAt = record.session.expiresAt;
+        void this.deps.reaper?.start({ runId: record.id, tenant: input.tenant, expiresAt }).catch(() => {});
+      }
       return record;
     } catch (err) {
       await handle.dispose().catch(() => undefined); // no record → no leak either
@@ -190,6 +204,26 @@ export class SandboxSessionService {
     return this.teardown(runId, live, "closed");
   }
 
+  // The durable reaper's teardown (T-b, called over the internal bridge when reaper:<runId> fires). Three
+  // cases: a live handle here → the normal expiry teardown; a running row with NO handle → the crash case,
+  // where the ROW still remembers enough (session.computeId → Driver.reap the stray container) and the
+  // ledger settles as orphaned (the in-memory trajectory died with the old process — that loss is the
+  // documented rung-1 cost); an already-settled row → the timer fired a no-op (close won the race).
+  async reap(tenant: string, runId: string): Promise<{ reaped: boolean }> {
+    const live = this.sessions.get(runId);
+    if (live && live.tenant === tenant) {
+      await this.teardown(runId, live, "expired");
+      return { reaped: true };
+    }
+    const record = await this.deps.store.get(runId);
+    if (!record || record.tenant !== tenant || record.kind !== "sandbox") return { reaped: false };
+    if (Run.from(record).isTerminal()) return { reaped: false };
+    const computeId = record.session?.computeId;
+    if (computeId !== undefined && this.deps.driver.reap) await this.deps.driver.reap(computeId).catch(() => undefined);
+    await this.settle(runId, tenant, "orphaned");
+    return { reaped: true };
+  }
+
   // TTL sweep — called at the top of every public method and from the composition root's interval. The
   // in-process half of "the reaper is the finally"; the Temporal reaper rung survives this process dying.
   sweep(): void {
@@ -215,7 +249,10 @@ export class SandboxSessionService {
       await this.deps.trajectories
         ?.seal({ runId, tenant: live.tenant, source: "run", events: live.trace })
         .catch(() => undefined);
-      return await this.settle(runId, live.tenant, reason);
+      const settled = await this.settle(runId, live.tenant, reason);
+      // Prompt reaper completion (best-effort) — a missed signal just lets the timer fire a no-op later.
+      void this.deps.reaper?.signalClosed(runId).catch(() => {});
+      return settled;
     } finally {
       await live.handle.dispose().catch(() => undefined); // the reaper IS the finally
     }

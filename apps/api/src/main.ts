@@ -612,6 +612,16 @@ async function main(): Promise<void> {
     trajectories: trajectoryStore,
     events: lateEvents,
     capabilities: capabilityStore,
+    // T-b: the durable reaper rides the same Temporal driver as approvals — a CP dying with the live
+    // handle no longer leaks the container or the row.
+    ...(approvalTemporal
+      ? {
+          reaper: {
+            start: (input: { runId: string; tenant: string; expiresAt: string }) => approvalTemporal.startReaper(input),
+            signalClosed: (runId: string) => approvalTemporal.signalReaperClosed(runId),
+          },
+        }
+      : {}),
   });
   if (sandboxSessions) setInterval(() => sandboxSessions.sweep(), 30_000).unref();
   // Capture a session login into a profile (browser-profiles S3) — only when interactive sessions exist (it needs

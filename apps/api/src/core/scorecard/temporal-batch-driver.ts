@@ -122,6 +122,39 @@ export class TemporalBatchDriver {
     }
   }
 
+  // Durable session reaper (orchestration.md T-b): one reaper:<runId> workflow per sandbox session — the
+  // teardown timer that survives every process. Same timing rule as approvals: timeoutMs computed at start,
+  // a late start only lengthens the window (reap skips a settled record, so never a premature teardown).
+  reaperWorkflowIdFor(runId: string): string {
+    return `everdict-reaper-${runId}`;
+  }
+
+  async startReaper(input: { runId: string; tenant: string; expiresAt: string }): Promise<void> {
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      const timeoutMs = Math.max(1000, new Date(input.expiresAt).getTime() - Date.now());
+      await client.workflow.start("sessionReaperWorkflow", {
+        taskQueue: this.opts.taskQueue ?? TASK_QUEUE,
+        workflowId: this.reaperWorkflowIdFor(input.runId),
+        args: [{ runId: input.runId, tenant: input.tenant, timeoutMs }],
+      });
+    } finally {
+      await connection.close();
+    }
+  }
+
+  // Prompt completion on close — best-effort; a missed signal just lets the timer fire a no-op at TTL.
+  async signalReaperClosed(runId: string): Promise<void> {
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      await client.workflow.getHandle(this.reaperWorkflowIdFor(runId)).signal("closed");
+    } finally {
+      await connection.close();
+    }
+  }
+
   // Cooperative cancellation for a superseded batch — best-effort (the record is already terminal; in-queue
   // activities also skip on the CP-side superseded guard).
   async cancel(scorecardId: string): Promise<void> {

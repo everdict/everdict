@@ -5,8 +5,9 @@ import { Client, Connection, WorkflowNotFoundError } from "@temporalio/client";
 // readable and controllable ONLY through this everdict wrap — addressed by LEDGER vocabulary (a scorecard/group
 // id, never a raw workflowId), role-gated at the route, and never a second control plane (raw gRPC stays
 // unexposed). Families per ledger id: the batch driver loop, the detached scoring pass, and the durable
-// approval WAIT (ledger id = the approval id). reaper:/reaction: join as their waves land.
-export const DRIVER_WORKFLOW_FAMILIES = ["batch", "score", "approval"] as const;
+// approval WAIT (ledger id = the approval id), and the durable session reaper (ledger id = the sandbox
+// run id — W5's T-b). reaction: joins with its wave.
+export const DRIVER_WORKFLOW_FAMILIES = ["batch", "score", "approval", "reaper"] as const;
 export type DriverWorkflowFamily = (typeof DRIVER_WORKFLOW_FAMILIES)[number];
 
 // The diagnostic slice an ops agent (or the web) needs to answer "where is this stuck, and why": lifecycle
@@ -35,6 +36,7 @@ export class DriverOpsService {
   workflowIdFor(family: DriverWorkflowFamily, ledgerId: string): string {
     if (family === "batch") return `everdict-batch-${ledgerId}`;
     if (family === "score") return `everdict-score-${ledgerId}`;
+    if (family === "reaper") return `everdict-reaper-${ledgerId}`;
     return `everdict-approval-${ledgerId}`;
   }
 

@@ -13,10 +13,14 @@ const familySchema = z.enum(DRIVER_WORKFLOW_FAMILIES);
 // scorecard rows, approval → the approval store) BEFORE Temporal is asked (no existence leak).
 export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps): void {
   const ownershipGuard = async (tenant: string, family: DriverWorkflowFamily, id: string): Promise<boolean> => {
-    // approval ledger ids live in the approval store; batch/score ids are scorecard rows.
+    // approval ledger ids live in the approval store; reaper ids are sandbox RUN rows; batch/score ids are scorecard rows.
     if (family === "approval") {
       const approval = await deps.approvalService?.get(tenant, id).catch(() => undefined);
       return approval !== undefined;
+    }
+    if (family === "reaper") {
+      const run = await deps.service.get(id).catch(() => undefined);
+      return run !== undefined && run.tenant === tenant && run.kind === "sandbox";
     }
     const record = await deps.scorecardService?.get(id);
     return record !== undefined && record?.tenant === tenant;
@@ -38,7 +42,9 @@ export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps):
         return reply.send(await deps.driverOps.describe(family, req.params.id));
       } catch (err) {
         if (err instanceof z.ZodError)
-          return reply.code(400).send({ code: "BAD_REQUEST", message: "family must be batch | score | approval" });
+          return reply
+            .code(400)
+            .send({ code: "BAD_REQUEST", message: "family must be batch | score | approval | reaper" });
         return sendError(reply, err);
       }
     },
@@ -61,7 +67,9 @@ export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps):
         return reply.send({ ok: true });
       } catch (err) {
         if (err instanceof z.ZodError)
-          return reply.code(400).send({ code: "BAD_REQUEST", message: "family must be batch | score | approval" });
+          return reply
+            .code(400)
+            .send({ code: "BAD_REQUEST", message: "family must be batch | score | approval | reaper" });
         return sendError(reply, err);
       }
     },
