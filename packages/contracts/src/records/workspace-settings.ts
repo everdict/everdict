@@ -92,6 +92,19 @@ export const WorkspaceSettingsSchema = z.object({
   // pull-usability verification snapshot taken at adopt / re-verify time (warn-not-block: adoption is recorded even
   // when the image can't be pulled). image/name/contents are NOT duplicated here — they resolve live from the
   // capability record. Design: docs/architecture/environment-image-store.md.
+  // E4 trace thresholds (native-observability / event-plumbing wave 4): evaluated over EVERY trajectory at
+  // seal time by the perception decorator — a crossing lands trace.threshold_crossed on the log (the wake
+  // signal for triage agents). metric = a derived number of the sealed trajectory; value = the exceeds-bound
+  // (strictly greater). name doubles as the trigger-filter key.
+  traceThresholds: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        metric: z.enum(["usd", "total_tokens", "llm_calls", "tool_calls", "tool_failures", "events", "latency_ms_max"]),
+        value: z.number().nonnegative(),
+      }),
+    )
+    .optional(),
   adoptedEnvironments: z
     .array(
       z.object({
@@ -195,3 +208,6 @@ export const WorkspaceSettingsSchema = z.object({
     .optional(),
 });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettingsSchema>;
+
+// One tenant-configured trace threshold (the traceThresholds[] item) — the perception decorator's unit.
+export type TraceThreshold = NonNullable<WorkspaceSettings["traceThresholds"]>[number];

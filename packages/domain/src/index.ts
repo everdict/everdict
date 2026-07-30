@@ -170,6 +170,11 @@ export { validateImageRef } from "./image/display-image.js";
 
 // trace — trace-derived usage summary (from @everdict/core; shapes stay in contracts)
 export { usageFromTrace } from "./trace/usage-from-trace.js";
+export {
+  trajectoryMetrics,
+  trajectoryMetricValue,
+  type TrajectoryMetrics,
+} from "./trace/trajectory-metrics.js";
 export { clampFidelity, FIDELITY_ORDER } from "./recording/fidelity.js";
 
 // capability — the Capability Store's reach/visibility kernel (new; the four-tier private|workspace|subset|public authority)

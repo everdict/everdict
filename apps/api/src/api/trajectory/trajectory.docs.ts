@@ -22,4 +22,21 @@ export const trajectoryDocs: Record<string, FastifySchema> = {
       200: { description: "{ items: TrajectoryMeta[], nextCursor? }" },
     },
   },
+  thresholdsGet: {
+    summary: "Get the workspace's trace thresholds (E4 perception config)",
+    description:
+      "The tenant-configured bounds evaluated over EVERY trajectory at seal time — a crossing lands " +
+      "trace.threshold_crossed on the event log (the triage agents' wake signal).",
+    tags: ["runs"],
+    response: { 200: { description: "{ thresholds: [{name, metric, value}] }" } },
+  },
+  thresholdsSet: {
+    summary: "Replace the workspace's trace thresholds",
+    description:
+      "Full replacement (like every settings list). metric: usd | total_tokens | llm_calls | tool_calls | " +
+      "tool_failures | events | latency_ms_max; value is the exceeds-bound (strictly greater). Applies to the " +
+      "next sealed trajectory — no restart. settings:write.",
+    tags: ["runs"],
+    response: { 200: { description: "{ thresholds }" } },
+  },
 };

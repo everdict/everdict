@@ -25,13 +25,15 @@ export interface TrajectoryListResult {
 
 export interface TrajectoryStore {
   // Seal a run's whole trajectory. IDEMPOTENT by runId — the first seal wins: a retried settle or a judged
-  // write-back never rewrites evidence.
+  // write-back never rewrites evidence. `created` says whether THIS call sealed it (false = a re-offer that
+  // lost to an earlier seal) — the perception decorator announces only on true, so at-least-once callers
+  // never double-emit a threshold fact.
   seal(input: {
     runId: string;
     tenant: string;
     source: TrajectoryMeta["source"];
     events: TraceEvent[];
-  }): Promise<TrajectoryMeta>;
+  }): Promise<TrajectoryMeta & { created: boolean }>;
   get(tenant: string, runId: string): Promise<{ meta: TrajectoryMeta; events: TraceEvent[] } | undefined>;
   // Browse the workspace's sealed evidence, newest first (N1 "look inward" — Settings › Traces reads OUR
   // store). Metas only: a page never hauls bodies.

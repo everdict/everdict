@@ -7,7 +7,13 @@ import {
 import { ApprovalService } from "@everdict/application-control";
 import { EventConsumerRunner, runFeedConsumer, scorecardFeedConsumer } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
-import { FsService, RevisionedWorkspaceFs, SkillService, withRegisteredFact } from "@everdict/application-control";
+import {
+  FsService,
+  RevisionedWorkspaceFs,
+  SkillService,
+  withRegisteredFact,
+  withTracePerception,
+} from "@everdict/application-control";
 import {
   CapabilityService,
   EnvironmentAdoptionService,
@@ -147,7 +153,7 @@ async function main(): Promise<void> {
     approvalStore,
     envelopeStore,
     eventConsumerStateStore,
-    trajectoryStore,
+    trajectoryStore: rawTrajectoryStore,
     commentStore,
     knowledgeStore,
     knowledgeEntryStore,
@@ -177,6 +183,13 @@ async function main(): Promise<void> {
   );
   const datasetRegistry = withRegisteredFact(rawDatasetRegistry, "dataset.registered", "dataset", lateEvents);
   const judgeRegistry = withRegisteredFact(rawJudgeRegistry, "judge.registered", "judge", lateEvents);
+  // E4 perception (event-plumbing wave 4): every trajectory passes through seal, so the tenant's trace
+  // thresholds are evaluated THERE — a crossing lands trace.threshold_crossed on the log and wakes whatever
+  // subscribed (the continuous-operations loop's sensory half). Announce-once rides seal's `created`.
+  const trajectoryStore = withTracePerception(rawTrajectoryStore, {
+    thresholdsFor: async (tenant) => (await settingsStore.get(tenant))?.traceThresholds ?? [],
+    events: lateEvents,
+  });
 
   // First-party agent templates (agent-automation B4) — seed the two flagship automation agents into _shared
   // (idempotent; disabled + creator-less by design: a workspace adopts one by saving its own copy).

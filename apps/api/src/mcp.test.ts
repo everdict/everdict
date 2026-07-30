@@ -160,6 +160,7 @@ function harness() {
     // Sandbox session runs (P6) — a stub driver so the MCP surface is testable; shares the run/trajectory
     // stores with RunService so get_run_trajectory serves a closed session's sealed evidence (parity roundtrip).
     trajectoryStore: sharedTrajectories,
+    settingsStore: new InMemoryWorkspaceSettingsStore(),
     sandboxSessions: new SandboxSessionService({
       store: sharedRunStore,
       trajectories: sharedTrajectories,
@@ -502,6 +503,8 @@ describe("MCP tools", () => {
       "get_skill_version",
       "get_usage",
       "get_workspace_mattermost",
+      "get_workspace_settings",
+      "get_workspace_trace_thresholds",
       "heartbeat_job",
       "import_harbor",
       "import_skill",
@@ -569,7 +572,9 @@ describe("MCP tools", () => {
       "set_rubric_version_tags",
       "set_runtime_version_tags",
       "set_workspace_mattermost",
+      "set_workspace_settings",
       "set_workspace_trace_source",
+      "set_workspace_trace_thresholds",
       "stamp_skill_version",
       "start_workspace_github_app_install",
       "submit_job_result",

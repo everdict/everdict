@@ -45,6 +45,11 @@ export const PLATFORM_EVENT_KINDS = [
   // its consumer becomes ordinary. payload carries the schedule's name + fire mode; a time-driven agent is
   // just a subscription on this kind (+ a scheduleId filter).
   "schedule.fired",
+  // E4 trace-derived facts (event-plumbing.md §3 wave 4): a sealed trajectory crossed a tenant-configured
+  // threshold — the owned store PERCEIVES, the log ANNOUNCES, agents react (the continuous-operations loop's
+  // sensory half). payload carries runId/threshold/metric/value/limit/source. Facts, not judgments: the
+  // crossing is arithmetic over the sealed events, never an inference.
+  "trace.threshold_crossed",
   // E2 ops facts (coverage wave 3): a delegated envelope REFUSED caused work at the admission gate (402) —
   // the "agent hit its budget" signal, emitted by the gate that already computed the refusal (never silently).
   "budget.exceeded",

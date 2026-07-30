@@ -380,8 +380,11 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     const store = new InMemoryTrajectoryStore();
     const first = await store.seal({ runId: "r1", tenant: "acme", source: "run", events: events as never });
     expect(first.eventCount).toBe(1);
+    expect(first.created).toBe(true);
     const second = await store.seal({ runId: "r1", tenant: "acme", source: "import", events: [] });
-    expect(second).toEqual(first); // idempotent — evidence is never rewritten
+    // Idempotent — evidence is never rewritten; `created:false` is how the perception decorator knows
+    // a re-offer must not re-announce (E4 announce-once).
+    expect(second).toEqual({ ...first, created: false });
     expect((await store.get("acme", "r1"))?.events).toHaveLength(1);
     expect(await store.get("rival", "r1")).toBeUndefined(); // tenant-scoped
   });

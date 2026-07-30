@@ -31,4 +31,61 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
         ),
       ),
   );
+
+  // Trace thresholds (E4 perception config) — BFF↔MCP parity with the /workspace/trace-thresholds routes.
+  const settings = deps.settingsStore;
+  if (!settings) return;
+
+  server.registerTool(
+    "get_workspace_trace_thresholds",
+    {
+      description:
+        "The tenant-configured trace thresholds — evaluated over EVERY trajectory at seal time; a crossing " +
+        "lands trace.threshold_crossed on the event log (the wake signal a triage agent subscribes to).",
+      inputSchema: {},
+    },
+    () => run(principal, "runs:read", async () => ok({ thresholds: (await settings.get(ws))?.traceThresholds ?? [] })),
+  );
+
+  server.registerTool(
+    "set_workspace_trace_thresholds",
+    {
+      description:
+        "Replace the workspace's trace thresholds (full replacement). metric: usd | total_tokens | llm_calls | " +
+        "tool_calls | tool_failures | events | latency_ms_max; value is the exceeds-bound (strictly greater). " +
+        "Applies to the next sealed trajectory. Admin (settings:write).",
+      inputSchema: {
+        thresholds: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(120),
+              metric: z.enum([
+                "usd",
+                "total_tokens",
+                "llm_calls",
+                "tool_calls",
+                "tool_failures",
+                "events",
+                "latency_ms_max",
+              ]),
+              value: z.number().nonnegative(),
+            }),
+          )
+          .max(50),
+      },
+    },
+    ({
+      thresholds,
+    }: {
+      thresholds: Array<{
+        name: string;
+        metric: "usd" | "total_tokens" | "llm_calls" | "tool_calls" | "tool_failures" | "events" | "latency_ms_max";
+        value: number;
+      }>;
+    }) =>
+      run(principal, "settings:write", async () => {
+        await settings.set(ws, { traceThresholds: thresholds });
+        return ok({ thresholds });
+      }),
+  );
 }

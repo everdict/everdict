@@ -265,6 +265,16 @@ resume from their own cursor/history.
   T-d `reaction:<eventId>` multi-step executor.
 - **E4 — Trace-derived facts.** Thresholds/anomalies over the owned trace store (needs native-obs N2) —
   continuous operations: the trace store perceives, the log announces, agents react, runs record.
+  **Threshold rung SHIPPED (master-plan W6)**: tenant-configured thresholds
+  (`WorkspaceSettings.traceThresholds` — `GET/PUT /workspace/trace-thresholds` +
+  `get/set_workspace_trace_thresholds`; metric ∈ usd | total_tokens | llm_calls | tool_calls |
+  tool_failures | events | latency_ms_max) are evaluated over EVERY trajectory at seal time by the
+  `withTracePerception` decorator on the store's one choke point (run settles, the OTLP door,
+  materialized imports, sandbox teardowns — announce-once rides the seal's `created` flag, so
+  at-least-once callers never double-emit). A crossing lands `trace.threshold_crossed`
+  (trigger-matchable) — with the E3 producers and the A3 activation engine this closes the flagship
+  loop's plumbing: production trace → owned store → fact → subscribed agent wakes, enveloped and gated.
+  Anomaly detection (beyond arithmetic bounds) stays a later rung.
 
 ## Open decisions
 

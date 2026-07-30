@@ -33,9 +33,9 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     tenant: string;
     source: TrajectoryMeta["source"];
     events: TraceEvent[];
-  }): Promise<TrajectoryMeta> {
+  }): Promise<TrajectoryMeta & { created: boolean }> {
     const existing = this.rows.get(input.runId);
-    if (existing) return existing.meta; // first seal wins — evidence is never rewritten
+    if (existing) return { ...existing.meta, created: false }; // first seal wins — evidence is never rewritten
     const meta: TrajectoryMeta = {
       runId: input.runId,
       tenant: input.tenant,
@@ -44,7 +44,7 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       sealedAt: new Date().toISOString(),
     };
     this.rows.set(input.runId, { meta, events: input.events });
-    return meta;
+    return { ...meta, created: true };
   }
 
   async get(tenant: string, runId: string): Promise<{ meta: TrajectoryMeta; events: TraceEvent[] } | undefined> {
@@ -83,23 +83,27 @@ export class PgTrajectoryStore implements TrajectoryStore {
     tenant: string;
     source: TrajectoryMeta["source"];
     events: TraceEvent[];
-  }): Promise<TrajectoryMeta> {
+  }): Promise<TrajectoryMeta & { created: boolean }> {
     const sealedAt = new Date().toISOString();
-    await this.client.query(
+    // RETURNING under ON CONFLICT DO NOTHING yields a row ONLY when this call inserted — `created` for free.
+    const inserted = await this.client.query<{ run_id: string }>(
       `INSERT INTO everdict_trajectories (run_id, tenant, source, event_count, body, sealed_at)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (run_id) DO NOTHING`,
+       ON CONFLICT (run_id) DO NOTHING
+       RETURNING run_id`,
       [input.runId, input.tenant, input.source, input.events.length, JSON.stringify(input.events), sealedAt],
     );
+    const created = inserted.rows.length > 0;
     // Read back — a lost race returns the FIRST seal's meta (never pretend the late write took).
     const sealed = await this.get(input.tenant, input.runId);
-    if (sealed) return sealed.meta;
+    if (sealed) return { ...sealed.meta, created };
     return {
       runId: input.runId,
       tenant: input.tenant,
       source: input.source,
       eventCount: input.events.length,
       sealedAt,
+      created,
     };
   }
 

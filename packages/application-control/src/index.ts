@@ -212,6 +212,7 @@ export type {
 export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";
 export { PlatformEventService, type PlatformEventServiceDeps } from "./platform-event/platform-event-service.js";
 export { withRegisteredFact } from "./platform-event/registry-facts.js";
+export { withTracePerception } from "./observability/trace-perception.js";
 export {
   SandboxSessionService,
   type CreateSandboxInput,

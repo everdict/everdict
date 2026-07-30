@@ -46,10 +46,11 @@ function fakeTrajectories() {
         eventCount: input.events.length,
         sealedAt: "t",
       };
-      if (!sealed.has(input.runId)) sealed.set(input.runId, { meta, events: input.events });
+      const created = !sealed.has(input.runId);
+      if (created) sealed.set(input.runId, { meta, events: input.events });
       const kept = sealed.get(input.runId);
       if (kept === undefined) throw new Error("unreachable");
-      return kept.meta;
+      return { ...kept.meta, created };
     },
     async get(tenant, runId) {
       const hit = sealed.get(runId);
