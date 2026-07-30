@@ -39,14 +39,27 @@ ensure_secret AGENT_INTERNAL_TOKEN "$(openssl rand -hex 32)"
 # MinIO root credential — object storage behind the workspace filesystem (bucket per tenant) + artifact offload.
 ensure_secret MINIO_ROOT_PASSWORD "$(openssl rand -hex 16)"
 
+# The api mounts ./certs on EVERY profile (it just does not read the key unless the managed store is on), so the
+# directory has to exist before compose runs at all: a bind mount whose source is missing is created by the docker
+# DAEMON, i.e. owned by root, and the openssl below can then never write into it. Creating it here — as the
+# invoking user, on every run — is what keeps a later `--profile images` able to generate its key pair.
+mkdir -p certs
+
 # Managed image store (profile `images`) — the signing key + self-signed certificate the registry trusts. Generated
 # only when that profile is being brought up, and never regenerated: rotating the key would invalidate every grant
 # already in flight, so an existing pair is left alone.
 if [[ " $* " == *" images "* ]]; then
-  mkdir -p certs
+  if [[ ! -w certs ]]; then
+    echo "✖ $(pwd)/certs is not writable by $(id -un) — the docker daemon created it as root on an earlier run." >&2
+    echo "  Repair it once, then re-run this command:" >&2
+    echo "    sudo chown -R \"\$(id -u):\$(id -g)\" $(pwd)/certs" >&2
+    exit 1
+  fi
   if [[ ! -f certs/image-token.key ]]; then
+    # stderr is deliberately NOT swallowed: openssl failing here aborts the script under `set -e`, and hiding its
+    # message made that abort look like the script had simply done nothing.
     openssl req -newkey rsa:2048 -nodes -keyout certs/image-token.key \
-      -x509 -days 3650 -out certs/image-token.crt -subj "/CN=everdict-image-token" 2>/dev/null
+      -x509 -days 3650 -out certs/image-token.crt -subj "/CN=everdict-image-token"
     chmod 600 certs/image-token.key
     echo "▶ generated certs/image-token.{key,crt} (the registry's rootcertbundle + the control plane's signing key)"
   fi
