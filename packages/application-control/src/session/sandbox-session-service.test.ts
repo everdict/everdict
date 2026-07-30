@@ -59,6 +59,12 @@ function fakeTrajectories() {
     async list(tenant) {
       return { items: [...sealed.values()].map((r) => r.meta).filter((m) => m.tenant === tenant) };
     },
+    async ingestedSince() {
+      return { trajectories: 0, events: 0 };
+    },
+    async deleteOlderThan() {
+      return 0;
+    },
   };
   return { store, sealed };
 }

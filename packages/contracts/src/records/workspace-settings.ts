@@ -92,6 +92,14 @@ export const WorkspaceSettingsSchema = z.object({
   // pull-usability verification snapshot taken at adopt / re-verify time (warn-not-block: adoption is recorded even
   // when the image can't be pulled). image/name/contents are NOT duplicated here — they resolve live from the
   // capability record. Design: docs/architecture/environment-image-store.md.
+  // N3 ingestion admission (native-observability §8): the workspace override for the OTLP door's quota.
+  // Enforced as stored events per rolling hour — past it the door refuses at 429 (visible, never a silent
+  // drop). Unset = the operator default (EVERDICT_INGEST_MAX_EVENTS_PER_HOUR); neither = unlimited.
+  traceIngestion: z
+    .object({
+      maxEventsPerHour: z.number().int().positive().optional(),
+    })
+    .optional(),
   // E4 trace thresholds (native-observability / event-plumbing wave 4): evaluated over EVERY trajectory at
   // seal time by the perception decorator — a crossing lands trace.threshold_crossed on the log (the wake
   // signal for triage agents). metric = a derived number of the sealed trajectory; value = the exceeds-bound

@@ -132,6 +132,7 @@ export interface McpDeps {
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped
   sandboxSessions?: SandboxSessionService; // sandbox session runs (execution-model P6) — absent = no container runtime here
   trajectoryStore?: TrajectoryStore; // the owned evidence ledger's browse surface (N1 look-inward)
+  traceIngestionConfig?: { defaultMaxEventsPerHour?: number; retentionDays?: number }; // N3 operator defaults (display)
   browserTickets?: TicketStore; // WS ticket store for interactive browser sessions
   browserProfileService?: BrowserProfileService; // saved authenticated browser profiles (browser-profiles S2) — workspace-scoped
   browserProfileCaptureService?: BrowserProfileCaptureService; // capture a session login into a profile (browser-profiles S3)

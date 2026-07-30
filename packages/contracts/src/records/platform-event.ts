@@ -53,6 +53,10 @@ export const PLATFORM_EVENT_KINDS = [
   // E2 ops facts (coverage wave 3): a delegated envelope REFUSED caused work at the admission gate (402) —
   // the "agent hit its budget" signal, emitted by the gate that already computed the refusal (never silently).
   "budget.exceeded",
+  // N3 ingestion admission: the OTLP door REFUSED an export past the workspace's events/hour quota (429
+  // at the door, never a silent drop). Emitted with an in-process cooldown so a retrying firehose reads as
+  // one signal, not a flood.
+  "trace.ingestion_throttled",
   // Agent-run lifecycle facts (reported BY the agent service) — observable in the feed/fleet view, but NEVER
   // trigger-matchable in v1 (agents watching agents is a runaway vector; see the loop-prevention guardrails).
   "agent.run.started",

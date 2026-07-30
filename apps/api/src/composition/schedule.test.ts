@@ -74,6 +74,12 @@ describe("wireScheduleService — the reserved 'everdict' source windows the OWN
       async get() {
         return undefined;
       },
+      async ingestedSince() {
+        return { trajectories: 0, events: 0 };
+      },
+      async deleteOlderThan() {
+        return 0;
+      },
       async list() {
         return {
           items: [

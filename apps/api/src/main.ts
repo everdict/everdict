@@ -639,6 +639,18 @@ async function main(): Promise<void> {
       : {}),
   });
   if (sandboxSessions) setInterval(() => sandboxSessions.sweep(), 30_000).unref();
+  // N3 retention: operator-configured TTL over the owned trajectory store (unset = keep forever). Hourly
+  // sweep, logged — evidence never leaves silently.
+  const retentionDays = positiveIntEnv(process.env.EVERDICT_TRAJECTORY_RETENTION_DAYS);
+  if (retentionDays !== undefined) {
+    const sweepTrajectories = async (): Promise<void> => {
+      const cutoff = new Date(Date.now() - retentionDays * 24 * 3_600_000).toISOString();
+      const removed = await trajectoryStore.deleteOlderThan(cutoff).catch(() => 0);
+      if (removed > 0)
+        console.log(`▶ trajectory retention: removed ${removed} sealed trajectories older than ${cutoff}`);
+    };
+    setInterval(() => void sweepTrajectories(), 3_600_000).unref();
+  }
   // Capture a session login into a profile (browser-profiles S3) — only when interactive sessions exist (it needs
   // a session's reachable CDP base). Encrypts the storageState blob with the shared at-rest cipher.
   const browserProfileCaptureService = browserSessionService
@@ -709,7 +721,23 @@ async function main(): Promise<void> {
       ? { driverOps: new DriverOpsService({ address: process.env.EVERDICT_TEMPORAL_ADDRESS }) }
       : {}),
     approvalService, // durable agent approvals (A6) — members list/decide; the agent service parks/settles
-    otlpIngest: new OtlpIngestService(trajectoryStore), // the OTLP/HTTP door (N0) — traces seal in the owned store
+    // The OTLP/HTTP door (N0) — traces seal in the owned store; the N3 admission lane refuses past the
+    // events/hour quota (workspace override, else EVERDICT_INGEST_MAX_EVENTS_PER_HOUR) at 429, never silently.
+    otlpIngest: new OtlpIngestService(trajectoryStore, {
+      quotaFor: async (tenant) => (await settingsStore.get(tenant))?.traceIngestion,
+      ...(positiveIntEnv(process.env.EVERDICT_INGEST_MAX_EVENTS_PER_HOUR) !== undefined
+        ? { defaultMaxEventsPerHour: positiveIntEnv(process.env.EVERDICT_INGEST_MAX_EVENTS_PER_HOUR) }
+        : {}),
+      events: platformEventService,
+    }),
+    traceIngestionConfig: {
+      ...(positiveIntEnv(process.env.EVERDICT_INGEST_MAX_EVENTS_PER_HOUR) !== undefined
+        ? { defaultMaxEventsPerHour: positiveIntEnv(process.env.EVERDICT_INGEST_MAX_EVENTS_PER_HOUR) }
+        : {}),
+      ...(positiveIntEnv(process.env.EVERDICT_TRAJECTORY_RETENTION_DAYS) !== undefined
+        ? { retentionDays: positiveIntEnv(process.env.EVERDICT_TRAJECTORY_RETENTION_DAYS) }
+        : {}),
+    },
     metrics, // GET /metrics (Prometheus text) — unauthenticated; deployments firewall the scrape path
     schedulingControl, // PUT/GET /internal/scheduling — runtime fairness dials (env stays the boot baseline)
     usageMeter, // meter-only billing usage — GET /usage

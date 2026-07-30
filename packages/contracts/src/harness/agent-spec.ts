@@ -42,6 +42,7 @@ export const TRIGGERABLE_EVENT_KINDS = [
   // E4: the flagship loop's wake signal — a production trace crossing a tenant threshold wakes the triage
   // agent (bounded by the activation cooldown; the woken run is enveloped like any other).
   "trace.threshold_crossed",
+  "trace.ingestion_throttled",
 ] as const;
 // Compile-time subset guarantee: every triggerable kind is a real platform-event kind.
 const _triggerableAreKinds: readonly PlatformEventKind[] = TRIGGERABLE_EVENT_KINDS;

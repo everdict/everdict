@@ -97,6 +97,36 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
     expect(await trajectories.get("acme", "")).toBeUndefined();
   });
 
+  it("the N3 admission lane: past the events/hour quota the door refuses at 429 and announces ONCE (cooldown)", async () => {
+    const trajectories = new InMemoryTrajectoryStore();
+    const emitted: string[] = [];
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      otlpIngest: new OtlpIngestService(trajectories, {
+        defaultMaxEventsPerHour: 3,
+        events: {
+          async emit(input) {
+            emitted.push(input.kind);
+            return undefined;
+          },
+        },
+      }),
+    });
+
+    // First export: 3 events (llm_call + tool pair) — exactly at the bound, admitted.
+    expect(
+      (await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-q1") })).statusCode,
+    ).toBe(200);
+    // Second export would cross the bound → 429 with the arithmetic, sealed nothing.
+    const refused = await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-q2") });
+    expect(refused.statusCode).toBe(429);
+    expect(refused.json()).toMatchObject({ code: "RATE_LIMITED", data: { usedLastHour: 3, limit: 3 } });
+    expect(await trajectories.get("acme", "run-q2")).toBeUndefined();
+    // The retrying exporter keeps getting 429s but the LOG hears about it once (cooldown).
+    await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-q3") });
+    expect(emitted).toEqual(["trace.ingestion_throttled"]);
+  });
+
   it("traces seal into the CALLER's workspace — another tenant cannot read them", async () => {
     const { app, trajectories } = build();
     await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-otlp-3") });

@@ -389,6 +389,40 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(await store.get("rival", "r1")).toBeUndefined(); // tenant-scoped
   });
 
+  it("meters ingestion from the store itself and sweeps retention by cutoff (N3)", async () => {
+    const store = new InMemoryTrajectoryStore();
+    await store.seal({ runId: "old", tenant: "acme", source: "otlp", events: events as never });
+    // Backdate by re-seeding through the public surface only: seal stamps now(), so use ingestedSince's
+    // exclusive bound instead — everything sealed "now" is inside a 1h window and outside a future one.
+    const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    expect(await store.ingestedSince("acme", hourAgo)).toEqual({ trajectories: 1, events: 1 });
+    expect(await store.ingestedSince("rival", hourAgo)).toEqual({ trajectories: 0, events: 0 }); // tenant-scoped
+    const future = new Date(Date.now() + 3_600_000).toISOString();
+    expect((await store.ingestedSince("acme", future)).events).toBe(0);
+
+    // Retention: a future cutoff removes today's rows; the sweep reports the count.
+    expect(await store.deleteOlderThan(future)).toBe(1);
+    expect(await store.get("acme", "old")).toBeUndefined();
+    expect(await store.deleteOlderThan(future)).toBe(0); // idempotent on an empty store
+  });
+
+  it("Pg impl meters and sweeps with tenant-scoped aggregate / cutoff DELETE (N3)", async () => {
+    const calls: Array<{ text: string; params?: unknown[] }> = [];
+    const client: SqlClient = {
+      async query(text: string, params?: unknown[]) {
+        calls.push({ text, params });
+        if (text.includes("SELECT count(*)")) return { rows: [{ trajectories: "2", events: "7" }] as never[] };
+        if (text.startsWith("DELETE")) return { rows: [{ run_id: "a" }, { run_id: "b" }] as never[] };
+        return { rows: [] as never[] };
+      },
+    };
+    const store = new PgTrajectoryStore(client);
+    expect(await store.ingestedSince("acme", "2026-07-30T00:00:00.000Z")).toEqual({ trajectories: 2, events: 7 });
+    expect(calls[0]?.text).toMatch(/tenant = \$1 AND sealed_at > \$2/);
+    expect(await store.deleteOlderThan("2026-07-01T00:00:00.000Z")).toBe(2);
+    expect(calls[1]?.text).toMatch(/DELETE FROM everdict_trajectories WHERE sealed_at < \$1/);
+  });
+
   it("Pg impl seals with ON CONFLICT DO NOTHING (first write wins at the row level)", async () => {
     const calls: Array<{ text: string; params?: unknown[] }> = [];
     const client: SqlClient = {

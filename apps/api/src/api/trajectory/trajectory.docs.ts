@@ -22,6 +22,23 @@ export const trajectoryDocs: Record<string, FastifySchema> = {
       200: { description: "{ items: TrajectoryMeta[], nextCursor? }" },
     },
   },
+  ingestionGet: {
+    summary: "The OTLP door's ingestion quota + usage (N3 admission lane)",
+    description:
+      "The effective events/hour bound (workspace override > operator default > unlimited), the last hour's " +
+      "stored events (the store is the meter), and the operator retention TTL when set. Past the bound the " +
+      "door refuses at 429 and lands trace.ingestion_throttled on the event log (cooldown-bounded).",
+    tags: ["runs"],
+    response: { 200: { description: "{ maxEventsPerHour?, source, usedLastHour, retentionDays? }" } },
+  },
+  ingestionSet: {
+    summary: "Set (or clear) the workspace's ingestion quota override",
+    description:
+      "maxEventsPerHour: a positive integer, or null to clear the override (falling back to the operator " +
+      "default). settings:write.",
+    tags: ["runs"],
+    response: { 200: { description: "{ maxEventsPerHour? }" } },
+  },
   thresholdsGet: {
     summary: "Get the workspace's trace thresholds (E4 perception config)",
     description:

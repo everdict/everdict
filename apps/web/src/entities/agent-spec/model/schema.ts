@@ -50,6 +50,7 @@ export const TRIGGERABLE_EVENT_KINDS = [
   'budget.exceeded',
   'schedule.fired',
   'trace.threshold_crossed',
+  'trace.ingestion_throttled',
 ] as const
 
 // 이벤트 payload 에 대한 선언적 필터 하나 — filters 는 AND 결합(예: passRate < 1 = 실패 케이스 있는 배치).

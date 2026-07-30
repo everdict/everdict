@@ -1,5 +1,10 @@
-import type { TrajectoryStore } from "@everdict/application-control";
+import type { PlatformEventEmitter, TrajectoryStore } from "@everdict/application-control";
+import { RateLimitError } from "@everdict/contracts";
 import { groupOtlpExportByRun, spansToTraceEvents } from "@everdict/trace";
+
+// How often a throttled tenant is ANNOUNCED (the fact), independent of how often it is refused (every
+// request). A retrying firehose reads as one signal on the log, not a flood.
+const THROTTLE_FACT_COOLDOWN_MS = 15 * 60_000;
 
 // The OTLP/HTTP door's core (native-observability N0, receiver embedded in the api per N-O2): group the
 // export's spans by everdict.run_id, normalize through the SAME span→TraceEvent path the pull sources use,
@@ -7,23 +12,75 @@ import { groupOtlpExportByRun, spansToTraceEvents } from "@everdict/trace";
 // write wins — a multi-batch export's later batches for an already-sealed run are rejected VISIBLY in the
 // response (partialSuccess), never silently; batch-per-run exporters (flush-at-exit, the dogfood shape)
 // arrive whole. Live append is the next rung.
+//
+// N3 admission lane: a trace firehose is the data-plane twin of runaway fan-out, so the door carries the
+// same governance grammar — a per-tenant events/hour quota (workspace override, else the operator default)
+// refused at 429, never a silent drop. The STORE is the meter (ingestedSince), so the count survives
+// restarts and replicas without a separate counter to drift.
 export class OtlpIngestService {
-  constructor(private readonly trajectories: TrajectoryStore) {}
+  private readonly lastThrottleFactAt = new Map<string, number>();
+
+  constructor(
+    private readonly trajectories: TrajectoryStore,
+    private readonly deps: {
+      // The workspace's quota override (WorkspaceSettings.traceIngestion) — resolved per request.
+      quotaFor?: (tenant: string) => Promise<{ maxEventsPerHour?: number } | undefined>;
+      defaultMaxEventsPerHour?: number; // operator default (EVERDICT_INGEST_MAX_EVENTS_PER_HOUR); unset = unlimited
+      events?: PlatformEventEmitter; // trace.ingestion_throttled (cooldown-bounded)
+      now?: () => number;
+    } = {},
+  ) {}
 
   async ingest(tenant: string, body: unknown): Promise<{ sealedRuns: number; rejectedSpans: number }> {
     const { groups, missingRunId } = groupOtlpExportByRun(body);
+    const normalized = [...groups].map(([runId, spans]) => ({
+      runId,
+      spanCount: spans.length,
+      events: spansToTraceEvents(spans),
+    }));
+    await this.admit(
+      tenant,
+      normalized.reduce((sum, group) => sum + group.events.length, 0),
+    );
     let sealedRuns = 0;
     let rejectedSpans = missingRunId;
-    for (const [runId, spans] of groups) {
-      const events = spansToTraceEvents(spans);
-      const before = await this.trajectories.get(tenant, runId);
+    for (const group of normalized) {
+      const before = await this.trajectories.get(tenant, group.runId);
       if (before) {
-        rejectedSpans += spans.length; // already sealed — evidence is never rewritten (first write wins)
+        rejectedSpans += group.spanCount; // already sealed — evidence is never rewritten (first write wins)
         continue;
       }
-      await this.trajectories.seal({ runId, tenant, source: "otlp", events });
+      await this.trajectories.seal({ runId: group.runId, tenant, source: "otlp", events: group.events });
       sealedRuns++;
     }
     return { sealedRuns, rejectedSpans };
+  }
+
+  // The quota check (N3): workspace override, else the operator default, else unlimited. Refusal is loud
+  // twice over — 429 to the exporter, trace.ingestion_throttled on the log (cooldown-bounded).
+  private async admit(tenant: string, incomingEvents: number): Promise<void> {
+    if (incomingEvents === 0) return;
+    const override = await this.deps.quotaFor?.(tenant).catch(() => undefined);
+    const limit = override?.maxEventsPerHour ?? this.deps.defaultMaxEventsPerHour;
+    if (limit === undefined) return;
+    const now = this.deps.now?.() ?? Date.now();
+    const used = await this.trajectories.ingestedSince(tenant, new Date(now - 3_600_000).toISOString());
+    if (used.events + incomingEvents <= limit) return;
+    const last = this.lastThrottleFactAt.get(tenant) ?? 0;
+    if (now - last >= THROTTLE_FACT_COOLDOWN_MS) {
+      this.lastThrottleFactAt.set(tenant, now);
+      void this.deps.events?.emit({
+        workspace: tenant,
+        kind: "trace.ingestion_throttled",
+        subject: { type: "workspace", id: tenant },
+        payload: { usedLastHour: used.events, incoming: incomingEvents, limit },
+        message: `Trace ingestion throttled — ${used.events} events in the last hour + ${incomingEvents} incoming > ${limit}.`,
+      });
+    }
+    throw new RateLimitError(
+      "RATE_LIMITED",
+      { usedLastHour: used.events, incoming: incomingEvents, limit },
+      `Trace ingestion quota exceeded: ${used.events} events in the last hour + ${incomingEvents} incoming > ${limit}. Retry later or raise the workspace quota.`,
+    );
   }
 }

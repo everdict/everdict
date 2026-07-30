@@ -136,6 +136,14 @@ collector and the store**.
   no Python package needed; the door's protobuf gap is documented with the collector front). Remaining:
   publish pipelines when the repo goes public.
 - **N3 — Scale rung.** ClickHouse adapter; retention/quota surfaces; ingestion admission in the §5 gate.
+  **Governance half SHIPPED (master-plan W7)**: the ingestion admission lane — per-tenant events/hour
+  quota at the door (workspace override via `WorkspaceSettings.traceIngestion` +
+  `GET/PUT /workspace/trace-ingestion`, operator default `EVERDICT_INGEST_MAX_EVENTS_PER_HOUR`; the STORE
+  is the meter via `ingestedSince`, so no counter drifts), refused at 429 with the arithmetic and
+  announced as `trace.ingestion_throttled` (cooldown-bounded, trigger-matchable) — plus retention:
+  `EVERDICT_TRAJECTORY_RETENTION_DAYS` drives an hourly `deleteOlderThan` sweep (logged, never silent;
+  unset = keep forever). Remaining: the ClickHouse adapter (entered by measurement — real infra), byte
+  quotas, and sampling policy.
 - **N4 — Mirror consolidation.** Collector-level exporters subsume raw-trace mirroring; score-attach
   sinks remain API-side.
 

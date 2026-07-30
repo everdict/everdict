@@ -72,6 +72,28 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       ...(sorted.length > limit && last !== undefined ? { nextCursor: encodeCursor(last) } : {}),
     };
   }
+
+  async ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }> {
+    let trajectories = 0;
+    let events = 0;
+    for (const row of this.rows.values()) {
+      if (row.meta.tenant !== tenant || row.meta.sealedAt <= sinceIso) continue;
+      trajectories += 1;
+      events += row.meta.eventCount;
+    }
+    return { trajectories, events };
+  }
+
+  async deleteOlderThan(cutoffIso: string): Promise<number> {
+    let removed = 0;
+    for (const [runId, row] of this.rows) {
+      if (row.meta.sealedAt < cutoffIso) {
+        this.rows.delete(runId);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
 }
 
 // Postgres-backed trajectory store (mig 0098) — ON CONFLICT DO NOTHING makes the seal first-write-wins.
@@ -167,5 +189,23 @@ export class PgTrajectoryStore implements TrajectoryStore {
       items: page,
       ...(metas.length > limit && last !== undefined ? { nextCursor: encodeCursor(last) } : {}),
     };
+  }
+
+  async ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }> {
+    const res = await this.client.query<{ trajectories: string | number; events: string | number }>(
+      `SELECT count(*) AS trajectories, COALESCE(SUM(event_count), 0) AS events
+       FROM everdict_trajectories WHERE tenant = $1 AND sealed_at > $2::timestamptz`,
+      [tenant, sinceIso],
+    );
+    const row = res.rows[0];
+    return { trajectories: Number(row?.trajectories ?? 0), events: Number(row?.events ?? 0) };
+  }
+
+  async deleteOlderThan(cutoffIso: string): Promise<number> {
+    const res = await this.client.query<{ run_id: string }>(
+      "DELETE FROM everdict_trajectories WHERE sealed_at < $1::timestamptz RETURNING run_id",
+      [cutoffIso],
+    );
+    return res.rows.length;
   }
 }

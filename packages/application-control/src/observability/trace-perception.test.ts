@@ -28,6 +28,12 @@ function fakeStore(): TrajectoryStore {
     async list() {
       return { items: [] };
     },
+    async ingestedSince() {
+      return { trajectories: 0, events: 0 };
+    },
+    async deleteOlderThan() {
+      return 0;
+    },
   };
 }
 

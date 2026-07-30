@@ -48,6 +48,48 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
   );
 
   server.registerTool(
+    "get_workspace_trace_ingestion",
+    {
+      description:
+        "The OTLP door's ingestion state (N3 admission lane): the effective events/hour bound (workspace " +
+        "override > operator default > unlimited), the last hour's stored events, and the retention TTL when " +
+        "set. Past the bound the door refuses at 429 and lands trace.ingestion_throttled on the event log.",
+      inputSchema: {},
+    },
+    () =>
+      run(principal, "runs:read", async () => {
+        const override = (await settings.get(ws))?.traceIngestion?.maxEventsPerHour;
+        const operatorDefault = deps.traceIngestionConfig?.defaultMaxEventsPerHour;
+        const used = await store.ingestedSince(ws, new Date(Date.now() - 3_600_000).toISOString());
+        return ok({
+          maxEventsPerHour: override ?? operatorDefault,
+          source: override !== undefined ? "workspace" : operatorDefault !== undefined ? "operator" : "unlimited",
+          usedLastHour: used.events,
+          ...(deps.traceIngestionConfig?.retentionDays !== undefined
+            ? { retentionDays: deps.traceIngestionConfig.retentionDays }
+            : {}),
+        });
+      }),
+  );
+
+  server.registerTool(
+    "set_workspace_trace_ingestion",
+    {
+      description:
+        "Set (or clear with null) the workspace's OTLP-door quota override — events stored per rolling hour. " +
+        "Admin (settings:write).",
+      inputSchema: { maxEventsPerHour: z.number().int().positive().nullable() },
+    },
+    ({ maxEventsPerHour }: { maxEventsPerHour: number | null }) =>
+      run(principal, "settings:write", async () => {
+        await settings.set(ws, {
+          traceIngestion: maxEventsPerHour === null ? {} : { maxEventsPerHour },
+        });
+        return ok({ maxEventsPerHour: maxEventsPerHour ?? undefined });
+      }),
+  );
+
+  server.registerTool(
     "set_workspace_trace_thresholds",
     {
       description:

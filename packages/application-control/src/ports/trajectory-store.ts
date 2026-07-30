@@ -38,4 +38,10 @@ export interface TrajectoryStore {
   // Browse the workspace's sealed evidence, newest first (N1 "look inward" — Settings › Traces reads OUR
   // store). Metas only: a page never hauls bodies.
   list(tenant: string, opts?: { limit?: number; cursor?: string }): Promise<TrajectoryListResult>;
+  // Ingestion accounting (N3's admission lane): what this workspace sealed since `sinceIso`. The STORE is
+  // the meter — no separate counter to drift or lose on restart; the door's quota check reads this.
+  ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }>;
+  // Retention (N3): delete trajectories sealed before the cutoff, across tenants (operator policy). Returns
+  // how many rows went — the sweep logs it, never silently. No retention configured = keep forever.
+  deleteOlderThan(cutoffIso: string): Promise<number>;
 }

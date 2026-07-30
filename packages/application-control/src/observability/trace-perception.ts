@@ -26,6 +26,8 @@ export function withTracePerception(
     },
     get: (tenant, runId) => store.get(tenant, runId),
     list: (tenant, opts) => store.list(tenant, opts),
+    ingestedSince: (tenant, sinceIso) => store.ingestedSince(tenant, sinceIso),
+    deleteOlderThan: (cutoffIso) => store.deleteOlderThan(cutoffIso),
   };
 }
 
