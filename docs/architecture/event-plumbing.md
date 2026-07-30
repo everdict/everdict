@@ -238,9 +238,12 @@ resume from their own cursor/history.
   so a poison fact never dams the log, `lag()` as the backpressure observable, mig 0097) + the personal
   FEED re-based (`feed:runs`/`feed:scorecards` — the completion facts carry exactly the old feed gate, and
   rows key on `nf-<eventId>` so a cursor rewind replays with zero duplicate effects, the W3 acceptance).
-  Remaining rungs: Mattermost (its coverage is wider than the facts — machine-fired completions post too,
-  so re-basing it is an E2 coverage decision), webhooks, and the Pg LISTEN/NOTIFY nudge (in-process poll at
-  3s is the single-CP correctness path today).
+  **Mattermost re-based (W6 backlog close-out)**: the last direct notification path now rides the log —
+  the `mm:completions` cursor consumer posts every completion fact (run/scorecard/report) through the ONE
+  channel poster the NotificationService still owns; the E2 widening below restored the machine-fired
+  coverage the direct path had, and `notifyRun`/`notifyScorecard` are deleted (notifications have exactly
+  one delivery mechanism). Webhooks became a subscription reaction (E3). Remaining rung: the Pg
+  LISTEN/NOTIFY nudge (in-process poll at 3s is the single-CP correctness path today).
 - **E2 — Coverage W2+W3.** Content/registry/fs/knowledge/ops facts; the "transition ⇒ fact" review rule.
   **First rung SHIPPED (master-plan W4)**: content/registry facts — `harness.registered` /
   `dataset.registered` / `judge.registered` via the `withRegisteredFact` composition-root decorator (one
@@ -249,11 +252,12 @@ resume from their own cursor/history.
   `causedBy agent:<id>:<conversation>`) · `knowledge.created/proposed/approved` (the S14 HITL loop's
   observable half) · ops fact `budget.exceeded` emitted by the admission gate's 402 refusal (the gate
   already computed it). All are trigger-matchable (`TRIGGERABLE_EVENT_KINDS`). The review rule is codified
-  in `.claude/rules/events.md`. **Deferred rungs**: `runner.online/offline` (needs a presence sweeper —
-  lease-TTL expiry detection, not a clean existing transition), budget *threshold* facts (80%-crossed needs
-  a meter hook; the refusal fact ships first), queue-depth bands (a W7 measurement concern), and the
-  Mattermost re-base (its coverage is wider than the facts — machine-fired completions post too; it stays
-  direct until the E3 subscription registry makes reactions one mechanism).
+  in `.claude/rules/events.md`. **Coverage widened (with the Mattermost re-base)**: the terminal-fact
+  initiator gates fell — a machine-fired run/scorecard completion announces on the log (actor/recipient
+  ride only with a known initiator, so the feed consumers still skip actor-less facts; child-run silence
+  stands). **Deferred rungs**: `runner.online/offline` (needs a presence sweeper — lease-TTL expiry
+  detection, not a clean existing transition), budget *threshold* facts (80%-crossed needs a meter hook;
+  the refusal fact ships first), and queue-depth bands (a W7 measurement concern).
 - **E3 — Convergence.** Subscription registry; `schedule.fired`; CI events; reactions admitted through
   the §5 gate (needs execution-model P4). **Producer rung SHIPPED (master-plan W6)**: every schedule fire
   lands `schedule.fired` on the log (subject = the schedule; payload carries `scheduleId`/`name`/`mode`
@@ -277,9 +281,14 @@ resume from their own cursor/history.
   `/internal/activations(…/status)`), waiting out each run under a per-step budget (awaiting_approval
   counts as alive — a HITL park mid-chain is exactly what durability buys); `activateDirect` is idempotent
   via `findTriggerSession` (a retry gets the EXISTING session back, never a second run); ops family
-  `reaction` is in `DRIVER_WORKFLOW_FAMILIES` from day one. Remaining rung: relocating the agent-spec
-  trigger fields onto subscriptions once the shape holds (additive always), and reactions-through-the-§5-
-  gate hardening as reaction runs join the admission path like any other agent activation.
+  `reaction` is in `DRIVER_WORKFLOW_FAMILIES` from day one. **Gate hardening SHIPPED**: every activation
+  launch path (spec triggers, subscription rules, reaction-workflow steps) now asks the tenant budget
+  BEFORE the run exists (`POST /internal/activations/admit` — 402 skips visibly; a chain step answers
+  {skipped} so an exhausted budget stops the chain), and the gate's causal leg gained O7's third knob (the
+  per-envelope in-flight cap, counted live from the run ledger — born-queued stands, the cap is the
+  runaway-flood backstop). Remaining rung: relocating the agent-spec trigger fields onto subscriptions —
+  deliberately AFTER the Settings › Subscriptions surface (shipped) has proven the replacement (additive
+  always: never move a surface before its replacement is lived-in).
 - **E4 — Trace-derived facts.** Thresholds/anomalies over the owned trace store (needs native-obs N2) —
   continuous operations: the trace store perceives, the log announces, agents react, runs record.
   **Threshold rung SHIPPED (master-plan W6)**: tenant-configured thresholds
