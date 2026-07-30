@@ -988,12 +988,7 @@ export class NomadBackend
       if (!newest?.ID) return undefined;
       const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
       const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
-      // resources=true — the list stub carries AllocatedResources only when asked (the same trap the runtime
-      // inspection hit live: without it the unit's cpu/mem ask reads blank).
-      const allocsRes = await this.http.request(
-        "GET",
-        `/v1/job/${encodeURIComponent(newest.ID)}/allocations?resources=true${ns ? `&namespace=${encodeURIComponent(ns)}` : ""}`,
-      );
+      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
       if (allocsRes.status >= 300) return undefined;
       const alloc = currentAlloc(
         JSON.parse(allocsRes.text) as Array<NomadAllocStub & { CreateIndex?: number; DesiredStatus?: string }>,
@@ -1010,7 +1005,11 @@ export class NomadBackend
           events: [],
         };
       }
-      const events = await this.allocTaskEvents(alloc.ID);
+      // One detail fetch feeds BOTH the event feed and the resource ask: the per-job allocations LIST omits
+      // AllocatedResources even with ?resources=true (live-verified on Nomad 2.0.3 — only the global
+      // /v1/allocations honors that flag), while the alloc DETAIL always carries it.
+      const detail = await this.allocDetail(alloc.ID);
+      const events = detail.events;
       const status = alloc.ClientStatus ?? "pending";
       const phase =
         status === "running"
@@ -1027,7 +1026,7 @@ export class NomadBackend
         ...(alloc.NodeName ? { node: alloc.NodeName } : {}),
         ...(eventsIndicateOom(events) ? { oom: true } : {}),
         ...(restarts > 0 ? { restarts } : {}),
-        ...nomadAllocResources(alloc),
+        ...nomadAllocResources(detail.stub ?? alloc),
         ...(age !== undefined ? { ageSeconds: age } : {}),
         events: nomadEventsToPlacement(events),
       };
@@ -1214,19 +1213,26 @@ export class NomadBackend
     return text === "" ? {} : { logTail: text.slice(-FAILURE_LOG_TAIL_CAP) };
   }
 
-  // The alloc's task events, flattened across tasks (one fetch feeds OOM detection AND the failure summary).
-  private async allocTaskEvents(allocId: string): Promise<NomadTaskEvent[]> {
+  // The alloc DETAIL read — one fetch feeds the task events (OOM detection + the failure summary + the
+  // placement event feed) AND the resource ask (the per-job allocations list omits AllocatedResources, so the
+  // detail is the only reliable source). Best-effort: a miss reads as no events / no stub.
+  private async allocDetail(allocId: string): Promise<{ events: NomadTaskEvent[]; stub?: NomadAllocStub }> {
     try {
       const res = await this.http.request("GET", `/v1/allocation/${allocId}`);
-      if (res.status >= 300) return [];
-      const detail = JSON.parse(res.text) as {
+      if (res.status >= 300) return { events: [] };
+      const detail = JSON.parse(res.text) as NomadAllocStub & {
         TaskStates?: Record<string, { Events?: NomadTaskEvent[] }>;
       };
-      return Object.values(detail.TaskStates ?? {}).flatMap((st) => st.Events ?? []);
+      return { events: Object.values(detail.TaskStates ?? {}).flatMap((st) => st.Events ?? []), stub: detail };
     } catch {
       /* detection is best-effort — fall through to the generic alloc-failed error */
-      return [];
+      return { events: [] };
     }
+  }
+
+  // The alloc's task events, flattened across tasks (one fetch feeds OOM detection AND the failure summary).
+  private async allocTaskEvents(allocId: string): Promise<NomadTaskEvent[]> {
+    return (await this.allocDetail(allocId)).events;
   }
 
   private readonly purgeQueue: Array<{ jobId: string; ns: string | undefined; at: number }> = [];

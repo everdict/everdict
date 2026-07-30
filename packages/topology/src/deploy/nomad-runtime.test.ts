@@ -731,6 +731,92 @@ describe("NomadTopologyRuntime.describeTopology / serviceLogs (topology observab
     });
   });
 
+  it("a declared store rosters from its SEPARATE silo job (live-caught: the topology job carries no store task)", async () => {
+    // Regression (live Nomad): dependency stores deploy via provisionSilo as everdict-store-<id>-default — a
+    // roster that reads only the topology job showed a RUNNING redis as "absent" and its logs as empty.
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path.includes("everdict-store-aegra-default/allocations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              {
+                ID: "silo1",
+                DesiredStatus: "run",
+                CreateIndex: 3,
+                NodeName: "worker-1",
+                TaskStates: {
+                  "everdict-store-default-postgres": { State: "running", Restarts: 0, Events: [{ Type: "Started" }] },
+                },
+              },
+            ]),
+          };
+        if (path.includes("/allocations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              {
+                ID: "a1",
+                DesiredStatus: "run",
+                CreateIndex: 5,
+                TaskStates: { "agent-server": { State: "running", Events: [] } },
+              },
+            ]),
+          };
+        if (path.startsWith("/v1/allocation/silo1"))
+          return {
+            status: 200,
+            text: JSON.stringify({
+              AllocatedResources: {
+                Tasks: { "everdict-store-default-postgres": { Cpu: { CpuShares: 1000 }, Memory: { MemoryMB: 1024 } } },
+              },
+            }),
+          };
+        return { status: 404, text: "" };
+      },
+    };
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http });
+    const topo = await rt.describeTopology(SPEC);
+    expect(topo?.services.find((s) => s.role === "store")).toMatchObject({
+      status: "running",
+      ready: true,
+      node: "worker-1",
+      cpu: 1000,
+      memoryMb: 1024,
+    });
+  });
+
+  it("serviceLogs for a declared store reads the SILO job's store task, not the topology job", async () => {
+    const calls: string[] = [];
+    const http: NomadHttp = {
+      async request(_method, path) {
+        calls.push(path);
+        if (path.includes("everdict-store-aegra-default/allocations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              {
+                ID: "silo1",
+                DesiredStatus: "run",
+                CreateIndex: 1,
+                TaskStates: { "everdict-store-default-postgres": { State: "running" } },
+              },
+            ]),
+          };
+        if (path.includes("/logs/silo1") && path.includes("type=stdout"))
+          return { status: 200, text: "PostgreSQL init done" };
+        if (path.includes("/logs/silo1")) return { status: 200, text: "" };
+        return { status: 404, text: "" };
+      },
+    };
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http });
+    // SPEC declares a postgres dependency → its declared row name is aegra-postgres (storeName).
+    const text = await rt.serviceLogs(SPEC, "aegra-postgres");
+    expect(text).toBe("PostgreSQL init done");
+    expect(calls.some((c) => c.includes("everdict-store-aegra-default/allocations"))).toBe(true);
+    expect(calls.some((c) => c.includes("task=everdict-store-default-postgres"))).toBe(true);
+  });
+
   it("a 404 job reads as an honest deployed:false with the DECLARED units rostered absent; an API failure as undefined", async () => {
     const gone = new NomadTopologyRuntime({
       addr: "http://nomad",

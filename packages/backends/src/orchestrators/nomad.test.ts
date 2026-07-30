@@ -962,14 +962,16 @@ describe("NomadBackend.inspectCase (case-scoped placement view)", () => {
                 NodeName: "worker-2",
                 DesiredStatus: "run",
                 CreateTime: (Date.now() - 90_000) * 1e6, // 90s ago, nanoseconds
-                AllocatedResources: { Tasks: { agent: { Cpu: { CpuShares: 500 }, Memory: { MemoryMB: 2048 } } } },
               },
             ]),
           };
         if (path === "/v1/allocation/a1")
           return {
             status: 200,
+            // AllocatedResources lives on the alloc DETAIL only — the per-job list omits it even with
+            // ?resources=true (live-verified on Nomad 2.0.3). The fake mirrors the real API shape.
             text: JSON.stringify({
+              AllocatedResources: { Tasks: { agent: { Cpu: { CpuShares: 500 }, Memory: { MemoryMB: 2048 } } } },
               TaskStates: {
                 agent: {
                   Events: [

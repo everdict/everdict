@@ -707,23 +707,30 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   async describeTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyStatus | undefined> {
     try {
       const ns = zone?.namespace ?? this.opts.namespace;
-      const declared: Array<{ name: string; role: "service" | "store"; image?: string; port?: number }> = [
+      const declared: Array<{
+        name: string;
+        role: "service" | "store";
+        image?: string;
+        port?: number;
+        storeType?: string;
+      }> = [
         ...spec.services.map((s) => ({
           name: s.name,
           role: "service" as const,
           ...(s.image ? { image: s.image } : {}),
           ...(s.port !== undefined ? { port: s.port } : {}),
         })),
-        ...dependencyStores(spec).map(({ name, def }) => ({
+        ...dependencyStores(spec).map(({ store, name, def }) => ({
           name,
           role: "store" as const,
           image: def.image,
           port: def.port,
+          storeType: store,
         })),
       ];
       const res = await this.http.request(
         "GET",
-        `/v1/job/${topologyJobId(spec, zone?.id)}/allocations?resources=true${this.nsq(ns, "&")}`,
+        `/v1/job/${topologyJobId(spec, zone?.id)}/allocations${this.nsq(ns, "?")}`,
       );
       if (res.status === 404)
         return {
@@ -734,13 +741,11 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         };
       if (res.status >= 300) return undefined;
       const allocs = JSON.parse(res.text) as Array<{
+        ID?: string;
         ClientStatus?: string;
         CreateIndex?: number;
         DesiredStatus?: string;
         NodeName?: string;
-        AllocatedResources?: {
-          Tasks?: Record<string, { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } }>;
-        };
         TaskStates?: Record<
           string,
           { State?: string; Restarts?: number; StartedAt?: string; Events?: TaskEventLike[] }
@@ -752,12 +757,61 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         {
           st: { State?: string; Restarts?: number; StartedAt?: string; Events?: TaskEventLike[] };
           alloc: (typeof allocs)[number];
+          task: string; // the ACTUAL task name (a silo store task differs from the declared row name)
         }
       >();
       const sorted = [...allocs].sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0));
       for (const a of [...sorted.filter((x) => x.DesiredStatus === "run"), ...sorted]) {
         for (const [task, st] of Object.entries(a.TaskStates ?? {})) {
-          if (!observed.has(task)) observed.set(task, { st, alloc: a });
+          if (!observed.has(task)) observed.set(task, { st, alloc: a, task });
+        }
+      }
+      // Dependency stores deploy as a SEPARATE silo job (provisionSilo — dedicatedStoreJobId), NOT as groups of
+      // the topology job (live-verified: the roster read the running redis as "absent" until this second read).
+      // Merge the silo job's tasks under the DECLARED store rows, keyed by store type (the silo task is named
+      // everdict-store-<zone>-<store>). Best-effort — a missing/unreachable silo job just leaves the rows absent.
+      if (declared.some((d) => d.role === "store")) {
+        const siloRes = await this.http
+          .request(
+            "GET",
+            `/v1/job/${dedicatedStoreJobId(spec, zone?.id ?? NO_ZONE_STORE_ID)}/allocations${this.nsq(ns, "?")}`,
+          )
+          .catch(() => undefined);
+        if (siloRes && siloRes.status < 300) {
+          try {
+            const siloAllocs = JSON.parse(siloRes.text) as typeof allocs;
+            const siloSorted = [...siloAllocs].sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0));
+            for (const a of [...siloSorted.filter((x) => x.DesiredStatus === "run"), ...siloSorted]) {
+              for (const [task, st] of Object.entries(a.TaskStates ?? {})) {
+                const row = declared.find((d) => d.storeType !== undefined && task.endsWith(`-${d.storeType}`));
+                if (row && !observed.has(row.name)) observed.set(row.name, { st, alloc: a, task });
+              }
+            }
+          } catch {
+            // best-effort — the store rows stay absent
+          }
+        }
+      }
+      // Per-task resource asks — the per-job allocations LIST omits AllocatedResources (even with
+      // ?resources=true; live-verified on Nomad 2.0.3), so read the contributing allocs' DETAILS (capped 5).
+      const taskResources = new Map<string, { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } }>();
+      const contributing = [
+        ...new Set([...observed.values()].map((o) => o.alloc.ID).filter((id): id is string => Boolean(id))),
+      ].slice(0, 5);
+      for (const allocId of contributing) {
+        const det = await this.http.request("GET", `/v1/allocation/${allocId}`).catch(() => undefined);
+        if (!det || det.status >= 300) continue;
+        try {
+          const parsed = JSON.parse(det.text) as {
+            AllocatedResources?: {
+              Tasks?: Record<string, { Cpu?: { CpuShares?: number }; Memory?: { MemoryMB?: number } }>;
+            };
+          };
+          for (const [task, r] of Object.entries(parsed.AllocatedResources?.Tasks ?? {})) {
+            if (!taskResources.has(task)) taskResources.set(task, r);
+          }
+        } catch {
+          // best-effort — a task without a resolved ask just leaves the fields absent
         }
       }
       const endpoints = this.warm.get(`${spec.id}@${spec.version}@${zone?.id ?? "default"}`)?.handle.endpoints ?? {};
@@ -772,7 +826,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         const events = o?.st.Events ?? [];
         const oom = events.some(eventLooksOom);
         const last = [...events].reverse().find((e) => (e.DisplayMessage ?? "").trim().length > 0);
-        const ask = o?.alloc.AllocatedResources?.Tasks?.[d.name];
+        const ask = o ? taskResources.get(o.task) : undefined;
         const age = taskAgeSeconds(o?.st.StartedAt, nowMs);
         return {
           ...d,
@@ -811,10 +865,12 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   async serviceLogs(spec: ServiceHarnessSpec, service: string, zone?: TrustZone): Promise<string | undefined> {
     try {
       const ns = zone?.namespace ?? this.opts.namespace;
-      const res = await this.http.request(
-        "GET",
-        `/v1/job/${topologyJobId(spec, zone?.id)}/allocations${this.nsq(ns, "?")}`,
-      );
+      // The task to read: a declared SERVICE lives in the topology job under its own name; a declared STORE lives
+      // in the SEPARATE silo job under everdict-store-<zone>-<storeType> (live-verified — the topology job carries
+      // no store task, so the store read must target the silo job).
+      const storeType = dependencyStores(spec).find((s) => s.name === service)?.store;
+      const jobId = storeType ? dedicatedStoreJobId(spec, zone?.id ?? NO_ZONE_STORE_ID) : topologyJobId(spec, zone?.id);
+      const res = await this.http.request("GET", `/v1/job/${jobId}/allocations${this.nsq(ns, "?")}`);
       if (res.status >= 300) return undefined;
       const allocs = JSON.parse(res.text) as Array<{
         ID?: string;
@@ -822,15 +878,22 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         DesiredStatus?: string;
         TaskStates?: Record<string, unknown>;
       }>;
+      const taskOf = (a: (typeof allocs)[number]): string | undefined =>
+        storeType
+          ? Object.keys(a.TaskStates ?? {}).find((t) => t.endsWith(`-${storeType}`))
+          : a.TaskStates?.[service] !== undefined
+            ? service
+            : undefined;
       const sorted = [...allocs].sort((a, b) => (b.CreateIndex ?? 0) - (a.CreateIndex ?? 0));
       const alloc =
-        sorted.find((a) => a.DesiredStatus === "run" && a.TaskStates?.[service] !== undefined) ??
-        sorted.find((a) => a.TaskStates?.[service] !== undefined);
-      if (!alloc?.ID) return undefined;
+        sorted.find((a) => a.DesiredStatus === "run" && taskOf(a) !== undefined) ??
+        sorted.find((a) => taskOf(a) !== undefined);
+      const task = alloc ? taskOf(alloc) : undefined;
+      if (!alloc?.ID || !task) return undefined;
       const read = async (stream: "stdout" | "stderr"): Promise<string> => {
         const logs = await this.http.request(
           "GET",
-          `/v1/client/fs/logs/${alloc.ID}?task=${encodeURIComponent(service)}&type=${stream}&plain=true${this.nsq(ns, "&")}`,
+          `/v1/client/fs/logs/${alloc.ID}?task=${encodeURIComponent(task)}&type=${stream}&plain=true${this.nsq(ns, "&")}`,
         );
         return logs.status < 300 ? logs.text : "";
       };
