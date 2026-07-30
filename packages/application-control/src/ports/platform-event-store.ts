@@ -18,4 +18,8 @@ export interface PlatformEventStore {
   // have enabled agents without reading every registry, so it walks one deployment-wide cursor instead).
   listAll(opts?: PlatformEventListOptions): Promise<PlatformEventRecord[]>;
   get(tenant: string, id: string): Promise<PlatformEventRecord | undefined>;
+  // EO4 retention: prune facts older than the cutoff (TTL must exceed max consumer lag + the replay window —
+  // the operator's knob, not a default). Run provenance survives pruning (origin embeds kind/subject), and
+  // cursors are seq-based, so a pruned prefix just stops being replayable. Returns rows removed.
+  deleteOlderThan(cutoffIso: string): Promise<number>;
 }

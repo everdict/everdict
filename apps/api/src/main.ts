@@ -675,6 +675,18 @@ async function main(): Promise<void> {
     };
     setInterval(() => void sweepTrajectories(), 3_600_000).unref();
   }
+  // EO4 retention: operator-configured TTL over the platform-event log (unset = keep forever). The TTL must
+  // exceed max consumer lag + the replay window (event-plumbing §4) — pruning is the operator saying "I no
+  // longer need to replay past this". Hourly sweep, logged; provenance survives (runs embed their origin).
+  const eventRetentionDays = positiveIntEnv(process.env.EVERDICT_EVENT_RETENTION_DAYS);
+  if (eventRetentionDays !== undefined) {
+    const sweepEvents = async (): Promise<void> => {
+      const cutoff = new Date(Date.now() - eventRetentionDays * 24 * 3_600_000).toISOString();
+      const removed = await platformEventStore.deleteOlderThan(cutoff).catch(() => 0);
+      if (removed > 0) console.log(`▶ event-log retention: removed ${removed} facts older than ${cutoff}`);
+    };
+    setInterval(() => void sweepEvents(), 3_600_000).unref();
+  }
   // Capture a session login into a profile (browser-profiles S3) — only when interactive sessions exist (it needs
   // a session's reachable CDP base). Encrypts the storageState blob with the shared at-rest cipher.
   const browserProfileCaptureService = browserSessionService

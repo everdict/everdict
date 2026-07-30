@@ -110,3 +110,36 @@ describe("PgPlatformEventStore", () => {
     expect(events[0]).toMatchObject({ id: "ev-3", seq: 3, subject: { type: "scorecard", id: "sc-1" } });
   });
 });
+
+describe("deleteOlderThan — EO4 retention (the log is a buffer, the TTL is the operator's replay window)", () => {
+  it("in-memory: prunes strictly-older facts and reports the count; newer facts and seq continuity survive", async () => {
+    const store = new InMemoryPlatformEventStore();
+    for (const [id, createdAt] of [
+      ["ev-old", "2026-07-01T00:00:00.000Z"],
+      ["ev-edge", "2026-07-15T00:00:00.000Z"],
+      ["ev-new", "2026-07-29T00:00:00.000Z"],
+    ] as const) {
+      await store.append({
+        id,
+        tenant: "acme",
+        kind: "run.completed",
+        subject: { type: "run", id },
+        payload: {},
+        message: "m",
+        createdAt,
+      });
+    }
+    expect(await store.deleteOlderThan("2026-07-15T00:00:00.000Z")).toBe(1); // cutoff itself survives (>=)
+    const left = await store.listAll({ order: "asc" });
+    expect(left.map((e) => e.id)).toEqual(["ev-edge", "ev-new"]);
+    expect(left.map((e) => e.seq)).toEqual([2, 3]); // seq is history, never renumbered by a prune
+  });
+
+  it("pg: one bounded DELETE with the cutoff as a parameter, count from RETURNING", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [{ id: "ev-old" }, { id: "ev-old2" }] }));
+    const store = new PgPlatformEventStore(client);
+    expect(await store.deleteOlderThan("2026-07-15T00:00:00.000Z")).toBe(2);
+    expect(calls[0]?.text).toContain("DELETE FROM everdict_platform_events WHERE created_at < $1");
+    expect(calls[0]?.params).toEqual(["2026-07-15T00:00:00.000Z"]);
+  });
+});

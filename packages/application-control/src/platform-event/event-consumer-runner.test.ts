@@ -24,6 +24,9 @@ function eventLog(records: Array<Omit<PlatformEventRecord, "seq">>): PlatformEve
       out = [...out].sort((a, b) => (opts?.order === "desc" ? b.seq - a.seq : a.seq - b.seq));
       return out.slice(0, opts?.limit ?? 100);
     },
+    async deleteOlderThan() {
+      return 0;
+    },
     async get() {
       return undefined;
     },

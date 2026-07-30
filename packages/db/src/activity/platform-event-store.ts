@@ -42,6 +42,13 @@ export class InMemoryPlatformEventStore implements PlatformEventStore {
   async get(tenant: string, id: string): Promise<PlatformEventRecord | undefined> {
     return this.rows.find((r) => r.tenant === tenant && r.id === id);
   }
+  async deleteOlderThan(cutoffIso: string): Promise<number> {
+    const before = this.rows.length;
+    const kept = this.rows.filter((r) => r.createdAt >= cutoffIso);
+    this.rows.length = 0;
+    this.rows.push(...kept);
+    return before - kept.length;
+  }
 }
 
 interface PlatformEventRow {
@@ -143,5 +150,13 @@ export class PgPlatformEventStore implements PlatformEventStore {
     );
     const row = res.rows[0];
     return row ? rowToRecord(row) : undefined;
+  }
+
+  async deleteOlderThan(cutoffIso: string): Promise<number> {
+    const res = await this.client.query<{ id: string }>(
+      "DELETE FROM everdict_platform_events WHERE created_at < $1 RETURNING id",
+      [cutoffIso],
+    );
+    return res.rows.length;
   }
 }

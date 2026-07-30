@@ -111,10 +111,13 @@ scaling safe: **the log makes demand timely; the gate makes it affordable.**
 
 ### 6. Trigger engines converge on subscriptions
 
-One **subscription registry**: `{selector (kinds + filter), reaction (agent | notification | webhook |
-mattermost | …), governance (cooldown, dedup window, enabled)}`. The agent matcher reads it (today's
-trigger fields relocate); schedules become **time events** (`schedule.fired` into the same log — Temporal
-stays the clock, its consumer becomes ordinary); CI webhooks land as workspace events. Three engines
+One **subscription registry**: `{selector (kinds + filter), reaction (agent | webhook | workflow),
+governance (cooldown, enabled)}` — the union AS SHIPPED. The design sketch listed notification/mattermost
+as reaction kinds; they landed as blanket LOG CONSUMERS instead (feed:* and mm:completions — a channel
+that should carry every completion is a cursor, not a per-rule choice), and `workflow` (the durable T-d
+chain) joined the union in their place. The agent matcher reads the registry (trigger fields relocated via
+the explicit import); schedules became **time events** (`schedule.fired` into the same log — Temporal
+stays the clock, its consumer became ordinary); CI facts carry filterable provenance. Three engines
 remain as *producers*; reacting is one mechanism.
 
 ## Temporal and the event plane — the role charter

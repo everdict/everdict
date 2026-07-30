@@ -106,9 +106,14 @@ record; the agent loop stays in the agent service — the workflow owns ONLY the
    runs already narrate on the log. Ops family `reaction` (ledger id = `<eventId>-<subscriptionId>`).
 
 **Tier 2 — adopt opportunistically:** cascade-cancel walker (O8: done = every non-terminal descendant
-cancelled; big trees need retries against runtimes) · pull-ingest shim pipeline (pull → materialize →
+cancelled; big trees need retries against runtimes. O8's per-kind OPT-OUT lands here too, deliberately:
+today's walk revokes exactly one descendant species — caused scorecard batches — so a kind knob would
+have nothing to discriminate; the walker is what brings run-level descendants [standalone-run cancel
+machinery, caused sandbox sessions] and with them the knob's first real choice) · pull-ingest shim pipeline (pull → materialize →
 judge → attach-back; the demoted-but-alive import path) · retention/TTL sweeps on Temporal Schedules
-(event-log TTL, trajectory retention N3, image-store GC) · CI re-pin (merge → digest resolution →
+(image-store GC; the event-log TTL and trajectory retention shipped their FIRST rung as in-process hourly
+sweeps — EVERDICT_EVENT_RETENTION_DAYS / EVERDICT_TRAJECTORY_RETENTION_DAYS, unset = keep forever — the
+Temporal-Schedules rung takes over when multi-replica CPs make in-process timers unreliable) · CI re-pin (merge → digest resolution →
 new immutable version; small but flaky-prone).
 
 **Tier 3 — hold:** export attach-back durability (the charter *allows* a mirror to be lossy — only if

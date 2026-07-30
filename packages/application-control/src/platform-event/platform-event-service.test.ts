@@ -19,6 +19,9 @@ function memoryStore(): PlatformEventStore & { rows: PlatformEventRecord[] } {
     async listAll(opts) {
       return rows.filter((r) => opts?.afterSeq === undefined || r.seq > opts.afterSeq);
     },
+    async deleteOlderThan() {
+      return 0;
+    },
     async get(tenant, id) {
       return rows.find((r) => r.tenant === tenant && r.id === id);
     },
@@ -76,6 +79,7 @@ describe("PlatformEventService", () => {
         list: async () => [],
         listAll: async () => [],
         get: async () => undefined,
+        deleteOlderThan: async () => 0,
       },
       agentEvents: {
         emit: async () => {
