@@ -8,7 +8,9 @@
 
 # ---- base: common runtime tools ----
 FROM node:22-bookworm-slim AS base
-# git: repo ops a LocalDriver code tool may need. claude CLI: kept for control-plane parity — the default agent uses
+# git: repo ops a LocalDriver code tool may need. python3: the interpreter for language:"python" code tools —
+# they execute on the in-process LocalDriver, so the interpreter must live in THIS image (node ships with the base).
+# claude CLI: kept for control-plane parity — the default agent uses
 # provider-native LLM (@everdict/llm), NOT the claude-code harness, so this is droppable for a leaner image later.
 # ca-certificates: TLS for the LLM provider + control-plane calls.
 # Enterprise proxy / air-gapped build (gap 17). Proxy: HTTP_PROXY/HTTPS_PROXY/NO_PROXY are Docker PREDEFINED build args
@@ -17,7 +19,7 @@ FROM node:22-bookworm-slim AS base
 # (`--build-arg CA_CERT="$(cat corp-root.crt)"`).
 ARG CA_CERT=""
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates \
+  && apt-get install -y --no-install-recommends git ca-certificates python3 \
   && rm -rf /var/lib/apt/lists/* \
   && if [ -n "$CA_CERT" ]; then printf '%s' "$CA_CERT" > /usr/local/share/ca-certificates/corp-proxy.crt && update-ca-certificates; fi \
   && npm i -g @anthropic-ai/claude-code \

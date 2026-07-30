@@ -25,12 +25,15 @@ export interface ScriptGraderConfig {
   id?: string; // grader id (default "script")
 }
 
-// Where the grading contract is materialized inside the compute. Fixed paths — the script receives the context
-// path as argv[1], so user code stays path-agnostic.
-const CONTEXT_PATH = "/tmp/everdict-grade-context.json";
-const INLINE_PATH: Record<ScriptGraderConfig["language"], string> = {
-  python: "/tmp/everdict-grader.py",
-  node: "/tmp/everdict-grader.mjs",
+// Where the grading contract is materialized inside the compute. Fixed file names — the script receives the
+// context path as argv[1], so user code stays path-agnostic. They are written INTO the exec's working directory
+// and referenced by bare relative names: that is the one shape both drivers resolve consistently (LocalDriver
+// roots an absolute writeFile path inside its sandbox while the interpreter would read it from the host;
+// DockerDriver resolves relative paths under its base).
+const CONTEXT_FILE = "everdict-grade-context.json";
+const INLINE_FILE: Record<ScriptGraderConfig["language"], string> = {
+  python: "everdict-grader.py",
+  node: "everdict-grader.mjs",
 };
 const INTERPRETER: Record<ScriptGraderConfig["language"], string> = { python: "python3", node: "node" };
 
@@ -86,12 +89,17 @@ export class ScriptGrader implements Grader {
   }
 
   private async runIn(compute: ComputeHandle, ctx: GradeContext): Promise<Score[]> {
+    // The case compute has the "work" convention; a dedicated grader image keeps its own default workdir.
+    // Materialized contract files live in this directory (writeFile needs the cwd prefix; the command below runs
+    // FROM it, so there they are referenced by bare names).
+    const cwd = this.cfg.cwd ?? (this.cfg.image ? undefined : "work");
+    const inCwd = (name: string): string => (cwd ? `${cwd.replace(/\/+$/, "")}/${name}` : name);
     let contextArg = this.cfg.contextPath;
     if (!contextArg) {
       // Full context minus the live handle — JSON-serializable by construction (EvalCase/TraceEvent[]/EnvSnapshot;
       // evidence = the pulled-trace extraction, when present).
       await compute.writeFile(
-        CONTEXT_PATH,
+        inCwd(CONTEXT_FILE),
         JSON.stringify({
           case: ctx.case,
           trace: ctx.trace,
@@ -99,17 +107,15 @@ export class ScriptGrader implements Grader {
           ...(ctx.evidence ? { evidence: ctx.evidence } : {}),
         }),
       );
-      contextArg = CONTEXT_PATH;
+      contextArg = CONTEXT_FILE;
     }
     let script = this.cfg.entrypoint;
     if (this.cfg.code) {
-      script = INLINE_PATH[this.cfg.language];
-      await compute.writeFile(script, this.cfg.code);
+      script = INLINE_FILE[this.cfg.language];
+      await compute.writeFile(inCwd(script), this.cfg.code);
     }
     if (!script) throw new BadRequestError("BAD_REQUEST", { grader: this.id }, "No grader script to run.");
     const cmd = `${INTERPRETER[this.cfg.language]} '${script.replace(/'/g, "'\\''")}' '${contextArg.replace(/'/g, "'\\''")}'`;
-    // The case compute has the "work" convention; a dedicated grader image keeps its own default workdir.
-    const cwd = this.cfg.cwd ?? (this.cfg.image ? undefined : "work");
     const r = await compute.exec(cmd, { ...(cwd ? { cwd } : {}), timeoutSec: this.cfg.timeoutSec ?? 1800 });
     if (r.exitCode !== 0) {
       throw new UpstreamError(

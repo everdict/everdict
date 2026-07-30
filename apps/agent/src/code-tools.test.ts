@@ -1,4 +1,5 @@
 import type { ComputeHandle, ExecResult } from "@everdict/contracts";
+import { LocalDriver } from "@everdict/drivers";
 import { describe, expect, it } from "vitest";
 import { type CodeToolRuntime, type ResolvedCodeTool, buildCodeTool, buildCodeTools } from "./code-tools.js";
 
@@ -46,8 +47,8 @@ describe("buildCodeTool", () => {
     const res = await def.call({ x: 1 }, {});
     expect(res).toEqual({ content: "the answer", isError: false });
     expect(ranCmd).toContain("python3");
-    expect(f.files.get("/tmp/everdict-tool-input.json")).toBe(JSON.stringify({ x: 1 }));
-    expect(f.files.get("/tmp/everdict-tool.py")).toBe("print(...)");
+    expect(f.files.get("everdict-tool-input.json")).toBe(JSON.stringify({ x: 1 })); // sandbox-relative
+    expect(f.files.get("everdict-tool.py")).toBe("print(...)");
     expect(f.disposed()).toBe(true);
   });
 
@@ -73,7 +74,7 @@ describe("buildCodeTool", () => {
     const res = await def.call({}, {});
     expect(gotEnv).toEqual({ API_KEY: "sk-1" });
     expect(res).toEqual({ content: '{"answer":42}', isError: false });
-    expect(f.files.has("/tmp/everdict-tool.mjs")).toBe(true); // node → .mjs
+    expect(f.files.has("everdict-tool.mjs")).toBe(true); // node → .mjs
   });
 
   it("returns an error result (never throws) when provisioning fails", async () => {
@@ -86,6 +87,32 @@ describe("buildCodeTool", () => {
     const res = await def.call({}, {});
     expect(res.isError).toBe(true);
     expect(res.content).toContain("no compute");
+  });
+});
+
+describe("buildCodeTool on the real LocalDriver", () => {
+  // Regression: the materialization paths were absolute (/tmp/everdict-tool.mjs). LocalDriver's writeFile roots an
+  // absolute path INSIDE its sandbox while the interpreter resolves it on the host → MODULE_NOT_FOUND on every
+  // call. Fake handles store paths literally, so only a real driver run catches the contract.
+  it("a node tool executes inside the sandbox and reads its input file", async () => {
+    // Given a node code tool on the real LocalDriver (the agent's default runtime)
+    const driver = new LocalDriver();
+    const rt: CodeToolRuntime = { provision: (spec) => driver.provision(spec), isolated: false };
+    const def = buildCodeTool(
+      tool({
+        language: "node",
+        code: [
+          'import { readFileSync } from "node:fs";',
+          'const input = JSON.parse(readFileSync(process.argv[2], "utf8"));',
+          "console.log(JSON.stringify({ content: `echo:${input.x}` }));",
+        ].join("\n"),
+      }),
+      rt,
+    );
+    // When the tool is called
+    const res = await def.call({ x: 41 }, {});
+    // Then the script actually ran and found both materialized files in the sandbox
+    expect(res).toEqual({ content: "echo:41", isError: false });
   });
 });
 

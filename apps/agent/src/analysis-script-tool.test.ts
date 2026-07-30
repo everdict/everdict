@@ -37,7 +37,7 @@ describe("run_analysis", () => {
     );
     expect(result.isError).toBe(false);
     expect(result.content).toBe("mean=0.42");
-    expect(f.files.get("/tmp/everdict-tool-input.json")).toBe(JSON.stringify({ rows: [1, 2] }));
+    expect(f.files.get("everdict-tool-input.json")).toBe(JSON.stringify({ rows: [1, 2] })); // sandbox-relative
     expect(f.disposed()).toBe(true); // handle released in a finally
   });
 });

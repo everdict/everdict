@@ -1,7 +1,14 @@
+import { exec } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import { AppError, type ComputeHandle, type ExecOpts, type GradeContext } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
 import { ScriptGrader } from "./script-grader.js";
+
+const pexec = promisify(exec);
 
 function mockCompute(stdout: string, exitCode = 0) {
   const writes: Array<{ path: string; data: string }> = [];
@@ -38,11 +45,14 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
 
     const scores = await grader.grade(ctx(compute));
 
-    const contextWrite = writes.find((w) => w.path === "/tmp/everdict-grade-context.json");
+    // Contract files are materialized INTO the exec cwd ("work") and referenced by bare relative names — the one
+    // shape both drivers resolve consistently.
+    const contextWrite = writes.find((w) => w.path === "work/everdict-grade-context.json");
     const parsed = JSON.parse(contextWrite?.data ?? "{}") as Record<string, unknown>;
     expect(Object.keys(parsed).sort()).toEqual(["case", "snapshot", "trace"]); // full context, no compute handle
-    expect(writes.some((w) => w.path === "/tmp/everdict-grader.py")).toBe(true); // inline code materialized
-    expect(execs[0]?.cmd).toContain("python3 '/tmp/everdict-grader.py' '/tmp/everdict-grade-context.json'");
+    expect(writes.some((w) => w.path === "work/everdict-grader.py")).toBe(true); // inline code materialized
+    expect(execs[0]?.cmd).toContain("python3 'everdict-grader.py' 'everdict-grade-context.json'");
+    expect(execs[0]?.opts?.cwd).toBe("work");
     // Multi-metric: both scores collected; graderId stamped with the runner's id (provenance).
     expect(scores.map((s) => s.metric)).toEqual(["accuracy", "style"]);
     expect(scores.every((s) => s.graderId === "my-grader")).toBe(true);
@@ -55,7 +65,7 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
     const scores = await grader.grade(ctx(compute));
 
     expect(execs[0]?.cmd).toContain("node '.grader/grade.mjs'");
-    expect(writes.map((w) => w.path)).toEqual(["/tmp/everdict-grade-context.json"]); // context only
+    expect(writes.map((w) => w.path)).toEqual(["work/everdict-grade-context.json"]); // context only
     expect(scores).toHaveLength(1); // a single Score object is accepted too
   });
 
@@ -120,7 +130,7 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
       },
     });
     expect(provisionedImage).toBe("everdict/grader:1");
-    expect(writes).toContain("/tmp/everdict-grade-context.json"); // context lands in the dedicated compute
+    expect(writes).toContain("everdict-grade-context.json"); // context lands in the dedicated compute's own workdir
     expect(scores[0]?.value).toBe(1);
     expect(disposed).toBe(true);
   });
@@ -166,7 +176,7 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
     });
     const scores = await grader.grade(ctx(compute));
     // the wrapper job's own context is NOT serialized — argv[1] is the pre-materialized env file
-    expect(writes.some((w) => w.path === "/tmp/everdict-grade-context.json")).toBe(false);
+    expect(writes).toEqual([]);
     expect(execs[0]?.cmd).toBe("node 'judge.mjs' 'judge-context.json'");
     expect(execs[0]?.opts?.cwd).toBe("work");
     expect(scores[0]).toMatchObject({ graderId: "judge", metric: "judge", pass: true });
@@ -177,9 +187,55 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
     const { compute, writes } = mockCompute(out);
     const withEvidence: GradeContext = { ...ctx(compute), evidence: { custom: { confirmation_id: "R-42" } } };
     await new ScriptGrader({ language: "python", code: "c" }).grade(withEvidence);
-    const contextWrite = writes.find((w) => w.path === "/tmp/everdict-grade-context.json");
+    const contextWrite = writes.find((w) => w.path === "work/everdict-grade-context.json");
     const parsed = JSON.parse(contextWrite?.data ?? "{}") as { evidence?: { custom?: Record<string, string> } };
     expect(parsed.evidence?.custom).toEqual({ confirmation_id: "R-42" });
+  });
+
+  it("an inline node grader executes on a real file-backed sandbox (regression: /tmp paths resolved on the host)", async () => {
+    // Given a handle with LocalDriver's exact path semantics (writeFile joins under a sandbox root; exec cwd joins
+    // under it too) — the in-memory fakes store paths literally, which is precisely what hid the pre-fix bug:
+    // inline code written to an absolute /tmp path landed inside the sandbox while the interpreter read the host.
+    const root = await mkdtemp(join(tmpdir(), "everdict-grader-test-"));
+    const sandbox: ComputeHandle = {
+      async exec(cmd: string, opts?: ExecOpts) {
+        const cwd = opts?.cwd ? join(root, opts.cwd) : root;
+        await mkdir(cwd, { recursive: true });
+        try {
+          const { stdout, stderr } = await pexec(cmd, { cwd });
+          return { exitCode: 0, stdout, stderr };
+        } catch (err) {
+          const e = err as { code?: number; stdout?: string; stderr?: string };
+          return { exitCode: e.code ?? 1, stdout: e.stdout ?? "", stderr: e.stderr ?? "" };
+        }
+      },
+      async writeFile(path: string, data: string) {
+        const full = join(root, path);
+        await mkdir(dirname(full), { recursive: true });
+        await writeFile(full, data);
+      },
+      async readFile() {
+        return "";
+      },
+      async dispose() {},
+    };
+    try {
+      const grader = new ScriptGrader({
+        language: "node",
+        id: "real",
+        code: [
+          'import { readFileSync } from "node:fs";',
+          'const ctx = JSON.parse(readFileSync(process.argv[2], "utf8"));',
+          'console.log(JSON.stringify([{ graderId: "real", metric: "echo", value: ctx.trace.length }]));',
+        ].join("\n"),
+      });
+      // When the grader runs against the real filesystem + interpreter
+      const scores = await grader.grade(ctx(sandbox));
+      // Then the script found both the materialized code and the context file from its cwd
+      expect(scores).toEqual([{ graderId: "real", metric: "echo", value: 1 }]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("makeGraders passes contextPath through (the code-judge wrapper spec)", async () => {

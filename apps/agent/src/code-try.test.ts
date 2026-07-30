@@ -6,6 +6,7 @@ import {
   type ExecResult,
   FIRST_PARTY_TENANT,
 } from "@everdict/contracts";
+import { LocalDriver } from "@everdict/drivers";
 import { describe, expect, it } from "vitest";
 import type { CodeToolRuntime } from "./code-tools.js";
 import { type CodeTryDeps, runCodeToolTry } from "./code-try.js";
@@ -83,7 +84,7 @@ describe("runCodeToolTry", () => {
     );
     expect(res.ok).toBe(true);
     expect(ranCmd).toContain("node --check");
-    expect([...f.files.keys()]).toEqual(["/tmp/everdict-tool-check.mjs"]); // source only — check executes nothing
+    expect([...f.files.keys()]).toEqual(["everdict-tool-check.mjs"]); // source only (sandbox-relative) — check executes nothing
     expect(f.disposed()).toBe(true);
   });
 
@@ -116,7 +117,7 @@ describe("runCodeToolTry", () => {
       { q: "hello" },
     );
     expect(res).toMatchObject({ mode: "run", ok: true, content: "result for q", missingSecrets: [] });
-    expect(f.files.get("/tmp/everdict-tool-input.json")).toBe(JSON.stringify({ q: "hello" }));
+    expect(f.files.get("everdict-tool-input.json")).toBe(JSON.stringify({ q: "hello" }));
   });
 
   it("run mode binds requiredSecrets by declared name (workspace tier first) and reports the unresolved ones", async () => {
@@ -195,6 +196,24 @@ describe("runCodeToolTry", () => {
     expect(res).toMatchObject({ mode: "run", ok: true, content: "ok" });
     expect(ranInput).toContain("node");
     expect(res.missingSecrets).toEqual(["TAVILY_API_KEY"]); // no secret tier wired → the gap is named, not hidden
+  });
+
+  it("check mode passes a clean source on the real LocalDriver (regression: absolute /tmp paths escaped the sandbox)", async () => {
+    // Given a clean node draft and the REAL LocalDriver — pre-fix, `node --check /tmp/everdict-tool-check.mjs`
+    // looked on the host while writeFile had rooted the source inside the sandbox → ok:false for valid code.
+    const driver = new LocalDriver();
+    const deps: CodeTryDeps = { runtime: { provision: (s) => driver.provision(s), isolated: false } };
+    // When check runs
+    const res = await runCodeToolTry(
+      deps,
+      principal,
+      "check",
+      { kind: "spec", name: "draft", spec: spec() },
+      undefined,
+    );
+    // Then the interpreter found the materialized source and reported it clean
+    expect(res.ok).toBe(true);
+    expect(res.content).toBe("");
   });
 
   it("an unknown first-party id is NOT_FOUND rather than falling through to the store", async () => {

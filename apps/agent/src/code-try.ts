@@ -40,9 +40,11 @@ export interface CodeTryResult {
 
 const CHECK_TIMEOUT_SEC = 30;
 const shellQuote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
+// Sandbox-relative (like code-tools.ts SCRIPT_PATH): writeFile and the default exec cwd share the handle's working
+// root on every driver; an absolute path lands inside LocalDriver's sandbox but is read from the host.
 const SCRIPT_PATH: Record<CodeToolSpec["language"], string> = {
-  python: "/tmp/everdict-tool-check.py",
-  node: "/tmp/everdict-tool-check.mjs",
+  python: "everdict-tool-check.py",
+  node: "everdict-tool-check.mjs",
 };
 // Parse-only validation commands — neither executes the module's code.
 const CHECK_COMMAND: Record<CodeToolSpec["language"], (script: string) => string> = {

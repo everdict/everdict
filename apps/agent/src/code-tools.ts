@@ -27,11 +27,15 @@ export interface CodeToolRuntime {
   isolated: boolean;
 }
 
-// Fixed materialization paths — the script receives the input path as argv[1], so author code stays path-agnostic.
-const INPUT_PATH = "/tmp/everdict-tool-input.json";
+// Fixed materialization paths — the script receives the input path as argv (python argv[1] / node argv[2]), so
+// author code stays path-agnostic. MUST stay sandbox-RELATIVE: writeFile and the default exec cwd both resolve
+// under the handle's working root on every driver (LocalDriver temp dir, DockerDriver base). An absolute path is
+// rooted INSIDE the sandbox by LocalDriver's writeFile while the interpreter resolves it on the host — the script
+// is never where the command looks.
+const INPUT_PATH = "everdict-tool-input.json";
 const SCRIPT_PATH: Record<ResolvedCodeTool["language"], string> = {
-  python: "/tmp/everdict-tool.py",
-  node: "/tmp/everdict-tool.mjs",
+  python: "everdict-tool.py",
+  node: "everdict-tool.mjs",
 };
 const INTERPRETER: Record<ResolvedCodeTool["language"], string> = { python: "python3", node: "node" };
 const shellQuote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
