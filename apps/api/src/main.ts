@@ -668,6 +668,13 @@ async function main(): Promise<void> {
     trajectories: trajectoryStore,
     events: lateEvents,
     capabilities: capabilityStore,
+    // The playground (harness-target sessions): registry + secrets + model binding + budget/usage — the
+    // same resolution and billing lanes a dispatched run uses, applied to the driver lane.
+    harnesses: harnessInstanceRegistry,
+    models: modelRegistry,
+    scopedSecretsFor,
+    budget,
+    usage: usageMeter,
     // T-b: the durable reaper rides the same Temporal driver as approvals — a CP dying with the live
     // handle no longer leaks the container or the row.
     ...(approvalTemporal

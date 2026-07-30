@@ -1,5 +1,12 @@
 import type { DispatchOptions, Dispatcher } from "@everdict/backends";
-import { BadRequestError, type CaseJob, type CaseResult, type ModelBinding, type ModelSpec } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type CaseJob,
+  type CaseResult,
+  type HarnessSpec,
+  type ModelBinding,
+  type ModelSpec,
+} from "@everdict/contracts";
 import { modelApiKeySecretName, modelConnectionEnv, normalizeModelBinding } from "@everdict/domain";
 import type { ModelRegistry } from "@everdict/registry";
 import type { ScopedSecretTiers } from "./judge-auth-dispatcher.js";
@@ -70,6 +77,56 @@ async function resolveBinding(
   };
 }
 
+// Resolve a SPEC's Model binding(s) — the per-spec half of the job rewrite, shared with the driver-lane
+// session resolver (the playground resolves a harness OUTSIDE any CaseJob). Returns the same spec object
+// when nothing changed, so callers can cheaply detect a no-op.
+async function resolveSpec(
+  models: ModelRegistry,
+  tenant: string,
+  submittedBy: string | undefined,
+  spec: HarnessSpec,
+  secretsFor?: SecretsFor,
+): Promise<{ spec: HarnessSpec; billed: BilledModel[] }> {
+  if (spec.kind === "command") {
+    if (spec.model === undefined) return { spec, billed: [] };
+    const resolved = await resolveBinding(models, tenant, submittedBy, spec.model, secretsFor);
+    if (!resolved) return { spec, billed: [] }; // unregistered raw string — leave the spec untouched.
+    const billed = resolved.billed ? [resolved.billed] : [];
+    const env = secretsFor ? { ...spec.env, ...resolved.env } : spec.env; // model env wins for the keys it sets
+    if (resolved.model.model === spec.model && env === spec.env) return { spec, billed };
+    return { spec: { ...spec, model: resolved.model.model, env }, billed };
+  }
+
+  if (spec.kind === "service") {
+    // Connection injection needs the secret tiers; without them there's nothing to do on a service (no {{model}} slot).
+    if (!secretsFor || !spec.services.some((s) => s.model !== undefined)) return { spec, billed: [] };
+    const resolvedServices = await Promise.all(
+      spec.services.map(async (s) => {
+        if (s.model === undefined) return { service: s };
+        const resolved = await resolveBinding(models, tenant, submittedBy, s.model, secretsFor);
+        if (!resolved) return { service: s };
+        return { service: { ...s, env: { ...s.env, ...resolved.env } }, billed: resolved.billed };
+      }),
+    );
+    const services = resolvedServices.map((r) => r.service);
+    const billed = resolvedServices.flatMap((r) => (r.billed ? [r.billed] : []));
+    return { spec: { ...spec, services }, billed };
+  }
+  return { spec, billed: [] };
+}
+
+// Resolve one harness spec's model binding for a non-dispatch consumer (the sandbox session resolver) —
+// same normalization, same connection-env injection, same fail-fast rules as the dispatch path.
+export async function resolveSpecModel(
+  models: ModelRegistry,
+  tenant: string,
+  submittedBy: string | undefined,
+  spec: HarnessSpec,
+  secretsFor?: SecretsFor,
+): Promise<HarnessSpec> {
+  return (await resolveSpec(models, tenant, submittedBy, spec, secretsFor)).spec;
+}
+
 // Resolve a job's harness Model binding(s): the rewritten job + the workspace-billed models used. Without secretsFor,
 // only the command {{model}} string is normalized (provenance only, no secret read → no billing signal); with it, the
 // connection env is injected into the right env map(s) and workspace-paid models are collected.
@@ -81,33 +138,11 @@ async function resolveJob(
   const spec = job.harnessSpec;
   if (!spec) return { job, billed: [] };
   const tenant = job.tenant ?? "default";
-
-  if (spec.kind === "command") {
-    if (spec.model === undefined) return { job, billed: [] };
-    const resolved = await resolveBinding(models, tenant, job.submittedBy, spec.model, secretsFor);
-    if (!resolved) return { job, billed: [] }; // unregistered raw string — leave the spec untouched.
-    const billed = resolved.billed ? [resolved.billed] : [];
-    const env = secretsFor ? { ...spec.env, ...resolved.env } : spec.env; // model env wins for the keys it sets
-    if (resolved.model.model === spec.model && env === spec.env) return { job, billed };
-    return { job: { ...job, harnessSpec: { ...spec, model: resolved.model.model, env } }, billed };
-  }
-
-  if (spec.kind === "service") {
-    // Connection injection needs the secret tiers; without them there's nothing to do on a service (no {{model}} slot).
-    if (!secretsFor || !spec.services.some((s) => s.model !== undefined)) return { job, billed: [] };
-    const resolvedServices = await Promise.all(
-      spec.services.map(async (s) => {
-        if (s.model === undefined) return { service: s };
-        const resolved = await resolveBinding(models, tenant, job.submittedBy, s.model, secretsFor);
-        if (!resolved) return { service: s };
-        return { service: { ...s, env: { ...s.env, ...resolved.env } }, billed: resolved.billed };
-      }),
-    );
-    const services = resolvedServices.map((r) => r.service);
-    const billed = resolvedServices.flatMap((r) => (r.billed ? [r.billed] : []));
-    return { job: { ...job, harnessSpec: { ...spec, services } }, billed };
-  }
-  return { job, billed: [] };
+  const resolved = await resolveSpec(models, tenant, job.submittedBy, spec, secretsFor);
+  return {
+    job: resolved.spec === spec ? job : { ...job, harnessSpec: resolved.spec },
+    billed: resolved.billed,
+  };
 }
 
 // Resolve a job's harness Model binding(s) → the rewritten job (the provenance/connection normalization). The billing
