@@ -3394,7 +3394,14 @@
     "cost": "비용 {amount}",
     "showAllEvents": "이벤트 {count}개 모두 보기",
     "collapseEvents": "접기",
-    "waitingEvents": "하네스를 기다리는 중…"
+    "waitingEvents": "하네스를 기다리는 중…",
+    "openFromHarness": "플레이그라운드에서 시험",
+    "switchSession": "세션 바꾸기",
+    "shellTitle": "셸",
+    "shellHint": "세션 컨테이너에서 명령을 실행해요 (ls · cat · ps · env …)",
+    "shellPlaceholder": "명령을 입력하고 Enter",
+    "shellExit": "종료 코드 {code}",
+    "errorExec": "명령을 실행하지 못했어요."
   },
   "agentManager": {
     "instructions": "지침",

@@ -328,6 +328,13 @@ export const controlPlane = {
     ),
   closeSandbox: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/close`, { method: 'POST' }),
+  // One-shot `sh -c` inside a live session's container (the playground's shell disclosure) — creator-or-admin,
+  // enforced by the control plane before anything runs.
+  execInSandbox: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/exec`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),
   // GET /harnesses/:id — a harness's instance version tag list.
   getHarness: <T>(auth: AuthContext, id: string) =>

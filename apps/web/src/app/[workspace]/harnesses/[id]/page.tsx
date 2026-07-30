@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
-import { MentionInChatButton } from '@/widgets/infra-panel'
+import { MentionInChatButton, OpenPlaygroundButton } from '@/widgets/infra-panel'
 import { DeleteHarnessButton } from '@/features/delete-harness'
 import { CommentsSection } from '@/features/discuss'
 import { HarnessVersionSwitcher } from '@/features/harness-versions'
@@ -236,6 +236,12 @@ export default async function HarnessDetailPage({
           description={summary}
           actions={
             <div className="flex flex-wrap items-center justify-end gap-2">
+              {/* A service harness is a multi-service topology, not something a single session container can
+                  boot — the playground only offers the kinds a sandbox can actually hold open. A process spec
+                  declares no image of its own, but the boot form's image override covers that. */}
+              {spec.kind !== 'service' && (
+                <OpenPlaygroundButton harnessId={id} {...(active ? { version: active } : {})} />
+              )}
               <MentionInChatButton
                 reference={{
                   type: 'harness',

@@ -62,6 +62,9 @@ export function HarnessPlaygroundPanel({
   const t = useTranslations('playground')
   const [state, setState] = useState<PanelState>('none')
   const [view, setView] = useState<SandboxSessionView | null>(null)
+  // Every live session on the control plane (newest first) — the reattach surface on mount AND the header
+  // switcher's options when the member is holding more than one harness open.
+  const [sessions, setSessions] = useState<SandboxSessionView[]>([])
   const [tasks, setTasks] = useState<SandboxTaskSummary[]>([])
   const [events, setEvents] = useState<Map<string, TraceEvent[]>>(() => new Map())
   const [input, setInput] = useState('')
@@ -100,34 +103,42 @@ export function HarnessPlaygroundPanel({
     [applyView]
   )
 
+  // Pull the live-session list and remember it. Returns it so the caller decides what to attach to; null means
+  // "could not tell" (transport failure, or no sandbox driver at all — which sets the unconfigured state).
+  const discover = useCallback(async (): Promise<SandboxSessionView[] | null> => {
+    try {
+      const res = await fetch('/api/sandboxes', { cache: 'no-store' })
+      // 404 = no sandbox driver composed. That is a deployment fact, not a member error — say so plainly
+      // instead of offering a boot button whose only possible answer is the same 404.
+      if (res.status === 404) {
+        setState('unconfigured')
+        return null
+      }
+      if (!res.ok) return null
+      const parsed = sandboxListSchema.safeParse(await res.json())
+      if (!parsed.success) return null
+      const newestFirst = [...parsed.data.sessions].sort((a, b) =>
+        b.record.createdAt.localeCompare(a.record.createdAt)
+      )
+      setSessions(newestFirst)
+      return newestFirst
+    } catch {
+      return null
+    }
+  }, [])
+
   // Mount: is this deployment even wired for sandboxes, and is a session of ours still alive?
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      try {
-        const res = await fetch('/api/sandboxes', { cache: 'no-store' })
-        if (cancelled) return
-        // 404 = no sandbox driver composed. That is a deployment fact, not a member error — say so plainly
-        // instead of offering a boot button whose only possible answer is the same 404.
-        if (res.status === 404) {
-          setState('unconfigured')
-          return
-        }
-        if (!res.ok) return
-        const parsed = sandboxListSchema.safeParse(await res.json())
-        if (cancelled || !parsed.success) return
-        const newest = [...parsed.data.sessions].sort((a, b) =>
-          b.record.createdAt.localeCompare(a.record.createdAt)
-        )
-        if (newest.length > 0) applyView(newest[0])
-      } catch {
-        // Silent — the boot form is a fine place to land when discovery fails.
-      }
+      const live = await discover()
+      if (cancelled || live === null || live.length === 0) return
+      applyView(live[0])
     })()
     return () => {
       cancelled = true
     }
-  }, [applyView])
+  }, [discover, applyView])
 
   // A detail page's "test this harness" entry — read once, then clear the buffer so a later remount does not
   // re-inject the same prefill over the member's own picks.
@@ -258,12 +269,13 @@ export function HarnessPlaygroundPanel({
         setView({ record: parsed.data })
         setState('attached')
         void refresh(parsed.data.id) // pick up the live half (TTL, harness, empty task list)
+        void discover() // the switcher must know about the session that just appeared
       } catch {
         setState('none')
         setBootError(t('errorBoot'))
       }
     },
-    [refresh, t]
+    [refresh, discover, t]
   )
 
   const submit = useCallback(async () => {
@@ -330,8 +342,9 @@ export function HarnessPlaygroundPanel({
       // The control plane settles the record either way; the panel just stops polling.
     } finally {
       setState('closed')
+      void discover() // drop the torn-down session from the switcher
     }
-  }, [sessionId])
+  }, [sessionId, discover])
 
   // Start over — the closed session's feed is evidence, but a new session is a new container, so nothing carries.
   const newSession = useCallback(() => {
@@ -344,6 +357,33 @@ export function HarnessPlaygroundPanel({
     setInput('')
     setState('none')
   }, [])
+
+  // Attach to a DIFFERENT live session. Its container has its own task history, so the feed is rebuilt from
+  // scratch: clearing `pulled` sends the replay effect back through every task's trace from cursor 0 — the same
+  // reattach path a remount takes. The list entry renders immediately, then the fetch fills in the live half.
+  const switchTo = useCallback(
+    (id: string) => {
+      if (id === sessionId) return
+      setTasks([])
+      setEvents(new Map())
+      cursors.current = {}
+      pulled.current = new Set()
+      setInput('')
+      const known = sessions.find((session) => session.record.id === id)
+      if (known) applyView(known)
+      void refresh(id)
+    },
+    [sessionId, sessions, applyView, refresh]
+  )
+
+  // Two sessions can run the same harness@version, so the run-id tail is what actually tells them apart.
+  const sessionOptions = sessions.map((session) => {
+    const harness = session.live?.harness ?? session.record.harness
+    return {
+      id: session.record.id,
+      label: `${harness.id}@${harness.version} · ${session.record.id.slice(-6)}`,
+    }
+  })
 
   if (state === 'unconfigured')
     return (
@@ -371,6 +411,8 @@ export function HarnessPlaygroundPanel({
     <PlaygroundView
       record={view.record}
       {...(view.live?.harness !== undefined ? { harness: view.live.harness } : {})}
+      sessions={sessionOptions}
+      onSwitch={switchTo}
       tasks={tasks}
       events={events}
       workspace={workspace}

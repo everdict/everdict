@@ -10,6 +10,7 @@ import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { EmptyState } from '@/shared/ui/empty-state'
 
+import { ExecShell } from './exec-shell'
 import { SessionHeader } from './session-header'
 import { TaskCard } from './task-card'
 import { TaskComposer } from './task-composer'
@@ -21,6 +22,8 @@ import { TaskComposer } from './task-composer'
 export function PlaygroundView({
   record,
   harness,
+  sessions,
+  onSwitch,
   tasks,
   events,
   workspace,
@@ -35,6 +38,8 @@ export function PlaygroundView({
 }: {
   record: Run
   harness?: { id: string; version: string }
+  sessions?: { id: string; label: string }[]
+  onSwitch?: (id: string) => void
   tasks: SandboxTaskSummary[]
   events: Map<string, TraceEvent[]>
   workspace: string
@@ -75,6 +80,8 @@ export function PlaygroundView({
       <SessionHeader
         record={record}
         {...(harness !== undefined ? { harness } : {})}
+        {...(sessions !== undefined ? { sessions } : {})}
+        {...(onSwitch !== undefined ? { onSwitch } : {})}
         closed={closed}
         closing={closing}
         onClose={onClose}
@@ -120,12 +127,16 @@ export function PlaygroundView({
           </Button>
         </div>
       ) : (
-        <TaskComposer
-          value={input}
-          onChange={onInputChange}
-          onSend={onSend}
-          disabled={composerDisabled}
-        />
+        <>
+          {/* Folded by default — looking inside the container is the exception, writing the next case is the norm. */}
+          <ExecShell sessionId={record.id} />
+          <TaskComposer
+            value={input}
+            onChange={onInputChange}
+            onSend={onSend}
+            disabled={composerDisabled}
+          />
+        </>
       )}
     </div>
   )

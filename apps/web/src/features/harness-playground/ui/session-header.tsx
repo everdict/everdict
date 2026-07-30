@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Timer } from 'lucide-react'
+import { Check, ChevronDown, Timer } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { Run } from '@/entities/run'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
+import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { Tooltip } from '@/shared/ui/tooltip'
 
@@ -19,12 +20,18 @@ import { fmtCountdown } from '../lib/merge'
 export function SessionHeader({
   record,
   harness,
+  sessions = [],
+  onSwitch,
   closed,
   closing,
   onClose,
 }: {
   record: Run
   harness?: { id: string; version: string }
+  // Every live session on the control plane. More than one means the member is holding several harnesses open
+  // at once, so the badge becomes a picker; a single session keeps a plain badge (no dropdown for one choice).
+  sessions?: { id: string; label: string }[]
+  onSwitch?: (id: string) => void
   closed: boolean
   closing: boolean
   onClose: () => void
@@ -50,10 +57,41 @@ export function SessionHeader({
   return (
     <div className="space-y-1.5 border-b border-border px-3 py-2.5">
       <div className="flex items-center gap-2">
-        <Badge tone="info" className="font-mono">
-          {label.id}
-          <span className="opacity-60">@{label.version}</span>
-        </Badge>
+        {sessions.length > 1 && onSwitch ? (
+          <DropdownMenu
+            align="start"
+            trigger={({ toggle }) => (
+              <button
+                type="button"
+                onClick={toggle}
+                aria-label={t('switchSession')}
+                className="flex min-w-0 items-center gap-1"
+              >
+                <Badge tone="info" className="font-mono">
+                  {label.id}
+                  <span className="opacity-60">@{label.version}</span>
+                  <ChevronDown className="size-3 opacity-70" />
+                </Badge>
+              </button>
+            )}
+          >
+            {sessions.map((session) => (
+              <DropdownItem
+                key={session.id}
+                onSelect={() => onSwitch(session.id)}
+                trailing={session.id === record.id ? <Check className="size-3.5" /> : undefined}
+                className="font-mono text-[12px]"
+              >
+                {session.label}
+              </DropdownItem>
+            ))}
+          </DropdownMenu>
+        ) : (
+          <Badge tone="info" className="font-mono">
+            {label.id}
+            <span className="opacity-60">@{label.version}</span>
+          </Badge>
+        )}
         <StatusPill status={record.status} />
         <div className="flex-1" />
         {!closed && (

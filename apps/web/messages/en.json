@@ -3394,7 +3394,14 @@
     "cost": "Cost {amount}",
     "showAllEvents": "Show all {count} events",
     "collapseEvents": "Show less",
-    "waitingEvents": "Waiting for the harness…"
+    "waitingEvents": "Waiting for the harness…",
+    "openFromHarness": "Test in playground",
+    "switchSession": "Switch session",
+    "shellTitle": "Shell",
+    "shellHint": "Run a command inside the session container (ls · cat · ps · env …)",
+    "shellPlaceholder": "Type a command, then Enter",
+    "shellExit": "exit {code}",
+    "errorExec": "Could not run the command."
   },
   "agentManager": {
     "instructions": "Instructions",
