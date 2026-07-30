@@ -402,6 +402,33 @@ supports" — and each member overlays their own on/off on top of it.**
 - Shadowing is per channel: a tool and a skill may share a name (the model reaches them through different doors —
   a tool call vs `use_skill`). The workspace-wide default-tool toggles on Settings › Agent remain the admin baseline.
 
+### The tool DETAIL (confirmed 2026-07-29)
+
+The list is a switch; `/settings/tools/<urlencoded key>` is the explanation behind the switch — a ROUTED page (never a
+dialog: the right-hand chat panel is half the workflow). `GET /agent/tools/:key` (`get_agent_tool`) returns the row
+plus what the tool actually IS, all derived from the same `resolveAgentCapabilities` pass the runtime uses:
+
+- **`transport`** — the three things the agent really does: `http` (open an MCP session) · `stdio` (`docker run -i` a
+  container) · `code` (write the source into a sandbox and run it). Rendered as one sentence + the real target.
+- **`functions`** — what the tool puts in front of the model, under the NAMESPACED name the model calls. A `code`
+  capability is exactly one function; an `mcp` server contributes as many as it serves. The bridged name has ONE
+  spelling — `mcpBridgedName`/`codeBridgedName` in `@everdict/domain` — used by the runtime bridge AND by this page,
+  so what a member reads is what gets registered. The DECLARED list is the author's `provides`; `POST
+  /agent/tools/:key/probe` (`probe_agent_tool`) connects AS THIS MEMBER with their bound secret and replaces it with
+  the server's own answer. Probing is HTTP-MCP only (a stdio container is the agent's to start, a code tool is verified
+  by RUNNING it — the store's try-runner, reused here; a first-party default resolves from the shipped definitions
+  since it has no store row, and stays trusted on a host runtime).
+- **`secrets`** — each declared name with the secret name it actually reads and whether the member can satisfy it.
+  Two worlds, and the UI splits on `bindable`: an ADOPTED capability (`CapabilityRef.secretBindings`) and a hand-wired
+  server (`authSecret`) keep their binding on the AgentSpec, so `PUT /agent/tools/:key/secrets`
+  (`bind_agent_tool_secrets`, `agents:write`) rewrites it and cuts a new agent version. A first-party default and a
+  published-but-unadopted capability read the secret by its DECLARED name — there is nothing to remap, so the page
+  offers "store a secret under exactly this name" instead. Names only, never values.
+- **Editing is the chat, not a form.** `editable` (a capability THIS workspace owns) surfaces "대화로 편집하기" →
+  the `tool` reference type (`get_capability`, carrying `source` since a tool may be owned elsewhere) + the `toolEdit`
+  mission; the agent reads the spec and publishes a new version under HITL approval. Built-ins and other workspaces'
+  publications are read-only here.
+
 ## First-party default toolset (confirmed 2026-07-27)
 
 The store as designed above is **adopt-only**: a capability reaches an agent solely via an explicit
@@ -421,6 +448,8 @@ default IS a capability, so it is browsable, versioned, and replaceable like any
   public tab shows the built-ins with a **"built-in" badge** (owner `_everdict`), and because they aren't DB rows they
   are **read-only** there (no edit/reach/delete — even for an admin) and shown as *provided by default* rather than an
   Adopt button (they're managed via Settings › Agent `disabledDefaults`, not adoption).
+- **Tools only.** The default tier is `web_search` / `fetch_url` / `pdf_read` — capabilities of the product. Everdict's
+  SKILLS are store examples a workspace copies (see Phase 10 below), never defaults.
 - **Default-enabled** = the agent includes them **without** an `AgentSpec.capabilities[]` pin. The effective toolset:
   ```
   first-party default capabilities (auto, gated)   ← web search · PDF · integration use-actions
@@ -457,17 +486,27 @@ integration config**, not a manual `secretBindings` map at adoption (there is no
   use-actions: Mattermost (list channels · read/post thread), GitHub (create issue · comment on PR/issue · read repo
   file · list PRs/issues), image-registry (list images/tags · inspect) — each gated on its integration, secrets
   auto-bound from config, writes HITL-gated.
-- **Phase 10 — first-party SKILLs over the integration actions (landed).** The `skill` kind joins the default tier: a
-  first-party skill rides `AgentProfile.skills` → `use_skill` with zero new runtime code (the adapters were already
-  generic). First seed: **`scorecard-fix-pr`** (`requires: "github"`) — the eval→fix loop as a procedure: diagnose a
-  scorecard's failing cases from the eval evidence (scorecard/run/judge reads), locate the root cause in the harness's
-  source repository (`get_github_file`), and open the fix PR via the `open_github_pr` action (branch → per-file
-  commits → PR over the workspace GitHub App installation token, near-idempotent like the CI setup-PR, `github:write`,
-  HITL-gated) — with the **experiment context** (scorecard link, harness@version × dataset@version, failing case ids +
-  judge verdicts, evidence excerpts) MANDATORY in the PR body, so a reviewer judges the fix without re-running
-  anything. With a gated default now real, the `integrationsConfigured` seam is wired: `apps/agent/src/main.ts`
-  derives it per workspace from the settings store via the pure `configuredIntegrations` (`@everdict/domain`) — a
-  gated default activates the moment its integration is configured, no adoption step.
+- **Phase 10 — first-party SKILLs (landed), then REFRAMED as store examples (2026-07-29, user decision).** Everdict
+  authors two skills — **`scorecard-fix-pr`** (the eval→fix loop as a procedure: diagnose a scorecard's failing cases
+  from the eval evidence, locate the root cause via `get_github_file`, open the fix PR via `open_github_pr` with the
+  experiment context MANDATORY in the body) and **`trace-analysis`** — but they are **NOT a default tier**. They are
+  EXAMPLES that live in the store (`firstPartySkillExamples()`, merged into the public catalog) until a workspace
+  takes one.
+  - **A skill is a document a workspace owns.** Shipping one as a silent default puts a procedure in every
+    workspace's agent that nobody there wrote, can edit, or can version — which is exactly what the reframe removes.
+    Tools stay defaults (nobody edits `web_search`); skills do not.
+  - **Taking one COPIES it** (`POST /skills/import` → `SkillService.importFromStore`): the content lands as an
+    ordinary workspace `SkillRecord`, `visibility: workspace`, its version line starting at the version copied, with
+    `origin: {source, id, version, name}` as provenance (never a live link — the moment they edit it, a link would
+    either fight their edits or lie). The store hides an example a workspace already took; taking it twice is 409.
+  - **Skill-kind capabilities are not agent attachments at all.** `resolveAgentCapabilities` resolves skills from ONE
+    channel — the workspace's own `SkillRecord`s — so Settings › Agent › Skills lists exactly what the agent follows,
+    and every entry is editable and versionable by the people it belongs to. Publishing a skill to the store hands
+    others something to copy; it does not add a second, uneditable row to anyone's library (not even the author's).
+    The old `origin: authored | packaged` split on `GET /agent/skills` is gone with it.
+  - `scorecard-fix-pr`'s `requires: "github"` gate went with the default tier: nothing is auto-attached, so there is
+    nothing to gate. The copy tells the agent to use the GitHub tools, and those are gated on their own.
+  See "Skill versions" below.
 
 The base control-plane surface is now **bridge-all** (docs/architecture/agent-conversations.md P13): every entity's
 reads AND mutations reach the agent (only the runner wire-protocol tools are excluded), with each mutation decided by
@@ -499,3 +538,20 @@ image** (pullable ref + composition preset + instructions) into the same store �
 - **Namespacing collisions** across many adopted capabilities — `mcp__<name>__<tool>` / `code__<name>`; enforce
   unique `name` per agent at adoption.
 - **Skill migration** — confirm `everdict_skills` has no production data worth preserving beyond the fold-in.
+
+## Skill versions (2026-07-29)
+
+A workspace skill carries its own semver, so "edit it in conversation, then stamp the version" is a real loop:
+
+- **The row is the WORKING COPY.** Members (and the agent, via `update_skill` under the session's permission mode)
+  edit it freely; `SkillRecord.version` names the last content the workspace decided to *publish*, not every keystroke.
+- **A stamp freezes content** (`POST /skills/:id/versions` / MCP `stamp_skill_version`): `bump` (major|minor|patch,
+  default patch) or an explicit version that must order above the current one (else 400), plus an optional `note`
+  (the changelog line). The snapshot is immutable — a re-stamp of a live version is 409 — which is what makes "what
+  did this procedure say when we ran that eval?" answerable. Content is read filesystem-first, so a body an agent
+  rewrote through the workspace filesystem is what gets frozen.
+- **A stamp is not an edit**: `updatedAt` stays put, so `latestStamp.stampedAt < skill.updatedAt` is exactly
+  "there are changes since the last stamp" — the detail page shows that as a badge next to the version.
+- Storage: `everdict_skills.version` + `everdict_skills.origin` (jsonb) and the `everdict_skill_versions` table
+  (mig 0091), behind the `SkillVersionStore` port (kept out of `SkillStore`: the row is read on every agent turn, the
+  line only when someone opens the version panel — the same split as `WorkspaceFs` ← `FsRevisionStore`).

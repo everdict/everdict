@@ -80,11 +80,19 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   on hover. Field-level `<p>` hints under inputs are fine; panel/list guidance is not.
 - **Detail views**: hide empty sections entirely (no "none" placeholder); entities show a meta strip, not a
   bare `dl` grid. **An entity detail is a ROUTED PAGE, never a dialog** — the right infra panel is half the
-  workflow (edit/experiment on what the left half shows), and a modal makes that split impossible. Read-only
-  variants of an entity share the SAME route rather than degrading to a modal: Settings › Skills serves both
-  the authored `Skill` (by id) and the published/built-in skill-kind capability (`?source=<owner workspace>`)
-  from `settings/skills/[id]`, with one meta-strip grammar. (Built-ins are code definitions, not store rows —
-  `GET /capabilities/:id` misses them, so resolve them from the owned + public LIST merge, as the list screen does.)
+  workflow (edit/experiment on what the left half shows), and a modal makes that split impossible.
+  **Settings › Agent › Skills lists only what the workspace OWNS** — no "built-in"/"shared" tier: an Everdict or
+  third-party skill in the store is an EXAMPLE, and taking it (`POST /skills/import`) copies it into the library as
+  an ordinary workspace skill, editable and versionable from `settings/skills/[id]` like anything a member wrote
+  (`origin` on the record is provenance only). Never re-introduce a read-only skill row that the agent follows but
+  nobody can edit. The detail's primary edit path stays "대화로 편집하기" (mission `skillEdit`), paired with
+  **"새 버전 찍기"** — the row is the working copy and a stamp freezes it (`skill.version` vs the newest stamp's
+  `stampedAt` is what renders the "edited since" badge; a stamp deliberately does not touch `updatedAt`).
+  **A settings LIST whose rows are entities links each row to that detail** — the row's name is the drill-in (the
+  right side belongs to its switch). `settings/tools/[key]` is the reference: a routed detail that EXPLAINS the thing
+  (transport · the functions it puts in front of the model, under the bridged name · the description the model reads
+  verbatim · the pinned source) and lets the member act on it (bind its secret via `SecretPicker`, connect-test or
+  run it, edit it in chat). A tool key carries `:`/`/`, so encode it into the segment on both sides.
 - **Domain-specific chat entries carry a MISSION**: a specialized entry like a skill detail's "대화로 편집하기"
   passes `mission` to `MentionInChatButton` → `PendingMention.mission` → `AgentChatPanel`. The chat surface is
   UNCHANGED; only the empty-state title/body/suggestions swap to that task's catalog block
