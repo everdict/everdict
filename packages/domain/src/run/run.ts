@@ -1,5 +1,5 @@
 import { type CaseResult, ConflictError, type EvalCase } from "@everdict/contracts";
-import type { PlatformFact, RunClass, RunEnvelope, RunOrigin, RunRecord } from "@everdict/contracts";
+import type { PlatformFact, RunAttachChannel, RunClass, RunEnvelope, RunOrigin, RunRecord } from "@everdict/contracts";
 
 // The domain model for a run's lifecycle (queued → running → succeeded | failed). Wraps the persistence
 // record (@everdict/db RunRecord — shapes unchanged); guard methods are the SSOT for what is legal, and
@@ -143,6 +143,7 @@ export class Run {
     computeId?: string; // driver-level compute id (container id) — the reaper's teardown key after a crash
     origin?: RunOrigin;
     envelope?: RunEnvelope;
+    attach?: RunAttachChannel[]; // default ["exec"]; a harness session adds "tasks" (test-case submissions)
     now: string;
   }): RunRecord {
     return {
@@ -158,7 +159,7 @@ export class Run {
       lifetime: "session", // held open until closed/expired — `running` means "alive", not "in progress"
       origin: input.origin ?? { cause: "member", actor: input.createdBy },
       placement: { where: "driver", isolation: "container" },
-      attach: ["exec"],
+      attach: input.attach ?? ["exec"],
       ...(input.envelope !== undefined ? { envelope: input.envelope } : {}),
       session: {
         image: input.image,

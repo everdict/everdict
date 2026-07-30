@@ -229,9 +229,14 @@ export { withTracePerception } from "./observability/trace-perception.js";
 export {
   SandboxSessionService,
   type CreateSandboxInput,
+  type ResolvedSessionHarness,
   type SandboxActor,
   type SandboxSessionServiceDeps,
+  type SandboxSessionView,
+  type SandboxTaskSummary,
+  type SandboxTaskTrace,
 } from "./session/sandbox-session-service.js";
+export { scopedComputeHandle } from "./session/scoped-compute.js";
 export { FIRST_PARTY_AGENT_TEMPLATES, seedFirstPartyAgents } from "./agent/first-party-agents.js";
 export type {
   GithubFileContent,

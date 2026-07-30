@@ -306,3 +306,236 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
     await expect(reborn.reap("rival", second.id)).resolves.toEqual({ reaped: false });
   });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Harness playground: a harness booted INTO the session, test cases driven through it one at a time.
+// ---------------------------------------------------------------------------------------------------
+
+import { PaymentRequiredError } from "@everdict/contracts";
+import type { EvaluableHarness } from "@everdict/contracts";
+import type { BudgetTracker, UsageMeter } from "@everdict/domain";
+import type { ResolvedSessionHarness } from "./sandbox-session-service.js";
+
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  const start = Date.now();
+  while (!cond()) {
+    if (Date.now() - start > ms) throw new Error("condition not reached in time");
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+// A controllable harness: install execs into the compute; run yields one assistant message, then (when
+// `hold` is set) parks abort-aware — the close-mid-task drill releases it via the session's abort signal.
+function fakePlaygroundHarness(opts: { hold?: boolean; image?: string | undefined } = {}) {
+  const installs: string[] = [];
+  const runCwds: string[] = [];
+  const harness: EvaluableHarness = {
+    id: "cc",
+    version: "1.0.0",
+    async install(compute) {
+      installs.push("install");
+      await compute.exec("npm i -g cc");
+    },
+    async *run(compute, task, ctx) {
+      await compute.exec(`agent ${task}`, { cwd: "work" });
+      yield { t: 1, kind: "message" as const, role: "assistant" as const, text: `did: ${task}` };
+      if (opts.hold) {
+        await new Promise<void>((resolve) => {
+          if (ctx.signal?.aborted) return resolve();
+          ctx.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+      }
+    },
+  };
+  const resolved: ResolvedSessionHarness = {
+    id: "cc",
+    version: "1.0.0",
+    harness,
+    apiKeyEnv: { ANTHROPIC_API_KEY: "sk-test" },
+    ...("image" in opts ? (opts.image !== undefined ? { image: opts.image } : {}) : { image: "harness-img:1" }),
+  };
+  return { resolved, installs, runCwds };
+}
+
+function fakeBudget(opts: { admitError?: boolean } = {}) {
+  const settles: Array<{ tenant: string; usd: number }> = [];
+  let admits = 0;
+  let releases = 0;
+  const budget: BudgetTracker = {
+    admit() {
+      admits++;
+      if (opts.admitError) throw new PaymentRequiredError("BUDGET_EXCEEDED", {}, "over budget");
+    },
+    release() {
+      releases++;
+    },
+    settle(tenant, cost) {
+      settles.push({ tenant, usd: cost.usd });
+    },
+    usage() {
+      return { runs: 0, usd: 0, tokens: 0 };
+    },
+  };
+  return { budget, settles, admits: () => admits, releases: () => releases };
+}
+
+describe("SandboxSessionService — the harness playground (test cases in a live session)", () => {
+  const boot = async (over: Partial<SandboxSessionServiceDeps> = {}, harnessOpts: Parameters<typeof fakePlaygroundHarness>[0] = {}) => {
+    const fake = fakePlaygroundHarness(harnessOpts);
+    const ctx = build({ resolveSessionHarness: async () => fake.resolved, ...over });
+    const record = await ctx.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } });
+    return { ...ctx, fake, session: record };
+  };
+
+  it("create with harness: warm-installs BEFORE the record, stamps the real harness id@version + attach tasks", async () => {
+    const { fake, session, driver } = await boot();
+    expect(fake.installs).toEqual(["install"]);
+    expect(driver.execs).toContain("npm i -g cc"); // installed into the session container
+    expect(session).toMatchObject({
+      kind: "sandbox",
+      harness: { id: "cc", version: "1.0.0" },
+      caseId: "harness-img:1",
+      attach: ["exec", "tasks"],
+      session: { image: "harness-img:1" },
+    });
+  });
+
+  it("a failed install disposes the container and leaves NO record (provision-before-record, extended)", async () => {
+    const fake = fakePlaygroundHarness();
+    fake.resolved.harness.install = async () => {
+      throw new Error("npm registry down");
+    };
+    const { service, runStore, driver } = build({ resolveSessionHarness: async () => fake.resolved });
+    await expect(service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } })).rejects.toMatchObject({
+      code: "HARNESS_INSTALL_FAILED",
+    });
+    expect(runStore.rows.size).toBe(0);
+    expect(driver.disposed.length).toBe(1);
+  });
+
+  it("no resolver → 400; resolver miss → 404; an imageless spec without harness.image → 400 naming the fix", async () => {
+    const bare = build();
+    await expect(bare.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } })).rejects.toMatchObject({ status: 400 });
+    const missing = build({ resolveSessionHarness: async () => undefined });
+    await expect(missing.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "nope" } })).rejects.toMatchObject({ status: 404 });
+    const imageless = fakePlaygroundHarness({ image: undefined });
+    const noImage = build({ resolveSessionHarness: async () => imageless.resolved });
+    await expect(noImage.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } })).rejects.toMatchObject({ status: 400 });
+    // the same imageless spec boots when the caller provides the image
+    const withImage = build({ resolveSessionHarness: async () => imageless.resolved });
+    const rec = await withImage.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc", image: "node:22" } });
+    expect(rec.session?.image).toBe("node:22");
+  });
+
+  it("submitTask creates a grouped child run (born running, run.submitted fact) and settles it succeeded with a sealed trajectory + billing settle", async () => {
+    const { budget, settles } = fakeBudget();
+    const usageLines: string[] = [];
+    const usage: UsageMeter = {
+      record(tenant, source, model) {
+        usageLines.push(`${tenant}:${source}:${model}`);
+      },
+      usage(): ReturnType<UsageMeter["usage"]> {
+        throw new Error("not used in this test");
+      },
+    };
+    const { service, runStore, trajectories, session } = await boot({ budget, usage });
+    const child = await service.submitTask(creator, session.id, { task: "add a README" });
+    expect(child).toMatchObject({
+      kind: "eval",
+      class: "interactive",
+      status: "running",
+      trigger: "playground",
+      harness: { id: "cc", version: "1.0.0" },
+      caseId: "task-1",
+      group: { id: session.id, role: "case" },
+      placement: { where: "driver" },
+    });
+    expect(runStore.events.some((e) => e.op === "create" && e.kinds.includes("run.submitted"))).toBe(true);
+    await until(() => runStore.rows.get(child.id)?.status === "succeeded");
+    // Evidence sealed under the CHILD run id; the session's own trace holds only boundary markers.
+    expect(trajectories.sealed.get(child.id)?.events.some((e) => e.kind === "message")).toBe(true);
+    const trace = await service.readTaskTrace(creator, session.id, child.id, 0);
+    expect(trace.done).toBe(true);
+    expect(trace.events.map((e) => e.kind)).toContain("message");
+    // The session view reflects the settled task.
+    const view = await service.getSession(creator, session.id);
+    expect(view.live?.tasks).toMatchObject([{ runId: child.id, caseId: "task-1", status: "succeeded" }]);
+    expect(view.live?.busy).toBe(false);
+    // billingCharges on a costless trace still settles nothing (no llm_call cost lines, own-pays) — the
+    // wiring is exercised, the amounts stay honest.
+    expect(settles.every((s) => s.tenant === "acme")).toBe(true);
+    expect(usageLines.every((l) => l.startsWith("acme:"))).toBe(true);
+  });
+
+  it("one task at a time: a second submit while one runs is a 409 naming the active run", async () => {
+    const { service, session, runStore } = await boot({}, { hold: true });
+    const first = await service.submitTask(creator, session.id, { task: "one" });
+    await expect(service.submitTask(creator, session.id, { task: "two" })).rejects.toMatchObject({
+      status: 409,
+      extra: { activeRun: first.id },
+    });
+    await service.close(creator, session.id); // releases the held task
+    await until(() => runStore.rows.get(first.id)?.status === "failed");
+  });
+
+  it("budget admission refuses at 402 BEFORE any child record exists", async () => {
+    const { budget, admits } = fakeBudget({ admitError: true });
+    const { service, runStore, session } = await boot({ budget });
+    const before = runStore.rows.size;
+    await expect(service.submitTask(creator, session.id, { task: "x" })).rejects.toMatchObject({ status: 402 });
+    expect(runStore.rows.size).toBe(before);
+    expect(admits()).toBe(1);
+  });
+
+  it("closing the session mid-task aborts the drive: the child settles failed{CANCELLED} with its partial trace sealed", async () => {
+    const { service, runStore, trajectories, session } = await boot({}, { hold: true });
+    const child = await service.submitTask(creator, session.id, { task: "long one" });
+    await until(() => (trajectories.sealed.size >= 0 && (runStore.rows.get(child.id) !== undefined)));
+    await service.close(creator, session.id);
+    await until(() => runStore.rows.get(child.id)?.status === "failed");
+    expect(runStore.rows.get(child.id)?.error?.code).toBe("CANCELLED");
+    // Partial evidence still sealed under the child.
+    expect(trajectories.sealed.get(child.id)?.events.some((e) => e.kind === "message")).toBe(true);
+    // The session's own sealed trajectory carries the task boundary markers, not the task's events.
+    const sessionTrace = trajectories.sealed.get(session.id)?.events ?? [];
+    expect(sessionTrace.some((e) => e.kind === "env_action" && e.action === "task.start")).toBe(true);
+    expect(sessionTrace.some((e) => e.kind === "message")).toBe(false);
+  });
+
+  it("readTaskTrace pages by cursor while live, then serves the sealed trajectory after settle (refresh-proof)", async () => {
+    const { service, runStore, session } = await boot();
+    const child = await service.submitTask(creator, session.id, { task: "cursor me" });
+    await until(() => runStore.rows.get(child.id)?.status === "succeeded");
+    const first = await service.readTaskTrace(creator, session.id, child.id, 0);
+    expect(first.events.length).toBeGreaterThan(0);
+    const second = await service.readTaskTrace(creator, session.id, child.id, first.nextCursor);
+    expect(second.events).toEqual([]);
+    expect(second.nextCursor).toBe(first.nextCursor);
+    // After close (live buffers gone) the sealed fallback serves the same events.
+    await service.close(creator, session.id);
+    const sealed = await service.readTaskTrace(creator, session.id, child.id, 0);
+    expect(sealed.done).toBe(true);
+    expect(sealed.events.length).toBe(first.events.length);
+  });
+
+  it("submitTask is creator-or-admin and refuses a non-harness session with a pointed 400", async () => {
+    const { service, session } = await boot();
+    await expect(
+      service.submitTask({ tenant: "acme", subject: "mallory", isAdmin: false }, session.id, { task: "x" }),
+    ).rejects.toMatchObject({ status: 403 });
+    const plain = build();
+    const rec = await plain.service.create({ tenant: "acme", createdBy: "alice", image: "python:3.12" });
+    await expect(plain.service.submitTask(creator, rec.id, { task: "x" })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("listSessions returns only this tenant's live sessions with their task summaries (the reattach surface)", async () => {
+    const { service, session } = await boot();
+    await service.submitTask(creator, session.id, { task: "a very long task ".repeat(30) });
+    const mine = await service.listSessions(creator);
+    expect(mine.map((v) => v.record.id)).toEqual([session.id]);
+    expect(mine[0]?.live?.harness).toEqual({ id: "cc", version: "1.0.0" });
+    expect(mine[0]?.live?.tasks[0]?.taskPreview.length).toBeLessThanOrEqual(201);
+    const other = await service.listSessions({ tenant: "zeta", subject: "bob", isAdmin: false });
+    expect(other).toEqual([]);
+  });
+});
