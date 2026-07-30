@@ -4293,6 +4293,9 @@
     "deleteBody": "“{name}” will stop firing. Runs it already started are unaffected.",
     "cancel": "Cancel",
     "emptyTitle": "No subscriptions yet",
-    "emptyDescription": "Create a rule to react to workspace events — wake an agent, deliver a webhook, or run a chain."
+    "emptyDescription": "Create a rule to react to workspace events — wake an agent, deliver a webhook, or run a chain.",
+    "importTriggers": "Import agent triggers",
+    "importing": "Importing…",
+    "importedResult": "{count} trigger rules imported — the agents' own trigger lists are now empty."
   }
 }

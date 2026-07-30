@@ -1,4 +1,5 @@
 import {
+  type AgentTrigger,
   ForbiddenError,
   NotFoundError,
   type SubscriptionGovernance,
@@ -33,6 +34,13 @@ export interface SubscriptionServiceDeps {
   store: SubscriptionStore;
   // Cross-store read behind a function, not a registry dep: does this agent id exist in the tenant registry?
   agentExists?: (tenant: string, agentId: string) => Promise<boolean>;
+  // The trigger-relocation seam (E3's last rung): read each tenant-owned agent's spec triggers, and clear
+  // them (a new immutable spec version with triggers: []) once their subscriptions exist. Wired by the
+  // composition root from the agent registry + save flow; absent = import unavailable.
+  agentTriggerSource?: {
+    list(tenant: string): Promise<Array<{ id: string; triggers: AgentTrigger[] }>>;
+    clearTriggers(tenant: string, agentId: string): Promise<void>;
+  };
   newId?: () => string;
   now?: () => string;
 }
@@ -104,6 +112,42 @@ export class SubscriptionService {
     await this.deps.store.remove(tenant, id);
   }
 
+  // Relocate agent-spec triggers into the registry (event-plumbing E3 §6, the deliberate last rung): one
+  // subscription per spec trigger (same selector grammar — a verbatim copy), then the spec's own copy is
+  // CLEARED so exactly one source matches. Idempotent: an already-identical rule is skipped, an agent with
+  // no triggers is untouched, and a re-run after a partial failure resumes where it stopped.
+  async importAgentTriggers(tenant: string, createdBy: string): Promise<{ imported: number; agents: string[] }> {
+    const source = this.deps.agentTriggerSource;
+    if (!source) throw new NotFoundError("NOT_FOUND", {}, "trigger import is not configured.");
+    const agents = await source.list(tenant);
+    const existing = await this.deps.store.list(tenant);
+    let imported = 0;
+    const relocated: string[] = [];
+    for (const agent of agents) {
+      if (agent.triggers.length === 0) continue;
+      for (const trigger of agent.triggers) {
+        const duplicate = existing.some(
+          (rule) =>
+            rule.reaction.kind === "agent" &&
+            rule.reaction.agentId === agent.id &&
+            sameSelector(rule.selector, trigger),
+        );
+        if (duplicate) continue;
+        await this.create({
+          tenant,
+          createdBy,
+          name: triggerRuleName(agent.id, trigger),
+          selector: { kinds: trigger.kinds, filters: trigger.filters },
+          reaction: { kind: "agent", agentId: agent.id },
+        });
+        imported++;
+      }
+      await source.clearTriggers(tenant, agent.id);
+      relocated.push(agent.id);
+    }
+    return { imported, agents: relocated };
+  }
+
   private async assertAgentTargets(tenant: string, reaction: SubscriptionReaction): Promise<void> {
     if (!this.deps.agentExists) return;
     const agentIds =
@@ -117,4 +161,18 @@ export class SubscriptionService {
         throw new NotFoundError("NOT_FOUND", { agentId }, `agent '${agentId}' not found in this workspace.`);
     }
   }
+}
+
+function sameSelector(a: SubscriptionSelector, b: AgentTrigger): boolean {
+  const kinds = (list: readonly string[]) => [...list].sort().join(",");
+  if (kinds(a.kinds) !== kinds(b.kinds)) return false;
+  const filters = (list: readonly AgentTrigger["filters"][number][]) =>
+    JSON.stringify([...list].sort((x, y) => x.field.localeCompare(y.field)));
+  return filters(a.filters) === filters(b.filters);
+}
+
+function triggerRuleName(agentId: string, trigger: AgentTrigger): string {
+  const head = trigger.kinds[0] ?? "events";
+  const extra = trigger.kinds.length > 1 ? ` +${trigger.kinds.length - 1}` : "";
+  return `${agentId} — ${head}${extra}`.slice(0, 120);
 }

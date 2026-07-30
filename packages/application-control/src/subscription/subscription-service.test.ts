@@ -140,3 +140,54 @@ describe("SubscriptionService — event → reaction rules under governance (E3 
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
+
+describe("importAgentTriggers — the trigger relocation (E3's last rung)", () => {
+  it("copies each spec trigger as an agent-reaction rule, clears the spec's copy, and is idempotent", async () => {
+    const { svc, store } = service({ agents: ["sentinel", "helper"] });
+    const cleared: string[] = [];
+    const triggers = new Map<string, Array<{ kinds: ["run.failed"] | ["scorecard.completed"]; filters: [] }>>([
+      [
+        "sentinel",
+        [
+          { kinds: ["run.failed"], filters: [] },
+          { kinds: ["scorecard.completed"], filters: [] },
+        ],
+      ],
+      ["helper", []],
+    ]);
+    const withSource = new SubscriptionService({
+      store,
+      agentExists: async () => true,
+      agentTriggerSource: {
+        list: async () => [...triggers.entries()].map(([id, t]) => ({ id, triggers: t })),
+        clearTriggers: async (_tenant, agentId) => {
+          cleared.push(agentId);
+          triggers.set(agentId, []);
+        },
+      },
+      newId: (() => {
+        let n = 100;
+        return () => `imp-${++n}`;
+      })(),
+      now: () => "2026-07-30T00:00:00.000Z",
+    });
+
+    const first = await withSource.importAgentTriggers("acme", "boss");
+    expect(first).toEqual({ imported: 2, agents: ["sentinel"] }); // helper had nothing to relocate
+    expect(cleared).toEqual(["sentinel"]);
+    const rules = await withSource.list("acme");
+    expect(rules).toHaveLength(2);
+    expect(rules.every((r) => r.reaction.kind === "agent" && r.reaction.agentId === "sentinel")).toBe(true);
+
+    // Idempotent: specs are cleared, and identical rules would be skipped anyway.
+    const again = await withSource.importAgentTriggers("acme", "boss");
+    expect(again.imported).toBe(0);
+    expect(await withSource.list("acme")).toHaveLength(2);
+    void svc;
+  });
+
+  it("is NOT_FOUND without the composition seam (dev wiring keeps the surface honest)", async () => {
+    const { svc } = service();
+    await expect(svc.importAgentTriggers("acme", "boss")).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});

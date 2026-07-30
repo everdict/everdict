@@ -13,6 +13,7 @@ import { ViewSnapshotService } from "@everdict/application-control";
 import type { WorkspaceFs } from "@everdict/application-control";
 import { BrowserProfileService } from "@everdict/application-control";
 import type { Scheduler } from "@everdict/backends";
+import type { AgentSpec } from "@everdict/contracts";
 import type {
   BrowserProfileStore,
   RunStore,
@@ -33,6 +34,7 @@ import type {
   RubricRegistry,
   RuntimeRegistry,
 } from "@everdict/registry";
+import { AgentService } from "../core/agent/agent-service.js";
 import { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import { BundleService } from "../core/bundle/bundle-service.js";
 import { githubRepoWriterFactory } from "../infrastructure/github/repo-writer.js";
@@ -190,6 +192,9 @@ export function buildSubscription(deps: {
   subscriptionStore: SubscriptionStore;
   agentRegistry: AgentRegistry;
 }): SubscriptionService {
+  // The trigger-relocation seam: read tenant-OWNED agents' latest spec triggers, and clear a spec's copy by
+  // saving a new immutable version with triggers: [] (the same version-free upsert the save route uses).
+  const agentSaves = new AgentService({ agents: deps.agentRegistry });
   return new SubscriptionService({
     store: deps.subscriptionStore,
     agentExists: async (tenant, agentId) => {
@@ -199,6 +204,23 @@ export function buildSubscription(deps: {
       } catch {
         return false;
       }
+    },
+    agentTriggerSource: {
+      list: async (tenant) => {
+        const entries = (await deps.agentRegistry.list(tenant)).filter((entry) => entry.owner === tenant);
+        const out: Array<{ id: string; triggers: AgentSpec["triggers"] }> = [];
+        for (const entry of entries) {
+          const spec = await deps.agentRegistry.get(tenant, entry.id, "latest").catch(() => undefined);
+          if (spec) out.push({ id: entry.id, triggers: spec.triggers });
+        }
+        return out;
+      },
+      clearTriggers: async (tenant, agentId) => {
+        const spec = await deps.agentRegistry.get(tenant, agentId, "latest");
+        if (spec.triggers.length === 0) return;
+        const { id: _id, version: _version, ...rest } = spec;
+        await agentSaves.saveAgent(tenant, undefined, agentId, { ...rest, triggers: [] });
+      },
     },
   });
 }

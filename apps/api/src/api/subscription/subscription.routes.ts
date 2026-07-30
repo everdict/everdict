@@ -86,6 +86,22 @@ export function registerSubscriptionRoutes(app: FastifyInstance, deps: ServerDep
     },
   );
 
+  // Trigger relocation (E3's last rung): copy every tenant-owned agent's spec triggers into subscriptions,
+  // then clear the spec's copy — after this, exactly one source matches. Explicit and member-driven, never
+  // a silent boot migration.
+  app.post("/subscriptions/import-agent-triggers", { schema: subscriptionDocs.importTriggers }, async (req, reply) => {
+    if (!deps.subscriptionService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "subscription service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "agents:write");
+      return reply.send(await deps.subscriptionService.importAgentTriggers(principal.workspace, principal.subject));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- T-d internal bridge (worker activity → CP → agent service) — the reaction workflow's two verbs. ---
   // The CP is the ONE bridge activities talk to (the reaper/approval discipline); it forwards to the agent
   // service and mirrors the answer's status, so the activity's retry semantics ride HTTP honestly:

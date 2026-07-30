@@ -192,3 +192,26 @@ describe("reaction internal bridge (T-d — worker activity → CP → agent ser
     ).toBe(404);
   });
 });
+
+describe("POST /subscriptions/import-agent-triggers — the trigger relocation", () => {
+  it("relocates and reports; a second call is an idempotent zero", async () => {
+    const triggers = new Map([["sentinel", [{ kinds: ["run.failed" as const], filters: [] }]]]);
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      subscriptionService: new SubscriptionService({
+        store: new InMemorySubscriptionStore(),
+        agentExists: async () => true,
+        agentTriggerSource: {
+          list: async () => [...triggers.entries()].map(([id, t]) => ({ id, triggers: t })),
+          clearTriggers: async (_t, agentId) => void triggers.set(agentId, []),
+        },
+      }),
+    });
+    const first = await app.inject({ method: "POST", url: "/subscriptions/import-agent-triggers", headers: H });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toEqual({ imported: 1, agents: ["sentinel"] });
+    const again = await app.inject({ method: "POST", url: "/subscriptions/import-agent-triggers", headers: H });
+    expect(again.json().imported).toBe(0);
+    expect((await app.inject({ method: "GET", url: "/subscriptions", headers: H })).json()).toHaveLength(1);
+  });
+});

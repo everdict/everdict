@@ -11,9 +11,24 @@ import { UpdateSubscriptionBodySchema } from "./request/update-subscription.js";
 // (enabled + cooldown). Authz reuses the agent actions (no new action): read = agents:read,
 // write = agents:write; edit/delete additionally require creator-or-admin (decided in the service).
 export const subscriptionDocs: Record<
-  "create" | "list" | "update" | "delete" | "internalStep" | "internalStepStatus",
+  "create" | "list" | "update" | "delete" | "importTriggers" | "internalStep" | "internalStepStatus",
   FastifySchema
 > = {
+  importTriggers: {
+    summary: "Relocate agent-spec triggers into subscriptions",
+    description:
+      "Copies every tenant-owned agent's spec triggers into agent-reaction subscriptions (verbatim selector), " +
+      "then clears each spec's own copy (a new immutable version with empty triggers) so exactly one source " +
+      "matches. Idempotent — identical rules are skipped. Requires agents:write.",
+    tags: ["subscription"],
+    response: {
+      200: {
+        description: "What was relocated",
+        ...toJsonSchema(z.object({ imported: z.number().int(), agents: z.array(z.string()) })),
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
   internalStep: {
     summary: "Start one reaction step (internal)",
     description:

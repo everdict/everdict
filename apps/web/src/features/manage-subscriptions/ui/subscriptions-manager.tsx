@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { Bot, Globe, Plus, Power, PowerOff, Trash2, Workflow } from 'lucide-react'
+import { Bot, Globe, Import, Plus, Power, PowerOff, Trash2, Workflow } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { TRIGGERABLE_EVENT_KINDS } from '@/entities/agent-spec'
-import { subscriptionSchema, type Subscription } from '@/entities/subscription'
+import { subscriptionSchema, subscriptionsSchema, type Subscription } from '@/entities/subscription'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -54,6 +54,27 @@ export function SubscriptionsManager({
   const [creating, setCreating] = useState(false)
   const [confirming, setConfirming] = useState<Subscription | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [imported, setImported] = useState<number | null>(null)
+
+  // Trigger relocation (E3's last rung): copy agent-spec triggers into rules, clear the spec copies, and
+  // refresh the list from the answer of a follow-up GET (new rules carry server-assigned ids).
+  const importTriggers = async () => {
+    setImporting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/subscriptions/import', { method: 'POST' })
+      const json = (await res.json()) as { imported?: number; error?: string; message?: string }
+      if (!res.ok || json.error) throw new Error(json.error ?? json.message ?? `HTTP ${res.status}`)
+      setImported(json.imported ?? 0)
+      const listed = await fetch('/api/subscriptions')
+      if (listed.ok) setRules(subscriptionsSchema.parse(await listed.json()))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const setEnabled = async (rule: Subscription, enabled: boolean) => {
     try {
@@ -86,12 +107,18 @@ export function SubscriptionsManager({
   return (
     <div className="space-y-4">
       {error ? <Callout tone="danger">{error}</Callout> : null}
+      {imported !== null && !error ? <Callout tone="muted">{t('importedResult', { count: imported })}</Callout> : null}
       <div className="flex items-center justify-between">
         <p className="text-[13px] text-muted-foreground">{t('lede')}</p>
         {canWrite ? (
-          <Button size="sm" onClick={() => setCreating(true)}>
-            <Plus /> {t('create')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => void importTriggers()} disabled={importing}>
+              <Import /> {importing ? t('importing') : t('importTriggers')}
+            </Button>
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus /> {t('create')}
+            </Button>
+          </div>
         ) : null}
       </div>
 

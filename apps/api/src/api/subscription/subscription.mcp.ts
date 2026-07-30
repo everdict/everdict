@@ -78,6 +78,17 @@ export function registerSubscriptionTools(server: McpServer, ctx: McpToolContext
   );
 
   server.registerTool(
+    "import_agent_triggers",
+    {
+      description:
+        "Relocate agent-spec triggers into subscriptions — one rule per trigger (verbatim selector, reaction = wake that agent), then each spec's own triggers are cleared so exactly one source matches. Idempotent.",
+      inputSchema: {},
+    },
+    () =>
+      run(principal, "agents:write", async () => ok(await subscriptions.importAgentTriggers(ws, principal.subject))),
+  );
+
+  server.registerTool(
     "delete_subscription",
     {
       description: "Delete a subscription — creator or workspace admin only (other workspaces get NOT_FOUND)",

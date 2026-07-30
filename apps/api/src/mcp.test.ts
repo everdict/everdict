@@ -512,6 +512,7 @@ describe("MCP tools", () => {
       "get_workspace_trace_ingestion",
       "get_workspace_trace_thresholds",
       "heartbeat_job",
+      "import_agent_triggers",
       "import_harbor",
       "import_skill",
       "import_terminal_bench",

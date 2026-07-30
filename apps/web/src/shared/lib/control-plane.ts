@@ -623,6 +623,8 @@ export const controlPlane = {
     }),
   deleteSubscription: (auth: AuthContext, id: string) =>
     call<void>(auth, `/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  importAgentTriggers: <T>(auth: AuthContext) =>
+    call<T>(auth, '/subscriptions/import-agent-triggers', { method: 'POST' }),
   getAgent: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/agents/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   // 플랫폼 이벤트 로그(라이프사이클 사실, 최신순) — 크래프팅 스튜디오의 리플레이 피커. events:read(viewer+).
