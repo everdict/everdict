@@ -74,7 +74,8 @@ type InfraPanelValue = {
   // frames the chat for a domain-specific task (e.g. editing a skill) instead of the generic analysis copy.
   mentionInChat: (ref: AgentReference, mission?: AgentChatMission) => void
   // Open the agent chat with a draft prompt pre-typed (and optionally an entity referenced) — nothing auto-sends.
-  askAgent: (prompt: string, ref?: AgentReference) => void
+  // A mission (studio/edit entry) rides along to frame the chat exactly like mentionInChat's.
+  askAgent: (prompt: string, ref?: AgentReference, mission?: AgentChatMission) => void
   pendingMention: PendingMention | null
   consumePendingMention: () => void
   // Open the agent chat on a specific existing session (a comment thread's discussion session) in watch mode.
@@ -238,11 +239,14 @@ export function InfraPanelProvider({
 
   // Reveal the agent chat with a draft prompt pre-typed (and optionally an entity referenced) — the "ask the
   // agent to do X with this" entry (e.g. edit a skill from its detail page). The member still presses send.
-  const askAgent = useCallback((prompt: string, ref?: AgentReference) => {
-    setPendingMention({ prompt, ...(ref ? { ref } : {}) })
-    setTab('agent')
-    setOpen(true)
-  }, [])
+  const askAgent = useCallback(
+    (prompt: string, ref?: AgentReference, mission?: AgentChatMission) => {
+      setPendingMention({ prompt, ...(ref ? { ref } : {}), ...(mission ? { mission } : {}) })
+      setTab('agent')
+      setOpen(true)
+    },
+    []
+  )
 
   const consumePendingMention = useCallback(() => setPendingMention(null), [])
 

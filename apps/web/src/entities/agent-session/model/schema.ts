@@ -102,9 +102,41 @@ export type AgentReference = z.infer<typeof agentReferenceSchema>
 // 대화 패널에 실리는 "임무" — 특정 도메인 상세의 전용 진입("대화로 편집하기" 등)으로 들어왔을 때, 패널의 구조는
 // 그대로 두고 빈 화면의 라이팅과 제안만 그 작업에 맞춘다(범용 "대화에서 분석" 진입은 임무 없음 = 기본 문구).
 // 값은 메시지 카탈로그 네임스페이스(agentChat.missions.<kind>)이기도 하므로 카탈로그 키와 1:1로 유지한다.
-export const AGENT_CHAT_MISSIONS = ['skillEdit', 'toolEdit'] as const
+export const AGENT_CHAT_MISSIONS = [
+  'skillEdit',
+  'toolEdit',
+  'harnessEdit',
+  'datasetEdit',
+  'judgeEdit',
+  'runtimeEdit',
+  'environmentEdit',
+  'agentCraft',
+  'viewAnalyze',
+  'scorecardAnalyze',
+  'runAnalyze',
+  'knowledgeAsk',
+] as const
 export const agentChatMissionSchema = z.enum(AGENT_CHAT_MISSIONS)
 export type AgentChatMission = z.infer<typeof agentChatMissionSchema>
+
+// 임무의 성격 — 패널이 진입을 어떻게 다루는지 이걸로 갈린다. `edit`(저작물을 고치는 전용 작업)는 항상 새 대화에서
+// 시작하고(남의 스레드를 이어받을 일이 없다) 기본 라벨이 "대화로 편집하기"가 된다. `analyze`/`ask`(결과·지식을 두고
+// 묻는 진입)는 열려 있는 대화에 참조 칩만 얹는다 — 스코어카드 둘을 한 대화에서 비교하는 흐름을 끊지 않기 위해서다.
+export const AGENT_CHAT_MISSION_INTENTS = {
+  skillEdit: 'edit',
+  toolEdit: 'edit',
+  harnessEdit: 'edit',
+  datasetEdit: 'edit',
+  judgeEdit: 'edit',
+  runtimeEdit: 'edit',
+  environmentEdit: 'edit',
+  agentCraft: 'edit',
+  viewAnalyze: 'analyze',
+  scorecardAnalyze: 'analyze',
+  runAnalyze: 'analyze',
+  knowledgeAsk: 'ask',
+} as const satisfies Record<AgentChatMission, 'edit' | 'analyze' | 'ask'>
+export type AgentChatMissionIntent = (typeof AGENT_CHAT_MISSION_INTENTS)[AgentChatMission]
 
 export const agentAttachmentSchema = z.object({
   name: z.string(),

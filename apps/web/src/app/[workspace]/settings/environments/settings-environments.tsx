@@ -26,18 +26,19 @@ export function SettingsEnvironments(props: {
 }) {
   const infra = useInfraPanelOptional()
 
+  // 이 표면의 대화 진입은 전부 환경을 만들거나 고치는 작업이므로 임무는 여기서 고정한다(워크벤치는 임무를 모른다).
   const dispatch = useCallback(
     (reference?: AgentReference, prompt?: string) => {
       const framed = typeof window !== 'undefined' && window.self !== window.top
       if (framed) {
         window.parent.postMessage(
-          { type: MENTION_IN_CHAT_MESSAGE, reference, prompt },
+          { type: MENTION_IN_CHAT_MESSAGE, reference, prompt, mission: 'environmentEdit' },
           window.location.origin
         )
         return
       }
-      if (prompt !== undefined) infra?.askAgent(prompt, reference)
-      else if (reference !== undefined) infra?.mentionInChat(reference)
+      if (prompt !== undefined) infra?.askAgent(prompt, reference, 'environmentEdit')
+      else if (reference !== undefined) infra?.mentionInChat(reference, 'environmentEdit')
     },
     [infra]
   )

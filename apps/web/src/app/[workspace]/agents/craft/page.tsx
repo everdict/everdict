@@ -35,7 +35,7 @@ export default async function AgentCraftPage({
       <div className="max-w-3xl">
         <AgentCraftStudio {...(agent ? { agentId: agent } : {})} initialSpec={initialSpec} />
       </div>
-      <AgentChatOpener prompt={t('kickoffPrompt')} />
+      <AgentChatOpener prompt={t('kickoffPrompt')} mission="agentCraft" />
     </div>
   )
 }

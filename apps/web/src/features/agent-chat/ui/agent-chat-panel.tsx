@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import {
+  AGENT_CHAT_MISSION_INTENTS,
   agentMessageListSchema,
   agentMessageSchema,
   agentSessionListSchema,
@@ -638,11 +639,18 @@ export function AgentChatPanel({
   // the draft prompt, then clear the buffer so a later tab re-mount (the agent tab unmounts when another infra
   // tab is shown) does not re-inject the same prefill. A prompt overwrites only an empty composer — never a
   // member's in-progress draft.
-  // A MISSION entry additionally lands on a fresh draft when a persisted conversation is open: the task framing
-  // only shows on an empty chat, and an editing mission has no business continuing someone else's thread.
+  // An EDIT-intent mission additionally lands on a fresh draft when a persisted conversation is open: the task
+  // framing only shows on an empty chat, and an editing mission has no business continuing someone else's thread.
+  // Analyze/ask missions keep the open thread — comparing two scorecards in one conversation must stay possible —
+  // and their framing simply applies whenever the chat is (or next becomes) empty.
   useEffect(() => {
     if (!pendingMention) return
-    if (pendingMention.mission && activeId !== null) newConversation()
+    if (
+      pendingMention.mission &&
+      AGENT_CHAT_MISSION_INTENTS[pendingMention.mission] === 'edit' &&
+      activeId !== null
+    )
+      newConversation()
     if (pendingMention.ref) addReference(pendingMention.ref)
     if (pendingMention.prompt)
       setInput((prev) => (prev.trim().length > 0 ? prev : (pendingMention.prompt ?? '')))

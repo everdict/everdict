@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   ArrowDown,
+  ChartSpline,
   Check,
   ChevronDown,
   Cpu,
+  MessageCircleQuestion,
   MessageSquarePlus,
   Pencil,
   ShieldCheck,
@@ -15,6 +17,7 @@ import { useTranslations } from 'next-intl'
 
 import { PinControl } from '@/features/analysis-artifacts'
 import {
+  AGENT_CHAT_MISSION_INTENTS,
   AGENT_PERMISSION_MODES,
   type AgentAttachmentInput,
   type AgentChatMission,
@@ -279,10 +282,15 @@ export function ConversationView({
           {isEmpty ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 px-5 text-center">
               <div className="grid size-11 place-items-center rounded-2xl bg-primary/12 text-primary">
-                {mission ? (
-                  <Pencil className="size-5" strokeWidth={1.75} />
-                ) : (
+                {/* 임무의 성격이 아이콘을 고른다 — 고치는 진입(연필) / 파고드는 진입(차트) / 묻는 진입(말풍선). */}
+                {mission === null || mission === undefined ? (
                   <Sparkles className="size-5" strokeWidth={1.75} />
+                ) : AGENT_CHAT_MISSION_INTENTS[mission.kind] === 'edit' ? (
+                  <Pencil className="size-5" strokeWidth={1.75} />
+                ) : AGENT_CHAT_MISSION_INTENTS[mission.kind] === 'analyze' ? (
+                  <ChartSpline className="size-5" strokeWidth={1.75} />
+                ) : (
+                  <MessageCircleQuestion className="size-5" strokeWidth={1.75} />
                 )}
               </div>
               <div className="space-y-1">

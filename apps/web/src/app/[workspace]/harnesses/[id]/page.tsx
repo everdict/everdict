@@ -243,6 +243,7 @@ export default async function HarnessDetailPage({
                   ...(active ? { version: active } : {}),
                   label: spec.id,
                 }}
+                mission="harnessEdit"
               />
               {versions.length > 1 ? (
                 <HarnessVersionSwitcher

@@ -162,7 +162,7 @@ export default async function RuntimeDetailPage({
         description={t('detailDescription')}
         actions={
           <div className="flex items-center gap-2">
-            <MentionInChatButton reference={{ type: 'runtime', id, label: id }} />
+            <MentionInChatButton reference={{ type: 'runtime', id, label: id }} mission="runtimeEdit" />
             {editable && (
               <Link
                 href={`/${workspace}/runtimes/${encodeURIComponent(id)}/edit`}

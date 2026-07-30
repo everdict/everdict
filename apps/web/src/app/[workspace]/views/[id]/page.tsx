@@ -41,7 +41,10 @@ export default async function ViewPage({
         }
         actions={
           <div className="flex items-center gap-2">
-            <MentionInChatButton reference={{ type: 'view', id: view.id, label: view.name }} />
+            <MentionInChatButton
+              reference={{ type: 'view', id: view.id, label: view.name }}
+              mission="viewAnalyze"
+            />
             <Link
               href={`/${workspace}/views`}
               className={buttonVariants({ size: 'sm', variant: 'secondary' })}

@@ -151,6 +151,7 @@ export default async function JudgeDetailPage({
                   version: judge.version,
                   label: judge.id,
                 }}
+                mission="judgeEdit"
               />
               {versions.length > 1 && (
                 <Link

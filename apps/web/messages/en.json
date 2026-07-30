@@ -3571,6 +3571,106 @@
           "Add a worked example that shows a real call",
           "Try this tool on a real input and tell me where it breaks"
         ]
+      },
+      "harnessEdit": {
+        "title": "Improve this harness together",
+        "body": "Say what should change. The agent reads the harness spec, applies your changes, and registers them as a new immutable version for your approval — existing scorecards keep pointing at the versions they ran.",
+        "suggestions": [
+          "Tighten the command and flags this harness launches with",
+          "Move the pinned images to the latest digests and register a new version",
+          "Explain what changed between the last two versions",
+          "Run a small scorecard against it to sanity-check the change"
+        ]
+      },
+      "datasetEdit": {
+        "title": "Refine this dataset together",
+        "body": "Say what should change. The agent reads the cases, edits or adds them, and registers a new immutable version for your approval — past scorecards keep the version they ran against.",
+        "suggestions": [
+          "Add cases that cover a failure mode we keep missing",
+          "Rewrite ambiguous case instructions so grading is unambiguous",
+          "Review the pass criteria case by case and flag weak ones",
+          "Register the result as a new version with a one-line note"
+        ]
+      },
+      "judgeEdit": {
+        "title": "Tune this judge together",
+        "body": "Say what should change. The agent reads the judge's spec, sharpens its criteria, and registers a new version for your approval — try it on a recent trace before you switch scorecards over.",
+        "suggestions": [
+          "Sharpen the verdict criteria so borderline cases stop flapping",
+          "Make it demand concrete evidence before a pass",
+          "Dry-run it on a recent trace and show me the verdict",
+          "Register the result as a new version with a one-line note"
+        ]
+      },
+      "runtimeEdit": {
+        "title": "Adjust this runtime together",
+        "body": "Say what should change. The agent inspects the runtime, updates its spec — capacity, isolation, auth wiring — and saves it for your approval.",
+        "suggestions": [
+          "Check this runtime's live capacity and health",
+          "Fix the cluster auth wiring and probe the connection again",
+          "Tighten the isolation settings for untrusted workloads",
+          "Explain which runs get routed here and why"
+        ]
+      },
+      "environmentEdit": {
+        "title": "Shape this environment together",
+        "body": "Say what you need. The agent guides the image push, verifies the image is reachable, and registers or updates the environment for your approval.",
+        "suggestions": [
+          "Walk me from pushing my image to registering it as an environment",
+          "Verify the image can be pulled from the workspace registry",
+          "Edit the contract so harnesses know how to reach it",
+          "Show me which harnesses use this environment today"
+        ]
+      },
+      "agentCraft": {
+        "title": "Craft an agent together",
+        "body": "Describe the job in plain language. The agent drafts the spec on the canvas, test-drives it with you, and registers it when you approve.",
+        "suggestions": [
+          "Draft an agent that watches scorecards and reports regressions",
+          "Give the draft only the tools it actually needs",
+          "Test-drive the draft on a realistic task",
+          "Register it and put it on a schedule"
+        ]
+      },
+      "viewAnalyze": {
+        "title": "Analyze with the agent",
+        "body": "Describe what you want to see. The agent drives the canvas live — grouping, filtering, charting — pins the artifacts worth keeping, and saves the lens as a View when you ask.",
+        "suggestions": [
+          "Group by model and chart the score trend",
+          "Filter to the failures and explain what they share",
+          "Build a dashboard of the metrics I should watch",
+          "Save this canvas as a view for the team"
+        ]
+      },
+      "scorecardAnalyze": {
+        "title": "Dig into this scorecard",
+        "body": "Ask anything about the results. The agent queries the cases, classifies failures, compares against a baseline, and charts what it finds.",
+        "suggestions": [
+          "Summarize the results and the biggest surprises",
+          "Classify the failing cases by root cause",
+          "Diff against the previous scorecard and list regressions",
+          "Chart the score and cost per case"
+        ]
+      },
+      "runAnalyze": {
+        "title": "Unpack this run",
+        "body": "Ask anything about this run. The agent walks the trace step by step and explains the verdict, the cost, and where things went sideways.",
+        "suggestions": [
+          "Walk through the trace and explain the verdict",
+          "Where did the time and tokens go?",
+          "Pinpoint the step where it went wrong",
+          "Compare it with a passing run of the same case"
+        ]
+      },
+      "knowledgeAsk": {
+        "title": "Ask about this entry",
+        "body": "Ask anything about this knowledge entry. The agent answers from the workspace knowledge graph — what it says, where it came from, and what links to it.",
+        "suggestions": [
+          "Summarize this entry in two sentences",
+          "What links here, and what does it link to?",
+          "Trace where this knowledge came from",
+          "Is anything in the workspace contradicting it?"
+        ]
       }
     },
     "errorSend": "Couldn’t send the message. Try again.",
@@ -3578,6 +3678,7 @@
     "errorGeneric": "Something went wrong.",
     "mentionAdd": "Reference a workspace entity",
     "sendToChat": "Analyze in chat",
+    "editInChat": "Edit in chat",
     "canvasLinked": "Analysis canvas linked — the agent sees what you see",
     "canvasLinkedNamed": "Analysis canvas linked · {name}",
     "mentionRemove": "Remove reference",

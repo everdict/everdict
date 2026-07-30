@@ -177,7 +177,7 @@ function AskInChat({ node }: { node: KnowledgeNodeView }) {
   }
   return (
     <div className="mt-2.5">
-      <MentionInChatButton reference={reference} label={t('askInChat')} />
+      <MentionInChatButton reference={reference} label={t('askInChat')} mission="knowledgeAsk" />
     </div>
   )
 }

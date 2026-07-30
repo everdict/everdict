@@ -202,6 +202,7 @@ export default async function RunDetailPage({
             <div className="flex items-center gap-2">
               <MentionInChatButton
                 reference={{ type: 'run', id: run.id, label: run.id.slice(0, 8) }}
+                mission="runAnalyze"
               />
               {/* 재생 가능한 run이면 "리플레이" 배지 → 아래 #replay 섹션으로 점프(발견성). agent trace만 있어도
                   재생되므로(하네스 무관) recordingRef 없이 trace만으로도 노출한다. */}

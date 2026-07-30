@@ -49,10 +49,13 @@ export default async function AnalyzePage({
             label={t('analyzeWithAgent')}
             prompt={agentPrompt}
             reference={agentReference}
+            mission="viewAnalyze"
           />
         }
       />
-      {flat.chat === '1' && <AgentChatOpener prompt={agentPrompt} reference={agentReference} />}
+      {flat.chat === '1' && (
+        <AgentChatOpener prompt={agentPrompt} reference={agentReference} mission="viewAnalyze" />
+      )}
       {error ? (
         <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : scorecards.length === 0 ? (

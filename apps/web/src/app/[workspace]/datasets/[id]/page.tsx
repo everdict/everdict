@@ -220,6 +220,7 @@ export default async function DatasetDetailPage({
                   version: dataset.version,
                   label: dataset.id,
                 }}
+                mission="datasetEdit"
               />
               {versions.length > 1 ? (
                 <VersionSwitcher

@@ -406,6 +406,7 @@ export default async function ScorecardDetailPage({
             <div className="flex items-center gap-2">
               <MentionInChatButton
                 reference={{ type: 'scorecard', id: record.id, label: record.id.slice(0, 8) }}
+                mission="scorecardAnalyze"
               />
               {/* Download the self-contained analysis artifact (summary + per-case verdict/scores) — a presigned
                   object-store URL. Shown only when the ref is a browser-fetchable http(s) URL (S3/MinIO); the dev

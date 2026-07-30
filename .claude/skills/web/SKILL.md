@@ -94,13 +94,17 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   verbatim · the pinned source) and lets the member act on it (bind its secret via `SecretPicker`, connect-test or
   run it, edit it in chat). A tool key carries `:`/`/`, so encode it into the segment on both sides.
 - **Domain-specific chat entries carry a MISSION**: a specialized entry like a skill detail's "대화로 편집하기"
-  passes `mission` to `MentionInChatButton` → `PendingMention.mission` → `AgentChatPanel`. The chat surface is
-  UNCHANGED; only the empty-state title/body/suggestions swap to that task's catalog block
-  (`agentChat.missions.<kind>`, vocabulary in `entities/agent-session`), and the empty state names the target
-  from the reference chip that arrived with it. A mission entry lands on a FRESH DRAFT when a persisted
-  conversation is open (the framing only shows on an empty chat) and clears on new-conversation / session
-  switch. A new mission = one enum value + one catalog block in BOTH locales + the prop at the entry — never a
-  second chat component. Generic "Analyze in chat" entries pass no mission and keep the default copy.
+  passes `mission` to `MentionInChatButton`/`AskAgentButton`/`AgentChatOpener` → `PendingMention.mission` →
+  `AgentChatPanel`. The chat surface is UNCHANGED; only the empty-state icon/title/body/suggestions swap to that
+  task's catalog block (`agentChat.missions.<kind>`, vocabulary in `entities/agent-session`), and the empty state
+  names the target from the reference chip that arrived with it. Every mission has an INTENT
+  (`AGENT_CHAT_MISSION_INTENTS`): `edit` (skill/tool/harness/dataset/judge/runtime/environment/agentCraft) lands on
+  a FRESH DRAFT when a persisted conversation is open and defaults the button caption to "대화로 편집하기";
+  `analyze`/`ask` (view/scorecard/run · knowledge) keep the open thread — comparing two scorecards in one
+  conversation must survive the entry — and only frame the chat when it is empty. Mission state clears on
+  new-conversation / session switch. A new mission = one enum value + one intent entry + one catalog block in BOTH
+  locales + the prop at the entry — never a second chat component. Every detail-page chat entry passes its mission;
+  only truly generic surfaces (the @-picker, the trace browser's chip-adder) stay mission-less with default copy.
 - **State toggles** = a status icon + click dropdown (`shared/ui/dropdown-menu.tsx`; e.g.
   `widgets/notification-bell/`), not text links.
 - **Infra split view** (`widgets/infra-panel`): infra concerns (schedules · runtimes · runs · work queue · a
