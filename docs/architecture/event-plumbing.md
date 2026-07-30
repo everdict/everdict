@@ -260,9 +260,26 @@ resume from their own cursor/history.
   so trigger FILTERS can select one schedule — a time-driven agent is now just a subscription on the
   clock's tick; Temporal stays the clock, its consumer became ordinary). CI needed no new kind: a
   CI-submitted batch's `scorecard.submitted` fact already carries `origin` (`github-actions`) +
-  provenance in its payload — filterable today. Remaining rungs: the one subscription registry
-  (relocating agent trigger fields once the shape holds), webhooks as a reaction kind, and the
-  T-d `reaction:<eventId>` multi-step executor.
+  provenance in its payload — filterable today. **Registry rung SHIPPED (W6 backlog close-out)**: the one
+  subscription registry is live — `SubscriptionRecord {selector, reaction, governance}` (contracts, mig
+  0100, `/subscriptions` + MCP parity, authz reuses `agents:read/write`), with the selector grammar shared
+  verbatim with agent triggers through `@everdict/domain` `eventSelectorMatches` (the agent activator's
+  `triggerMatches` delegates to it, so the two can never drift). Reactions are a closed union, each with a
+  live executor: `agent` (matched INSIDE the activation engine next to spec triggers — same loop guards,
+  durable per-(agent, event) dedup, per-rule `cooldownSec`, one-pass collapse with the agent's own
+  trigger), `webhook` (the `subscriptions:reactions` E1 cursor consumer — pointer-only JSON,
+  `x-everdict-event` for receiver dedup, optional HMAC `x-everdict-signature`, failures ride
+  retry → dead-letter), and `workflow` (the T-d executor below; without Temporal the consumer skips
+  VISIBLY, never a half-run imitation). **T-d SHIPPED**: `reaction:<eventId>` runs as
+  `everdict-reaction-<eventId>-<subscriptionId>` — the deterministic id is the dedup (redelivery →
+  AlreadyStarted, swallowed); the workflow walks the steps, one agent activation per step over the
+  activity → CP → agent-service bridge (`/internal/reactions/step(+status)` →
+  `/internal/activations(…/status)`), waiting out each run under a per-step budget (awaiting_approval
+  counts as alive — a HITL park mid-chain is exactly what durability buys); `activateDirect` is idempotent
+  via `findTriggerSession` (a retry gets the EXISTING session back, never a second run); ops family
+  `reaction` is in `DRIVER_WORKFLOW_FAMILIES` from day one. Remaining rung: relocating the agent-spec
+  trigger fields onto subscriptions once the shape holds (additive always), and reactions-through-the-§5-
+  gate hardening as reaction runs join the admission path like any other agent activation.
 - **E4 — Trace-derived facts.** Thresholds/anomalies over the owned trace store (needs native-obs N2) —
   continuous operations: the trace store perceives, the log announces, agents react, runs record.
   **Threshold rung SHIPPED (master-plan W6)**: tenant-configured thresholds

@@ -96,7 +96,14 @@ record; the agent loop stays in the agent service — the workflow owns ONLY the
    idempotent write-back, so it takes the in-process pass).
 4. **Heavy event reactions (the E3 executor)** — a thin consumer starts `workflowId = eventId`
    (idempotent by construction); the workflow runs the multi-step reaction. First residents: regression
-   triage, the scorecard-fix-PR chain.
+   triage, the scorecard-fix-PR chain. **SHIPPED (W6 backlog close-out)** as `reactionWorkflow`
+   (`everdict-reaction-<eventId>-<subscriptionId>` — the id includes the rule, so two subscriptions on
+   one fact chain independently while redelivery still collapses): the `subscriptions:reactions` cursor
+   consumer starts it for `reaction.kind="workflow"` subscriptions; each step = one agent activation over
+   the activity → CP → agent-service internal bridge, watched to terminal under a per-step budget
+   (`awaiting_approval` counts as alive — a HITL park mid-chain is exactly what durability buys). A step
+   that ends `failed`/`cancelled`/skipped/timed out ends the chain; the workflow adds no judgment — the
+   runs already narrate on the log. Ops family `reaction` (ledger id = `<eventId>-<subscriptionId>`).
 
 **Tier 2 — adopt opportunistically:** cascade-cancel walker (O8: done = every non-terminal descendant
 cancelled; big trees need retries against runtimes) · pull-ingest shim pipeline (pull → materialize →
