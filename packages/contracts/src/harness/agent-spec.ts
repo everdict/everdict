@@ -36,6 +36,9 @@ export const TRIGGERABLE_EVENT_KINDS = [
   "knowledge.proposed",
   "knowledge.approved",
   "budget.exceeded",
+  // E3 time events: a time-driven agent = a subscription on the clock's tick (bounded by the schedule's
+  // own cadence + the activation cooldown).
+  "schedule.fired",
 ] as const;
 // Compile-time subset guarantee: every triggerable kind is a real platform-event kind.
 const _triggerableAreKinds: readonly PlatformEventKind[] = TRIGGERABLE_EVENT_KINDS;

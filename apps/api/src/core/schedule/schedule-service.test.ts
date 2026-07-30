@@ -229,6 +229,39 @@ describe("ScheduleService.fire — firing (called by the internal route)", () =>
     });
   });
 
+  it("every fire lands schedule.fired on the log (E3 time events) — payload carries scheduleId for trigger filters", async () => {
+    const store = new InMemoryScheduleStore();
+    const emitted: Array<{ kind: string; subject: { type: string; id: string }; payload?: Record<string, unknown> }> =
+      [];
+    const s = new ScheduleService({
+      store,
+      newId: () => "sch-1",
+      now: () => "2026-06-29T03:00:00.000Z",
+      submitScorecard: async () => ({ id: "sc-fired", status: "queued" }),
+      events: {
+        async emit(input) {
+          emitted.push({
+            kind: input.kind,
+            subject: input.subject,
+            ...(input.payload ? { payload: input.payload } : {}),
+          });
+          return undefined;
+        },
+      },
+    });
+    await s.create({ ...base, runTemplate });
+    await s.fire("acme", "sch-1");
+    expect(emitted).toEqual([
+      {
+        kind: "schedule.fired",
+        subject: { type: "schedule", id: "sch-1" },
+        // The matcher's filters read the PAYLOAD, so the id rides there too (a time-driven agent = a
+        // subscription on schedule.fired + a scheduleId filter).
+        payload: { scheduleId: "sch-1", name: base.name, mode: "scorecard" },
+      },
+    ]);
+  });
+
   it("a pull-mode schedule fires a trace evaluation over a rolling window (ingestPull, correlate:id, since=now-windowHours)", async () => {
     // "Every day, judge the last 24h of production traces": the fire enumerates the rolling window's traces and judges
     // them directly (no dataset, no harness run).

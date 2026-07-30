@@ -2,6 +2,7 @@ import { ScheduleService } from "@everdict/application-control";
 import type {
   AgentReportRunner,
   NotificationService,
+  PlatformEventService,
   ScorecardService,
   TraceSourceService,
   ViewSnapshotService,
@@ -46,6 +47,8 @@ export function wireScheduleService(
     notificationService?: NotificationService;
     // Optional — accumulate the View's numbers on the workspace filesystem on every report fire.
     viewSnapshotService?: ViewSnapshotService;
+    // Optional — schedule.fired time events onto the platform log (E3). Absent = fires stay silent.
+    platformEventService?: PlatformEventService;
   },
 ): ScheduleService {
   const {
@@ -112,6 +115,7 @@ export function wireScheduleService(
       : undefined;
   const scheduleService = new ScheduleService({
     store: scheduleStore,
+    ...(deps.platformEventService ? { events: deps.platformEventService } : {}),
     ...(temporalAddress ? { driver: new TemporalScheduleDriver({ address: temporalAddress }) } : {}),
     submitScorecard: (sc) => scorecardService.submit(sc),
     // Pull-mode fire — judge the recent traces of a rolling window (no harness run). listTraceIds enumerates the window

@@ -540,6 +540,7 @@ async function main(): Promise<void> {
     ...(traceSourceService ? { traceSourceService } : {}),
     notificationService, // report-mode fire completion fan-out (analysis-studio V4)
     viewSnapshotService, // report fires also accumulate the View's numbers on the workspace filesystem
+    platformEventService, // E3: every fire lands schedule.fired on the log (time-driven agents subscribe to it)
   });
 
   const queueService = buildQueue({

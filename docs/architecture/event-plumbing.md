@@ -255,7 +255,14 @@ resume from their own cursor/history.
   Mattermost re-base (its coverage is wider than the facts — machine-fired completions post too; it stays
   direct until the E3 subscription registry makes reactions one mechanism).
 - **E3 — Convergence.** Subscription registry; `schedule.fired`; CI events; reactions admitted through
-  the §5 gate (needs execution-model P4).
+  the §5 gate (needs execution-model P4). **Producer rung SHIPPED (master-plan W6)**: every schedule fire
+  lands `schedule.fired` on the log (subject = the schedule; payload carries `scheduleId`/`name`/`mode`
+  so trigger FILTERS can select one schedule — a time-driven agent is now just a subscription on the
+  clock's tick; Temporal stays the clock, its consumer became ordinary). CI needed no new kind: a
+  CI-submitted batch's `scorecard.submitted` fact already carries `origin` (`github-actions`) +
+  provenance in its payload — filterable today. Remaining rungs: the one subscription registry
+  (relocating agent trigger fields once the shape holds), webhooks as a reaction kind, and the
+  T-d `reaction:<eventId>` multi-step executor.
 - **E4 — Trace-derived facts.** Thresholds/anomalies over the owned trace store (needs native-obs N2) —
   continuous operations: the trace store perceives, the log announces, agents react, runs record.
 

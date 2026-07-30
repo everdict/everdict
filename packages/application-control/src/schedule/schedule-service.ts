@@ -8,6 +8,7 @@ import {
 } from "@everdict/contracts";
 import { Schedule, type ScheduleSpec, classifyFailure } from "@everdict/domain";
 import type { AgentReportRunner } from "../ports/agent-report-runner.js";
+import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { ScheduleStore } from "../ports/schedule-store.js";
 import type { RunScorecardInput } from "../scorecard/scorecard-service.js";
 import type { PullIngestInput } from "../scorecard/scorecard-shared.js";
@@ -51,6 +52,9 @@ export type ScheduleRecordWithNext = ScheduleRecord & { nextFireTimes?: string[]
 
 export interface ScheduleServiceDeps {
   store: ScheduleStore;
+  // E3 time events (event-plumbing.md §6): every fire lands schedule.fired on the log — Temporal stays the
+  // clock, its consumers become ordinary subscribers. Best-effort by the emit contract.
+  events?: PlatformEventEmitter;
   // Temporal sync — if not injected, schedules are only stored/managed and never fire (Temporal-less dev path).
   driver?: ScheduleDriver;
   // Called on a BATCH-mode fire (= ScorecardService.submit). If not injected, a batch fire throws BadRequest (firing disabled).
@@ -201,6 +205,20 @@ export class ScheduleService {
   async fire(tenant: string, id: string): Promise<{ scorecardId?: string; artifactId?: string }> {
     const schedule = await this.getRecord(tenant, id); // 404
     const t = schedule.runTemplate;
+    // The tick is a FACT: a time-driven agent is just a subscription on schedule.fired (+ a scheduleId
+    // filter — filters read the payload, so the id rides there too). The fire never depends on the emit.
+    void this.deps.events?.emit({
+      workspace: tenant,
+      kind: "schedule.fired",
+      subject: { type: "schedule", id },
+      actor: schedule.createdBy,
+      payload: {
+        scheduleId: id,
+        name: schedule.name,
+        mode: t.report ? "report" : t.pull ? "pull" : "scorecard",
+      },
+      message: `Schedule "${schedule.name}" fired`,
+    });
     const { submitScorecard, ingestPull, listTraceIds, reportRunner } = this.deps;
     // Firer-configured checks live OUTSIDE the try: a missing firer is a deployment-config problem, not a schedule-config
     // one, so it must NOT auto-disable the schedule (the catch's classifyFailure would). Each mode needs its own firer.
