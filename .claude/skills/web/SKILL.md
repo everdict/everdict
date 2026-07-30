@@ -145,7 +145,10 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   MIRRORS the class tables in `lib/file-kind.ts` because runtime-decoupling forbids importing contracts values,
   so keep the two in step. `CodeEditor` takes a wide `CodeLanguage`: a new language is a lazy
   `@codemirror/legacy-modes` entry, never a second editor, and unknown paths render as `'plain'` rather than
-  guessing. Anything the browser can't show still downloads (`lib/file-bytes.ts`, client-side blob).
+  guessing. Anything the browser can't show still downloads (`lib/file-bytes.ts`, client-side blob). **Run**
+  appears for runnable extensions ONLY when `GET /me` reports `config.fileExecution` (the deployment composed an
+  execution driver) AND the member may write — never a button whose only possible answer is 404; the result
+  renders in `ui/execution-output.tsx` like a terminal (a non-zero exit is a result, not an error toast).
 - **Secret-name inputs** are never free text — use `SecretPicker` from `features/pick-secret`
   (combobox over preloaded names + "new" inline create; `defaultMultiline` for PEM/kubeconfig).
   Used by harness env, GHE App private key, Mattermost tokens.

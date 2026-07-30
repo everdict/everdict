@@ -30,6 +30,14 @@ paths in (e.g. the runner's `~/.codex` login). Consumed by the managed `DockerBa
 (`packages/backends/src/orchestrators/docker-backend.ts`) AND the self-hosted runner's `docker` capability
 (`packages/self-hosted-runner/src/run-leased-job.ts`) — one `case.image` definition runs managed OR local identically.
 
+## Second consumer: running one workspace file
+`FileExecutionService` (`@everdict/application-control` `fs/file-execution-service.ts`) provisions a Driver per
+RUN of a workspace file (the Files viewer's "Run" / `run_file`): write the file in → `timeout <sec> sh -c
+'<interpreter> ./<name>'` → collect stdout/stderr + the files it produced → `dispose()` in a `finally`. Composed
+only where a container runtime exists (`EVERDICT_FILE_EXECUTION_DRIVER=docker`); **never LocalDriver** — that one
+is for code already inside a sandbox (agent, job runner), and the control plane is not one. Interpreter/image
+policy is pure domain (`fileRunPlanFor`). See `docs/architecture/workspace-filesystem.md` (Running a file).
+
 ## Driver vs Backend
 - **Backend** (`@everdict/backends`) = *placement*: dispatches the job-runner job to an orchestrator; isolation
   = the orchestrator runtime. It never runs the harness itself (see skill `backends`).

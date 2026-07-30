@@ -54,8 +54,8 @@ move(tenant, from, to) → FsEntry            // file rename or whole-subtree mo
 
 | Surface | What |
 | --- | --- |
-| HTTP (`apps/api` `api/fs/`) | `GET /fs/entries` · `GET/PUT /fs/file` · `POST /fs/directories` · `POST /fs/move` · `DELETE /fs/entry` — thin routes over `FsService` (application-control): utf8-vs-base64 shaping on read, strict base64 decode on write, miss → 404. |
-| MCP (parity) | `list_files` / `get_file` (read-classified by prefix) · `write_file` / `make_directory` / `move_file` / `delete_file` (permission-gated; `delete_` is additionally guarded in auto mode). |
+| HTTP (`apps/api` `api/fs/`) | `GET /fs/entries` · `GET/PUT /fs/file` · `POST /fs/directories` · `POST /fs/move` · `POST /fs/executions` (see **Running a file**) · `DELETE /fs/entry` — thin routes over `FsService` (application-control): utf8-vs-base64 shaping on read, strict base64 decode on write, miss → 404. |
+| MCP (parity) | `list_files` / `get_file` (read-classified by prefix) · `write_file` / `make_directory` / `move_file` / `run_file` / `delete_file` (permission-gated; `delete_` is additionally guarded in auto mode). |
 | Conversational agent | Bridge-all picks the tools up with no extra wiring; the system prompt's **Files** section sets the convention and the per-turn Environment names the conversation's **task directory** (`tasks/<conversation-id>/`) — each task's working files land in its own area, and finished deliverables get promoted to the shared library (`reports/` · `data/` · `artifacts/`). |
 | Web (`/[workspace]/files`) | Lazy tree + viewer/editor (every class in **File types** below — prose, tables, code, media, download) + a bash-style shell (`ls cd cat tree mkdir touch echo>/>> cp mv rm`) sharing one directory cache. |
 | Settings › Files | The workspace filesystem browsed in-service (never the object-storage console): the page is the folder tree ALONE, and a selected file renders interactively in the right-hand split-view panel (the infra panel's purpose-built `files` tab — the full **File types** matrix below, member editing; a panel-side mutation bumps `fsRevision` so the tree refetches in place). No shell and no storage/cleanup surface here. `GET /fs/usage` + `DELETE /fs` (settings:write) stay API/MCP-only ops surfaces (`get_fs_usage` / `delete_all_files`). |
@@ -128,10 +128,40 @@ FsActor    = { kind: member|agent|system, subject, agentId?, agentName?, convers
   revision's bytes as a NEW revision carrying `restoredFrom`, so a rollback is itself audited. A move rewrites
   the ledger's stored path (`rename`), so history follows a file instead of starting over; a deleted path keeps
   its history, and re-creating it continues the numbering.
-- **Surfaces**: `GET /fs/revisions` · `GET /fs/revisions/content` · `POST /fs/revisions/restore`, with MCP
-  parity (`list_file_revisions` / `get_file_revision` / `restore_file_revision`, plus `write_file`'s
-  `base_revision`). The web renders them as the viewer's **History** panel (author line, publish message,
-  revision preview, restore) and the **merge dialog** on a refused save.
+- **The whole-tree wipe is the ONE exception**: `DELETE /fs` (admin) purges the ledger AND the revision blobs
+  (`FsRevisionStore.purge` + `WorkspaceFs.removeRevisionBlobs`), reporting `purgedRevisions`. History no file
+  references would otherwise surprise whoever pressed "empty the filesystem" and quietly keep costing storage.
+  Deleting a single entry deliberately keeps its history — that is what makes a delete recoverable.
+- **Usage tells the truth about it**: `GET /fs/usage` carries `history: {revisions, bytes}` alongside the tree
+  totals, summed from the ledger's own `size` column (one aggregate — never a bucket walk). With unlimited
+  retention this outgrows the visible tree on an actively-edited workspace, so hiding it would misreport what
+  the workspace stores.
+- **Attribution reaches the projections too**: saving a skill or a knowledge entry publishes its body revision
+  as that MEMBER (`writeSkillContent`/`writeKnowledgeBody` take an `FsActor`), so a Settings edit, a shell edit
+  and an agent's `write_file` land in one comparable history. Lazy legacy backfill stays deliberately
+  actor-less — it is machinery, not authorship, and reads as `system`.
+- **Surfaces**: `GET /fs/revisions` (paged) · `GET /fs/revisions/content` · `GET /fs/revisions/diff` ·
+  `POST /fs/revisions/restore`, with MCP parity (`list_file_revisions` / `get_file_revision` /
+  `diff_file_revisions` / `restore_file_revision`, plus `write_file`'s `base_revision`). The web renders them as
+  the viewer's **History** panel (author line, publish message, revision preview, **compare**, restore) and the
+  **merge dialog** on a refused save.
+- **Diff** (`diffFileText` in `@everdict/domain`) reuses the merge's line matching, so a diff and a merge can
+  never disagree about what changed. It returns HUNKS with context rather than the whole document, and `to`
+  defaults to the LIVE file — the comparison a reader actually wants ("what did this revision change from what
+  I'm looking at?"). Binary or over-cap content comes back `truncated` instead of a fabricated text diff.
+- **Paging** uses the revision NUMBER as a keyset cursor (`before=`), not an opaque token: it is already a
+  dense, monotonic, per-path sequence, and the `(tenant, path, revision DESC)` index makes page 100 cost what
+  page 1 costs.
+- **Reads self-heal the one gap the write ordering can leave.** If a process dies between the ledger append and
+  the head write, the file holds older bytes than its published revision. A read compares the live object to the
+  head revision's recorded SIZE and, on a mismatch, serves the published blob and writes it back. Size (not
+  hash) because both numbers are already in hand — two same-size revisions slip through, the accepted limit of
+  not hashing every read forever.
+- **Anywhere a file backs an entity, its history shows there too**: Settings › Skills detail renders the
+  history of `skills/<id>/SKILL.md`, and a knowledge entry's detail renders `knowledge/<id>.md` — same panel,
+  same component, so an edit made in Settings, in the shell or by an agent is one comparable list. An agent's
+  author line OPENS the conversation it ran in (postMessage `everdict:open-agent-session`, the same channel the
+  comment threads use), because "why did this change?" is answered by the thread, not by the file.
 - Listings deliberately carry no revision (that would be a ledger query per row); `stat`/`read`/`write` do.
 
 ## File types
@@ -175,16 +205,44 @@ Adding a format is **two edits**: a row in the contracts table, and a branch in 
 its own mirror of the class tables (`lib/file-kind.ts`) because runtime-decoupling forbids importing contracts
 values — keep the two in step.
 
+## Running a file
+
+The viewer's **Run** — a `.py`/`.sh`/`.js`/`.ts` file executed in a sandbox that exists for that one command.
+Deliberately NOT an eval: no harness, no grading, no run record. `POST /fs/executions` (+ MCP `run_file`,
+`files:write`) → `FileExecutionService` (application-control) over the `Driver` port.
+
+```
+read the file → provision a container (the language's image, or a caller-chosen one)
+  → write the file in → `timeout <sec> sh -c '<interpreter> ./<name>'`
+  → collect what it printed + what it wrote → dispose (always, in a finally)
+```
+
+- **The interpreter follows the extension; the image is a default.** `fileRunPlanFor` (`@everdict/domain`) is the
+  whole policy — one row per language, and only languages that run in a single invocation (nothing needing a
+  build step). Passing `image` swaps the container without changing the command, so a script can run against a
+  **workspace environment image** and get the dependencies an eval case would.
+- **The timeout is enforced INSIDE the sandbox** (`timeout(1)`), so "it ran too long" is a deterministic exit
+  code (124) rather than a guess from wall-clock. Default 60s, hard cap 300s.
+- **Produced files come back next to the script** — base64 out of the sandbox, published through the normal
+  filesystem write (so they get a revision, attributed to the member or the agent that ran it). That is what
+  makes a run productive rather than merely observable: a chart, a converted document, a generated dataset. An
+  existing path is reported as `skipped`, **never overwritten** — a run is not an edit.
+- **A non-zero exit is a RESULT**, rendered like a terminal would (the traceback is the point), not an error toast.
+- **Opt-in by deployment.** The service is composed only when `EVERDICT_FILE_EXECUTION_DRIVER=docker` (which
+  needs the docker socket mounted into the api container). Absent, the route 404s, the MCP tool does not exist,
+  and `GET /me` reports `config.fileExecution: false` so the web hides Run instead of offering a button whose
+  only possible answer is 404. There is **no local-process fallback**: `LocalDriver` is for code already inside a
+  sandbox (the agent, the job runner) — the control plane is not one.
+
 ### Where each type can go next
 
 The registry answers "does it open". These are the openings for "does it *work*", roughly in ascending cost.
 None is committed; the point is that each one is a branch in one switch, not a new subsystem.
 
-- **Code → run it.** The ChatGPT-artifact move, and the one Everdict is best placed for: the execution layer
-  already exists (Driver + `case.image`, the self-hosted runner, topology sandboxes). "Run this file" is
-  placement plus an output pane, not a new engine — a `.py`/`.sh` dispatched to the workspace's default runtime,
-  stdout streamed back, outputs written into the same folder. The invariant to hold: it runs in the tenant's
-  isolation, never on the control plane.
+- **Code → run it. SHIPPED** — see **Running a file** below. What is still open on this axis: streaming the
+  output while it runs (today the whole run happens inside one request), an execution record to poll or cancel,
+  and placement beyond the control plane's own container runtime (dispatch to Nomad/K8s or a self-hosted runner,
+  reusing the same service behind a different `Driver`).
 - **Notebooks (`.ipynb`).** Today they render as JSON. Cell-wise rendering (markdown cells + code + stored
   outputs) is presentation-only; executing them is the same unlock as running code, one step later.
 - **Spreadsheets.** The CSV grid is the seed — sorting, column stats and a row count are cheap follow-ons.
