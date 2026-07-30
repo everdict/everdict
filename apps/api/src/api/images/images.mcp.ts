@@ -54,8 +54,9 @@ export function registerImagesTools(server: McpServer, ctx: McpToolContext): voi
     {
       description:
         "Inspect a manifest (tag or digest) in this workspace's managed namespace — returns the digest, media " +
-        "type, and platforms or layer count. The digest it reports is what the REGISTRY stored, so pin that " +
-        "rather than a mutable tag when registering an environment.",
+        "type, platforms, size, and (best-effort, from the OCI config blob) the build history the image was " +
+        "made from plus its runtime config (entrypoint/cmd/env/labels). The digest it reports is what the " +
+        "REGISTRY stored, so pin that rather than a mutable tag when registering an environment.",
       inputSchema: {
         repository: z.string().min(1).describe('repository name inside the workspace namespace — "officeqa-env"'),
         reference: z.string().min(1).describe('a tag or digest — "v1.2.0" · "sha256:…"'),

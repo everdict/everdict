@@ -899,6 +899,12 @@ export const controlPlane = {
   listWorkspaceImages: <T>(auth: AuthContext) => call<T>(auth, '/workspace/images'),
   listWorkspaceImageTags: <T>(auth: AuthContext, repository: string) =>
     call<T>(auth, `/workspace/images/${encodeURIComponent(repository)}/tags`),
+  // 태그/다이제스트 하나의 상세 — 핀 다이제스트 + (best-effort) OCI config 유래 빌드 히스토리·런타임 구성·크기.
+  inspectWorkspaceImage: <T>(auth: AuthContext, repository: string, reference: string) =>
+    call<T>(
+      auth,
+      `/workspace/images/manifest?repository=${encodeURIComponent(repository)}&reference=${encodeURIComponent(reference)}`
+    ),
   removeWorkspaceImage: <T>(auth: AuthContext, repository: string) =>
     call<T>(auth, `/workspace/images/${encodeURIComponent(repository)}`, { method: 'DELETE' }),
   // Workspace environment-image adoption (import) — the inventory of adopted environments + pull-usability verify.

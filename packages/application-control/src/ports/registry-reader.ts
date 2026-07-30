@@ -1,17 +1,18 @@
-import type { ImageRegistryCoordinates, ImageRegistryProbeResult, RegistryAuth } from "@everdict/contracts";
+import type {
+  ImageInspect,
+  ImageRegistryCoordinates,
+  ImageRegistryProbeResult,
+  RegistryAuth,
+} from "@everdict/contracts";
 
 // The connection-probe outcome the reader classifies — the ImageRegistryProbeResult minus `credential` (which of
 // the configured secrets was used is the service's concern; the reader only knows whether a credential was given).
 export type RegistryConnectivity = Omit<ImageRegistryProbeResult, "credential">;
 
-// A manifest inspect summary (best-effort — fields depend on the manifest kind).
-export interface ImageManifestInfo {
-  reference: string; // the tag/digest inspected
-  digest?: string; // the Docker-Content-Digest of the manifest
-  mediaType?: string; // the manifest media type (image manifest vs manifest list/index)
-  platforms?: string[]; // "os/arch" entries, for a manifest list / OCI index
-  layerCount?: number; // number of layers, for a single image manifest
-}
+// A manifest inspect (best-effort — fields depend on the manifest kind and on what the backend resolves; the
+// managed store reads the OCI config blob for the build history, a BYO reader may stop at the manifest summary).
+// The shape is the contract's `ImageInspectSchema` — one schema serves the port, the wire response, and the docs.
+export type ImageManifestInfo = ImageInspect;
 
 // Read-only Docker Registry HTTP API v2 client (list tags / inspect a manifest) for ONE resolved registry — the
 // adapter owns the base URL, the v2 bearer/basic token-auth handshake, media-type negotiation, and error remapping

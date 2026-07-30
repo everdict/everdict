@@ -2,7 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { workspaceImageRemoveSchema, workspaceImageTagsSchema } from '@/entities/workspace-image'
+import {
+  workspaceImageInspectSchema,
+  workspaceImageRemoveSchema,
+  type WorkspaceImageInspect,
+} from '@/entities/workspace-image'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -23,16 +27,18 @@ export async function removeWorkspaceImageAction(
   }
 }
 
-// 태그는 목록에 딸려오지 않는다(리포지토리당 레지스트리 호출 1회) — 행을 펼칠 때만 가져온다.
-export async function listWorkspaceImageTagsAction(
-  repository: string
-): Promise<{ ok: true; tags: string[] } | { ok: false; error: string }> {
+// 버전(태그) 하나의 상세 — 상세 화면에서 태그를 고를 때마다 호출된다. 실패는 결과로 돌려 화면이 요약으로 버틴다.
+// (태그 목록은 상세 페이지가 서버에서 읽는다 — 목록 화면의 행 펼침이 상세 라우트로 승격되면서 클라이언트 액션은 없어졌다.)
+export async function inspectWorkspaceImageAction(
+  repository: string,
+  reference: string
+): Promise<{ ok: true; inspect: WorkspaceImageInspect } | { ok: false; error: string }> {
   const ctx = await authContext()
   try {
-    const parsed = workspaceImageTagsSchema.parse(
-      await controlPlane.listWorkspaceImageTags(ctx, repository)
+    const inspect = workspaceImageInspectSchema.parse(
+      await controlPlane.inspectWorkspaceImage(ctx, repository, reference)
     )
-    return { ok: true, tags: parsed.tags }
+    return { ok: true, inspect }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

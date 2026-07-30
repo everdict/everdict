@@ -41,6 +41,11 @@ function fakeApi(seed: Record<string, Record<string, string>> = {}) {
       const digest = repos.get(repository)?.get(reference);
       return { reference, ...(digest ? { digest } : {}) };
     },
+    async inspect(repository, reference, access) {
+      calls.push({ op: "inspect", repository, access });
+      const digest = repos.get(repository)?.get(reference);
+      return { reference, ...(digest ? { digest } : {}) };
+    },
     async deleteManifest(repository, digest, access) {
       calls.push({ op: "delete", repository, access });
       deleted.push(digest);

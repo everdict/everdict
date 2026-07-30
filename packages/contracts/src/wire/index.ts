@@ -68,6 +68,7 @@ export * from "./harness/validate-harness-template-result.js";
 export * from "./environment-adoption/adopted-environment-view.js";
 export * from "./image-registry/image-push-credentials.js";
 export * from "./images/image-catalog.js";
+export * from "./images/image-inspect.js";
 export * from "./images/image-push-grant.js";
 export * from "./images/image-remove.js";
 export * from "./images/image-tags.js";

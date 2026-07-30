@@ -91,7 +91,9 @@ export class ManagedImageStore implements WorkspaceImages {
 
   async inspect(tenant: string, repository: string, reference: string): Promise<ImageManifestInfo> {
     const repo = this.resolve(tenant, repository);
-    return this.opts.api.manifest(repo, reference, this.access(repo, PULL));
+    // The enriched read (config blob → build history/runtime config) — digest-resolution paths (remove) stay on
+    // the cheap `manifest` summary, so only the caller who opens a detail pays the extra round-trips.
+    return this.opts.api.inspect(repo, reference, this.access(repo, PULL));
   }
 
   async mintPushGrant(tenant: string, repository: string): Promise<ImageGrant> {

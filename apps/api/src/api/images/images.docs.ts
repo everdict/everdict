@@ -1,5 +1,6 @@
 import {
   ImageCatalogResponseSchema,
+  ImageInspectResponseSchema,
   ImagePushGrantResponseSchema,
   ImageRemoveResponseSchema,
   ImageTagsResponseSchema,
@@ -107,25 +108,16 @@ const docs = {
   manifest: {
     summary: "Inspect a manifest in the workspace's image namespace",
     description:
-      "Manifest summary (digest, media type, platforms) for a tag or digest in the caller's namespace — the " +
-      "authoritative digest to pin a just-pushed image by. Read is harnesses:read: provenance, not a credential.",
+      "Inspect a tag or digest in the caller's namespace: the authoritative digest to pin a just-pushed image " +
+      "by, plus — best-effort, resolved from the OCI config blob — the build history (the Dockerfile steps the " +
+      "image was made from), the runtime configuration, size, and platform. Read is harnesses:read: provenance, " +
+      "not a credential.",
     tags: ["images"],
     querystring: toJsonSchema(
       z.object({ repository: z.string().min(1), reference: z.string().min(1).describe("Tag or digest") }),
     ),
     response: {
-      200: {
-        description: "Manifest summary",
-        ...toJsonSchema(
-          z.object({
-            reference: z.string(),
-            digest: z.string().optional(),
-            mediaType: z.string().optional(),
-            platforms: z.array(z.string()).optional(),
-            layerCount: z.number().int().optional(),
-          }),
-        ),
-      },
+      200: { description: "Inspect detail", ...toJsonSchema(ImageInspectResponseSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },
