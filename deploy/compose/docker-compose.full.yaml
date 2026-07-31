@@ -227,6 +227,15 @@ services:
       PORT: "8787"
       # ── Persistence: every store on Postgres; migrations apply at startup ──
       DATABASE_URL: postgresql://${POSTGRES_USER:-everdict}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-everdict}
+      # ── The OWNED trace ledger (every sealed trajectory: eval runs, agent turns, OTLP-door arrivals) ──
+      # Empty = rung 1, the Postgres above. Set it (with `--profile clickhouse`, which brings the engine up)
+      # to move ONLY this store to ClickHouse; every other store keeps DATABASE_URL. See .env.full.example.
+      EVERDICT_CLICKHOUSE_URL: ${EVERDICT_CLICKHOUSE_URL:-}
+      EVERDICT_CLICKHOUSE_DATABASE: ${EVERDICT_CLICKHOUSE_DATABASE:-}
+      # OTLP-door admission + ledger retention (empty = unlimited / keep forever). The workspace can lower the
+      # quota below the operator default in Settings; it can never raise it past what is set here.
+      EVERDICT_INGEST_MAX_EVENTS_PER_HOUR: ${EVERDICT_INGEST_MAX_EVENTS_PER_HOUR:-}
+      EVERDICT_TRAJECTORY_RETENTION_DAYS: ${EVERDICT_TRAJECTORY_RETENTION_DAYS:-}
       # ── No in-memory: store-backed self-hosted runner hub (multi-replica safe) ──
       EVERDICT_SELF_HOSTED_STORE_HUB: "1"
       # Idle timeout for a parked self-hosted job with no lease/heartbeat activity (ms). Default 300000 (5 min).
@@ -318,6 +327,12 @@ services:
       # working (skill/knowledge reads fall back to their DB replicas). Never hold the control plane hostage to storage.
       minio:
         condition: service_started
+      # Ops-scale trace ledger (profile `clickhouse`). `required: false` = when the profile is off the api starts
+      # exactly as before; when it is on the api waits for the engine, because the ClickHouse store applies its
+      # DDL at boot (ensureSchema) and a cold engine would crash-loop the control plane.
+      clickhouse:
+        condition: service_healthy
+        required: false
     extra_hosts:
       # Reach host-side services (a self-hosted runner or a LiteLLM proxy running on the Docker host).
       - "host.docker.internal:host-gateway"
@@ -360,9 +375,11 @@ services:
     restart: unless-stopped
 
   # ── ClickHouse — the trajectory store's OPS-SCALE rung (native-observability N-O1 rung 2) — `--profile clickhouse` ──
-  # Opt-in by measurement, never by default: rung 1 (Postgres jsonb) fits the compose stack as-is. With the
-  # profile on, set EVERDICT_CLICKHOUSE_URL=http://clickhouse:8123 on the api service — ONLY the trajectory
-  # store swaps engines (the port makes it invisible); everything else stays on Postgres.
+  # Opt-in by measurement, never by default: rung 1 (Postgres jsonb) fits the compose stack as-is. Turning it on
+  # is two things, both in .env: EVERDICT_CLICKHOUSE_URL=http://clickhouse:8123 and starting with
+  # `--profile clickhouse`. ONLY the trajectory store swaps engines (the port makes it invisible); everything
+  # else stays on Postgres. ⚠️ The swap is not a migration — trajectories already sealed in Postgres stay there
+  # and stop appearing in the ledger until you switch back.
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
     profiles: ["clickhouse"]
@@ -374,6 +391,13 @@ services:
       - clickhouse-data:/var/lib/clickhouse
     expose:
       - "8123"
+    healthcheck:
+      # The api applies its DDL at boot, so "started" is not enough — gate on the HTTP interface answering.
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
     restart: unless-stopped
 
   # ── Temporal worker — polls the task queue; batch/schedule activities bridge back to the API over /internal ──

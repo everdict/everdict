@@ -80,6 +80,14 @@ services:
       <<: *runtime-proxy-env
       PORT: "8787"
       DATABASE_URL: postgresql://${POSTGRES_USER:-everdict}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-everdict}
+      # The OWNED trace ledger (eval runs · agent turns · OTLP-door arrivals). Empty = it lives in the Postgres
+      # above. Point it at an EXTERNAL ClickHouse to move only this store there (this stack bundles no engine —
+      # docker-compose.full.yaml has one behind `--profile clickhouse`).
+      EVERDICT_CLICKHOUSE_URL: ${EVERDICT_CLICKHOUSE_URL:-}
+      EVERDICT_CLICKHOUSE_DATABASE: ${EVERDICT_CLICKHOUSE_DATABASE:-}
+      # OTLP-door quota (events/workspace/hour) + ledger retention in days. Empty = unlimited / keep forever.
+      EVERDICT_INGEST_MAX_EVENTS_PER_HOUR: ${EVERDICT_INGEST_MAX_EVENTS_PER_HOUR:-}
+      EVERDICT_TRAJECTORY_RETENTION_DAYS: ${EVERDICT_TRAJECTORY_RETENTION_DAYS:-}
       # Secret at-rest encryption KEK (base64, 32B). Leave empty to disable the secret store (fail-closed).
       EVERDICT_SECRETS_KEY: ${EVERDICT_SECRETS_KEY:-}
       # Guard token for /internal/** (minting API keys). Leave empty to disable those routes (fail-closed).

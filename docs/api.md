@@ -98,8 +98,14 @@ GET /runs/:id ◀── poll until status is terminal     (or receive the webhoo
 `RunStore` (create/update/get/list). Default `InMemoryRunStore`; set `DATABASE_URL` and the API uses
 **`PgRunStore`** (real Postgres) — it runs migrations at boot (`migrate()` over `packages/db/migrations/`,
 idempotent) and persists `RunRecord`s (`result`/`error` as `jsonb`). Same interface, so the service +
-lifecycle are unchanged. Migration discipline: `docs/migration/`. ClickHouse (analytics) can be added the
-same way behind `RunStore`.
+lifecycle are unchanged. Migration discipline: `docs/migration/`.
+
+The **trajectory store** (the owned trace ledger: eval runs · agent turns · OTLP-door arrivals · materialized
+imports) is the one store with a second engine: `EVERDICT_CLICKHOUSE_URL` swaps it to `ClickHouseTrajectoryStore`
+(table created at boot) while every other store keeps `DATABASE_URL`. Compose ships the engine behind
+`--profile clickhouse`; the swap copies nothing, so already-sealed trajectories stay in the engine that wrote
+them. Neighbouring knobs: `EVERDICT_INGEST_MAX_EVENTS_PER_HOUR` (OTLP-door quota) and
+`EVERDICT_TRAJECTORY_RETENTION_DAYS` (ledger retention).
 
 ## Run it
 ```bash

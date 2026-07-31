@@ -70,6 +70,24 @@ lazily; skill/knowledge bodies + agent task outputs + the web `/files` tree live
 `cp .env.full.example .env`, set the four required secrets, then
 `docker compose -f deploy/compose/docker-compose.full.yaml --env-file deploy/compose/.env up -d --build`.
 
+**Trace ledger.** Everdict keeps its own copy of every trace it stands on — eval runs, agent conversation
+turns, arrivals at the OTLP door (`POST /v1/traces`), materialized pull-imports — and Settings › Traces reads
+that ledger. By default it lives in Postgres, which is enough at eval-scale. For ops-scale volume, move *only*
+that store to the bundled ClickHouse (everything else stays on Postgres):
+
+```bash
+# in deploy/compose/.env
+EVERDICT_CLICKHOUSE_URL=http://clickhouse:8123
+bash deploy/compose/full.sh --profile clickhouse    # or: docker compose … --profile clickhouse up -d
+```
+
+The table is created at boot — no migration step. ⚠️ The swap is **not** a migration either: trajectories
+already sealed in Postgres stay there and vanish from the ledger until you switch back. ⚠️ The URL and the
+profile travel together — a URL set with the profile off boots the api against an engine that isn't running
+and it restarts forever (clear the URL to return to Postgres). Two related knobs live next to it in `.env`:
+`EVERDICT_INGEST_MAX_EVENTS_PER_HOUR` (the door's per-workspace hourly quota; past it the door answers 429
+instead of dropping silently) and `EVERDICT_TRAJECTORY_RETENTION_DAYS`.
+
 ## Build just the images
 
 ```bash
