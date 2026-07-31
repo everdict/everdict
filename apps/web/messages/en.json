@@ -3803,7 +3803,10 @@
     "title": "Service topology",
     "notDeployed": "No warm topology is standing on the cluster right now.",
     "restarts": "restarts {count}",
-    "role": { "service": "service", "store": "store" },
+    "role": {
+      "service": "service",
+      "store": "store"
+    },
     "age": "up {age}",
     "endpoint": "endpoint",
     "showDetail": "detail",
@@ -4362,7 +4365,8 @@
     "approve": "Allow",
     "deny": "Deny",
     "craftNew": "Craft agent",
-    "manage": "Manage agents"
+    "manage": "Manage agents",
+    "tasks": "Tasks"
   },
   "craftAgent": {
     "title": "Craft an agent",
@@ -4519,5 +4523,34 @@
     "importTriggers": "Import agent triggers",
     "importing": "Importing…",
     "importedResult": "{count} trigger rules imported — the agents' own trigger lists are now empty."
+  },
+  "agentTasks": {
+    "title": "Tasks",
+    "description": "The workspace's shared work ledger — members and agents create, claim, and complete tasks; completing one wakes agents waiting on it.",
+    "backToFleet": "Agent fleet",
+    "unavailable": "The task ledger is unavailable right now.",
+    "create": "Add",
+    "createPlaceholder": "Describe a unit of work… (e.g. Run the baseline on web@2.2.0)",
+    "filterAll": "All ({count})",
+    "openCount": "{count} open",
+    "status": {
+      "pending": "Pending",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "ownerLabel": "Owner: {owner}",
+    "blockedBy": "blocked by {count}",
+    "actions": "Task actions",
+    "claim": "Claim",
+    "complete": "Complete",
+    "cancel": "Cancel task",
+    "reopen": "Reopen",
+    "delete": "Delete",
+    "emptyTitle": "No tasks yet",
+    "emptyDescription": "Add a unit of work, or let the agent create tasks from a conversation.",
+    "errorCreate": "Could not create the task.",
+    "errorUpdate": "Could not update the task.",
+    "errorDelete": "Could not delete the task (creator or admin only)."
   }
 }

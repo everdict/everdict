@@ -35,6 +35,12 @@ export default async function AgentsPage({ params }: { params: Promise<{ workspa
         actions={
           <span className="flex items-center gap-2">
             <Link
+              href={`/${workspace}/agents/tasks`}
+              className={buttonVariants({ size: 'sm', variant: 'outline' })}
+            >
+              {t('tasks')}
+            </Link>
+            <Link
               href={`/${workspace}/settings/agent`}
               className={buttonVariants({ size: 'sm', variant: 'outline' })}
             >

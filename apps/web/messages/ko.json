@@ -3803,7 +3803,10 @@
     "title": "서비스 토폴로지",
     "notDeployed": "지금 클러스터에 떠 있는 웜 토폴로지가 없어요.",
     "restarts": "재시작 {count}",
-    "role": { "service": "서비스", "store": "스토어" },
+    "role": {
+      "service": "서비스",
+      "store": "스토어"
+    },
     "age": "가동 {age}",
     "endpoint": "엔드포인트",
     "showDetail": "상세",
@@ -4362,7 +4365,8 @@
     "approve": "허용",
     "deny": "거부",
     "craftNew": "에이전트 크래프트",
-    "manage": "에이전트 관리"
+    "manage": "에이전트 관리",
+    "tasks": "태스크"
   },
   "craftAgent": {
     "title": "에이전트 크래프트",
@@ -4519,5 +4523,34 @@
     "importTriggers": "에이전트 트리거 가져오기",
     "importing": "가져오는 중…",
     "importedResult": "트리거 규칙 {count}개를 가져왔습니다 — 에이전트 스펙의 트리거 목록은 비워졌습니다."
+  },
+  "agentTasks": {
+    "title": "태스크",
+    "description": "워크스페이스 공유 작업 원장 — 멤버와 에이전트가 태스크를 만들고 맡고 완료합니다. 완료되면 그 태스크를 기다리던 에이전트가 깨어납니다.",
+    "backToFleet": "에이전트 플릿",
+    "unavailable": "지금은 태스크 원장을 사용할 수 없습니다.",
+    "create": "추가",
+    "createPlaceholder": "작업 단위를 적어주세요… (예: web@2.2.0 베이스라인 실행)",
+    "filterAll": "전체 ({count})",
+    "openCount": "미완료 {count}건",
+    "status": {
+      "pending": "대기",
+      "in_progress": "진행 중",
+      "completed": "완료",
+      "cancelled": "취소됨"
+    },
+    "ownerLabel": "담당: {owner}",
+    "blockedBy": "선행 {count}건",
+    "actions": "태스크 작업",
+    "claim": "맡기",
+    "complete": "완료",
+    "cancel": "태스크 취소",
+    "reopen": "다시 열기",
+    "delete": "삭제",
+    "emptyTitle": "아직 태스크가 없습니다",
+    "emptyDescription": "작업 단위를 추가하거나, 대화에서 에이전트가 태스크를 만들게 해보세요.",
+    "errorCreate": "태스크를 만들지 못했습니다.",
+    "errorUpdate": "태스크를 수정하지 못했습니다.",
+    "errorDelete": "태스크를 삭제하지 못했습니다(생성자 또는 관리자만)."
   }
 }

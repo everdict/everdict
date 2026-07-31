@@ -469,6 +469,18 @@ export const controlPlane = {
   fireSchedule: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/schedules/${encodeURIComponent(id)}/fire`, { method: 'POST' }),
   // Saved scorecard-analysis View — a named AnalysisConfig (opaque), private|shared. Re-run live against current data on open.
+  // Workspace task ledger (agent-teams) — cross-turn, cross-agent coordination tasks.
+  listTasks: <T>(auth: AuthContext, status?: string) =>
+    call<T>(auth, status ? `/tasks?status=${encodeURIComponent(status)}` : '/tasks'),
+  createTask: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/tasks', { method: 'POST', body: JSON.stringify(body) }),
+  updateTask: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/tasks/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteTask: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listViews: <T>(auth: AuthContext) => call<T>(auth, '/views'),
   getView: <T>(auth: AuthContext, id: string) => call<T>(auth, `/views/${encodeURIComponent(id)}`),
   createView: <T>(auth: AuthContext, body: unknown) =>
