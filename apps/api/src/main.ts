@@ -1,9 +1,9 @@
 import {
   KnowledgeEntryService,
   KnowledgeService,
+  TaskService,
   registryLatestVersionResolver,
   seedFirstPartyAgents,
-  TaskService,
 } from "@everdict/application-control";
 import { ApprovalService } from "@everdict/application-control";
 import {

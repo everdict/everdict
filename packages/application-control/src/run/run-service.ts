@@ -27,8 +27,6 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
-import { failedCaseResult } from "../run-suite.js";
-import { failedCaseResult } from "../run-suite.js";
 import { type StampedFact, stampFacts } from "../platform-event/outbox.js";
 import { type ArtifactStore, offloadSnapshot } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
@@ -40,6 +38,7 @@ import type { RunStore } from "../ports/run-store.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
+import { failedCaseResult } from "../run-suite.js";
 
 // Where a running case's platform trace is accumulating (derived on read; docs/architecture/live-observability.md).
 export interface LiveTraceRef {
