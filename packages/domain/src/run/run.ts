@@ -127,6 +127,39 @@ export class Run {
     };
   }
 
+  // A CHAT turn enters the same ledger (execution-model.md decision O1: "chat turns are runs, grouped").
+  // Everything an activation run gets — status, cost, a sealed trajectory, causation stamping — a turn a member
+  // typed gets too, so agent work has ONE accounting path instead of two. Two fields differ from the activation
+  // factory and both are the point: the cause is the MEMBER (nobody woke this; someone asked), and the class is
+  // INTERACTIVE (a human is waiting on it, so it must not be scheduled like background fan-out). The session is
+  // the same GROUP, which is what keeps a 50-turn conversation one row in the console.
+  static newChatTurn(input: {
+    id: string;
+    tenant: string;
+    agentId: string;
+    agentVersion?: string;
+    sessionId: string;
+    actor: string; // the member whose message opened this turn
+    now: string;
+  }): RunRecord {
+    return {
+      id: input.id,
+      tenant: input.tenant,
+      harness: { id: input.agentId, version: input.agentVersion ?? "latest" },
+      caseId: "chat",
+      status: "running",
+      trigger: "agent",
+      createdBy: input.actor,
+      kind: "agent",
+      class: "interactive",
+      lifetime: "task",
+      origin: { cause: "member", actor: input.actor },
+      group: { id: input.sessionId, role: "turn" },
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+  }
+
   // A session run enters the ledger (execution-model.md P6): "run this environment image and shell in".
   // Born RUNNING — the container is provisioned before the record exists (no orphan record on a failed
   // provision), so there is no queued phase. The HARNESS column names what the user ASKED for (an

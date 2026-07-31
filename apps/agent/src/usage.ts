@@ -49,6 +49,9 @@ export interface AgentRunEventReport {
   eventId?: string;
   creator?: string;
   budgetUsd?: number; // the delegated slice (A7/§5.2) — the CP stamps it as the run's envelope
+  // What opened this run (O1): an activation woken by a platform event (default), or a chat turn a member
+  // typed. A chat turn is recorded on the ledger but stays OFF the event log — see the CP route.
+  cause?: "event" | "chat";
   // O2 (transcripts are traces): a terminal report's transcript projection — the CP seals it as the run's
   // own trajectory (source "run", first write wins).
   trace?: TraceEvent[];
@@ -75,6 +78,7 @@ export function runEventReporter(
         ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
         ...(input.creator !== undefined ? { creator: input.creator } : {}),
         ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}),
+        ...(input.cause !== undefined ? { cause: input.cause } : {}),
         ...(input.trace !== undefined ? { trace: input.trace } : {}),
       }),
     });

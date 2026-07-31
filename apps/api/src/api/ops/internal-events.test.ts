@@ -140,6 +140,11 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
     });
     return { app, runStore, trajectories };
   }
+  const post = {
+    method: "POST" as const,
+    url: "/internal/agent-run-events",
+    headers: { "x-internal-token": "itok" },
+  };
   const report = (over: Record<string, unknown>) => ({
     tenant: "acme",
     kind: "agent.run.started",
@@ -276,6 +281,77 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
       payload: report({ kind: "agent.run.completed", message: "bad", trace: [{ t: 0, kind: "nope" }] }),
     });
     expect(bad.statusCode).toBe(400);
+  });
+
+  it("cause=chat opens a MEMBER-caused interactive run, seals its transcript, and stays off the event log (O1)", async () => {
+    const runStore = new InMemoryRunStore();
+    const trajectories = new InMemoryTrajectoryStore();
+    const eventStore = new InMemoryPlatformEventStore();
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: runStore, trajectories }),
+      platformEvents: new PlatformEventService({ store: eventStore }),
+      internalToken: "itok",
+    });
+    const chat = (over: Record<string, unknown>) => ({
+      tenant: "acme",
+      kind: "agent.run.started",
+      sessionId: "sess-chat",
+      agentId: "default",
+      eventKind: "chat",
+      message: "Chat turn in conversation sess-chat.",
+      runId: "run-chat-1",
+      creator: "alice",
+      cause: "chat",
+      ...over,
+    });
+
+    expect((await app.inject({ ...post, payload: chat({}) })).statusCode).toBe(200);
+    expect(await runStore.get("run-chat-1")).toMatchObject({
+      kind: "agent",
+      class: "interactive", // a member is waiting on it — never scheduled like background fan-out
+      status: "running",
+      caseId: "chat",
+      createdBy: "alice",
+      origin: { cause: "member", actor: "alice" },
+      group: { id: "sess-chat", role: "turn" }, // the conversation groups its turns
+    });
+
+    const trace = [
+      { t: 0, kind: "message", role: "user", text: "what changed?" },
+      { t: 1, kind: "message", role: "assistant", text: "two runs regressed." },
+    ];
+    expect(
+      (
+        await app.inject({
+          ...post,
+          payload: chat({ kind: "agent.run.completed", message: "Chat turn completed.", trace }),
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect((await runStore.get("run-chat-1"))?.status).toBe("succeeded");
+    expect((await trajectories.get("acme", "run-chat-1"))?.events).toEqual(trace);
+
+    // Human typing volume must not drown the event log — the conversation is already visible as itself.
+    expect(await eventStore.list("acme")).toEqual([]);
+  });
+
+  it("cause=chat without a creator is refused (400) — an unattributed turn would be a lie in the ledger", async () => {
+    const { app, runStore } = ledgerHarness();
+    const res = await app.inject({
+      ...post,
+      payload: {
+        tenant: "acme",
+        kind: "agent.run.started",
+        sessionId: "sess-chat",
+        agentId: "default",
+        eventKind: "chat",
+        message: "Chat turn.",
+        runId: "run-chat-2",
+        cause: "chat",
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(await runStore.get("run-chat-2")).toBeUndefined();
   });
 
   it("a report WITHOUT runId keeps the event-only behavior (an older agent service)", async () => {

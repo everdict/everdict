@@ -6,6 +6,7 @@ import { eventSelectorMatches } from "@everdict/domain";
 import { isGuardedAction } from "./action-policy.js";
 import type { AgentMailbox } from "./agent-mailbox.js";
 import { transcriptToTrace } from "./run-trace.js";
+import type { AgentRunEventReport } from "./usage.js";
 
 // Registry-driven activation (docs/architecture/agent-automation.md A3): a platform event matches an ENABLED
 // crafted agent's declarative triggers → one headless run (a trigger-origin session) executes under an agt_
@@ -62,29 +63,9 @@ export interface AgentActivatorDeps {
   // skips the run VISIBLY; the bridge itself fails open on transport errors.
   admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
   // Report agent.run.* lifecycle FACTS back to the control plane (event log → fleet observability, agent-
-  // automation A5). Best-effort — an unreachable control plane never affects the run.
-  reportRunEvent?: (input: {
-    workspace: string;
-    kind:
-      | "agent.run.started"
-      | "agent.run.awaiting_approval"
-      | "agent.run.completed"
-      | "agent.run.failed"
-      | "agent.run.cancelled";
-    sessionId: string;
-    agentId: string;
-    eventKind: string;
-    message: string;
-    // P3 ledger correlation: one run id per activation/turn — the CP opens/settles Run{kind:"agent"} on it.
-    runId?: string;
-    agentVersion?: string;
-    eventId?: string;
-    creator?: string;
-    budgetUsd?: number; // the delegated slice (A7/§5.2) — becomes the run's envelope on the CP
-    // O2 (transcripts are traces): terminal reports carry the turn's transcript projected as TraceEvent[] —
-    // the CP seals it as the run's own trajectory (source "run").
-    trace?: TraceEvent[];
-  }) => Promise<void>;
+  // automation A5), carrying the P3 ledger correlation and the O2 transcript trace. Best-effort — an
+  // unreachable control plane never affects the run. One shape, defined once in usage.ts.
+  reportRunEvent?: (input: AgentRunEventReport) => Promise<void>;
 }
 
 export class AgentActivator {

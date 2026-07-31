@@ -627,6 +627,22 @@ export class RunService {
     await this.deps.store.create(Run.newAgentRun({ ...input, now: this.now() }));
   }
 
+  // The same ledger for the turns a MEMBER types (decision O1: chat turns are runs, grouped under the
+  // conversation). Idempotent like the activation twin, and settled through the same `settleAgentRun` — the
+  // only difference is the record the domain mints (member cause, interactive class).
+  async recordChatTurn(input: {
+    id: string;
+    tenant: string;
+    agentId: string;
+    agentVersion?: string;
+    sessionId: string;
+    actor: string;
+  }): Promise<void> {
+    const existing = await this.deps.store.get(input.id);
+    if (existing) return;
+    await this.deps.store.create(Run.newChatTurn({ ...input, now: this.now() }));
+  }
+
   async settleAgentRun(
     id: string,
     outcome: "completed" | "failed" | "cancelled",

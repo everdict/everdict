@@ -399,7 +399,13 @@ can be discussed like any other entity, and the knowledge layer can promote what
 - **P3 — Agent runs enter the ledger.** The agent service writes `Run{kind:"agent"}` transitions (control
   plane owns the record — O4); the session keeps the transcript and gains `runId`; the fleet view becomes
   a filter on the activity console. `causedBy` stamping starts here (an agent-submitted scorecard carries
-  the agent run's id).
+  the agent run's id). **Both openings are wired** (O1): an activation woken by an event opens a
+  background, event-caused run, and a chat turn a member types opens an *interactive, member-caused* one —
+  same ledger, same settle, same sealed transcript-trajectory, grouped by the conversation. The bridge is
+  one endpoint (`POST /internal/agent-run-events`, `cause: event | chat`); chat turns deliberately do NOT
+  land on the event log — `agent.run.*` exists so *headless* work is visible, a conversation is already
+  visible as itself, and human typing volume would drown the log. Not yet on the ledger: comment-thread
+  discussion turns (their own surface reports live activity — folding them in is a separate decision).
 - **P4 — Governance: the gate and the envelopes.** The one admission gate in front of every kind; delegated
   envelopes enforced along the causal tree (the A7 per-agent budget becomes the agent run's envelope);
   fan-out guards; cascade cancellation. This is the phase that makes agent-scale fan-out *safe to allow*.
@@ -431,11 +437,12 @@ can be discussed like any other entity, and the knowledge layer can promote what
 
 ## Open decisions (maintainer input wanted)
 
-- **O1 — Is a chat turn a run?** *Recommendation: yes* — one activation = one run, grouped under the
-  conversation. Uniform cost, status and trajectory; the chat panel becomes a live view onto a run rather
-  than a separate world. Cost: run volume (mitigated by the grouping the console already does).
-  Alternative: only headless activations become runs, and chat stays conversation-only — cheaper, but
-  keeps two accounting paths forever.
+- **O1 — Is a chat turn a run?** *Adopted: yes* — one turn = one run, grouped under the conversation.
+  Uniform cost, status and trajectory; the chat panel becomes a live view onto a run rather than a separate
+  world. Cost: run volume (mitigated by the grouping the console already does). SHIPPED in P3: the turn is
+  `class: "interactive"` with `origin.cause: "member"`, so it is never scheduled like background fan-out and
+  the ledger names who asked. The one narrowing taken at implementation: no `agent.run.*` event per turn
+  (see P3).
 - **O2 — Is an agent transcript a trace?** *Recommendation: yes*, this is what makes agent runs first-class
   everywhere. Risk: the trace contract was built for harness output; agent-specific fields (approvals,
   todos, sub-agents) may need extension rather than shoe-horning.

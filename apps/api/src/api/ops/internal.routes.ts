@@ -166,6 +166,12 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
         // P3 ledger correlation (optional — an older agent service just keeps the event-only behavior):
         // the agent service mints one run id per activation/turn and threads it through every report.
         runId: z.string().min(1).optional(),
+        // What opened this run (O1): an activation woken by a platform event (default) or a chat turn a
+        // member typed. A chat turn takes the member-caused, interactive record — and stays OFF the event
+        // log: agent.run.* exists so headless work is visible, while a conversation is already visible as
+        // itself, and human typing volume would drown the log. (Same deliberate narrowing as ingest
+        // completions — widening it is an E2 decision, not a default.)
+        cause: z.enum(["event", "chat"]).default("event"),
         agentVersion: z.string().min(1).optional(),
         eventId: z.string().min(1).optional(),
         creator: z.string().min(1).optional(),
@@ -176,31 +182,58 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    const { tenant, kind, sessionId, agentId, eventKind, message, runId, agentVersion, eventId, creator, budgetUsd } =
-      body.data;
-    await deps.platformEvents.emit({
-      workspace: tenant,
+    const {
+      tenant,
       kind,
-      subject: { type: "agent_session", id: sessionId },
-      payload: { agentId, eventKind, ...(runId !== undefined ? { runId } : {}) },
-      causedBy: `agent:${agentId}:${sessionId}`,
+      sessionId,
+      agentId,
+      eventKind,
       message,
-    });
+      runId,
+      agentVersion,
+      eventId,
+      creator,
+      budgetUsd,
+      cause,
+    } = body.data;
+    if (cause !== "chat")
+      await deps.platformEvents.emit({
+        workspace: tenant,
+        kind,
+        subject: { type: "agent_session", id: sessionId },
+        payload: { agentId, eventKind, ...(runId !== undefined ? { runId } : {}) },
+        causedBy: `agent:${agentId}:${sessionId}`,
+        message,
+      });
     // The universal ledger (execution-model P3, O4): started opens Run{kind:"agent"}, a terminal report
     // settles it. Both idempotent (at-least-once reporting); awaiting_approval is event-only.
     if (runId !== undefined) {
       if (kind === "agent.run.started") {
-        await deps.service.recordAgentRun({
-          id: runId,
-          tenant,
-          agentId,
-          ...(agentVersion !== undefined ? { agentVersion } : {}),
-          sessionId,
-          eventKind,
-          ...(eventId !== undefined ? { eventId } : {}),
-          ...(creator !== undefined ? { createdBy: creator } : {}),
-          ...(budgetUsd !== undefined ? { budgetUsd } : {}),
-        });
+        if (cause === "chat") {
+          // A chat turn's actor is not optional the way an activation's creator is — the member who typed it
+          // IS the cause. No fallback: an unattributed turn would be a lie in the ledger.
+          if (creator === undefined)
+            return reply.code(400).send({ code: "BAD_REQUEST", message: "creator is required for cause=chat" });
+          await deps.service.recordChatTurn({
+            id: runId,
+            tenant,
+            agentId,
+            ...(agentVersion !== undefined ? { agentVersion } : {}),
+            sessionId,
+            actor: creator,
+          });
+        } else
+          await deps.service.recordAgentRun({
+            id: runId,
+            tenant,
+            agentId,
+            ...(agentVersion !== undefined ? { agentVersion } : {}),
+            sessionId,
+            eventKind,
+            ...(eventId !== undefined ? { eventId } : {}),
+            ...(creator !== undefined ? { createdBy: creator } : {}),
+            ...(budgetUsd !== undefined ? { budgetUsd } : {}),
+          });
       } else if (kind !== "agent.run.awaiting_approval") {
         const outcome =
           kind === "agent.run.completed" ? "completed" : kind === "agent.run.cancelled" ? "cancelled" : "failed";

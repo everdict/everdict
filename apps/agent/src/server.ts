@@ -18,6 +18,7 @@ import { type AgentDraft, AgentDraftSchema } from "./agent-draft-tool.js";
 import { AgentMailbox } from "./agent-mailbox.js";
 import type { AgentTryEvent } from "./agent-try.js";
 import { runAgentTry } from "./agent-try.js";
+import { withChatTurnRun } from "./chat-run.js";
 import { type ChatDeps, DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import { type CodeTryDeps, runCodeToolTry } from "./code-try.js";
 import type { CommentActivityReporter } from "./comment-activity.js";
@@ -30,6 +31,7 @@ import { runReportTurn } from "./report-turn.js";
 import { runSkillTry } from "./skill-try.js";
 import { TeammateSupervisor } from "./teammate-supervisor.js";
 import { runTeammateTurn } from "./teammate-turn.js";
+import type { AgentRunEventReport } from "./usage.js";
 
 export interface AgentServerDeps extends ChatDeps {
   authenticate: Authenticate;
@@ -48,26 +50,10 @@ export interface AgentServerDeps extends ChatDeps {
   admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
   // Test seam: the activation run executor. Default = the teammate-turn machinery (one request-less loop turn).
   activationRunTurn?: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<void>;
-  // agent.run.* lifecycle facts → the control plane's event log (fleet observability, agent-automation A5).
-  reportRunEvent?: (input: {
-    workspace: string;
-    kind:
-      | "agent.run.started"
-      | "agent.run.awaiting_approval"
-      | "agent.run.completed"
-      | "agent.run.failed"
-      | "agent.run.cancelled";
-    sessionId: string;
-    agentId: string;
-    eventKind: string;
-    message: string;
-    // P3 ledger correlation: one run id per activation/turn — the CP opens/settles Run{kind:"agent"} on it.
-    runId?: string;
-    agentVersion?: string;
-    eventId?: string;
-    creator?: string;
-    budgetUsd?: number;
-  }) => Promise<void>;
+  // agent.run.* lifecycle facts + the P3 ledger correlation → the control plane (fleet observability,
+  // agent-automation A5). The report shape has ONE definition (usage.ts) — a hand-copied twin here silently
+  // dropped `trace` from the declared surface once already.
+  reportRunEvent?: (input: AgentRunEventReport) => Promise<void>;
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
   // the monitoring→agent bridge). Absent → the internal event path is disabled (only user-authenticated events).
   internalToken?: string;
@@ -542,25 +528,33 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // The turn still feeds the live-turn fan-out (records only), so a web panel that attaches mid-turn follows it.
     if (!(req.headers.accept ?? "").includes("text/event-stream")) {
       try {
-        const result = await runChat(
+        // O1: this turn is a run on the ledger (opened here, settled with its transcript-as-trace).
+        const result = await withChatTurnRun(
           deps,
           principal,
-          headers,
           id,
-          message,
-          references,
-          attachments,
+          () =>
+            runChat(
+              deps,
+              principal,
+              headers,
+              id,
+              message,
+              references,
+              attachments,
+              controller.signal,
+              {
+                onRecord: (r) => liveTurns.broadcast(principal.workspace, id, "message", r),
+                drainInput,
+                sendMessage,
+                spawnTeammate,
+                listTeammates,
+                ...(mode === "bypass" ? {} : { permit: withRules((): PermissionDecision => "allow") }),
+                ...(mode === "plan" ? { planMode: true } : {}),
+              },
+              canvas,
+            ),
           controller.signal,
-          {
-            onRecord: (r) => liveTurns.broadcast(principal.workspace, id, "message", r),
-            drainInput,
-            sendMessage,
-            spawnTeammate,
-            listTeammates,
-            ...(mode === "bypass" ? {} : { permit: withRules((): PermissionDecision => "allow") }),
-            ...(mode === "plan" ? { planMode: true } : {}),
-          },
-          canvas,
         );
         return reply.send(result);
       } catch (err) {
@@ -624,76 +618,85 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       return decision === "allow";
     };
     try {
-      await runChat(
+      // O1: same ledger run for the streaming path — the turn outlives this request, so the run settles with
+      // the loop, not with the SSE connection.
+      await withChatTurnRun(
         deps,
         principal,
-        headers,
         id,
-        message,
-        references,
-        attachments,
+        () =>
+          runChat(
+            deps,
+            principal,
+            headers,
+            id,
+            message,
+            references,
+            attachments,
+            controller.signal,
+            {
+              onEvent: (e) => {
+                if (e.type === "text_delta") write("delta", { text: e.delta });
+                // Live extended-thinking tokens — grow the transcript's reasoning block before the answer streams in.
+                else if (e.type === "reasoning_delta") write("reasoning", { text: e.delta });
+                // The post-decision event: forward it so the web dismisses the prompt even when the decision was the
+                // registry's timeout/disconnect default rather than a click.
+                else if (e.type === "permission") write("permission_resolved", { name: e.name, decision: e.decision });
+                else if (e.type === "plan") write("plan_presented", { plan: e.plan });
+                // The loop is waiting out a transient model failure — surface it so the panel can say WHY the turn
+                // is quiet instead of looking frozen (the wait can be minutes under persistentRetry).
+                else if (e.type === "retry")
+                  write("retry", {
+                    attempt: e.attempt,
+                    delayMs: e.delayMs,
+                    ...(e.persistent === true ? { persistent: true } : {}),
+                  });
+                // The run switched to the fallback model after sustained failure — one informational line.
+                else if (e.type === "fallback") write("fallback", { from: e.from, to: e.to });
+              },
+              // An emitted analysis artifact (chart/table/report) — push the record so the web renders it live.
+              onArtifact: (artifact) => write("artifact", artifact),
+              // The agent drove the analysis canvas — push the stored-form config so the web applies it live.
+              onViewConfig: (config) => write("view_config", config),
+              // Crafting canvas open → the agent gets craft_agent (patches stream to the web) + try_agent_draft
+              // (shadow run under the CALLER's own headers, so the try is RBAC-bounded exactly like the member).
+              ...(agentDraft
+                ? {
+                    onAgentDraft: (draft: AgentDraft) => write("agent_draft", draft),
+                    tryAgentDraft: (draft: AgentDraft, event: AgentTryEvent) =>
+                      runAgentTry(
+                        { ...deps, maxTurns: 10 },
+                        principal,
+                        headers,
+                        {
+                          draft: {
+                            ...(draft.instructions !== undefined ? { instructions: draft.instructions } : {}),
+                            ...(draft.task !== undefined ? { task: draft.task } : {}),
+                          },
+                        },
+                        event,
+                        controller.signal,
+                      ),
+                  }
+                : {}),
+              onRecord: (r) => write("message", r),
+              // The permit hook is ALWAYS wired — it reads the live mode per ask (bypass auto-allow · auto → ask
+              // only guarded · default/plan → HITL + rules), so the chat-header picker applies mid-turn in both
+              // directions. plan → planMode + onPlan approval (turn-scoped by construction).
+              permit,
+              ...(mode === "plan" ? { planMode: true, onPlan } : {}),
+              drainInput,
+              // Soft interrupt: park the loop's step trigger on the live turn so POST /interrupt can fire it —
+              // with queued input (POST /input) the turn continues REDIRECTED; bare it ends "interrupted".
+              onInterruptReady: (interrupt) => liveTurns.setInterrupt(principal.workspace, id, interrupt),
+              sendMessage,
+              spawnTeammate,
+              listTeammates,
+            },
+            canvas,
+            agentDraft,
+          ),
         controller.signal,
-        {
-          onEvent: (e) => {
-            if (e.type === "text_delta") write("delta", { text: e.delta });
-            // Live extended-thinking tokens — grow the transcript's reasoning block before the answer streams in.
-            else if (e.type === "reasoning_delta") write("reasoning", { text: e.delta });
-            // The post-decision event: forward it so the web dismisses the prompt even when the decision was the
-            // registry's timeout/disconnect default rather than a click.
-            else if (e.type === "permission") write("permission_resolved", { name: e.name, decision: e.decision });
-            else if (e.type === "plan") write("plan_presented", { plan: e.plan });
-            // The loop is waiting out a transient model failure — surface it so the panel can say WHY the turn
-            // is quiet instead of looking frozen (the wait can be minutes under persistentRetry).
-            else if (e.type === "retry")
-              write("retry", {
-                attempt: e.attempt,
-                delayMs: e.delayMs,
-                ...(e.persistent === true ? { persistent: true } : {}),
-              });
-            // The run switched to the fallback model after sustained failure — one informational line.
-            else if (e.type === "fallback") write("fallback", { from: e.from, to: e.to });
-          },
-          // An emitted analysis artifact (chart/table/report) — push the record so the web renders it live.
-          onArtifact: (artifact) => write("artifact", artifact),
-          // The agent drove the analysis canvas — push the stored-form config so the web applies it live.
-          onViewConfig: (config) => write("view_config", config),
-          // Crafting canvas open → the agent gets craft_agent (patches stream to the web) + try_agent_draft
-          // (shadow run under the CALLER's own headers, so the try is RBAC-bounded exactly like the member).
-          ...(agentDraft
-            ? {
-                onAgentDraft: (draft: AgentDraft) => write("agent_draft", draft),
-                tryAgentDraft: (draft: AgentDraft, event: AgentTryEvent) =>
-                  runAgentTry(
-                    { ...deps, maxTurns: 10 },
-                    principal,
-                    headers,
-                    {
-                      draft: {
-                        ...(draft.instructions !== undefined ? { instructions: draft.instructions } : {}),
-                        ...(draft.task !== undefined ? { task: draft.task } : {}),
-                      },
-                    },
-                    event,
-                    controller.signal,
-                  ),
-              }
-            : {}),
-          onRecord: (r) => write("message", r),
-          // The permit hook is ALWAYS wired — it reads the live mode per ask (bypass auto-allow · auto → ask
-          // only guarded · default/plan → HITL + rules), so the chat-header picker applies mid-turn in both
-          // directions. plan → planMode + onPlan approval (turn-scoped by construction).
-          permit,
-          ...(mode === "plan" ? { planMode: true, onPlan } : {}),
-          drainInput,
-          // Soft interrupt: park the loop's step trigger on the live turn so POST /interrupt can fire it —
-          // with queued input (POST /input) the turn continues REDIRECTED; bare it ends "interrupted".
-          onInterruptReady: (interrupt) => liveTurns.setInterrupt(principal.workspace, id, interrupt),
-          sendMessage,
-          spawnTeammate,
-          listTeammates,
-        },
-        canvas,
-        agentDraft,
       );
       write("done", {});
     } catch (err) {
