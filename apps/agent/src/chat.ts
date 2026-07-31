@@ -233,6 +233,10 @@ export interface ChatDeps {
   // The workspace's registered (crafted) agents as spawnable sub-agent types (registrySubagentTypes) — merged
   // after the builtins (a name collision keeps the builtin). Absent → builtins only (dev / no registry).
   listSubagentTypes?: (principal: Principal) => Promise<SubagentType[]>;
+  // Session running memory: once the bounded replay span exceeds this many characters, the oldest records are
+  // folded into the session's digest at the turn boundary (see maintainSessionMemory). Ops/test tuning knob;
+  // absent → MEMORY_TRIGGER_CHARS.
+  memoryTriggerChars?: number;
   // Extended-thinking budget (tokens). Set → the loop asks the model to reason before answering (Anthropic `thinking`;
   // reasoning models reason regardless). Reasoning is captured + streamed either way; absent → thinking off.
   thinkingBudgetTokens?: number;
@@ -373,6 +377,53 @@ function recordsToHistory(records: AgentMessageRecord[]): ChatMessage[] {
   });
 }
 
+// Session running memory maintenance (Claude Code's session memory reinterpreted): once the bounded replay span
+// outgrows the trigger, fold the oldest records — up to a clean USER boundary, keeping the recent tail verbatim —
+// into a fresh digest seeded with the PREVIOUS digest (nothing falls off the end; the memory only rolls forward).
+// Runs at the turn boundary on the host, decoupled from the loop's own in-run compaction: compaction fits ONE
+// run's context, memory bounds what every FUTURE turn replays.
+const MEMORY_TRIGGER_CHARS = 100_000; // ~25k tokens of replayed transcript before folding
+const MEMORY_KEEP_RECENT = 20; // records kept verbatim after a fold (the conversation's working set)
+
+export async function maintainSessionMemory(opts: {
+  sessions: AgentSessionStore;
+  workspace: string;
+  sessionId: string;
+  previousMemory: string | undefined;
+  coveredThroughSeq: number | undefined;
+  summarize: (span: ChatMessage[]) => Promise<string>;
+  now: string;
+  triggerChars?: number;
+}): Promise<void> {
+  const all = await opts.sessions.listMessages(opts.workspace, opts.sessionId);
+  const coveredThrough = opts.coveredThroughSeq;
+  const tail = coveredThrough === undefined ? all : all.filter((m) => m.seq > coveredThrough);
+  const chars = (opts.previousMemory?.length ?? 0) + tail.reduce((n, m) => n + m.content.length, 0);
+  if (chars < (opts.triggerChars ?? MEMORY_TRIGGER_CHARS) || tail.length <= MEMORY_KEEP_RECENT) return;
+  // Cut at the first USER record at/after the keep boundary so the remaining tail replays balanced (an assistant
+  // tool_call and its results never straddle the cut). No safe boundary → skip; next turn tries again.
+  let cut = -1;
+  for (let i = tail.length - MEMORY_KEEP_RECENT; i < tail.length; i++) {
+    if (tail[i]?.role === "user") {
+      cut = i;
+      break;
+    }
+  }
+  if (cut <= 0) return;
+  const oldSpan = tail.slice(0, cut);
+  const throughSeq = oldSpan[oldSpan.length - 1]?.seq;
+  if (throughSeq === undefined) return;
+  const seeded: ChatMessage[] = [
+    ...(opts.previousMemory !== undefined && opts.previousMemory.length > 0
+      ? [{ role: "user", content: `[Previous conversation memory]\n${opts.previousMemory}` } satisfies ChatMessage]
+      : []),
+    ...recordsToHistory(oldSpan),
+  ];
+  const digest = (await opts.summarize(seeded)).trim();
+  if (digest.length === 0) return; // the summariser declined — keep replaying in full rather than dropping context
+  await opts.sessions.setSessionMemory(opts.workspace, opts.sessionId, digest, throughSeq, opts.now);
+}
+
 export function extractToolCalls(message: ChatMessage): AgentToolCall[] | undefined {
   if (message.role !== "assistant") return undefined;
   const tcs = message.tool_calls;
@@ -412,8 +463,22 @@ export async function runChat(
   const session = await deps.sessions.getVisibleSession(workspace, subject, sessionId);
   if (!session) throw new NotFoundError("NOT_FOUND", undefined, "Conversation not found.");
 
-  const existing = await deps.sessions.listMessages(workspace, sessionId);
-  let seq = existing.length === 0 ? 0 : Math.max(...existing.map((m) => m.seq)) + 1;
+  const allMessages = await deps.sessions.listMessages(workspace, sessionId);
+  let seq = allMessages.length === 0 ? 0 : Math.max(...allMessages.map((m) => m.seq)) + 1;
+  // Bounded replay (session running memory): with a maintained digest, only the records AFTER the covered seq
+  // replay verbatim — the digest leads the history as a synthetic user turn (memoryHistory below). Without one,
+  // the whole transcript replays (the historical behaviour).
+  const covered = session.memoryThroughSeq;
+  const existing = covered === undefined ? allMessages : allMessages.filter((m) => m.seq > covered);
+  const memoryHistory: ChatMessage[] =
+    session.memory !== undefined && session.memory.length > 0
+      ? [
+          {
+            role: "user",
+            content: `[Conversation memory — a digest of the earlier part of this conversation. Continue from it; the original messages are not replayed.]\n\n${session.memory}`,
+          },
+        ]
+      : [];
 
   const userRecord: AgentMessageRecord = {
     id: deps.newId(),
@@ -563,7 +628,11 @@ export async function runChat(
     }
     const userForModel =
       preambles.length > 0 ? `${preambles.join("\n\n")}\n\n---\n\nUser message:\n${userText}` : userText;
-    const history: ChatMessage[] = [...recordsToHistory(existing), { role: "user", content: userForModel }];
+    const history: ChatMessage[] = [
+      ...memoryHistory,
+      ...recordsToHistory(existing),
+      { role: "user", content: userForModel },
+    ];
     // Which registered model powers this turn, in priority order: the conversation's own pick (session.model, set in
     // the chat) → the workspace AgentSpec's model (Settings › Agent) → the agent server's default model.
     const modelRef = session.model ?? profile?.model;
@@ -668,6 +737,22 @@ export async function runChat(
         } catch {}
       }
     }
+
+    // Maintain the session's running memory at the turn boundary (successful turns only — a failed turn changed
+    // little and rethrew above). Best-effort: a summariser/store failure skips maintenance; next turn retries.
+    try {
+      await maintainSessionMemory({
+        sessions: deps.sessions,
+        workspace,
+        sessionId,
+        previousMemory: session.memory,
+        coveredThroughSeq: session.memoryThroughSeq,
+        // The same tier rule as in-run compaction: the cheap summariser when configured, else the turn's own model.
+        summarize: summarize ?? buildSummarizer(model.transport, model.model),
+        now: deps.now(),
+        ...(deps.memoryTriggerChars !== undefined ? { triggerChars: deps.memoryTriggerChars } : {}),
+      });
+    } catch {}
   } finally {
     await tools.close();
   }

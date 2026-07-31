@@ -1,8 +1,9 @@
-import { ToolRegistry } from "@everdict/agent-runtime";
+import { type ChatMessage, ToolRegistry } from "@everdict/agent-runtime";
+import type { AgentMessageRecord } from "@everdict/contracts";
 import { InMemoryAgentSessionStore } from "@everdict/db";
 import type { LlmTransport, StreamRequest } from "@everdict/llm";
 import { describe, expect, it } from "vitest";
-import { type ChatDeps, runChat } from "./chat.js";
+import { type ChatDeps, maintainSessionMemory, runChat } from "./chat.js";
 
 const PRINCIPAL = { subject: "u-1", workspace: "acme", roles: ["member"] };
 
@@ -27,6 +28,133 @@ async function seededDeps(transport: LlmTransport): Promise<{ deps: ChatDeps; se
   };
   return { deps, sessions };
 }
+
+function record(seq: number, role: "user" | "assistant", content: string): AgentMessageRecord {
+  return {
+    id: `m-${seq}`,
+    tenant: "acme",
+    sessionId: "s-1",
+    seq,
+    role,
+    content,
+    createdAt: "2026-07-31T00:00:00.000Z",
+  };
+}
+
+describe("session running memory", () => {
+  it("folds the oldest records (to a clean user boundary) into a digest seeded with the previous memory", async () => {
+    // Given a transcript past the trigger: 26 records alternating user/assistant (user on even seqs)
+    const sessions = new InMemoryAgentSessionStore();
+    await sessions.createSession({
+      id: "s-1",
+      tenant: "acme",
+      owner: "u-1",
+      title: "t",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z",
+    });
+    await sessions.appendMessages(
+      Array.from({ length: 26 }, (_, i) => record(i, i % 2 === 0 ? "user" : "assistant", `message number ${i}`)),
+    );
+    const summarized: ChatMessage[][] = [];
+    // When maintenance runs with a tiny trigger and a prior digest
+    await maintainSessionMemory({
+      sessions,
+      workspace: "acme",
+      sessionId: "s-1",
+      previousMemory: "OLD DIGEST",
+      coveredThroughSeq: undefined,
+      summarize: async (span) => {
+        summarized.push(span);
+        return "NEW DIGEST";
+      },
+      now: "2026-07-31T01:00:00.000Z",
+      triggerChars: 10,
+    });
+    // Then the fold cut at the first USER record inside the keep window (26-20=6 → seq 6), covering seq 0..5
+    const s = await sessions.getSession("acme", "u-1", "s-1");
+    expect(s?.memory).toBe("NEW DIGEST");
+    expect(s?.memoryThroughSeq).toBe(5);
+    // …and the summariser saw the PREVIOUS digest leading the folded span (nothing falls off the end)
+    const seen = summarized[0] ?? [];
+    expect(seen[0]?.content).toContain("OLD DIGEST");
+    expect(seen.some((m) => typeof m.content === "string" && m.content.includes("message number 5"))).toBe(true);
+    expect(seen.some((m) => typeof m.content === "string" && m.content.includes("message number 6"))).toBe(false);
+  });
+
+  it("does nothing below the trigger or when the summariser declines", async () => {
+    const sessions = new InMemoryAgentSessionStore();
+    await sessions.createSession({
+      id: "s-1",
+      tenant: "acme",
+      owner: "u-1",
+      title: "t",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z",
+    });
+    await sessions.appendMessages(Array.from({ length: 26 }, (_, i) => record(i, "user", `m${i}`)));
+    // Below the trigger → untouched
+    await maintainSessionMemory({
+      sessions,
+      workspace: "acme",
+      sessionId: "s-1",
+      previousMemory: undefined,
+      coveredThroughSeq: undefined,
+      summarize: async () => "SHOULD NOT RUN",
+      now: "2026-07-31T01:00:00.000Z",
+      triggerChars: 1_000_000,
+    });
+    expect((await sessions.getSession("acme", "u-1", "s-1"))?.memory).toBeUndefined();
+    // Over the trigger but the summariser returns "" → keep replaying in full rather than dropping context
+    await maintainSessionMemory({
+      sessions,
+      workspace: "acme",
+      sessionId: "s-1",
+      previousMemory: undefined,
+      coveredThroughSeq: undefined,
+      summarize: async () => "",
+      now: "2026-07-31T01:00:00.000Z",
+      triggerChars: 10,
+    });
+    expect((await sessions.getSession("acme", "u-1", "s-1"))?.memory).toBeUndefined();
+  });
+
+  it("replays the digest + only the uncovered tail on the next turn (bounded replay)", async () => {
+    // Given a session whose memory covers seq ≤ 1
+    const requests: StreamRequest[] = [];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: async (req) => {
+        requests.push(req);
+        return {
+          content: "ok",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      },
+    };
+    const { deps, sessions } = await seededDeps(transport);
+    const s = await sessions.getSession("acme", "u-1", "s-1");
+    if (!s) throw new Error("expected the seeded session");
+    s.memory = "DIGEST OF THE EARLY SPAN";
+    s.memoryThroughSeq = 1;
+    await sessions.appendMessages([
+      record(0, "user", "ancient question"),
+      record(1, "assistant", "ancient answer"),
+      record(2, "user", "recent question"),
+      record(3, "assistant", "recent answer"),
+    ]);
+    // When the next turn runs
+    await runChat(deps, PRINCIPAL, {}, "s-1", "continue");
+    // Then the model saw the digest as the leading user turn, the uncovered tail, and NOT the covered records
+    const sent = requests[0]?.messages ?? [];
+    expect(sent[0]?.content).toContain("DIGEST OF THE EARLY SPAN");
+    const texts = sent.map((m) => (typeof m.content === "string" ? m.content : ""));
+    expect(texts.some((t) => t.includes("recent question"))).toBe(true);
+    expect(texts.some((t) => t.includes("ancient question"))).toBe(false);
+  });
+});
 
 describe("runChat knowledge auto-recall", () => {
   it("recalls workspace knowledge about @-referenced anchors via ONE get_task_context call (no reference → no recall)", async () => {

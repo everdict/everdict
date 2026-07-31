@@ -95,6 +95,7 @@ function sessionsStub() {
     async touchSession() {},
     async setSessionModel() {},
     async setSessionPermissionMode() {},
+    async setSessionMemory() {},
     async setSessionStatus(_tenant: string, id: string, status: string) {
       statuses.push({ id, status });
     },

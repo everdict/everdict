@@ -23,6 +23,10 @@ export interface AgentSessionStore {
     mode: AgentPermissionMode | null,
     updatedAt: string,
   ): Promise<void>;
+  // Set the session's running memory: the digest of the oldest span + the highest message seq it covers, and bump
+  // updatedAt. The next turn replays memory + only the messages AFTER throughSeq (bounded replay for long
+  // conversations). Maintained by the chat host at turn boundaries; only ever moves forward.
+  setSessionMemory(tenant: string, id: string, memory: string, throughSeq: number, updatedAt: string): Promise<void>;
   // Headless-run lifecycle transition (agent-automation A4) — owned by the agent service's activation wrapper.
   setSessionStatus(tenant: string, id: string, status: AgentRunStatus, updatedAt: string): Promise<void>;
   // Point the session at its LATEST ledger run (P3 — an activation/turn = a Run{kind:"agent"}).

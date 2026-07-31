@@ -170,10 +170,17 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   read-only toolset is framed as the verifier's qualification. (4) **Structured output** (kernel): `outputSchema`
   registers a `structured_output` tool whose parameters ARE the schema; the submission ends the run with the
   value on `AgentLoopResult.structuredOutput` (one nudge if the model finishes without submitting) — for
-  programmatic hosts (activations, reactions, evals). Deferred from the same analysis: session running memory
-  (store schema), task ledger (agent-teams), stale-file reminders (revision-ledger events), soft interrupt,
-  streaming tool execution (deliberately last — Claude Code's inc-4258 double-execution scar interacts with our
-  non-streaming retry ladder).
+  programmatic hosts (activations, reactions, evals). (5) **Session running memory** (Claude Code's session
+  memory reinterpreted; mig 0101): `AgentSessionRecord.memory` + `memoryThroughSeq` hold a rolling digest of the
+  conversation's oldest records, maintained by `maintainSessionMemory` at successful turn boundaries — once the
+  bounded replay span outgrows ~100k chars, the records beyond the recent-20 working set are folded (cut at a
+  clean USER boundary so the tail replays balanced) into a fresh digest SEEDED with the previous one (memory only
+  rolls forward; a declining summariser keeps full replay). The next turn replays digest + uncovered tail instead
+  of the whole history — a long conversation stops re-reading (and re-compacting) its entire past every turn.
+  In-run compaction is unchanged and complementary: compaction fits ONE run's context; memory bounds what every
+  FUTURE turn replays. Deferred from the same analysis: task ledger (agent-teams), stale-file reminders
+  (revision-ledger events), soft interrupt, streaming tool execution (deliberately last — Claude Code's inc-4258
+  double-execution scar interacts with our non-streaming retry ladder).
 - **P9 (per-workspace customization, landed — Phase 1)** — each workspace can enhance its own agent, plugging its
   context + tools into the shared framework the way Claude Code takes a per-project CLAUDE.md + MCP servers. A new
   **registered, versioned `AgentSpec` entity** (`(tenant, id, version) → AgentSpec`, same immutable-version SSOT as

@@ -137,3 +137,20 @@ describe("InMemoryAgentSessionStore", () => {
     expect(await store.getSession("acme", "alice", "s1")).toBeDefined();
   });
 });
+
+describe("session running memory", () => {
+  it("setSessionMemory persists the digest + covered seq and only ever rolls forward on later folds", async () => {
+    const store = new InMemoryAgentSessionStore();
+    await store.createSession(session({ id: "s1", owner: "alice" }));
+    await store.setSessionMemory("acme", "s1", "digest v1", 9, "2026-07-31T01:00:00.000Z");
+    let s = await store.getSession("acme", "alice", "s1");
+    expect(s?.memory).toBe("digest v1");
+    expect(s?.memoryThroughSeq).toBe(9);
+    expect(s?.updatedAt).toBe("2026-07-31T01:00:00.000Z");
+    // A later fold replaces the digest and advances the covered seq.
+    await store.setSessionMemory("acme", "s1", "digest v2", 24, "2026-07-31T02:00:00.000Z");
+    s = await store.getSession("acme", "alice", "s1");
+    expect(s?.memory).toBe("digest v2");
+    expect(s?.memoryThroughSeq).toBe(24);
+  });
+});

@@ -41,6 +41,13 @@ export const AgentSessionRecordSchema = z.object({
   model: z.string().optional(),
   // The session's standing permission mode (the member picks it in the chat header). Unset → "default" (ask).
   permissionMode: AgentPermissionModeSchema.optional(),
+  // Session running memory (Claude Code's session memory reinterpreted): a rolling digest of the conversation's
+  // OLDEST records, maintained at turn boundaries once the replayed transcript outgrows the budget. The next turn
+  // replays `memory` (as a leading synthetic user turn) + only the records with seq > memoryThroughSeq — bounded
+  // replay, so a long conversation stops re-reading (and re-compacting) its entire past every turn. Unset → full
+  // replay (the historical behaviour). The digest is model text, never member-authored — display surfaces skip it.
+  memory: z.string().optional(),
+  memoryThroughSeq: z.number().int().nonnegative().optional(),
   // Who may read/continue the conversation: unset|"private" = the owner only (personal chat history);
   // "workspace" = any workspace member (e.g. a comment-thread discussion session — the shared detail surface).
   visibility: z.enum(["private", "workspace"]).optional(),

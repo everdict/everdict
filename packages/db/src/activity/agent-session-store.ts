@@ -59,6 +59,20 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     s.permissionMode = mode ?? undefined; // null clears the standing mode → "default" (ask)
   }
 
+  async setSessionMemory(
+    tenant: string,
+    id: string,
+    memory: string,
+    throughSeq: number,
+    updatedAt: string,
+  ): Promise<void> {
+    const s = this.sessions.find((r) => r.tenant === tenant && r.id === id);
+    if (!s) return;
+    s.updatedAt = updatedAt;
+    s.memory = memory;
+    s.memoryThroughSeq = throughSeq;
+  }
+
   async setSessionStatus(tenant: string, id: string, status: AgentRunStatus, updatedAt: string): Promise<void> {
     const s = this.sessions.find((r) => r.tenant === tenant && r.id === id);
     if (!s) return;
@@ -121,6 +135,8 @@ interface SessionRow {
   title: string;
   model: string | null;
   permission_mode: string | null;
+  memory: string | null;
+  memory_through_seq: number | null;
   visibility: string | null;
   origin: unknown;
   status: string | null;
@@ -130,7 +146,7 @@ interface SessionRow {
 }
 
 const SESSION_COLUMNS =
-  "id, tenant, owner, title, model, permission_mode, visibility, origin, status, run_id, created_at, updated_at";
+  "id, tenant, owner, title, model, permission_mode, memory, memory_through_seq, visibility, origin, status, run_id, created_at, updated_at";
 
 function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
   return AgentSessionRecordSchema.parse({
@@ -140,6 +156,8 @@ function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
     title: row.title,
     ...(row.model !== null ? { model: row.model } : {}),
     ...(row.permission_mode !== null ? { permissionMode: row.permission_mode } : {}),
+    ...(row.memory !== null ? { memory: row.memory } : {}),
+    ...(row.memory_through_seq !== null ? { memoryThroughSeq: Number(row.memory_through_seq) } : {}),
     ...(row.visibility !== null ? { visibility: row.visibility } : {}),
     ...(row.origin !== null && row.origin !== undefined ? { origin: row.origin } : {}),
     ...(row.status !== null ? { status: row.status } : {}),
@@ -266,6 +284,19 @@ export class PgAgentSessionStore implements AgentSessionStore {
     await this.client.query(
       "UPDATE everdict_agent_sessions SET permission_mode = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
       [tenant, id, mode, updatedAt],
+    );
+  }
+
+  async setSessionMemory(
+    tenant: string,
+    id: string,
+    memory: string,
+    throughSeq: number,
+    updatedAt: string,
+  ): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_agent_sessions SET memory = $3, memory_through_seq = $4, updated_at = $5 WHERE tenant = $1 AND id = $2",
+      [tenant, id, memory, throughSeq, updatedAt],
     );
   }
 
