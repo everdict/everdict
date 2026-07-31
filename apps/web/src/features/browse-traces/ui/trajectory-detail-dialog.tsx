@@ -6,21 +6,24 @@ import { useParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, ExternalLink, X } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
-import type { TraceEvent } from '@/entities/trace'
 import { fmtDateTimeFull } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
 
-import { getTrajectoryAction, type TrajectoryMeta } from '../api/browse-trajectories'
-import { TraceEventList } from './trace-detail'
+import {
+  getTrajectoryAction,
+  type TrajectoryMeta,
+  type TrajectorySegment,
+} from '../api/browse-trajectories'
+import { TrajectoryView } from './trajectory-view'
 
 // 봉인 궤적 상세 — 우리 스토어(N1)가 가진 증거를 설정 안에서 그대로 연다. run 소스만 run 상세로도 열리므로
 // (otlp 도착분은 익스포터가 찍은 everdict.run_id, materialize된 import는 ingest:<scorecardId>:<caseId> 로
 // 봉인돼 run 레코드가 없다) 목록의 유일한 상세 표면은 이 다이얼로그다. 외부 플랫폼 트레이스의
-// TraceDetailDialog 와 같은 문법(헤더·메타 스트립·prev/next·←/→)을 쓰되, 스팬 워터폴은 없다 — 우리 스토어는
-// 정규화된 TraceEvent 를 보관하지 정규화 전 스팬 트리를 보관하지 않는다.
+// TraceDetailDialog 와 같은 문법(헤더·메타 스트립·prev/next·←/→)을 쓰고, 본문은 TrajectoryView 가
+// 시스템 뷰(에이전트·배치·서비스 평면 + 전문 페이로드)로 연다.
 export function TrajectoryDetailDialog({
   open,
   onClose,
@@ -36,17 +39,17 @@ export function TrajectoryDetailDialog({
   const locale = useLocale()
   const timeZone = useTimeZone()
   const { workspace } = useParams<{ workspace: string }>()
-  const [events, setEvents] = useState<TraceEvent[] | undefined>()
+  const [segments, setSegments] = useState<TrajectorySegment[] | undefined>()
   const [error, setError] = useState<string | undefined>()
   const [pending, start] = useTransition()
 
   useEffect(() => {
     if (!open) return
-    setEvents(undefined)
+    setSegments(undefined)
     setError(undefined)
     start(async () => {
       const res = await getTrajectoryAction(meta.runId)
-      if (res.ok) setEvents(res.events)
+      if (res.ok) setSegments(res.segments)
       else setError(res.error)
     })
   }, [open, meta.runId])
@@ -69,7 +72,7 @@ export function TrajectoryDetailDialog({
       open={open}
       onClose={onClose}
       labelledBy="trajectory-detail-title"
-      className="flex h-[85vh] max-h-[85vh] max-w-[1100px] flex-col"
+      className="flex h-[90vh] max-h-[90vh] max-w-[1400px] flex-col"
     >
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div className="min-w-0 space-y-1">
@@ -131,20 +134,19 @@ export function TrajectoryDetailDialog({
 
       <div className="flex flex-wrap gap-x-7 gap-y-2 border-b border-border bg-card/50 px-5 py-3">
         <Meta label={t('metaSource')} value={t(`source_${meta.source}`)} />
-        <Meta label={t('metaEvents')} value={String(meta.eventCount)} />
         <Meta
           label={t('metaSealedAt')}
           value={fmtDateTimeFull(meta.sealedAt, { locale, timeZone })}
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 p-4">
         {error ? (
           <Callout tone="danger">{error}</Callout>
-        ) : pending && !events ? (
+        ) : pending && !segments ? (
           <p className="px-1 py-2 text-[12px] text-faint">{t('loading')}</p>
-        ) : events ? (
-          <TraceEventList events={events} />
+        ) : segments ? (
+          <TrajectoryView segments={segments} />
         ) : null}
       </div>
     </Dialog>

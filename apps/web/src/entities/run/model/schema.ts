@@ -43,6 +43,21 @@ export const trajectoryResponseSchema = z.object({
     sealedAt: z.string(),
   }),
   events: z.array(traceEventSchema).default([]),
+  // 이 run에 기여한 EMITTER들 — 실행 자신의 기록 + 자기 스팬을 이 run에 밀어넣은 서비스마다 하나
+  // (`service:<service.name>`). 실행 세그먼트 하나만 `events`를 생략한다(그 스트림이 top-level `events`라
+  // 같은 트레이스를 두 번 싣지 않는다). 다중 평면 등급 이전 컨트롤 플레인은 아예 보내지 않으므로 기본값은 빈 배열.
+  segments: z
+    .array(
+      z.object({
+        emitter: z.string(),
+        source: z.enum(['run', 'otlp', 'import']),
+        eventCount: z.number().int().nonnegative(),
+        t0: z.string().optional(),
+        sealedAt: z.string(),
+        events: z.array(z.unknown()).optional(),
+      })
+    )
+    .default([]),
 })
 export type TrajectoryResponse = z.infer<typeof trajectoryResponseSchema>
 

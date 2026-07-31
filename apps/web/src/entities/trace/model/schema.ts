@@ -75,6 +75,8 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
     t: z.number(),
     kind: z.literal('span'),
     name: z.string(),
+    // 스팬 자체의 길이(OTLP end−start). 없으면 순간으로 도착해 크로스-플레인 타임라인이 시작점만 그린다.
+    durationMs: z.number().optional(),
     attributes: z.record(z.string(), z.unknown()).optional(),
   }),
   // 인프라 플레인 기록(배치/서비스) — 백엔드가 오케스트레이터의 계정을 트레이스에 봉인한 것

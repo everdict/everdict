@@ -1,7 +1,15 @@
 export { TraceBrowser, type TraceSelection } from './ui/trace-browser'
 export { TraceDetail, TraceEventList } from './ui/trace-detail'
 export { TrajectoryBrowser } from './ui/trajectory-browser'
-export { listTrajectoriesAction, type ListTrajectoriesResult } from './api/browse-trajectories'
+// The sealed evidence's reading surface — shared by the settings trajectory dialog and the run detail.
+// `asSingleSegment` is how a caller holding ONE stream (a legacy run's row embed) reads it here.
+export { asSingleSegment, TrajectoryView } from './ui/trajectory-view'
+export {
+  getTrajectoryAction,
+  listTrajectoriesAction,
+  type ListTrajectoriesResult,
+  type TrajectorySegment,
+} from './api/browse-trajectories'
 export {
   inspectTraceAction,
   listTracesAction,

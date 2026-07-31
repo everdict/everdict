@@ -45,13 +45,31 @@ export async function listTrajectoriesAction(
   }
 }
 
+// One EMITTER's contribution to the trajectory — the execution's own record, plus one per service that
+// pushed its own OTel spans through the door (`service:<service.name>`). `t0` is the absolute instant this
+// segment's relative `t` counts from: the anchor that lets planes share one time axis.
+const trajectorySegmentSchema = z.object({
+  emitter: z.string(),
+  source: z.enum(['run', 'otlp', 'import']),
+  eventCount: z.number().int().nonnegative(),
+  t0: z.string().optional(),
+  sealedAt: z.string(),
+  // Omitted on exactly one segment — the execution's, whose stream is the response's top-level `events`
+  // (the wire never ships the same trace twice). Rehydrated below so callers see a uniform list.
+  events: z.array(traceEventSchema).optional(),
+})
+export type TrajectorySegment = Omit<z.infer<typeof trajectorySegmentSchema>, 'events'> & {
+  events: TraceEvent[]
+}
+
 const trajectoryDetailSchema = z.object({
   meta: trajectoryMetaSchema,
   events: z.array(traceEventSchema).default([]),
+  segments: z.array(trajectorySegmentSchema).default([]),
 })
 
 export type GetTrajectoryResult =
-  | { ok: true; meta: TrajectoryMeta; events: TraceEvent[] }
+  | { ok: true; meta: TrajectoryMeta; events: TraceEvent[]; segments: TrajectorySegment[] }
   | { ok: false; error: string }
 
 // One sealed trajectory's full evidence — the ledger's own detail read (GET /trajectories/:id), which
@@ -61,7 +79,29 @@ export async function getTrajectoryAction(runId: string): Promise<GetTrajectoryR
   const ctx = await authContext()
   try {
     const detail = trajectoryDetailSchema.parse(await controlPlane.getTrajectory(ctx, runId))
-    return { ok: true, meta: detail.meta, events: detail.events }
+    const segments: TrajectorySegment[] = detail.segments.map((segment) => ({
+      ...segment,
+      events: segment.events ?? detail.events,
+    }))
+    return {
+      ok: true,
+      meta: detail.meta,
+      events: detail.events,
+      // A control plane that predates the multi-plane rung sends no segments — the execution's own stream
+      // is then the whole trajectory, and the view reads it as a single plane.
+      segments:
+        segments.length > 0
+          ? segments
+          : [
+              {
+                emitter: detail.meta.source,
+                source: detail.meta.source,
+                eventCount: detail.events.length,
+                sealedAt: detail.meta.sealedAt,
+                events: detail.events,
+              },
+            ],
+    }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
