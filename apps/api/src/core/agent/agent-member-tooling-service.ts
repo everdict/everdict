@@ -12,6 +12,7 @@ import {
 import {
   type AgentPreferenceChannel,
   type AgentSpec,
+  AgentSpecSchema,
   BadRequestError,
   type CapabilityRecord,
   type CapabilityRef,
@@ -137,10 +138,10 @@ export class AgentMemberToolingService {
   }
 
   // Point one tool's declared secrets at real secret NAMES. The binding is workspace-level because that is where it
-  // lives — an adopted capability keeps it on its CapabilityRef, a hand-wired server on its `authSecret` — so this
-  // writes the AgentSpec through the sibling save (a new immutable version, `latest` moves). Only those two channels
-  // are bindable: a first-party default and a published-but-unadopted capability read the secret by its DECLARED
-  // name, so the fix there is a secret of that name, not a mapping.
+  // lives — an adopted capability keeps it on its CapabilityRef, a hand-wired server on its `authSecret`, and the two
+  // channels with no home of their own (a first-party default, a published-but-unadopted capability) on the spec's
+  // toolSecretBindings overlay — so this writes the AgentSpec through the sibling save (a new immutable version,
+  // `latest` moves).
   async bindToolSecrets(
     tenant: string,
     subject: string,
@@ -151,12 +152,6 @@ export class AgentMemberToolingService {
     if (!agentService)
       throw new BadRequestError("BAD_REQUEST", { key }, "Agent configuration is not writable on this deployment.");
     const tool = await this.requireTool(tenant, subject, key);
-    if (!isBindable(tool))
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { key },
-        "This tool reads its secrets by their declared name — create a secret with that name instead of mapping it.",
-      );
     const declared = new Set(Object.keys(tool.secretBindings));
     for (const name of Object.keys(bindings))
       if (!declared.has(name))
@@ -166,8 +161,12 @@ export class AgentMemberToolingService {
     try {
       spec = await this.deps.agents.get(tenant, AGENT_CHAT_CONFIG_ID, "latest");
     } catch {
-      // Bindable means the binding already lives on this workspace's agent, so a missing spec is a real inconsistency.
-      throw new NotFoundError("NOT_FOUND", { key }, "this workspace has no agent configuration to bind against.");
+      // An adopted capability / hand-wired server exists only ON a spec, so a missing one is a real inconsistency
+      // for them. A built-in default or an unadopted publication needs no spec to be offered — bootstrap the
+      // baseline the binding will live on (the save below registers it as 1.0.0).
+      if (tool.origin.channel === "mcpServer" || (tool.origin.channel === "capability" && tool.baseline))
+        throw new NotFoundError("NOT_FOUND", { key }, "this workspace has no agent configuration to bind against.");
+      spec = AgentSpecSchema.parse({ id: AGENT_CHAT_CONFIG_ID, version: "0.0.0" });
     }
     // The upsert takes everything but the coordinates it assigns itself (a changed spec becomes a new version).
     const { id: _id, version: _version, ...body } = applyBindings(spec, tool, bindings);
@@ -253,13 +252,6 @@ function recordOf(tool: ResolvedAgentTool): CapabilityRecord | undefined {
   return undefined;
 }
 
-// Can this member REBIND the tool's secrets? Only where a binding has somewhere to live: an ADOPTED capability
-// (baseline=true ⇒ a CapabilityRef pins it on the AgentSpec) or a hand-wired MCP server.
-function isBindable(tool: ResolvedAgentTool): boolean {
-  if (tool.origin.channel === "mcpServer") return true;
-  return tool.origin.channel === "capability" && tool.baseline;
-}
-
 // What a live probe would connect to: the URL, the server NAME the runtime namespaces its functions under, and the
 // secret whose value becomes the Authorization header. undefined ⇒ not an HTTP MCP tool (nothing to probe).
 function httpProbeTarget(
@@ -282,10 +274,25 @@ function httpProbeTarget(
   return { url: record.spec.url, serverName: record.name, ...(bound !== undefined ? { authSecret: bound } : {}) };
 }
 
-// The AgentSpec with this tool's bindings replaced. Two shapes, because the two bindable channels store it in two
-// places: a hand-wired server's single `Authorization` becomes its `authSecret`; an adopted capability's map becomes
-// its CapabilityRef.secretBindings. Everything else on the spec is carried through untouched.
+// The AgentSpec with this tool's bindings replaced. Three shapes, because the channels store it in three places: a
+// hand-wired server's single `Authorization` becomes its `authSecret`; an adopted capability's map becomes its
+// CapabilityRef.secretBindings; a built-in default / unadopted publication writes the spec-level toolSecretBindings
+// overlay. Everything else on the spec is carried through untouched.
 function applyBindings(spec: AgentSpec, tool: ResolvedAgentTool, bindings: Record<string, string>): AgentSpec {
+  if (tool.origin.channel === "builtin" || (tool.origin.channel === "capability" && !tool.baseline)) {
+    const current = spec.toolSecretBindings[tool.key] ?? {};
+    const next: Record<string, string> = { ...current };
+    for (const logical of Object.keys(tool.secretBindings)) {
+      const bound = bindings[logical]?.trim();
+      if (bound === undefined) continue; // an omitted entry keeps its current binding
+      if (bound.length > 0) next[logical] = bound;
+      else delete next[logical]; // an empty name CLEARS the remap (back to the declared name)
+    }
+    const overlay = { ...spec.toolSecretBindings };
+    if (Object.keys(next).length > 0) overlay[tool.key] = next;
+    else delete overlay[tool.key];
+    return { ...spec, toolSecretBindings: overlay };
+  }
   if (tool.origin.channel === "mcpServer") {
     const serverName = tool.origin.server.name;
     const authSecret = bindings.Authorization?.trim() ?? "";
@@ -397,7 +404,9 @@ function toToolDetail(
       : {}),
     ...(record ? { capability: { source: record.tenant, id: record.id, version: record.version } } : {}),
     tags: record?.tags ?? [],
-    bindable: isBindable(tool),
+    // Every channel's binding has somewhere to live — an adopted capability on its CapabilityRef, a hand-wired
+    // server on its authSecret, a built-in default / unadopted publication on the spec's toolSecretBindings overlay.
+    bindable: true,
     // Editing + versioning a tool means editing the capability behind it — possible only for one this workspace owns
     // (a first-party default and another workspace's publication are read-only here).
     editable: tool.origin.channel === "capability" && record?.tenant === tenant,

@@ -75,7 +75,7 @@
     "probeFailed": "Could not run the connection test.",
     "secretsTitle": "Secrets",
     "secretsBindHint": "Point each secret this tool declares at one of your own secret names. Values never pass through here — only names.",
-    "secretsNameHint": "This tool reads its secret by the declared name, so it cannot be remapped — store a secret under exactly that name.",
+    "secretsNameHint": "Store a secret under exactly the name this tool reads. Pointing it at a different secret is an agent edit (agents:write).",
     "secretResolved": "Ready",
     "secretMissing": "Missing",
     "boundTo": "reads",

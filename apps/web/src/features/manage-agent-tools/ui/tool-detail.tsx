@@ -306,9 +306,9 @@ function FunctionRow({ fn }: { fn: AgentToolFunction }) {
   )
 }
 
-// 필요한 시크릿 — 두 가지 세계가 있고 화면도 그렇게 갈린다. 채택된 capability / 직접 배선한 MCP 서버는 이름을 다시
-// 이을 수 있고(바인딩), 기본 제공 도구와 아직 채택하지 않은 발행물은 "선언된 이름"으로 읽으므로 그 이름의 시크릿을
-// 만들어 주는 게 유일한 해결이다.
+// 필요한 시크릿 — 모든 채널이 바인딩 저장처를 갖는다(채택 capability=CapabilityRef · 직접 배선 서버=authSecret ·
+// 기본 제공/미채택 발행물=AgentSpec.toolSecretBindings 오버레이). 그래서 화면은 권한으로만 갈린다: agents:write 면
+// 기존 시크릿을 골라 잇거나 인라인으로 새로 만들고(피커), 아니면 도구가 읽는 이름 그대로 값을 넣어 주는 것이 해결이다.
 function SecretsSection({
   tool,
   secretNames,

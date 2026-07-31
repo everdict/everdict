@@ -19,6 +19,7 @@ function spec(over: Partial<AgentSpec> = {}): AgentSpec {
     mcpServers: [],
     capabilities: [],
     disabledDefaults: [],
+    toolSecretBindings: {},
     triggers: [{ kinds: ["scorecard.completed"], filters: [] }],
     enabled: true,
     tags: [],

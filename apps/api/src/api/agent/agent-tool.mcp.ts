@@ -72,9 +72,9 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
       description:
         "Point one tool's declared secrets at real secret names in this workspace (names only — never values). This " +
         "edits the WORKSPACE agent configuration, since that is where the binding lives (an adopted capability's " +
-        "pinned reference / a hand-wired server's authSecret), so it needs agents:write and cuts a new agent version. " +
-        "A built-in default or a published-but-unadopted capability reads its secret by the DECLARED name and has no " +
-        "binding to edit — create a secret with that name instead. Omitted entries keep their current binding.",
+        "pinned reference / a hand-wired server's authSecret / the spec-level overlay for a built-in default or a " +
+        "published-but-unadopted capability), so it needs agents:write and cuts a new agent version. Omitted " +
+        "entries keep their current binding; an empty name clears the remap (back to the declared name).",
       inputSchema: {
         key: z.string().describe("Key from list_agent_tools"),
         bindings: z.record(z.string()).describe("Declared secret name → the secret name it should read"),

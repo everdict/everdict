@@ -437,11 +437,14 @@ plus what the tool actually IS, all derived from the same `resolveAgentCapabilit
   by RUNNING it — the store's try-runner, reused here; a first-party default resolves from the shipped definitions
   since it has no store row, and stays trusted on a host runtime).
 - **`secrets`** — each declared name with the secret name it actually reads and whether the member can satisfy it.
-  Two worlds, and the UI splits on `bindable`: an ADOPTED capability (`CapabilityRef.secretBindings`) and a hand-wired
-  server (`authSecret`) keep their binding on the AgentSpec, so `PUT /agent/tools/:key/secrets`
-  (`bind_agent_tool_secrets`, `agents:write`) rewrites it and cuts a new agent version. A first-party default and a
-  published-but-unadopted capability read the secret by its DECLARED name — there is nothing to remap, so the page
-  offers "store a secret under exactly this name" instead. Names only, never values.
+  Every channel's binding lives on the AgentSpec — an ADOPTED capability on its `CapabilityRef.secretBindings`, a
+  hand-wired server on its `authSecret`, and a first-party default / published-but-unadopted capability on the
+  spec-level `toolSecretBindings` overlay (tool key → declared name → workspace secret name; without an entry they
+  bind by the declared name) — so `PUT /agent/tools/:key/secrets` (`bind_agent_tool_secrets`, `agents:write`)
+  rewrites any of them and cuts a new agent version (bootstrapping the chat config when a fresh workspace has none).
+  The page therefore offers the same secret picker everywhere: select one of your existing secret names or create one
+  inline; a member without `agents:write` still gets "store a secret under exactly the bound name". Names only,
+  never values.
 - **Editing is the chat, not a form.** `editable` (a capability THIS workspace owns) surfaces "대화로 편집하기" →
   the `tool` reference type (`get_capability`, carrying `source` since a tool may be owned elsewhere) + the `toolEdit`
   mission; the agent reads the spec and publishes a new version under HITL approval. Built-ins and other workspaces'

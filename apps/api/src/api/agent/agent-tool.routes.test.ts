@@ -50,6 +50,7 @@ const agentSpec = (over: Partial<AgentSpec> = {}): AgentSpec => ({
   mcpServers: [],
   capabilities: [],
   disabledDefaults: [],
+  toolSecretBindings: {},
   triggers: [],
   enabled: false,
   tags: [],
@@ -223,8 +224,9 @@ describe("agent tool detail", () => {
     expect(tool.secrets).toEqual([
       expect.objectContaining({ name: "TAVILY_API_KEY", boundTo: "TAVILY_API_KEY", resolved: false }),
     ]);
-    // A default reads its secret by the declared name and belongs to Everdict — nothing here is the member's to edit.
-    expect(tool).toMatchObject({ bindable: false, editable: false, probeable: false });
+    // A default belongs to Everdict, so its spec is not the member's to edit — but its secret binding lives on the
+    // workspace agent's toolSecretBindings overlay, so it CAN be pointed at an existing secret.
+    expect(tool).toMatchObject({ bindable: true, editable: false, probeable: false });
   });
 
   it("lists an mcp tool's declared functions under the names the runtime namespaces them with", async () => {
@@ -283,15 +285,55 @@ describe("agent tool detail", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("refuses to bind a built-in default — it reads its secret by the declared name", async () => {
-    const { app } = await build();
+  it("binds a built-in default to an existing secret, bootstrapping the agent config when none exists", async () => {
+    const { app, agents } = await build({ secrets: { MY_KEY: "tvly-abc" } });
     const res = await app.inject({
       method: "PUT",
       url: "/agent/tools/default%3Aweb-search/secrets",
       headers: H,
       payload: { bindings: { TAVILY_API_KEY: "MY_KEY" } },
     });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(200);
+    // The remap is live in the refreshed detail — and the member's existing secret now satisfies it.
+    expect(detail(res.json()).secrets).toEqual([
+      expect.objectContaining({ name: "TAVILY_API_KEY", boundTo: "MY_KEY", resolved: true }),
+    ]);
+    // No spec existed, so the binding bootstrapped the chat config as its first version.
+    const saved = await agents.get("acme", "default", "latest");
+    expect(saved.version).toBe("1.0.0");
+    expect(saved.toolSecretBindings).toEqual({ "default:web-search": { TAVILY_API_KEY: "MY_KEY" } });
+  });
+
+  it("binds an unadopted publication through the same overlay — no adopting reference required", async () => {
+    const { app, agents } = await build({ capabilities: [mcpCapability()] });
+    const res = await app.inject({
+      method: "PUT",
+      url: `/agent/tools/${key}/secrets`,
+      headers: H,
+      payload: { bindings: { API_KEY: "GRAFANA_TOKEN" } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(detail(res.json()).secrets[0]).toMatchObject({ boundTo: "GRAFANA_TOKEN" });
+    const saved = await agents.get("acme", "default", "latest");
+    expect(saved.capabilities).toEqual([]); // still unadopted — the overlay carries the map, not a pin
+    expect(saved.toolSecretBindings).toEqual({ "capability:acme/grafana": { API_KEY: "GRAFANA_TOKEN" } });
+  });
+
+  it("a blank name clears an overlay remap — the tool falls back to its declared name", async () => {
+    const { app, agents } = await build();
+    const bind = (name: string) =>
+      app.inject({
+        method: "PUT",
+        url: "/agent/tools/default%3Aweb-search/secrets",
+        headers: H,
+        payload: { bindings: { TAVILY_API_KEY: name } },
+      });
+    await bind("MY_KEY");
+    const res = await bind("");
+    expect(res.statusCode).toBe(200);
+    expect(detail(res.json()).secrets[0]).toMatchObject({ boundTo: "TAVILY_API_KEY" });
+    const saved = await agents.get("acme", "default", "latest");
+    expect(saved.toolSecretBindings).toEqual({}); // an emptied entry is dropped, not stored as {}
   });
 
   it("probing an mcp tool sends the member's own bound secret and returns what the server serves", async () => {

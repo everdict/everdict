@@ -105,7 +105,7 @@ export function registerAgentToolRoutes(app: FastifyInstance, deps: ServerDeps):
           ),
         );
       } catch (err) {
-        return sendError(reply, err); // not bindable / undeclared name → 400 · unknown key → 404
+        return sendError(reply, err); // undeclared name → 400 · unknown key → 404
       }
     },
   );

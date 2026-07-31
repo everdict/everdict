@@ -111,6 +111,12 @@ export const AgentSpecSchema = z.object({
   // Defaults (web search, PDF, integration tools) are included in the agent's toolset without adoption; listing an id
   // here opts that one default out. Adopting a same-named capability also shadows a default. See capability.ts.
   disabledDefaults: z.array(z.string()).default([]),
+  // Secret rebinding for the tools that have no binding home of their own — a first-party default and a
+  // published-but-unadopted capability would otherwise read each secret by its declared name. Keyed by TOOL key
+  // (`default:<id>` / `capability:<owner>/<id>`), each entry maps a declared secret name to the secret name this
+  // workspace actually holds. An adopted capability keeps its map on its CapabilityRef, a hand-wired server on its
+  // `authSecret` — those never read this field. Names only, never values.
+  toolSecretBindings: z.record(z.string(), z.record(z.string(), z.string())).default({}),
   // Registered model id (this workspace's model registry) powering the agent; unset → the agent server's default model.
   model: z.string().optional(),
   // Standing instructions rendered as the FIRST message of a triggered activation ("when you are woken, do

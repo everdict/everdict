@@ -132,6 +132,7 @@ function spec(over: Partial<AgentSpec> = {}): AgentSpec {
     mcpServers: [],
     capabilities: [],
     disabledDefaults: [],
+    toolSecretBindings: {},
     triggers: [],
     enabled: false,
     tags: [],

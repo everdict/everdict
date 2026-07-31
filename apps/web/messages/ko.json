@@ -75,7 +75,7 @@
     "probeFailed": "연결 테스트를 실행하지 못했습니다.",
     "secretsTitle": "필요한 시크릿",
     "secretsBindHint": "이 도구가 선언한 시크릿을 내 시크릿 이름에 연결합니다. 값은 여기를 지나가지 않고 이름만 오갑니다.",
-    "secretsNameHint": "이 도구는 선언된 이름 그대로 시크릿을 읽습니다. 이름을 바꿔 연결할 수 없으니 정확히 그 이름으로 저장하세요.",
+    "secretsNameHint": "이 도구가 읽는 이름 그대로 시크릿을 저장하세요. 다른 시크릿으로 잇는 건 에이전트 설정 권한(agents:write)이 필요합니다.",
     "secretResolved": "준비됨",
     "secretMissing": "없음",
     "boundTo": "읽는 이름",

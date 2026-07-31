@@ -114,6 +114,7 @@ const agentSpec = (over: Partial<AgentSpec> = {}): AgentSpec => ({
   mcpServers: [],
   capabilities: [],
   disabledDefaults: [],
+  toolSecretBindings: {},
   triggers: [],
   enabled: false,
   tags: [],
@@ -199,6 +200,65 @@ describe("resolveAgentCapabilities", () => {
       query,
     );
     expect(keyed(tools, "capability:acme/draft")?.enabled).toBe(true);
+  });
+
+  it("remaps a built-in default's declared secret through the spec-level overlay", async () => {
+    const tools = await resolveAgentCapabilities(
+      deps({
+        agentRegistry: fakeRegistry(
+          agentSpec({ toolSecretBindings: { "default:web-search": { TAVILY_API_KEY: "MY_KEY" } } }),
+        ),
+      }),
+      query,
+    );
+    expect(keyed(tools, "default:web-search")?.secretBindings).toEqual({ TAVILY_API_KEY: "MY_KEY" });
+  });
+
+  it("remaps an unadopted publication's secrets, ignoring names the tool no longer declares", async () => {
+    const grafana = codeCapability({ id: "grafana", name: "grafana" });
+    grafana.spec = {
+      ...grafana.spec,
+      requiredSecrets: [{ name: "API_KEY", description: "token" }],
+    } as typeof grafana.spec;
+    const tools = await resolveAgentCapabilities(
+      deps({
+        agentRegistry: fakeRegistry(
+          agentSpec({ toolSecretBindings: { "capability:acme/grafana": { API_KEY: "MY_KEY", GONE: "STALE" } } }),
+        ),
+        capabilityStore: fakeCapabilities([grafana]),
+      }),
+      query,
+    );
+    expect(keyed(tools, "capability:acme/grafana")?.secretBindings).toEqual({ API_KEY: "MY_KEY" });
+  });
+
+  it("never lets the overlay override an adopted reference's own binding map", async () => {
+    const grafana = codeCapability({ id: "grafana", name: "grafana" });
+    grafana.spec = {
+      ...grafana.spec,
+      requiredSecrets: [{ name: "API_KEY", description: "token" }],
+    } as typeof grafana.spec;
+    const tools = await resolveAgentCapabilities(
+      deps({
+        agentRegistry: fakeRegistry(
+          agentSpec({
+            capabilities: [
+              {
+                source: TENANT,
+                id: "grafana",
+                version: "1.0.0",
+                secretBindings: { API_KEY: "REF_KEY" },
+                enableWrite: false,
+              },
+            ],
+            toolSecretBindings: { "capability:acme/grafana": { API_KEY: "OVERLAY_KEY" } },
+          }),
+        ),
+        capabilityStore: fakeCapabilities([grafana]),
+      }),
+      query,
+    );
+    expect(keyed(tools, "capability:acme/grafana")?.secretBindings).toEqual({ API_KEY: "REF_KEY" });
   });
 
   it("offers the first-party defaults, and honors the workspace opt-out as the baseline", async () => {

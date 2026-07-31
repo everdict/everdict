@@ -98,6 +98,9 @@ export const agentSpecSchema = z.object({
   capabilities: z.array(capabilityRefSchema).default([]),
   // 워크스페이스가 끈 first-party 기본 도구(capability id) — 기본 도구셋(웹검색 등)은 채택 없이 붙지만 여기 나열한 id 는 제외.
   disabledDefaults: z.array(z.string()).default([]),
+  // 자기 바인딩 저장처가 없는 도구(기본 제공·미채택 발행물)의 시크릿 리매핑 — 도구 키 → { 선언 이름 → 실제 시크릿 이름 }.
+  // 값은 절대 없다(이름만). 저장 시 반드시 보존(capabilities/disabledDefaults 와 동일 규칙).
+  toolSecretBindings: z.record(z.string(), z.record(z.string(), z.string())).default({}),
   model: z.string().optional(),
   // 트리거 활성화 시 첫 메시지로 렌더되는 상시 지시(매 턴을 물들이는 instructions 와 구분).
   task: z.string().optional(),

@@ -48,7 +48,8 @@ export interface ResolvedAgentTool {
   baseline: boolean; // what the workspace put on the table (enabled !== baseline ⇒ the member overrode it)
   writes: boolean; // EFFECTIVE mutation flag (an mcp adopted without enableWrite bridges read verbs only)
   // logical secret name → the name of the secret THIS member must hold. An adopted capability maps them explicitly
-  // (CapabilityRef.secretBindings); anything else binds by same-name convention.
+  // (CapabilityRef.secretBindings), a hand-wired server via its authSecret; a built-in default and an unadopted
+  // publication bind by same-name convention unless the spec's toolSecretBindings overlay remaps them.
   secretBindings: Record<string, string>;
   owner: string; // the workspace that published it (= the caller's tenant for own/private tools; "" for raw mcp servers)
   version?: string;
@@ -85,6 +86,22 @@ function bindSecrets(record: CapabilityRecord, ref: CapabilityRef | undefined): 
   const bindings: Record<string, string> = {};
   for (const rs of spec.requiredSecrets) bindings[rs.name] = ref?.secretBindings[rs.name] ?? rs.name;
   return bindings;
+}
+
+// The AgentSpec.toolSecretBindings overlay for the channels with no binding home of their own (built-in defaults +
+// publications enabled without adoption). Only DECLARED names are remapped — a stale entry for a secret the tool no
+// longer declares is ignored, never invented.
+function rebindDeclared(
+  bindings: Record<string, string>,
+  overlay: Record<string, string> | undefined,
+): Record<string, string> {
+  if (!overlay) return bindings;
+  const merged = { ...bindings };
+  for (const name of Object.keys(merged)) {
+    const bound = overlay[name];
+    if (bound !== undefined && bound.length > 0) merged[name] = bound;
+  }
+  return merged;
 }
 
 function capabilityCandidate(
@@ -231,7 +248,11 @@ async function candidatePools(
     // the author's own library — the SkillRecord it was published from is already there.
     const candidate = capabilityCandidate(record, { tenant, baseline: false });
     if (!candidate || adoptedKeys.has(candidate.key)) continue; // an adopted pin already speaks for this capability
-    pool.push(candidate);
+    // No adopting ref to carry a binding map, so the spec-level overlay is where a remap for this tool lives.
+    pool.push({
+      ...candidate,
+      secretBindings: rebindDeclared(candidate.secretBindings, spec?.toolSecretBindings[candidate.key]),
+    });
   }
 
   // First-party defaults last. The integration gate still applies (an ungated default is not a candidate at all —
@@ -260,7 +281,10 @@ async function candidatePools(
       enabled: false,
       baseline: !disabledDefaults.includes(def.record.id),
       writes: spec_.type === "mcp" ? spec_.write : !spec_.isReadOnly,
-      secretBindings: Object.fromEntries(spec_.requiredSecrets.map((rs) => [rs.name, rs.name])),
+      secretBindings: rebindDeclared(
+        Object.fromEntries(spec_.requiredSecrets.map((rs) => [rs.name, rs.name])),
+        spec?.toolSecretBindings[builtinToolKey(def.record.id)],
+      ),
       owner: def.record.tenant,
       version: def.record.version,
       origin: { channel: "builtin", builtin: def },

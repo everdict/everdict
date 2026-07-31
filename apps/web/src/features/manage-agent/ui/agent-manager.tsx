@@ -56,7 +56,9 @@ export function AgentManager({
   // 워크스페이스가 끈 first-party 기본 도구(id). 기본 도구셋은 채택 없이 붙지만 여기서 끌 수 있다. 저장 시 반드시 보존.
   const [disabledDefaults, setDisabledDefaults] = useState<string[]>(agent?.disabledDefaults ?? [])
   const toggleDefault = (id: string, enabled: boolean) =>
-    setDisabledDefaults((ids) => (enabled ? ids.filter((x) => x !== id) : [...new Set([...ids, id])]))
+    setDisabledDefaults((ids) =>
+      enabled ? ids.filter((x) => x !== id) : [...new Set([...ids, id])]
+    )
   const [pending, startTransition] = useTransition()
 
   const patchServer = (index: number, patch: Partial<ServerRow>) =>
@@ -88,6 +90,8 @@ export function AgentManager({
       capabilities,
       // 기본 도구 opt-out — 빠뜨리면 저장 시 꺼둔 기본 도구가 되살아난다(capabilities 와 동일 보존 규칙).
       disabledDefaults,
+      // 도구 상세에서 이어 둔 시크릿 리매핑(기본 제공·미채택 발행물) — 빠뜨리면 저장 시 전부 풀린다(동일 보존 규칙).
+      toolSecretBindings: agent?.toolSecretBindings ?? {},
       tags: agent?.tags ?? [],
     }
     startTransition(async () => {
@@ -304,7 +308,9 @@ export function AgentManager({
                     <div className="flex items-center gap-2">
                       <span className="truncate font-mono text-[13px] font-medium">{d.name}</span>
                       {d.requires && (
-                        <Badge tone="outline">{t('builtinRequires', { integration: d.requires })}</Badge>
+                        <Badge tone="outline">
+                          {t('builtinRequires', { integration: d.requires })}
+                        </Badge>
                       )}
                     </div>
                     <div className="text-[11.5px] text-muted-foreground">{d.description}</div>

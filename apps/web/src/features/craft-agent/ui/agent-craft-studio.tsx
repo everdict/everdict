@@ -124,6 +124,7 @@ export function AgentCraftStudio({
       mcpServers: initialSpec?.mcpServers ?? [],
       capabilities: initialSpec?.capabilities ?? [],
       disabledDefaults: initialSpec?.disabledDefaults ?? [],
+      toolSecretBindings: initialSpec?.toolSecretBindings ?? {},
       tags: initialSpec?.tags ?? [],
       enabled,
     }
