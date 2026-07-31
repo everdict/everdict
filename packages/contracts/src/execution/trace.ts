@@ -45,6 +45,21 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     name: z.string(),
     attributes: z.record(z.string(), z.unknown()).optional(),
   }),
+  // The INFRA-plane record of the run's execution — the orchestrator's own account (job submission, blocked
+  // placement verdicts, task/pod lifecycle events, restarts, OOM kills; a service topology's per-unit state).
+  // Appended by the BACKEND, the only layer that sees it, so the record survives the cluster's job GC and rides
+  // the sealed trajectory. scope "placement" = the case's own unit; "service" = a topology unit the run drives.
+  // Judges/sinks may ignore it (same contract as `log`).
+  z.object({
+    t: z.number(),
+    kind: z.literal("infra"),
+    scope: z.enum(["placement", "service"]),
+    event: z.string().optional(), // orchestrator event type ("Started", "Driver Failure", "blocked", …)
+    message: z.string(),
+    unit: z.string().optional(), // alloc id / pod name
+    node: z.string().optional(),
+    service: z.string().optional(), // the topology unit's name (scope "service")
+  }),
 ]);
 export type TraceEvent = z.infer<typeof TraceEventSchema>;
 

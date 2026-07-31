@@ -556,6 +556,27 @@ describe("K8s harness resources + OOM classification", () => {
     expect(err.message).toContain("resources.memoryMb");
   });
 
+  it("dispatch seals the infra-plane record onto the result's trace (submitted → placed → pod events)", async () => {
+    const { api } = mockApi({
+      jobPods: [{ name: "everdict-c1-x-pod", phase: "Succeeded", node: "n3" }],
+      podEvents: [{ reason: "Pulled", message: "Successfully pulled image", at: new Date().toISOString() }],
+    });
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
+    const result = await backend.dispatch(JOB);
+    const infra = result.trace.filter((e) => e.kind === "infra");
+    // 이벤트는 실제 타임스탬프(t) 순으로 정렬돼 실린다 — 구성만 단언(순서는 소스 타임스탬프에 따름).
+    expect(infra.map((e) => (e.kind === "infra" ? e.event : undefined)).sort()).toEqual([
+      "Pulled",
+      "placed",
+      "submitted",
+    ]);
+    expect(infra.find((e) => e.kind === "infra" && e.event === "placed")).toMatchObject({
+      scope: "placement",
+      unit: "everdict-c1-x-pod",
+      node: "n3",
+    });
+  });
+
   it("a failed K8s job's throw carries the failure evidence in extra (pod/node/events + log tail)", async () => {
     // Regression: dispatch's finally deletes the Job right after the throw — the pod identity, its events, and
     // the pod log tail must be captured at throw time or they are unreachable exactly when someone asks "why".

@@ -8,6 +8,7 @@ import {
   InternalError,
   NotFoundError,
   OOM_KILLED,
+  type TraceEvent,
   UpstreamError,
   judgeAuthEnv,
   judgeEnv,
@@ -167,6 +168,31 @@ export function placementEventLines(events: NomadTaskEvent[]): string[] {
     .map((e) => `${e.Type ? `${e.Type}: ` : ""}${e.DisplayMessage ?? ""}`.trim())
     .filter((line) => line !== "")
     .slice(-FAILURE_EVENT_CAP);
+}
+
+// Alloc task events → infra-plane trace events with REAL timestamps (event Time − dispatch t0) — the cluster's
+// own account of the case, appended to the result's trace so it seals with the trajectory.
+export function nomadInfraEvents(
+  events: NomadTaskEvent[],
+  unit: string,
+  node: string | undefined,
+  t0: number,
+): TraceEvent[] {
+  return events
+    .filter((e) => (e.DisplayMessage ?? "").trim() !== "" || (e.Type ?? "").trim() !== "")
+    .slice(-PLACEMENT_EVENT_CAP)
+    .map((e) => ({
+      t:
+        typeof e.Time === "number" && e.Time > 0
+          ? Math.max(0, Math.floor(e.Time / 1e6) - t0)
+          : Math.max(0, Date.now() - t0),
+      kind: "infra" as const,
+      scope: "placement" as const,
+      ...(e.Type ? { event: e.Type } : {}),
+      message: (e.DisplayMessage ?? e.Type ?? "").trim(),
+      unit,
+      ...(node ? { node } : {}),
+    }));
 }
 
 // Nomad task events → the wire PlacementEvent feed (newest PLACEMENT_EVENT_CAP, empty ones dropped, ns → ISO).
@@ -742,12 +768,28 @@ export class NomadBackend
     const opts = await this.effectiveOpts(job);
     const ns = opts.namespace;
     const jobId = nomadJobId(job, dispatchSuffix()); // unique per dispatch (concurrent same-case batches + no stale-alloc reads)
+    // The infra-plane record of THIS dispatch (submission, blocked verdicts, placement) — appended to the
+    // result's trace so the sealed trajectory keeps the orchestrator's account after the job is GC'd.
+    const t0 = Date.now();
+    const infra: TraceEvent[] = [];
+    const mark = (event: string, message: string, extra?: { unit?: string; node?: string }): void => {
+      infra.push({
+        t: Math.max(0, Date.now() - t0),
+        kind: "infra",
+        scope: "placement",
+        event,
+        message,
+        ...(extra?.unit ? { unit: extra.unit } : {}),
+        ...(extra?.node ? { node: extra.node } : {}),
+      });
+    };
     const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId));
     if (submit.status >= 300) {
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
+    mark("submitted", `nomad job ${jobId}${ns ? ` (namespace ${ns})` : ""}`);
     try {
-      const allocId = await this.waitForAlloc(jobId, ns, options?.signal, options?.onWaiting);
+      const allocId = await this.waitForAlloc(jobId, ns, options?.signal, options?.onWaiting, mark);
       const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
       const logs = await this.http.request(
         "GET",
@@ -764,7 +806,15 @@ export class NomadBackend
             ? "alloc log fetch failed (alloc dir already GC'd — raise the Nomad client's gc_max_allocs for eval churn)"
             : "alloc log fetch failed",
         );
-      return await this.parseResultOrExplain(logs.text, allocId, ns);
+      const result = await this.parseResultOrExplain(logs.text, allocId, ns);
+      // The cluster's own task-event account (with REAL event timestamps) closes the infra record — best-effort:
+      // a detail miss just leaves the collector's own marks.
+      const detail = await this.allocDetail(allocId);
+      result.trace = [
+        ...result.trace,
+        ...[...infra, ...nomadInfraEvents(detail.events, allocId, detail.stub?.NodeName, t0)].sort((a, b) => a.t - b.t),
+      ];
+      return result;
     } catch (err) {
       // If the wait was aborted, reclaim the submitted job so it doesn't keep running (best-effort, never masks err).
       if (options?.signal?.aborted) {
@@ -1252,12 +1302,14 @@ export class NomadBackend
     namespace?: string,
     signal?: AbortSignal,
     onWaiting?: (reason: string) => void,
+    onInfra?: (event: string, message: string, extra?: { unit?: string; node?: string }) => void,
   ): Promise<string> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 900;
     const blockedBudgetMs = this.opts.failOnBlockedEvalMs ?? 120_000;
     const nsq = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
     let blockedSinceMs: number | undefined;
+    let placedMarked = false;
     for (let i = 0; i < maxPolls; i++) {
       if (signal?.aborted) throw new InternalError("CANCELLED", { jobId }, "dispatch aborted while waiting for alloc.");
       const res = await this.http.request("GET", `/v1/job/${jobId}/allocations${nsq}`);
@@ -1287,6 +1339,7 @@ export class NomadBackend
             if (blockedSinceMs === undefined) {
               try {
                 onWaiting?.(`placement blocked — ${blocked}`);
+                onInfra?.("blocked", blocked);
               } catch {
                 // best-effort; a listener throw must not break dispatch
               }
@@ -1295,7 +1348,9 @@ export class NomadBackend
             if (Date.now() - blockedSinceMs >= blockedBudgetMs) {
               throw new UpstreamError(
                 "UPSTREAM_ERROR",
-                { jobId, reason: "placement_blocked" },
+                // The verdict rides as evidence too (classifyFailure → CaseFailure.placement.events → the
+                // failed result's infra trace) — an unplaceable case's record explains itself after GC.
+                { jobId, reason: "placement_blocked", placement: { events: [`blocked: ${blocked}`] } },
                 `placement blocked — ${blocked} (the job's resources exceed what any eligible node offers; lower the harness resources or add capacity)`,
               );
             }
@@ -1304,6 +1359,18 @@ export class NomadBackend
           }
         }
         if (alloc) {
+          // First sighting of the placed unit — the infra record's "placed" mark (unit + node identity).
+          if (!placedMarked) {
+            placedMarked = true;
+            try {
+              onInfra?.("placed", `alloc ${alloc.ID}${alloc.NodeName ? ` on ${alloc.NodeName}` : ""}`, {
+                unit: alloc.ID,
+                ...(alloc.NodeName ? { node: alloc.NodeName } : {}),
+              });
+            } catch {
+              // best-effort; a listener throw must not break dispatch
+            }
+          }
           if (alloc.ClientStatus === "complete") return alloc.ID;
           if (alloc.ClientStatus === "failed" || alloc.ClientStatus === "lost") {
             const events = await this.allocTaskEvents(alloc.ID);

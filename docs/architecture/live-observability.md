@@ -169,3 +169,21 @@ now attach `extra.placement {unit, node, events[]}` + `extra.logTail` (stderr-pr
 16 KB tail cap) to the thrown `UpstreamError`; `classifyFailure` lifts both onto the `CaseFailure`, and the
 batch path's synthesized failed `CaseResult` carries the log tail as a `log` trace event — so the sealed
 trajectory keeps the evidence after the cluster has long forgotten the job.
+
+### Infra-plane trace recording (the record, not just the read)
+
+The placement/topology reads above are LIVE — once the orchestrator GC's the job they have nothing left to
+answer with. The record half: every dispatch now APPENDS the infra plane to the result's trace as `infra`
+TraceEvents (`scope placement | service`), so it seals with the trajectory and survives the cluster:
+
+- Nomad/K8s dispatch: `submitted` → blocked verdicts (as they are first seen) → `placed` (unit + node) → the
+  orchestrator's own task/pod events with their REAL timestamps (event time − dispatch t0), on success AND
+  failure (`failedCaseResult` renders `CaseFailure.placement.events` as infra events ahead of the log tail).
+- `ServiceTopologyBackend` appends the topology roster at case completion (per unit: role/status/restarts/OOM/
+  node) — "what stack did this case actually run against" is evidence, not archaeology.
+- Consumers: judges/sinks ignore the kind (same contract as `log`); the web timeline and the trace browser
+  render it (`[placement] Started: Task started by client @node`).
+
+Live-verified on Nomad 2.0.3: a succeeded run's sealed trajectory carried
+`submitted → Received → Task Setup → placed(alloc, node) → Started → Terminated(Exit 0)` and a pull-denied
+run carried the full docker denial message — both readable from `GET /runs/:id/trajectory` after the job was gone.

@@ -13,17 +13,27 @@ export type Dispatch = (job: CaseJob) => Promise<CaseResult>;
 export function failedCaseResult(job: CaseJob, error: unknown): CaseResult {
   const message = error instanceof Error ? error.message : String(error);
   const failure = classifyFailure(error, "dispatch");
+  // Failure evidence rides the trace: the placement identity + orchestrator events as infra-plane events, the
+  // backend-captured log tail (already gone from the cluster by the time anyone reads this) as a `log` event,
+  // then the error itself — so the sealed trajectory carries the whole post-mortem.
+  const infra = (failure.placement?.events ?? []).map((line, i) => ({
+    t: i,
+    kind: "infra" as const,
+    scope: "placement" as const,
+    message: line,
+    ...(failure.placement?.unit ? { unit: failure.placement.unit } : {}),
+    ...(failure.placement?.node ? { node: failure.placement.node } : {}),
+  }));
   return {
     caseId: job.evalCase.id,
     harness: `${job.harness.id}@${job.harness.version}`,
     ...(job.trial !== undefined ? { trial: job.trial } : {}), // carry the trial index so pass@k/flakiness sees this failure
-    // Failure evidence rides the trace: the backend-captured log tail (already gone from the cluster by the time
-    // anyone reads this) as a `log` event, then the error itself — so the sealed trajectory carries the post-mortem.
     trace: [
+      ...infra,
       ...(failure.logTail !== undefined
-        ? [{ t: 0, kind: "log" as const, stream: "stderr" as const, text: failure.logTail }]
+        ? [{ t: infra.length, kind: "log" as const, stream: "stderr" as const, text: failure.logTail }]
         : []),
-      { t: failure.logTail !== undefined ? 1 : 0, kind: "error", message },
+      { t: infra.length + (failure.logTail !== undefined ? 1 : 0), kind: "error", message },
     ],
     snapshot: { kind: "prompt", output: "" },
     // Carry the reason in detail — the web/CLI surface score.detail as-is, so "why it failed" is visible per case.

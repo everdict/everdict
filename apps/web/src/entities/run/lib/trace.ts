@@ -22,6 +22,13 @@ export function summarizeTraceEvent(e: TraceEvent): string {
       return String(a.message ?? '')
     case 'log':
       return `[${String(a.stream ?? '')}] ${String(a.text ?? '').slice(0, 140)}`
+    case 'infra': {
+      // 인프라 플레인 기록(배치/서비스) — [scope/service] event: message (node)
+      const head = a.service ? `${String(a.scope ?? '')}/${String(a.service)}` : String(a.scope ?? '')
+      const event = a.event ? `${String(a.event)}: ` : ''
+      const node = a.node ? ` @${String(a.node)}` : ''
+      return `[${head}] ${event}${String(a.message ?? '').slice(0, 140)}${node}`
+    }
     default:
       return ''
   }
@@ -36,6 +43,7 @@ const TRACE_KIND_COLOR: Record<string, string> = {
   env_action: 'bg-accent-foreground',
   error: 'bg-destructive',
   log: 'bg-border',
+  infra: 'bg-accent-foreground',
 }
 
 export function traceKindColor(kind: string): string {

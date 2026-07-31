@@ -209,6 +209,43 @@ describe("NomadBackend.dispatch", () => {
     await expect(backend.dispatch(JOB)).rejects.toThrow(/placement blocked.*exhausted/i);
   });
 
+  it("dispatch seals the infra-plane record onto the result's trace (submitted → placed → task events)", async () => {
+    // The orchestrator's account of the run must ride the RESULT (and thus the sealed trajectory) — after the
+    // job is GC'd, the live placement read has nothing left to answer with.
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path.includes("/allocations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { ID: "alloc1", ClientStatus: "complete", NodeName: "worker-7", DesiredStatus: "run" },
+            ]),
+          };
+        if (path === "/v1/allocation/alloc1")
+          return {
+            status: 200,
+            text: JSON.stringify({
+              NodeName: "worker-7",
+              TaskStates: {
+                agent: {
+                  Events: [{ Type: "Started", DisplayMessage: "Task started by client", Time: Date.now() * 1e6 }],
+                },
+              },
+            }),
+          };
+        if (path.includes("/logs/")) return { status: 200, text: `${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http, pollIntervalMs: 1 });
+    const result = await backend.dispatch(JOB);
+    const infra = result.trace.filter((e) => e.kind === "infra");
+    expect(infra.map((e) => (e.kind === "infra" ? e.event : undefined))).toEqual(["submitted", "placed", "Started"]);
+    expect(infra[1]).toMatchObject({ scope: "placement", unit: "alloc1", node: "worker-7" });
+    expect(infra[2]).toMatchObject({ message: "Task started by client", unit: "alloc1", node: "worker-7" });
+  });
+
   it("a blocked placement fires onWaiting ONCE with the verdict (visible waiting, not a silent 'queued')", async () => {
     const http: NomadHttp = {
       async request(_method, path) {

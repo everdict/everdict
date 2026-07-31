@@ -501,7 +501,27 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Topolo
         ...(readStore ? { readStore } : {}),
       });
 
-      return { caseId: job.evalCase.id, harness: `${spec.id}@${spec.version}`, trace, snapshot, scores };
+      // The SERVICE-plane infra record: the warm topology's per-unit state at case completion (role/status/
+      // restarts/OOM/node), appended to the trace so the sealed trajectory says what stack the case actually ran
+      // against — after the roster read landed, "the stack was healthy/churning when this case ran" is evidence,
+      // not archaeology. Best-effort; scored ABOVE (the graders never see these events).
+      const roster = await this.opts.runtime.describeTopology?.(spec, zone).catch(() => undefined);
+      const infra: TraceEvent[] = (roster?.services ?? []).slice(0, 20).map((s) => ({
+        t: 0,
+        kind: "infra" as const,
+        scope: "service" as const,
+        service: s.name,
+        event: s.status,
+        message: `${s.role ?? "unit"}/${s.name} ${s.status}${s.restarts !== undefined && s.restarts > 0 ? `, restarts ${s.restarts}` : ""}${s.oom ? ", OOM-killed" : ""}${s.lastEvent ? ` — ${s.lastEvent}` : ""}`,
+        ...(s.node ? { node: s.node } : {}),
+      }));
+      return {
+        caseId: job.evalCase.id,
+        harness: `${spec.id}@${spec.version}`,
+        trace: [...trace, ...infra],
+        snapshot,
+        scores,
+      };
     } finally {
       recorder?.stop(); // flush the environment recorder before the browser is torn down (idempotent)
       await releaseTarget();

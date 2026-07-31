@@ -11,6 +11,7 @@ import {
   NotFoundError,
   OOM_KILLED,
   type RegistryAuth,
+  type TraceEvent,
   UpstreamError,
   judgeAuthEnv,
   judgeEnv,
@@ -1413,15 +1414,59 @@ export class K8sBackend
       const payload = auth
         ? { apiVersion: "v1", kind: "List", items: [k8sRegistryAuthSecret(auth, ns), manifest] }
         : manifest;
+      const t0 = Date.now();
       await api.applyJob(payload, ns);
       try {
         await this.waitForJob(api, name, ns, options?.signal);
-        return parseResult(await api.podLogs(name, ns));
+        const result = parseResult(await api.podLogs(name, ns));
+        // The infra-plane record of this dispatch (pod identity/node + the namespace events with their REAL
+        // timestamps) — appended to the trace so the sealed trajectory keeps the orchestrator's account after
+        // the Job is deleted in the finally below. Best-effort: a read miss just leaves the record shorter.
+        result.trace = [...result.trace, ...(await this.infraEvents(api, name, ns, t0))];
+        return result;
       } finally {
         // On an aborted wait this finally is exactly the reclaim — the submitted Job is deleted, not left running.
         await api.deleteJob(name, ns);
       }
     });
+  }
+
+  // Pod identity + namespace events → infra trace events (scope "placement"). Captured BEFORE the finally
+  // deletes the Job — the last moment the pod and its events are reachable.
+  private async infraEvents(api: K8sApi, name: string, ns: string, t0: number): Promise<TraceEvent[]> {
+    try {
+      const pods = (await api.podsForJob(name, ns)) ?? [];
+      const pod = pods.at(-1);
+      const out: TraceEvent[] = [
+        { t: 0, kind: "infra", scope: "placement", event: "submitted", message: `k8s job ${name} (namespace ${ns})` },
+      ];
+      if (!pod) return out;
+      out.push({
+        t: Math.max(0, Date.now() - t0),
+        kind: "infra",
+        scope: "placement",
+        event: "placed",
+        message: `pod ${pod.name}${pod.node ? ` on ${pod.node}` : ""}`,
+        unit: pod.name,
+        ...(pod.node ? { node: pod.node } : {}),
+      });
+      const events = (await api.objectEvents(pod.name, ns).catch(() => undefined)) ?? [];
+      for (const e of events.slice(-20)) {
+        const at = e.at ? Date.parse(e.at) : Number.NaN;
+        out.push({
+          t: Number.isFinite(at) ? Math.max(0, at - t0) : Math.max(0, Date.now() - t0),
+          kind: "infra",
+          scope: "placement",
+          ...(e.reason ? { event: e.reason } : {}),
+          message: e.message,
+          unit: pod.name,
+          ...(pod.node ? { node: pod.node } : {}),
+        });
+      }
+      return out.sort((a, b) => a.t - b.t);
+    } catch {
+      return []; // best-effort — the infra record must never fail a run
+    }
   }
 
   private async waitForJob(api: K8sApi, name: string, ns: string, signal?: AbortSignal): Promise<void> {

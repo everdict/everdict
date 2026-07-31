@@ -350,13 +350,22 @@ describe("RunService", () => {
       logTail: "panic: boom",
     });
     expect(done?.result?.trace).toEqual([
-      { t: 0, kind: "log", stream: "stderr", text: "panic: boom" },
-      { t: 1, kind: "error", message: "alloc failed — Driver Failure: Failed to pull image" },
+      // 인프라 플레인이 먼저 — the placement events as infra evidence, then the log tail, then the error.
+      {
+        t: 0,
+        kind: "infra",
+        scope: "placement",
+        message: "Driver Failure: Failed to pull image",
+        unit: "a1",
+        node: "worker-2",
+      },
+      { t: 1, kind: "log", stream: "stderr", text: "panic: boom" },
+      { t: 2, kind: "error", message: "alloc failed — Driver Failure: Failed to pull image" },
     ]);
     // Dual-write parity with the success path — the evidence trace sealed as the run's own trajectory.
     expect(sealed).toHaveLength(1);
     expect(sealed[0]).toMatchObject({ runId: rec.id, source: "run" });
-    expect(sealed[0]?.events).toHaveLength(2);
+    expect(sealed[0]?.events).toHaveLength(3);
   });
 
   it("submit throws when over budget (no run created, maps to 402)", async () => {

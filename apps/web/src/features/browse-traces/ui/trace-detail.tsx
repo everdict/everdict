@@ -26,6 +26,7 @@ function EventRow({ event, index }: { event: TraceEvent; index: number }) {
     log: 'text-faint',
     artifact: 'text-[var(--color-success)]',
     span: 'text-faint',
+    infra: 'text-[var(--color-warning)]',
   }
   return (
     <li className="flex gap-3 px-3 py-1.5">
@@ -98,6 +99,16 @@ function EventRow({ event, index }: { event: TraceEvent; index: number }) {
           </span>
         )}
         {event.kind === 'span' && <span className="text-faint">{event.name}</span>}
+        {event.kind === 'infra' && (
+          <span className="break-words text-foreground/90">
+            <span className="font-mono text-[10.5px] text-faint">
+              [{event.service ? `${event.scope}/${event.service}` : event.scope}]
+            </span>{' '}
+            {event.event ? `${event.event}: ` : ''}
+            {event.message}
+            {event.node && <span className="text-faint"> @{event.node}</span>}
+          </span>
+        )}
       </div>
     </li>
   )

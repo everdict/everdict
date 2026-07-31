@@ -72,6 +72,17 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
     name: z.string(),
     attributes: z.record(z.string(), z.unknown()).optional(),
   }),
+  // 인프라 플레인 기록(배치/서비스) — 백엔드가 오케스트레이터의 계정을 트레이스에 봉인한 것
+  z.object({
+    t: z.number(),
+    kind: z.literal('infra'),
+    scope: z.enum(['placement', 'service']),
+    event: z.string().optional(),
+    message: z.string(),
+    unit: z.string().optional(),
+    node: z.string().optional(),
+    service: z.string().optional(),
+  }),
 ])
 
 // Everdict origin recovered from a pulled trace's platform metadata (the everdict.* keys the sink writes + the
