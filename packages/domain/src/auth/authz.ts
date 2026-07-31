@@ -68,6 +68,13 @@ export type Action =
   | "settings:write"
   | "comments:read"
   | "comments:write"
+  // The eval tracker (issues + projects + initiatives, docs/tracker.md) — ONE action pair for all three, because
+  // they are one workflow: an issue only means something inside its project, and a project only inside its
+  // initiative. Read viewer+ (knowing what the team is evaluating is benign), write member+ (collaborative
+  // content like datasets/comments). No issues:delete — removal is ordinary content mutation, gated
+  // creator-or-admin in the service, like skills and comments.
+  | "issues:read"
+  | "issues:write"
   // Minting workspace image-registry push credentials — the only member action where a credential 'value' leaves to the caller,
   // so it's honestly named as a separate action instead of reusing harnesses:register (viewer+) (register/unregister = settings:write, read = harnesses:read).
   | "images:push"
@@ -104,6 +111,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:write", // runtime registration (+validate/probe) is role-independent — every member registers their own workspace's execution infra (same as harnesses:register)
     "members:read", // reading the team (workspace members) is benign → viewer+
     "comments:read", // reading comments = benign (viewing collaborative discussion) → viewer+
+    "issues:read", // reading the tracker (what the team is evaluating and why) is benign → viewer+
   ]),
   member: new Set<Action>([
     "runs:read",
@@ -135,6 +143,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "members:read",
     "comments:read",
     "comments:write", // writing comments = collaborative content (discussing which model was run) → member+ (deletion = author-or-admin, service layer)
+    "issues:read",
+    "issues:write", // filing/resolving/linking tracker work = collaborative content → member+ (deletion = creator-or-admin, service layer)
     "images:push", // workspace registry push credential — harness authoring (image publishing) is a member's job
     "mattermost:post", // posting to the workspace Mattermost channel (using the integration) — a member's job, unlike admin-only registration (settings:write)
     "github:write", // creating a GitHub issue/comment via the workspace App (using the integration) — a member's job, unlike admin-only App registration (settings:write)
@@ -187,6 +197,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "settings:write",
     "comments:read",
     "comments:write",
+    "issues:read",
+    "issues:write",
     "images:push",
     "mattermost:post",
     "github:write",
@@ -217,6 +229,7 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "runtimes:read",
   "members:read",
   "comments:read",
+  "issues:read",
 ];
 // write scope = read ∪ content mutation (submit runs, register, create versions, run). Governance (secrets/members/settings/keys write, datasets:delete) is admin-scope only.
 const SCOPE_WRITE_ACTIONS: readonly Action[] = [
@@ -235,6 +248,7 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "capabilities:write",
   "runtimes:write",
   "comments:write",
+  "issues:write", // filing/resolving tracker work = content mutation (an agent triaging its own regressions needs it)
   "images:push", // image publishing = part of harness authoring (a credential scoped to one's own workspace registry)
   "mattermost:post", // posting to the workspace Mattermost channel = content mutation (using a configured integration)
   "github:write", // creating a GitHub issue/comment via the workspace App = content mutation (using a configured integration)

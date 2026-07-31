@@ -22,6 +22,7 @@ export * from "./secret.js";
 export * from "./skill.js";
 export * from "./subscription.js";
 export * from "./tenant-key.js";
+export * from "./tracker.js";
 export * from "./usage.js";
 export * from "./user-profile.js";
 export * from "./view.js";

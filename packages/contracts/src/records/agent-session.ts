@@ -96,6 +96,10 @@ export const AGENT_REFERENCE_TYPES = [
   "environment",
   "tool",
   "trace",
+  // The eval tracker's issue (docs/tracker.md) — the "why" behind a run: what problem is under evaluation,
+  // which scorecard closed it, and whether it has regressed since. The context an agent needs before it
+  // re-investigates something the team already resolved.
+  "issue",
 ] as const;
 export const AgentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES);
 export type AgentReferenceType = z.infer<typeof AgentReferenceTypeSchema>;

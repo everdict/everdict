@@ -77,6 +77,20 @@ export const PLATFORM_EVENT_KINDS = [
   "task.claimed",
   "task.completed",
   "task.cancelled",
+  // Eval-tracker lifecycle facts (docs/tracker.md) — the "why we evaluate" layer announcing itself. Emitted by
+  // IssueService/ProjectService/InitiativeService, the single choke point every transport calls. The status
+  // transitions are FOLDED into one kind per subject rather than one kind per verb: payload carries {from, to}
+  // plus `cause` (manual | github_sync | regression), so a subscription expresses "wake me when an issue
+  // regresses" as a payload filter instead of forcing a kind per outcome. Facts, not judgments: `regression`
+  // states that a linked scorecard's pass rate fell below the resolution scorecard's — arithmetic over sealed
+  // results. Durable per-issue history lives ON the record (the log is swept); these facts are the live half.
+  "issue.created",
+  "issue.status_changed",
+  "issue.linked", // a capability (harness/dataset/judge/scorecard/run/view) was attached to an issue
+  "project.created",
+  "project.status_changed",
+  "initiative.created",
+  "initiative.status_changed",
   // Agent-run lifecycle facts (reported BY the agent service) — observable in the feed/fleet view, but NEVER
   // trigger-matchable in v1 (agents watching agents is a runaway vector; see the loop-prevention guardrails).
   "agent.run.started",

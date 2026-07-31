@@ -12,6 +12,10 @@ export const NotificationKindSchema = z.enum([
   "schedule_failed",
   "report_completed", // a scheduled analysis report was produced — links to the view's report artifact (analysis-studio V4)
   "comment_mention", // @-mentioned in a comment — the link jumps straight to that context (dataset comment)
+  // A resolved tracker issue stopped holding: a later batch on the same dataset+harness scored below the
+  // scorecard that closed it (docs/tracker.md). The one notification worth interrupting someone for, because
+  // nobody is watching a closed issue — that is exactly why it needs to come find them.
+  "issue_regressed",
 ]);
 export type NotificationKind = z.infer<typeof NotificationKindSchema>;
 

@@ -51,6 +51,15 @@ export const TRIGGERABLE_EVENT_KINDS = [
   // creator never wakes on its own task (causedBy loop guard); cross-agent wakes are the ledger's purpose.
   "task.created",
   "task.completed",
+  // Eval tracker (docs/tracker.md): the "why" layer's wake signals — "a new issue landed", "an issue regressed,
+  // go triage it", "a project/initiative closed, write the release note". The folded status kinds keep the
+  // vocabulary small; a payload filter (cause eq regression, to eq completed) picks the outcome that matters.
+  // issue.linked and the remaining *.created kinds stay observable-only — attaching a dataset is not news worth
+  // waking a fleet for.
+  "issue.created",
+  "issue.status_changed",
+  "project.status_changed",
+  "initiative.status_changed",
 ] as const;
 // Compile-time subset guarantee: every triggerable kind is a real platform-event kind.
 const _triggerableAreKinds: readonly PlatformEventKind[] = TRIGGERABLE_EVENT_KINDS;

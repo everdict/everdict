@@ -77,6 +77,34 @@ export {
 export { type NewQueuedRunInput, Run, type RunTransition } from "./run/run.js";
 export { Approval, type ApprovalTransition, type NewPendingApprovalInput } from "./approval/approval.js";
 
+// tracker — the eval tracker's aggregates (Initiative ⊃ Project ⊃ Issue) + the readiness arithmetic that gates
+// a release (docs/tracker.md).
+export {
+  Issue,
+  isOpenIssueStatus,
+  type IssueEditInput,
+  type IssueReopenInput,
+  type IssueStatusChangeOptions,
+  type IssueTransition,
+  type NewIssueInput,
+  type NewIssueLinkInput,
+} from "./tracker/issue.js";
+export {
+  type NewProjectInput,
+  Project,
+  type ProjectEditInput,
+  type ProjectStatusChangeInput,
+  type ProjectTransition,
+} from "./tracker/project.js";
+export {
+  Initiative,
+  type InitiativeEditInput,
+  type InitiativeStatusChangeInput,
+  type InitiativeTransition,
+  type NewInitiativeInput,
+} from "./tracker/initiative.js";
+export { initiativeReadiness, projectRollup } from "./tracker/readiness.js";
+
 // member — the last-admin invariant (from apps/api core/member)
 export { MembershipPolicy } from "./member/membership-policy.js";
 
@@ -110,6 +138,13 @@ export { diffHarnessSpecs } from "./harness/harness-diff.js";
 
 // secret — reverse-usage index (which registry specs / settings integrations reference a workspace secret by name)
 export { collectSecretUsages, type SecretUsage, type SecretUsageInputs } from "./secret/secret-usage.js";
+
+// workspace settings — the Mattermost connection list (plural ∪ the legacy singular), shared by every consumer
+export {
+  DEFAULT_MATTERMOST_CONNECTION,
+  type MattermostConnection,
+  mattermostConnections,
+} from "./workspace/mattermost-connections.js";
 
 // judge — spec version diff (base ↔ candidate); shares the spec-diff engine with the harness diff
 export { diffJudgeSpecs } from "./judge/judge-diff.js";
