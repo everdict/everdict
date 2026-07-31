@@ -2797,7 +2797,7 @@
     "integrations": "Integrations",
     "integrationsDesc": "GitHub App, Mattermost, trace sinks and sources, image registries.",
     "observability": "Traces",
-    "observabilityDesc": "Browse the traces a registered platform holds.",
+    "observabilityDesc": "Open the sealed traces this workspace holds, and connect observability platforms.",
     "knowledge": "Knowledge",
     "knowledgeDesc": "The claims and skills your workspace has recorded, mapped over the entities they concern.",
     "ci": "CI",
@@ -3006,7 +3006,7 @@
     "noPermissionTitle": "No access",
     "noPermissionHint": "You need workspace read access to browse traces.",
     "ownStoreTitle": "everdict traces",
-    "ownStoreDescription": "The sealed evidence this workspace holds — own executions, OTLP-door arrivals, and materialized imports. A row opens its run."
+    "ownStoreDescription": "The sealed evidence this workspace holds — own executions, OTLP-door arrivals, and materialized imports. A row opens the trace itself."
   },
   "traceBrowser": {
     "sourceLabel": "Trace source",

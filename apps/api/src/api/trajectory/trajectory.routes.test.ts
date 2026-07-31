@@ -64,6 +64,69 @@ describe("GET /trajectories — browsing the owned evidence ledger (N1 look-inwa
   });
 });
 
+describe("GET /trajectories/:id — opening one sealed trajectory", () => {
+  it("serves the meta and every sealed event, without echoing the tenant back", async () => {
+    const { app } = await build();
+    const res = await app.inject({ method: "GET", url: "/trajectories/r1", headers: H });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.meta).toEqual({ runId: "r1", source: "run", eventCount: 1, sealedAt: expect.any(String) });
+    expect(body.meta.tenant).toBeUndefined();
+    expect(body.events).toEqual([{ t: 0, kind: "llm_call", model: "m" }]);
+  });
+
+  it("opens evidence that has NO run row — an otlp arrival and a materialized import", async () => {
+    const trajectoryStore = new InMemoryTrajectoryStore();
+    // Neither id is a run record's id: the OTLP door seals under the exporter's everdict.run_id, and a pull
+    // ingest materializes under ingest:<scorecardId>:<caseId>. The run-scoped read cannot reach either.
+    await trajectoryStore.seal({
+      runId: "svc-checkout-42",
+      tenant: "acme",
+      source: "otlp",
+      events: [{ t: 0, kind: "span", name: "checkout" }],
+    });
+    await trajectoryStore.seal({
+      runId: "ingest:sc1:case-a",
+      tenant: "acme",
+      source: "import",
+      events: [{ t: 0, kind: "message", role: "user", text: "hi" }],
+    });
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      trajectoryStore,
+    });
+
+    const otlp = await app.inject({ method: "GET", url: "/trajectories/svc-checkout-42", headers: H });
+    expect(otlp.statusCode).toBe(200);
+    expect(otlp.json().meta.source).toBe("otlp");
+    // The run-scoped twin still 404s for the same evidence — that gap is why this route exists.
+    expect((await app.inject({ method: "GET", url: "/runs/svc-checkout-42/trajectory", headers: H })).statusCode).toBe(
+      404,
+    );
+
+    const imported = await app.inject({
+      method: "GET",
+      url: `/trajectories/${encodeURIComponent("ingest:sc1:case-a")}`,
+      headers: H,
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().events).toHaveLength(1);
+  });
+
+  it("is 404 for another workspace's trajectory (no existence leak) and for an unknown id", async () => {
+    const { app } = await build();
+    expect((await app.inject({ method: "GET", url: "/trajectories/r9", headers: H })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/trajectories/nope", headers: H })).statusCode).toBe(404);
+  });
+
+  it("is absent (404) when no trajectory store is configured", async () => {
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+    });
+    expect((await app.inject({ method: "GET", url: "/trajectories/r1", headers: H })).statusCode).toBe(404);
+  });
+});
+
 describe("trace thresholds — the perception loop end to end (E4)", () => {
   const J = { ...H, "content-type": "application/json" };
 

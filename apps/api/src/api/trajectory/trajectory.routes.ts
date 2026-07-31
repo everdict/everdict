@@ -16,8 +16,8 @@ const TraceThresholdsBodySchema = z.object({
     .max(50),
 });
 
-// The owned trajectory ledger (N1): a browse LIST over the sealed evidence. Envelope-free trivial read —
-// the route calls the store directly (the secrets-list precedent); detail reads stay on the run surface.
+// The owned trajectory ledger (N1): browse the sealed evidence, then open one. Envelope-free trivial reads —
+// the routes call the store directly (the secrets-list precedent).
 export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps): void {
   app.get<{ Querystring: { limit?: string; cursor?: string } }>(
     "/trajectories",
@@ -41,6 +41,27 @@ export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps)
       }
     },
   );
+
+  // Detail over the SAME ledger: one sealed trajectory by the id it was sealed under. GET
+  // /runs/:id/trajectory is run-scoped (it reads the run row first), so evidence that has no run row —
+  // an otlp arrival keyed by the exporter's everdict.run_id, a materialized import keyed
+  // ingest:<scorecardId>:<caseId> — could be listed but never opened. This route is the ledger's own
+  // read: workspace-scoped, so another tenant's trajectory is 404 (no existence leak).
+  app.get<{ Params: { id: string } }>("/trajectories/:id", { schema: trajectoryDocs.get }, async (req, reply) => {
+    if (!deps.trajectoryStore)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory store not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runs:read");
+      const sealed = await deps.trajectoryStore.get(principal.workspace, req.params.id);
+      if (!sealed) return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
+      const { tenant: _tenant, ...meta } = sealed.meta; // the tenant is the caller's own — never echoed
+      return reply.send({ meta, events: sealed.events });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 
   // Trace thresholds (E4 perception config): evaluated over every trajectory at seal time — a crossing
   // lands trace.threshold_crossed on the log. Envelope-free settings CRUD (the secrets precedent).

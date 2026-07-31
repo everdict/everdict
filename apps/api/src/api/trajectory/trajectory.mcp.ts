@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type McpToolContext, ok, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 
 // The owned trajectory ledger over MCP — BFF↔MCP parity with trajectory.routes.ts. Browse the sealed
-// evidence (metas), then open one with get_run_trajectory (the run is the home).
+// evidence (metas), then open one with get_trajectory.
 export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
   if (!deps.trajectoryStore) return;
@@ -15,7 +15,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
       description:
         "List the workspace's SEALED trajectories (the owned evidence ledger, newest first, cursor-paginated). " +
         "Each meta says how the evidence arrived (source: run | otlp | import) and how big it is (eventCount). " +
-        "Open one with get_run_trajectory.",
+        "Open one with get_trajectory.",
       inputSchema: {
         limit: z.number().int().positive().max(200).optional(),
         cursor: z.string().optional().describe("opaque cursor from the previous page"),
@@ -30,6 +30,27 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
           }),
         ),
       ),
+  );
+
+  server.registerTool(
+    "get_trajectory",
+    {
+      description:
+        "Open ONE sealed trajectory from the owned ledger: its meta plus every normalized TraceEvent (the " +
+        "same evidence a judge reads). Keyed by the id it was sealed under (TrajectoryMeta.runId from " +
+        "list_trajectories) — this works for every source, whereas get_run_trajectory only opens evidence " +
+        "that has a run row (never an otlp arrival or a materialized import).",
+      inputSchema: {
+        runId: z.string().min(1).describe("the id the trajectory was sealed under (TrajectoryMeta.runId)"),
+      },
+    },
+    ({ runId }: { runId: string }) =>
+      run(principal, "runs:read", async () => {
+        const sealed = await store.get(ws, runId);
+        if (!sealed) return fail("NOT_FOUND: trajectory not found.");
+        const { tenant: _tenant, ...meta } = sealed.meta;
+        return ok({ meta, events: sealed.events });
+      }),
   );
 
   // Trace thresholds (E4 perception config) — BFF↔MCP parity with the /workspace/trace-thresholds routes.

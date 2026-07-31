@@ -36,7 +36,12 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
     kind: z.literal('tool_call'),
     id: z.string(),
     name: z.string(),
-    args: z.unknown(),
+    // `.optional()` is load-bearing, not cosmetic: the contracts schema is zod v3, where a bare
+    // `z.unknown()` key is optional — so the control plane happily emits a tool_call WITHOUT args (an
+    // OTLP span carrying no input attribute normalizes to exactly that). In zod v4 a bare `z.unknown()`
+    // is REQUIRED, so mirroring it verbatim rejected real evidence while the drift guard stayed green
+    // (both infer `unknown`, which already admits undefined). Keep the runtime as loose as the wire.
+    args: z.unknown().optional(),
   }),
   z.object({
     t: z.number(),

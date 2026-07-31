@@ -43,7 +43,9 @@
     ".next-dev-claude/types/**/*.ts",
     ".next-dev-claude/dev/types/**/*.ts",
     ".next-verify-store/types/**/*.ts",
-    ".next-verify-store/dev/types/**/*.ts"
+    ".next-verify-store/dev/types/**/*.ts",
+    ".next-live/types/**/*.ts",
+    ".next-live/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

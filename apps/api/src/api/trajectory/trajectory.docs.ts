@@ -1,15 +1,16 @@
 import type { FastifySchema } from "fastify";
 
 // The owned trajectory ledger's browse surface (native-observability N1 "look inward"): list the sealed
-// evidence, newest first — Settings › Traces' primary tab reads THIS, not a tenant's external platform.
-// Detail stays on GET /runs/:id/trajectory (the run is the home).
+// evidence, newest first, and open one — Settings › Traces' primary section reads THIS, not a tenant's
+// external platform. GET /runs/:id/trajectory stays the run-scoped twin (the run is the home for evidence
+// that HAS a run).
 export const trajectoryDocs: Record<string, FastifySchema> = {
   list: {
     summary: "List the workspace's sealed trajectories (the owned evidence ledger)",
     description:
       "Metas only ({runId, source, eventCount, sealedAt}), newest first, cursor-paginated. source says how the " +
       "evidence arrived: run (our own execution), otlp (the OTLP door), import (materialized pull-ingest). " +
-      "Open one via GET /runs/:id/trajectory.",
+      "Open one via GET /trajectories/:id.",
     tags: ["runs"],
     querystring: {
       type: "object",
@@ -20,6 +21,23 @@ export const trajectoryDocs: Record<string, FastifySchema> = {
     },
     response: {
       200: { description: "{ items: TrajectoryMeta[], nextCursor? }" },
+    },
+  },
+  get: {
+    summary: "Open one sealed trajectory (meta + every normalized TraceEvent)",
+    description:
+      "The ledger's own detail read, keyed by the id the trajectory was sealed under (TrajectoryMeta.runId). " +
+      "Works for every source — an otlp arrival or a materialized import has no run row, so the run-scoped " +
+      "GET /runs/:id/trajectory cannot open it. Another workspace's (or an unknown) id is 404.",
+    tags: ["runs"],
+    params: {
+      type: "object",
+      properties: { id: { type: "string", description: "the id the trajectory was sealed under" } },
+      required: ["id"],
+    },
+    response: {
+      200: { description: "{ meta: { runId, source, eventCount, sealedAt }, events: TraceEvent[] }" },
+      404: { description: "no such trajectory in this workspace" },
     },
   },
   ingestionGet: {

@@ -59,8 +59,9 @@ export default async function ObservabilityPage() {
     <div className="space-y-8">
       {header}
       {/* The PRIMARY section reads OUR store (native-observability N1 "look inward"): every sealed trajectory —
-          own executions, OTLP-door arrivals, materialized imports — each row opening its run (the home). The
-          external platforms below stay as the pull/export integration surface. */}
+          own executions, OTLP-door arrivals, materialized imports — each row opening the evidence itself in a
+          dialog (only source "run" also has a run page to link out to). The external platforms below stay as
+          the pull/export integration surface. */}
       <section className="space-y-3">
         <h2 className="text-sm font-medium">{t('ownStoreTitle')}</h2>
         <p className="text-xs text-muted-foreground">{t('ownStoreDescription')}</p>

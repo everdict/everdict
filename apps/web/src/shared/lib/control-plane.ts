@@ -234,7 +234,10 @@ export const controlPlane = {
     call<T>(auth, `/runs/${encodeURIComponent(id)}/topology`),
   // 토폴로지 서비스 1개의 로그 테일 — "스택은 떠 있는데 케이스가 실패한다"의 서비스 쪽 답.
   getTopologyServiceLogs: <T>(auth: AuthContext, id: string, service: string) =>
-    call<T>(auth, `/runs/${encodeURIComponent(id)}/topology/services/${encodeURIComponent(service)}/logs`),
+    call<T>(
+      auth,
+      `/runs/${encodeURIComponent(id)}/topology/services/${encodeURIComponent(service)}/logs`
+    ),
   // One-shot exec inside a run's live sandbox (SandboxTerminal). Creator-or-admin, enforced by the control plane.
   execInRun: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/exec`, {

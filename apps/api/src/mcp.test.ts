@@ -510,6 +510,7 @@ describe("MCP tools", () => {
       "get_skill",
       "get_skill_version",
       "get_topology_service_logs",
+      "get_trajectory",
       "get_usage",
       "get_workspace_mattermost",
       "get_workspace_settings",
@@ -2227,6 +2228,47 @@ describe("sandbox session tools — BFF↔MCP parity (P6)", () => {
     const viewer = await connect(deps, ["viewer"]);
     const res = await viewer.callTool({ name: "create_sandbox", arguments: { image: "img" } });
     expect(res.isError).toBe(true);
+  });
+});
+
+describe("trajectory tools — the owned evidence ledger over MCP", () => {
+  it("get_trajectory opens evidence with no run row (an otlp arrival) that get_run_trajectory cannot reach", async () => {
+    const deps = harness();
+    const store = deps.trajectoryStore;
+    if (!store) throw new Error("the test harness wires a trajectory store");
+    // Sealed under the exporter's everdict.run_id — no run record exists for it, by construction.
+    await store.seal({
+      runId: "svc-checkout-7",
+      tenant: "acme",
+      source: "otlp",
+      events: [{ t: 0, kind: "span", name: "checkout" }],
+    });
+    const client = await connect(deps, ["member"]);
+
+    const opened = JSON.parse(
+      text(await client.callTool({ name: "get_trajectory", arguments: { runId: "svc-checkout-7" } })),
+    );
+    expect(opened.meta).toMatchObject({ runId: "svc-checkout-7", source: "otlp", eventCount: 1 });
+    expect(opened.events).toEqual([{ t: 0, kind: "span", name: "checkout" }]);
+
+    // The run-scoped twin still cannot open it — that gap is what this tool closes.
+    expect((await client.callTool({ name: "get_run_trajectory", arguments: { id: "svc-checkout-7" } })).isError).toBe(
+      true,
+    );
+  });
+
+  it("another workspace's trajectory is not found (no existence leak)", async () => {
+    const deps = harness();
+    const store = deps.trajectoryStore;
+    if (!store) throw new Error("the test harness wires a trajectory store");
+    await store.seal({
+      runId: "rival-1",
+      tenant: "rival",
+      source: "run",
+      events: [{ t: 0, kind: "log", stream: "stdout", text: "x" }],
+    });
+    const client = await connect(deps, ["member"]);
+    expect((await client.callTool({ name: "get_trajectory", arguments: { runId: "rival-1" } })).isError).toBe(true);
   });
 });
 
