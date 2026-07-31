@@ -87,8 +87,9 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
   trigger-matchable**: the "new work appeared" / "a dependency cleared" wake-up pair, so a teammate agent picks
   up work without a human prompt. Loop safety: an agent-created task stamps `causedBy agent:<id>:<conv>` (the
   creator never wakes on its own task); claiming (→ in_progress) without naming an owner records the claimer.
-  Claude Code's TaskCreate/TaskList tool family, reinterpreted server-side. Web UI (a ledger board) is a
-  deliberate follow-up — agents and the API are the first consumers.
+  Claude Code's TaskCreate/TaskList tool family, reinterpreted server-side. The web board is
+  `/[workspace]/agents/tasks` (status chips · inline composer · claim/complete/cancel/reopen row verbs) —
+  the fleet page shows the RUNS, the board shows the WORK.
 
 ## Roadmap (staged; each stage is shippable + testable on its own)
 
