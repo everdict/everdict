@@ -125,7 +125,10 @@ function SettingsNav({
         <ArrowLeft className={iconClass} strokeWidth={1.75} />
         {t('backToApp')}
       </Link>
-      <div className="-mr-1 mt-1 flex-1 overflow-y-auto pr-1">
+      {/* The settings list is long enough to outgrow a short viewport — it scrolls, but paints no bar
+          (`scrollbar-none`): a track appearing inside the chrome rail reads as breakage, and it also let the rows
+          shift horizontally whenever it showed up. No gutter to reserve now, so the rows align with the link above. */}
+      <div className="mt-1 flex-1 overflow-y-auto scrollbar-none">
         <nav className="flex flex-col gap-4">
           {SETTINGS_NAV_GROUPS.map((group) => {
             const items = group.items.filter(
@@ -302,7 +305,8 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
         <Kbd>{mac ? '⌘' : 'Ctrl'} K</Kbd>
       </button>
 
-      <div className="-mr-1 flex-1 overflow-y-auto pr-1">
+      {/* Same chromeless rail as the settings nav — the app nav scrolls on short viewports without painting a bar. */}
+      <div className="flex-1 overflow-y-auto scrollbar-none">
         <NavLinks workspace={props.workspace} onNavigate={onNavigate} />
       </div>
 
