@@ -2220,7 +2220,7 @@ describe("sandbox session tools — BFF↔MCP parity (P6)", () => {
     const trajectory = JSON.parse(
       text(await client.callTool({ name: "get_run_trajectory", arguments: { id: created.id } })),
     );
-    expect(trajectory.meta).toMatchObject({ source: "run", eventCount: 4 });
+    expect(trajectory.meta).toMatchObject({ source: "run", eventCount: 5 }); // infra(provisioned) + start + call/result + close
   });
 
   it("a viewer role cannot open a sandbox (runs:submit gate)", async () => {
