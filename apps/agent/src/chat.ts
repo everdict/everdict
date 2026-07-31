@@ -102,6 +102,72 @@ async function recallKnowledge(call: McpInvoke, references: AgentReference[]): P
   }
 }
 
+// Stale-file reminders (Claude Code's edited_text_file attachment reinterpreted over the revision ledger): the
+// mid-conversation counterpart of the write path's 409 + three-way merge. Files THIS conversation touched
+// (get_file/write_file calls in the replayed transcript) are checked against the ledger's newest revision at the
+// turn boundary; a revision published AFTER the conversation's last touch by someone ELSE — a member, or an agent
+// in ANOTHER conversation — earns a warning, so the agent re-reads before relying on (or overwriting) stale
+// knowledge. Best-effort and capped: an unreachable ledger or an unparsable record just means no reminder.
+const STALE_CHECK_MAX_FILES = 8;
+
+// path → ISO time of the conversation's LAST touch (read or write; a later own-write supersedes an earlier read —
+// the agent's knowledge is current as of its own publish).
+function touchedFilesOf(records: AgentMessageRecord[]): Map<string, string> {
+  const touched = new Map<string, string>();
+  for (const r of records) {
+    if (r.role !== "assistant" || !r.toolCalls) continue;
+    for (const tc of r.toolCalls) {
+      if (tc.name !== "get_file" && tc.name !== "write_file") continue;
+      try {
+        const args = JSON.parse(tc.arguments) as { path?: unknown };
+        if (typeof args.path === "string" && args.path.length > 0) touched.set(args.path, r.createdAt);
+      } catch {
+        // unparsable arguments (a truncated call) — not a touch
+      }
+    }
+  }
+  return touched;
+}
+
+export async function staleFileReminder(
+  call: McpInvoke,
+  records: AgentMessageRecord[],
+  sessionId: string,
+): Promise<string | undefined> {
+  const touched = touchedFilesOf(records);
+  if (touched.size === 0) return undefined;
+  const recent = [...touched.entries()].slice(-STALE_CHECK_MAX_FILES); // the most recently touched files
+  const lines = await Promise.all(
+    recent.map(async ([path, touchedAt]): Promise<string | undefined> => {
+      try {
+        const r = await call("list_file_revisions", { path, limit: 1 });
+        if (r.isError) return undefined;
+        const revisions = JSON.parse(r.content) as Array<{
+          revision?: number;
+          createdAt?: string;
+          message?: string;
+          actor?: { kind?: string; subject?: string; agentId?: string; agentName?: string; conversationId?: string };
+        }>;
+        const latest = Array.isArray(revisions) ? revisions[0] : undefined;
+        if (!latest || typeof latest.createdAt !== "string") return undefined;
+        if (latest.actor?.conversationId === sessionId) return undefined; // this conversation's own publish
+        if (latest.createdAt <= touchedAt) return undefined; // nothing newer than the conversation's last touch
+        const by =
+          latest.actor?.kind === "agent"
+            ? `agent ${latest.actor.agentName ?? latest.actor.agentId ?? "unknown"}`
+            : (latest.actor?.subject ?? "someone");
+        const note = latest.message ? ` ("${latest.message}")` : "";
+        return `- ${path} — revision ${latest.revision ?? "?"} published by ${by} at ${latest.createdAt}${note}`;
+      } catch {
+        return undefined; // best-effort — a ledger hiccup never fails the turn
+      }
+    }),
+  );
+  const flagged = lines.filter((l): l is string => l !== undefined);
+  if (flagged.length === 0) return undefined;
+  return `Files you used earlier in this conversation have been REVISED since, by someone else. Re-read them with get_file before relying on or overwriting their content:\n${flagged.join("\n")}`;
+}
+
 // Resolve each @-reference via its read tool and assemble a context preamble the model reads before the user's
 // words. Best-effort: an unresolved reference degrades to a note rather than failing the turn.
 async function resolveReferences(call: McpInvoke, references: AgentReference[]): Promise<string> {
@@ -625,6 +691,12 @@ export async function runChat(
       // Auto-recall: what the workspace already knows about those anchors rides along (best-effort, one call).
       const recalled = await recallKnowledge(tools.call, references);
       if (recalled) preambles.push(recalled);
+    }
+    // Stale-file reminders: files this conversation touched that someone ELSE has revised since (zero ledger
+    // calls when the conversation never touched a file).
+    if (tools.call) {
+      const stale = await staleFileReminder(tools.call, existing, sessionId);
+      if (stale) preambles.push(stale);
     }
     const userForModel =
       preambles.length > 0 ? `${preambles.join("\n\n")}\n\n---\n\nUser message:\n${userText}` : userText;

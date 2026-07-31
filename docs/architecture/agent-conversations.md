@@ -178,9 +178,16 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   rolls forward; a declining summariser keeps full replay). The next turn replays digest + uncovered tail instead
   of the whole history — a long conversation stops re-reading (and re-compacting) its entire past every turn.
   In-run compaction is unchanged and complementary: compaction fits ONE run's context; memory bounds what every
-  FUTURE turn replays. Deferred from the same analysis: task ledger (agent-teams), stale-file reminders
-  (revision-ledger events), soft interrupt, streaming tool execution (deliberately last — Claude Code's inc-4258
-  double-execution scar interacts with our non-streaming retry ladder).
+  FUTURE turn replays. (6) **Stale-file reminders** (`staleFileReminder` — Claude Code's `edited_text_file`
+  attachment reinterpreted over the revision ledger): at the turn boundary, the files this conversation touched
+  (get_file/write_file calls in the replayed transcript, most-recent 8) are checked against the ledger's newest
+  revision (`list_file_revisions` limit 1, parallel, best-effort); a revision published AFTER the conversation's
+  last touch by someone ELSE — a member, or an agent in ANOTHER conversation (`actor.conversationId` decides) —
+  earns a preamble warning naming who/when/why, so the agent re-reads before relying on or overwriting stale
+  knowledge. The mid-conversation counterpart of the write path's 409 + three-way merge; zero ledger calls for
+  conversations that never touched a file. Deferred from the same analysis: task ledger (agent-teams), soft
+  interrupt, streaming tool execution (deliberately last — Claude Code's inc-4258 double-execution scar interacts
+  with our non-streaming retry ladder).
 - **P9 (per-workspace customization, landed — Phase 1)** — each workspace can enhance its own agent, plugging its
   context + tools into the shared framework the way Claude Code takes a per-project CLAUDE.md + MCP servers. A new
   **registered, versioned `AgentSpec` entity** (`(tenant, id, version) → AgentSpec`, same immutable-version SSOT as

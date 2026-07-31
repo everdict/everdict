@@ -3,7 +3,7 @@ import type { AgentMessageRecord } from "@everdict/contracts";
 import { InMemoryAgentSessionStore } from "@everdict/db";
 import type { LlmTransport, StreamRequest } from "@everdict/llm";
 import { describe, expect, it } from "vitest";
-import { type ChatDeps, maintainSessionMemory, runChat } from "./chat.js";
+import { type ChatDeps, maintainSessionMemory, runChat, staleFileReminder } from "./chat.js";
 
 const PRINCIPAL = { subject: "u-1", workspace: "acme", roles: ["member"] };
 
@@ -153,6 +153,66 @@ describe("session running memory", () => {
     const texts = sent.map((m) => (typeof m.content === "string" ? m.content : ""));
     expect(texts.some((t) => t.includes("recent question"))).toBe(true);
     expect(texts.some((t) => t.includes("ancient question"))).toBe(false);
+  });
+});
+
+describe("staleFileReminder", () => {
+  const touchRecord = (seq: number, tool: "get_file" | "write_file", path: string, at: string): AgentMessageRecord => ({
+    id: `m-${seq}`,
+    tenant: "acme",
+    sessionId: "s-1",
+    seq,
+    role: "assistant",
+    content: "",
+    toolCalls: [{ id: `t-${seq}`, name: tool, arguments: JSON.stringify({ path }) }],
+    createdAt: at,
+  });
+  const revision = (over: Record<string, unknown>) => ({
+    revision: 4,
+    createdAt: "2026-07-31T02:00:00.000Z",
+    actor: { kind: "member", subject: "bob" },
+    ...over,
+  });
+
+  it("flags files someone ELSE revised after this conversation's last touch — never its own publishes", async () => {
+    // Given: file a was READ at T1 and revised by Bob at T2; file b was WRITTEN by THIS conversation (its own
+    // publish is the latest); file c was read and never changed since.
+    const byPath: Record<string, unknown[]> = {
+      "docs/a.md": [revision({ actor: { kind: "member", subject: "bob" }, message: "tighten wording" })],
+      "docs/b.md": [revision({ actor: { kind: "agent", agentName: "everdict", conversationId: "s-1" } })],
+      "docs/c.md": [revision({ createdAt: "2026-07-31T00:30:00.000Z" })],
+    };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      expect(name).toBe("list_file_revisions");
+      return { content: JSON.stringify(byPath[args.path as string] ?? []), isError: false };
+    };
+    const records = [
+      touchRecord(0, "get_file", "docs/a.md", "2026-07-31T01:00:00.000Z"),
+      touchRecord(1, "write_file", "docs/b.md", "2026-07-31T01:00:00.000Z"),
+      touchRecord(2, "get_file", "docs/c.md", "2026-07-31T01:00:00.000Z"),
+    ];
+    // When the reminder is built for the next turn
+    const reminder = await staleFileReminder(call, records, "s-1");
+    // Then only the foreign, newer revision is flagged — with who/when/why
+    expect(reminder).toContain("docs/a.md");
+    expect(reminder).toContain("bob");
+    expect(reminder).toContain("tighten wording");
+    expect(reminder).not.toContain("docs/b.md");
+    expect(reminder).not.toContain("docs/c.md");
+  });
+
+  it("makes zero ledger calls when the conversation never touched a file, and absorbs ledger failures", async () => {
+    let calls = 0;
+    const failing = async () => {
+      calls += 1;
+      throw new Error("ledger down");
+    };
+    expect(await staleFileReminder(failing, [], "s-1")).toBeUndefined();
+    expect(calls).toBe(0);
+    // A touched file + a broken ledger → no reminder, no thrown turn
+    const records = [touchRecord(0, "get_file", "docs/a.md", "2026-07-31T01:00:00.000Z")];
+    expect(await staleFileReminder(failing, records, "s-1")).toBeUndefined();
+    expect(calls).toBe(1);
   });
 });
 
