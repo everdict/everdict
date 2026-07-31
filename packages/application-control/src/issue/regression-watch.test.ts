@@ -1,0 +1,254 @@
+import type { IssueRecord, NotificationRecord, PlatformEventRecord, ScorecardRecord } from "@everdict/contracts";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { IssueListFilter, IssueStore } from "../ports/issue-store.js";
+import type { NotificationStore } from "../ports/notification-store.js";
+import type { OutboxEvent } from "../ports/run-store.js";
+import type { ScorecardListFilter, ScorecardStore } from "../ports/scorecard-store.js";
+import { IssueService } from "./issue-service.js";
+import { regressionWatch } from "./regression-watch.js";
+
+const RESOLVED_AT = "2026-07-01T00:00:00.000Z";
+const NOW = "2026-07-31T00:00:00.000Z";
+
+class FakeIssueStore implements IssueStore {
+  readonly byId = new Map<string, IssueRecord>();
+  readonly events: OutboxEvent[] = [];
+
+  async create(record: IssueRecord, events?: OutboxEvent[]): Promise<void> {
+    this.byId.set(record.id, record);
+    if (events) this.events.push(...events);
+  }
+  async get(tenant: string, id: string): Promise<IssueRecord | undefined> {
+    const record = this.byId.get(id);
+    return record && record.tenant === tenant ? record : undefined;
+  }
+  async getByGithub(): Promise<IssueRecord | undefined> {
+    return undefined;
+  }
+  async list(tenant: string, filter?: IssueListFilter): Promise<IssueRecord[]> {
+    return [...this.byId.values()].filter(
+      (r) =>
+        r.tenant === tenant &&
+        (filter?.status === undefined || r.status === filter.status) &&
+        (filter?.link === undefined || r.links.some((l) => l.type === filter.link?.type && l.id === filter.link.id)),
+    );
+  }
+  async update(
+    tenant: string,
+    id: string,
+    patch: Partial<IssueRecord>,
+    events?: OutboxEvent[],
+  ): Promise<IssueRecord | undefined> {
+    const current = this.byId.get(id);
+    if (!current || current.tenant !== tenant) return undefined;
+    const next = { ...current, ...patch, id: current.id, tenant: current.tenant };
+    this.byId.set(id, next);
+    if (events) this.events.push(...events);
+    return next;
+  }
+  async remove(tenant: string, id: string): Promise<void> {
+    this.byId.delete(id);
+  }
+}
+
+class FakeScorecardStore implements ScorecardStore {
+  readonly byId = new Map<string, ScorecardRecord>();
+  async create(record: ScorecardRecord): Promise<void> {
+    this.byId.set(record.id, record);
+  }
+  async update(): Promise<ScorecardRecord | undefined> {
+    return undefined;
+  }
+  async get(id: string): Promise<ScorecardRecord | undefined> {
+    return this.byId.get(id);
+  }
+  async list(_tenant?: string, _filter?: ScorecardListFilter): Promise<ScorecardRecord[]> {
+    return [...this.byId.values()];
+  }
+  async delete(): Promise<boolean> {
+    return true;
+  }
+}
+
+class FakeFeed implements NotificationStore {
+  readonly rows = new Map<string, NotificationRecord>();
+  async add(record: NotificationRecord): Promise<void> {
+    if (!this.rows.has(record.id)) this.rows.set(record.id, record); // natural-key idempotence, like the real store
+  }
+  async list(): Promise<NotificationRecord[]> {
+    return [...this.rows.values()];
+  }
+  async markRead(): Promise<number> {
+    return 0;
+  }
+  async countUnread(): Promise<number> {
+    return 0;
+  }
+}
+
+// A scorecard whose two cases yield the given pass rate (0, 0.5 or 1). Only the fields the watch reads are
+// meaningful; the rest satisfy the record's shape.
+function scorecard(id: string, over: { passes: number; createdAt: string; harnessVersion?: string }): ScorecardRecord {
+  const harness = `web-agent@${over.harnessVersion ?? "2.0.0"}`;
+  return {
+    id,
+    tenant: "acme",
+    dataset: { id: "regression-suite", version: "1.0.0" },
+    harness: { id: "web-agent", version: over.harnessVersion ?? "2.0.0" },
+    status: "succeeded",
+    summary: [],
+    scorecard: {
+      harness,
+      suiteId: "regression-suite",
+      results: Array.from({ length: 2 }, (_, i) => ({
+        caseId: `c${i}`,
+        harness,
+        trace: [],
+        snapshot: { kind: "repo" as const, diff: "", changedFiles: [], headSha: "abc" },
+        // caseVerdict reads `pass` (the ground-truth verdict), not the raw value.
+        scores: [
+          { graderId: "tests", metric: "tests_pass", value: i < over.passes ? 1 : 0, pass: i < over.passes },
+        ],
+      })),
+    },
+    createdAt: over.createdAt,
+    updatedAt: over.createdAt,
+  };
+}
+
+function completedEvent(scorecardId: string, id = "ev-1"): PlatformEventRecord {
+  return {
+    id,
+    seq: 1,
+    tenant: "acme",
+    kind: "scorecard.completed",
+    subject: { type: "scorecard", id: scorecardId },
+    actor: "dana",
+    payload: {},
+    message: "done",
+    createdAt: NOW,
+  };
+}
+
+describe("regressionWatch", () => {
+  let issues: FakeIssueStore;
+  let scorecards: FakeScorecardStore;
+  let feed: FakeFeed;
+
+  function watcher() {
+    return regressionWatch({
+      issues,
+      issueService: new IssueService({ store: issues, scorecards, now: () => NOW }),
+      scorecards,
+      feed,
+    });
+  }
+
+  async function resolvedIssue(over: Partial<IssueRecord> = {}): Promise<IssueRecord> {
+    const record: IssueRecord = {
+      id: "iss-1",
+      tenant: "acme",
+      title: "Agent drops the tool result on retry",
+      status: "done",
+      labels: [],
+      links: [
+        { type: "dataset", id: "regression-suite", addedBy: "dana", addedAt: RESOLVED_AT },
+        { type: "harness", id: "web-agent", addedBy: "dana", addedAt: RESOLVED_AT },
+      ],
+      resolution: { scorecardId: "sc-baseline", by: "dana", at: RESOLVED_AT },
+      history: [],
+      createdBy: "dana",
+      createdAt: RESOLVED_AT,
+      updatedAt: RESOLVED_AT,
+      ...over,
+    };
+    await issues.create(record);
+    return record;
+  }
+
+  beforeEach(async () => {
+    issues = new FakeIssueStore();
+    scorecards = new FakeScorecardStore();
+    feed = new FakeFeed();
+    await scorecards.create(scorecard("sc-baseline", { passes: 2, createdAt: RESOLVED_AT }));
+  });
+
+  it("reopens a resolved issue as regressed when a later batch scores lower, and says by how much", async () => {
+    await resolvedIssue({ assignee: "eve" });
+    await scorecards.create(scorecard("sc-new", { passes: 1, createdAt: NOW }));
+
+    await watcher().handle(completedEvent("sc-new"));
+
+    const after = await issues.get("acme", "iss-1");
+    expect(after?.status).toBe("regressed");
+    expect(after?.resolution?.scorecardId).toBe("sc-baseline"); // the baseline it fell FROM is preserved
+    expect(after?.history.at(-1)).toMatchObject({ event: "reopened", detail: { cause: "regression" } });
+
+    const fact = issues.events.find((e) => e.kind === "issue.status_changed");
+    expect(fact?.payload).toMatchObject({ from: "done", to: "regressed", cause: "regression", scorecardId: "sc-new" });
+    // Not an agent — the causedBy loop-guard prefix must stay honest.
+    expect(fact?.causedBy).toBeUndefined();
+
+    const bell = await feed.list();
+    expect(bell.map((n) => n.recipient).sort()).toEqual(["dana", "eve"]);
+    expect(bell[0]).toMatchObject({ kind: "issue_regressed", link: { resourceType: "issue", resourceId: "iss-1" } });
+    expect(bell[0]?.body).toContain("100%");
+    expect(bell[0]?.body).toContain("50%");
+  });
+
+  it("fires across a harness VERSION bump — that is exactly the drop worth catching", async () => {
+    await resolvedIssue();
+    await scorecards.create(scorecard("sc-new", { passes: 0, createdAt: NOW, harnessVersion: "3.0.0" }));
+    await watcher().handle(completedEvent("sc-new"));
+    expect((await issues.get("acme", "iss-1"))?.status).toBe("regressed");
+  });
+
+  it("stays silent when the score held, improved, or the batch predates the resolution", async () => {
+    await resolvedIssue();
+    await scorecards.create(scorecard("sc-equal", { passes: 2, createdAt: NOW }));
+    await scorecards.create(scorecard("sc-old", { passes: 0, createdAt: "2026-06-01T00:00:00.000Z" }));
+
+    await watcher().handle(completedEvent("sc-equal"));
+    expect((await issues.get("acme", "iss-1"))?.status).toBe("done");
+
+    await watcher().handle(completedEvent("sc-old", "ev-2"));
+    expect((await issues.get("acme", "iss-1"))?.status).toBe("done"); // a late-arriving old batch is not news
+    expect(await feed.list()).toEqual([]);
+  });
+
+  it("is idempotent under redelivery — the second pass finds the issue no longer done", async () => {
+    await resolvedIssue();
+    await scorecards.create(scorecard("sc-new", { passes: 1, createdAt: NOW }));
+    const watch = watcher();
+    await watch.handle(completedEvent("sc-new"));
+    await watch.handle(completedEvent("sc-new"));
+    expect(issues.events.filter((e) => e.kind === "issue.status_changed")).toHaveLength(1);
+    expect(await feed.list()).toHaveLength(1);
+  });
+
+  it("ignores issues that do not watch BOTH the dataset and the harness, or that closed without evidence", async () => {
+    await resolvedIssue({
+      id: "iss-dataset-only",
+      links: [{ type: "dataset", id: "regression-suite", addedBy: "dana", addedAt: RESOLVED_AT }],
+    });
+    await resolvedIssue({
+      id: "iss-no-evidence",
+      links: [
+        { type: "dataset", id: "regression-suite", addedBy: "dana", addedAt: RESOLVED_AT },
+        { type: "harness", id: "web-agent", addedBy: "dana", addedAt: RESOLVED_AT },
+      ],
+      resolution: { note: "closed by hand", by: "dana", at: RESOLVED_AT },
+    });
+    await scorecards.create(scorecard("sc-new", { passes: 0, createdAt: NOW }));
+
+    await watcher().handle(completedEvent("sc-new"));
+    expect((await issues.get("acme", "iss-dataset-only"))?.status).toBe("done");
+    expect((await issues.get("acme", "iss-no-evidence"))?.status).toBe("done");
+  });
+
+  it("never treats the resolution scorecard itself as a regression", async () => {
+    await resolvedIssue();
+    await watcher().handle(completedEvent("sc-baseline"));
+    expect((await issues.get("acme", "iss-1"))?.status).toBe("done");
+  });
+});

@@ -15,6 +15,18 @@ export interface GithubIssue {
   url: string; // html_url
   isPullRequest: boolean;
   updatedAt: string;
+  // GitHub-owned content the tracker's imported copy mirrors (docs/tracker.md ownership split). Absent body =
+  // the issue has none; labels is always present (possibly empty) so a pull can clear them.
+  body?: string;
+  labels: string[];
+}
+
+// One comment on an issue — pulled read-only into the tracker's copy for context.
+export interface GithubIssueComment {
+  author: string;
+  body: string;
+  createdAt: string;
+  url: string;
 }
 
 // Outbound GitHub repo-ops port (re-architecture P2d) — read + write operations on one repo behind a resolved
@@ -40,7 +52,24 @@ export interface GithubRepoWriter {
   // Read a text file's UTF-8 content on a ref (default branch when omitted). A non-file path is an error.
   getFile(repository: string, path: string, ref?: string): Promise<GithubFileContent>;
   // List issues (includes PRs), filtered by state ("open"|"closed"|"all", default open), most-recently-updated first.
-  listIssues(repository: string, opts: { state?: string; perPage: number }): Promise<GithubIssue[]>;
+  // `since` (ISO) asks GitHub for only what changed after that instant — the tracker's manual bulk pull uses it as
+  // an incremental watermark so a repo with 500 issues costs one page, not five. `maxPages` bounds the Link-header
+  // walk (default 1: the historical single-page behaviour every existing caller relies on).
+  listIssues(
+    repository: string,
+    opts: { state?: string; perPage: number; since?: string; maxPages?: number },
+  ): Promise<GithubIssue[]>;
+  // One issue by number — the per-issue sync's read (list narrows, this confirms).
+  getIssue(repository: string, issueNumber: number): Promise<GithubIssue>;
+  // Push the local resolution back: close or reopen the remote issue. Title/body stay GitHub-owned, so this
+  // deliberately writes STATE ONLY (the accompanying explanation rides as a comment).
+  updateIssue(repository: string, issueNumber: number, patch: { state: "open" | "closed" }): Promise<void>;
+  // The issue's comment thread, oldest first, capped — context for whoever reads the imported copy.
+  listIssueComments(
+    repository: string,
+    issueNumber: number,
+    opts: { maxComments: number },
+  ): Promise<GithubIssueComment[]>;
   // Create an issue; returns its number + html_url.
   createIssue(repository: string, opts: { title: string; body?: string }): Promise<{ number: number; url: string }>;
   // Add a comment to an issue or PR (PRs are issues via the issues API); returns the comment's html_url.

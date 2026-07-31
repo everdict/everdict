@@ -1,0 +1,186 @@
+import type { InitiativeRecord, IssueRecord, ProjectRecord } from "@everdict/contracts";
+import type { OutboxEvent } from "../ports/run-store.js";
+import { ConflictError } from "@everdict/contracts";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { InitiativeListFilter, InitiativeStore } from "../ports/initiative-store.js";
+import type { IssueListFilter, IssueStore } from "../ports/issue-store.js";
+import type { ProjectListFilter, ProjectStore } from "../ports/project-store.js";
+import { InitiativeService } from "./initiative-service.js";
+
+const NOW = "2026-07-31T00:00:00.000Z";
+
+// One generic fake for the three tenant-scoped tracker stores — they share a CRUD shape, and the readiness
+// gate only needs list-by-parent plus the outbox rows.
+class FakeStore<T extends { id: string; tenant: string }> {
+  readonly byId = new Map<string, T>();
+  readonly events: OutboxEvent[] = [];
+
+  async create(record: T, events?: OutboxEvent[]): Promise<void> {
+    this.byId.set(record.id, record);
+    if (events) this.events.push(...events);
+  }
+  async get(tenant: string, id: string): Promise<T | undefined> {
+    const record = this.byId.get(id);
+    return record && record.tenant === tenant ? record : undefined;
+  }
+  async update(tenant: string, id: string, patch: Partial<T>, events?: OutboxEvent[]): Promise<T | undefined> {
+    const current = this.byId.get(id);
+    if (!current || current.tenant !== tenant) return undefined;
+    const next = { ...current, ...patch, id: current.id, tenant: current.tenant };
+    this.byId.set(id, next);
+    if (events) this.events.push(...events);
+    return next;
+  }
+  async remove(tenant: string, id: string): Promise<void> {
+    this.byId.delete(id);
+  }
+  all(tenant: string): T[] {
+    return [...this.byId.values()].filter((r) => r.tenant === tenant);
+  }
+}
+
+class FakeIssueStore extends FakeStore<IssueRecord> implements IssueStore {
+  async getByGithub(): Promise<IssueRecord | undefined> {
+    return undefined;
+  }
+  async list(tenant: string, filter?: IssueListFilter): Promise<IssueRecord[]> {
+    return this.all(tenant).filter((r) => filter?.projectId === undefined || r.projectId === filter.projectId);
+  }
+}
+
+class FakeProjectStore extends FakeStore<ProjectRecord> implements ProjectStore {
+  async list(tenant: string, filter?: ProjectListFilter): Promise<ProjectRecord[]> {
+    const rows = this.all(tenant).filter(
+      (r) => filter?.initiativeId === undefined || r.initiativeId === filter.initiativeId,
+    );
+    return filter?.limit !== undefined ? rows.slice(0, filter.limit) : rows;
+  }
+}
+
+class FakeInitiativeStore extends FakeStore<InitiativeRecord> implements InitiativeStore {
+  async list(tenant: string, _filter?: InitiativeListFilter): Promise<InitiativeRecord[]> {
+    return this.all(tenant);
+  }
+}
+
+function issue(id: string, projectId: string, status: IssueRecord["status"]): IssueRecord {
+  return {
+    id,
+    tenant: "acme",
+    title: `issue ${id}`,
+    status,
+    projectId,
+    labels: [],
+    links: [],
+    ...(status === "done" || status === "regressed"
+      ? { resolution: { scorecardId: "sc-1", by: "dana", at: NOW } }
+      : {}),
+    history: [],
+    createdBy: "dana",
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+}
+
+function project(id: string, initiativeId: string, status: ProjectRecord["status"]): ProjectRecord {
+  return {
+    id,
+    tenant: "acme",
+    name: `project ${id}`,
+    status,
+    initiativeId,
+    history: [],
+    createdBy: "dana",
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+}
+
+describe("InitiativeService — the release gate", () => {
+  let initiatives: FakeInitiativeStore;
+  let projects: FakeProjectStore;
+  let issues: FakeIssueStore;
+  let ids: number;
+  const actor = { subject: "dana" };
+
+  function service() {
+    return new InitiativeService({
+      store: initiatives,
+      projects,
+      issues,
+      newId: () => `id-${++ids}`,
+      now: () => NOW,
+    });
+  }
+
+  beforeEach(() => {
+    initiatives = new FakeInitiativeStore();
+    projects = new FakeProjectStore();
+    issues = new FakeIssueStore();
+    ids = 0;
+  });
+
+  it("reports readiness across every project's issues, leading with regressions", async () => {
+    const svc = service();
+    const initiative = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
+    await projects.create(project("p1", initiative.id, "completed"));
+    await projects.create(project("p2", initiative.id, "in_progress"));
+    await issues.create(issue("a", "p1", "regressed"));
+    await issues.create(issue("b", "p2", "todo"));
+    await issues.create(issue("c", "p2", "done"));
+
+    const detail = await svc.detail("acme", initiative.id);
+    expect(detail.readiness.ready).toBe(false);
+    expect(detail.readiness.openIssues).toBe(2);
+    expect(detail.readiness.totalIssues).toBe(3);
+    expect(detail.readiness.blockers.map((b) => b.issueId)).toEqual(["a", "b"]);
+    expect(detail.readiness.projects.map((p) => p.id).sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("refuses completion while work is open under it — the check a team wants before shipping", async () => {
+    const svc = service();
+    const initiative = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
+    await projects.create(project("p1", initiative.id, "in_progress"));
+    await issues.create(issue("a", "p1", "in_progress"));
+    await expect(svc.setStatus("acme", initiative.id, { status: "completed" }, actor)).rejects.toThrow(ConflictError);
+  });
+
+  it("a regressed issue inside a COMPLETED project still blocks the release", async () => {
+    const svc = service();
+    const initiative = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
+    await projects.create(project("p1", initiative.id, "completed"));
+    await issues.create(issue("a", "p1", "regressed"));
+    await expect(svc.setStatus("acme", initiative.id, { status: "completed" }, actor)).rejects.toThrow(ConflictError);
+  });
+
+  it("completes when readiness is clean, and records the override when forced", async () => {
+    const svc = service();
+    const clean = await svc.create({ tenant: "acme", createdBy: "dana", name: "clean" });
+    await projects.create(project("p1", clean.id, "completed"));
+    await issues.create(issue("a", "p1", "done"));
+    const completed = await svc.setStatus("acme", clean.id, { status: "completed" }, actor);
+    expect(completed.status).toBe("completed");
+    expect(completed.completedAt).toBe(NOW);
+
+    const gapped = await svc.create({ tenant: "acme", createdBy: "dana", name: "gapped" });
+    await projects.create(project("p2", gapped.id, "in_progress"));
+    await issues.create(issue("b", "p2", "todo"));
+    await svc.setStatus("acme", gapped.id, { status: "completed", force: true }, actor);
+    const forcedFact = initiatives.events.find((e) => e.payload?.forced === true);
+    expect(forcedFact?.kind).toBe("initiative.status_changed");
+    expect(forcedFact?.payload).toMatchObject({ openIssues: 1, forced: true });
+  });
+
+  it("refuses to delete an initiative that still holds projects", async () => {
+    const svc = service();
+    const initiative = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
+    await projects.create(project("p1", initiative.id, "in_progress"));
+    await expect(svc.remove("acme", initiative.id, { subject: "dana", isAdmin: true })).rejects.toThrow(ConflictError);
+  });
+
+  it("scopes every read to the workspace — another tenant's initiative does not resolve", async () => {
+    const svc = service();
+    const initiative = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
+    await expect(svc.get("globex", initiative.id)).rejects.toThrow(/not found/);
+  });
+});

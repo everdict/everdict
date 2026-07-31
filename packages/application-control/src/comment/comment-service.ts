@@ -12,6 +12,8 @@ import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 
 // Comment service — collaborative discussion on resources (harness/dataset/scorecard/view/schedule/job/runtime) + single-level replies.
 // Shared by HTTP routes and MCP tools (BFF↔MCP parity). authZ: read=comments:read, write=comments:write, delete=author-or-admin.
+// The tracker's three kinds are commentable for the same reason datasets are: an issue is where a team argues
+// about how something was evaluated, and threading that discussion anywhere else splits the record.
 export const COMMENT_RESOURCE_TYPES = [
   "dataset",
   "harness",
@@ -20,6 +22,9 @@ export const COMMENT_RESOURCE_TYPES = [
   "schedule",
   "run",
   "runtime",
+  "issue",
+  "project",
+  "initiative",
 ] as const;
 export type CommentResourceType = (typeof COMMENT_RESOURCE_TYPES)[number];
 

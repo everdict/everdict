@@ -57,6 +57,9 @@ export type { ScorecardListFilter, ScorecardStore } from "./ports/scorecard-stor
 export type { SubscriptionStore } from "./ports/subscription-store.js";
 export type { UsageStore } from "./ports/usage-store.js";
 export type { AgentTaskStore } from "./ports/agent-task-store.js";
+export type { IssueListFilter, IssueStore } from "./ports/issue-store.js";
+export type { ProjectListFilter, ProjectStore } from "./ports/project-store.js";
+export type { InitiativeListFilter, InitiativeStore } from "./ports/initiative-store.js";
 export type { ViewStore } from "./ports/view-store.js";
 export type { OAuthStateStore } from "./ports/oauth-state-store.js";
 export type { RunnerStore } from "./ports/runner-store.js";
@@ -95,6 +98,37 @@ export {
   type TaskServiceDeps,
   type UpdateTaskInput,
 } from "./task/task-service.js";
+// The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue.
+export {
+  type CreateIssueInput,
+  type IssueActor,
+  type IssueAgentAttribution,
+  type IssueGithubPusher,
+  IssueService,
+  type IssueServiceDeps,
+  type SetIssueStatusInput,
+} from "./issue/issue-service.js";
+export { REGRESSION_WATCH_ACTOR, regressionWatch, type RegressionWatchDeps } from "./issue/regression-watch.js";
+export {
+  GithubIssueSync,
+  type GithubIssueSyncDeps,
+  type GithubRepositoryTokenSource,
+  type ImportGithubIssuesInput,
+  type ImportGithubIssuesResult,
+  type SyncOutcome,
+} from "./issue/github-issue-sync.js";
+export {
+  type CreateProjectInput,
+  type ProjectActor,
+  ProjectService,
+  type ProjectServiceDeps,
+} from "./project/project-service.js";
+export {
+  type CreateInitiativeInput,
+  type InitiativeActor,
+  InitiativeService,
+  type InitiativeServiceDeps,
+} from "./initiative/initiative-service.js";
 export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";
 export {
   type CaptureViewSnapshotInput,
@@ -260,6 +294,7 @@ export { FIRST_PARTY_AGENT_TEMPLATES, seedFirstPartyAgents } from "./agent/first
 export type {
   GithubFileContent,
   GithubIssue,
+  GithubIssueComment,
   GithubRepoWriter,
   GithubRepoWriterFactory,
 } from "./ports/github-repo-writer.js";
