@@ -26,7 +26,18 @@ export { ApprovalService, type ApprovalServiceDeps } from "./approval/approval-s
 export type { EnvelopeSpend, EnvelopeStore } from "./ports/envelope-store.js";
 export { admitCausedWork } from "./admission/admission.js";
 export type { EventConsumerStateStore } from "./ports/event-consumer-store.js";
-export type { TrajectoryListResult, TrajectoryMeta, TrajectoryStore } from "./ports/trajectory-store.js";
+export {
+  defaultEmitter,
+  EXECUTION_EMITTERS,
+  executionSegment,
+  type SealedTrajectory,
+  type TrajectoryListResult,
+  type TrajectoryMeta,
+  type TrajectorySegment,
+  trajectorySegmentsWire,
+  type TrajectorySegmentWire,
+  type TrajectoryStore,
+} from "./ports/trajectory-store.js";
 export {
   EventConsumerRunner,
   type PlatformEventConsumer,

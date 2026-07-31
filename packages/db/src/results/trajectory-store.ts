@@ -1,4 +1,12 @@
-import type { TrajectoryListResult, TrajectoryMeta, TrajectoryStore } from "@everdict/application-control";
+import {
+  type SealedTrajectory,
+  type TrajectoryListResult,
+  type TrajectoryMeta,
+  type TrajectorySegment,
+  type TrajectoryStore,
+  defaultEmitter,
+  executionSegment,
+} from "@everdict/application-control";
 import { type TraceEvent, TraceEventSchema } from "@everdict/contracts";
 import { z } from "zod";
 import type { SqlClient } from "../client.js";
@@ -25,39 +33,81 @@ function clampLimit(limit: number | undefined): number {
   return Math.min(Math.floor(limit), MAX_LIST_LIMIT);
 }
 
+function isoOf(value: string | Date): string {
+  return typeof value === "string" ? value : value.toISOString();
+}
+
 export class InMemoryTrajectoryStore implements TrajectoryStore {
-  private readonly rows = new Map<string, { meta: TrajectoryMeta; events: TraceEvent[] }>();
+  // One entry per run: the header (how it first arrived) plus one segment per emitter, insertion-ordered.
+  private readonly rows = new Map<
+    string,
+    { tenant: string; source: TrajectoryMeta["source"]; sealedAt: string; segments: TrajectorySegment[] }
+  >();
 
   async seal(input: {
     runId: string;
     tenant: string;
     source: TrajectoryMeta["source"];
     events: TraceEvent[];
+    emitter?: string;
+    t0?: string;
   }): Promise<TrajectoryMeta & { created: boolean }> {
-    const existing = this.rows.get(input.runId);
-    if (existing) return { ...existing.meta, created: false }; // first seal wins — evidence is never rewritten
-    const meta: TrajectoryMeta = {
-      runId: input.runId,
-      tenant: input.tenant,
+    const emitter = input.emitter ?? defaultEmitter(input.source);
+    const sealedAt = new Date().toISOString();
+    const segment: TrajectorySegment = {
+      emitter,
       source: input.source,
       eventCount: input.events.length,
-      sealedAt: new Date().toISOString(),
+      ...(input.t0 !== undefined ? { t0: input.t0 } : {}),
+      sealedAt,
+      events: input.events,
     };
-    this.rows.set(input.runId, { meta, events: input.events });
-    return { ...meta, created: true };
+    const existing = this.rows.get(input.runId);
+    if (!existing) {
+      this.rows.set(input.runId, {
+        tenant: input.tenant,
+        source: input.source,
+        sealedAt,
+        segments: [segment],
+      });
+      return { ...this.metaOf(input.runId), created: true };
+    }
+    if (existing.tenant !== input.tenant) {
+      // Another workspace already owns this id — never touch it, never leak that it exists.
+      return {
+        runId: input.runId,
+        tenant: input.tenant,
+        source: input.source,
+        eventCount: input.events.length,
+        sealedAt,
+        created: false,
+      };
+    }
+    // First seal per emitter wins — a retried settle re-offers the same evidence and changes nothing.
+    if (existing.segments.some((s) => s.emitter === emitter)) return { ...this.metaOf(input.runId), created: false };
+    existing.segments.push(segment);
+    return { ...this.metaOf(input.runId), created: true };
   }
 
-  async get(tenant: string, runId: string): Promise<{ meta: TrajectoryMeta; events: TraceEvent[] } | undefined> {
+  async get(tenant: string, runId: string): Promise<SealedTrajectory | undefined> {
     const row = this.rows.get(runId);
-    return row && row.meta.tenant === tenant ? row : undefined;
+    if (!row || row.tenant !== tenant) return undefined;
+    const segments = row.segments.map((s) => ({ ...s }));
+    const execution = executionSegment(segments);
+    return {
+      meta: this.metaOf(runId),
+      events: execution?.events ?? [],
+      ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
+      segments,
+    };
   }
 
   async list(tenant: string, opts?: { limit?: number; cursor?: string }): Promise<TrajectoryListResult> {
     const limit = clampLimit(opts?.limit);
     const after = opts?.cursor !== undefined ? decodeCursor(opts.cursor) : undefined;
-    const sorted = [...this.rows.values()]
-      .filter((r) => r.meta.tenant === tenant)
-      .map((r) => r.meta)
+    const sorted = [...this.rows.keys()]
+      .filter((runId) => this.rows.get(runId)?.tenant === tenant)
+      .map((runId) => this.metaOf(runId))
       .sort((a, b) => b.sealedAt.localeCompare(a.sealedAt) || b.runId.localeCompare(a.runId))
       .filter(
         (m) =>
@@ -76,10 +126,10 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
   async ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }> {
     let trajectories = 0;
     let events = 0;
-    for (const row of this.rows.values()) {
-      if (row.meta.tenant !== tenant || row.meta.sealedAt <= sinceIso) continue;
+    for (const [runId, row] of this.rows) {
+      if (row.tenant !== tenant || row.sealedAt <= sinceIso) continue;
       trajectories += 1;
-      events += row.meta.eventCount;
+      events += this.metaOf(runId).eventCount;
     }
     return { trajectories, events };
   }
@@ -87,16 +137,42 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
   async deleteOlderThan(cutoffIso: string): Promise<number> {
     let removed = 0;
     for (const [runId, row] of this.rows) {
-      if (row.meta.sealedAt < cutoffIso) {
+      if (row.sealedAt < cutoffIso) {
         this.rows.delete(runId);
         removed += 1;
       }
     }
     return removed;
   }
+
+  // The header a caller sees: how the trajectory first arrived, and every emitter's events counted together.
+  private metaOf(runId: string): TrajectoryMeta {
+    const row = this.rows.get(runId);
+    if (!row) throw new Error(`trajectory ${runId} vanished mid-read`);
+    return {
+      runId,
+      tenant: row.tenant,
+      source: row.source,
+      eventCount: row.segments.reduce((sum, s) => sum + s.eventCount, 0),
+      sealedAt: row.sealedAt,
+    };
+  }
 }
 
-// Postgres-backed trajectory store (mig 0098) — ON CONFLICT DO NOTHING makes the seal first-write-wins.
+interface PrimaryRow {
+  run_id: string;
+  tenant: string;
+  source: string;
+  emitter: string | null;
+  event_count: number;
+  segment_event_count: number;
+  t0: string | Date | null;
+  sealed_at: string | Date;
+}
+
+// Postgres-backed trajectory store (mig 0098 + 0104) — the header row carries the FIRST emitter's body;
+// every later emitter lands in everdict_trajectory_segments. ON CONFLICT DO NOTHING makes both writes
+// first-write-wins, per emitter.
 export class PgTrajectoryStore implements TrajectoryStore {
   constructor(private readonly client: SqlClient) {}
 
@@ -105,52 +181,123 @@ export class PgTrajectoryStore implements TrajectoryStore {
     tenant: string;
     source: TrajectoryMeta["source"];
     events: TraceEvent[];
+    emitter?: string;
+    t0?: string;
   }): Promise<TrajectoryMeta & { created: boolean }> {
+    const emitter = input.emitter ?? defaultEmitter(input.source);
     const sealedAt = new Date().toISOString();
     // RETURNING under ON CONFLICT DO NOTHING yields a row ONLY when this call inserted — `created` for free.
     const inserted = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectories (run_id, tenant, source, event_count, body, sealed_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, t0, sealed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8)
        ON CONFLICT (run_id) DO NOTHING
        RETURNING run_id`,
-      [input.runId, input.tenant, input.source, input.events.length, JSON.stringify(input.events), sealedAt],
+      [
+        input.runId,
+        input.tenant,
+        input.source,
+        emitter,
+        input.events.length,
+        JSON.stringify(input.events),
+        input.t0 ?? null,
+        sealedAt,
+      ],
     );
-    const created = inserted.rows.length > 0;
-    // Read back — a lost race returns the FIRST seal's meta (never pretend the late write took).
-    const sealed = await this.get(input.tenant, input.runId);
-    if (sealed) return { ...sealed.meta, created };
-    return {
-      runId: input.runId,
-      tenant: input.tenant,
-      source: input.source,
-      eventCount: input.events.length,
-      sealedAt,
-      created,
-    };
+    if (inserted.rows.length > 0) {
+      return {
+        runId: input.runId,
+        tenant: input.tenant,
+        source: input.source,
+        eventCount: input.events.length,
+        sealedAt,
+        created: true,
+      };
+    }
+    // The trajectory exists. A re-offer from the SAME emitter is a retry (evidence is never rewritten); a
+    // different emitter is a new plane and is kept beside the others.
+    const primary = await this.primary(input.runId);
+    if (!primary || primary.tenant !== input.tenant) {
+      return {
+        runId: input.runId,
+        tenant: input.tenant,
+        source: input.source,
+        eventCount: input.events.length,
+        sealedAt,
+        created: false,
+      };
+    }
+    if ((primary.emitter ?? primary.source) === emitter) return { ...metaOf(primary), created: false };
+    const appended = await this.client.query<{ run_id: string }>(
+      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, t0, sealed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8)
+       ON CONFLICT (run_id, emitter) DO NOTHING
+       RETURNING run_id`,
+      [
+        input.runId,
+        emitter,
+        input.tenant,
+        input.source,
+        input.events.length,
+        JSON.stringify(input.events),
+        input.t0 ?? null,
+        sealedAt,
+      ],
+    );
+    const created = appended.rows.length > 0;
+    if (created) {
+      await this.client.query(
+        "UPDATE everdict_trajectories SET segment_event_count = segment_event_count + $1 WHERE run_id = $2",
+        [input.events.length, input.runId],
+      );
+    }
+    const refreshed = await this.primary(input.runId);
+    return { ...metaOf(refreshed ?? primary), created };
   }
 
-  async get(tenant: string, runId: string): Promise<{ meta: TrajectoryMeta; events: TraceEvent[] } | undefined> {
-    const res = await this.client.query<{
-      run_id: string;
-      tenant: string;
+  async get(tenant: string, runId: string): Promise<SealedTrajectory | undefined> {
+    const res = await this.client.query<PrimaryRow & { body: unknown }>(
+      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, body, t0, sealed_at
+       FROM everdict_trajectories WHERE run_id = $1`,
+      [runId],
+    );
+    const row = res.rows[0];
+    if (!row || row.tenant !== tenant) return undefined;
+    const sides = await this.client.query<{
+      emitter: string;
       source: string;
       event_count: number;
       body: unknown;
+      t0: string | Date | null;
       sealed_at: string | Date;
-    }>("SELECT run_id, tenant, source, event_count, body, sealed_at FROM everdict_trajectories WHERE run_id = $1", [
-      runId,
-    ]);
-    const row = res.rows[0];
-    if (!row || row.tenant !== tenant) return undefined;
-    return {
-      meta: {
-        runId: row.run_id,
-        tenant: row.tenant,
+    }>(
+      `SELECT emitter, source, event_count, body, t0, sealed_at FROM everdict_trajectory_segments
+       WHERE run_id = $1 ORDER BY sealed_at ASC, emitter ASC`,
+      [runId],
+    );
+    const segments: TrajectorySegment[] = [
+      {
+        emitter: row.emitter ?? row.source,
         source: row.source as TrajectoryMeta["source"],
         eventCount: Number(row.event_count),
-        sealedAt: typeof row.sealed_at === "string" ? row.sealed_at : row.sealed_at.toISOString(),
+        ...(row.t0 !== null ? { t0: isoOf(row.t0) } : {}),
+        sealedAt: isoOf(row.sealed_at),
+        events: EventsSchema.parse(row.body),
       },
-      events: EventsSchema.parse(row.body),
+      ...sides.rows.map((side) => ({
+        emitter: side.emitter,
+        source: side.source as TrajectoryMeta["source"],
+        eventCount: Number(side.event_count),
+        ...(side.t0 !== null ? { t0: isoOf(side.t0) } : {}),
+        sealedAt: isoOf(side.sealed_at),
+        events: EventsSchema.parse(side.body),
+      })),
+    ];
+    const execution = executionSegment(segments);
+    return {
+      meta: metaOf(row),
+      events: execution?.events ?? [],
+      ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
+      segments,
     };
   }
 
@@ -163,26 +310,14 @@ export class PgTrajectoryStore implements TrajectoryStore {
       conds.push("(sealed_at, run_id) < ($2::timestamptz, $3)");
       vals.push(after.sealedAt, after.runId);
     }
-    const res = await this.client.query<{
-      run_id: string;
-      tenant: string;
-      source: string;
-      event_count: number;
-      sealed_at: string | Date;
-    }>(
-      `SELECT run_id, tenant, source, event_count, sealed_at FROM everdict_trajectories
+    const res = await this.client.query<PrimaryRow>(
+      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, t0, sealed_at FROM everdict_trajectories
        WHERE ${conds.join(" AND ")}
        ORDER BY sealed_at DESC, run_id DESC
        LIMIT ${limit + 1}`,
       vals,
     );
-    const metas: TrajectoryMeta[] = res.rows.map((row) => ({
-      runId: row.run_id,
-      tenant: row.tenant,
-      source: row.source as TrajectoryMeta["source"],
-      eventCount: Number(row.event_count),
-      sealedAt: typeof row.sealed_at === "string" ? row.sealed_at : row.sealed_at.toISOString(),
-    }));
+    const metas = res.rows.map(metaOf);
     const page = metas.slice(0, limit);
     const last = page[page.length - 1];
     return {
@@ -193,7 +328,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
 
   async ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }> {
     const res = await this.client.query<{ trajectories: string | number; events: string | number }>(
-      `SELECT count(*) AS trajectories, COALESCE(SUM(event_count), 0) AS events
+      `SELECT count(*) AS trajectories, COALESCE(SUM(event_count + segment_event_count), 0) AS events
        FROM everdict_trajectories WHERE tenant = $1 AND sealed_at > $2::timestamptz`,
       [tenant, sinceIso],
     );
@@ -202,10 +337,30 @@ export class PgTrajectoryStore implements TrajectoryStore {
   }
 
   async deleteOlderThan(cutoffIso: string): Promise<number> {
+    // Side segments go with the header (ON DELETE CASCADE) — never orphaned evidence.
     const res = await this.client.query<{ run_id: string }>(
       "DELETE FROM everdict_trajectories WHERE sealed_at < $1::timestamptz RETURNING run_id",
       [cutoffIso],
     );
     return res.rows.length;
   }
+
+  private async primary(runId: string): Promise<PrimaryRow | undefined> {
+    const res = await this.client.query<PrimaryRow>(
+      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, t0, sealed_at
+       FROM everdict_trajectories WHERE run_id = $1`,
+      [runId],
+    );
+    return res.rows[0];
+  }
+}
+
+function metaOf(row: PrimaryRow): TrajectoryMeta {
+  return {
+    runId: row.run_id,
+    tenant: row.tenant,
+    source: row.source as TrajectoryMeta["source"],
+    eventCount: Number(row.event_count) + Number(row.segment_event_count ?? 0),
+    sealedAt: isoOf(row.sealed_at),
+  };
 }

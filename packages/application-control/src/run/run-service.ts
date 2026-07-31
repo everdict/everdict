@@ -35,7 +35,7 @@ import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
-import type { TrajectoryStore } from "../ports/trajectory-store.js";
+import { type TrajectorySegmentWire, type TrajectoryStore, trajectorySegmentsWire } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { failedCaseResult } from "../run-suite.js";
@@ -673,19 +673,37 @@ export class RunService {
   async trajectory(
     tenant: string,
     runId: string,
-  ): Promise<{ meta: { source: string; eventCount: number; sealedAt: string }; events: unknown[] } | undefined> {
+  ): Promise<
+    | {
+        meta: { source: string; eventCount: number; sealedAt: string };
+        events: unknown[];
+        segments: TrajectorySegmentWire[];
+      }
+    | undefined
+  > {
     const record = await this.deps.store.get(runId);
     if (!record || record.tenant !== tenant) return undefined;
     const sealed = await this.deps.trajectories?.get(tenant, runId);
     if (sealed) {
       const { runId: _r, tenant: _t, ...meta } = sealed.meta;
-      return { meta, events: sealed.events };
+      // The run page reads the whole SYSTEM, not just the agent: every emitter that contributed (the
+      // execution plus each service that pushed its own spans) travels in the same shape the ledger's
+      // own detail read serves.
+      return { meta, events: sealed.events, segments: trajectorySegmentsWire(sealed) };
     }
     // Dual-read fallback: the pre-P5 embed — served in the same shape so consumers never care which copy.
     if (record.result && record.result.trace.length > 0)
       return {
         meta: { source: "embed", eventCount: record.result.trace.length, sealedAt: record.updatedAt },
         events: record.result.trace,
+        segments: [
+          {
+            emitter: "embed",
+            source: "run",
+            eventCount: record.result.trace.length,
+            sealedAt: record.updatedAt,
+          },
+        ],
       };
     return undefined;
   }

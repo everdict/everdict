@@ -23,7 +23,19 @@ function fakeStore(): TrajectoryStore {
     },
     async get(tenant, runId) {
       const hit = sealed.get(runId);
-      return hit && hit.meta.tenant === tenant ? hit : undefined;
+      if (!hit || hit.meta.tenant !== tenant) return undefined;
+      return {
+        ...hit,
+        segments: [
+          {
+            emitter: hit.meta.source,
+            source: hit.meta.source,
+            eventCount: hit.events.length,
+            sealedAt: hit.meta.sealedAt,
+            events: hit.events,
+          },
+        ],
+      };
     },
     async list() {
       return { items: [] };

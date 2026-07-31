@@ -376,17 +376,61 @@ describe("PgScorecardStore", () => {
 describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
   const events = [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } }];
 
-  it("seals once and NEVER rewrites — the first seal wins, cross-tenant reads miss", async () => {
+  it("seals once per emitter and NEVER rewrites — a re-offer wins nothing, cross-tenant reads miss", async () => {
     const store = new InMemoryTrajectoryStore();
     const first = await store.seal({ runId: "r1", tenant: "acme", source: "run", events: events as never });
     expect(first.eventCount).toBe(1);
     expect(first.created).toBe(true);
-    const second = await store.seal({ runId: "r1", tenant: "acme", source: "import", events: [] });
+    const again = await store.seal({ runId: "r1", tenant: "acme", source: "run", events: [] });
     // Idempotent — evidence is never rewritten; `created:false` is how the perception decorator knows
     // a re-offer must not re-announce (E4 announce-once).
-    expect(second).toEqual({ ...first, created: false });
+    expect(again).toEqual({ ...first, created: false });
     expect((await store.get("acme", "r1"))?.events).toHaveLength(1);
     expect(await store.get("rival", "r1")).toBeUndefined(); // tenant-scoped
+  });
+
+  it("a second EMITTER joins as its own plane instead of being mistaken for a retry", async () => {
+    const store = new InMemoryTrajectoryStore();
+    await store.seal({ runId: "r1", tenant: "acme", source: "run", events: events as never });
+    const service = await store.seal({
+      runId: "r1",
+      tenant: "acme",
+      source: "otlp",
+      emitter: "service:checkout",
+      t0: "2026-07-31T00:00:00.000Z",
+      events: [{ t: 5, kind: "span", name: "GET /cart", durationMs: 12 }] as never,
+    });
+    expect(service.created).toBe(true);
+    expect(service.eventCount).toBe(2); // the trajectory now holds BOTH planes
+
+    const sealed = await store.get("acme", "r1");
+    expect(sealed?.segments.map((s) => s.emitter)).toEqual(["run", "service:checkout"]);
+    expect(sealed?.segments[1]?.t0).toBe("2026-07-31T00:00:00.000Z"); // the plane's own alignment anchor
+    // The EXECUTION's record stays what a judge reads — a service's spans never displace the agent's trace.
+    expect(sealed?.executionEmitter).toBe("run");
+    expect(sealed?.events).toHaveLength(1);
+    expect(sealed?.events[0]).toMatchObject({ kind: "llm_call" });
+  });
+
+  it("a run whose services sealed FIRST still keeps the agent's own trace as the judged evidence", async () => {
+    // The topology shape: services push spans through the door while the case runs, so the run's own seal
+    // arrives last. Pre-multi-plane that seal was silently dropped.
+    const store = new InMemoryTrajectoryStore();
+    await store.seal({
+      runId: "r1",
+      tenant: "acme",
+      source: "otlp",
+      emitter: "service:checkout",
+      events: [{ t: 0, kind: "span", name: "GET /cart" }] as never,
+    });
+    const run = await store.seal({ runId: "r1", tenant: "acme", source: "run", events: events as never });
+    expect(run.created).toBe(true);
+
+    const sealed = await store.get("acme", "r1");
+    expect(sealed?.executionEmitter).toBe("run");
+    expect(sealed?.events[0]).toMatchObject({ kind: "llm_call" });
+    expect(sealed?.meta.source).toBe("otlp"); // how the trajectory FIRST arrived
+    expect(sealed?.meta.eventCount).toBe(2);
   });
 
   it("meters ingestion from the store itself and sweeps retention by cutoff (N3)", async () => {
@@ -421,6 +465,8 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(calls[0]?.text).toMatch(/tenant = \$1 AND sealed_at > \$2/);
     expect(await store.deleteOlderThan("2026-07-01T00:00:00.000Z")).toBe(2);
     expect(calls[1]?.text).toMatch(/DELETE FROM everdict_trajectories WHERE sealed_at < \$1/);
+    // Every plane's events ride the meter, not just the header's — a service segment is stored evidence too.
+    expect(calls[0]?.text).toMatch(/SUM\(event_count \+ segment_event_count\)/);
   });
 
   it("Pg impl seals with ON CONFLICT DO NOTHING (first write wins at the row level)", async () => {
@@ -428,6 +474,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     const client: SqlClient = {
       async query(text: string, params?: unknown[]) {
         calls.push({ text, params });
+        if (text.includes("FROM everdict_trajectory_segments")) return { rows: [] } as never;
         if (text.startsWith("SELECT"))
           return {
             rows: [
@@ -435,8 +482,11 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
                 run_id: "r1",
                 tenant: "acme",
                 source: "run",
+                emitter: "run",
                 event_count: 1,
+                segment_event_count: 0,
                 body: events,
+                t0: null,
                 sealed_at: "2026-07-30T00:00:00.000Z",
               },
             ],
@@ -449,6 +499,44 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(calls[0]?.text).toMatch(/INSERT INTO everdict_trajectories/);
     expect(calls[0]?.text).toMatch(/ON CONFLICT \(run_id\) DO NOTHING/);
     expect(meta.source).toBe("run"); // read back — a lost race returns the FIRST seal's meta
+    expect(meta.created).toBe(false); // same emitter: a retry writes nothing
     expect((await store.get("acme", "r1"))?.meta.eventCount).toBe(1);
+  });
+
+  it("Pg impl keeps a LOSING seal from another emitter as its own segment row", async () => {
+    const calls: Array<{ text: string; params?: unknown[] }> = [];
+    const client: SqlClient = {
+      async query(text: string, params?: unknown[]) {
+        calls.push({ text, params });
+        // The header insert loses the race; the segment insert takes.
+        if (text.includes("INSERT INTO everdict_trajectory_segments")) return { rows: [{ run_id: "r1" }] } as never;
+        if (text.startsWith("INSERT")) return { rows: [] } as never;
+        if (text.includes("FROM everdict_trajectory_segments")) return { rows: [] } as never;
+        if (text.startsWith("SELECT"))
+          return {
+            rows: [
+              {
+                run_id: "r1",
+                tenant: "acme",
+                source: "otlp",
+                emitter: "service:checkout",
+                event_count: 3,
+                segment_event_count: 0,
+                t0: null,
+                sealed_at: "2026-07-30T00:00:00.000Z",
+              },
+            ],
+          } as never;
+        return { rows: [] } as never;
+      },
+    };
+    const store = new PgTrajectoryStore(client);
+    const meta = await store.seal({ runId: "r1", tenant: "acme", source: "run", events: events as never });
+    expect(meta.created).toBe(true); // a NEW plane, not a rejected retry
+    const segmentInsert = calls.find((c) => c.text.includes("INSERT INTO everdict_trajectory_segments"));
+    expect(segmentInsert?.text).toMatch(/ON CONFLICT \(run_id, emitter\) DO NOTHING/);
+    expect(segmentInsert?.params?.[1]).toBe("run"); // the emitter this seal belongs to
+    // The denormalized counter keeps the browse row and the ingestion meter honest.
+    expect(calls.some((c) => /SET segment_event_count = segment_event_count \+ \$1/.test(c.text))).toBe(true);
   });
 });
