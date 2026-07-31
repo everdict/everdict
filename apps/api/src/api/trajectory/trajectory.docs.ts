@@ -24,11 +24,15 @@ export const trajectoryDocs: Record<string, FastifySchema> = {
     },
   },
   get: {
-    summary: "Open one sealed trajectory (meta + every normalized TraceEvent)",
+    summary: "Open one sealed trajectory (meta + every normalized TraceEvent, across every emitter)",
     description:
       "The ledger's own detail read, keyed by the id the trajectory was sealed under (TrajectoryMeta.runId). " +
       "Works for every source — an otlp arrival or a materialized import has no run row, so the run-scoped " +
-      "GET /runs/:id/trajectory cannot open it. Another workspace's (or an unknown) id is 404.",
+      "GET /runs/:id/trajectory cannot open it. Another workspace's (or an unknown) id is 404. " +
+      "`events` is the EXECUTION's own record (what judges score). `segments` describes every emitter that " +
+      "contributed to this run — the execution itself plus each `service:<service.name>` that pushed its own " +
+      "spans through the OTLP door — so a caller can read the whole system, not just the agent. Exactly one " +
+      "segment omits `events`: that is the execution one, whose stream is the top-level `events`.",
     tags: ["runs"],
     params: {
       type: "object",
@@ -36,7 +40,11 @@ export const trajectoryDocs: Record<string, FastifySchema> = {
       required: ["id"],
     },
     response: {
-      200: { description: "{ meta: { runId, source, eventCount, sealedAt }, events: TraceEvent[] }" },
+      200: {
+        description:
+          "{ meta: { runId, source, eventCount, sealedAt }, events: TraceEvent[], " +
+          "segments: [{ emitter, source, eventCount, t0?, sealedAt, events? }] }",
+      },
       404: { description: "no such trajectory in this workspace" },
     },
   },

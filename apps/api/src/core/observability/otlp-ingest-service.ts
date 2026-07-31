@@ -1,17 +1,28 @@
 import type { PlatformEventEmitter, TrajectoryStore } from "@everdict/application-control";
 import { RateLimitError } from "@everdict/contracts";
-import { groupOtlpExportByRun, spansToTraceEvents } from "@everdict/trace";
+import { groupOtlpExportByRun, partitionSpansByService, spansToTraceEvents } from "@everdict/trace";
 
 // How often a throttled tenant is ANNOUNCED (the fact), independent of how often it is refused (every
 // request). A retrying firehose reads as one signal on the log, not a flood.
 const THROTTLE_FACT_COOLDOWN_MS = 15 * 60_000;
 
+// A plane's absolute anchor: when its earliest span started. Undefined when no span carries a usable
+// start — a reader keeps that plane on its own axis rather than aligning it against a guess.
+function isoOfEarliestStart(spans: { startMs: number }[]): string | undefined {
+  const starts = spans.map((span) => span.startMs).filter((ms) => Number.isFinite(ms) && ms > 0);
+  return starts.length > 0 ? new Date(Math.min(...starts)).toISOString() : undefined;
+}
+
 // The OTLP/HTTP door's core (native-observability N0, receiver embedded in the api per N-O2): group the
 // export's spans by everdict.run_id, normalize through the SAME span→TraceEvent path the pull sources use,
-// and seal each run's trajectory in the OWNED store. Rung-1 seal semantics apply: one seal per run, first
-// write wins — a multi-batch export's later batches for an already-sealed run are rejected VISIBLY in the
-// response (partialSuccess), never silently; batch-per-run exporters (flush-at-exit, the dogfood shape)
-// arrive whole. Live append is the next rung.
+// and seal each run's trajectory in the OWNED store.
+//
+// The MULTI-PLANE rung: a run is a system, not one process. Spans are grouped a second time by OTel's own
+// `service.name`, and each service seals as its OWN segment (`service:<name>`) — so the agent under test,
+// the orchestrator's account of where it ran, and every service the agent drives land in ONE trajectory
+// without ever rewriting each other's bytes. Seal semantics are unchanged where they matter: first write
+// wins PER EMITTER, so a retried batch is still refused VISIBLY in the response (partialSuccess) and never
+// silently. What changed is that a second SERVICE is no longer mistaken for a retry.
 //
 // N3 admission lane: a trace firehose is the data-plane twin of runaway fan-out, so the door carries the
 // same governance grammar — a per-tenant events/hour quota (workspace override, else the operator default)
@@ -35,23 +46,38 @@ export class OtlpIngestService {
     const { groups, missingRunId } = groupOtlpExportByRun(body);
     const normalized = [...groups].map(([runId, spans]) => ({
       runId,
-      spanCount: spans.length,
-      events: spansToTraceEvents(spans),
+      // One plane per emitting service. `spansToTraceEvents` re-bases `t` per call, so each plane's
+      // offsets already count from ITS OWN first span — t0 is that instant, the anchor a cross-plane
+      // reader aligns the planes on.
+      planes: [...partitionSpansByService(spans)].map(([service, planeSpans]) => ({
+        emitter: service !== undefined ? `service:${service}` : "otlp",
+        spanCount: planeSpans.length,
+        t0: isoOfEarliestStart(planeSpans),
+        events: spansToTraceEvents(planeSpans),
+      })),
     }));
     await this.admit(
       tenant,
-      normalized.reduce((sum, group) => sum + group.events.length, 0),
+      normalized.reduce((sum, group) => sum + group.planes.reduce((n, plane) => n + plane.events.length, 0), 0),
     );
     let sealedRuns = 0;
     let rejectedSpans = missingRunId;
     for (const group of normalized) {
-      const before = await this.trajectories.get(tenant, group.runId);
-      if (before) {
-        rejectedSpans += group.spanCount; // already sealed — evidence is never rewritten (first write wins)
-        continue;
+      let tookAny = false;
+      for (const plane of group.planes) {
+        const sealed = await this.trajectories.seal({
+          runId: group.runId,
+          tenant,
+          source: "otlp",
+          emitter: plane.emitter,
+          events: plane.events,
+          ...(plane.t0 !== undefined ? { t0: plane.t0 } : {}),
+        });
+        // This emitter already sealed — evidence is never rewritten (first write wins, per plane).
+        if (sealed.created) tookAny = true;
+        else rejectedSpans += plane.spanCount;
       }
-      await this.trajectories.seal({ runId: group.runId, tenant, source: "otlp", events: group.events });
-      sealedRuns++;
+      if (tookAny) sealedRuns++;
     }
     return { sealedRuns, rejectedSpans };
   }

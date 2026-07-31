@@ -1,3 +1,4 @@
+import { trajectorySegmentsWire } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
@@ -39,7 +40,10 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
         "Open ONE sealed trajectory from the owned ledger: its meta plus every normalized TraceEvent (the " +
         "same evidence a judge reads). Keyed by the id it was sealed under (TrajectoryMeta.runId from " +
         "list_trajectories) — this works for every source, whereas get_run_trajectory only opens evidence " +
-        "that has a run row (never an otlp arrival or a materialized import).",
+        "that has a run row (never an otlp arrival or a materialized import). `segments` lists every emitter " +
+        "that contributed to the run — the execution plus each service:<service.name> that pushed its own " +
+        "spans through the OTLP door — so you can read the whole SYSTEM (agent, placement, services), not " +
+        "just the agent. The one segment without `events` is the execution one: its stream is `events`.",
       inputSchema: {
         runId: z.string().min(1).describe("the id the trajectory was sealed under (TrajectoryMeta.runId)"),
       },
@@ -49,7 +53,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
         const sealed = await store.get(ws, runId);
         if (!sealed) return fail("NOT_FOUND: trajectory not found.");
         const { tenant: _tenant, ...meta } = sealed.meta;
-        return ok({ meta, events: sealed.events });
+        return ok({ meta, events: sealed.events, segments: trajectorySegmentsWire(sealed) });
       }),
   );
 

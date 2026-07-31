@@ -1,3 +1,4 @@
+import { trajectorySegmentsWire } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
@@ -57,7 +58,7 @@ export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps)
       const sealed = await deps.trajectoryStore.get(principal.workspace, req.params.id);
       if (!sealed) return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
       const { tenant: _tenant, ...meta } = sealed.meta; // the tenant is the caller's own — never echoed
-      return reply.send({ meta, events: sealed.events });
+      return reply.send({ meta, events: sealed.events, segments: trajectorySegmentsWire(sealed) });
     } catch (err) {
       return sendError(reply, err);
     }

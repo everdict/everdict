@@ -127,6 +127,77 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
     expect(emitted).toEqual(["trace.ingestion_throttled"]);
   });
 
+  // A service under test joins the run's trajectory by setting OTEL_SERVICE_NAME + the run correlation —
+  // OTel's own attribute, no everdict-specific convention (the multi-plane rung).
+  const serviceExport = (runId: string, service: string, span: string) => ({
+    resourceSpans: [
+      {
+        resource: {
+          attributes: [
+            { key: "everdict.run_id", value: { stringValue: runId } },
+            { key: "service.name", value: { stringValue: service } },
+          ],
+        },
+        scopeSpans: [
+          {
+            spans: [
+              {
+                name: span,
+                startTimeUnixNano: "5000000000",
+                endTimeUnixNano: "5500000000",
+                attributes: [{ key: "http.route", value: { stringValue: "/cart" } }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  it("each emitting SERVICE seals as its own plane — one run, the whole system", async () => {
+    const { app, trajectories } = build();
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/traces",
+      headers: H,
+      payload: {
+        resourceSpans: [
+          ...serviceExport("run-sys-1", "checkout", "GET /cart").resourceSpans,
+          ...serviceExport("run-sys-1", "payments", "POST /charge").resourceSpans,
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({}); // nothing rejected — a second service is not a duplicate
+
+    const sealed = await trajectories.get("acme", "run-sys-1");
+    expect(sealed?.segments.map((s) => s.emitter)).toEqual(["service:checkout", "service:payments"]);
+    // Each plane carries its own absolute anchor, so a reader can lay them on one time axis.
+    expect(sealed?.segments.every((s) => s.t0 !== undefined)).toBe(true);
+    expect(sealed?.meta.eventCount).toBe(2);
+    // A structural span keeps its own length — without it a service plane would draw as an instant.
+    expect(sealed?.segments[0]?.events[0]).toMatchObject({ kind: "span", durationMs: 500 });
+  });
+
+  it("a service's spans JOIN an already-sealed run instead of being rejected as a retry", async () => {
+    const { app, trajectories } = build();
+    await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-sys-2") });
+    const joined = await app.inject({
+      method: "POST",
+      url: "/v1/traces",
+      headers: H,
+      payload: serviceExport("run-sys-2", "checkout", "GET /cart"),
+    });
+    expect(joined.statusCode).toBe(200);
+    expect(joined.json()).toEqual({}); // admitted — the pre-multi-plane door rejected this span
+
+    const sealed = await trajectories.get("acme", "run-sys-2");
+    expect(sealed?.segments.map((s) => s.emitter)).toEqual(["otlp", "service:checkout"]);
+    // The agent's own record still answers "what did the agent do" — a service never displaces it.
+    expect(sealed?.executionEmitter).toBe("otlp");
+    expect(sealed?.events).toHaveLength(3);
+  });
+
   it("traces seal into the CALLER's workspace — another tenant cannot read them", async () => {
     const { app, trajectories } = build();
     await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-otlp-3") });

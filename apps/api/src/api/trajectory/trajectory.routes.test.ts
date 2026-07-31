@@ -75,6 +75,46 @@ describe("GET /trajectories/:id — opening one sealed trajectory", () => {
     expect(body.events).toEqual([{ t: 0, kind: "llm_call", model: "m" }]);
   });
 
+  it("describes every emitter that contributed, shipping each plane's events exactly once", async () => {
+    const trajectoryStore = new InMemoryTrajectoryStore();
+    await trajectoryStore.seal({
+      runId: "sys-1",
+      tenant: "acme",
+      source: "run",
+      events: [{ t: 0, kind: "llm_call", model: "m" }],
+    });
+    await trajectoryStore.seal({
+      runId: "sys-1",
+      tenant: "acme",
+      source: "otlp",
+      emitter: "service:checkout",
+      t0: "2026-07-31T00:00:00.000Z",
+      events: [{ t: 12, kind: "span", name: "GET /cart", durationMs: 30 }],
+    });
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      trajectoryStore,
+    });
+
+    const body = (await app.inject({ method: "GET", url: "/trajectories/sys-1", headers: H })).json();
+    expect(body.meta.eventCount).toBe(2); // every plane counted
+    expect(body.events).toEqual([{ t: 0, kind: "llm_call", model: "m" }]); // the execution's own record
+    expect(body.segments).toHaveLength(2);
+    // The execution segment omits `events` — its stream is the top-level one, never shipped twice.
+    expect(body.segments[0]).toEqual({
+      emitter: "run",
+      source: "run",
+      eventCount: 1,
+      sealedAt: expect.any(String),
+    });
+    expect(body.segments[1]).toMatchObject({
+      emitter: "service:checkout",
+      source: "otlp",
+      t0: "2026-07-31T00:00:00.000Z",
+      events: [{ t: 12, kind: "span", name: "GET /cart", durationMs: 30 }],
+    });
+  });
+
   it("opens evidence that has NO run row — an otlp arrival and a materialized import", async () => {
     const trajectoryStore = new InMemoryTrajectoryStore();
     // Neither id is a run record's id: the OTLP door seals under the exporter's everdict.run_id, and a pull
