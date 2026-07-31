@@ -47,10 +47,13 @@ export function SpanMappingEditor({
       {open ? (
         <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
           <p className="text-[12px] text-muted-foreground">{t('subtitle')}</p>
-          <div className={cn('grid gap-2 sm:grid-cols-2')}>
+          {/* 열 수는 감싼 폼의 @container 폭 기준(뷰포트 아님) — 폼이 반쪽 컬럼/모바일이면 한 줄씩 쌓인다. */}
+          <div className={cn('grid gap-2 @sm:grid-cols-2')}>
             {SPAN_MAPPING_FIELDS.map((f) => (
               <label key={f} className="space-y-1">
-                <span className="font-mono text-[11px] text-muted-foreground">{t(`field_${f}`)}</span>
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  {t(`field_${f}`)}
+                </span>
                 <Input
                   value={mapping[f] ?? ''}
                   onChange={(e) => onChange({ ...mapping, [f]: e.target.value })}

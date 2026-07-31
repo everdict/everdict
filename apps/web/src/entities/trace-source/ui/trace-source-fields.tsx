@@ -47,8 +47,9 @@ export function TraceSourceFields({
 }) {
   const t = useTranslations('traceSourceFields')
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+    // 자기 자신이 @container — 하네스/런타임 위자드 어느 쪽에 박히든 호스트 폭이 아니라 이 서브폼의 실제 폭으로 열 수가 정해진다.
+    <div className="@container space-y-4">
+      <div className="grid gap-4 @sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label>{t('kindLabel')}</Label>
           <Combobox
@@ -68,7 +69,7 @@ export function TraceSourceFields({
           />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid gap-4 @sm:grid-cols-2">
         <div className="space-y-1.5">
           <div className="flex items-center gap-1">
             <Label>{t('correlateLabel')}</Label>
@@ -98,7 +99,7 @@ export function TraceSourceFields({
           />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid gap-4 @sm:grid-cols-2">
         <div className="space-y-1.5">
           <div className="flex items-center gap-1">
             <Label>{t('serviceLabel')}</Label>

@@ -83,7 +83,7 @@ export function EnvEditor({
                   onChange={(e) => set(i, { key: e.target.value })}
                   placeholder="NAME"
                   spellCheck={false}
-                  className="flex-1 font-mono text-[12px]"
+                  className="min-w-0 flex-1 font-mono text-[12px]"
                 />
                 <SourceToggle
                   secret={r.secret}

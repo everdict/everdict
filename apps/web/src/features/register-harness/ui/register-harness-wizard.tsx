@@ -279,7 +279,9 @@ export function TemplateForm({
   }
 
   return (
-    <div className="space-y-5">
+    // @container: 폼의 열 수는 뷰포트가 아니라 폼 자신의 폭을 따른다 — 같은 폼이 전체폭(새 버전 페이지)·카드 안·
+    // 인프라 패널이 열려 반쪽이 된 좌측 컬럼·모바일에서 모두 렌더되므로 뷰포트 브레이크포인트는 잘못된 축을 잰다.
+    <div className="@container space-y-5">
       <ModeToggle
         mode={mode}
         setForm={() => setMode('form')}
@@ -289,7 +291,7 @@ export function TemplateForm({
         }}
       />
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid gap-3 @md:grid-cols-2 @2xl:grid-cols-3">
         <div className="space-y-1.5">
           <FieldLabel
             tip={t.rich('kindTip', {
@@ -385,7 +387,7 @@ export function TemplateForm({
                     }
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid gap-2.5 @sm:grid-cols-2">
                   <LabeledInput
                     label="name"
                     tip={t('svcNameTip')}
@@ -476,7 +478,7 @@ export function TemplateForm({
                   onChange={(v) => setService(i, { volumes: v })}
                   placeholder="pgdata:/var/lib/postgresql/data"
                 />
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid gap-2.5 @sm:grid-cols-2">
                   <LabeledInput
                     label="readiness timeout (ms)"
                     tip={t('svcReadinessTimeoutTip')}
@@ -528,7 +530,7 @@ export function TemplateForm({
             )}
             {s.deps.map((d, i) => (
               <div key={i} className="space-y-2.5 rounded-lg border bg-card p-3">
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid gap-2.5 @md:grid-cols-2 @2xl:grid-cols-3">
                   <div className="space-y-1">
                     <span className="flex items-center gap-1">
                       <span className="text-[11px] font-[510] text-muted-foreground">
@@ -641,7 +643,7 @@ export function TemplateForm({
               Front door
               <InfoTip content={t.rich('frontDoorTip', { b: (c) => <b>{c}</b> })} />
             </h3>
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid gap-2.5 @md:grid-cols-2 @2xl:grid-cols-3">
               <LabeledInput
                 label="service"
                 tip={t('fdServiceTip')}
@@ -686,7 +688,7 @@ export function TemplateForm({
 
       {mode === 'form' && s.kind === 'command' && (
         <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid gap-2.5 @md:grid-cols-2 @2xl:grid-cols-3">
             <div className="space-y-1">
               <span className="flex items-center gap-1">
                 <span className="text-[11px] font-[510] text-muted-foreground">
@@ -700,6 +702,7 @@ export function TemplateForm({
                   value={s.image}
                   onChange={(e) => set({ image: e.target.value })}
                   placeholder="ghcr.io/…"
+                  className="min-w-0 flex-1"
                 />
                 <EnvironmentPicker onPick={(env) => set({ image: env.image })} />
               </div>
@@ -855,8 +858,9 @@ export function InstanceForm({
   }
 
   return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3">
+    // @container — TemplateForm 과 같은 이유(폼 자신의 폭이 기준축).
+    <div className="@container space-y-5">
+      <div className="grid gap-3 @sm:grid-cols-2">
         <div className="space-y-1.5">
           <FieldLabel htmlFor="itid" tip={t('templateIdTip')}>
             template id
@@ -924,6 +928,7 @@ export function InstanceForm({
                     onChange={(e) => setPin(i, { value: e.target.value, source: undefined })}
                     placeholder={g.placeholder}
                     aria-label={t('pinValueAria', { slot: p.slot })}
+                    className="min-w-0 flex-1"
                   />
                   <EnvironmentPicker
                     onPick={(env) =>
@@ -950,28 +955,35 @@ export function InstanceForm({
           onAdd={() => set({ pins: [...s.pins, { slot: '', value: '' }] })}
         >
           {s.pins.map((p, i) => (
-            <div key={i} className="flex items-center gap-2 rounded-lg border bg-card p-3">
+            <div
+              key={i}
+              className="flex flex-col gap-2 rounded-lg border bg-card p-3 @sm:flex-row @sm:items-center"
+            >
               <Input
                 value={p.slot}
                 onChange={(e) => setPin(i, { slot: e.target.value })}
                 placeholder="slot (agent-server / image / model)"
+                className="min-w-0 @sm:flex-1"
               />
               <Input
                 value={p.value}
                 onChange={(e) => setPin(i, { value: e.target.value, source: undefined })}
                 placeholder="value (ghcr.io/…/agent:abc)"
+                className="min-w-0 @sm:flex-1"
               />
-              <EnvironmentPicker
-                onPick={(env) =>
-                  setPin(i, {
-                    value: env.image,
-                    source: { source: env.tenant, id: env.id, version: env.version },
-                  })
-                }
-              />
-              {s.pins.length > 1 && (
-                <RemoveBtn onClick={() => set({ pins: s.pins.filter((_, j) => j !== i) })} />
-              )}
+              <div className="flex items-center gap-2">
+                <EnvironmentPicker
+                  onPick={(env) =>
+                    setPin(i, {
+                      value: env.image,
+                      source: { source: env.tenant, id: env.id, version: env.version },
+                    })
+                  }
+                />
+                {s.pins.length > 1 && (
+                  <RemoveBtn onClick={() => set({ pins: s.pins.filter((_, j) => j !== i) })} />
+                )}
+              </div>
             </div>
           ))}
         </Section>
@@ -1074,6 +1086,7 @@ function OverridesEditor({
                           value={r.service}
                           onChange={(e) => setSvcOv(i, { service: e.target.value })}
                           placeholder={t('svcNamePlaceholder')}
+                          className="min-w-0 flex-1"
                         />
                         <RemoveBtn
                           onClick={() =>
@@ -1081,7 +1094,7 @@ function OverridesEditor({
                           }
                         />
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid gap-2 @md:grid-cols-3">
                         <NumField
                           label="replicas"
                           value={r.replicas}
@@ -1115,7 +1128,7 @@ function OverridesEditor({
                         rows={2}
                         className="font-mono text-[12px]"
                       />
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid gap-2 @sm:grid-cols-2">
                         <NumField
                           label="readiness timeout (ms)"
                           value={r.readinessTimeout}
@@ -1149,7 +1162,7 @@ function OverridesEditor({
                     <Callout tone="danger">{t('bodyJsonInline', { error: bodyError })}</Callout>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-2 @sm:grid-cols-2">
                   <NumField
                     label={t('completionTimeoutLabel')}
                     value={s.completionTimeout}
@@ -1622,7 +1635,7 @@ function PeerWiringEditor({
               />
               <RemoveBtn onClick={() => onChange(rows.filter((_, j) => j !== i))} />
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid gap-2 @md:grid-cols-3">
               <WiringEnvField
                 label={t('wiringUrlEnv')}
                 value={r.urlEnv}
@@ -1796,7 +1809,7 @@ function DepInjectEditor({
                 onChange={(e) => set(i, { env: e.target.value })}
                 placeholder="VALKEY_URL"
                 spellCheck={false}
-                className="w-2/5 font-mono text-[12px]"
+                className="w-2/5 min-w-0 font-mono text-[12px]"
               />
               <Input
                 aria-label={t('depInjectTemplateLabel')}
@@ -1804,7 +1817,7 @@ function DepInjectEditor({
                 onChange={(e) => set(i, { template: e.target.value })}
                 placeholder={t('depInjectTemplatePlaceholder')}
                 spellCheck={false}
-                className="flex-1 font-mono text-[12px]"
+                className="min-w-0 flex-1 font-mono text-[12px]"
               />
               <button
                 type="button"

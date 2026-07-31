@@ -160,8 +160,17 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   with its own version combobox via `versionOptions`) — never re-implement the chip picker or hardcode
   `version: 'latest'`. Used by the scorecard wizard (both modes), schedule form, re-run dialog.
 - **Create/edit form width**: the page's `Card` owns the width cap (`max-w-2xl`, `max-w-3xl` for the judge
-  code editor) and the form fills it — never cap the form inside a full-width Card (fields would hug the
-  left edge on wide screens). Field grids stack below `sm` (`grid gap-3 sm:grid-cols-3`).
+  code editor and the harness wizard) and the form fills it — never cap the form inside a full-width Card
+  (fields would hug the left edge on wide screens). **Field grids are container-queried, never viewport-queried**:
+  mark the form root `@container` and write `grid gap-3 @md:grid-cols-2 @2xl:grid-cols-3` (combobox/long-label
+  triples) or `@sm:grid-cols-2` (short pairs) — a `sm:`/`lg:` breakpoint measures the wrong axis, because the
+  same form renders full-width (new-version page), inside a capped Card, and in the ~500px column left when the
+  infra panel is open. A subform shared by several wizards (`entities/trace-source` `TraceSourceFields`) declares
+  its OWN `@container` so it is correct in any host. Flex rows that pair an input with a button/toggle give the
+  input `min-w-0 flex-1` (else it collapses to ~30px) and stack with `flex-col … @sm:flex-row`. Reference:
+  `features/register-harness/ui/register-harness-wizard.tsx`. The same container-over-viewport rule already
+  governs detail views (`app/[workspace]/harnesses/[id]/page.tsx`, `features/inspect-harness/ui/*-view.tsx`) —
+  Tailwind container breakpoints are NOT the viewport rem values (`@sm`=24rem, `@md`=28rem, `@2xl`=42rem).
 
 ## Language & i18n (per CLAUDE.md)
 Skill/rule bodies English; **code comments Korean**. User-facing UI copy is **never hardcoded** —
