@@ -19,6 +19,14 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
   strings. Absolute http(s) refs untouched; credentials remain same-origin-guarded against the resolved URL.
 - `POST /scorecards/ingest/pull` INLINE sources carry `correlate`/`correlateTag`/`service`/`artifactBaseUrl`
   (pre-fix they were silently stripped, so an inline tag-correlated pull degraded to empty id-fetches).
+- **The OTLP door seals PER EMITTER, not per run.** `groupOtlpExportByRun` groups by `everdict.run_id`, then
+  `partitionSpansByService` splits each run's spans by OTel's own `service.name` — every service seals as its own
+  segment (`service:<name>`; spans with no service.name stay the run's own `otlp` plane). So a second service is
+  never mistaken for a duplicate re-export, and first-write-wins still refuses a true retry VISIBLY
+  (`partialSuccess.rejectedSpans`). Each plane's `t0` is its earliest span start — the anchor that lets planes share
+  one time axis; `spansToTraceEvents` re-bases `t` per call, so a plane's offsets already count from its own start.
+  A structural span carries `durationMs` (OTLP end−start) or a service plane draws as instants. See
+  `docs/architecture/native-observability.md` N5.
 - Keep parsing pure/deterministic (unit-testable with sample span JSON); only `fetch()` does I/O. Inject `fetchImpl`
   for tests.
 - **Credentials are injected, never embedded.** A source takes `headers?`; the caller resolves the value from the

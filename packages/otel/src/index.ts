@@ -14,17 +14,28 @@ export const EVERDICT_SEMCONV = {
   groupId: "everdict.group_id",
 } as const;
 
+// OTel's own identity attribute for the emitting process — deliberately NOT an everdict key. It is the
+// plane key of a multi-service trajectory: joining a run's system view is setting OTEL_SERVICE_NAME plus
+// the run correlation above, and nothing else.
+export const OTEL_SERVICE_NAME_ATTR = "service.name";
+
 export interface EverdictCorrelation {
   runId: string; // the everdict run this trace belongs to — the door REFUSES spans without one (visibly)
   kind?: string; // executable family (eval | agent | command | sandbox | analysis) when known
   caseId?: string;
   groupId?: string;
+  // The emitting process's name. This is OTel's OWN `service.name`, not an everdict convention — the door
+  // groups a run's spans by it, so every service that sets it gets its own PLANE in the run's trajectory
+  // (the agent's steps, the orchestrator's placement record and each service side by side on one axis).
+  // Omit it in a single-process agent; set it in every service of a system under test.
+  serviceName?: string;
 }
 
 // The correlation as resource attributes — hand to your SDK's Resource (TS: resourceFromAttributes(...),
 // Py: Resource.create(...)). Resource-level is the right layer: one process, one run.
 export function everdictResourceAttributes(correlation: EverdictCorrelation): Record<string, string> {
   return {
+    ...(correlation.serviceName !== undefined ? { [OTEL_SERVICE_NAME_ATTR]: correlation.serviceName } : {}),
     [EVERDICT_SEMCONV.runId]: correlation.runId,
     ...(correlation.kind !== undefined ? { [EVERDICT_SEMCONV.kind]: correlation.kind } : {}),
     ...(correlation.caseId !== undefined ? { [EVERDICT_SEMCONV.caseId]: correlation.caseId } : {}),

@@ -1,7 +1,11 @@
-import { EVERDICT_SEMCONV as INTERNAL_SEMCONV } from "@everdict/trace";
+import {
+  EVERDICT_SEMCONV as INTERNAL_SEMCONV,
+  OTEL_SERVICE_NAME_ATTR as INTERNAL_SERVICE_NAME_ATTR,
+} from "@everdict/trace";
 import { describe, expect, it } from "vitest";
 import {
   EVERDICT_SEMCONV,
+  OTEL_SERVICE_NAME_ATTR,
   everdictExporterEnv,
   everdictExporterOptions,
   everdictResourceAttributes,
@@ -13,6 +17,20 @@ describe("@everdict/otel — the user-facing OTLP-door configuration helpers (N2
     // The user package is deliberately dependency-free, so the constants are duplicated — this test is
     // the lockstep: a receiver-side rename fails HERE before it strands a user.
     expect(EVERDICT_SEMCONV).toEqual(INTERNAL_SEMCONV);
+    // The plane key is OTel's own attribute — the door groups by exactly this string.
+    expect(OTEL_SERVICE_NAME_ATTR).toBe(INTERNAL_SERVICE_NAME_ATTR);
+  });
+
+  it("a SERVICE joins a run's system view by naming itself — OTel's own attribute, no everdict key", () => {
+    // The multi-plane recipe: same run correlation, one service.name per process. The door then seals
+    // each service as its own plane of the run's trajectory instead of mistaking it for a retry.
+    expect(everdictResourceAttributes({ runId: "run-1", serviceName: "checkout" })).toEqual({
+      "service.name": "checkout",
+      "everdict.run_id": "run-1",
+    });
+    expect(everdictResourceAttributesEnv({ runId: "run-1", serviceName: "checkout" })).toBe(
+      "service.name=checkout,everdict.run_id=run-1",
+    );
   });
 
   it("builds resource attributes and their env rendering from one correlation", () => {

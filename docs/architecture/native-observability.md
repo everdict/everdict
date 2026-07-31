@@ -47,7 +47,7 @@ collector and the store**.
 | `everdict.run_id` correlation tag | stamped at execution (`application-execution/run-case.ts`) | lets pull find our runs | native correlation on arrival |
 | `TraceProvenance` extraction | `sources/trace-source.ts` | uniform "Everdict origin" across kinds | ingest-time provenance |
 | Span waterfall + browse/inspect | `spans-to-nodes`, Settings › Traces | renders *their* store | renders *our* store first |
-| `TraceEvent` vocabulary (+ raw `span` passthrough, artifacts) | contracts | the normalization target | unchanged — the internal contract |
+| `TraceEvent` vocabulary (+ raw `span` passthrough, artifacts) | contracts | the normalization target | unchanged — the internal contract (+ `span.durationMs` at N5) |
 | TrajectoryStore (design) | execution-model §6 | the owned store for run trajectories | the same store, fed by the collector |
 
 ## The design
@@ -149,6 +149,26 @@ collector and the store**.
   the opt-in `--profile clickhouse` compose service. Rung-2 honesties documented in the adapter:
   `sealed_at` as ISO String, first-write-wins resolved at READ (earliest row / argMin) over
   check-then-insert. Remaining: byte quotas and sampling policy.
+- **N5 — The system plane (multi-emitter trajectories).** A run is a SYSTEM, not one process: the agent
+  under test, the orchestrator that placed it, and every service it drives. Before this rung the owned
+  ledger held exactly one sealed body per run, so a service pushing its own OTel spans into a live run
+  was rejected as a duplicate (`rejectedSpans`) and a topology run's late agent seal could lose to an
+  early service arrival. **SHIPPED**: a trajectory is now the sum of its **segments** — one per emitter,
+  keyed `(runId, emitter)` where the emitter is the arrival channel (`run`/`otlp`/`import`) or
+  `service:<service.name>` (OTel's own attribute, the maintainer's decision — participating is
+  `OTEL_SERVICE_NAME` plus the run correlation, never an everdict-specific key). Properties:
+  first-write-wins is unchanged but now applies PER EMITTER, so "evidence is never rewritten" stays
+  literally true while a late plane is added beside the others; each segment carries its own absolute
+  `t0`, the anchor that lets planes share one time axis; and `SealedTrajectory.events` still resolves to
+  the EXECUTION's own record (`executionEmitter`), so a service's spans can never displace what a judge
+  scores. Storage: Postgres gains `everdict_trajectory_segments` (mig 0104, FK-cascaded, with a
+  denormalized `segment_event_count` so a browse row and the ingestion meter stay honest); ClickHouse
+  needs no new table — a segment IS a row, first-write-wins resolved at read per `(run_id, emitter)`.
+  The wire (`GET /trajectories/:id`, `GET /runs/:id/trajectory`, `get_trajectory`) gains `segments`,
+  with the execution segment omitting `events` so a system read never ships the same trace twice. The
+  web renders it as swimlanes (agent · placement · one lane per service) over one axis, and
+  `span.durationMs` (new, optional) keeps a service's spans from arriving as instants. Remaining:
+  W3C `traceparent`/`baggage` propagation helpers, and per-plane retention/sampling policy.
 - **N4 — Mirror consolidation.** Collector-level exporters subsume raw-trace mirroring; score-attach
   sinks remain API-side.
 
