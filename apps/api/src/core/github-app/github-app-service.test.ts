@@ -295,6 +295,8 @@ describe("GithubAppService", () => {
         url: "https://gh/7",
         isPullRequest: false,
         updatedAt: "2026-07-02T00:00:00Z",
+        // Labels ride along for the tracker's imported copies (GitHub owns them); always present, possibly empty.
+        labels: [],
       },
       {
         number: 8,
@@ -304,6 +306,7 @@ describe("GithubAppService", () => {
         url: "https://gh/8",
         isPullRequest: true,
         updatedAt: "2026-07-01T00:00:00Z",
+        labels: [],
       },
     ]);
   });

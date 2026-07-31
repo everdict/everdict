@@ -32,7 +32,16 @@ import {
   originSource,
 } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
-import type { SubscriptionService, TaskService, ViewService, ViewSnapshotService } from "@everdict/application-control";
+import type {
+  GithubIssueSync,
+  InitiativeService,
+  IssueService,
+  ProjectService,
+  SubscriptionService,
+  TaskService,
+  ViewService,
+  ViewSnapshotService,
+} from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { SkillService } from "@everdict/application-control";
 import type { FileExecutionService, FsService } from "@everdict/application-control";
@@ -147,6 +156,11 @@ export interface ServerDeps {
   subscriptionService?: SubscriptionService; // subscription registry (event → reaction rules, E3) (route disabled if absent)
   viewService?: ViewService; // saved scorecard-analysis View CRUD (route disabled if absent)
   taskService?: TaskService; // workspace task ledger — cross-agent coordination (route disabled if absent)
+  // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).
+  issueService?: IssueService;
+  projectService?: ProjectService;
+  initiativeService?: InitiativeService;
+  issueSync?: GithubIssueSync; // GitHub import + manual two-way sync (absent = no workspace GitHub App)
   viewSnapshotService?: ViewSnapshotService; // capture a View onto the workspace filesystem (route disabled if absent)
   benchmarkService?: BenchmarkService; // benchmark catalog + ingest (route disabled if absent)
   bundleService?: BundleService; // bundle apply (one-shot register of harness+benchmark+runtime; route disabled if absent)

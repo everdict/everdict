@@ -5,6 +5,9 @@ import type {
   EnvelopeStore,
   EventConsumerStateStore,
   FsRevisionStore,
+  InitiativeStore,
+  IssueStore,
+  ProjectStore,
   TrajectoryStore,
 } from "@everdict/application-control";
 import {
@@ -110,6 +113,12 @@ import {
   makePool,
   migrate,
   sqlClient,
+  InMemoryIssueStore,
+  InMemoryProjectStore,
+  InMemoryInitiativeStore,
+  PgIssueStore,
+  PgProjectStore,
+  PgInitiativeStore,
 } from "@everdict/db";
 import {
   type AgentRegistry,
@@ -178,6 +187,10 @@ export interface Persistence {
   subscriptionStore: SubscriptionStore; // subscription registry (event → reaction rules, E3 §6)
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
   taskStore: AgentTaskStore; // workspace task ledger — cross-turn, cross-agent coordination (agent-teams)
+  // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer.
+  issueStore: IssueStore;
+  projectStore: ProjectStore;
+  initiativeStore: InitiativeStore;
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members own) — dual-scoped private|workspace
   skillVersionStore: SkillVersionStore; // a skill's stamped, immutable versions — the line its working copy moves along
@@ -268,6 +281,9 @@ export async function makePersistence(): Promise<Persistence> {
       subscriptionStore: new InMemorySubscriptionStore(),
       viewStore: new InMemoryViewStore(),
       taskStore: new InMemoryAgentTaskStore(),
+      issueStore: new InMemoryIssueStore(),
+      projectStore: new InMemoryProjectStore(),
+      initiativeStore: new InMemoryInitiativeStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
       skillVersionStore: new InMemorySkillVersionStore(),
@@ -319,6 +335,9 @@ export async function makePersistence(): Promise<Persistence> {
     subscriptionStore: new PgSubscriptionStore(client),
     viewStore: new PgViewStore(client),
     taskStore: new PgAgentTaskStore(client),
+    issueStore: new PgIssueStore(client),
+    projectStore: new PgProjectStore(client),
+    initiativeStore: new PgInitiativeStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),
     skillVersionStore: new PgSkillVersionStore(client),

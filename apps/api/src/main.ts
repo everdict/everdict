@@ -1,6 +1,10 @@
 import {
+  GithubIssueSync,
+  InitiativeService,
+  IssueService,
   KnowledgeEntryService,
   KnowledgeService,
+  ProjectService,
   TaskService,
   registryLatestVersionResolver,
   seedFirstPartyAgents,
@@ -9,6 +13,7 @@ import { ApprovalService } from "@everdict/application-control";
 import {
   EventConsumerRunner,
   mattermostConsumer,
+  regressionWatch,
   runFeedConsumer,
   scorecardFeedConsumer,
   subscriptionReactionConsumer,
@@ -85,6 +90,7 @@ import { runtimeSessionProvision } from "./infrastructure/browser-session/nomad-
 import { PooledBrowserProvisioner } from "./infrastructure/browser-session/pooled-browser-provisioner.js";
 import { RoutingBrowserProvisioner } from "./infrastructure/browser-session/routing-browser-provisioner.js";
 import { RuntimeBrowserProvisioner } from "./infrastructure/browser-session/runtime-browser-provisioner.js";
+import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
 import { installProxyDispatcher } from "./infrastructure/http/proxy-dispatcher.js";
 import { probeMcpServer } from "./infrastructure/mcp/probe-mcp.js";
 import { buildServer } from "./server.js";
@@ -169,6 +175,9 @@ async function main(): Promise<void> {
     subscriptionStore,
     viewStore,
     taskStore,
+    issueStore,
+    projectStore,
+    initiativeStore,
     browserProfileStore,
     skillStore,
     skillVersionStore,
@@ -633,6 +642,53 @@ async function main(): Promise<void> {
   // Workspace task ledger (agent-teams): lifecycle facts (task.created/claimed/completed/cancelled) are
   // emitted here — the single choke point both transports call; created/completed are trigger-matchable.
   const taskService = new TaskService({ store: taskStore, events: platformEventService });
+  // The eval tracker (docs/tracker.md). IssueService is the single choke point for tracker facts: every
+  // transition (member, MCP, and later the regression watch) stamps and persists through it, so no transport
+  // can produce a fact-less move. The scorecard store rides along to validate resolution evidence and to build
+  // an issue's evaluation history.
+  // The GitHub half is a COLLABORATOR of IssueService, and IssueService is what it calls back into for
+  // transitions. The two therefore reference each other: a holder breaks the construction order without
+  // weakening the "one choke point for facts and pushes" invariant — the pusher closure reads the holder at
+  // CALL time, by which point it is populated.
+  const githubSyncRef: { current?: GithubIssueSync } = {};
+  const issueService = new IssueService({
+    store: issueStore,
+    scorecards: scorecardStore,
+    events: platformEventService,
+    github: { pushStatus: async (record, actor) => githubSyncRef.current?.pushStatus(record, actor) },
+  });
+  // Absent GitHub App config just means the sync routes answer 404 — the local tracker is unaffected.
+  const githubIssueSync = new GithubIssueSync({
+    store: issueStore,
+    issues: issueService,
+    tokens: githubAppService,
+    writers: githubRepoWriterFactory(),
+    ...(process.env.WEB_BASE_URL ? { webBaseUrl: process.env.WEB_BASE_URL } : {}),
+  });
+  githubSyncRef.current = githubIssueSync;
+  // The regression watch closes the tracker's loop: a resolved issue whose evaluation later degrades reopens
+  // itself as `regressed` and finds its owner in the bell. Registered here (after IssueService exists) rather
+  // than beside the feed consumers — the runner picks up a late registration on its next tick, and the
+  // consumer's own cursor makes that indistinguishable from having been there since start.
+  eventConsumers.register(
+    regressionWatch({
+      issues: issueStore,
+      issueService,
+      scorecards: scorecardStore,
+      feed: notificationStore,
+    }),
+  );
+  const projectService = new ProjectService({
+    store: projectStore,
+    issues: issueStore,
+    events: platformEventService,
+  });
+  const initiativeService = new InitiativeService({
+    store: initiativeStore,
+    projects: projectStore,
+    issues: issueStore,
+    events: platformEventService,
+  });
   const subscriptionService = buildSubscription({ subscriptionStore, agentRegistry });
   // Reverse secret-usage index (GET /secrets/usage) — reads the registries + settings to annotate each workspace
   // secret with its live reference sites. Read-only; scans latest specs per request (nothing cached).
@@ -831,6 +887,10 @@ async function main(): Promise<void> {
     queueService,
     viewService,
     taskService,
+    issueService,
+    issueSync: githubIssueSync,
+    projectService,
+    initiativeService,
     subscriptionService,
     // §5.1 activation admission — the agent service asks this before launching a run (402 past the tenant
     // budget; a pass reserves one run, settled later via the usage bridge below).

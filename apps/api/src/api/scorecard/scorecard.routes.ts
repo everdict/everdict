@@ -198,7 +198,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.get<{ Querystring: { judge?: string; schedule?: string } }>(
+  app.get<{ Querystring: { judge?: string; schedule?: string; dataset?: string; harness?: string } }>(
     "/scorecards",
     { schema: scorecardDocs.list },
     async (req, reply) => {
@@ -208,9 +208,18 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       if (!principal) return reply;
       try {
         gate(principal, "scorecards:read");
-        const { judge, schedule } = req.query;
+        const { judge, schedule, dataset, harness } = req.query;
         // Mutually-exclusive detail-history narrows: ?schedule= (schedule's run history) | ?judge= (judge's eval history).
-        const filter = schedule ? { scheduleId: schedule } : judge ? { judge } : undefined;
+        // ?dataset=/?harness= are the combinable capability narrows (the store has always supported them) — they
+        // answer "what has this capability been evaluated on", which the tracker's issue history is built from and
+        // the web previously reconstructed by grouping the whole workspace list client-side.
+        const filter = schedule
+          ? { scheduleId: schedule }
+          : judge
+            ? { judge }
+            : dataset !== undefined || harness !== undefined
+              ? { ...(dataset !== undefined ? { dataset } : {}), ...(harness !== undefined ? { harness } : {}) }
+              : undefined;
         return reply.send(await deps.scorecardService.list(principal.workspace, filter));
       } catch (err) {
         return sendError(reply, err);

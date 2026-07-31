@@ -57,8 +57,16 @@ describe("CommentService", () => {
   it("an unsupported resourceType → 400", async () => {
     const { service } = svc();
     await expect(
-      service.create({ tenant: "acme", resourceType: "project", resourceId: "p", author: "u", body: "x" }),
+      service.create({ tenant: "acme", resourceType: "workflow", resourceId: "p", author: "u", body: "x" }),
     ).rejects.toThrow(/Unsupported/);
+  });
+
+  it("the eval tracker's three kinds are commentable — an issue is where a team argues about the evaluation", async () => {
+    const { service } = svc();
+    for (const resourceType of ["issue", "project", "initiative"]) {
+      const comment = await service.create({ tenant: "acme", resourceType, resourceId: "x", author: "u", body: "b" });
+      expect(comment.resourceType).toBe(resourceType);
+    }
   });
 
   it("only the author can delete — others 403, admin allowed, missing 404", async () => {

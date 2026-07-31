@@ -276,15 +276,31 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "list_scorecards",
       {
-        description: "This workspace's scorecards (summary only — excludes heavy per-case results)",
+        description:
+          "This workspace's scorecards (summary only — excludes heavy per-case results). Narrow by dataset or " +
+          "harness to see what a capability has been evaluated on over time — that is the comparison to make " +
+          "before claiming something regressed.",
         inputSchema: {
           judge: z.string().optional().describe("narrow to batches that applied this Agent Judge (any version)"),
           schedule: z.string().optional().describe("narrow to the runs a schedule fired (its run history)"),
+          dataset: z.string().optional().describe("narrow to batches run on this dataset (any version)"),
+          harness: z.string().optional().describe("narrow to batches run with this harness (any version)"),
         },
       },
-      ({ judge, schedule }) =>
+      ({ judge, schedule, dataset, harness }) =>
         run(principal, "scorecards:read", async () =>
-          ok(await scorecards.list(ws, schedule ? { scheduleId: schedule } : judge ? { judge } : undefined)),
+          ok(
+            await scorecards.list(
+              ws,
+              schedule
+                ? { scheduleId: schedule }
+                : judge
+                  ? { judge }
+                  : dataset !== undefined || harness !== undefined
+                    ? { ...(dataset !== undefined ? { dataset } : {}), ...(harness !== undefined ? { harness } : {}) }
+                    : undefined,
+            ),
+          ),
         ),
     );
 

@@ -45,6 +45,7 @@ const REFERENCE_TOOL: Record<AgentReferenceType, string> = {
   environment: "get_capability", // an environment IS a capability of kind `environment` — one store entity, one read
   tool: "get_capability", // ditto for the tool kinds (mcp | code) — Settings › Agent › Tools hands the agent the spec
   trace: "inspect_trace",
+  issue: "get_issue", // the tracker's unit of intent — what problem is under evaluation, how it closed, whether it regressed
 };
 
 // The read-tool arguments for a reference. Most entities read by (id, version?); a `trace` reads by (name=source,
@@ -339,6 +340,10 @@ export interface ChatDeps {
 
 export interface ChatResult {
   messages: AgentMessageRecord[]; // the newly produced tail (user echo + assistant/tool turns), seq-ordered
+  // What the turn spent on the model, summed across the loop's calls. It already goes to the meter (billing);
+  // this hands the SAME numbers to the ledger, so the turn's own run detail can state its cost instead of
+  // leaving it to the invoice. Absent when the turn consumed nothing (an aborted turn before the first call).
+  usage?: { model: string; inputTokens: number; outputTokens: number };
 }
 
 // Streaming hooks (SSE): onEvent forwards the loop's live events (text deltas, tool call/result); onRecord fires
@@ -693,6 +698,9 @@ export async function runChat(
     ...(analysisScriptTool ? [analysisScriptTool] : []),
   ];
   const registry = extraTools.length > 0 ? new ToolRegistry([...tools.registry.list(), ...extraTools]) : tools.registry;
+  // Declared out here because the model and its token counters live inside the turn block, while the result
+  // this function returns is assembled after it.
+  let turnUsage: ChatResult["usage"];
   try {
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
     // clean text + the reference metadata separately).
@@ -845,6 +853,12 @@ export async function runChat(
       }
       throw err;
     } finally {
+      // The ledger's copy of the same numbers (O2): the turn's model spend travels back to the caller, which
+      // projects it into the sealed trajectory as an llm_call — so the run detail can state what the turn cost
+      // instead of the invoice being the only place it exists. Recorded whatever the billing rule says: an
+      // own-pays/personal-key turn still SPENT these tokens, and evidence is not an invoice.
+      if (inputTokens + outputTokens > 0)
+        turnUsage = { model: model.model, inputTokens, outputTokens };
       // Meter the conversation's LLM cost against the workspace when it ran on a workspace-billed model — the same
       // rule as the harness (own-pays/personal-key/dev conversations are not metered). In a finally so a FAILED or
       // aborted turn's consumed tokens are still billed. Best-effort: never fail the chat.
@@ -884,5 +898,5 @@ export async function runChat(
   const nextTitle = session.title === DEFAULT_SESSION_TITLE ? deriveTitle(userText) : undefined;
   await deps.sessions.touchSession(workspace, sessionId, deps.now(), nextTitle);
 
-  return { messages: [userRecord, ...producedRecords] };
+  return { messages: [userRecord, ...producedRecords], ...(turnUsage ? { usage: turnUsage } : {}) };
 }

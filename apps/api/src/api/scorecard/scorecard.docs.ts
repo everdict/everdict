@@ -143,6 +143,8 @@ const docs = {
       z.object({
         judge: z.string().optional().describe("Narrow to batches that applied this Agent Judge (any version)"),
         schedule: z.string().optional().describe("Narrow to the runs a schedule fired (its run history)"),
+        dataset: z.string().optional().describe("Narrow to batches run on this dataset (any version)"),
+        harness: z.string().optional().describe("Narrow to batches run with this harness (any version)"),
       }),
     ),
     response: {

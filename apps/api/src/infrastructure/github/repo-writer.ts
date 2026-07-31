@@ -1,10 +1,49 @@
-import type { GithubRepoWriter, GithubRepoWriterFactory } from "@everdict/application-control";
+import type { GithubIssue, GithubRepoWriter, GithubRepoWriterFactory } from "@everdict/application-control";
 import { UpstreamError } from "@everdict/contracts";
 import { z } from "zod";
 
 // The fetch-backed GitHub repo-write adapter — owns the REST endpoints, response parsing, and the
 // 422 reuse translations behind the GithubRepoWriter port. Moved out of ci-link-service in
 // re-architecture P2d; the injectable fetch keeps tests recording the exact wire bytes.
+
+// The issue shape both the list and the single-issue read return — parsed once so the two paths can never drift.
+const ISSUE_ROW = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  html_url: z.string(),
+  updated_at: z.string(),
+  body: z.string().nullish(),
+  labels: z.array(z.union([z.string(), z.object({ name: z.string() })])).default([]),
+  user: z.object({ login: z.string() }).nullish(),
+  pull_request: z.unknown().optional(),
+});
+const ISSUE_ROWS = z.array(ISSUE_ROW);
+
+function toGithubIssue(row: z.infer<typeof ISSUE_ROW>): GithubIssue {
+  return {
+    number: row.number,
+    title: row.title,
+    state: row.state,
+    author: row.user?.login ?? "",
+    url: row.html_url,
+    isPullRequest: row.pull_request !== undefined,
+    updatedAt: row.updated_at,
+    // An empty body reads as "no description", not as an empty string to render.
+    ...(row.body ? { body: row.body } : {}),
+    labels: row.labels.map((l) => (typeof l === "string" ? l : l.name)),
+  };
+}
+
+// GitHub paginates with the RFC 5988 Link header; rel="next" is absent on the last page, which ends the walk.
+function nextPageUrl(link: string | null): string | undefined {
+  if (!link) return undefined;
+  for (const part of link.split(",")) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
+}
 
 // GitHub API base — github.com uses the api. subdomain, GHE uses /api/v3 (determined by the link's host).
 function apiBase(host?: string): string {
@@ -122,28 +161,51 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
         },
         async listIssues(repository, opts) {
           const state = opts.state === "closed" || opts.state === "all" ? opts.state : "open";
-          const url = `${base}/repos/${repository}/issues?state=${state}&per_page=${opts.perPage}&sort=updated&direction=desc`;
+          const since = opts.since !== undefined ? `&since=${encodeURIComponent(opts.since)}` : "";
+          // Default 1 page keeps every pre-existing caller's behaviour; the tracker's bulk pull opts into the walk.
+          const maxPages = Math.max(1, opts.maxPages ?? 1);
+          const collected: GithubIssue[] = [];
+          let url: string | undefined =
+            `${base}/repos/${repository}/issues?state=${state}&per_page=${opts.perPage}&sort=updated&direction=desc${since}`;
+          for (let page = 0; page < maxPages && url !== undefined; page += 1) {
+            const res = await gh(url);
+            collected.push(...ISSUE_ROWS.parse(await res.json()).map(toGithubIssue));
+            url = nextPageUrl(res.headers.get("link"));
+          }
+          return collected;
+        },
+        async getIssue(repository, issueNumber) {
+          return toGithubIssue(
+            ISSUE_ROW.parse(await (await gh(`${base}/repos/${repository}/issues/${issueNumber}`)).json()),
+          );
+        },
+        async updateIssue(repository, issueNumber, patch) {
+          const res = await doFetch(`${base}/repos/${repository}/issues/${issueNumber}`, {
+            method: "PATCH",
+            headers: headers(token),
+            body: JSON.stringify({ state: patch.state }),
+          });
+          if (!res.ok) throw await upstream(res, "issue state update failed");
+        },
+        async listIssueComments(repository, issueNumber, opts) {
+          const perPage = Math.min(100, Math.max(1, opts.maxComments));
           const rows = z
             .array(
               z.object({
-                number: z.number(),
-                title: z.string(),
-                state: z.string(),
+                body: z.string().nullish(),
+                created_at: z.string(),
                 html_url: z.string(),
-                updated_at: z.string(),
                 user: z.object({ login: z.string() }).nullish(),
-                pull_request: z.unknown().optional(),
               }),
             )
-            .parse(await (await gh(url)).json());
-          return rows.map((r) => ({
-            number: r.number,
-            title: r.title,
-            state: r.state,
+            .parse(
+              await (await gh(`${base}/repos/${repository}/issues/${issueNumber}/comments?per_page=${perPage}`)).json(),
+            );
+          return rows.slice(-opts.maxComments).map((r) => ({
             author: r.user?.login ?? "",
+            body: r.body ?? "",
+            createdAt: r.created_at,
             url: r.html_url,
-            isPullRequest: r.pull_request !== undefined,
-            updatedAt: r.updated_at,
           }));
         },
         async createIssue(repository, opts) {
