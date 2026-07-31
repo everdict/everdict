@@ -8,7 +8,7 @@ import {
   buildSummarizer,
   runAgentLoop,
 } from "@everdict/agent-runtime";
-import type { AgentSessionStore, AnalysisArtifactStore } from "@everdict/application-control";
+import type { AgentSessionStore, AnalysisArtifactStore, Metrics } from "@everdict/application-control";
 import {
   type AgentMessageRecord,
   type AgentReference,
@@ -303,6 +303,11 @@ export interface ChatDeps {
   // folded into the session's digest at the turn boundary (see maintainSessionMemory). Ops/test tuning knob;
   // absent → MEMORY_TRIGGER_CHARS.
   memoryTriggerChars?: number;
+  // Agent-plane observability (the round-2 gap analysis' "measure before optimizing"): the loop's resilience
+  // events become Prometheus series — turn outcomes/durations, retry waits, fallback switches, truncations,
+  // compactions, tool failures — so "why do turns die" is a measured distribution, not an anecdote. main.ts
+  // exposes GET /metrics on the agent server (unauthenticated like the control plane's; firewall the scrape path).
+  metrics?: Metrics;
   // Extended-thinking budget (tokens). Set → the loop asks the model to reason before answering (Anthropic `thinking`;
   // reasoning models reason regardless). Reasoning is captured + streamed either way; absent → thinking off.
   thinkingBudgetTokens?: number;
@@ -754,6 +759,28 @@ export async function runChat(
     const builtinNames = new Set(BUILTIN_SUBAGENT_TYPES.map((t) => t.name));
     const subagentTypes = [...BUILTIN_SUBAGENT_TYPES, ...crafted.filter((t) => !builtinNames.has(t.name))];
 
+    // Meter the loop's resilience events into Prometheus series (fired before the host hook, so a throwing SSE
+    // writer can never skip a count). Cheap no-op without a Metrics instance (dev).
+    const meter = (e: AgentEvent): void => {
+      const m = deps.metrics;
+      if (!m) return;
+      if (e.type === "retry")
+        m.counter("everdict_agent_retry_total", "Model-call retry waits in agent turns", {
+          persistent: e.persistent === true ? "true" : "false",
+        });
+      else if (e.type === "fallback")
+        m.counter("everdict_agent_fallback_total", "Agent runs switched to the fallback model");
+      else if (e.type === "truncated")
+        m.counter("everdict_agent_truncated_total", "Agent turns that hit the output-token cap");
+      else if (e.type === "compaction")
+        m.counter("everdict_agent_compaction_total", "In-run compaction steps", { mode: e.mode ?? "unknown" });
+      else if (e.type === "tool_result")
+        m.counter("everdict_agent_tool_result_total", "Agent tool results", { ok: e.isError ? "false" : "true" });
+      else if (e.type === "done")
+        m.counter("everdict_agent_turn_total", "Agent chat turns by stop reason", { outcome: e.stopReason });
+    };
+    const turnStartedMs = Date.now();
+
     // Accumulate this conversation's token usage across turns (the loop reports tokens; the control plane prices them).
     let inputTokens = 0;
     let outputTokens = 0;
@@ -776,7 +803,10 @@ export async function runChat(
         ...(deps.toolTimeoutMs !== undefined ? { toolTimeoutMs: deps.toolTimeoutMs } : {}),
         ...(deps.persistentRetry === true ? { persistentRetry: true } : {}),
         ...(deps.thinkingBudgetTokens !== undefined ? { thinking: { budgetTokens: deps.thinkingBudgetTokens } } : {}),
-        ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
+        onEvent: (e) => {
+          meter(e);
+          hooks?.onEvent?.(e);
+        },
         ...(hooks?.permit ? { permit: hooks.permit } : {}),
         ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
         ...(hooks?.onInterruptReady ? { onInterruptReady: hooks.onInterruptReady } : {}),
@@ -794,6 +824,8 @@ export async function runChat(
       // as an assistant record before rethrowing, so the transcript shows the failure and the conversation stays
       // continuable — the next turn replays a balanced history (normalizeHistory pairs any dangling tool_calls).
       // A user abort is not a failure. Best-effort: a store write must not mask the original error.
+      // A thrown turn never reached the loop's done event — count it under its own outcome.
+      deps.metrics?.counter("everdict_agent_turn_total", "Agent chat turns by stop reason", { outcome: "error" });
       if (signal?.aborted !== true) {
         const detail = err instanceof Error ? err.message : String(err);
         try {
@@ -813,6 +845,13 @@ export async function runChat(
           await deps.reportUsage({ workspace, model: model.model, inputTokens, outputTokens });
         } catch {}
       }
+      // Turn wall-clock, success or not — the latency half of the "why do turns die" distribution.
+      deps.metrics?.observe(
+        "everdict_agent_turn_seconds",
+        "Agent chat turn duration",
+        {},
+        (Date.now() - turnStartedMs) / 1000,
+      );
     }
 
     // Maintain the session's running memory at the turn boundary (successful turns only — a failed turn changed

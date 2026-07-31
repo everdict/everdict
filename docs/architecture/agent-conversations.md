@@ -196,9 +196,15 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   ChatHooks.onInterruptReady forwards it. REMAINING WIRING (blocked on the concurrent server.ts run-ledger
   refactor): the chat route passing `onInterruptReady: (fn) => liveTurns.setInterrupt(ws, id, fn)`, a
   `POST /agent/sessions/:id/interrupt` route (visibility-aware like /stop), and the web's queue-then-interrupt
-  composer flow (POST /input then /interrupt while a turn is live). Deferred from the same analysis: task ledger
-  (agent-teams), streaming tool execution (deliberately last — Claude Code's inc-4258 double-execution scar
-  interacts with our non-streaming retry ladder).
+  composer flow (POST /input then /interrupt while a turn is live). (8) **Agent-plane metrics**
+  (`ChatDeps.metrics` → the shared zero-dep Prometheus registry, exposed as GET /metrics on the agent server by
+  main.ts): the loop's resilience events become measured series — `everdict_agent_turn_total{outcome}` (incl. a
+  thrown turn as outcome="error"), `everdict_agent_turn_seconds` (success or not), `everdict_agent_retry_total
+  {persistent}`, `everdict_agent_fallback_total`, `everdict_agent_truncated_total`,
+  `everdict_agent_compaction_total{mode}`, `everdict_agent_tool_result_total{ok}` — so "why do turns die" is a
+  distribution you scrape, not an anecdote (the measurement gate the gap analysis put BEFORE streaming tool
+  execution). Deferred from the same analysis: task ledger (agent-teams), streaming tool execution (deliberately
+  last — Claude Code's inc-4258 double-execution scar interacts with our non-streaming retry ladder).
 - **P9 (per-workspace customization, landed — Phase 1)** — each workspace can enhance its own agent, plugging its
   context + tools into the shared framework the way Claude Code takes a per-project CLAUDE.md + MCP servers. A new
   **registered, versioned `AgentSpec` entity** (`(tenant, id, version) → AgentSpec`, same immutable-version SSOT as

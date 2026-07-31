@@ -4,6 +4,7 @@ import {
   type AgentSessionStore,
   type AnalysisArtifactStore,
   type CapabilityStore,
+  Metrics,
   type SecretStore,
   type SubscriptionStore,
   type TenantKeyStore,
@@ -178,7 +179,12 @@ async function main(): Promise<void> {
   const localDriver = new LocalDriver();
   const codeRuntime: CodeToolRuntime = { provision: (spec) => localDriver.provision(spec), isolated: false };
 
+  // Agent-plane observability: the chat host meters loop resilience events (turn outcomes/durations, retries,
+  // fallbacks, truncations, compactions, tool failures) into this registry; exposed below as GET /metrics.
+  const metrics = new Metrics();
+
   const app = buildServer({
+    metrics,
     authenticate: meAuthenticate(config.CONTROL_PLANE_URL),
     checkViewAccess: viewAccessChecker(config.CONTROL_PLANE_URL), // view-artifacts gallery gate (analysis-studio V3)
     sessions,
@@ -257,6 +263,12 @@ async function main(): Promise<void> {
       console.error("▶ everdict-agent: event reconcile loop on (registry-driven trigger activation)");
     }
   }
+
+  // Prometheus scrape endpoint — registered here (process-level operator surface, like the control plane's:
+  // unauthenticated by convention; deployments firewall the scrape path).
+  app.get("/metrics", async (_req, reply) =>
+    reply.header("content-type", "text/plain; version=0.0.4").send(metrics.render()),
+  );
 
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
   console.error(`▶ everdict-agent listening on :${config.PORT} (control plane ${config.CONTROL_PLANE_URL})`);

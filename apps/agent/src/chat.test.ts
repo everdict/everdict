@@ -1,4 +1,5 @@
 import { type ChatMessage, ToolRegistry } from "@everdict/agent-runtime";
+import { Metrics } from "@everdict/application-control";
 import type { AgentMessageRecord } from "@everdict/contracts";
 import { InMemoryAgentSessionStore } from "@everdict/db";
 import type { LlmTransport, StreamRequest } from "@everdict/llm";
@@ -153,6 +154,67 @@ describe("session running memory", () => {
     const texts = sent.map((m) => (typeof m.content === "string" ? m.content : ""));
     expect(texts.some((t) => t.includes("recent question"))).toBe(true);
     expect(texts.some((t) => t.includes("ancient question"))).toBe(false);
+  });
+});
+
+describe("agent-plane metrics", () => {
+  it("meters turn outcomes and durations — and a thrown turn counts under outcome=error", async () => {
+    // Given a metered deps whose first turn succeeds
+    const okTransport: LlmTransport = {
+      provider: "fake",
+      stream: async () => ({
+        content: "ok",
+        toolCalls: [],
+        finishReason: "stop",
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      }),
+    };
+    const { deps } = await seededDeps(okTransport);
+    const metrics = new Metrics();
+    deps.metrics = metrics;
+    await runChat(deps, PRINCIPAL, {}, "s-1", "hello");
+    // Then the loop's done event became a turn counter + a duration observation
+    let rendered = metrics.render();
+    expect(rendered).toContain('everdict_agent_turn_total{outcome="end_turn"} 1');
+    expect(rendered).toContain("everdict_agent_turn_seconds_count 1");
+
+    // And a permanently-failing turn counts under its own outcome instead of vanishing
+    deps.resolveModel = async () => ({
+      transport: {
+        provider: "fake",
+        stream: async () => {
+          throw Object.assign(new Error("model 400: invalid"), { status: 502, extra: { status: 400 } });
+        },
+      },
+      model: "test-model",
+    });
+    await expect(runChat(deps, PRINCIPAL, {}, "s-1", "again")).rejects.toThrow();
+    rendered = metrics.render();
+    expect(rendered).toContain('everdict_agent_turn_total{outcome="error"} 1');
+    expect(rendered).toContain("everdict_agent_turn_seconds_count 2"); // failed turns still record latency
+  });
+
+  it("meters retry waits with their persistence label", async () => {
+    let calls = 0;
+    const flaky: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        calls += 1;
+        if (calls === 1)
+          throw Object.assign(new Error("model 429: rate limited"), { extra: { status: 429, retryAfterMs: 1 } });
+        return {
+          content: "recovered",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      },
+    };
+    const { deps } = await seededDeps(flaky);
+    const metrics = new Metrics();
+    deps.metrics = metrics;
+    await runChat(deps, PRINCIPAL, {}, "s-1", "hello");
+    expect(metrics.render()).toContain('everdict_agent_retry_total{persistent="false"} 1');
   });
 });
 
