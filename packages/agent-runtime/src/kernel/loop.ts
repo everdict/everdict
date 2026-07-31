@@ -25,7 +25,7 @@ import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoRemind
 import { normalizeHistory } from "./normalize.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 
-export type StopReason = "end_turn" | "max_turns" | "token_budget" | "no_progress" | "aborted";
+export type StopReason = "end_turn" | "max_turns" | "token_budget" | "no_progress" | "aborted" | "interrupted";
 
 // A specialized sub-agent type the model can select via spawn_agent(subagent_type). A type is a ROLE (an instruction
 // appended to the sub-task prompt) plus an optional model tier; its tools stay read-only (the isolation invariant).
@@ -78,6 +78,12 @@ export interface AgentLoopOptions {
   persistentRetry?: boolean;
   // Output-token cap per model call (the provider's max_tokens). Absent → the transport's default.
   outputTokens?: number;
+  // Soft interrupt (Claude Code's ESC reinterpreted): hands the host a trigger that aborts only the IN-FLIGHT
+  // step — the model stream, a retry wait, or the executing tool batch — while the LOOP survives. An interrupted
+  // tool batch closes its pairing with synthetic results; then the loop drains queued input: messages queued →
+  // the turn continues redirected; nothing queued → the run ends with stopReason "interrupted" (stop and wait
+  // for the user — a bare ESC). Distinct from the run signal, which kills the whole turn.
+  onInterruptReady?: (interrupt: () => void) => void;
   // Structured output (Claude Code's --json-schema StructuredOutput tool, reinterpreted for programmatic hosts —
   // activations, reactions, evals): when set, the loop registers a `structured_output` tool whose parameters ARE
   // this JSON Schema; the model submits its final result through it and the run ends with the value on
@@ -510,6 +516,31 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     ...planTools,
     ...structuredTools,
   ]);
+  // Soft-interrupt state: the CURRENT step's controller (the model stream or the tool batch in flight) and the
+  // sticky flag the boundaries consume. The trigger is handed to the host once, up front.
+  let stepController: AbortController | null = null;
+  let stepInterrupted = false;
+  const interruptStep = (): void => {
+    stepInterrupted = true;
+    stepController?.abort();
+  };
+  opts.onInterruptReady?.(interruptStep);
+  // Run a step under its own controller, linked to the run signal (a run abort still cancels the step). The
+  // listener is removed when the step settles so long runs don't accumulate them on the run signal.
+  const withStep = async <T>(fn: (stepSignal: AbortSignal) => Promise<T>): Promise<T> => {
+    const controller = new AbortController();
+    if (opts.signal?.aborted || stepInterrupted) controller.abort();
+    const onRunAbort = (): void => controller.abort();
+    opts.signal?.addEventListener("abort", onRunAbort, { once: true });
+    stepController = controller;
+    try {
+      return await fn(controller.signal);
+    } finally {
+      stepController = null;
+      opts.signal?.removeEventListener("abort", onRunAbort);
+    }
+  };
+
   let finalText = "";
   let compactionCount = 0;
   // No-progress guard state: the previous turn's tool-call signature + how many turns in a row it has repeated.
@@ -549,6 +580,20 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     return true;
   };
 
+  // Absorb queued input at a balanced boundary. Returns how many messages were injected — the soft-interrupt
+  // resolution keys on it (queued → the turn continues redirected; nothing queued → "interrupted").
+  const drainQueuedInput = async (): Promise<number> => {
+    if (!opts.drainInput) return 0;
+    const injected = await opts.drainInput();
+    for (const m of injected) {
+      messages = [...messages, m];
+      produced.push(m);
+      await opts.onMessage?.(m);
+    }
+    if (injected.length > 0) emit({ type: "input", messages: injected.length });
+    return injected.length;
+  };
+
   for (let turn = 1; turn <= maxTurns; turn++) {
     if (opts.signal?.aborted) return finish("aborted", turn - 1);
 
@@ -557,16 +602,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
     // Mid-run steering: pull any user messages the host queued since the run started. Safe here — the context is
     // balanced at a turn boundary (never mid tool_call/result), so appending a user turn keeps the transcript valid.
-    if (opts.drainInput) {
-      const injected = await opts.drainInput();
-      if (injected.length > 0) {
-        for (const m of injected) {
-          messages = [...messages, m];
-          produced.push(m);
-          await opts.onMessage?.(m);
-        }
-        emit({ type: "input", messages: injected.length });
-      }
+    const injectedAtBoundary = await drainQueuedInput();
+
+    // A soft interrupt that fired between steps (during compaction/summarize, or racing a boundary) resolves
+    // here: queued input means it was a REDIRECT (already absorbed above — continue); a bare interrupt means
+    // "stop and wait for the user" (Claude Code's ESC).
+    if (stepInterrupted) {
+      stepInterrupted = false;
+      if (injectedAtBoundary === 0) return finish("interrupted", turn - 1);
     }
 
     emit({ type: "turn_start", turn });
@@ -588,23 +631,29 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         const turnMessages: ChatMessage[] =
           reminder.length > 0 ? [...messages, { role: "user", content: reminder }] : messages;
         try {
-          return await activeTransport.stream({
-            model: activeModel,
-            system,
-            messages: turnMessages,
-            tools,
-            // Cache the stable prefix (system + tools) so long multi-turn runs re-read a cached prefix each turn —
-            // the provider's own prompt/KV caching (Anthropic cache_control; OpenAI caches automatically).
-            cache: { system: true, tools: true },
-            ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-            ...(opts.outputTokens !== undefined ? { maxTokens: opts.outputTokens } : {}),
-            ...(opts.thinking ? { thinking: opts.thinking } : {}),
-            ...(opts.signal ? { signal: opts.signal } : {}),
-            onContentDelta: (delta) => emit({ type: "text_delta", delta }),
-            onReasoningDelta: (delta) => emit({ type: "reasoning_delta", delta }),
-          });
+          // Each attempt is its own STEP: a soft interrupt cancels the in-flight stream (the run signal still
+          // cancels it too, via the step link) and surfaces below as a non-error exit.
+          return await withStep((stepSignal) =>
+            activeTransport.stream({
+              model: activeModel,
+              system,
+              messages: turnMessages,
+              tools,
+              // Cache the stable prefix (system + tools) so long multi-turn runs re-read a cached prefix each turn —
+              // the provider's own prompt/KV caching (Anthropic cache_control; OpenAI caches automatically).
+              cache: { system: true, tools: true },
+              ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+              ...(opts.outputTokens !== undefined ? { maxTokens: opts.outputTokens } : {}),
+              ...(opts.thinking ? { thinking: opts.thinking } : {}),
+              signal: stepSignal,
+              onContentDelta: (delta) => emit({ type: "text_delta", delta }),
+              onReasoningDelta: (delta) => emit({ type: "reasoning_delta", delta }),
+            }),
+          );
         } catch (err) {
           if (opts.signal?.aborted) return undefined;
+          // Soft interrupt mid-stream: not an error — the caller resolves it (redirect or finish "interrupted").
+          if (stepInterrupted) return undefined;
           // Reactive recovery: the prompt is too long → compact once and retry the SAME turn (bounded by the shared
           // circuit breaker) instead of failing the run on a single budget-estimate miss.
           if (isContextOverflow(err) && compactionCount < MAX_COMPACTIONS) {
@@ -627,7 +676,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             const delayMs = retryDelayMs(persistentAttempt, retryAfter, PERSISTENT_RETRY_MAX_DELAY_MS);
             emit({ type: "retry", attempt: persistentAttempt, delayMs, persistent: true });
             await sleep(delayMs, opts.signal);
-            if (opts.signal?.aborted) return undefined;
+            if (opts.signal?.aborted || stepInterrupted) return undefined;
             attempt -= 1; // a capacity wait doesn't consume the transient budget
             continue;
           }
@@ -635,7 +684,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             const delayMs = retryDelayMs(attempt, retryAfter);
             emit({ type: "retry", attempt: attempt + 1, delayMs });
             await sleep(delayMs, opts.signal);
-            if (opts.signal?.aborted) return undefined;
+            if (opts.signal?.aborted || stepInterrupted) return undefined;
             continue;
           }
           // Retries exhausted on a transient error → switch to the fallback model (once) and keep going.
@@ -656,7 +705,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       }
     };
     const result = await callModel();
-    if (!result) return finish("aborted", turn - 1);
+    if (!result) {
+      if (opts.signal?.aborted || !stepInterrupted) return finish("aborted", turn - 1);
+      // Soft interrupt mid model call: nothing was appended (the transcript is balanced) — absorb the queued
+      // redirect and continue, or end the run waiting for the user (a bare interrupt).
+      stepInterrupted = false;
+      if ((await drainQueuedInput()) > 0) continue;
+      return finish("interrupted", turn - 1);
+    }
 
     // Meter this turn's token usage (the host prices it into USD). Fired before the budget bookkeeping below.
     if (result.usage) opts.onUsage?.(result.usage);
@@ -739,7 +795,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const turnImages: ToolResultImage[] = []; // images returned by this turn's tools → one follow-up multimodal turn
     for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments });
 
-    const dispatchOne = async (tc: { name: string; arguments: string }): Promise<ToolResult> => {
+    const dispatchOne = async (
+      tc: { name: string; arguments: string },
+      stepSignal: AbortSignal,
+    ): Promise<ToolResult> => {
       const tool = registry.get(tc.name);
       const parsed = parseArgs(tc.arguments);
       if (!tool) return { content: `Unknown tool: ${tc.name}`, isError: true };
@@ -760,7 +819,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             isError: true,
           };
       }
-      return invokeWithTimeout(tool, parsed.value, activeModel, opts.toolTimeoutMs ?? 0, opts.signal);
+      return invokeWithTimeout(tool, parsed.value, activeModel, opts.toolTimeoutMs ?? 0, stepSignal);
     };
     // Dispatch the turn's tool calls with WRITE-SAFETY partitioning (Claude Code's isConcurrencySafe partition,
     // reinterpreted over isReadOnly): consecutive read-only calls run CONCURRENTLY (the model asks for independent
@@ -771,22 +830,61 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       const tool = registry.get(tc.name);
       return tool === undefined || tool.isReadOnly === true;
     };
+    // The whole dispatch runs as ONE step: a soft interrupt (or run abort) stops the WAIT even when a tool
+    // ignores its signal, and the pairing is closed with synthetic results so the transcript stays balanced.
     const outputs: ToolResult[] = [];
-    for (let start = 0; start < result.toolCalls.length; ) {
-      const head = result.toolCalls[start];
-      if (!head) break;
-      let end = start + 1;
-      if (isReadOnlyCall(head)) {
-        while (end < result.toolCalls.length) {
-          const next = result.toolCalls[end];
-          if (!next || !isReadOnlyCall(next)) break;
-          end += 1;
+    let batchInterrupted = false;
+    await withStep(async (stepSignal) => {
+      const interruption = new Promise<"interrupted">((resolve) => {
+        stepSignal.addEventListener("abort", () => resolve("interrupted"), { once: true });
+      });
+      for (let start = 0; start < result.toolCalls.length; ) {
+        const head = result.toolCalls[start];
+        if (!head) break;
+        let end = start + 1;
+        if (isReadOnlyCall(head)) {
+          while (end < result.toolCalls.length) {
+            const next = result.toolCalls[end];
+            if (!next || !isReadOnlyCall(next)) break;
+            end += 1;
+          }
         }
+        const slice = result.toolCalls.slice(start, end);
+        const settled: (ToolResult | undefined)[] = [];
+        const all = Promise.all(
+          slice.map((tc, i) =>
+            dispatchOne(tc, stepSignal).then((r) => {
+              settled[i] = r;
+              return r;
+            }),
+          ),
+        );
+        const raced = await Promise.race([all, interruption]);
+        if (raced === "interrupted") {
+          // Close the pairing: settled tools keep their real result, in-flight ones get an outcome-unknown error,
+          // never-started ones are marked not-executed. Abandoned promises keep running detached (results discarded).
+          batchInterrupted = true;
+          for (let i = 0; i < slice.length; i++) {
+            outputs.push(
+              settled[i] ?? {
+                content:
+                  "[Interrupted by the user while this tool call was in flight — its outcome is unknown. Verify with a read tool and re-issue it if still needed.]",
+                isError: true,
+              },
+            );
+          }
+          for (let j = end; j < result.toolCalls.length; j++) {
+            outputs.push({
+              content: "[Interrupted by the user before this tool call started — it was NOT executed.]",
+              isError: true,
+            });
+          }
+          return;
+        }
+        outputs.push(...raced);
+        start = end;
       }
-      const batch = await Promise.all(result.toolCalls.slice(start, end).map((tc) => dispatchOne(tc)));
-      outputs.push(...batch);
-      start = end;
-    }
+    });
     for (let i = 0; i < result.toolCalls.length; i++) {
       const tc = result.toolCalls[i];
       const output = outputs[i];
@@ -803,6 +901,17 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       if (output.images && output.images.length > 0) turnImages.push(...output.images);
       emit({ type: "tool_result", name: tc.name, isError: output.isError });
       await opts.onMessage?.(toolMessage);
+    }
+
+    // Soft interrupt mid tool batch: the pairing above is closed (real + synthetic results), so this is a
+    // balanced boundary — absorb the queued redirect and continue, or end the run waiting for the user. A run
+    // abort takes its own exit. Checked BEFORE structured output: the user's interrupt outranks a submission
+    // that happened to land in the same batch.
+    if (batchInterrupted) {
+      if (opts.signal?.aborted) return finish("aborted", turn);
+      stepInterrupted = false;
+      if ((await drainQueuedInput()) > 0) continue;
+      return finish("interrupted", turn);
     }
 
     // The model submitted its structured result — the run is complete (every tool_call above is answered, so the

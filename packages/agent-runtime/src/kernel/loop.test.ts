@@ -1007,6 +1007,110 @@ describe("runAgentLoop", () => {
     expect((requests[0]?.tools ?? []).map((t) => t.name)).not.toContain("structured_output");
   });
 
+  it("soft interrupt mid model call redirects: the stream is cut, queued input absorbed, the turn continues", async () => {
+    let interrupt: (() => void) | undefined;
+    const queue: ChatMessage[] = [];
+    let calls = 0;
+    const requests: StreamRequest[] = [];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: (req) => {
+        calls += 1;
+        requests.push(req);
+        if (calls === 1) {
+          // Hangs until aborted — the shape of a long in-flight stream the user wants to cut.
+          return new Promise((_resolve, reject) => {
+            req.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          });
+        }
+        return Promise.resolve({ content: "doing B instead", toolCalls: [], finishReason: "stop", usage: usage7 });
+      },
+    };
+    const run = runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      onInterruptReady: (i) => {
+        interrupt = i;
+      },
+      drainInput: () => queue.splice(0),
+    });
+    await new Promise((r) => setTimeout(r, 10)); // let the first stream get in flight
+    queue.push({ role: "user", content: "actually, do B instead" });
+    interrupt?.();
+    const result = await run;
+    // The turn survived the cut and continued redirected.
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.content).toBe("doing B instead");
+    const second = requests[1]?.messages ?? [];
+    expect(second.some((m) => m.role === "user" && m.content === "actually, do B instead")).toBe(true);
+  });
+
+  it("a bare soft interrupt (nothing queued) ends the run with stopReason interrupted", async () => {
+    let interrupt: (() => void) | undefined;
+    let calls = 0;
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: (req) => {
+        calls += 1;
+        return new Promise((_resolve, reject) => {
+          req.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+    };
+    const run = runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      onInterruptReady: (i) => {
+        interrupt = i;
+      },
+      drainInput: () => [],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    interrupt?.();
+    const result = await run;
+    expect(result.stopReason).toBe("interrupted");
+    expect(calls).toBe(1); // no blind re-call after the cut
+  });
+
+  it("soft interrupt mid tool batch closes the pairing with synthetic results and continues redirected", async () => {
+    let interrupt: (() => void) | undefined;
+    const queue: ChatMessage[] = [];
+    const hang: ToolDefinition = {
+      name: "hang",
+      description: "never settles (a wedged MCP call)",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      call: () => new Promise(() => {}),
+    };
+    const { transport } = fakeTransport([toolCallResult("t1", "hang", "{}"), textResult("resumed after redirect")]);
+    const run = runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([hang]),
+      onInterruptReady: (i) => {
+        interrupt = i;
+      },
+      drainInput: () => queue.splice(0),
+    });
+    await new Promise((r) => setTimeout(r, 10)); // let the tool get in flight
+    queue.push({ role: "user", content: "skip that, summarize instead" });
+    interrupt?.();
+    const result = await run;
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.content).toBe("resumed after redirect");
+    // The wedged call was answered synthetically — pairing intact, outcome flagged unknown.
+    const toolMessages = result.produced.filter((m) => m.role === "tool") as { content: string }[];
+    expect(toolMessages.some((m) => m.content.includes("outcome is unknown"))).toBe(true);
+  });
+
   it("stops with aborted when the signal is already aborted", async () => {
     const { transport } = fakeTransport([textResult("unused")]);
     const result = await runAgentLoop({

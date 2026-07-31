@@ -351,6 +351,10 @@ export interface ChatHooks {
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
   drainInput?: () => ChatMessage[];
+  // Soft interrupt (Claude Code's ESC): receives the loop's step-interrupt trigger — aborts only the in-flight
+  // step (model stream / tool batch); with queued input the turn continues redirected, bare it ends "interrupted".
+  // The host parks the trigger (LiveTurnRegistry) so POST /interrupt can fire it. Absent → no soft interrupt.
+  onInterruptReady?: (interrupt: () => void) => void;
   // Plan mode: start read-only; the agent must present_plan and have it approved (onPlan) before any write tool runs.
   // The SSE handler supplies onPlan to park for the human; absent onPlan → auto-approve.
   planMode?: boolean;
@@ -775,6 +779,7 @@ export async function runChat(
         ...(hooks?.onEvent ? { onEvent: hooks.onEvent } : {}),
         ...(hooks?.permit ? { permit: hooks.permit } : {}),
         ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
+        ...(hooks?.onInterruptReady ? { onInterruptReady: hooks.onInterruptReady } : {}),
         ...(hooks?.planMode ? { planMode: hooks.planMode } : {}),
         ...(hooks?.onPlan ? { onPlan: hooks.onPlan } : {}),
         ...(hooks?.sendMessage ? { sendMessage: hooks.sendMessage } : {}),

@@ -185,9 +185,20 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   last touch by someone ELSE — a member, or an agent in ANOTHER conversation (`actor.conversationId` decides) —
   earns a preamble warning naming who/when/why, so the agent re-reads before relying on or overwriting stale
   knowledge. The mid-conversation counterpart of the write path's 409 + three-way merge; zero ledger calls for
-  conversations that never touched a file. Deferred from the same analysis: task ledger (agent-teams), soft
-  interrupt, streaming tool execution (deliberately last — Claude Code's inc-4258 double-execution scar interacts
-  with our non-streaming retry ladder).
+  conversations that never touched a file. (7) **Soft interrupt** (kernel + seam; Claude Code's ESC
+  reinterpreted): `onInterruptReady` hands the host a trigger that aborts only the IN-FLIGHT step — each model
+  attempt and the whole tool dispatch run under a per-step AbortController linked to the run signal, and a retry
+  wait breaks early. An interrupted model call appends nothing (balanced); an interrupted tool batch closes its
+  pairing with synthetic results (settled tools keep their real result; in-flight → outcome-unknown error;
+  never-started → not-executed). Resolution at the now-balanced boundary: queued input (drainInput) → the turn
+  continues REDIRECTED; nothing queued → stopReason `interrupted` (stop and wait for the user — a bare ESC).
+  `LiveTurnRegistry.setInterrupt/interrupt` parks the trigger per turn (stop() stays the whole-turn abort);
+  ChatHooks.onInterruptReady forwards it. REMAINING WIRING (blocked on the concurrent server.ts run-ledger
+  refactor): the chat route passing `onInterruptReady: (fn) => liveTurns.setInterrupt(ws, id, fn)`, a
+  `POST /agent/sessions/:id/interrupt` route (visibility-aware like /stop), and the web's queue-then-interrupt
+  composer flow (POST /input then /interrupt while a turn is live). Deferred from the same analysis: task ledger
+  (agent-teams), streaming tool execution (deliberately last — Claude Code's inc-4258 double-execution scar
+  interacts with our non-streaming retry ladder).
 - **P9 (per-workspace customization, landed — Phase 1)** — each workspace can enhance its own agent, plugging its
   context + tools into the shared framework the way Claude Code takes a per-project CLAUDE.md + MCP servers. A new
   **registered, versioned `AgentSpec` entity** (`(tenant, id, version) → AgentSpec`, same immutable-version SSOT as

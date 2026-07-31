@@ -95,6 +95,25 @@ describe("LiveTurnRegistry", () => {
     expect(reg.snapshot("acme", "s1")?.pendingRetry).toBeUndefined();
   });
 
+  it("interrupt fires the parked step trigger without aborting the turn — stop() stays the whole-turn abort", () => {
+    const reg = new LiveTurnRegistry();
+    const controller = reg.begin("acme", "s1");
+    if (!controller) throw new Error("expected a claimed turn");
+    // Before the loop parks its trigger, interrupt reports false (the route answers honestly, not pretending).
+    expect(reg.interrupt("acme", "s1")).toBe(false);
+    let fired = 0;
+    reg.setInterrupt("acme", "s1", () => {
+      fired += 1;
+    });
+    // When the soft interrupt fires, Then only the step trigger runs — the turn's own controller stays alive.
+    expect(reg.interrupt("acme", "s1")).toBe(true);
+    expect(fired).toBe(1);
+    expect(controller.signal.aborted).toBe(false);
+    expect(reg.isLive("acme", "s1")).toBe(true);
+    // Unknown sessions report false.
+    expect(reg.interrupt("acme", "missing")).toBe(false);
+  });
+
   it("snapshot and attach report nothing for a session with no live turn (the 204 path)", () => {
     const reg = new LiveTurnRegistry();
     expect(reg.snapshot("acme", "missing")).toBeNull();

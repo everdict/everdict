@@ -29,6 +29,10 @@ interface LiveTurn {
   // 명시적 undefined 리셋(plan 결정 후)을 위해 required | undefined 로 둔다 (delete 금지 규칙).
   pendingPlan: { requestId: string; plan: string } | undefined;
   pendingRetry: { attempt: number; delayMs: number; persistent?: boolean } | undefined;
+  // The loop's soft-interrupt trigger (parked via setInterrupt once the turn's loop starts). Aborts only the
+  // in-flight STEP — with queued input the turn continues redirected; bare it ends "interrupted". stop() stays
+  // the whole-turn abort.
+  interrupt: (() => void) | undefined;
 }
 
 function textOf(data: unknown): string {
@@ -59,6 +63,7 @@ export class LiveTurnRegistry {
       streamingReasoning: "",
       pendingPlan: undefined,
       pendingRetry: undefined,
+      interrupt: undefined,
     });
     return controller;
   }
@@ -135,6 +140,23 @@ export class LiveTurnRegistry {
         turn.listeners.delete(listener);
       }
     }
+  }
+
+  // Park the loop's soft-interrupt trigger for this turn (wired from the chat route's onInterruptReady).
+  setInterrupt(workspace: string, sessionId: string, interrupt: () => void): void {
+    const turn = this.turns.get(this.key(workspace, sessionId));
+    if (!turn) return;
+    turn.interrupt = interrupt;
+  }
+
+  // Soft-interrupt the live turn (POST /interrupt): abort only the in-flight step — the loop survives and
+  // either continues redirected (input was queued) or ends "interrupted". False = nothing live / the loop has
+  // not parked its trigger yet (the caller 404s/409s rather than pretending).
+  interrupt(workspace: string, sessionId: string): boolean {
+    const turn = this.turns.get(this.key(workspace, sessionId));
+    if (!turn || !turn.interrupt) return false;
+    turn.interrupt();
+    return true;
   }
 
   // Abort the live turn (POST /stop). False = nothing live for that session.
