@@ -3171,7 +3171,13 @@
     "submit": "Start run"
   },
   "traceTimeline": {
-    "empty": "No trace events."
+    "empty": "No trace events.",
+    "plane": {
+      "all": "All",
+      "agent": "Agent",
+      "placement": "Infra",
+      "service": "Services"
+    }
   },
   "trendScorecards": {
     "datasetLabel": "Dataset",

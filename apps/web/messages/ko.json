@@ -3171,7 +3171,13 @@
     "submit": "실행하기"
   },
   "traceTimeline": {
-    "empty": "트레이스 이벤트가 없습니다."
+    "empty": "트레이스 이벤트가 없습니다.",
+    "plane": {
+      "all": "전체",
+      "agent": "에이전트",
+      "placement": "인프라",
+      "service": "서비스"
+    }
   },
   "trendScorecards": {
     "datasetLabel": "Dataset",
