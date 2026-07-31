@@ -147,6 +147,26 @@ samp {
   --chart-4: #eda100;
   --chart-5: #e87ba4;
   --chart-other: #9197a0;
+  /* ANSI 16색 (로그·터미널 출력 전용, shared/lib/ansi.ts) — 차트 팔레트와 별개다: 여기서 색을 고르는 건
+     우리가 아니라 로그를 뱉는 프로세스이고, 우리는 그 이름을 "이 표면에서 읽히는 값"으로만 옮긴다.
+     밝은 배경이라 원색을 그대로 쓰면 노랑/시안이 사라지므로 어둡게 밟아 둔다. ANSI white 는 회색으로
+     내리는데(흰 배경에 흰 글자는 안 보인다), 이는 터미널 에뮬레이터의 라이트 테마 관례와 같다. */
+  --ansi-black: #27272a;
+  --ansi-red: #c72e35;
+  --ansi-green: #1a7f4b;
+  --ansi-yellow: #96650a;
+  --ansi-blue: #2559c7;
+  --ansi-magenta: #8b3fbe;
+  --ansi-cyan: #0e6d80;
+  --ansi-white: #71717a;
+  --ansi-bright-black: #52525b;
+  --ansi-bright-red: #e5484d;
+  --ansi-bright-green: #2f9e6e;
+  --ansi-bright-yellow: #b8860b;
+  --ansi-bright-blue: #3b6fe0;
+  --ansi-bright-magenta: #a855f7;
+  --ansi-bright-cyan: #0e8ba3;
+  --ansi-bright-white: #3f3f46;
   --border: rgba(13, 14, 16, 0.085);
   --border-strong: rgba(13, 14, 16, 0.14);
   --input: rgba(13, 14, 16, 0.12);
@@ -188,6 +208,24 @@ samp {
   --chart-4: #c98500;
   --chart-5: #d55181;
   --chart-other: #62666d;
+  /* ANSI 16색 — 근검정 표면에 맞춰 다시 밟은 같은 색 이름. ANSI black 은 순검정이 아니라 보이는 회색으로
+     올린다(검은 배경의 검은 글자는 사라진다) — 라이트의 white 처리와 대칭이다. */
+  --ansi-black: #4b5058;
+  --ansi-red: #eb5757;
+  --ansi-green: #4cb782;
+  --ansi-yellow: #f2c94c;
+  --ansi-blue: #5e9eff;
+  --ansi-magenta: #c084fc;
+  --ansi-cyan: #45c8e0;
+  --ansi-white: #c9ccd1;
+  --ansi-bright-black: #6b7280;
+  --ansi-bright-red: #ff8a8a;
+  --ansi-bright-green: #86efac;
+  --ansi-bright-yellow: #fde047;
+  --ansi-bright-blue: #93c5fd;
+  --ansi-bright-magenta: #d8b4fe;
+  --ansi-bright-cyan: #7fe3f2;
+  --ansi-bright-white: #f7f8f8;
   --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.12);
   --input: rgba(255, 255, 255, 0.1);
@@ -270,6 +308,18 @@ body > *:not(.fixed):not(:has([data-sonner-toaster])) {
 *::-webkit-scrollbar-thumb:hover {
   background: var(--color-muted-foreground);
   background-clip: padding-box;
+}
+
+/* Chromeless scroll region — still scrolls (wheel/trackpad/keyboard), just paints no track or thumb. For a fixed
+   chrome rail like the sidebar nav, a bar that appears only because the list outgrew a short viewport reads as a
+   defect rather than as affordance; the content itself is the cue. Never use this on page content, where the bar
+   is the only signal that more exists below. Specificity beats the `*` rules above, so no `!important` needed. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 ::selection {

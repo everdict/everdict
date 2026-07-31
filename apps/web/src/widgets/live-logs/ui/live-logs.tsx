@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
+import { AnsiText } from '@/shared/ui/ansi-text'
 
 const TERMINAL = new Set(['succeeded', 'failed', 'superseded', 'cancelled'])
 const POLL_MS = 3000
@@ -84,9 +85,7 @@ export function LiveLogs({ runId, initialStatus }: { runId: string; initialStatu
               }}
               className={cn(
                 'rounded px-1.5 py-0.5 font-mono text-[10.5px] transition-colors',
-                s === stream
-                  ? 'bg-muted text-foreground'
-                  : 'text-faint hover:text-muted-foreground'
+                s === stream ? 'bg-muted text-foreground' : 'text-faint hover:text-muted-foreground'
               )}
               title={t(s === 'stdout' ? 'stdoutHint' : 'stderrHint')}
             >
@@ -99,7 +98,7 @@ export function LiveLogs({ runId, initialStatus }: { runId: string; initialStatu
         ref={scroller}
         className="max-h-80 overflow-auto rounded-lg border border-border bg-muted/40 p-3 font-mono text-[11.5px] leading-relaxed text-muted-foreground"
       >
-        {text || (found ? '' : t('waiting'))}
+        <AnsiText text={text || (found ? '' : t('waiting'))} />
       </pre>
     </div>
   )

@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import type { TopologyStatus } from '@everdict/contracts/wire'
 import { useTranslations } from 'next-intl'
 
-import type { TopologyStatus } from '@everdict/contracts/wire'
 import { fmtDurationMs } from '@/shared/lib/format'
+import { cn } from '@/shared/lib/utils'
+import { AnsiText } from '@/shared/ui/ansi-text'
 import { Card } from '@/shared/ui/card'
 import { SectionHeader } from '@/shared/ui/section-header'
-import { cn } from '@/shared/lib/utils'
 
 const TERMINAL = new Set(['succeeded', 'failed', 'superseded', 'cancelled'])
 const POLL_MS = 5000
@@ -86,7 +87,9 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
             svc.node,
             svc.cpu !== undefined ? `cpu ${svc.cpu}` : undefined,
             svc.memoryMb !== undefined ? `${svc.memoryMb} MiB` : undefined,
-            svc.ageSeconds !== undefined ? t('age', { age: fmtDurationMs(svc.ageSeconds * 1000) }) : undefined,
+            svc.ageSeconds !== undefined
+              ? t('age', { age: fmtDurationMs(svc.ageSeconds * 1000) })
+              : undefined,
           ].filter(Boolean)
           return (
             <div key={svc.name} className="px-4 py-2.5">
@@ -163,15 +166,21 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
                           key={`${e.at ?? ''}-${i}`}
                           className="flex gap-2 font-mono text-[11px] leading-relaxed"
                         >
-                          {e.at && <span className="shrink-0 text-faint">{e.at.slice(11, 19)}</span>}
-                          {e.type && <span className="shrink-0 text-muted-foreground">{e.type}</span>}
-                          <span className="min-w-0 break-all text-muted-foreground/80">{e.message}</span>
+                          {e.at && (
+                            <span className="shrink-0 text-faint">{e.at.slice(11, 19)}</span>
+                          )}
+                          {e.type && (
+                            <span className="shrink-0 text-muted-foreground">{e.type}</span>
+                          )}
+                          <span className="min-w-0 break-all text-muted-foreground/80">
+                            {e.message}
+                          </span>
                         </div>
                       ))}
                     </div>
                   )}
                   <pre className="max-h-64 overflow-auto rounded-lg border border-border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
-                    {logs[svc.name] ?? t('loadingLogs')}
+                    <AnsiText text={logs[svc.name] ?? t('loadingLogs')} />
                   </pre>
                 </div>
               )}

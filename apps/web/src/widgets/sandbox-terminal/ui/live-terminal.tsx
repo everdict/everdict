@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
+import { AnsiText } from '@/shared/ui/ansi-text'
 import { Input } from '@/shared/ui/input'
 
 // Interactive sandbox terminal (observability ⑥) — a PERSISTENT shell over WebSocket: unlike the one-shot exec,
@@ -91,7 +92,7 @@ export function LiveTerminal({ runId }: { runId: string }) {
         className="max-h-80 min-h-32 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-[#0b0b0c] p-3 font-mono text-[11.5px] leading-relaxed text-neutral-200"
       >
         {lines.length === 0 && <span className="text-neutral-500">{t('hint')}</span>}
-        {lines.join('')}
+        <AnsiText text={lines.join('')} />
       </div>
       <form onSubmit={send} className="flex items-center gap-2">
         <span className="select-none font-mono text-[13px] text-muted-foreground">$</span>

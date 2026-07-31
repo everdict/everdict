@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl'
 import type { FileExecutionResultView } from '@/entities/workspace-file'
 import { fmtBytes } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
+import { AnsiText } from '@/shared/ui/ansi-text'
 
 // What a run produced, rendered the way a terminal would: the streams as they came, the exit code as a fact
 // rather than an error banner. A script that exits non-zero has RUN — the person reading it wants the traceback,
@@ -51,7 +52,7 @@ export function ExecutionOutput({
         {streams === '' ? (
           <span className="text-muted-foreground">{t('runNoOutput')}</span>
         ) : (
-          streams
+          <AnsiText text={streams} />
         )}
         {result.truncated && (
           <span className="text-muted-foreground">{`\n${t('runTruncated')}`}</span>
