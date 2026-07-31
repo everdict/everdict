@@ -179,7 +179,7 @@ function SessionRows({
                       size="icon-sm"
                       aria-label={t('rename')}
                       onClick={() => startRename(s)}
-                      className="size-6 opacity-0 group-hover:opacity-100"
+                      className="hidden size-6 group-focus-within:inline-flex group-hover:inline-flex"
                     >
                       <Pencil className="size-3.5" />
                     </Button>
@@ -188,7 +188,7 @@ function SessionRows({
                       size="icon-sm"
                       aria-label={t('delete')}
                       onClick={() => setPendingDelete(s.id)}
-                      className="size-6 opacity-0 hover:text-destructive group-hover:opacity-100"
+                      className="hidden size-6 hover:text-destructive group-focus-within:inline-flex group-hover:inline-flex"
                     >
                       <Trash2 className="size-3.5" />
                     </Button>

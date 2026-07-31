@@ -35,7 +35,6 @@ import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-
 import { Markdown } from '@/shared/ui/markdown'
 
 import { buildTranscript } from '../lib/transcript'
-import { AgentAvatar } from './agent-avatar'
 import { Composer } from './composer'
 import { ContextBlock } from './context-block'
 import { MessageRow, UserBadge, type ChatUser } from './message-row'
@@ -265,8 +264,7 @@ export function ConversationView({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border px-2 py-1.5">
-        <AgentAvatar size="sm" />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-[560] text-foreground">
+        <span className="min-w-0 flex-1 truncate pl-1 text-[13px] font-[560] text-foreground">
           {title}
         </span>
         <ModelPicker models={models} model={model} onChange={onChangeModel} />
