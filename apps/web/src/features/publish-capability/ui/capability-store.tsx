@@ -9,13 +9,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleCheck,
-  Code2,
-  Container,
-  GitCompare,
-  Globe,
-  History,
   Loader2,
-  Lock,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -23,21 +17,16 @@ import {
   Share2,
   Sparkles,
   Trash2,
-  Users,
   Zap,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import { VersionTagsEditor } from '@/features/version-tags'
 import {
   isBuiltInCapability,
   type Capability,
-  type CapabilityImageClass,
   type CapabilitySpec,
-  type CapabilitySpecDiff,
   type CapabilityType,
-  type CapabilityVersions,
   type CapabilityVisibility,
   type ProbeCapabilityMcpResult,
   type ValidateCapabilityResult,
@@ -55,88 +44,42 @@ import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label, Textarea } from '@/shared/ui/input'
-import { Markdown } from '@/shared/ui/markdown'
 import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
-import { SkillDocs } from '@/shared/ui/skill-docs'
 import { StatCard } from '@/shared/ui/stat-card'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { adoptCapabilityAction, unadoptCapabilityAction } from '../api/adopt-capability'
-import { importSkillAction } from '../api/import-skill'
-import {
-  adoptEnvironmentAction,
-  unadoptEnvironmentAction,
-  verifyAdoptedEnvironmentAction,
-} from '../api/adopt-environment'
-import {
-  diffCapabilityVersionsAction,
-  loadCapabilityVersionAction,
-  loadCapabilityVersionsAction,
-} from '../api/capability-versions'
 import { deleteCapabilityVersionAction, saveCapabilityAction } from '../api/manage-capabilities'
 import {
   listImageTagsAction,
   probeCapabilityMcpAction,
   validateCapabilityAction,
 } from '../api/wizard-tools'
+import {
+  capKey,
+  storeItemHref,
+  TYPE_ICON,
+  VIS_ICON,
+  type RequiredSecret,
+  type StoreVariant,
+} from '../lib/capability-display'
 import { CodeTryPanel } from './code-try-panel'
 import { ReachDialog, VisibilityPicker, WorkspacePicker } from './reach-controls'
 
-// capability 의 필요 시크릿(채택 시 내 시크릿으로 바인딩). skill 은 없음.
-function requiredSecretsOf(c: Capability): RequiredSecret[] {
-  if (c.spec.type === 'mcp' || c.spec.type === 'code') return c.spec.requiredSecrets
-  return []
-}
-// 이 capability 가 write(변경) 도구를 제공하는가 — 채택 시 enableWrite 옵트인 대상.
-function offersWrite(c: Capability): boolean {
-  if (c.spec.type === 'mcp') return c.spec.write
-  if (c.spec.type === 'code') return !c.spec.isReadOnly
-  return false
-}
-const capKey = (c: { tenant: string; id: string }): string => `${c.tenant}/${c.id}`
-
 type Author = { name: string; avatarUrl?: string }
-type RequiredSecret = { name: string; description: string }
 
-const TYPE_ICON: Record<CapabilityType, typeof Boxes> = {
-  mcp: Boxes,
-  code: Code2,
-  skill: Sparkles,
-  environment: Container,
-}
-const VIS_ICON: Record<CapabilityVisibility, typeof Lock> = {
-  private: Lock,
-  workspace: Users,
-  subset: Share2,
-  public: Globe,
-}
-// 뷰어 기준 이미지 분류 배지 톤 — workspace/external=풀 가능, local/unqualified=풀 보장 없음(경고).
-const IMG_CLASS_TONE: Record<CapabilityImageClass, 'success' | 'info' | 'warning'> = {
-  managed: 'success',
-  workspace: 'success',
-  external: 'info',
-  local: 'warning',
-  unqualified: 'warning',
-}
-
-type StoreVariant = 'catalog' | 'mine'
-
-// Store — 매니지드/공개 발행된 capability 카탈로그. 하네스·데이터셋 목록과 같은 행 레이아웃(스탯 + 필터 + 행) 위에
-// 얹고, 상세는 제자리 확장이 아니라 Dialog 로 띄운다(다른 컬럼 위젯을 밀지 않게). variant='catalog' 는 공개 목록만
-// (가져옴/채택 여부를 행에 표시), variant='mine' 는 내 워크스페이스가 발행한 것(편집/공개범위/삭제 관리 + 발행). 매니지드
-// (첫당사자) 항목은 "기본 제공"이 아니라 스토어가 매니지드하는 것 → 배지 + 채택/가져오기 버튼으로 노출한다.
+// Store — 매니지드/공개 발행된 capability 카탈로그. 하네스·데이터셋 목록과 같은 행 레이아웃(스탯 + 필터 + 행)이고,
+// 행은 **상세 페이지로 가는 링크**다(제자리 확장도, 모달도 아니다 — 상세는 주소를 가진 라우트라야 인프라 패널과
+// 나란히 놓이고 공유된다). variant='catalog' 는 공개 목록만(가져옴/채택 여부를 행에 표시), variant='mine' 는 내
+// 워크스페이스가 발행한 것(편집/공개범위/삭제 관리 + 발행). 매니지드(첫당사자) 항목은 "기본 제공"이 아니라 스토어가
+// 매니지드하는 것 → 배지로 구분하고, 워크스페이스에 추가하는 일은 상세에서 한다.
 export function CapabilityStore({
   items,
   variant,
   authors,
   canWrite,
-  canAdopt,
-  canImportEnvironment,
-  canImportSkill,
   adoptedKeys,
   importedSkillKeys,
   adoptedEnvironments,
-  secretNames,
   myWorkspaces,
   imageRegistries,
   currentWorkspace,
@@ -148,15 +91,10 @@ export function CapabilityStore({
   variant: StoreVariant
   authors: Record<string, Author>
   canWrite: boolean
-  canAdopt: boolean
-  canImportEnvironment: boolean
-  // 스킬 가져오기 = 워크스페이스 스킬 라이브러리에 쓰기(skills:write) — 채택(에이전트 설정)과 권한 축이 다르다.
-  canImportSkill: boolean
   adoptedKeys: string[]
   // 이미 가져온 스킬 예제의 출처 키(source/id) — 스킬은 참조가 아니라 워크스페이스 스킬 사본이 되므로 판정 기준이 다르다.
   importedSkillKeys: string[]
   adoptedEnvironments: AdoptedEnvironment[]
-  secretNames: string[]
   myWorkspaces: { id: string; name: string }[]
   imageRegistries: { name: string; host: string }[]
   currentWorkspace: string
@@ -171,9 +109,6 @@ export function CapabilityStore({
   const [editing, setEditing] = useState<Capability | 'new' | null>(null)
   const [reaching, setReaching] = useState<Capability | null>(null)
   const [confirming, setConfirming] = useState<Capability | null>(null)
-  const [adopting, setAdopting] = useState<Capability | null>(null)
-  // 상세 Dialog 로 띄울 대상(제자리 확장 대체).
-  const [detail, setDetail] = useState<Capability | null>(null)
   const [pending, startTransition] = useTransition()
 
   // 필터 — 하네스/데이터셋 목록과 동일한 지속 필터(검색·종류·상태·정렬). 워크스페이스 + variant 별로 기억.
@@ -260,75 +195,6 @@ export function CapabilityStore({
       if (r.ok) toast.success(t('deleted', { name: c.name }))
       else toast.error(r.error ?? t('deleteError'))
       setConfirming(null)
-    })
-
-  // 워크스페이스에 추가 — 필요 시크릿/쓰기 옵션이 있으면 다이얼로그로 바인딩을 받고, 없으면 바로 추가.
-  // 추가에 성공하면 상세를 닫는다: 카탈로그에서 그 행은 이제 목록에서 사라지므로 열어 둘 상세가 없다.
-  const startAdopt = (c: Capability) => {
-    if (requiredSecretsOf(c).length > 0 || offersWrite(c)) setAdopting(c)
-    else adopt(c, {}, false)
-  }
-  const adopt = (c: Capability, secretBindings: Record<string, string>, enableWrite: boolean) =>
-    startTransition(async () => {
-      const r = await adoptCapabilityAction({
-        source: c.tenant,
-        id: c.id,
-        version: c.version,
-        secretBindings,
-        enableWrite,
-      })
-      if (r.ok) {
-        toast.success(t('added', { name: c.name }))
-        setDetail(null)
-      } else {
-        toast.error(r.error ?? t('addError'))
-      }
-      setAdopting(null)
-    })
-  const unadopt = (c: Capability) =>
-    startTransition(async () => {
-      const r = await unadoptCapabilityAction(c.tenant, c.id)
-      if (r.ok) toast.success(t('removedFromWorkspace', { name: c.name }))
-      else toast.error(r.error ?? t('addError'))
-    })
-
-  // 스킬 추가 — 참조를 pin 하는 게 아니라 **사본**을 만든다. 그 순간부터 Settings › Agent › Skills 의 워크스페이스
-  // 스킬이고, 편집도 버전 찍기도 거기서 한다(everdict 매니지드 스킬이 워크스페이스에 들어오는 유일한 경로).
-  const importSkill = (c: Capability) =>
-    startTransition(async () => {
-      const r = await importSkillAction({ source: c.tenant, id: c.id, version: c.version })
-      if (r.ok) {
-        toast.success(t('skillCopied', { name: c.name }))
-        setDetail(null)
-      } else toast.error(r.error ?? t('addError'))
-    })
-
-  // environment 추가/제거 — 워크스페이스 인벤토리에 넣고, 넣을 때 pull 가능성을 검증한다(warn-not-block).
-  const importEnv = (c: Capability) =>
-    startTransition(async () => {
-      const r = await adoptEnvironmentAction({ source: c.tenant, id: c.id, version: c.version })
-      if (!r.ok) {
-        toast.error(r.error ?? t('importError'))
-        return
-      }
-      if (r.environment.verify?.pullable === false)
-        toast.warning(t('importedNotPullable', { name: c.name }))
-      else toast.success(t('imported', { name: c.name }))
-      setDetail(null)
-    })
-  const removeEnv = (c: Capability) =>
-    startTransition(async () => {
-      const r = await unadoptEnvironmentAction(c.tenant, c.id)
-      if (!r.ok) toast.error(r.error ?? t('unimportError'))
-      else toast.success(t('unimported', { name: c.name }))
-    })
-  const reverifyEnv = (e: AdoptedEnvironment) =>
-    startTransition(async () => {
-      const r = await verifyAdoptedEnvironmentAction(e.source, e.id)
-      if (!r.ok) toast.error(r.error ?? t('reverifyError'))
-      else if (r.environment.verify?.pullable === false)
-        toast.warning(t('importedNotPullable', { name: e.name ?? e.id }))
-      else toast.success(t('reverified'))
     })
 
   const typeOptions = [
@@ -468,18 +334,10 @@ export function CapabilityStore({
             const managed = isBuiltInCapability(c)
             const here = inWorkspace(c)
             return (
-              <div
+              <Link
                 key={capKey(c)}
-                role="button"
-                tabIndex={0}
-                onClick={() => setDetail(c)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setDetail(c)
-                  }
-                }}
-                className="group block cursor-pointer rounded-lg border bg-card p-3.5 shadow-raise outline-none transition-colors hover:border-border-strong hover:bg-elevated focus-visible:border-border-strong"
+                href={storeItemHref(currentWorkspace, c, variant === 'mine' ? 'mine' : undefined)}
+                className="group block rounded-lg border bg-card p-3.5 shadow-raise outline-none transition-colors hover:border-border-strong hover:bg-elevated focus-visible:border-border-strong"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-start gap-3">
@@ -525,11 +383,16 @@ export function CapabilityStore({
                     </div>
                   </div>
                   {/* 우측 — 행은 읽기 전용이다. 워크스페이스에 추가/제거는 상세에서만 하므로 행마다 버튼이 자리를 먹지
-                      않는다(리니어st. 조용한 행 + 호버 시 드릴인 신호). 관리 메뉴만 제자리에 남고, 카드(role=button)가
-                      상세를 열므로 메뉴 클릭은 버블링을 막는다. */}
+                      않는다(리니어st. 조용한 행 + 호버 시 드릴인 신호). 관리 메뉴만 제자리에 남고, 행 전체가 상세로 가는
+                      링크이므로 메뉴 클릭은 이동을 막는다. */}
                   <div className="flex shrink-0 items-center gap-1.5">
                     {canManage(c) && (
-                      <span onClick={(e) => e.stopPropagation()}>
+                      <span
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                        }}
+                      >
                         <DropdownMenu
                           align="end"
                           trigger={({ open, toggle }) => (
@@ -574,7 +437,7 @@ export function CapabilityStore({
                     />
                   </div>
                 </div>
-              </div>
+              </Link>
             )
           })}
         </div>
@@ -586,28 +449,6 @@ export function CapabilityStore({
             {t('showMore')}
           </Button>
         </div>
-      )}
-
-      {detail !== null && (
-        <CapabilityDetailDialog
-          capability={detail}
-          variant={variant}
-          currentWorkspace={currentWorkspace}
-          currentSubject={currentSubject}
-          isAdmin={isAdmin}
-          inWorkspace={inWorkspace(detail)}
-          adoptedEnv={adoptedEnvMap.get(capKey(detail))}
-          canAdopt={canAdopt}
-          canImportEnvironment={canImportEnvironment}
-          canImportSkill={canImportSkill}
-          pending={pending}
-          onClose={() => setDetail(null)}
-          onAdopt={() => (detail.spec.type === 'skill' ? importSkill(detail) : startAdopt(detail))}
-          onUnadopt={() => unadopt(detail)}
-          onImport={() => importEnv(detail)}
-          onRemoveEnv={() => removeEnv(detail)}
-          onReverifyEnv={reverifyEnv}
-        />
       )}
 
       {editing !== null && (
@@ -627,16 +468,6 @@ export function CapabilityStore({
           canPublishPublic={canPublishPublic}
           myWorkspaces={myWorkspaces}
           onClose={() => setReaching(null)}
-        />
-      )}
-
-      {adopting !== null && (
-        <AdoptDialog
-          capability={adopting}
-          secretNames={secretNames}
-          pending={pending}
-          onClose={() => setAdopting(null)}
-          onAdopt={(bindings, enableWrite) => adopt(adopting, bindings, enableWrite)}
         />
       )}
 
@@ -710,175 +541,6 @@ function RowMeta({ capability }: { capability: Capability }) {
         </span>
       ))}
     </div>
-  )
-}
-
-// 상세 Dialog — 카드 클릭 시 전체 스펙을 모달로 띄운다(제자리 확장이 아니라, 다른 컬럼에 영향 없이). 헤더(이름/종류/버전/
-// 배지) + CapabilityDetail(버전 패널 + 스펙 본문) + 푸터 액션(채택/가져오기, environment 는 pull 상태·재검증 포함).
-function CapabilityDetailDialog({
-  capability,
-  variant,
-  currentWorkspace,
-  currentSubject,
-  isAdmin,
-  inWorkspace,
-  adoptedEnv,
-  canAdopt,
-  canImportEnvironment,
-  canImportSkill,
-  pending,
-  onClose,
-  onAdopt,
-  onUnadopt,
-  onImport,
-  onRemoveEnv,
-  onReverifyEnv,
-}: {
-  capability: Capability
-  variant: StoreVariant
-  currentWorkspace: string
-  currentSubject?: string
-  isAdmin: boolean
-  inWorkspace: boolean
-  adoptedEnv?: AdoptedEnvironment
-  canAdopt: boolean
-  canImportEnvironment: boolean
-  canImportSkill: boolean
-  pending: boolean
-  onClose: () => void
-  onAdopt: () => void
-  onUnadopt: () => void
-  onImport: () => void
-  onRemoveEnv: () => void
-  onReverifyEnv: (e: AdoptedEnvironment) => void
-}) {
-  const t = useTranslations('capabilityStore')
-  const TypeIcon = TYPE_ICON[capability.spec.type]
-  const VisIcon = VIS_ICON[capability.visibility]
-  const managed = isBuiltInCapability(capability)
-  const isEnv = capability.spec.type === 'environment'
-  const isSkill = capability.spec.type === 'skill'
-  // 환경은 워크스페이스 인벤토리(settings:write), 스킬은 스킬 라이브러리(skills:write), 그 외는 내 에이전트
-  // (agents:write) — 저장되는 곳도 권한도 다르지만 사용자에게는 같은 한 가지 동작이라 문구는 하나다.
-  const canChange = isEnv ? canImportEnvironment : isSkill ? canImportSkill : canAdopt
-  // 스킬은 여기서 뺄 수 없다: 가져온 것은 참조가 아니라 우리 워크스페이스 스킬 사본이라, 지우는 일은
-  // Settings › Agent › Skills 에서 그 스킬을 지우는 일이다(스토어가 남의 편집물을 회수할 수는 없다).
-  const canRemoveHere = canChange && !isSkill
-  // 우리가 발행한 스킬을 우리가 다시 가져오는 것은 같은 이름의 사본을 하나 더 만드는 일일 뿐이다 — 원본 Skill 은
-  // 이미 라이브러리에 있다(발행은 남들에게 복사거리를 내주는 행위이지, 내 라이브러리에 뭔가를 더하는 게 아니다).
-  const ownPublication = isSkill && capability.tenant === currentWorkspace
-  const verify = adoptedEnv?.verify
-  return (
-    <Dialog open onClose={onClose} align="top" className="max-w-2xl">
-      <div className="max-h-[85vh] space-y-4 overflow-y-auto p-6">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <TypeIcon className="size-5 shrink-0 text-primary" />
-            <span className="min-w-0 truncate font-mono text-[15px] font-[560]">
-              {capability.name}
-            </span>
-            <Badge tone="outline" className="shrink-0">
-              {t(`type_${capability.spec.type}`)}
-            </Badge>
-            {managed && (
-              <Badge tone="info" className="shrink-0 gap-1">
-                <Sparkles className="size-3" />
-                {t('managed')}
-              </Badge>
-            )}
-            {variant === 'mine' && (
-              <Badge
-                tone={capability.visibility === 'private' ? 'outline' : 'info'}
-                className="shrink-0 gap-1"
-              >
-                <VisIcon className="size-3" />
-                {t(`vis_${capability.visibility}`)}
-              </Badge>
-            )}
-            <code className="shrink-0 rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
-              {capability.version}
-            </code>
-          </div>
-          <p className="text-[13px] text-muted-foreground">{capability.description}</p>
-          {managed && <p className="text-[12px] text-muted-foreground">{t('managedHint')}</p>}
-        </div>
-
-        <CapabilityDetail
-          capability={capability}
-          currentWorkspace={currentWorkspace}
-          currentSubject={currentSubject}
-          isAdmin={isAdmin}
-        />
-
-        {isEnv && inWorkspace && verify && (
-          <div className="flex items-center gap-3">
-            <Badge tone={verify.pullable ? 'success' : 'warning'}>
-              {verify.pullable
-                ? t('importedBadge')
-                : t(
-                    verify.reason === 'auth'
-                      ? 'verifyAuth'
-                      : verify.reason === 'not-found'
-                        ? 'verifyNotFound'
-                        : 'verifyUnreachable'
-                  )}
-            </Badge>
-            {canImportEnvironment && adoptedEnv && (
-              <button
-                type="button"
-                className="text-[12px] font-[510] text-link transition-colors hover:text-foreground"
-                disabled={pending}
-                onClick={() => onReverifyEnv(adoptedEnv)}
-              >
-                {t('reverify')}
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* 상세가 가져오기의 유일한 표면 — 목록 행은 읽기 전용이고, 워크스페이스에 넣고 빼는 일은 여기서만 한다.
-            환경(인벤토리)과 도구·스킬(에이전트)은 저장되는 곳이 다르지만 사용자에게는 같은 한 가지 동작이라 문구를 통일한다. */}
-        <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
-          {inWorkspace ? (
-            <span className="inline-flex items-center gap-1.5 text-[12px] font-[510] text-success">
-              <CircleCheck className="size-4" />
-              {isSkill ? t('detailSkillCopied') : t('detailInWorkspace')}
-            </span>
-          ) : ownPublication ? (
-            <span className="text-[12px] text-muted-foreground">{t('skillOwnPublication')}</span>
-          ) : isSkill ? (
-            // 스킬만 결과가 다르다 — 참조가 붙는 게 아니라 우리가 고칠 수 있는 사본이 생긴다. InfoTip 이 아니라
-            // 버튼 옆 한 줄로 두는 이유: 누르기 전에 알아야 하는 사실이다.
-            <span className="text-[12px] text-muted-foreground">{t('skillCopyHint')}</span>
-          ) : (
-            <span />
-          )}
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={onClose}>
-              {t('close')}
-            </Button>
-            {inWorkspace
-              ? canRemoveHere && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={pending}
-                    onClick={isEnv ? onRemoveEnv : onUnadopt}
-                  >
-                    {t('removeFromWorkspace')}
-                  </Button>
-                )
-              : canChange &&
-                !ownPublication && (
-                  <Button size="sm" disabled={pending} onClick={isEnv ? onImport : onAdopt}>
-                    <Plus />
-                    {t('addToWorkspace')}
-                  </Button>
-                )}
-          </div>
-        </div>
-      </div>
-    </Dialog>
   )
 }
 
@@ -1749,469 +1411,6 @@ function CapabilityEditorDialog({
         </div>
       </div>
     </Dialog>
-  )
-}
-
-// 추가 다이얼로그 — 필요 시크릿을 내 워크스페이스 시크릿 이름으로 바인딩 + 쓰기 옵트인. 그 다음 에이전트에 pin 추가.
-function AdoptDialog({
-  capability,
-  secretNames,
-  pending,
-  onClose,
-  onAdopt,
-}: {
-  capability: Capability
-  secretNames: string[]
-  pending: boolean
-  onClose: () => void
-  onAdopt: (secretBindings: Record<string, string>, enableWrite: boolean) => void
-}) {
-  const t = useTranslations('capabilityStore')
-  const required = requiredSecretsOf(capability)
-  const write = offersWrite(capability)
-  const [bindings, setBindings] = useState<Record<string, string>>(
-    Object.fromEntries(required.map((s) => [s.name, s.name]))
-  )
-  const [enableWrite, setEnableWrite] = useState(false)
-
-  return (
-    <Dialog open onClose={onClose} className="max-w-md">
-      <div className="space-y-4 p-5">
-        <div>
-          <h3 className="text-sm font-medium">{t('addTitle', { name: capability.name })}</h3>
-          {capability.spec.type === 'code' && (
-            <p className="mt-1 text-[12px] text-muted-foreground">{t('addCodeNote')}</p>
-          )}
-        </div>
-        {required.length > 0 && (
-          <div className="space-y-2">
-            <Label>{t('bindSecrets')}</Label>
-            <p className="text-[12px] text-muted-foreground">{t('bindSecretsHint')}</p>
-            {required.map((s) => (
-              <div key={s.name} className="space-y-1">
-                <div className="text-[12px]">
-                  <span className="font-mono">{s.name}</span>
-                  {s.description ? (
-                    <span className="text-muted-foreground"> — {s.description}</span>
-                  ) : null}
-                </div>
-                <Input
-                  list="cap-secret-names"
-                  value={bindings[s.name] ?? ''}
-                  onChange={(e) => setBindings((b) => ({ ...b, [s.name]: e.target.value }))}
-                  placeholder={s.name}
-                  className="font-mono text-[12px]"
-                />
-              </div>
-            ))}
-            <datalist id="cap-secret-names">
-              {secretNames.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
-          </div>
-        )}
-        {write && (
-          <label className="flex items-center gap-2 text-[13px]">
-            <input
-              type="checkbox"
-              className="accent-primary"
-              checked={enableWrite}
-              onChange={(e) => setEnableWrite(e.target.checked)}
-            />
-            <span>{t('enableWrite')}</span>
-          </label>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            {t('cancel')}
-          </Button>
-          <Button size="sm" disabled={pending} onClick={() => onAdopt(bindings, enableWrite)}>
-            {pending ? t('saving') : t('addToWorkspace')}
-          </Button>
-        </div>
-      </div>
-    </Dialog>
-  )
-}
-
-// capability 상세(제자리 드릴인) — mcp/code/skill 의 전체 스펙을 카드 안에서 읽기전용으로 노출한다(라우트 미사용).
-function CapabilityDetail({
-  capability,
-  currentWorkspace,
-  currentSubject,
-  isAdmin,
-}: {
-  capability: Capability
-  currentWorkspace: string
-  currentSubject?: string
-  isAdmin: boolean
-}) {
-  const t = useTranslations('capabilityStore')
-  // 크로스테넌트 public/subset 카드는 오너 워크스페이스를 source 로 넘겨 버전을 조회한다. 내 워크스페이스 것이면 생략.
-  const source = capability.tenant !== currentWorkspace ? capability.tenant : undefined
-  const builtin = isBuiltInCapability(capability)
-  // 버전 태그 편집 = 내 워크스페이스 소유 + 버전 생성자-or-admin(서버가 최종 강제). 빌트인/크로스테넌트는 읽기전용.
-  const canManageVersions =
-    !builtin && source === undefined && (capability.createdBy === currentSubject || isAdmin)
-  // 상세에 표시할 레코드 — 최신(넘어온 capability) 또는 스위처로 고른 과거 버전.
-  const [shown, setShown] = useState<Capability>(capability)
-  const s = shown.spec
-  const secrets = s.type === 'mcp' || s.type === 'code' ? s.requiredSecrets : []
-  return (
-    <div className="mt-2 space-y-3 rounded-md border border-border bg-secondary/30 p-3 text-[12.5px]">
-      {!builtin && (
-        <CapabilityVersionsPanel
-          id={capability.id}
-          source={source}
-          latestVersion={capability.version}
-          shownVersion={shown.version}
-          canManage={canManageVersions}
-          onShowVersion={setShown}
-        />
-      )}
-      {s.type === 'mcp' && (
-        <>
-          <div className="space-y-0.5">
-            <p className="text-[11px] font-[510] text-muted-foreground">
-              {t(s.image ? 'mcpImage' : 'mcpUrl')}
-            </p>
-            <code className="block break-all font-mono text-foreground">
-              {s.image ? `${s.image}${s.args.length > 0 ? ` ${s.args.join(' ')}` : ''}` : s.url}
-            </code>
-          </div>
-          {s.provides.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {s.provides.map((p) => (
-                <Badge key={p} tone="neutral">
-                  {p}
-                </Badge>
-              ))}
-            </div>
-          )}
-          {s.write && <Badge tone="warning">{t('mcpWrite')}</Badge>}
-        </>
-      )}
-      {s.type === 'code' && (
-        <>
-          <div className="flex flex-wrap gap-1">
-            <Badge tone="outline">{s.language}</Badge>
-            <Badge tone={s.isReadOnly ? 'success' : 'warning'}>
-              {t(s.isReadOnly ? 'codeReadOnly' : 'codeWrites')}
-            </Badge>
-          </div>
-          <CodeEditor
-            value={s.code}
-            language={s.language}
-            readOnly
-            minHeight="120px"
-            maxHeight="320px"
-            aria-label={t('code')}
-          />
-          {Object.keys(s.parametersSchema).length > 0 && (
-            <div className="space-y-0.5">
-              <p className="text-[11px] font-[510] text-muted-foreground">{t('params')}</p>
-              <pre className="max-h-40 overflow-auto rounded-md bg-secondary/50 p-2 font-mono text-[11px] leading-relaxed">
-                {JSON.stringify(s.parametersSchema, null, 2)}
-              </pre>
-            </div>
-          )}
-          {s.examples.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-[11px] font-[510] text-muted-foreground">{t('examplesLabel')}</p>
-              {s.examples.map((e, i) => (
-                <div key={i} className="text-[12px] text-muted-foreground">
-                  {e.name && <span className="font-[510] text-foreground">{e.name}: </span>}
-                  <code className="break-all font-mono">{JSON.stringify(e.input)}</code>
-                  {e.note ? ` — ${e.note}` : ''}
-                </div>
-              ))}
-            </div>
-          )}
-          {/* 예제로 직접 실행 — 코드만 읽고 채택하지 않는다(타 워크스페이스 코드는 격리 런타임에서만; 서버가 판정). */}
-          <CodeTryPanel
-            showCheck={false}
-            buildTarget={() => ({
-              ref: { source: shown.tenant, id: shown.id, version: shown.version },
-            })}
-            initialInput={s.examples[0] ? JSON.stringify(s.examples[0].input, null, 2) : '{}'}
-          />
-        </>
-      )}
-      {s.type === 'skill' && (
-        // 멀티문서 스킬 뷰어(SKILL.md + 부속 파일 탭) — 스킬 관리 상세와 동일한 공용 뷰어를 공유(v1 단일 문서 나열 대체).
-        <SkillDocs instructions={s.instructions} files={s.files} />
-      )}
-      {s.type === 'environment' && (
-        <div className="space-y-3">
-          {/* 이미지 참조 + 뷰어 기준 분류 + 벤치마크/OS 요약 */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <code className="min-w-0 truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
-              {s.image}
-            </code>
-            {shown.imageClass && (
-              <Badge tone={IMG_CLASS_TONE[shown.imageClass]}>
-                {t(`imgClass_${shown.imageClass}`)}
-              </Badge>
-            )}
-            {s.contents?.benchmark && <Badge tone="outline">{s.contents.benchmark}</Badge>}
-            {s.contents?.os && (
-              <Badge tone="outline">
-                {s.contents.os}
-                {s.contents.arch ? `/${s.contents.arch}` : ''}
-              </Badge>
-            )}
-          </div>
-          <div>
-            <p className="text-[11px] font-[510] text-muted-foreground">{t('envInstructions')}</p>
-            {/* instructions 는 마크다운 문서 — 렌더링해 보여준다 */}
-            <Markdown content={s.instructions} className="mt-1 text-[12.5px] leading-relaxed" />
-          </div>
-          {s.preset && (
-            <div>
-              <p className="text-[11px] font-[510] text-muted-foreground">{t('envPreset')}</p>
-              <pre className="mt-1 overflow-x-auto font-mono text-[11.5px] leading-relaxed text-muted-foreground">
-                {JSON.stringify(s.preset, null, 2)}
-              </pre>
-            </div>
-          )}
-          {s.contents && s.contents.packages.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1">
-              {s.contents.packages.map((p) => (
-                <Badge key={p} tone="neutral">
-                  {p}
-                </Badge>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {secrets.length > 0 && (
-        <div className="space-y-0.5">
-          <p className="text-[11px] font-[510] text-muted-foreground">{t('requiredSecrets')}</p>
-          {secrets.map((secret) => (
-            <div key={secret.name} className="text-muted-foreground">
-              <span className="font-mono text-foreground">{secret.name}</span>
-              {secret.description ? ` — ${secret.description}` : ''}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// 버전 관리 패널(레지스트리 엔티티 패리티) — 상세 드릴인 안의 버전 목록·스위처·버전 태그·구조 diff. 드릴인은 라우트가
-// 아니라 클라이언트 상태라 열 때 온디맨드로 로드한다. 내 워크스페이스 소유 + 생성자/admin 이면 태그 편집(canManage), 아니면
-// 읽기전용. source=크로스테넌트 public/subset 오너(내 것이면 생략).
-function CapabilityVersionsPanel({
-  id,
-  source,
-  latestVersion,
-  shownVersion,
-  canManage,
-  onShowVersion,
-}: {
-  id: string
-  source?: string
-  latestVersion: string
-  shownVersion: string
-  canManage: boolean
-  onShowVersion: (record: Capability) => void
-}) {
-  const t = useTranslations('capabilityStore')
-  const [data, setData] = useState<CapabilityVersions | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string>()
-  const [switching, startSwitch] = useTransition()
-  const [base, setBase] = useState('')
-  const [candidate, setCandidate] = useState('')
-  const [diff, setDiff] = useState<CapabilitySpecDiff | null>(null)
-  const [diffing, startDiff] = useTransition()
-  const [diffError, setDiffError] = useState<string>()
-
-  const reload = useCallback(() => {
-    setLoading(true)
-    loadCapabilityVersionsAction(id, source).then((r) => {
-      if (r.ok) {
-        setData(r.data)
-        setError(undefined)
-      } else {
-        setError(r.error)
-      }
-      setLoading(false)
-    })
-  }, [id, source])
-  useEffect(() => {
-    reload()
-  }, [reload])
-
-  // 스위처 — 고른 버전의 전체 레코드를 불러 상세 spec 을 교체.
-  const showVersion = (version: string) => {
-    if (version === shownVersion) return
-    startSwitch(async () => {
-      const r = await loadCapabilityVersionAction(id, version, source)
-      if (r.ok) onShowVersion(r.data)
-      else setError(r.error)
-    })
-  }
-
-  const runDiff = () => {
-    if (!base || !candidate) return
-    startDiff(async () => {
-      const r = await diffCapabilityVersionsAction(id, base, candidate, source)
-      if (r.ok) {
-        setDiff(r.data)
-        setDiffError(undefined)
-      } else {
-        setDiff(null)
-        setDiffError(r.error)
-      }
-    })
-  }
-
-  if (loading) return <p className="text-[11px] text-muted-foreground">{t('versionsLoading')}</p>
-  if (error) return <p className="text-[11px] text-[var(--color-danger)]">{error}</p>
-  if (!data || data.versions.length === 0) return null
-
-  const descending = [...data.versions].reverse() // 최신 먼저
-
-  return (
-    <div className="space-y-2 rounded-md border border-border/70 bg-background/40 p-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1 text-[11px] font-[510] text-muted-foreground">
-          <History className="size-3.5" />
-          {t('versionsLabel')}
-        </span>
-        <Combobox
-          options={descending.map((v) => ({
-            value: v,
-            label: v === latestVersion ? `${v} · ${t('latest')}` : v,
-            ...((data.versionTags[v]?.length ?? 0) > 0
-              ? { hint: data.versionTags[v]?.join(' · ') }
-              : {}),
-          }))}
-          value={shownVersion}
-          onChange={showVersion}
-          disabled={switching}
-          className="w-[200px]"
-          aria-label={t('versionsLabel')}
-        />
-        {switching && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-      </div>
-
-      {(canManage || (data.versionTags[shownVersion]?.length ?? 0) > 0) && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-faint">{t('versionTagsLabel')}</span>
-          <VersionTagsEditor
-            entity="capability"
-            id={id}
-            version={shownVersion}
-            tags={data.versionTags[shownVersion] ?? []}
-            canEdit={canManage}
-            onSaved={reload}
-          />
-        </div>
-      )}
-
-      {data.versions.length > 1 && (
-        <div className="space-y-1.5 border-t border-border/60 pt-2">
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-            <GitCompare className="size-3.5 text-muted-foreground" />
-            <VersionSelect
-              versions={descending}
-              value={base}
-              placeholder={t('diffBase')}
-              onChange={setBase}
-            />
-            <ArrowRight className="size-3 text-faint" />
-            <VersionSelect
-              versions={descending}
-              value={candidate}
-              placeholder={t('diffCandidate')}
-              onChange={setCandidate}
-            />
-            <button
-              type="button"
-              disabled={!base || !candidate || diffing}
-              onClick={runDiff}
-              className="rounded border border-border px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-            >
-              {t('diffCompare')}
-            </button>
-            {diffing && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-          </div>
-          {diffError && <p className="text-[11px] text-[var(--color-danger)]">{diffError}</p>}
-          {diff && <CapabilityDiffView diff={diff} />}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function VersionSelect({
-  versions,
-  value,
-  placeholder,
-  onChange,
-}: {
-  versions: string[]
-  value: string
-  placeholder: string
-  onChange: (v: string) => void
-}) {
-  return (
-    <Combobox
-      options={versions.map((v) => ({ value: v, label: v }))}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      className="w-[120px]"
-      aria-label={placeholder}
-    />
-  )
-}
-
-// 구조 diff 렌더 — 필드 경로별 before → after + added/removed/changed 톤. typeChanged(종류 재구성) 힌트.
-function CapabilityDiffView({ diff }: { diff: CapabilitySpecDiff }) {
-  const t = useTranslations('capabilityStore')
-  if (diff.changes.length === 0)
-    return <p className="text-[11px] text-muted-foreground">{t('diffNoChanges')}</p>
-  const label = (change: CapabilitySpecDiff['changes'][number]['change']) =>
-    change === 'added' ? t('diffAdded') : change === 'removed' ? t('diffRemoved') : t('diffChanged')
-  const tone = (change: CapabilitySpecDiff['changes'][number]['change']) =>
-    change === 'added' ? 'success' : change === 'removed' ? 'danger' : 'warning'
-  return (
-    <div className="space-y-1.5">
-      <p className="text-[11px] text-muted-foreground">
-        {t('diffSummary', {
-          added: diff.summary.added,
-          removed: diff.summary.removed,
-          changed: diff.summary.changed,
-        })}
-        {diff.typeChanged ? ` · ${t('diffTypeChanged')}` : ''}
-      </p>
-      <div className="space-y-1">
-        {diff.changes.map((ch) => (
-          <div
-            key={ch.path}
-            className="rounded border border-border/60 bg-secondary/30 p-1.5 text-[11px]"
-          >
-            <div className="flex items-center gap-1.5">
-              <Badge tone={tone(ch.change)}>{label(ch.change)}</Badge>
-              <code className="break-all font-mono text-foreground">{ch.path}</code>
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-[10.5px] text-muted-foreground">
-              <span className="break-all line-through decoration-[var(--color-danger)]/50">
-                {ch.before}
-              </span>
-              <ArrowRight className="size-3 shrink-0 text-faint" />
-              <span className="break-all text-foreground">{ch.after}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
   )
 }
 

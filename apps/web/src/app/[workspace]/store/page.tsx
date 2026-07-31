@@ -20,9 +20,6 @@ export default async function StorePage() {
   const { principal, ctx } = await currentPrincipal()
   const canRead = can(principal?.roles, 'capabilities:read')
   const canWrite = can(principal?.roles, 'capabilities:write')
-  const canAdopt = can(principal?.roles, 'agents:write') // 채택 = 내 에이전트 설정 편집
-  const canImportEnvironment = can(principal?.roles, 'settings:write')
-  const canImportSkill = can(principal?.roles, 'skills:write') // 스킬 가져오기 = 라이브러리에 사본을 만드는 일 // 환경 가져오기 = 워크스페이스 인벤토리(설정)
   const isAdmin = (principal?.roles ?? []).includes('admin')
   // 인스턴스 정책(operator env) — 멤버도 public 발행 가능? admin 은 항상 가능. UX 게이팅용(서버가 최종 강제).
   const allowMemberPublicPublish = principal?.config?.allowMemberPublicPublish === true
@@ -56,13 +53,9 @@ export default async function StorePage() {
           variant="catalog"
           authors={store.authors}
           canWrite={canWrite}
-          canAdopt={canAdopt}
-          canImportEnvironment={canImportEnvironment}
-          canImportSkill={canImportSkill}
           adoptedKeys={store.adoptedKeys}
           importedSkillKeys={store.importedSkillKeys}
           adoptedEnvironments={store.adoptedEnvironments}
-          secretNames={store.secretNames}
           myWorkspaces={store.myWorkspaces}
           imageRegistries={store.imageRegistries}
           currentWorkspace={principal?.workspace ?? ''}

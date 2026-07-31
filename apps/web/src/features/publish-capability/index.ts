@@ -1,4 +1,7 @@
 export { CapabilityStore } from './ui/capability-store'
+// 스토어 상세 — 다이얼로그가 아니라 라우트(`/[workspace]/store/[source]/[id]`)가 렌더한다.
+export { CapabilityDetailView } from './ui/capability-detail-view'
+export { capKey, storeItemHref, type StoreVariant } from './lib/capability-display'
 // 코드 도구 검증 패널(check/run) — 스토어 상세와 Settings › Agent › Tools 상세가 같은 실행 계약으로 공유한다.
 export { CodeTryPanel, type CodeTryTargetBuilder } from './ui/code-try-panel'
 export { EnvironmentWorkbench } from './ui/environment-workbench'

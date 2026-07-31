@@ -14,7 +14,7 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // pull-usability verification (warn-not-block). authZ (capabilities:read / settings:write) is control-plane enforced.
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
-// 환경 인벤토리/가져옴 상태를 렌더하는 표면 — 스토어(카탈로그·내 발행)와 설정의 Environments 페이지.
+// 환경 인벤토리/가져옴 상태를 렌더하는 표면 — 스토어(카탈로그·내 발행·상세)와 설정의 Environments 페이지.
 function revalidateEnvironmentPages(): void {
   for (const path of [
     '/[workspace]/store',
@@ -22,6 +22,8 @@ function revalidateEnvironmentPages(): void {
     '/[workspace]/settings/environments',
   ])
     revalidatePath(path)
+  // 가져오기/제거·재검증을 누르는 자리 — 동적 세그먼트라 'page' 타입으로 지정해야 매칭된다.
+  revalidatePath('/[workspace]/store/[source]/[id]', 'page')
 }
 
 export async function listAdoptedEnvironmentsAction(): Promise<

@@ -29,7 +29,7 @@ function toSaveBody(agent: AgentSpec | undefined, capabilities: CapabilityRef[])
   }
 }
 
-// 채택 상태를 렌더하는 표면 — 스토어(카탈로그·내 발행)와 설정(에이전트의 채택 목록 + 관리 페이지들).
+// 채택 상태를 렌더하는 표면 — 스토어(카탈로그·내 발행·상세)와 설정(에이전트의 채택 목록 + 관리 페이지들).
 function revalidateAdoptionPages(): void {
   for (const path of [
     '/[workspace]/store',
@@ -39,6 +39,8 @@ function revalidateAdoptionPages(): void {
     '/[workspace]/settings/tools',
   ])
     revalidatePath(path)
+  // 추가/제거를 실제로 누르는 자리 — 동적 세그먼트라 'page' 타입으로 지정해야 매칭된다.
+  revalidatePath('/[workspace]/store/[source]/[id]', 'page')
 }
 
 export interface AdoptActionResult {

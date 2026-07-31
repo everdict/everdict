@@ -30,6 +30,8 @@ export async function importSkillAction(body: {
       '/[workspace]/settings/agent',
     ])
       revalidatePath(path)
+    // 가져오기를 누르는 자리(스토어 상세) — 동적 세그먼트라 'page' 타입으로 지정해야 매칭된다.
+    revalidatePath('/[workspace]/store/[source]/[id]', 'page')
     return { ok: true, skill }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

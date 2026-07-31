@@ -365,6 +365,24 @@ split — **no API/authz change, web IA only**:
   team asset nobody but its author can see. A tool kind is one member's agent's until shared; an environment is
   what a harness pins, held workspace-wide on `WorkspaceSettings.adoptedEnvironments`. Discovery/import of other workspaces' environments stays in `/store` (linked). The store substrate
   (entity, versions, reach kernel, routes) is unchanged — presentation only.
+### The store DETAIL is a route, not a dialog (confirmed 2026-07-31)
+
+A store row is a LINK to `/{workspace}/store/{source}/{id}` (`?from=mine` when the entry point was the workspace's own
+publications — it picks the back link and shows the reach badge). The detail used to be a modal over the list; it is
+now a page, for the same reason the tool detail is (`### The tool DETAIL`): the right-hand infra/chat panel is half the
+workflow, a full-screen spec (code + try-runner, SKILL.md + attachment tabs, an environment's agent contract) does not
+belong in a box over the list, and a published capability deserves an address a member can share.
+
+- The page fetches the record server-side (`getCapability(id, source)` — first-party `_shared` entries resolve there
+  too) and 404s on anything the caller cannot see, so a foreign private publication stays indistinguishable from a
+  missing one. `?version=` is not part of the address: the version switcher stays an on-demand client read
+  (`CapabilityVersionsPanel`), because inspecting an old version is a lens on the same entity, not another entity.
+- **The detail is the only surface that adds/removes**: list rows stay read-only (manage menu aside), and
+  `CapabilityDetailView` owns the whole per-kind decision — agent adoption (`agents:write`, with the secret-binding /
+  write-opt-in dialog), skill copy-into-library (`skills:write`), environment import + pull re-check (`settings:write`).
+  Mutations `router.refresh()` the page so its own "in your workspace" state is re-read from the control plane, on top
+  of the server actions' `revalidatePath` of the list surfaces (which now includes this dynamic route, `'page'` typed).
+
 ## The member's agent: Tools + Skills are per member (confirmed 2026-07-29)
 
 A workspace is not one agent. Two members of the same workspace want different tools on the assistant they talk to and
