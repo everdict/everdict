@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation'
 import {
   Activity,
   Boxes,
+  ChevronRight,
   Cpu,
   Eye,
   EyeOff,
@@ -72,11 +73,13 @@ function usageHref(ref: SecretUsageMetaRef, workspace: string): string | undefin
   }
 }
 
-// The live reference sites of one secret — chips (linked where the resource has a page), or an "unused" badge when
-// the secret is referenced nowhere. Computed by the control plane per request, so a removed reference is already gone.
+// The live reference sites of one secret — collapsed to ONE line by default ("used in N places"), because the point of
+// showing references is knowing the secret IS in use, not reading every site; expanding reveals the linked chips.
+// Referenced nowhere → an "unused" badge. Computed by the control plane per request, so a removed reference is already gone.
 function UsageSites({ refs }: { refs: SecretUsageMetaRef[] }) {
   const t = useTranslations('manageWorkspaceSecrets')
   const { workspace } = useParams<{ workspace: string }>()
+  const [open, setOpen] = useState(false)
   if (refs.length === 0)
     return (
       <Badge tone="outline" className="mt-1">
@@ -84,39 +87,51 @@ function UsageSites({ refs }: { refs: SecretUsageMetaRef[] }) {
       </Badge>
     )
   return (
-    <span className="mt-1 flex flex-wrap items-center gap-1">
-      <span className="text-[11px] text-faint">{t('usedBy')}</span>
-      {refs.map((ref) => {
-        const Icon = USAGE_KIND_ICON[ref.kind]
-        const href = usageHref(ref, workspace)
-        const key = `${ref.kind}:${ref.resourceId ?? ref.label}:${ref.field}:${ref.detail ?? ''}`
-        const chip =
-          'inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[11px]'
-        const body = (
-          <>
-            <Icon className="size-3 shrink-0 text-muted-foreground/70" />
-            <span className="font-mono text-foreground/80">{ref.label}</span>
-            <span className="text-faint">
-              {t(`usageField.${ref.field}`)}
-              {ref.detail ? ` ${ref.detail}` : ''}
-            </span>
-          </>
-        )
-        return href ? (
-          <Link
-            key={key}
-            href={href}
-            title={t(`usageKind.${ref.kind}`)}
-            className={cn(chip, 'transition-colors hover:border-primary/40 hover:bg-muted')}
-          >
-            {body}
-          </Link>
-        ) : (
-          <span key={key} title={t(`usageKind.${ref.kind}`)} className={chip}>
-            {body}
-          </span>
-        )
-      })}
+    <span className="mt-1 block">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 text-[11px] text-faint transition-colors hover:text-foreground"
+      >
+        <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} />
+        {t('usedInCount', { count: refs.length })}
+      </button>
+      {open && (
+        <span className="mt-1 flex flex-wrap items-center gap-1">
+          {refs.map((ref) => {
+            const Icon = USAGE_KIND_ICON[ref.kind]
+            const href = usageHref(ref, workspace)
+            const key = `${ref.kind}:${ref.resourceId ?? ref.label}:${ref.field}:${ref.detail ?? ''}`
+            const chip =
+              'inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[11px]'
+            const body = (
+              <>
+                <Icon className="size-3 shrink-0 text-muted-foreground/70" />
+                <span className="font-mono text-foreground/80">{ref.label}</span>
+                <span className="text-faint">
+                  {t(`usageField.${ref.field}`)}
+                  {ref.detail ? ` ${ref.detail}` : ''}
+                </span>
+              </>
+            )
+            return href ? (
+              <Link
+                key={key}
+                href={href}
+                title={t(`usageKind.${ref.kind}`)}
+                className={cn(chip, 'transition-colors hover:border-primary/40 hover:bg-muted')}
+              >
+                {body}
+              </Link>
+            ) : (
+              <span key={key} title={t(`usageKind.${ref.kind}`)} className={chip}>
+                {body}
+              </span>
+            )
+          })}
+        </span>
+      )}
     </span>
   )
 }

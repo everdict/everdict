@@ -1516,7 +1516,7 @@
     "emptyTitle": "No secrets yet.",
     "emptyHint": " Add one with “Add secret”.",
     "updatedHint": "Updated {date}",
-    "usedBy": "Used by",
+    "usedInCount": "Used in {count, plural, one {# place} other {# places}}",
     "unused": "Unused",
     "usageKind": {
       "harness": "Harness",

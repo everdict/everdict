@@ -1516,7 +1516,7 @@
     "emptyTitle": "아직 등록한 시크릿이 없어요.",
     "emptyHint": " “시크릿 추가”로 넣어요.",
     "updatedHint": "갱신 {date}",
-    "usedBy": "사용처",
+    "usedInCount": "{count}곳에서 사용 중",
     "unused": "미사용",
     "usageKind": {
       "harness": "하네스",
