@@ -1,4 +1,11 @@
-import { type CaseJob, CaseJobSchema, type CaseResult, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
+import { arch, hostname, platform } from "node:os";
+import {
+  type CaseJob,
+  CaseJobSchema,
+  type CaseResult,
+  RUNNER_PROTOCOL_VERSION,
+  type TraceEvent,
+} from "@everdict/contracts";
 import { classifyFailure, stageForError } from "@everdict/domain";
 import type { EnvRecordSink } from "@everdict/topology";
 
@@ -195,12 +202,34 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
           }
         : undefined;
       reportLog?.("▶ Started — running the case on this self-hosted runner.");
+      // M1 — the self-hosted lane's infra-plane record: no orchestrator sees this case, so the RUNNER (the layer
+      // that does) stamps the host identity onto the result's trace. The runner id itself is already on the run
+      // record (the CP stamps it at lease); this adds the leased/finished marks + WHERE it physically ran.
+      const leasedAtMs = Date.now();
+      const hostInfra = (event: string, message: string): TraceEvent => {
+        const now = Date.now();
+        return {
+          t: Math.max(0, now - leasedAtMs),
+          kind: "infra",
+          scope: "placement",
+          event,
+          message,
+          node: hostname(),
+          at: new Date(now).toISOString(),
+        };
+      };
+      const leasedMark = hostInfra(
+        "leased",
+        `self-hosted runner picked the job — host ${hostname()} (${platform()}/${arch()})`,
+      );
       try {
         const result = await deps.runJob(parsed.data, {
           signal: controller.signal,
           ...(reportScreen ? { reportScreen } : {}),
           ...(recordSink ? { recordSink } : {}),
         });
+        // Best-effort append — the infra record must never fail a job (a test double may return a bare object).
+        result.trace = [...(result.trace ?? []), leasedMark, hostInfra("finished", "case finished on this runner")];
         await deps.callJson("submit_job_result", { jobId, result });
         setStatus(active > 1 ? `running ${active - 1} job(s)` : "idle", "info");
         log(`✓ job ${jobId} done → replied`);
@@ -217,7 +246,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         const failed = {
           caseId: parsed.data.evalCase.id,
           harness: `${parsed.data.harness.id}@${parsed.data.harness.version}`,
-          trace: [{ t: 0, kind: "error", message: errMsg(e) }],
+          trace: [leasedMark, { t: 1, kind: "error", message: errMsg(e) }],
           snapshot: { kind: "prompt", output: "" },
           scores: [
             {

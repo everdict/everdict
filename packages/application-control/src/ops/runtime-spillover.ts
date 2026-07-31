@@ -54,7 +54,8 @@ export async function executeWithSpillover(
       return { result, target };
     } catch (err) {
       const failure = classifyFailure(err, "dispatch");
-      // Only an infra failure says anything about the runtime's health.
+      // Only an infra failure says anything about the runtime's health. (The closed→open transition itself is
+      // announced by the breaker's own onOpen hook — wired where the breaker is constructed.)
       if (failure.class === "infra") opts.breaker.failure(keyOf(target));
       lastErr = err;
       const next = candidates[i + 1];

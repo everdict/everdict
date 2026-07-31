@@ -289,6 +289,35 @@ describe("RunService", () => {
     expect(done?.error?.message).toBe("boom");
   });
 
+  it("emits run.placement_blocked ONCE when the dispatch layer reports the run cannot start (M2)", async () => {
+    // The wait loop may report the blocked verdict on every poll — the fact must stay one signal per run.
+    const store = new InMemoryRunStore();
+    const emitted: Array<{ kind: string; message: string }> = [];
+    const blockedDispatcher: Dispatcher = {
+      async dispatch(job, opts) {
+        opts?.onWaiting?.("placement blocked — memory exhausted on 1 node(s)");
+        opts?.onWaiting?.("placement blocked — memory exhausted on 1 node(s)");
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({
+      dispatcher: blockedDispatcher,
+      store,
+      newId: ids,
+      events: {
+        async emit(input) {
+          emitted.push({ kind: input.kind, message: input.message });
+          return undefined;
+        },
+      },
+    });
+    await svc.submit({ tenant: "t", harness: { id: "scripted", version: "0" }, case: CASE });
+    await flush();
+    const blocked = emitted.filter((e) => e.kind === "run.placement_blocked");
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]?.message).toContain("memory exhausted");
+  });
+
   it("a failed single run keeps the classified failure + backend evidence and seals it as its trajectory", async () => {
     // Regression (live-caught on Nomad): a failed SINGLE run kept only error {code,message} — the classified
     // CaseFailure with the throw-time evidence (placement identity + log tail) was a batch-only privilege, and

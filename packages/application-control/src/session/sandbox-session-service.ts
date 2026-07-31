@@ -239,6 +239,17 @@ export class SandboxSessionService {
         createdBy: input.createdBy,
         expiresAtMs: new Date(this.now()).getTime() + ttlSec * 1000,
         trace: [
+          // M3 — the sandbox's infra-plane record: the driver container identity, so the sealed trajectory says
+          // WHERE this session physically ran (the sandbox twin of the backend's placement record).
+          {
+            t: 0,
+            kind: "infra",
+            scope: "placement",
+            event: "provisioned",
+            message: `sandbox container${handle.id !== undefined ? ` ${handle.id}` : ""} (image ${resolved.image})`,
+            ...(handle.id !== undefined ? { unit: handle.id } : {}),
+            at: this.now(),
+          },
           {
             t: 0,
             kind: "env_action",
@@ -252,9 +263,7 @@ export class SandboxSessionService {
         ],
         t: 1,
         execCount: 0,
-        ...(resolved.playground
-          ? { playground: { resolved: resolved.playground, taskSeq: 0, tasks: [] } }
-          : {}),
+        ...(resolved.playground ? { playground: { resolved: resolved.playground, taskSeq: 0, tasks: [] } } : {}),
       });
       // Durable expiry (T-b): best-effort — a Temporal outage never blocks the session (the in-process
       // sweep still bounds the TTL while this process lives).
@@ -364,7 +373,14 @@ export class SandboxSessionService {
       throw err;
     }
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
-    const entry: TaskEntry = { runId: id, caseId, task: input.task, submittedAt: this.now(), status: "running", events: [] };
+    const entry: TaskEntry = {
+      runId: id,
+      caseId,
+      task: input.task,
+      submittedAt: this.now(),
+      status: "running",
+      events: [],
+    };
     playground.tasks.push(entry);
     // The session's own trajectory keeps POINTERS (task boundaries), never the events — the child run owns its trace.
     live.trace.push({ t: live.t++, kind: "env_action", action: "task.start", detail: { run: id, caseId } });

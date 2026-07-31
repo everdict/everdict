@@ -289,7 +289,26 @@ async function main(): Promise<void> {
     image,
     secretStore,
   });
-  const { metrics, breaker } = buildObservability(scheduler);
+  // M2 — runtime.circuit_opened rides the breaker's own closed→open transition (late-bound: the platform event
+  // service is built after the scheduler). Key format is `${tenant}:${runtimeId}` — split on the FIRST colon
+  // (the runtime half may itself carry colons, e.g. self:ws).
+  const { metrics, breaker } = buildObservability(scheduler, {
+    onBreakerOpen: (key) => {
+      const sep = key.indexOf(":");
+      if (sep <= 0) return;
+      const tenant = key.slice(0, sep);
+      const runtime = key.slice(sep + 1);
+      void lateEvents
+        .emit({
+          workspace: tenant,
+          kind: "runtime.circuit_opened",
+          subject: { type: "runtime", id: runtime },
+          payload: { runtime },
+          message: `Runtime ${runtime} marked unhealthy — the spillover circuit opened (repeated infra failures)`,
+        })
+        ?.catch?.(() => {});
+    },
+  });
   startAutoscaler({ autoscale, scalingTargets, scheduler });
   const { budget, usageMeter } = await buildBudgets({ budgetStore, usageStore });
 

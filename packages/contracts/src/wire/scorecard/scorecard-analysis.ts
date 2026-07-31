@@ -50,5 +50,16 @@ export const ScorecardAnalysisBundleResponseSchema = z.object({
       failure: z.unknown().optional().describe("Classified failure (when the case failed)"),
     }),
   ),
+  // The infra lens (M5) — the batch's classified-failure aggregation, derived from the per-case failures above.
+  infra: z
+    .object({
+      failedCases: z.number().int(),
+      byClass: z.record(z.string(), z.number().int()),
+      byCode: z.record(z.string(), z.number().int()),
+      oom: z.number().int(),
+      placementBlocked: z.number().int(),
+    })
+    .optional()
+    .describe("Absent on bundles offloaded before the lens existed"),
 });
 export type ScorecardAnalysisBundleResponse = z.infer<typeof ScorecardAnalysisBundleResponseSchema>;

@@ -51,6 +51,9 @@ export const TRIGGERABLE_EVENT_KINDS = [
   'schedule.fired',
   'trace.threshold_crossed',
   'trace.ingestion_throttled',
+  // M2 라이브 이상 팩트 — 배치 불가/런타임 서킷 오픈(서버 목록과 동일 어휘)
+  'run.placement_blocked',
+  'runtime.circuit_opened',
   // Task ledger (agent-teams) — "new work appeared" / "a dependency cleared" (same vocabulary as the server list).
   'task.created',
   'task.completed',

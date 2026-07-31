@@ -1438,29 +1438,40 @@ export class K8sBackend
       const pods = (await api.podsForJob(name, ns)) ?? [];
       const pod = pods.at(-1);
       const out: TraceEvent[] = [
-        { t: 0, kind: "infra", scope: "placement", event: "submitted", message: `k8s job ${name} (namespace ${ns})` },
+        {
+          t: 0,
+          kind: "infra",
+          scope: "placement",
+          event: "submitted",
+          message: `k8s job ${name} (namespace ${ns})`,
+          at: new Date(t0).toISOString(),
+        },
       ];
       if (!pod) return out;
+      const placedMs = Date.now();
       out.push({
-        t: Math.max(0, Date.now() - t0),
+        t: Math.max(0, placedMs - t0),
         kind: "infra",
         scope: "placement",
         event: "placed",
         message: `pod ${pod.name}${pod.node ? ` on ${pod.node}` : ""}`,
         unit: pod.name,
         ...(pod.node ? { node: pod.node } : {}),
+        at: new Date(placedMs).toISOString(),
       });
       const events = (await api.objectEvents(pod.name, ns).catch(() => undefined)) ?? [];
       for (const e of events.slice(-20)) {
-        const at = e.at ? Date.parse(e.at) : Number.NaN;
+        const atMs = e.at ? Date.parse(e.at) : Number.NaN;
+        const epochMs = Number.isFinite(atMs) ? atMs : Date.now();
         out.push({
-          t: Number.isFinite(at) ? Math.max(0, at - t0) : Math.max(0, Date.now() - t0),
+          t: Math.max(0, epochMs - t0),
           kind: "infra",
           scope: "placement",
           ...(e.reason ? { event: e.reason } : {}),
           message: e.message,
           unit: pod.name,
           ...(pod.node ? { node: pod.node } : {}),
+          at: new Date(epochMs).toISOString(),
         });
       }
       return out.sort((a, b) => a.t - b.t);

@@ -57,6 +57,16 @@ export const PLATFORM_EVENT_KINDS = [
   // at the door, never a silent drop). Emitted with an in-process cooldown so a retrying firehose reads as
   // one signal, not a flood.
   "trace.ingestion_throttled",
+  // Runtime-debugging live-anomaly facts (M2 — the bridge from monitoring to automation): perceptions the
+  // execution machinery ALREADY computes, announced so subscriptions/agents can react while the run is alive
+  // instead of a person polling. Bounded by construction, never a per-poll flood:
+  // - run.placement_blocked: the cluster scheduler cannot place a run's case right now (Nomad blocked
+  //   evaluation / capacity verdict). Emitted ONCE per run (and once per scorecard batch) at the first
+  //   sighting, with the scheduler's own verdict in the payload.
+  "run.placement_blocked",
+  // - runtime.circuit_opened: the spillover circuit breaker opened for a (tenant, runtime) lane — the runtime
+  //   is being skipped as unhealthy. Emitted at the OPEN transition only (the breaker already dedupes state).
+  "runtime.circuit_opened",
   // Task-ledger lifecycle facts (the workspace coordination substrate, docs/architecture/agent-teams.md) —
   // emitted by TaskService, the single choke point both transports call. created/completed are the
   // trigger-matchable pair ("new work appeared" / "a dependency cleared" — the team wake-up signals); claimed/

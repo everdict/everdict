@@ -43,6 +43,10 @@ export const TRIGGERABLE_EVENT_KINDS = [
   // agent (bounded by the activation cooldown; the woken run is enveloped like any other).
   "trace.threshold_crossed",
   "trace.ingestion_throttled",
+  // M2 live-anomaly facts — "the cluster can't place this" / "a runtime lane went unhealthy" wake the ops
+  // agent while the run is still alive (both emitted once per transition, never per poll).
+  "run.placement_blocked",
+  "runtime.circuit_opened",
   // Task ledger (agent-teams): "new work appeared" / "a dependency cleared" — the team wake-up pair. The
   // creator never wakes on its own task (causedBy loop guard); cross-agent wakes are the ledger's purpose.
   "task.created",

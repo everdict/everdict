@@ -65,6 +65,8 @@ export class ScorecardBatchService {
   private readonly concurrency: number;
   private readonly scoring: ScoringService;
   private readonly inFlight: Map<string, AbortController>;
+  // M2 dedup — one run.placement_blocked fact per batch (the step timeline keeps every sighting).
+  private readonly placementBlockedAnnounced = new Set<string>();
   // Runtime health memory for sharded-batch spillover (docs/architecture/batch-resilience.md).
   private readonly breaker: CircuitBreaker;
   private readonly getRecord: (id: string) => Promise<ScorecardRecord | undefined>;
@@ -560,8 +562,23 @@ export class ScorecardBatchService {
             boostMb: ctx.memoryBoostMb?.[caseId],
             oomAutoBoost: ctx.oomAutoBoost,
             speculation: ctx.speculation,
-            onWaiting: (reason) =>
-              void this.appendBatchStep(id, { phase: "dispatch", status: "info", message: reason }),
+            onWaiting: (reason) => {
+              void this.appendBatchStep(id, { phase: "dispatch", status: "info", message: reason });
+              // M2 live-anomaly fact — ONCE per batch (500 blocked cases must read as one signal, not a flood):
+              // the same verdict the step timeline shows, announced so subscriptions/agents can react.
+              if (!this.placementBlockedAnnounced.has(id)) {
+                this.placementBlockedAnnounced.add(id);
+                void this.deps.events
+                  ?.emit({
+                    workspace: ctx.tenant,
+                    kind: "run.placement_blocked",
+                    subject: { type: "scorecard", id },
+                    payload: { reason },
+                    message: `Scorecard ${id} has cases that cannot start — ${reason}`,
+                  })
+                  ?.catch?.(() => {});
+              }
+            },
             ...(childId && runStore ? { onStarted: () => void this.markChildRunning(childId) } : {}),
             onStep: (message, cid) =>
               void this.appendBatchStep(id, { phase: "case", status: "info", message, caseId: cid }),

@@ -451,6 +451,15 @@ export interface AnalysisBundle {
   harness: string;
   summary: MetricSummary[];
   cases: Array<{ caseId: string; verdict: boolean | undefined; scores: Score[]; failure?: CaseFailure }>;
+  // M5 — the infra lens: the batch's classified-failure aggregation ("was this the agent or the platform").
+  // Derived from the SAME per-case failures below, so a consumer can render the trend without re-walking cases.
+  infra: {
+    failedCases: number; // cases carrying a classified failure (agent FAILs carry none by design)
+    byClass: Record<string, number>; // infra | config | harness | agent
+    byCode: Record<string, number>; // OOM_KILLED | UPSTREAM_ERROR | …
+    oom: number; // OOM_KILLED count (the "raise resources" signal)
+    placementBlocked: number; // placement_blocked-coded failures (the "cluster capacity" signal)
+  };
 }
 
 export function analysisBundle(
@@ -458,6 +467,19 @@ export function analysisBundle(
   summary: MetricSummary[],
   results: CaseResult[],
 ): AnalysisBundle {
+  const byClass: Record<string, number> = {};
+  const byCode: Record<string, number> = {};
+  let failedCases = 0;
+  let oom = 0;
+  let placementBlocked = 0;
+  for (const r of results) {
+    if (!r.failure) continue;
+    failedCases++;
+    byClass[r.failure.class] = (byClass[r.failure.class] ?? 0) + 1;
+    byCode[r.failure.code] = (byCode[r.failure.code] ?? 0) + 1;
+    if (r.failure.code === "OOM_KILLED") oom++;
+    if (r.failure.message.includes("placement blocked")) placementBlocked++;
+  }
   return {
     scorecardId: meta.scorecardId,
     dataset: meta.dataset,
@@ -469,6 +491,7 @@ export function analysisBundle(
       scores: r.scores,
       ...(r.failure ? { failure: r.failure } : {}),
     })),
+    infra: { failedCases, byClass, byCode, oom, placementBlocked },
   };
 }
 

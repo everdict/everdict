@@ -181,18 +181,19 @@ export function nomadInfraEvents(
   return events
     .filter((e) => (e.DisplayMessage ?? "").trim() !== "" || (e.Type ?? "").trim() !== "")
     .slice(-PLACEMENT_EVENT_CAP)
-    .map((e) => ({
-      t:
-        typeof e.Time === "number" && e.Time > 0
-          ? Math.max(0, Math.floor(e.Time / 1e6) - t0)
-          : Math.max(0, Date.now() - t0),
-      kind: "infra" as const,
-      scope: "placement" as const,
-      ...(e.Type ? { event: e.Type } : {}),
-      message: (e.DisplayMessage ?? e.Type ?? "").trim(),
-      unit,
-      ...(node ? { node } : {}),
-    }));
+    .map((e) => {
+      const epochMs = typeof e.Time === "number" && e.Time > 0 ? Math.floor(e.Time / 1e6) : Date.now();
+      return {
+        t: Math.max(0, epochMs - t0),
+        kind: "infra" as const,
+        scope: "placement" as const,
+        ...(e.Type ? { event: e.Type } : {}),
+        message: (e.DisplayMessage ?? e.Type ?? "").trim(),
+        unit,
+        ...(node ? { node } : {}),
+        at: new Date(epochMs).toISOString(),
+      };
+    });
 }
 
 // Nomad task events → the wire PlacementEvent feed (newest PLACEMENT_EVENT_CAP, empty ones dropped, ns → ISO).
@@ -773,14 +774,16 @@ export class NomadBackend
     const t0 = Date.now();
     const infra: TraceEvent[] = [];
     const mark = (event: string, message: string, extra?: { unit?: string; node?: string }): void => {
+      const now = Date.now();
       infra.push({
-        t: Math.max(0, Date.now() - t0),
+        t: Math.max(0, now - t0),
         kind: "infra",
         scope: "placement",
         event,
         message,
         ...(extra?.unit ? { unit: extra.unit } : {}),
         ...(extra?.node ? { node: extra.node } : {}),
+        at: new Date(now).toISOString(),
       });
     };
     const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts, jobId));

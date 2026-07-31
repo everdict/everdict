@@ -59,6 +59,9 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     unit: z.string().optional(), // alloc id / pod name
     node: z.string().optional(),
     service: z.string().optional(), // the topology unit's name (scope "service")
+    // Absolute wall-clock (ISO) when the emitter knows it — the cross-plane alignment anchor: `t` is relative
+    // to the EMITTER's clock (dispatch t0 for infra vs in-job t0 for agent events), `at` is absolute.
+    at: z.string().optional(),
   }),
 ]);
 export type TraceEvent = z.infer<typeof TraceEventSchema>;

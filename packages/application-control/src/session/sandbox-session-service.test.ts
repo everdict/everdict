@@ -228,8 +228,9 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
     expect(runStore.events.at(-1)).toEqual({ op: "update", kinds: ["run.completed"] });
 
     const sealed = await trajectories.store.get("acme", record.id);
-    expect(sealed?.meta).toMatchObject({ source: "run", eventCount: 6 }); // start + 2×(call+result) + close
+    expect(sealed?.meta).toMatchObject({ source: "run", eventCount: 7 }); // infra(provisioned) + start + 2×(call+result) + close
     expect(sealed?.events.map((e) => e.kind)).toEqual([
+      "infra", // M3 — the container identity leads the trajectory (WHERE the session physically ran)
       "env_action",
       "tool_call",
       "tool_result",
@@ -380,7 +381,10 @@ function fakeBudget(opts: { admitError?: boolean } = {}) {
 }
 
 describe("SandboxSessionService — the harness playground (test cases in a live session)", () => {
-  const boot = async (over: Partial<SandboxSessionServiceDeps> = {}, harnessOpts: Parameters<typeof fakePlaygroundHarness>[0] = {}) => {
+  const boot = async (
+    over: Partial<SandboxSessionServiceDeps> = {},
+    harnessOpts: Parameters<typeof fakePlaygroundHarness>[0] = {},
+  ) => {
     const fake = fakePlaygroundHarness(harnessOpts);
     const ctx = build({ resolveSessionHarness: async () => fake.resolved, ...over });
     const record = await ctx.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } });
@@ -415,15 +419,25 @@ describe("SandboxSessionService — the harness playground (test cases in a live
 
   it("no resolver → 400; resolver miss → 404; an imageless spec without harness.image → 400 naming the fix", async () => {
     const bare = build();
-    await expect(bare.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } })).rejects.toMatchObject({ status: 400 });
+    await expect(
+      bare.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } }),
+    ).rejects.toMatchObject({ status: 400 });
     const missing = build({ resolveSessionHarness: async () => undefined });
-    await expect(missing.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "nope" } })).rejects.toMatchObject({ status: 404 });
+    await expect(
+      missing.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "nope" } }),
+    ).rejects.toMatchObject({ status: 404 });
     const imageless = fakePlaygroundHarness({ image: undefined });
     const noImage = build({ resolveSessionHarness: async () => imageless.resolved });
-    await expect(noImage.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } })).rejects.toMatchObject({ status: 400 });
+    await expect(
+      noImage.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } }),
+    ).rejects.toMatchObject({ status: 400 });
     // the same imageless spec boots when the caller provides the image
     const withImage = build({ resolveSessionHarness: async () => imageless.resolved });
-    const rec = await withImage.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc", image: "node:22" } });
+    const rec = await withImage.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      harness: { id: "cc", image: "node:22" },
+    });
     expect(rec.session?.image).toBe("node:22");
   });
 
@@ -490,7 +504,7 @@ describe("SandboxSessionService — the harness playground (test cases in a live
   it("closing the session mid-task aborts the drive: the child settles failed{CANCELLED} with its partial trace sealed", async () => {
     const { service, runStore, trajectories, session } = await boot({}, { hold: true });
     const child = await service.submitTask(creator, session.id, { task: "long one" });
-    await until(() => (trajectories.sealed.size >= 0 && (runStore.rows.get(child.id) !== undefined)));
+    await until(() => trajectories.sealed.size >= 0 && runStore.rows.get(child.id) !== undefined);
     await service.close(creator, session.id);
     await until(() => runStore.rows.get(child.id)?.status === "failed");
     expect(runStore.rows.get(child.id)?.error?.code).toBe("CANCELLED");

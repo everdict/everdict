@@ -99,13 +99,17 @@ export function buildExecutionScheduling(deps: {
 
 // Prometheus metrics (docs/architecture/work-queue.md — the time-series half; /queue is the snapshot half)
 // + the per-runtime circuit breaker + the scrape-time scheduler gauges.
-export function buildObservability(scheduler: Scheduler) {
+export function buildObservability(scheduler: Scheduler, opts?: { onBreakerOpen?: (key: string) => void }) {
   const metrics = new Metrics();
   // Per-runtime circuit breaker — shared between the batch spillover (ScorecardService) and the queue view
-  // (observability): one health memory, three consumers (spillover · queue view · metrics).
+  // (observability): one health memory, three consumers (spillover · queue view · metrics). The extra
+  // onBreakerOpen hook is the M2 fact seam (runtime.circuit_opened) — the breaker's own closed→open transition
+  // is the dedup, so the fact fires once per outage, never per failing case.
   const breaker = new CircuitBreaker({
-    onOpen: (key) =>
-      metrics.counter("everdict_breaker_open_total", "Circuit-breaker open transitions.", { circuit: key }),
+    onOpen: (key) => {
+      metrics.counter("everdict_breaker_open_total", "Circuit-breaker open transitions.", { circuit: key });
+      opts?.onBreakerOpen?.(key);
+    },
   });
   // Scrape-time gauges — sampled live so the scrape always reflects the current scheduler state.
   metrics.gauge("everdict_scheduler_queued", "Jobs waiting in the control-plane scheduler queue.", () => [

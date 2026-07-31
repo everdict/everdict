@@ -28,6 +28,7 @@ import {
 import { admitCausedWork } from "../admission/admission.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
 import { failedCaseResult } from "../run-suite.js";
+import { failedCaseResult } from "../run-suite.js";
 import { type StampedFact, stampFacts } from "../platform-event/outbox.js";
 import { type ArtifactStore, offloadSnapshot } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
@@ -510,8 +511,25 @@ export class RunService {
       // is this orchestrator's job. admit was already counted synchronously in submit, so don't double-count.
       // onStarted flips the run queued→running the moment compute actually begins (managed dispatch / self-hosted lease)
       // — so a single run parked behind a busy runner reads as "waiting", not "running", exactly like a batch child.
+      // M2 live-anomaly fact: the dispatch layer already computed "this cannot start right now" (blocked
+      // placement / all capable runners offline) — announce it ONCE per run so subscriptions/agents can react
+      // while the run is alive, instead of a person polling the placement read.
+      let waitingAnnounced = false;
       const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, jobToRun, {
         onStarted: () => void this.markRunning(id),
+        onWaiting: (reason) => {
+          if (waitingAnnounced) return;
+          waitingAnnounced = true;
+          void this.deps.events
+            ?.emit({
+              workspace: input.tenant,
+              kind: "run.placement_blocked",
+              subject: { type: "run", id },
+              payload: { reason, ...(input.runtime ? { runtime: input.runtime } : {}) },
+              message: `Run ${id} cannot start — ${reason}`,
+            })
+            ?.catch?.(() => {});
+        },
       });
       // Cost attribution, itemized per model: managed = the job's tenant · workspace-shared runner = that workspace ·
       // personal runner = own-pays, EXCEPT calls that used a workspace-billed model (the team's key paid) → the
