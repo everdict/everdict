@@ -227,7 +227,8 @@ export function Composer({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                if (canSend && !sending) onSend()
+                // sending 중의 Enter 도 onSend 로 — 패널이 REDIRECT(queue-then-interrupt)로 처리한다.
+                if (canSend) onSend()
               }
             }}
             rows={1}

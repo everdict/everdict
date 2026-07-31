@@ -149,6 +149,14 @@ export class LiveTurnRegistry {
     turn.interrupt = interrupt;
   }
 
+  // Is there a parked trigger to fire? The interrupt route checks THIS before queueing the redirect message, so
+  // a send that raced a finishing turn queues nothing (the caller falls back to a normal send instead of leaving
+  // an orphan in the mailbox for some future turn to drain).
+  hasInterrupt(workspace: string, sessionId: string): boolean {
+    const turn = this.turns.get(this.key(workspace, sessionId));
+    return turn?.interrupt !== undefined;
+  }
+
   // Soft-interrupt the live turn (POST /interrupt): abort only the in-flight step — the loop survives and
   // either continues redirected (input was queued) or ends "interrupted". False = nothing live / the loop has
   // not parked its trigger yet (the caller 404s/409s rather than pretending).

@@ -156,17 +156,13 @@ export const agentPlane = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
-  // Queue a user message into the RUNNING turn's mailbox (absorbed at the next boundary / on interrupt).
-  queueInput: <T>(auth: AuthContext, id: string, message: string) =>
-    call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}/input`, {
-      method: 'POST',
-      body: JSON.stringify({ message }),
-    }),
-  // Soft interrupt (ESC): abort only the in-flight step — with queued input the turn continues REDIRECTED;
-  // bare it ends "interrupted". Distinct from stopTurn (whole-turn abort).
-  interruptTurn: <T>(auth: AuthContext, id: string) =>
+  // Soft interrupt (ESC): abort only the in-flight step. With `message`, the server queues it ATOMICALLY
+  // (liveness checked first — a redirect racing a finishing turn queues nothing and 404s, so the caller falls
+  // back to a normal send) and the turn continues REDIRECTED; bare it ends "interrupted". Distinct from
+  // stopTurn (whole-turn abort).
+  interruptTurn: <T>(auth: AuthContext, id: string, message?: string) =>
     call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}/interrupt`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify(message !== undefined ? { message } : {}),
     }),
 }

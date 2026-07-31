@@ -99,13 +99,16 @@ describe("LiveTurnRegistry", () => {
     const reg = new LiveTurnRegistry();
     const controller = reg.begin("acme", "s1");
     if (!controller) throw new Error("expected a claimed turn");
-    // Before the loop parks its trigger, interrupt reports false (the route answers honestly, not pretending).
+    // Before the loop parks its trigger, interrupt reports false (the route answers honestly, not pretending)
+    // and hasInterrupt says so WITHOUT firing — the atomic redirect checks it before queueing the message.
+    expect(reg.hasInterrupt("acme", "s1")).toBe(false);
     expect(reg.interrupt("acme", "s1")).toBe(false);
     let fired = 0;
     reg.setInterrupt("acme", "s1", () => {
       fired += 1;
     });
     // When the soft interrupt fires, Then only the step trigger runs — the turn's own controller stays alive.
+    expect(reg.hasInterrupt("acme", "s1")).toBe(true);
     expect(reg.interrupt("acme", "s1")).toBe(true);
     expect(fired).toBe(1);
     expect(controller.signal.aborted).toBe(false);

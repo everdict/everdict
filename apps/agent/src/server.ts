@@ -782,10 +782,18 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
     const { id } = idParams.parse(req.params);
+    const parsed = z.object({ message: z.string().min(1).optional() }).safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
-    if (!liveTurns.interrupt(principal.workspace, id))
+    // Liveness FIRST, queue second (atomic redirect): a redirect that raced a finishing turn must queue NOTHING —
+    // an orphaned mailbox message would silently prepend itself to some future turn. 404 → the caller falls back
+    // to a normal send.
+    if (!liveTurns.hasInterrupt(principal.workspace, id))
       return reply.code(404).send({ code: "NOT_FOUND", message: "No interruptible turn for that conversation." });
+    if (parsed.data.message !== undefined)
+      deliver(principal.workspace, id, { from: "user", content: parsed.data.message });
+    liveTurns.interrupt(principal.workspace, id);
     return reply.send({ ok: true });
   });
 

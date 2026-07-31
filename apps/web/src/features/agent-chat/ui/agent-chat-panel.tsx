@@ -537,16 +537,20 @@ export function AgentChatPanel({
         setInput('')
         setPendingUser(text)
         try {
-          const queued = await fetch(`/api/agent/sessions/${encodeURIComponent(target)}/input`, {
+          // 원자적 리다이렉트: 서버가 라이브니스 확인 후 큐+절단을 한 번에 — 턴 종료와 레이스하면 아무것도
+          // 큐하지 않고 404(고아 메일박스 메시지 방지) → 입력 복원 + 재전송 안내.
+          const r = await fetch(`/api/agent/sessions/${encodeURIComponent(target)}/interrupt`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ message: text }),
           })
-          if (!queued.ok) throw new Error('queue failed')
-          // Best-effort: 끊을 스텝이 없어도(404 — 경계 사이) 큐된 메시지는 다음 경계에서 흡수된다.
-          await fetch(`/api/agent/sessions/${encodeURIComponent(target)}/interrupt`, {
-            method: 'POST',
-          }).catch(() => {})
+          if (r.status === 404) {
+            setInput(text)
+            setPendingUser(null)
+            toast.error(t('redirectMissed'))
+            return
+          }
+          if (!r.ok) throw new Error('interrupt failed')
         } catch {
           setInput(text)
           setPendingUser(null)
