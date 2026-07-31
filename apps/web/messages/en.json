@@ -1536,24 +1536,11 @@
       "help": "Reference them with the “personal” scope in harness env, and only you can run or view that harness."
     },
     "encryptedNote": "Values are encrypted at rest and can’t be viewed again after saving (the list shows names only).",
-    "customSecretsLabel": "Custom secrets",
     "adminRequired": "Admin access is required to make changes.",
-    "providerTokensLabel": "Provider tokens",
-    "providerTokens": {
-      "HF_TOKEN": {
-        "provider": "HuggingFace",
-        "usedFor": "Fetch gated datasets (benchmarks)",
-        "help": "A fine-grained token with read access to the target dataset repo is enough. Gated datasets also need you to accept the terms on your HF account. A personal token takes precedence over the workspace's shared one."
-      }
-    },
-    "savedAsName": "Saved as secret name <code>{name}</code>.",
-    "registeredHint": "{usedFor} · Registered (updated {date})",
     "deleteConfirm": "Confirm delete",
     "cancel": "Cancel",
-    "replace": "Replace",
     "delete": "Delete",
     "register": "Register",
-    "issue": "Get one ↗",
     "registeredCount": "{count} registered",
     "addSecret": "Add secret",
     "emptyTitle": "No secrets yet.",

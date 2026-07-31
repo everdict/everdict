@@ -1536,24 +1536,11 @@
       "help": "하니스 env 에서 “내 개인” 스코프로 참조하면 그 하니스는 나만 실행·열람할 수 있어요."
     },
     "encryptedNote": "값은 at-rest 암호화되고, 저장 후에는 다시 볼 수 없어요(목록엔 이름만).",
-    "customSecretsLabel": "직접 추가한 시크릿",
     "adminRequired": "변경하려면 관리자 권한이 필요해요.",
-    "providerTokensLabel": "프로바이더 토큰",
-    "providerTokens": {
-      "HF_TOKEN": {
-        "provider": "HuggingFace",
-        "usedFor": "gated 데이터셋(벤치마크) 가져오기",
-        "help": "fine-grained 토큰에 대상 데이터셋 저장소 읽기 권한이면 충분해요. gated 데이터셋은 HF 계정의 약관 동의도 필요해요. 개인 토큰이 워크스페이스 공유보다 우선해요."
-      }
-    },
-    "savedAsName": "시크릿 이름 <code>{name}</code> 으로 저장돼요.",
-    "registeredHint": "{usedFor} · 등록됨 (갱신 {date})",
     "deleteConfirm": "삭제 확인",
     "cancel": "취소",
-    "replace": "교체",
     "delete": "삭제",
     "register": "등록",
-    "issue": "발급 ↗",
     "registeredCount": "등록됨 {count}개",
     "addSecret": "시크릿 추가",
     "emptyTitle": "아직 등록한 시크릿이 없어요.",

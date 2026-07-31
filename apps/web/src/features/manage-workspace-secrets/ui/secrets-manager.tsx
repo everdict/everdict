@@ -19,14 +19,7 @@ import {
 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
-import {
-  PROVIDER_TOKENS,
-  providerTokenNames,
-  type ProviderTokenDef,
-  type SecretMeta,
-  type SecretScope,
-  type SecretUsageMetaRef,
-} from '@/entities/secret'
+import type { SecretMeta, SecretScope, SecretUsageMetaRef } from '@/entities/secret'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -149,10 +142,6 @@ export function SecretsManager({
   const copy = COPY[variant]
   // personal = personal (user) scope (self-managed), workspace = shared (admin).
   const scope: SecretScope = variant === 'personal' ? 'user' : 'workspace'
-  // Provider tokens (reserved names, consumed by the platform) — curate only the ones consumed in this scope.
-  const providers = PROVIDER_TOKENS.filter((pt) => pt.scopes.includes(scope))
-  // Exclude provider tokens from the raw list (avoid double exposure — the curated section above is their place).
-  const rawSecrets = secrets.filter((s) => !(providerTokenNames.has(s.name) && s.scope === scope))
 
   return (
     <div className="space-y-4">
@@ -176,173 +165,14 @@ export function SecretsManager({
         </div>
       </div>
 
-      {providers.length > 0 && (
-        <ProviderTokenRows
-          providers={providers}
-          secrets={secrets}
-          scope={scope}
-          canWrite={canWrite}
-        />
-      )}
-
       <SecretRows
-        secrets={rawSecrets}
+        secrets={secrets}
         canWrite={canWrite}
         scope={scope}
         namePlaceholder={copy.namePlaceholder}
-        {...(providers.length > 0 ? { sectionLabel: t('customSecretsLabel') } : {})}
       />
 
       {!canWrite && <p className="text-[12.5px] text-muted-foreground">{t('adminRequired')}</p>}
-    </div>
-  )
-}
-
-// Provider tokens — a curated list with predefined reserved names. Users register by "which service token it is" without knowing the name.
-function ProviderTokenRows({
-  providers,
-  secrets,
-  scope,
-  canWrite,
-}: {
-  providers: ProviderTokenDef[]
-  secrets: SecretMeta[]
-  scope: SecretScope
-  canWrite: boolean
-}) {
-  const t = useTranslations('manageWorkspaceSecrets')
-  const locale = useLocale()
-  const timeZone = useTimeZone()
-  const [editing, setEditing] = useState<string>() // name of the token whose register/replace form is open
-  const [confirmName, setConfirmName] = useState<string>()
-  const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
-
-  function onDelete(target: string) {
-    setError(undefined)
-    startTransition(async () => {
-      const r = await deleteSecretAction(target, scope)
-      setConfirmName(undefined)
-      if (!r.ok) setError(r.error)
-    })
-  }
-
-  return (
-    <div className="space-y-2.5">
-      <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-        {t('providerTokensLabel')}
-      </span>
-      <SettingsList>
-        {providers.map((pt) => {
-          const registered = secrets.find((s) => s.name === pt.name && s.scope === scope)
-          return (
-            <SettingsRow
-              key={pt.name}
-              label={
-                <span className="flex items-center gap-1.5">
-                  <span className="text-[13px] font-[560] text-foreground">
-                    {t(`providerTokens.${pt.name}.provider`)}
-                  </span>
-                  <InfoTip
-                    content={
-                      <>
-                        {t(`providerTokens.${pt.name}.help`)}
-                        <br />
-                        {t.rich('savedAsName', {
-                          name: pt.name,
-                          code: (chunks) => <code className="font-mono">{chunks}</code>,
-                        })}
-                      </>
-                    }
-                  />
-                </span>
-              }
-              hint={
-                registered
-                  ? t('registeredHint', {
-                      usedFor: t(`providerTokens.${pt.name}.usedFor`),
-                      date: new Date(registered.updatedAt).toLocaleDateString(locale, { timeZone }),
-                    })
-                  : t(`providerTokens.${pt.name}.usedFor`)
-              }
-            >
-              {canWrite && (
-                <span className="flex items-center gap-2.5">
-                  {registered ? (
-                    confirmName === pt.name ? (
-                      <>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          disabled={pending}
-                          onClick={() => onDelete(pt.name)}
-                        >
-                          {t('deleteConfirm')}
-                        </Button>
-                        <button
-                          type="button"
-                          className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-                          onClick={() => setConfirmName(undefined)}
-                        >
-                          {t('cancel')}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
-                          onClick={() => setEditing(editing === pt.name ? undefined : pt.name)}
-                        >
-                          {t('replace')}
-                        </button>
-                        <button
-                          type="button"
-                          className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-destructive"
-                          onClick={() => setConfirmName(pt.name)}
-                        >
-                          {t('delete')}
-                        </button>
-                      </>
-                    )
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setEditing(editing === pt.name ? undefined : pt.name)}
-                    >
-                      {t('register')}
-                    </Button>
-                  )}
-                  <a
-                    href={pt.helpUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[12px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-                  >
-                    {t('issue')}
-                  </a>
-                </span>
-              )}
-            </SettingsRow>
-          )
-        })}
-      </SettingsList>
-      {editing && (
-        <AddSecretForm
-          scope={scope}
-          namePlaceholder=""
-          fixedName={editing}
-          onDone={() => setEditing(undefined)}
-          onCancel={() => setEditing(undefined)}
-        />
-      )}
-      {error && (
-        <Callout tone="danger" className="py-1.5">
-          {error}
-        </Callout>
-      )}
     </div>
   )
 }
@@ -353,13 +183,11 @@ function SecretRows({
   canWrite,
   scope,
   namePlaceholder,
-  sectionLabel,
 }: {
   secrets: SecretRow[]
   canWrite: boolean
   scope: SecretScope
   namePlaceholder: string
-  sectionLabel?: string // distinguishing label when shown alongside the provider tokens section
 }) {
   const t = useTranslations('manageWorkspaceSecrets')
   const locale = useLocale()
@@ -383,13 +211,7 @@ function SecretRows({
     <div className="space-y-2.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[12px] font-[510] text-faint">
-          {sectionLabel ? (
-            <span className="text-[11px] uppercase tracking-wide">{sectionLabel}</span>
-          ) : secrets.length > 0 ? (
-            t('registeredCount', { count: secrets.length })
-          ) : (
-            ''
-          )}
+          {secrets.length > 0 ? t('registeredCount', { count: secrets.length }) : ''}
         </span>
         {canWrite && !adding && !addingOffline && (
           <span className="flex items-center gap-2">
@@ -524,22 +346,19 @@ function SecretRows({
 }
 
 // Toggled inline add form — name + value (single-line ↔ multi-line toggle; single-line has a show toggle) + save/cancel. Compact inside the card.
-// fixedName = provider token (reserved name): hide the name input and take only the value (single-line).
 function AddSecretForm({
   scope,
   namePlaceholder,
-  fixedName,
   onDone,
   onCancel,
 }: {
   scope: SecretScope
   namePlaceholder: string
-  fixedName?: string
   onDone: () => void
   onCancel: () => void
 }) {
   const t = useTranslations('manageWorkspaceSecrets')
-  const [name, setName] = useState(fixedName ?? '')
+  const [name, setName] = useState('')
   const [value, setValue] = useState('')
   const [show, setShow] = useState(false)
   const [multiline, setMultiline] = useState(false) // toggle for multi-line value input like a kubeconfig
@@ -558,34 +377,30 @@ function AddSecretForm({
 
   return (
     <div className="space-y-3 rounded-lg border bg-muted/30 p-3.5">
-      <div className={fixedName ? 'grid gap-3' : 'grid gap-3 sm:grid-cols-2'}>
-        {!fixedName && (
-          <div className="space-y-1.5">
-            <Label htmlFor="secret-name">{t('nameLabel')}</Label>
-            <Input
-              id="secret-name"
-              value={name}
-              placeholder={namePlaceholder}
-              onChange={(e) => setName(e.target.value.toUpperCase())}
-              autoComplete="off"
-              spellCheck={false}
-              className="font-mono text-[12px]"
-            />
-            {nameInvalid && <FieldError message={t('nameInvalid')} />}
-          </div>
-        )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="secret-name">{t('nameLabel')}</Label>
+          <Input
+            id="secret-name"
+            value={name}
+            placeholder={namePlaceholder}
+            onChange={(e) => setName(e.target.value.toUpperCase())}
+            autoComplete="off"
+            spellCheck={false}
+            className="font-mono text-[12px]"
+          />
+          {nameInvalid && <FieldError message={t('nameInvalid')} />}
+        </div>
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <Label htmlFor="secret-value">{t('valueLabel')}</Label>
-            {!fixedName && (
-              <button
-                type="button"
-                className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-                onClick={() => setMultiline((v) => !v)}
-              >
-                {multiline ? t('singleLine') : t('multiLine')}
-              </button>
-            )}
+            <button
+              type="button"
+              className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setMultiline((v) => !v)}
+            >
+              {multiline ? t('singleLine') : t('multiLine')}
+            </button>
           </div>
           {multiline ? (
             <Textarea
