@@ -1,10 +1,16 @@
 import Link from 'next/link'
-import { Boxes, ChevronRight } from 'lucide-react'
+import { ChevronRight, CircleDot } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { EvalDashboard } from '@/widgets/eval-dashboard'
 import { RunsTable } from '@/widgets/runs-table'
-import { harnessesSchema } from '@/entities/harness'
+import { RegressedIssues, ReleaseReadiness } from '@/widgets/tracker-overview'
+import {
+  initiativeDetailSchema,
+  initiativesSchema,
+  type InitiativeDetail,
+} from '@/entities/initiative'
+import { issuesSchema } from '@/entities/issue'
 import { runsSchema } from '@/entities/run'
 import { scorecardsSchema } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
@@ -15,6 +21,12 @@ import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 
 export const dynamic = 'force-dynamic'
+
+// 오버뷰는 사이드바와 같은 순서로 답한다: 먼저 "내보내도 되나"(이니셔티브 readiness), 다음 "무엇이 무너졌나"(회귀),
+// 그다음에야 "무엇이 돌았나"(평가 활동). readiness 는 detail 읽기에서만 계산되므로(목록은 경량 유지) 활성 이니셔티브
+// 몇 개만 상세로 가져온다 — 홈이 워크스페이스 전체를 훑지 않도록 명시적으로 캡을 둔다.
+const READINESS_CARDS = 4
+const REGRESSION_ROWS = 6
 
 function ViewAll({ href, label }: { href: string; label: string }) {
   return (
@@ -34,23 +46,41 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
   const ctx = await authContext()
   let error: string | undefined
   let runs = runsSchema.parse([])
-  let harnesses = harnessesSchema.parse([])
   let scorecards = scorecardsSchema.parse([])
+  let regressed = issuesSchema.parse([])
+  let readiness: InitiativeDetail[] = []
   try {
-    const [r, h, sc] = await Promise.all([
+    const [r, sc, active, reg] = await Promise.all([
       controlPlane.listRuns(ctx),
-      controlPlane.listHarnesses(ctx),
       controlPlane.listScorecards(ctx),
+      controlPlane.listInitiatives(ctx, { status: 'active', limit: READINESS_CARDS }),
+      controlPlane.listIssues(ctx, { status: 'regressed', limit: REGRESSION_ROWS }),
     ])
     runs = runsSchema.parse(r)
-    harnesses = harnessesSchema.parse(h)
     scorecards = scorecardsSchema.parse(sc)
+    regressed = issuesSchema.parse(reg)
+    // 이니셔티브별 readiness 는 도메인 산식이라 서버가 계산한다 — 웹이 다시 구현하면 두 곳이 갈라진다.
+    // 하나가 실패해도 나머지 카드는 살린다.
+    readiness = (
+      await Promise.all(
+        initiativesSchema.parse(active).map((i) =>
+          controlPlane
+            .getInitiative(ctx, i.id)
+            .then((d) => initiativeDetailSchema.parse(d))
+            .catch(() => undefined)
+        )
+      )
+    ).filter((d): d is InitiativeDetail => d !== undefined)
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
+  // 막힌 배포가 먼저 — 준비된 것은 볼 일이 없다.
+  const orderedReadiness = [...readiness].sort(
+    (a, b) => Number(a.readiness.ready) - Number(b.readiness.ready)
+  )
 
   return (
-    <div className="space-y-7">
+    <div className="@container space-y-7">
       <PageHeader title={t('title')} description={t('description')} />
 
       {error ? (
@@ -58,7 +88,38 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
           {t('connectError', { error })}
         </Callout>
       ) : (
-        <EvalDashboard scorecards={scorecards} workspace={workspace} />
+        <>
+          <section className="space-y-2.5">
+            <SectionHeader
+              title={t('releaseReadiness')}
+              action={<ViewAll href={`/${workspace}/initiatives`} label={t('viewAll')} />}
+            />
+            {orderedReadiness.length === 0 ? (
+              <EmptyState
+                icon={<CircleDot />}
+                title={t('emptyInitiativesTitle')}
+                hint={t('emptyInitiativesHint')}
+              />
+            ) : (
+              <ReleaseReadiness workspace={workspace} initiatives={orderedReadiness} />
+            )}
+          </section>
+
+          {/* 회귀가 없으면 섹션째 숨긴다 — "이상 없음" 카드는 매일 보면 노이즈다. */}
+          {regressed.length > 0 && (
+            <section className="space-y-2.5">
+              <SectionHeader
+                title={t('regressions')}
+                action={
+                  <ViewAll href={`/${workspace}/issues?status=regressed`} label={t('viewAll')} />
+                }
+              />
+              <RegressedIssues workspace={workspace} issues={regressed} />
+            </section>
+          )}
+
+          <EvalDashboard scorecards={scorecards} workspace={workspace} />
+        </>
       )}
 
       <section className="space-y-2.5">
@@ -67,54 +128,6 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
           action={<ViewAll href={`/${workspace}/runs`} label={t('viewAll')} />}
         />
         <RunsTable runs={runs} workspace={workspace} limit={5} />
-      </section>
-
-      <section className="space-y-2.5">
-        <SectionHeader
-          title={t('harnesses')}
-          action={<ViewAll href={`/${workspace}/harnesses`} label={t('viewAll')} />}
-        />
-        {harnesses.length === 0 ? (
-          <EmptyState
-            icon={<Boxes />}
-            title={t('emptyHarnessesTitle')}
-            hint={t('emptyHarnessesHint')}
-          />
-        ) : (
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-            {harnesses.slice(0, 6).map((h) => (
-              <Link
-                key={h.id}
-                href={`/${workspace}/harnesses`}
-                className="group flex items-start gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
-              >
-                <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border group-hover:text-foreground">
-                  <Boxes className="size-[18px]" strokeWidth={1.75} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-[560] text-foreground">
-                    {h.id}
-                  </span>
-                  <span className="mt-1 flex flex-wrap gap-1">
-                    {h.versions.slice(0, 4).map((v) => (
-                      <span
-                        key={v}
-                        className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground ring-1 ring-inset ring-border"
-                      >
-                        {v}
-                      </span>
-                    ))}
-                    {h.versions.length > 4 && (
-                      <span className="px-1 py-0.5 text-[10.5px] text-faint">
-                        +{h.versions.length - 4}
-                      </span>
-                    )}
-                  </span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        )}
       </section>
     </div>
   )

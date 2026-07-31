@@ -109,7 +109,8 @@
     "loadingViews": "Loading views…",
     "noViews": "No views yet — save one from the analyze dashboard.",
     "chartEmpty": "Nothing to plot.",
-    "seriesCapped": "{hidden} more series not shown."
+    "seriesCapped": "{hidden} more series not shown.",
+    "metricBaseline": "baseline {value}"
   },
   "analyzeScorecards": {
     "all": "All",
@@ -1650,13 +1651,21 @@
   "overviewPage": {
     "viewAll": "View all",
     "title": "Overview",
-    "description": "Evaluation status for this workspace",
+    "description": "Can we ship — what is blocked, what regressed, and what has been evaluated.",
     "connectError": "Couldn't reach the server: {error}",
     "connectErrorHint": "Check that `CONTROL_PLANE_URL` is set and `everdict-api` is running.",
     "recentRuns": "Recent runs",
     "harnesses": "Harnesses",
     "emptyHarnessesTitle": "No harnesses yet.",
-    "emptyHarnessesHint": "Registered harnesses show up here."
+    "emptyHarnessesHint": "Registered harnesses show up here.",
+    "releaseReadiness": "Release readiness",
+    "regressions": "Regressions",
+    "readinessReady": "Ready",
+    "readinessBlocked": "{count} open",
+    "readinessProgress": "{resolved} of {total} issues resolved across {projects} project(s)",
+    "readinessMoreBlockers": "+{count} more blocking",
+    "emptyInitiativesTitle": "No active initiatives.",
+    "emptyInitiativesHint": "An initiative groups the projects a release depends on — its readiness tells you whether you can ship."
   },
   "palette": {
     "placeholder": "Go to a page or run an action…",
@@ -2951,7 +2960,7 @@
     "currentRevision": "current",
     "restore": "Restore",
     "restoredFrom": "Restored revision {revision}",
-    "onBehalfOf": "for {subject}",
+    "onBehalfOf": "for {name}",
     "anAgent": "an agent",
     "systemActor": "System",
     "noHistoryTitle": "No published revisions yet",

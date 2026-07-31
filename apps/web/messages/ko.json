@@ -109,7 +109,8 @@
     "loadingViews": "뷰 불러오는 중…",
     "noViews": "아직 뷰가 없습니다. 분석 대시보드에서 저장해 보세요.",
     "chartEmpty": "그릴 데이터가 없어요.",
-    "seriesCapped": "{hidden}개 시리즈는 표시하지 않았어요."
+    "seriesCapped": "{hidden}개 시리즈는 표시하지 않았어요.",
+    "metricBaseline": "기준 {value}"
   },
   "analyzeScorecards": {
     "all": "전체",
@@ -1650,13 +1651,21 @@
   "overviewPage": {
     "viewAll": "전체 보기",
     "title": "개요",
-    "description": "이 워크스페이스의 평가 현황",
+    "description": "내보내도 되는지 — 무엇이 막혀 있고, 무엇이 회귀했고, 무엇이 평가됐는지.",
     "connectError": "서버에 연결하지 못했어요: {error}",
     "connectErrorHint": "`CONTROL_PLANE_URL` 과 `everdict-api` 가동 여부를 확인하세요.",
     "recentRuns": "최근 Runs",
     "harnesses": "하니스",
     "emptyHarnessesTitle": "아직 하니스가 없어요.",
-    "emptyHarnessesHint": "하니스를 등록하면 여기에 표시돼요."
+    "emptyHarnessesHint": "하니스를 등록하면 여기에 표시돼요.",
+    "releaseReadiness": "배포 준비도",
+    "regressions": "회귀",
+    "readinessReady": "준비됨",
+    "readinessBlocked": "{count}건 남음",
+    "readinessProgress": "프로젝트 {projects}개에서 이슈 {total}건 중 {resolved}건 해결",
+    "readinessMoreBlockers": "+{count}건 더 막고 있음",
+    "emptyInitiativesTitle": "진행 중인 이니셔티브가 없어요.",
+    "emptyInitiativesHint": "이니셔티브는 하나의 배포가 기대는 프로젝트들을 묶습니다 — readiness 가 내보내도 되는지 답해 줍니다."
   },
   "palette": {
     "placeholder": "페이지로 이동하거나 작업 실행…",
@@ -2951,7 +2960,7 @@
     "currentRevision": "현재",
     "restore": "되돌리기",
     "restoredFrom": "rev {revision} 을(를) 되돌림",
-    "onBehalfOf": "· {subject} 요청",
+    "onBehalfOf": "· {name} 요청",
     "anAgent": "에이전트",
     "systemActor": "시스템",
     "noHistoryTitle": "아직 발행된 버전이 없습니다",
