@@ -685,6 +685,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           permit,
           ...(mode === "plan" ? { planMode: true, onPlan } : {}),
           drainInput,
+          // Soft interrupt: park the loop's step trigger on the live turn so POST /interrupt can fire it —
+          // with queued input (POST /input) the turn continues REDIRECTED; bare it ends "interrupted".
+          onInterruptReady: (interrupt) => liveTurns.setInterrupt(principal.workspace, id, interrupt),
           sendMessage,
           spawnTeammate,
           listTeammates,
@@ -765,6 +768,21 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
     if (!liveTurns.stop(principal.workspace, id))
       return reply.code(404).send({ code: "NOT_FOUND", message: "No live turn for that conversation." });
+    return reply.send({ ok: true });
+  });
+
+  // Soft-interrupt the session's live turn (Claude Code's ESC): abort only the IN-FLIGHT step — the loop
+  // survives and either continues REDIRECTED (input was queued via POST /input first) or ends "interrupted"
+  // (bare — stop and wait for the user). Distinct from /stop, which kills the whole turn. 404 when nothing is
+  // live or the loop hasn't parked its trigger yet. Visibility-aware like /stop.
+  app.post("/agent/sessions/:id/interrupt", async (req, reply) => {
+    const principal = await principalOf(req, reply);
+    if (!principal) return reply;
+    const { id } = idParams.parse(req.params);
+    const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
+    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    if (!liveTurns.interrupt(principal.workspace, id))
+      return reply.code(404).send({ code: "NOT_FOUND", message: "No interruptible turn for that conversation." });
     return reply.send({ ok: true });
   });
 

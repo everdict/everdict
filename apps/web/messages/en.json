@@ -3762,7 +3762,8 @@
     },
     "retryNotice": "Provider hiccup — retrying in {seconds}s (attempt {attempt})",
     "retryNoticePersistent": "Waiting out a capacity limit — retrying in {seconds}s (attempt {attempt})",
-    "fallbackNotice": "Switched to the fallback model: {model}"
+    "fallbackNotice": "Switched to the fallback model: {model}",
+    "redirectNoContext": "Reference and attachment chips can't ride a redirect — stop the running turn first, then send with the chips."
   },
   "workspaceSettings": {
     "meterUsage": "Meter usage",

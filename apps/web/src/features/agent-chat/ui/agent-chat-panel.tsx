@@ -523,7 +523,37 @@ export function AgentChatPanel({
   const send = useCallback(
     async (textArg?: string, refsArg?: AgentReference[]) => {
       const text = (textArg ?? input).trim()
-      if (text.length === 0 || sending) return
+      if (text.length === 0) return
+      // 진행 중인 턴으로의 전송 = REDIRECT (queue-then-interrupt — Claude Code 의 ESC 재해석): 메시지를 러닝
+      // 턴의 메일박스에 큐잉하고 현재 스텝만 끊는다 — 루프는 살아서 다음 경계에서 메시지를 흡수하고 방향을
+      // 튼다. 칩(레퍼런스/첨부)은 전체 챗 파이프라인이 필요하므로 리다이렉트에 실을 수 없다 — Stop 후 재전송.
+      if (sending) {
+        if (!activeId || textArg !== undefined) return
+        if (references.length > 0 || attachments.length > 0) {
+          toast.error(t('redirectNoContext'))
+          return
+        }
+        const target = activeId
+        setInput('')
+        setPendingUser(text)
+        try {
+          const queued = await fetch(`/api/agent/sessions/${encodeURIComponent(target)}/input`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ message: text }),
+          })
+          if (!queued.ok) throw new Error('queue failed')
+          // Best-effort: 끊을 스텝이 없어도(404 — 경계 사이) 큐된 메시지는 다음 경계에서 흡수된다.
+          await fetch(`/api/agent/sessions/${encodeURIComponent(target)}/interrupt`, {
+            method: 'POST',
+          }).catch(() => {})
+        } catch {
+          setInput(text)
+          setPendingUser(null)
+          toast.error(t('errorSend'))
+        }
+        return
+      }
 
       // 드래프트의 첫 전송 — 이제서야 서버 세션을 만든다(드래프트에서 고른 모델·실행 권한 모드를 실어서).
       let sessionId = activeId
