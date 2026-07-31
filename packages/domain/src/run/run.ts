@@ -301,9 +301,15 @@ export class Run {
   }
 
   // queued|running → failed (execution error, isolated as a run failure).
-  fail(error: { code: string; message: string }, now: string): RunTransition {
+  // result: the synthesized failed CaseResult (classified CaseFailure + the evidence trace the backend captured
+  // at throw time) — the single-run twin of the batch path's failed result, so the ledger keeps the post-mortem
+  // (placement identity, log tail) instead of only {code, message}. Optional: legacy callers settle error-only.
+  fail(error: { code: string; message: string }, now: string, result?: CaseResult): RunTransition {
     this.assertNotTerminal("fail");
-    return { patch: { status: "failed", error, updatedAt: now }, facts: terminalFact(this.record, "failed") };
+    return {
+      patch: { status: "failed", error, ...(result ? { result } : {}), updatedAt: now },
+      facts: terminalFact(this.record, "failed"),
+    };
   }
 
   // Boot-recovery adoption: settle with a result harvested from the still-alive job (zero re-run).

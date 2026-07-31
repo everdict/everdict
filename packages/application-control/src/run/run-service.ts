@@ -27,6 +27,7 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
+import { failedCaseResult } from "../run-suite.js";
 import { type StampedFact, stampFacts } from "../platform-event/outbox.js";
 import { type ArtifactStore, offloadSnapshot } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
@@ -553,7 +554,17 @@ export class RunService {
         err instanceof AppError
           ? { code: err.code, message: err.message }
           : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-      await this.finalize(id, (run) => run.fail(error, this.now()));
+      // The single-run ledger keeps the SAME post-mortem the batch path does: the classified CaseFailure with the
+      // evidence the backend captured at throw time (placement identity + log tail, gone from the cluster right
+      // after settlement) plus the evidence trace. Live-caught gap — error {code,message} alone left a failed
+      // single run with no "why" once the orchestrator job was GC'd.
+      const failed = failedCaseResult(job, err);
+      await this.finalize(id, (run) => run.fail(error, this.now(), failed));
+      // Dual-write parity with the success path: the evidence trace seals as the run's own trajectory.
+      if (failed.trace.length > 0)
+        void this.deps.trajectories
+          ?.seal({ runId: id, tenant: input.tenant, source: "run", events: failed.trace })
+          .catch(() => {});
     }
     // Completion notification (Mattermost etc.) — with the latest record. Failure is independent of the run result (swallow). Independent of the webhook.
     if (this.deps.onComplete) {

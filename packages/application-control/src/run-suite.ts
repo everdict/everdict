@@ -8,7 +8,9 @@ export type Dispatch = (job: CaseJob) => Promise<CaseResult>;
 // Record the reason as a trace=error event and put one pass:false score so the pass rate/summary counts this case as a failure.
 // The classified failure (stage × class × retryable) rides on the result so recovery can act by WHERE it died
 // (retry ?class=infra re-runs only infra casualties; agent FAILs are legitimate outcomes and carry no failure).
-function failedCaseResult(job: CaseJob, error: unknown): CaseResult {
+// Exported: RunService settles a SINGLE run's dispatch failure with the same synthesis, so the evidence
+// (CaseFailure.placement/logTail + the trace) is one shape everywhere — never a batch-only privilege.
+export function failedCaseResult(job: CaseJob, error: unknown): CaseResult {
   const message = error instanceof Error ? error.message : String(error);
   const failure = classifyFailure(error, "dispatch");
   return {

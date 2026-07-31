@@ -1,6 +1,13 @@
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import { BadRequestError, type CaseJob, type CaseResult, type EvalCase, type HarnessSpec } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type CaseJob,
+  type CaseResult,
+  type EvalCase,
+  type HarnessSpec,
+  UpstreamError,
+} from "@everdict/contracts";
 import { InMemoryRecordingStore, InMemoryRunStore, type RunRecord } from "@everdict/db";
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
@@ -280,6 +287,76 @@ describe("RunService", () => {
     const done = await svc.get(rec.id);
     expect(done?.status).toBe("failed");
     expect(done?.error?.message).toBe("boom");
+  });
+
+  it("a failed single run keeps the classified failure + backend evidence and seals it as its trajectory", async () => {
+    // Regression (live-caught on Nomad): a failed SINGLE run kept only error {code,message} — the classified
+    // CaseFailure with the throw-time evidence (placement identity + log tail) was a batch-only privilege, and
+    // the run had no trajectory at all, so once the orchestrator job was GC'd the "why" was gone.
+    const store = new InMemoryRunStore();
+    const sealed: Array<{ runId: string; source: string; events: unknown[] }> = [];
+    const evidenceFailDispatcher: Dispatcher = {
+      async dispatch() {
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          {
+            alloc: "a1",
+            placement: { unit: "a1", node: "worker-2", events: ["Driver Failure: Failed to pull image"] },
+            logTail: "panic: boom",
+          },
+          "alloc failed — Driver Failure: Failed to pull image",
+        );
+      },
+    };
+    const svc = new RunService({
+      dispatcher: evidenceFailDispatcher,
+      store,
+      newId: ids,
+      trajectories: {
+        async seal(input) {
+          sealed.push({ runId: input.runId, source: input.source, events: [...input.events] });
+          return {
+            runId: input.runId,
+            tenant: input.tenant,
+            source: input.source,
+            eventCount: input.events.length,
+            sealedAt: "2026-01-01T00:00:00Z",
+            created: true,
+          };
+        },
+        async get() {
+          return undefined;
+        },
+        async list() {
+          return { items: [] };
+        },
+        async ingestedSince() {
+          return { trajectories: 0, events: 0 };
+        },
+        async deleteOlderThan() {
+          return 0;
+        },
+      },
+    });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "scripted", version: "0" }, case: CASE });
+    await flush();
+    const done = await svc.get(rec.id);
+    expect(done?.status).toBe("failed");
+    // The same synthesis the batch path uses: classified failure + evidence on the result.
+    expect(done?.result?.failure).toMatchObject({
+      stage: "dispatch",
+      class: "infra",
+      placement: { unit: "a1", node: "worker-2", events: ["Driver Failure: Failed to pull image"] },
+      logTail: "panic: boom",
+    });
+    expect(done?.result?.trace).toEqual([
+      { t: 0, kind: "log", stream: "stderr", text: "panic: boom" },
+      { t: 1, kind: "error", message: "alloc failed — Driver Failure: Failed to pull image" },
+    ]);
+    // Dual-write parity with the success path — the evidence trace sealed as the run's own trajectory.
+    expect(sealed).toHaveLength(1);
+    expect(sealed[0]).toMatchObject({ runId: rec.id, source: "run" });
+    expect(sealed[0]?.events).toHaveLength(2);
   });
 
   it("submit throws when over budget (no run created, maps to 402)", async () => {
