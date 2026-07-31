@@ -57,6 +57,12 @@ export const TRIGGERABLE_EVENT_KINDS = [
   // Task ledger (agent-teams) — "new work appeared" / "a dependency cleared" (same vocabulary as the server list).
   'task.created',
   'task.completed',
+  // Eval tracker (docs/tracker.md) — the "why" layer's wake signals: a new issue landed, an issue regressed
+  // (payload filter cause eq regression), a project/initiative closed. Same vocabulary as the server list.
+  'issue.created',
+  'issue.status_changed',
+  'project.status_changed',
+  'initiative.status_changed',
 ] as const
 
 // 이벤트 payload 에 대한 선언적 필터 하나 — filters 는 AND 결합(예: passRate < 1 = 실패 케이스 있는 배치).

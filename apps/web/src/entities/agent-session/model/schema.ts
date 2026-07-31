@@ -82,6 +82,7 @@ export const AGENT_REFERENCE_TYPES = [
   'environment', // environment kind 의 capability(get_capability) — 평가 환경 이미지 자산
   'tool', // mcp|code kind 의 capability(get_capability) — 에이전트가 실제로 호출하는 도구. source=소유 워크스페이스
   'trace',
+  'issue', // 평가 트래커의 이슈(get_issue) — 무엇을 왜 평가하는지, 어떻게 닫혔고 왜 회귀했는지의 맥락
 ] as const
 export const agentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES)
 export type AgentReferenceType = z.infer<typeof agentReferenceTypeSchema>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import {
   BookOpen,
   Boxes,
+  CircleDot,
   ClipboardCheck,
   Container,
   Database,
@@ -26,6 +27,7 @@ import {
 } from '@/entities/agent-session'
 
 export const REFERENCE_TYPE_ICON: Record<AgentReferenceType, LucideIcon> = {
+  issue: CircleDot,
   harness: Boxes,
   runtime: Server,
   run: Play,

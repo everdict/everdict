@@ -57,6 +57,10 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType): Promise<un
         return kind === 'mcp' || kind === 'code'
       })
     }
+    case 'issue':
+      // 평가 트래커의 이슈 — normalize 가 `title` 을 라벨로 집는다(이슈엔 name 이 없음).
+      // 열려 있는 것부터 보이도록 최근 활동순 슬라이스만 가져온다(닫힌 이슈까지 @-피커에 쏟지 않는다).
+      return controlPlane.listIssues<Row[]>(ctx, { limit: 50 })
     case 'trace':
       // trace references are attached from the observability browser (keyed by source+traceId), not @-picked here.
       return []

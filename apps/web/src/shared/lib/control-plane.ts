@@ -484,6 +484,153 @@ export const controlPlane = {
     }),
   deleteTask: (auth: AuthContext, id: string) =>
     callVoid(auth, `/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer over the
+  // capabilities. One authz pair for all three (issues:read viewer+ / issues:write member+); delete is
+  // additionally creator-or-admin, decided server-side.
+  listIssues: <T>(
+    auth: AuthContext,
+    filter?: {
+      status?: string
+      project?: string
+      assignee?: string
+      linkType?: string
+      linkId?: string
+      limit?: number
+    }
+  ) => {
+    const q = new URLSearchParams()
+    if (filter?.status) q.set('status', filter.status)
+    if (filter?.project) q.set('project', filter.project)
+    if (filter?.assignee) q.set('assignee', filter.assignee)
+    // The reverse lookup ("which issues watch this harness") needs both halves or the route 400s.
+    if (filter?.linkType && filter.linkId) {
+      q.set('linkType', filter.linkType)
+      q.set('linkId', filter.linkId)
+    }
+    if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
+    const qs = q.toString()
+    return call<T>(auth, qs ? `/issues?${qs}` : '/issues')
+  },
+  getIssue: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}`),
+  createIssue: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/issues', { method: 'POST', body: JSON.stringify(body) }),
+  updateIssue: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  // Every workflow move goes here — the control plane picks the transition (move / resolve / reopen) that fits
+  // the issue's current state, and an illegal one comes back as the domain's 400/409.
+  setIssueStatus: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  addIssueLink: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/links`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  removeIssueLink: <T>(auth: AuthContext, id: string, type: string, linkId: string) =>
+    call<T>(
+      auth,
+      `/issues/${encodeURIComponent(id)}/links/${encodeURIComponent(type)}/${encodeURIComponent(linkId)}`,
+      { method: 'DELETE' }
+    ),
+  // The issue's evaluation history: pinned evidence ∪ every batch its linked datasets/harnesses ran.
+  listIssueScorecards: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/scorecards`),
+  deleteIssue: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/issues/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // GitHub import + MANUAL two-way sync for tracker issues (docs/tracker.md). Everdict stays the CLIENT: there is
+  // no inbound webhook and no periodic sweep, so a pull happens only when someone asks for one and a push happens
+  // as the effect of a local transition. All of these are issues:write (importing and syncing mutate the tracker).
+  // The candidate list rides the workspace GitHub App's installation scope, so a repo the App is not on is a 404.
+  listIssueImportCandidates: <T>(
+    auth: AuthContext,
+    filter: { repository: string; host?: string; state?: string }
+  ) => {
+    const q = new URLSearchParams({ repository: filter.repository })
+    if (filter.host) q.set('host', filter.host)
+    if (filter.state) q.set('state', filter.state)
+    return call<T>(auth, `/issues/import/candidates?${q.toString()}`)
+  },
+  // 201 { created, skipped } — idempotent by the remote identity, so a number already imported comes back as a
+  // skip rather than a duplicate. The skips are the caller's to surface; they are not an error.
+  importIssues: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/issues/import', { method: 'POST', body: JSON.stringify(body) }),
+  // Bulk pull over one repo's pull-enabled copies — one outcome row per issue, and a single issue's failure is
+  // recorded on that row instead of failing the batch.
+  pullIssueRepository: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/issues/sync', { method: 'POST', body: JSON.stringify(body) }),
+  pullIssue: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
+  setIssueGithubSync: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/github`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  // Detach drops the remote link only — the local issue and its whole history stay.
+  detachIssueGithub: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/github`, { method: 'DELETE' }),
+  listProjects: <T>(
+    auth: AuthContext,
+    filter?: { status?: string; initiative?: string; limit?: number }
+  ) => {
+    const q = new URLSearchParams()
+    if (filter?.status) q.set('status', filter.status)
+    if (filter?.initiative) q.set('initiative', filter.initiative)
+    if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
+    const qs = q.toString()
+    return call<T>(auth, qs ? `/projects?${qs}` : '/projects')
+  },
+  // The detail carries the issue rollup (derived per read); the list stays lean.
+  getProject: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/projects/${encodeURIComponent(id)}`),
+  createProject: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/projects', { method: 'POST', body: JSON.stringify(body) }),
+  updateProject: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/projects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  // Completion is a GATE: with open issues the control plane refuses with a 409 whose `data.openIssues` is the
+  // blocker count the confirmation has to name. Keeping the envelope is the point — flattening the refusal to a
+  // message would leave the UI guessing, and force must stay an explicit second decision, never a silent retry.
+  setProjectStatus: (auth: AuthContext, id: string, body: unknown) =>
+    callWithEnvelope(auth, `/projects/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  // 409 while the project still holds issues (deleting would orphan them) — move them first.
+  deleteProject: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  listInitiatives: <T>(auth: AuthContext, filter?: { status?: string; limit?: number }) => {
+    const q = new URLSearchParams()
+    if (filter?.status) q.set('status', filter.status)
+    if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
+    const qs = q.toString()
+    return call<T>(auth, qs ? `/initiatives?${qs}` : '/initiatives')
+  },
+  // The detail carries the release verdict (readiness over every project's issues) — a fan-out the list omits.
+  getInitiative: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/initiatives/${encodeURIComponent(id)}`),
+  createInitiative: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/initiatives', { method: 'POST', body: JSON.stringify(body) }),
+  updateInitiative: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/initiatives/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  // The release gate — same 409-carrying-the-count contract as a project completion.
+  setInitiativeStatus: (auth: AuthContext, id: string, body: unknown) =>
+    callWithEnvelope(auth, `/initiatives/${encodeURIComponent(id)}/status`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteInitiative: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/initiatives/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listViews: <T>(auth: AuthContext) => call<T>(auth, '/views'),
   getView: <T>(auth: AuthContext, id: string) => call<T>(auth, `/views/${encodeURIComponent(id)}`),
   createView: <T>(auth: AuthContext, body: unknown) =>
@@ -500,16 +647,20 @@ export const controlPlane = {
   captureViewSnapshot: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/views/${encodeURIComponent(id)}/snapshots`, { method: 'POST' }),
   // filter.judge = only batches that applied this Agent Judge (the judge detail's evaluation history);
-  // filter.schedule = only the runs a schedule fired (the schedule detail's run history). Mutually exclusive.
-  listScorecards: <T>(auth: AuthContext, filter?: { judge?: string; schedule?: string }) =>
-    call<T>(
-      auth,
-      filter?.schedule
-        ? `/scorecards?schedule=${encodeURIComponent(filter.schedule)}`
-        : filter?.judge
-          ? `/scorecards?judge=${encodeURIComponent(filter.judge)}`
-          : '/scorecards'
-    ),
+  // filter.schedule = only the runs a schedule fired (the schedule detail's run history);
+  // filter.dataset / filter.harness = every batch that exercised a capability (the tracker's evaluation history).
+  listScorecards: <T>(
+    auth: AuthContext,
+    filter?: { judge?: string; schedule?: string; dataset?: string; harness?: string }
+  ) => {
+    const q = new URLSearchParams()
+    if (filter?.schedule) q.set('schedule', filter.schedule)
+    else if (filter?.judge) q.set('judge', filter.judge)
+    if (filter?.dataset) q.set('dataset', filter.dataset)
+    if (filter?.harness) q.set('harness', filter.harness)
+    const qs = q.toString()
+    return call<T>(auth, qs ? `/scorecards?${qs}` : '/scorecards')
+  },
   getScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
   runScorecard: <T>(auth: AuthContext, body: unknown) =>
@@ -882,8 +1033,8 @@ export const controlPlane = {
     call<T>(auth, '/workspace/mattermost', { method: 'PUT', body: JSON.stringify(body) }),
   probeMattermost: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/mattermost/probe', { method: 'POST', body: JSON.stringify(body) }),
-  removeMattermost: (auth: AuthContext) =>
-    callVoid(auth, '/workspace/mattermost', { method: 'DELETE' }),
+  removeMattermost: (auth: AuthContext, name: string) =>
+    callVoid(auth, `/workspace/mattermost/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   // Per-harness EXPORT selection (assignment) — body { source: name | null }, null clears it (no export). The referenced
   // name is a registered trace SOURCE (sink-capable kind). harnesses:register (member+) — where to export is the harness owner's call.
   assignHarnessTraceSink: <T>(auth: AuthContext, harnessId: string, body: unknown) =>

@@ -17,6 +17,8 @@ export const notificationKinds = [
   'schedule_failed',
   'report_completed',
   'comment_mention',
+  // 닫아둔 이슈의 평가가 무너졌다 — 아무도 안 보고 있는 이슈라서, 이슈 쪽이 사람을 찾아와야 한다.
+  'issue_regressed',
 ] as const
 export const notificationKindSchema = z.enum(notificationKinds)
 

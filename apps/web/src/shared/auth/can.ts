@@ -43,6 +43,9 @@ export type WebAction =
   | 'settings:write'
   | 'comments:read'
   | 'comments:write'
+  // The eval tracker (issues + projects + initiatives) — one action pair for all three, mirroring the control plane.
+  | 'issues:read'
+  | 'issues:write'
   | 'images:push'
 
 const PERMS: Record<string, WebAction[]> = {
@@ -63,6 +66,7 @@ const PERMS: Record<string, WebAction[]> = {
     'runtimes:write', // runtime registration (+connection test) is role-agnostic — same as harnesses:register
     'members:read', // team read is viewer+
     'comments:read', // comment read is viewer+
+    'issues:read', // reading the tracker (what the team is evaluating) is viewer+
   ],
   member: [
     'runs:read',
@@ -92,6 +96,8 @@ const PERMS: Record<string, WebAction[]> = {
     'members:read',
     'comments:read',
     'comments:write', // comment creation is member+ (deletion is author-or-admin, the server decides)
+    'issues:read',
+    'issues:write', // filing/resolving/linking tracker work → member+ (deletion is creator-or-admin, server-side)
     'images:push', // publishing/retracting a workspace image is harness authoring → member+ (mirrors the control plane)
   ],
   admin: [
@@ -137,6 +143,8 @@ const PERMS: Record<string, WebAction[]> = {
     'settings:write',
     'comments:read',
     'comments:write',
+    'issues:read',
+    'issues:write',
     'images:push',
   ],
 }

@@ -4,11 +4,14 @@ import {
   BookOpen,
   Bot,
   Boxes,
+  CircleDot,
   Database,
+  FolderKanban,
   Gavel,
   LayoutDashboard,
   MonitorDown,
   Puzzle,
+  Rocket,
   Store,
   Terminal,
   type LucideIcon,
@@ -28,10 +31,16 @@ export interface NavSection {
   heading?: string
   headingKey?: string // nav.* key — preferred over `heading` (raw) so section titles are localized
   items: NavItem[]
+  // 접이식 섹션(기본 접힘). 사이드바의 1차 관심사는 트래커이고, 평가 primitive 들은 그 아래로 물러난다.
+  // 접혀 있어도 ① 현재 경로가 이 섹션 안이면 자동으로 펼쳐지고 ② 명령 팔레트에는 그대로 남아, 도달성은 유지된다.
+  collapsible?: boolean
 }
 
-// The sidebar is the EVAL half of the split view: home (overview) · harness (what) · benchmark (with what) ·
-// scorecard (result) · judge (who scores the result) + saved views.
+// The sidebar leads with the TRACKER (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue. That is the deliberate
+// order of the product's questions: "why are we evaluating this, and can we ship" comes first, and the eval
+// primitives that answer "what ran" (harness · dataset · scorecard · judge · store · view · agent) sit under a
+// collapsed "Evaluation" group. Nothing is removed — the group expands on click, auto-expands whenever the
+// active route is inside it, and every entry stays in the command palette (ALL_NAV_ITEMS).
 // Infra concerns (runs · schedules · runtimes · work queue) are NOT sidebar entries — they live on the vertical
 // infra rail (widgets/infra-panel) on the right; their full pages remain routable (panel "full page" links,
 // command palette infra group).
@@ -49,6 +58,30 @@ export const NAV_SECTIONS: NavSection[] = [
         exact: true,
         keywords: 'overview home',
       },
+      {
+        href: '/issues',
+        labelKey: 'issues',
+        icon: CircleDot,
+        keywords: 'issue bug regression triage tracker 이슈 회귀 트래커',
+      },
+      {
+        href: '/projects',
+        labelKey: 'projects',
+        icon: FolderKanban,
+        keywords: 'project milestone target date rollup 프로젝트 마일스톤 목표일',
+      },
+      {
+        href: '/initiatives',
+        labelKey: 'initiatives',
+        icon: Rocket,
+        keywords: 'initiative release readiness ship 이니셔티브 릴리스 준비',
+      },
+    ],
+  },
+  {
+    headingKey: 'evaluation',
+    collapsible: true,
+    items: [
       {
         href: '/harnesses',
         labelKey: 'harnesses',
@@ -74,16 +107,16 @@ export const NAV_SECTIONS: NavSection[] = [
         keywords: 'judge grader model harness rubric verdict score',
       },
       {
-        href: '/store',
-        labelKey: 'store',
-        icon: Store,
-        keywords: 'store capability tool mcp code skill adopt publish marketplace 도구 스토어',
-      },
-      {
         href: '/views',
         labelKey: 'views',
         icon: Bookmark,
         keywords: 'view analysis saved dashboard leaderboard trend compare pivot',
+      },
+      {
+        href: '/store',
+        labelKey: 'store',
+        icon: Store,
+        keywords: 'store capability tool mcp code skill adopt publish marketplace 도구 스토어',
       },
       {
         href: '/agents',

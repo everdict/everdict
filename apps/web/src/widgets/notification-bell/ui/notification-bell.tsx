@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   AtSign,
+  TriangleAlert,
   Bell,
   BellOff,
   BellRing,
@@ -72,6 +73,7 @@ const KIND_META: Record<NotificationKind, { Icon: LucideIcon; tone: KindTone }> 
   schedule_failed: { Icon: CalendarX, tone: 'danger' },
   report_completed: { Icon: ClipboardCheck, tone: 'info' }, // scheduled analysis report pinned to a view
   comment_mention: { Icon: AtSign, tone: 'info' },
+  issue_regressed: { Icon: TriangleAlert, tone: 'danger' }, // 닫힌 이슈가 다시 열렸다 — 경보로 읽혀야 한다
 }
 const TONE_CHIP: Record<KindTone, string> = {
   success: 'bg-[var(--color-success)]/12 text-[var(--color-success)]',

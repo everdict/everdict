@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { ArrowLeft, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
+import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
@@ -52,55 +52,107 @@ function navRowClass(active: boolean) {
   )
 }
 
+// 접이식 섹션의 열림 상태 저장소 키. next-themes 없이 localStorage 를 쓰는 테마 토글과 같은 방식 — 의존성 추가 없이
+// 사용자가 한 번 펼친 그룹은 다음 방문에도 펼쳐진 채로 남는다.
+const NAV_GROUP_STORAGE_PREFIX = 'everdict-nav-group:'
+
 function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: () => void }) {
   const pathname = usePathname()
   const t = useTranslations('nav')
   // Eval nav + the pinned Resources group (guide + agent-connect entry points) render as one sectioned list.
   const sections = [...NAV_SECTIONS, RESOURCES_SECTION]
+  // 사용자가 직접 토글한 그룹만 기록한다(미기록 = 기본 접힘 + 활성 경로 자동 펼침).
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  // localStorage 는 렌더 중에 읽으면 하이드레이션이 어긋나므로 마운트 후에 반영한다. 첫 페인트는 기본값(접힘)이라
+  // 어차피 우리가 원하는 초기 상태다.
+  useEffect(() => {
+    const restored: Record<string, boolean> = {}
+    for (const section of NAV_SECTIONS) {
+      if (!section.collapsible || !section.headingKey) continue
+      const saved = window.localStorage.getItem(`${NAV_GROUP_STORAGE_PREFIX}${section.headingKey}`)
+      if (saved !== null) restored[section.headingKey] = saved === 'open'
+    }
+    if (Object.keys(restored).length > 0) setOpenGroups((prev) => ({ ...restored, ...prev }))
+  }, [])
+
+  const toggleGroup = (key: string, next: boolean) => {
+    setOpenGroups((prev) => ({ ...prev, [key]: next }))
+    window.localStorage.setItem(`${NAV_GROUP_STORAGE_PREFIX}${key}`, next ? 'open' : 'closed')
+  }
+
+  const isActiveItem = (href: string, exact?: boolean) => {
+    const full = `/${workspace}${href}`
+    return exact ? pathname === full : pathname === full || pathname.startsWith(`${full}/`)
+  }
+
   return (
     <nav className="flex flex-col gap-4">
-      {sections.map((section, i) => (
-        <div key={section.headingKey ?? section.heading ?? `s-${i}`} className="flex flex-col gap-0.5">
-          {(section.headingKey || section.heading) && (
-            <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">
-              {section.headingKey ? t(section.headingKey) : section.heading}
-            </p>
-          )}
-          {section.items.map((item) => {
-            const href = `/${workspace}${item.href}` // suffix → prefixed with the active workspace
-            const active = item.exact
-              ? pathname === href
-              : pathname === href || pathname.startsWith(`${href}/`)
-            const Icon = item.icon
-            return (
-              <Link
-                key={item.href}
-                href={href}
-                onClick={onNavigate}
-                aria-current={active ? 'page' : undefined}
-                // data-tour: 온보딩 투어의 스포트라이트 앵커(nav-harnesses 등). 사이드바에 항상 존재해 라우트 전환에도 안정적.
-                data-tour={`nav-${item.labelKey}`}
-                className={navRowClass(active)}
+      {sections.map((section, i) => {
+        const key = section.headingKey ?? section.heading ?? `s-${i}`
+        // 접힌 그룹이 현재 보고 있는 화면을 숨기면 안 된다 — 활성 항목을 품고 있으면 저장된 상태와 무관하게 펼친다.
+        const holdsActive = section.items.some((item) => isActiveItem(item.href, item.exact))
+        const open = !section.collapsible || holdsActive || (openGroups[key] ?? false)
+        return (
+          <div key={key} className="flex flex-col gap-0.5">
+            {section.collapsible && section.headingKey ? (
+              <button
+                type="button"
+                onClick={() => toggleGroup(section.headingKey ?? key, !open)}
+                aria-expanded={open}
+                className="group flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5 text-[11px] font-[510] tracking-wide text-faint transition-colors hover:text-secondary-foreground"
               >
-                <span
-                  className={cn(
-                    'absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
-                    active ? 'opacity-100' : 'opacity-0'
-                  )}
+                <ChevronRight
+                  className={cn('size-3 transition-transform duration-150', open && 'rotate-90')}
+                  strokeWidth={2.25}
                 />
-                <Icon
-                  className={cn(
-                    'size-[17px] shrink-0 transition-colors',
-                    active ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'
-                  )}
-                  strokeWidth={1.75}
-                />
-                {t(item.labelKey)}
-              </Link>
-            )
-          })}
-        </div>
-      ))}
+                {t(section.headingKey)}
+              </button>
+            ) : (
+              (section.headingKey || section.heading) && (
+                <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">
+                  {section.headingKey ? t(section.headingKey) : section.heading}
+                </p>
+              )
+            )}
+            {open &&
+              section.items.map((item) => {
+                const href = `/${workspace}${item.href}` // suffix → prefixed with the active workspace
+                const active = isActiveItem(item.href, item.exact)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={href}
+                    onClick={onNavigate}
+                    aria-current={active ? 'page' : undefined}
+                    // data-tour: 온보딩 투어의 스포트라이트 앵커(nav-harnesses 등). 접이식 그룹 안의 앵커는 투어가 해당
+                    // 라우트로 먼저 이동하면서(step.href) 자동 펼침이 걸려 살아난다 — 앵커를 못 찾아도 투어는 카드만
+                    // 중앙에 띄우고 계속된다.
+                    data-tour={`nav-${item.labelKey}`}
+                    className={navRowClass(active)}
+                  >
+                    <span
+                      className={cn(
+                        'absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
+                        active ? 'opacity-100' : 'opacity-0'
+                      )}
+                    />
+                    <Icon
+                      className={cn(
+                        'size-[17px] shrink-0 transition-colors',
+                        active
+                          ? 'text-foreground'
+                          : 'text-muted-foreground group-hover:text-foreground'
+                      )}
+                      strokeWidth={1.75}
+                    />
+                    {t(item.labelKey)}
+                  </Link>
+                )
+              })}
+          </div>
+        )
+      })}
     </nav>
   )
 }
