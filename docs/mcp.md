@@ -53,6 +53,31 @@ rule `api-layer`):
 | `ingest_scorecard` | `scorecards:run` | upload externally-run `TraceEvent[]` → scorecard (no harness run; push) |
 | `pull_scorecard` | `scorecards:run` | pull traces from a tenant's OTel/MLflow (`source` + `runs:[{caseId,runId}]`, `authSecret`=SecretStore key) → scorecard |
 
+### Eval tracker (docs/tracker.md)
+Initiative ⊃ Project ⊃ Issue — the "why we evaluate" layer. One action pair covers all three
+(`issues:read` viewer+, `issues:write` member+); delete additionally requires creator-or-admin. This is the
+surface an agent triages its OWN regressions through: find the issue watching a harness, read how it was closed
+last time, move it.
+
+| tool | authZ | notes |
+|---|---|---|
+| `create_issue` | `issues:write` | file a problem under evaluation; `links` attach the capabilities that verify it |
+| `list_issues` | `issues:read` | newest activity first; `linkType`+`linkId` answers "which issues watch this harness" |
+| `get_issue` | `issues:read` | links, resolution (incl. the scorecard that proved it), GitHub copy, durable history |
+| `update_issue` | `issues:write` | content only (title/description/labels/assignee/project); `null` clears |
+| `set_issue_status` | `issues:write` | say where it should end up — the control plane picks move/resolve/reopen. `done` REQUIRES a resolution; reopening a done issue as `regressed` records a fallen resolution. Illegal move → `CONFLICT` |
+| `add_issue_link` / `remove_issue_link` | `issues:write` | attach/detach harness · dataset · judge · scorecard · run · view |
+| `list_issue_scorecards` | `scorecards:read` | the issue's EVALUATION HISTORY: pinned evidence ∪ every batch its linked dataset/harness ran |
+| `delete_issue` | `issues:write` | hard delete; creator or admin |
+| `create/list/get/update/delete_project` | `issues:write` / `issues:read` | issues under one target date; `get` carries the rollup |
+| `set_project_status` | `issues:write` | completing REFUSES while issues are open (`CONFLICT`); `force:true` overrides and is recorded |
+| `create/list/get/update/delete_initiative` | `issues:write` / `issues:read` | the deployment umbrella; `get` carries the readiness verdict + blockers |
+| `set_initiative_status` | `issues:write` | the RELEASE GATE — refuses while any issue under any of its projects is open; `force:true` is a recorded override |
+| `list_github_import_candidates` | `issues:write` | a repo's issues minus PRs minus what this workspace already imported |
+| `import_github_issues` | `issues:write` | copy GitHub issues in; idempotent by remote identity. A closed issue lands `done` WITHOUT a scorecard — never invent evidence |
+| `pull_github_issues` / `sync_github_issue` | `issues:write` | MANUAL refresh (no webhook, no sweep). GitHub wins on title/description/labels/comments; a remote close/reopen reconciles through the normal transitions |
+| `set_issue_github_sync` | `issues:write` | pull/push toggles. Push closes/reopens the GitHub issue and posts a comment — a visible action in someone else's tracker |
+
 Authorization/validation failures come back as MCP tool errors (`isError`), e.g. `FORBIDDEN: …`. When the error
 carries structured data it is appended as JSON under that line — the same payload the HTTP envelope puts in
 `data`. That is how a caller recovers rather than just failing: `write_file` losing a race to a concurrent

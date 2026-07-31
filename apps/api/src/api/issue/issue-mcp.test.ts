@@ -1,5 +1,11 @@
-import { InitiativeService, IssueService, ProjectService, RunService } from "@everdict/application-control";
-import type { OutboxEvent } from "@everdict/application-control";
+import {
+  GithubIssueSync,
+  InitiativeService,
+  IssueService,
+  ProjectService,
+  RunService,
+} from "@everdict/application-control";
+import type { GithubRepoWriter, GithubRepoWriterFactory, OutboxEvent } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import {
@@ -33,10 +39,25 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
       pushed.push(...batch.map((b) => b.record));
     },
   };
+  // A writer that answers nothing — these tests assert the tool SURFACE, not GitHub behaviour (that lives in
+  // github-issue-sync.test.ts).
+  const idleWriter = new Proxy({} as GithubRepoWriter, {
+    get: () => async () => {
+      throw new Error("GitHub is not exercised in the MCP surface test");
+    },
+  });
+  const writers: GithubRepoWriterFactory = { for: () => idleWriter };
+  const issueService = new IssueService({ store: issueStore, scorecards: new InMemoryScorecardStore(), events });
   return {
     deps: {
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-      issueService: new IssueService({ store: issueStore, scorecards: new InMemoryScorecardStore(), events }),
+      issueService,
+      issueSync: new GithubIssueSync({
+        store: issueStore,
+        issues: issueService,
+        tokens: { tokenForRepository: async () => ({ token: "tok" }) },
+        writers,
+      }),
       projectService: new ProjectService({ store: projectStore, issues: issueStore, events }),
       initiativeService: new InitiativeService({
         store: new InMemoryInitiativeStore(),
@@ -90,6 +111,23 @@ describe("eval tracker MCP tools", () => {
       "update_initiative",
       "set_initiative_status",
       "delete_initiative",
+    ]) {
+      expect(names).toContain(name);
+    }
+  });
+
+  // The GitHub half is its own optional collaborator (absent when no App is configured), so its parity is
+  // asserted separately — a service wired into ServerDeps but forgotten in mcp.ts loses its whole tool family
+  // silently, which is exactly how the knowledge tools once went missing.
+  it("exposes the GitHub import + manual sync tools when the sync collaborator is composed", async () => {
+    const client = await connect(makeDeps().deps);
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const name of [
+      "list_github_import_candidates",
+      "import_github_issues",
+      "pull_github_issues",
+      "sync_github_issue",
+      "set_issue_github_sync",
     ]) {
       expect(names).toContain(name);
     }
