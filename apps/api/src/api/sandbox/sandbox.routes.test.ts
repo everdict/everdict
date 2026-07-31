@@ -94,7 +94,7 @@ describe("sandbox session routes — run an environment image and shell in (P6)"
     // The session's evidence serves through the EXISTING run surface — no new read endpoint.
     const trajectory = await app.inject({ method: "GET", url: `/runs/${record.id}/trajectory`, headers: H });
     expect(trajectory.statusCode).toBe(200);
-    expect(trajectory.json().meta).toMatchObject({ source: "run", eventCount: 4 }); // start + call + result + close
+    expect(trajectory.json().meta).toMatchObject({ source: "run", eventCount: 5 }); // start + call + result + close
   });
 
   it("validates the body: image XOR environment, and rejects an empty command", async () => {
