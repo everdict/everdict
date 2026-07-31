@@ -13,7 +13,7 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
       "get_workspace_mattermost",
       {
         description:
-          "This workspace's Mattermost integration — host (operator-configured server URL, MATTERMOST_HOST env; absent = unavailable) + config (botTokenSecretName/defaultChannelId, not secret values; absent = not registered).",
+          "This workspace's Mattermost connections — host (operator-configured server URL, MATTERMOST_HOST env; absent = unavailable) + connections[] (name/botTokenSecretName/defaultChannelId, not secret values; empty = nothing registered). Completion/regression alerts go to every connection that has a channel.",
         inputSchema: {},
       },
       () => run(principal, "settings:read", async () => ok(await mm.get(ws))),
@@ -22,8 +22,9 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
       "set_workspace_mattermost",
       {
         description:
-          "Register/update the Mattermost integration (admin). The server URL is operator env (MATTERMOST_HOST), not passed here. Put the bot token (value) in the SecretStore first and pass its name as botTokenSecretName. The bot token (+ channel) is verified against the live server before saving (a failed connection is an error). defaultChannelId = the completion/regression alert channel.",
+          "Register/update one Mattermost connection (admin, upsert by name — a workspace can register several, one bot+channel per team/purpose). The server URL is operator env (MATTERMOST_HOST), not passed here. Put the bot token (value) in the SecretStore first and pass its name as botTokenSecretName. The bot token (+ channel) is verified against the live server before saving (a failed connection is an error). defaultChannelId = the completion/regression alert channel of THIS connection.",
         inputSchema: {
+          name: z.string().min(1).optional().describe("connection name (upsert key; omitted = 'default')"),
           botTokenSecretName: z.string().min(1).describe("SecretStore key name holding the bot access token"),
           defaultChannelId: z
             .string()
@@ -39,10 +40,11 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
             ),
         },
       },
-      ({ botTokenSecretName, defaultChannelId, commandTokenSecretName }) =>
+      ({ name, botTokenSecretName, defaultChannelId, commandTokenSecretName }) =>
         run(principal, "settings:write", async () =>
           ok({
             config: await mm.set(ws, {
+              ...(name ? { name } : {}),
               botTokenSecretName,
               ...(defaultChannelId ? { defaultChannelId } : {}),
               ...(commandTokenSecretName ? { commandTokenSecretName } : {}),
@@ -69,12 +71,12 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
       "remove_workspace_mattermost",
       {
         description:
-          "Unregister the Mattermost integration (admin). Completion/regression alerts are no longer posted afterward.",
-        inputSchema: {},
+          "Remove one Mattermost connection by name (admin). Its channel stops receiving completion/regression alerts; the workspace's other connections are untouched.",
+        inputSchema: { name: z.string().min(1).describe("name of the connection to remove") },
       },
-      () =>
+      ({ name }) =>
         run(principal, "settings:write", async () => {
-          await mm.clear(ws);
+          await mm.remove(ws, name);
           return ok({ ok: true });
         }),
     );
@@ -82,34 +84,39 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
       "post_mattermost_message",
       {
         description:
-          "Post a message to this workspace's configured Mattermost channel (the default channel of the registered bot), as the workspace bot. Use this to notify the team — e.g. a scorecard regression summary or a run result. Requires the workspace to have a registered Mattermost bot + default channel (otherwise an error). member+ (mattermost:post). Returns the channel id the message landed in.",
+          "Post a message to a workspace Mattermost channel (a connection's configured channel), as that connection's bot. Use this to notify the team — e.g. a scorecard regression summary or a run result. connection picks which registered connection to post through (omit for the first one; get the names from get_workspace_mattermost). Requires a registered bot + a channel on it (otherwise an error). member+ (mattermost:post). Returns the connection + channel id the message landed in.",
         inputSchema: {
           message: z.string().min(1).describe("the message text to post (Mattermost Markdown supported)"),
+          connection: z.string().min(1).optional().describe("connection name (omitted = the first registered one)"),
         },
       },
-      ({ message }) => run(principal, "mattermost:post", async () => ok(await mm.postMessage(ws, message))),
+      ({ message, connection }) =>
+        run(principal, "mattermost:post", async () => ok(await mm.postMessage(ws, message, connection))),
     );
     server.registerTool(
       "list_mattermost_channels",
       {
         description:
-          "List the Mattermost channels this workspace's bot can access (across its teams): id, name, display name, team, type. Requires a registered bot. Use to find a channel id before reading it with get_mattermost_channel_posts.",
-        inputSchema: {},
+          "List the Mattermost channels a workspace bot can access (across its teams): id, name, display name, team, type. Requires a registered bot; connection picks which one (omitted = the first). Use to find a channel id before reading it with get_mattermost_channel_posts.",
+        inputSchema: {
+          connection: z.string().min(1).optional().describe("connection name (omitted = the first registered one)"),
+        },
       },
-      () => run(principal, "settings:read", async () => ok(await mm.listChannels(ws))),
+      ({ connection }) => run(principal, "settings:read", async () => ok(await mm.listChannels(ws, connection))),
     );
     server.registerTool(
       "get_mattermost_channel_posts",
       {
         description:
-          "Read recent posts in a Mattermost channel (newest first): author user id, message, timestamp. Requires a registered bot with access to the channel. Get the channel id from list_mattermost_channels.",
+          "Read recent posts in a Mattermost channel (newest first): author user id, message, timestamp. Requires a registered bot with access to the channel; connection picks which one (omitted = the first). Get the channel id from list_mattermost_channels.",
         inputSchema: {
           channelId: z.string().min(1).describe("the channel id (from list_mattermost_channels)"),
           limit: z.number().int().positive().max(100).optional().describe("max posts to return (default 30, max 100)"),
+          connection: z.string().min(1).optional().describe("connection name (omitted = the first registered one)"),
         },
       },
-      ({ channelId, limit }) =>
-        run(principal, "settings:read", async () => ok(await mm.getChannelPosts(ws, channelId, limit))),
+      ({ channelId, limit, connection }) =>
+        run(principal, "settings:read", async () => ok(await mm.getChannelPosts(ws, channelId, limit, connection))),
     );
   }
 }

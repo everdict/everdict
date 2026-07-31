@@ -1,6 +1,7 @@
 import type { EnvValue, HarnessSpec, ModelSpec, RuntimeSpec, WorkspaceSettings } from "@everdict/contracts";
 import type { SecretUsageRef } from "@everdict/contracts/wire";
 import { modelApiKeySecretName } from "../model/model-binding.js";
+import { mattermostConnections } from "../workspace/mattermost-connections.js";
 
 // Reverse index of workspace secrets — given the CURRENT registry specs (latest per entity) + workspace settings,
 // enumerate every site that names a secret. Pure: the control plane fetches the specs; this decides what references
@@ -80,14 +81,12 @@ export function collectSecretUsages(inputs: SecretUsageInputs): SecretUsage[] {
   // --- workspace settings integrations (all workspace-scoped) ---
   const s = inputs.settings;
   if (s) {
-    if (s.mattermost) {
-      workspaceRef(s.mattermost.botTokenSecretName, { kind: "mattermost", label: "Mattermost", field: "bot-token" });
-      if (s.mattermost.commandTokenSecretName) {
-        workspaceRef(s.mattermost.commandTokenSecretName, {
-          kind: "mattermost",
-          label: "Mattermost",
-          field: "command-token",
-        });
+    // mattermost — every registered connection (the plural list, else the legacy singular lifted in).
+    for (const connection of mattermostConnections(s)) {
+      const base = { kind: "mattermost", label: "Mattermost", detail: connection.name } as const;
+      workspaceRef(connection.botTokenSecretName, { ...base, field: "bot-token" });
+      if (connection.commandTokenSecretName) {
+        workspaceRef(connection.commandTokenSecretName, { ...base, field: "command-token" });
       }
     }
     // image registries — the plural canonical list, else the legacy singular (mirrors the settings read-merge).

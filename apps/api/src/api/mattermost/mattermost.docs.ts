@@ -11,31 +11,34 @@ import { errorResponses, toJsonSchema } from "../openapi.js";
 // Values are widened to FastifySchema so Fastify does NOT narrow reply.code() to the documented status keys.
 const docs = {
   status: {
-    summary: "Workspace Mattermost integration status",
+    summary: "Workspace Mattermost connections",
     description:
-      "Workspace-owned integration (an admin registers the workspace's bot + channel once — replaces personal " +
+      "Workspace-owned integration (an admin registers one bot + channel per team/purpose — replaces personal " +
       "connected-account notifications). host is the operator-configured server URL (MATTERMOST_HOST env; absent = " +
-      "unavailable); config is absent when the workspace hasn't registered a bot. All secret fields are SecretStore " +
-      "name references, never values. Requires settings:read.",
+      "unavailable); connections is empty when the workspace hasn't registered a bot. Completion/regression " +
+      "notifications go to every connection that has a channel. All secret fields are SecretStore name references, " +
+      "never values. Requires settings:read.",
     tags: ["mattermost"],
     response: {
       200: {
-        description: "Operator server URL + workspace registration",
+        description: "Operator server URL + the workspace's connections",
         ...toJsonSchema(MattermostStatusResponseSchema),
       },
       ...errorResponses(401, 403, 404),
     },
   },
   upsert: {
-    summary: "Register or update the workspace Mattermost",
+    summary: "Register or update a workspace Mattermost connection",
     description:
-      "The server URL is operator env (MATTERMOST_HOST), not accepted here. Put the bot token (and optionally the " +
-      "inbound verification token) into the SecretStore first, then pass only their names. The bot token (+ channel) " +
-      "is verified against the live server before saving (strict — a failed connection is a 400). Setting " +
+      "Upsert by name (omitted = 'default'). The server URL is operator env (MATTERMOST_HOST), not accepted here. Put " +
+      "the bot token (and optionally the inbound verification token) into the SecretStore first, then pass only their " +
+      "names. The bot token (+ channel) is verified against the live server before saving (strict — a failed " +
+      "connection is a 400). An omitted channel/command token keeps what that connection already had. Setting " +
       "commandTokenSecretName activates the /everdict slash command and buttons. Requires settings:write (admin).",
     tags: ["mattermost"],
     body: toJsonSchema(
       z.object({
+        name: z.string().min(1).optional().describe("Connection name — the upsert key (default: 'default')"),
         botTokenSecretName: z.string().min(1).describe("SecretStore name of the bot access token"),
         defaultChannelId: z.string().min(1).optional(),
         commandTokenSecretName: z
@@ -46,7 +49,7 @@ const docs = {
       }),
     ),
     response: {
-      200: { description: "Stored config", ...toJsonSchema(MattermostUpsertResponseSchema) },
+      200: { description: "Stored connection", ...toJsonSchema(MattermostUpsertResponseSchema) },
       ...errorResponses(400, 401, 403, 404),
     },
   },
@@ -69,23 +72,32 @@ const docs = {
     },
   },
   remove: {
-    summary: "Remove the workspace Mattermost integration",
-    description: "Clears the workspace Mattermost config (notifications stop). Requires settings:write (admin).",
+    summary: "Remove a workspace Mattermost connection",
+    description:
+      "Removes the named connection (its channel stops receiving notifications; the others are untouched). " +
+      "Requires settings:write (admin).",
     tags: ["mattermost"],
+    params: toJsonSchema(z.object({ name: z.string().describe("Connection name") })),
     response: { 204: { description: "Removed", type: "null" }, ...errorResponses(401, 403, 404) },
   },
   postMessage: {
-    summary: "Post a message to the workspace Mattermost channel",
+    summary: "Post a message to a workspace Mattermost channel",
     description:
-      "Post a message to the workspace's configured default channel as the bot — powers the conversational agent's " +
-      "post_mattermost_message tool (notify the team, e.g. a regression summary). Requires a registered bot + default " +
-      "channel (missing config → 400). Requires mattermost:post (member+), distinct from admin-only registration.",
+      "Post a message to a connection's channel as its bot — powers the conversational agent's " +
+      "post_mattermost_message tool (notify the team, e.g. a regression summary). connection selects which " +
+      "registered connection to post through (omitted = the first). Requires a registered bot + a channel on it " +
+      "(missing config → 400). Requires mattermost:post (member+), distinct from admin-only registration.",
     tags: ["mattermost"],
-    body: toJsonSchema(z.object({ message: z.string().min(1).describe("Message text to post (Markdown supported)") })),
+    body: toJsonSchema(
+      z.object({
+        message: z.string().min(1).describe("Message text to post (Markdown supported)"),
+        connection: z.string().min(1).optional().describe("Connection name (omitted = the first registered one)"),
+      }),
+    ),
     response: {
       200: {
-        description: "The channel the message landed in",
-        ...toJsonSchema(z.object({ channelId: z.string() })),
+        description: "The connection + channel the message landed in",
+        ...toJsonSchema(z.object({ connection: z.string(), channelId: z.string() })),
       },
       ...errorResponses(400, 401, 403, 404),
     },

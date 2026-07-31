@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { useState, type ComponentType, type ReactNode } from 'react'
+import { Boxes, Github, MessagesSquare, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { GithubAppManager, type GithubAppNotice } from '@/features/manage-github-app'
@@ -11,17 +11,28 @@ import type { GithubAppView } from '@/entities/github-app'
 import type { ImageRegistryConfig } from '@/entities/image-registry'
 import type { MattermostConfig } from '@/entities/mattermost'
 import { cn } from '@/shared/lib/utils'
-import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
-import { SettingsList } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 export type IntegrationKey = 'github' | 'mattermost' | 'image-registry'
 
-// Integrations tab — one-line per-integration summary rows (connection-status badge); "Manage" expands that
-// integration's manager IN PLACE below the row (single-open accordion) instead of swapping the whole list for a
-// drill-in view — no page-navigation feel, the other integrations stay visible. If a GitHub App installation
-// callback just fired (githubAppNotice) or a ?app= deep link is present, that row starts expanded.
+interface IntegrationTile {
+  key: IntegrationKey
+  label: string
+  icon: ComponentType<{ className?: string }>
+  tint: string // the icon chip's own accent, so a tile is recognizable before its label is read
+  tip: ReactNode
+  hint: string
+  count: number // 0 = not connected
+  status: string
+  detail: ReactNode
+}
+
+// Integrations tab — an ICON TILE GRID (the roster keeps growing, so a tile is scannable at a glance: brand-tinted
+// glyph + name + connection count) with the selected integration's manager expanded IN PLACE below the grid. Not a
+// drill-in route and not a stack of full-width rows: the other integrations stay visible while one is being managed.
+// If a GitHub App installation callback just fired (githubAppNotice) or a ?app= deep link is present, that tile starts
+// open.
 export function IntegrationsPanel({
   githubApp,
   githubAppNotice,
@@ -33,8 +44,9 @@ export function IntegrationsPanel({
 }: {
   githubApp: GithubAppView
   githubAppNotice?: GithubAppNotice
-  // Mattermost status: host = operator env server URL (absent = unavailable); config = the workspace registration.
-  mattermost?: { host?: string; config?: MattermostConfig }
+  // Mattermost status: host = operator env server URL (absent = unavailable — the URL itself is never surfaced);
+  // connections = the workspace's registered bot+channel pairs.
+  mattermost?: { host?: string; connections?: MattermostConfig[] }
   imageRegistries: ImageRegistryConfig[]
   canWrite: boolean
   secretNames: string[]
@@ -47,28 +59,21 @@ export function IntegrationsPanel({
   const [active, setActive] = useState<IntegrationKey | undefined>(
     initialActive ?? (githubAppNotice ? 'github' : undefined)
   )
+  const mattermostConnections = mattermost?.connections ?? []
 
-  const rows: {
-    key: IntegrationKey
-    label: string
-    tip: ReactNode
-    hint: string
-    status: ReactNode
-    detail: ReactNode
-  }[] = [
+  const tiles: IntegrationTile[] = [
     {
       key: 'github',
       label: 'GitHub',
+      icon: Github,
+      tint: 'bg-foreground/[0.06] text-foreground',
       tip: tGithub('titleTip'),
       hint: t('githubHint'),
+      count: githubApp.installations.length,
       status:
-        githubApp.installations.length > 0 ? (
-          <Badge tone="success">
-            {t('githubConnected', { count: githubApp.installations.length })}
-          </Badge>
-        ) : (
-          <Badge tone="outline">{t('notConnected')}</Badge>
-        ),
+        githubApp.installations.length > 0
+          ? t('githubCount', { count: githubApp.installations.length })
+          : t('notConnected'),
       detail: (
         <GithubAppManager
           view={githubApp}
@@ -80,36 +85,39 @@ export function IntegrationsPanel({
     {
       key: 'mattermost',
       label: 'Mattermost',
+      icon: MessagesSquare,
+      tint: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
       tip: tMattermost('titleTip'),
       hint: t('mattermostHint'),
+      // A connection needs the operator's server to be usable at all — without it nothing is really connected.
+      count: mattermost?.host ? mattermostConnections.length : 0,
       status:
-        mattermost?.config && mattermost.host ? (
-          <Badge tone="success">{t('mattermostConnected', { host: mattermost.host })}</Badge>
-        ) : (
-          <Badge tone="outline">{t('notConnected')}</Badge>
-        ),
+        mattermost?.host && mattermostConnections.length > 0
+          ? t('mattermostCount', { count: mattermostConnections.length })
+          : t('notConnected'),
       detail: (
         <MattermostManager
           canWrite={canWrite}
           secretNames={secretNames}
+          connections={mattermostConnections}
           {...(mattermost?.host !== undefined ? { serverHost: mattermost.host } : {})}
-          {...(mattermost?.config !== undefined ? { config: mattermost.config } : {})}
         />
       ),
     },
     {
       key: 'image-registry',
       label: t('imageRegistryLabel'),
+      icon: Boxes,
+      tint: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
       tip: tRegistry.rich('titleTip', {
         mono: (chunks) => <span className="font-mono">{chunks}</span>,
       }),
       hint: t('imageRegistryHint'),
+      count: imageRegistries.length,
       status:
-        imageRegistries.length > 0 ? (
-          <Badge tone="success">{t('registeredCount', { count: imageRegistries.length })}</Badge>
-        ) : (
-          <Badge tone="outline">{t('notRegistered')}</Badge>
-        ),
+        imageRegistries.length > 0
+          ? t('imageRegistryCount', { count: imageRegistries.length })
+          : t('notRegistered'),
       detail: (
         <ImageRegistryManager
           registries={imageRegistries}
@@ -120,39 +128,76 @@ export function IntegrationsPanel({
     },
   ]
 
+  const open = tiles.find((tile) => tile.key === active)
+
   return (
-    <SettingsList>
-      {rows.map((r) => {
-        const open = active === r.key
-        return (
-          <li key={r.key}>
-            <div className="flex min-h-[60px] flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <div className="min-w-0 space-y-0.5">
-                <span className="inline-flex flex-wrap items-center gap-2 text-[13px] font-[510] text-foreground">
-                  <span className="inline-flex items-center gap-1.5">
-                    {r.label}
-                    <InfoTip content={r.tip} />
-                  </span>
-                  {r.status}
-                </span>
-                <p className="text-[12px] leading-relaxed text-muted-foreground">{r.hint}</p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2 sm:justify-end">
-                <Button
-                  variant="secondary"
-                  size="xs"
-                  aria-expanded={open}
-                  onClick={() => setActive(open ? undefined : r.key)}
+    <div className="@container space-y-4">
+      <ul className="grid grid-cols-2 gap-2 @md:grid-cols-3 @2xl:grid-cols-4">
+        {tiles.map((tile) => {
+          const selected = tile.key === active
+          const Icon = tile.icon
+          return (
+            <li key={tile.key}>
+              <button
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setActive(selected ? undefined : tile.key)}
+                className={cn(
+                  'flex h-full w-full flex-col items-start gap-2 rounded-lg border bg-card p-3 text-left transition',
+                  'hover:border-border/90 hover:shadow-raise',
+                  selected && 'border-primary/60 ring-1 ring-primary/25'
+                )}
+              >
+                <span
+                  className={cn(
+                    'flex size-9 shrink-0 items-center justify-center rounded-md',
+                    tile.tint
+                  )}
                 >
-                  {open ? t('collapse') : t('manage')}
-                  <ChevronDown className={cn('transition-transform', open && 'rotate-180')} />
-                </Button>
-              </div>
+                  <Icon className="size-[18px]" />
+                </span>
+                <span className="min-w-0 space-y-0.5">
+                  <span className="block truncate text-[13px] font-[510] text-foreground">
+                    {tile.label}
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+                    <span
+                      className={cn(
+                        'size-1.5 shrink-0 rounded-full',
+                        tile.count > 0 ? 'bg-success' : 'bg-border'
+                      )}
+                    />
+                    <span className="truncate">{tile.status}</span>
+                  </span>
+                </span>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+
+      {open && (
+        <section className="rounded-lg border bg-card">
+          <header className="flex items-start justify-between gap-4 px-4 py-3">
+            <div className="min-w-0 space-y-0.5">
+              <span className="inline-flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
+                {open.label}
+                <InfoTip content={open.tip} />
+              </span>
+              <p className="text-[12px] leading-relaxed text-muted-foreground">{open.hint}</p>
             </div>
-            {open && <div className="border-t border-border/60 px-4 py-4">{r.detail}</div>}
-          </li>
-        )
-      })}
-    </SettingsList>
+            <Button
+              variant="ghost"
+              size="xs"
+              aria-label={t('collapse')}
+              onClick={() => setActive(undefined)}
+            >
+              <X />
+            </Button>
+          </header>
+          <div className="border-t border-border/60 px-4 py-4">{open.detail}</div>
+        </section>
+      )}
+    </div>
   )
 }

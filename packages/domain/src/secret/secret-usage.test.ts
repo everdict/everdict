@@ -212,6 +212,33 @@ describe("collectSecretUsages", () => {
     });
   });
 
+  it("names the Mattermost CONNECTION each token belongs to (a workspace registers several)", () => {
+    const settings = WorkspaceSettingsSchema.parse({
+      mattermostConnections: [
+        { name: "team-alerts", botTokenSecretName: "MM_BOT", commandTokenSecretName: "MM_CMD" },
+        { name: "platform", botTokenSecretName: "MM_BOT2" },
+      ],
+    });
+    const usages = collectSecretUsages({ harnesses: [], runtimes: [], models: [], settings });
+    expect(usages).toEqual([
+      {
+        name: "MM_BOT",
+        scope: "workspace",
+        ref: { kind: "mattermost", label: "Mattermost", detail: "team-alerts", field: "bot-token" },
+      },
+      {
+        name: "MM_CMD",
+        scope: "workspace",
+        ref: { kind: "mattermost", label: "Mattermost", detail: "team-alerts", field: "command-token" },
+      },
+      {
+        name: "MM_BOT2",
+        scope: "workspace",
+        ref: { kind: "mattermost", label: "Mattermost", detail: "platform", field: "bot-token" },
+      },
+    ]);
+  });
+
   it("falls back to the legacy singular image registry + legacy trace sinks", () => {
     const settings = WorkspaceSettingsSchema.parse({
       imageRegistry: { host: "ghcr.io", pushSecretName: "LEGACY_PUSH" },

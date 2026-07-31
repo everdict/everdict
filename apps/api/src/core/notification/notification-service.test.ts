@@ -39,7 +39,9 @@ interface PostCall {
 }
 
 function build(opts: {
-  mattermost?: WorkspaceSettings["mattermost"]; // workspace registration (bot token)
+  mattermost?: WorkspaceSettings["mattermost"]; // LEGACY singular registration (read-compat path)
+  mattermostConnections?: WorkspaceSettings["mattermostConnections"]; // the plural connections a workspace registers
+  host?: string; // operator server URL (MATTERMOST_HOST) — defaults to the legacy fixture's host
   secrets?: Record<string, string>; // botTokenSecretName → value
   apiPublicUrl?: string; // enables the interactive Rerun button on completion posts
   fetchImpl?: typeof fetch;
@@ -50,13 +52,17 @@ function build(opts: {
     return Promise.resolve(new Response("{}"));
   }) as unknown as typeof fetch;
   const feed = new InMemoryNotificationStore();
+  const host = opts.host ?? opts.mattermost?.host;
   const svc = new NotificationService({
-    settingsFor: async () => (opts.mattermost !== undefined ? { mattermost: opts.mattermost } : {}),
+    settingsFor: async () => ({
+      ...(opts.mattermost !== undefined ? { mattermost: opts.mattermost } : {}),
+      ...(opts.mattermostConnections !== undefined ? { mattermostConnections: opts.mattermostConnections } : {}),
+    }),
     secretsFor: async () => opts.secrets ?? {},
     feed,
     mattermost: mattermostHttpClient(opts.fetchImpl ?? recording),
     // Server URL is now operator env (mattermostHost), no longer read from the per-workspace settings — thread the fixture's host through.
-    ...(opts.mattermost?.host ? { mattermostHost: opts.mattermost.host } : {}),
+    ...(host ? { mattermostHost: host } : {}),
     ...(opts.apiPublicUrl ? { apiPublicUrl: opts.apiPublicUrl } : {}),
   });
   return { svc, calls, feed };
@@ -101,6 +107,47 @@ describe("mm:completions → workspace Mattermost bot (the re-based channel)", (
     const failing = (() => Promise.reject(new Error("network"))) as unknown as typeof fetch;
     const { svc } = build({ mattermost: mm, secrets: { MM_BOT: "botxyz" }, fetchImpl: failing });
     await expect(mattermostConsumer(svc).handle(runFactFor("succeeded"))).resolves.toBeUndefined();
+  });
+
+  // A workspace registers one connection per team/purpose — every one that named a channel asked to be notified.
+  it("fans out to EVERY connection with a channel, each with its own bot token", async () => {
+    const { svc, calls } = build({
+      host: "https://mm.corp.io",
+      mattermostConnections: [
+        { name: "team-alerts", botTokenSecretName: "MM_BOT", defaultChannelId: "ch-ops" },
+        { name: "platform", botTokenSecretName: "MM_BOT2", defaultChannelId: "ch-platform" },
+        { name: "inbound-only", botTokenSecretName: "MM_BOT" }, // no channel → not a notification target
+      ],
+      secrets: { MM_BOT: "botxyz", MM_BOT2: "bot222" },
+    });
+    await mattermostConsumer(svc).handle(runFactFor("succeeded"));
+    expect(calls).toHaveLength(2);
+    expect(calls.map((c) => [c.body.channel_id, c.auth])).toEqual([
+      ["ch-ops", "Bearer botxyz"],
+      ["ch-platform", "Bearer bot222"],
+    ]);
+  });
+
+  it("one connection's missing token or outage never silences the others", async () => {
+    const reached: string[] = [];
+    const flaky = ((_url: string | URL, init?: { body?: string }) => {
+      const channelId = String(JSON.parse(init?.body ?? "{}").channel_id);
+      if (channelId === "ch-ops") return Promise.reject(new Error("network"));
+      reached.push(channelId);
+      return Promise.resolve(new Response("{}"));
+    }) as unknown as typeof fetch;
+    const { svc } = build({
+      host: "https://mm.corp.io",
+      mattermostConnections: [
+        { name: "gone", botTokenSecretName: "MM_MISSING", defaultChannelId: "ch-gone" }, // no secret → skipped
+        { name: "team-alerts", botTokenSecretName: "MM_BOT", defaultChannelId: "ch-ops" }, // transport throws
+        { name: "platform", botTokenSecretName: "MM_BOT2", defaultChannelId: "ch-platform" },
+      ],
+      secrets: { MM_BOT: "botxyz", MM_BOT2: "bot222" },
+      fetchImpl: flaky,
+    });
+    await expect(mattermostConsumer(svc).handle(runFactFor("succeeded"))).resolves.toBeUndefined();
+    expect(reached).toEqual(["ch-platform"]); // the last connection still got its post
   });
 });
 

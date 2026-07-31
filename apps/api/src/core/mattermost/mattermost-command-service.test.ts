@@ -46,6 +46,38 @@ describe("MattermostCommandService — inbound verification + dispatch", () => {
     await expect(svc.handleCommand("acme", { text: "status" })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
+  // The slash command may be installed on ANY of the workspace's connections — the request carries only its token.
+  it("accepts the token of any registered connection, and still rejects one belonging to none", async () => {
+    await settings.set("multi", {
+      mattermostConnections: [
+        { name: "team-alerts", botTokenSecretName: "MM_BOT", commandTokenSecretName: "MM_CMD" },
+        { name: "platform", botTokenSecretName: "MM_BOT2", commandTokenSecretName: "MM_CMD2" },
+      ],
+    });
+    const multi = new MattermostCommandService({
+      settings,
+      secretsFor: async () => ({ MM_CMD: TOKEN, MM_CMD2: "other-cmd-token" }),
+    });
+    await expect(multi.handleCommand("multi", { token: TOKEN, text: "status" })).resolves.toMatchObject({
+      response_type: "ephemeral",
+    });
+    await expect(multi.handleCommand("multi", { token: "other-cmd-token", text: "status" })).resolves.toMatchObject({
+      response_type: "ephemeral",
+    });
+    await expect(multi.handleCommand("multi", { token: "wrong", text: "status" })).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+  });
+
+  it("a workspace whose connections all lack an inbound token is Forbidden", async () => {
+    await settings.set("outbound-only", {
+      mattermostConnections: [{ name: "team-alerts", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" }],
+    });
+    await expect(svc.handleCommand("outbound-only", { token: TOKEN, text: "status" })).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+  });
+
   // --- dispatch ---
   it("status → connection-check response (ephemeral)", async () => {
     const r = await svc.handleCommand("acme", { token: TOKEN, text: "status" });

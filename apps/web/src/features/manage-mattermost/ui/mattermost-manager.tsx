@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
@@ -9,6 +9,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label } from '@/shared/ui/input'
+import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import {
@@ -17,20 +18,21 @@ import {
   setMattermostAction,
 } from '../api/manage-mattermost'
 
-// Workspace-owned Mattermost integration — the server URL is operator env (MATTERMOST_HOST), shown read-only. An admin
-// registers the workspace's bot token + channel; run/scorecard completion & regression notifications are posted to the
-// channel with the bot token (replaces personal connections). The bot token value is stored only as a workspace secret (name).
-// Registration requires a verified connection first (Test connection → the control plane also re-verifies strictly on save).
-// serverHost = the operator-configured Mattermost URL (absent = operator hasn't set MATTERMOST_HOST). secretNames = token picker.
-// Rendered inside the Integrations accordion row — the row owns the title/InfoTip, so this renders content only.
+// Workspace-owned Mattermost connections — an admin registers one bot + channel per team/purpose against the
+// operator's server; run/scorecard completion & regression notifications are posted to EVERY connection that has a
+// channel. Bot/command token values are stored only as workspace secret references (names). The server URL is
+// deployment infrastructure (MATTERMOST_HOST) and is never shown or entered here — serverHost only tells us whether
+// the integration is usable at all. Registration requires a verified connection first (Test connection → the control
+// plane also re-verifies strictly on save).
+// Rendered inside the Integrations detail — the panel owns the title/InfoTip, so this renders content only.
 export function MattermostManager({
   serverHost,
-  config,
+  connections,
   canWrite,
   secretNames,
 }: {
   serverHost?: string
-  config?: MattermostConfig
+  connections: MattermostConfig[]
   canWrite: boolean
   secretNames: string[]
 }) {
@@ -38,20 +40,28 @@ export function MattermostManager({
   const [pending, startTransition] = useTransition()
   const [probing, startProbing] = useTransition()
   const [error, setError] = useState<string>()
-  const [tokenName, setTokenName] = useState(config?.botTokenSecretName ?? '')
-  const [channel, setChannel] = useState(config?.defaultChannelId ?? '')
-  const [cmdName, setCmdName] = useState(config?.commandTokenSecretName ?? '')
+  // Edit target name — a row's Edit prefills the form (save is an upsert keyed by name). undefined = add a connection.
+  const [editing, setEditing] = useState<string>()
+  const [name, setName] = useState('')
+  const [tokenName, setTokenName] = useState('')
+  const [channel, setChannel] = useState('')
+  const [cmdName, setCmdName] = useState('')
   const [created, setCreated] = useState<string[]>([])
-  // Verified-connection gate — Save is enabled only after a reachable probe for the CURRENT token+channel. Editing resets it.
-  const [verified, setVerified] = useState<{ botUsername?: string; channelName?: string }>()
+  // Verified-connection gate — Save is enabled only after a reachable probe for the CURRENT token+channel pair.
+  const [verified, setVerified] = useState<{
+    probeKey: string
+    botUsername?: string
+    channelName?: string
+  }>()
   const [probeReason, setProbeReason] = useState<string>()
   const names = [...new Set([...secretNames, ...created])]
 
-  // Any change to what we'd verify (bot token or channel) invalidates a prior probe → re-gate Save.
-  useEffect(() => {
-    setVerified(undefined)
-    setProbeReason(undefined)
-  }, [tokenName, channel])
+  // The fingerprint the probe must match — editing the bot token or channel invalidates a prior test.
+  const probeKey = `${tokenName.trim()}|${channel.trim()}`
+  const probeFresh = verified?.probeKey === probeKey
+  const canSave = probeFresh && name.trim() !== '' && !pending
+  // The inbound URLs are workspace-level (routed by ?ws=), so they're shown once for whichever connection enabled them.
+  const inbound = connections.find((c) => c.commandUrl)
 
   // Operator hasn't configured a Mattermost server — nothing to register a bot against.
   if (!serverHost) {
@@ -62,12 +72,34 @@ export function MattermostManager({
     )
   }
 
+  function resetForm() {
+    setEditing(undefined)
+    setName('')
+    setTokenName('')
+    setChannel('')
+    setCmdName('')
+    setVerified(undefined)
+    setProbeReason(undefined)
+  }
+
+  function startEdit(c: MattermostConfig) {
+    setError(undefined)
+    setEditing(c.name)
+    setName(c.name)
+    setTokenName(c.botTokenSecretName)
+    setChannel(c.defaultChannelId ?? '')
+    setCmdName(c.commandTokenSecretName ?? '')
+    setVerified(undefined) // editing requires re-testing the connection
+    setProbeReason(undefined)
+  }
+
   function onTest() {
     setError(undefined)
     if (!tokenName.trim()) {
       setError(t('validationToken'))
       return
     }
+    const key = probeKey
     startProbing(async () => {
       const r = await probeMattermostAction({
         botTokenSecretName: tokenName.trim(),
@@ -80,6 +112,7 @@ export function MattermostManager({
       }
       if (r.probe?.reachable) {
         setVerified({
+          probeKey: key,
           ...(r.probe.botUsername ? { botUsername: r.probe.botUsername } : {}),
           ...(r.probe.channelName ? { channelName: r.probe.channelName } : {}),
         })
@@ -93,40 +126,113 @@ export function MattermostManager({
 
   function onSave() {
     setError(undefined)
+    if (!name.trim()) {
+      setError(t('validationName'))
+      return
+    }
     startTransition(async () => {
       const r = await setMattermostAction({
+        name: name.trim(),
         botTokenSecretName: tokenName.trim(),
         ...(channel.trim() ? { defaultChannelId: channel.trim() } : {}),
         ...(cmdName.trim() ? { commandTokenSecretName: cmdName.trim() } : {}),
       })
       if (!r.ok) setError(r.error)
+      else resetForm()
     })
   }
-  function onRemove() {
+
+  function onRemove(target: string) {
     setError(undefined)
     startTransition(async () => {
-      const r = await removeMattermostAction()
-      if (r.ok) {
-        setTokenName('')
-        setChannel('')
-        setCmdName('')
-        setVerified(undefined)
-      } else setError(r.error)
+      const r = await removeMattermostAction(target)
+      if (!r.ok) setError(r.error)
+      else if (editing === target) resetForm()
     })
   }
 
   return (
     <div className="space-y-3">
-      {canWrite ? (
-        <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
-          {/* The server URL is operator env — read-only, never an input. */}
-          <div className="flex flex-wrap items-center gap-2 rounded-md border bg-elevated px-3 py-2 text-[12px]">
-            <span className="font-[510] text-foreground">{t('serverUrl')}</span>
-            <code className="break-all text-muted-foreground">{serverHost}</code>
-            <InfoTip content={t('serverUrlTip')} />
-          </div>
+      {connections.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">{t('empty')}</p>
+      ) : (
+        <SettingsList>
+          {connections.map((c) => (
+            <SettingsRow
+              key={c.name}
+              label={
+                <span className="inline-flex flex-wrap items-center gap-1.5">
+                  {c.name}
+                  {c.defaultChannelId ? (
+                    <code className="rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
+                      {c.defaultChannelId}
+                    </code>
+                  ) : (
+                    <Badge tone="outline">{t('noChannel')}</Badge>
+                  )}
+                  {c.commandTokenSecretName && <Badge tone="success">{t('inboundEnabled')}</Badge>}
+                </span>
+              }
+              hint={t('botTokenRef', { name: c.botTokenSecretName })}
+            >
+              {canWrite && (
+                <>
+                  <button
+                    type="button"
+                    className="text-[12px] font-[510] text-link hover:text-foreground"
+                    disabled={pending}
+                    onClick={() => startEdit(c)}
+                  >
+                    {t('edit')}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[12px] font-[510] text-destructive hover:underline"
+                    disabled={pending}
+                    onClick={() => onRemove(c.name)}
+                  >
+                    {t('remove')}
+                  </button>
+                </>
+              )}
+            </SettingsRow>
+          ))}
+        </SettingsList>
+      )}
 
-          <div className="grid gap-3 sm:grid-cols-2">
+      {inbound && (
+        <div className="space-y-1 rounded-md border bg-elevated px-3 py-2 text-[12px]">
+          <p className="font-[510] text-foreground">{t('inboundUrlTitle')}</p>
+          <p className="text-muted-foreground">
+            {t('commandRequestUrl')}{' '}
+            <code className="break-all text-foreground">{inbound.commandUrl}</code>
+          </p>
+          {inbound.actionUrl && (
+            <p className="text-muted-foreground">
+              {t('buttonActionUrl')}{' '}
+              <code className="break-all text-foreground">{inbound.actionUrl}</code>
+            </p>
+          )}
+        </div>
+      )}
+
+      {canWrite ? (
+        <div className="@container space-y-3 rounded-lg border bg-card p-4 shadow-raise">
+          <p className="text-[12px] font-[560] text-foreground">
+            {editing ? t('editTitle', { name: editing }) : t('addTitle')}
+          </p>
+          <div className="grid gap-3 @md:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="mm-name">{t('nameLabel')}</Label>
+              {/* name = upsert key — locked while editing so a rename can't silently fork a second connection. */}
+              <Input
+                id="mm-name"
+                placeholder={t('namePlaceholder')}
+                value={name}
+                disabled={editing !== undefined}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
             {/* The bot token is a workspace secret reference, not free text — choose or create inline. */}
             <div className="space-y-1">
               <Label htmlFor="mm-token">{t('botTokenSecret')}</Label>
@@ -177,7 +283,7 @@ export function MattermostManager({
             <Button variant="secondary" size="sm" disabled={probing} onClick={onTest}>
               {probing ? t('testing') : t('testConnection')}
             </Button>
-            {verified && (
+            {probeFresh && verified && (
               <Badge tone="success">
                 {verified.channelName
                   ? t('verifiedWithChannel', {
@@ -194,43 +300,27 @@ export function MattermostManager({
             </Callout>
           )}
 
-          {config?.commandUrl && (
-            <div className="space-y-1 rounded-md border bg-elevated px-3 py-2 text-[12px]">
-              <p className="font-[510] text-foreground">{t('inboundUrlTitle')}</p>
-              <p className="text-muted-foreground">
-                {t('commandRequestUrl')}{' '}
-                <code className="break-all text-foreground">{config.commandUrl}</code>
-              </p>
-              {config.actionUrl && (
-                <p className="text-muted-foreground">
-                  {t('buttonActionUrl')}{' '}
-                  <code className="break-all text-foreground">{config.actionUrl}</code>
-                </p>
-              )}
-            </div>
-          )}
-
           <div className="flex items-center gap-3">
-            <Button size="sm" disabled={pending || !verified} onClick={onSave}>
-              {pending ? t('saving') : config ? t('update') : t('register')}
+            <Button size="sm" disabled={!canSave} onClick={onSave}>
+              {pending ? t('saving') : editing ? t('update') : t('register')}
             </Button>
-            {!verified && <span className="text-[12px] text-faint">{t('verifyFirst')}</span>}
-            {config && (
+            {!probeFresh && <span className="text-[12px] text-faint">{t('verifyFirst')}</span>}
+            {editing && (
               <button
                 type="button"
-                className="text-[12px] font-[510] text-destructive hover:underline"
+                className="text-[12px] text-muted-foreground hover:text-foreground"
                 disabled={pending}
-                onClick={onRemove}
+                onClick={resetForm}
               >
-                {t('remove')}
+                {t('cancel')}
               </button>
             )}
           </div>
         </div>
-      ) : config ? (
-        <p className="text-[13px] text-muted-foreground">{t('connectedTo', { host: serverHost })}</p>
       ) : (
-        <p className="text-[13px] text-muted-foreground">{t('notConfigured')}</p>
+        connections.length === 0 && (
+          <p className="text-[13px] text-muted-foreground">{t('notConfigured')}</p>
+        )
       )}
 
       {error && (

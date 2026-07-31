@@ -7,10 +7,13 @@ import { z } from 'zod'
 
 // Runtime boundary validation stays here (zod v4); the EXPORTED types are anchored to @everdict/contracts
 // (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
-// Client mirror of the control plane /workspace/mattermost response — workspace-owned Mattermost integration.
-// No secrets: botTokenSecretName is a SecretStore name reference, not the value. The server URL (host) is an
-// operator env (MATTERMOST_HOST), shared across the deployment — it rides at the status top level, not in config.
+// Client mirror of the control plane /workspace/mattermost response — workspace-owned Mattermost connections
+// (a workspace registers one bot + channel per team/purpose; completion/regression alerts go to every one that
+// has a channel). No secrets: botTokenSecretName is a SecretStore name reference, not the value. The server URL
+// (host) is an operator env (MATTERMOST_HOST) — it rides at the status top level purely as the availability
+// signal (the UI never shows it; a workspace never inputs it).
 export const mattermostConfigSchema = z.object({
+  name: z.string(),
   botTokenSecretName: z.string(),
   defaultChannelId: z.string().optional(),
   // inbound (slash command/button) verification token name + the inbound URL an admin registers in MM (only when configured).
@@ -19,10 +22,10 @@ export const mattermostConfigSchema = z.object({
   actionUrl: z.string().optional(),
 })
 
-// GET /workspace/mattermost → { host? (operator env server URL), config? (workspace registration) }.
+// GET /workspace/mattermost → { host? (operator env server URL), connections[] (the workspace's registrations) }.
 export const mattermostResponseSchema = z.object({
   host: z.string().optional(),
-  config: mattermostConfigSchema.optional(),
+  connections: z.array(mattermostConfigSchema),
 })
 
 // POST /workspace/mattermost/probe → the connection-test outcome (classified; reachable gates Save).

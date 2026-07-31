@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { ForbiddenError } from "@everdict/contracts";
+import { mattermostConnections } from "@everdict/domain";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
 // Handles Mattermost inbound (slash commands + interactive buttons) — Everdict's first inbound surface.
@@ -37,14 +38,22 @@ export interface MattermostCommandServiceDeps {
 export class MattermostCommandService {
   constructor(private readonly deps: MattermostCommandServiceDeps) {}
 
-  // Inbound verification — constant-time compare against the commandTokenSecretName value. Unset / no token / mismatch are all rejected (fail-closed).
+  // Inbound verification — constant-time compare against EVERY connection's commandTokenSecretName value (a workspace
+  // registers one connection per team, and the slash command may be installed on any of them; the request only tells us
+  // the token). No inbound-configured connection / no token / no match are all rejected (fail-closed). Every candidate
+  // is compared even after a match so the work doesn't depend on which connection matched.
   private async verify(workspace: string, token?: string): Promise<void> {
-    const mm = (await this.deps.settings.get(workspace))?.mattermost;
-    if (!mm?.commandTokenSecretName)
+    const connections = mattermostConnections(await this.deps.settings.get(workspace));
+    const names = connections.map((c) => c.commandTokenSecretName).filter((name): name is string => name !== undefined);
+    if (names.length === 0)
       throw new ForbiddenError("FORBIDDEN", { workspace }, "This workspace has no Mattermost inbound configured.");
-    const expected = (await this.deps.secretsFor(workspace))[mm.commandTokenSecretName];
-    if (!expected || !token || !constantTimeEq(token, expected))
-      throw new ForbiddenError("FORBIDDEN", { workspace }, "Mattermost request token verification failed.");
+    const secrets = await this.deps.secretsFor(workspace);
+    let matched = false;
+    for (const name of names) {
+      const expected = secrets[name];
+      if (expected && token && constantTimeEq(token, expected)) matched = true;
+    }
+    if (!matched) throw new ForbiddenError("FORBIDDEN", { workspace }, "Mattermost request token verification failed.");
   }
 
   // Slash command `/everdict <sub> …` — verify, then parse and dispatch. token/text/user_name are MM form fields.

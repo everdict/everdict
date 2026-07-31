@@ -1,4 +1,5 @@
-import { BadRequestError, type WorkspaceSettings } from "@everdict/contracts";
+import { BadRequestError, NotFoundError } from "@everdict/contracts";
+import { DEFAULT_MATTERMOST_CONNECTION, type MattermostConnection, mattermostConnections } from "@everdict/domain";
 import type {
   MattermostChannel,
   MattermostClient,
@@ -7,16 +8,19 @@ import type {
 } from "../ports/mattermost-client.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
-// Workspace-owned Mattermost integration service — an admin registers the workspace's bot + channel against the
+// Workspace-owned Mattermost integration service — an admin registers the workspace's bots + channels against the
 // operator-configured Mattermost server (replacing personal connected-account notifications). The server URL is an
 // operator env (MATTERMOST_HOST), shared across the deployment — the self-hosted operator registers it once, so
-// workspaces never input a host. Registration is verified against the live server (strict): the bot token must
-// authenticate and, when given, the default channel must be accessible. No secrets: botTokenSecretName is a
-// SecretStore name reference. The HTTP routes and MCP tools share this core.
+// workspaces never input a host. A workspace registers MULTIPLE connections (one bot+channel per team/purpose,
+// keyed by name): completion/regression notifications fan out to every connection with a channel, and the inbound
+// slash command accepts any connection's command token. Registration is verified against the live server (strict):
+// the bot token must authenticate and, when given, the channel must be accessible. No secrets: botTokenSecretName
+// is a SecretStore name reference. The HTTP routes and MCP tools share this core.
 // Design: docs/architecture/workspace-scoped-integrations.md
 
-// Workspace Mattermost registration (no secrets — all name references / URLs). host is NOT here (operator env).
+// One workspace Mattermost connection (no secrets — all name references / URLs). host is NOT here (operator env).
 export interface MattermostConfigView {
+  name: string;
   botTokenSecretName: string;
   defaultChannelId?: string;
   // SecretStore name of the inbound (slash-command/button) verification token. Setting it activates the /everdict command and buttons.
@@ -27,10 +31,10 @@ export interface MattermostConfigView {
 }
 
 // GET status — host is the operator-configured server URL (absent = MATTERMOST_HOST unset → integration unavailable);
-// config is absent when the workspace hasn't registered a bot yet.
+// connections is empty when the workspace hasn't registered a bot yet.
 export interface MattermostStatus {
   host?: string;
-  config?: MattermostConfigView;
+  connections: MattermostConfigView[];
 }
 
 export interface MattermostServiceConfig {
@@ -44,8 +48,6 @@ export interface MattermostServiceDeps {
   secretsFor: (workspace: string) => Promise<Record<string, string>>; // botTokenSecretName → value (verify only, never returned)
   config?: MattermostServiceConfig;
 }
-
-type MattermostSettings = NonNullable<WorkspaceSettings["mattermost"]>;
 
 export class MattermostService {
   private readonly settings: WorkspaceSettingsStore;
@@ -71,24 +73,27 @@ export class MattermostService {
     };
   }
 
-  private view(workspace: string, mm: MattermostSettings): MattermostConfigView {
-    const urls = mm.commandTokenSecretName ? this.inboundUrls(workspace) : {};
+  private view(workspace: string, connection: MattermostConnection): MattermostConfigView {
+    const urls = connection.commandTokenSecretName ? this.inboundUrls(workspace) : {};
     return {
-      botTokenSecretName: mm.botTokenSecretName,
-      ...(mm.defaultChannelId ? { defaultChannelId: mm.defaultChannelId } : {}),
-      ...(mm.commandTokenSecretName ? { commandTokenSecretName: mm.commandTokenSecretName } : {}),
+      name: connection.name,
+      botTokenSecretName: connection.botTokenSecretName,
+      ...(connection.defaultChannelId ? { defaultChannelId: connection.defaultChannelId } : {}),
+      ...(connection.commandTokenSecretName ? { commandTokenSecretName: connection.commandTokenSecretName } : {}),
       ...(urls.commandUrl ? { commandUrl: urls.commandUrl } : {}),
       ...(urls.actionUrl ? { actionUrl: urls.actionUrl } : {}),
     };
   }
 
-  // Status — operator server URL (env) + this workspace's registration (if any).
+  // Current connections — the plural list, else the legacy singular registration lifted in as name="default".
+  private async connections(workspace: string): Promise<MattermostConnection[]> {
+    return mattermostConnections(await this.settings.get(workspace));
+  }
+
+  // Status — operator server URL (env) + this workspace's connections (empty when none).
   async get(workspace: string): Promise<MattermostStatus> {
-    const mm = (await this.settings.get(workspace))?.mattermost;
-    return {
-      ...(this.config.host ? { host: this.config.host } : {}),
-      ...(mm ? { config: this.view(workspace, mm) } : {}),
-    };
+    const connections = (await this.connections(workspace)).map((c) => this.view(workspace, c));
+    return { ...(this.config.host ? { host: this.config.host } : {}), connections };
   }
 
   // The operator-configured server URL, or a BadRequest when unset (MATTERMOST_HOST env not configured).
@@ -121,11 +126,14 @@ export class MattermostService {
     return this.client.verify(host, token, input.defaultChannelId);
   }
 
-  // Register/update (admin). Strict: the bot token (+ channel if given) must verify against the live server first —
-  // a failed connection blocks the save with the classified reason. Put the bot token value in the SecretStore first.
+  // Register/update one connection (admin, upsert by name). Strict: the bot token (+ channel if given) must verify
+  // against the live server first — a failed connection blocks the save with the classified reason. Put the bot token
+  // value in the SecretStore first. An omitted channel/command token keeps what that connection already had (a partial
+  // update of one connection), and the first write migrates the legacy singular registration into the list.
   async set(
     workspace: string,
     input: {
+      name?: string;
       botTokenSecretName: string;
       defaultChannelId?: string;
       commandTokenSecretName?: string;
@@ -140,42 +148,59 @@ export class MattermostService {
         { reason: result.reason ?? "error" },
         `Could not connect to Mattermost: ${result.detail}`,
       );
-    const existing = (await this.settings.get(workspace))?.mattermost ?? undefined;
+    const name = input.name ?? DEFAULT_MATTERMOST_CONNECTION;
+    const current = await this.connections(workspace);
+    const existing = current.find((c) => c.name === name);
     const defaultChannelId = input.defaultChannelId ?? existing?.defaultChannelId;
     const commandTokenSecretName = input.commandTokenSecretName ?? existing?.commandTokenSecretName;
-    const next: MattermostSettings = {
+    const entry: MattermostConnection = {
+      name,
       botTokenSecretName: input.botTokenSecretName,
       ...(defaultChannelId ? { defaultChannelId } : {}),
       ...(commandTokenSecretName ? { commandTokenSecretName } : {}),
     };
-    await this.settings.set(workspace, { mattermost: next });
-    return this.view(workspace, next);
+    // Update IN PLACE — the list order is what the settings UI shows and what "the first connection" (the default
+    // post target) means, so editing one connection must never reshuffle the others.
+    const next = current.some((c) => c.name === name)
+      ? current.map((c) => (c.name === name ? entry : c))
+      : [...current, entry];
+    await this.settings.set(workspace, { mattermostConnections: next, mattermost: null });
+    return this.view(workspace, entry);
   }
 
-  // Clear (admin). The jsonb merge || can't delete a key, so null-out to invalidate it (read as undefined).
-  async clear(workspace: string): Promise<void> {
-    await this.settings.set(workspace, { mattermost: null });
+  // Remove one connection (admin, by name). Its channel stops receiving notifications; the others are untouched.
+  // The legacy singular field is nulled out on every write (the jsonb merge || can't delete a key).
+  async remove(workspace: string, name: string): Promise<void> {
+    const next = (await this.connections(workspace)).filter((c) => c.name !== name);
+    await this.settings.set(workspace, { mattermostConnections: next, mattermost: null });
   }
 
-  // The workspace's Mattermost registration, or a BadRequest when no bot is registered yet (shared by the read tools
-  // and postMessage — every "use the integration" op needs a registered bot).
-  private async requireRegistered(workspace: string): Promise<MattermostSettings> {
-    const mm = (await this.settings.get(workspace))?.mattermost;
-    if (!mm)
+  // Select the connection an operation acts through: by name when given (unknown → 404), else the first registered
+  // one (the workspace's default target for agent posts/reads). No connection at all → BadRequest telling the caller
+  // to register one — every "use the integration" op needs a registered bot.
+  private async selectConnection(workspace: string, name?: string): Promise<MattermostConnection> {
+    const connections = await this.connections(workspace);
+    if (name !== undefined) {
+      const found = connections.find((c) => c.name === name);
+      if (!found) throw new NotFoundError("NOT_FOUND", { name }, `Mattermost connection is not registered: ${name}`);
+      return found;
+    }
+    const first = connections[0];
+    if (!first)
       throw new BadRequestError(
         "BAD_REQUEST",
         {},
         "Mattermost is not registered for this workspace. An admin must register a bot token first (Settings → Integrations).",
       );
-    return mm;
+    return first;
   }
 
   // List the channels the workspace bot can access (across its teams) — for the agent to discover a channel id before
-  // reading it. Requires the operator server URL + a registered bot.
-  async listChannels(workspace: string): Promise<{ channels: MattermostChannel[] }> {
+  // reading it. Requires the operator server URL + a registered bot (connection selects which one).
+  async listChannels(workspace: string, connection?: string): Promise<{ channels: MattermostChannel[] }> {
     const host = this.requireHost();
-    const mm = await this.requireRegistered(workspace);
-    const token = await this.botTokenValue(workspace, mm.botTokenSecretName);
+    const target = await this.selectConnection(workspace, connection);
+    const token = await this.botTokenValue(workspace, target.botTokenSecretName);
     return { channels: await this.client.listChannels(host, token) };
   }
 
@@ -185,30 +210,35 @@ export class MattermostService {
     workspace: string,
     channelId: string,
     limit?: number,
+    connection?: string,
   ): Promise<{ posts: MattermostPostView[] }> {
     const host = this.requireHost();
-    const mm = await this.requireRegistered(workspace);
-    const token = await this.botTokenValue(workspace, mm.botTokenSecretName);
+    const target = await this.selectConnection(workspace, connection);
+    const token = await this.botTokenValue(workspace, target.botTokenSecretName);
     const perPage = Math.min(Math.max(limit ?? 30, 1), 100);
     return { posts: await this.client.getChannelPosts(host, token, channelId, perPage) };
   }
 
-  // Post a message to this workspace's configured default channel as the workspace bot (the conversational agent's
-  // post_mattermost_message tool + its HTTP/MCP endpoint). Unlike completion notifications (fire-and-forget), failure
-  // is SURFACED — the agent must know whether the post landed, so config gaps throw BadRequest and a transport/HTTP
-  // failure propagates as the adapter's remapped UpstreamError. Requires the operator server URL + a registered bot +
-  // a defaultChannelId. Returns the channel it landed in.
-  async postMessage(workspace: string, message: string): Promise<{ channelId: string }> {
+  // Post a message to a connection's channel as its bot (the conversational agent's post_mattermost_message tool +
+  // its HTTP/MCP endpoint) — the named connection, else the first registered one. Unlike completion notifications
+  // (fire-and-forget fan-out), failure is SURFACED — the agent must know whether the post landed, so config gaps
+  // throw BadRequest and a transport/HTTP failure propagates as the adapter's remapped UpstreamError. Returns the
+  // connection + channel it landed in.
+  async postMessage(
+    workspace: string,
+    message: string,
+    connection?: string,
+  ): Promise<{ connection: string; channelId: string }> {
     const host = this.requireHost();
-    const mm = await this.requireRegistered(workspace);
-    if (!mm.defaultChannelId)
+    const target = await this.selectConnection(workspace, connection);
+    if (!target.defaultChannelId)
       throw new BadRequestError(
         "BAD_REQUEST",
-        {},
-        "No default Mattermost channel is configured for this workspace. An admin must set a default channel first.",
+        { connection: target.name },
+        `The Mattermost connection '${target.name}' has no channel configured. An admin must set its channel first.`,
       );
-    const token = await this.botTokenValue(workspace, mm.botTokenSecretName);
-    await this.client.post(host, token, { channelId: mm.defaultChannelId, message });
-    return { channelId: mm.defaultChannelId };
+    const token = await this.botTokenValue(workspace, target.botTokenSecretName);
+    await this.client.post(host, token, { channelId: target.defaultChannelId, message });
+    return { connection: target.name, channelId: target.defaultChannelId };
   }
 }

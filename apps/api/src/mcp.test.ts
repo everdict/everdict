@@ -299,7 +299,7 @@ describe("MCP — mattermost post", () => {
       arguments: { message: "scorecard regression on suite X" },
     });
     expect(posted.isError).toBeFalsy();
-    expect(JSON.parse(text(posted))).toMatchObject({ channelId: "ch" });
+    expect(JSON.parse(text(posted))).toMatchObject({ connection: "default", channelId: "ch" });
     // A viewer lacks mattermost:post.
     const viewer = await connect(deps, ["viewer"]);
     const denied = await viewer.callTool({ name: "post_mattermost_message", arguments: { message: "x" } });
@@ -772,7 +772,7 @@ describe("MCP tools", () => {
     expect(view.callbackUrl).toBe("http://api.test/workspace/github-app/callback");
   });
 
-  it("workspace mattermost: admin can register/read/unregister, member lacks settings:write → denied", async () => {
+  it("workspace mattermost: admin can register several connections/read/remove one, member lacks settings:write → denied", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const member = await connect(deps, ["member"]);
@@ -787,19 +787,26 @@ describe("MCP tools", () => {
       ).isError,
     ).toBe(true);
 
-    // admin registers → visible on read (no secret values). host rides at the status top level (operator env).
+    // admin registers two connections → both visible on read (no secret values). host rides at the status top level (operator env).
     await admin.callTool({
       name: "set_workspace_mattermost",
-      arguments: { botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+      arguments: { name: "team-alerts", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+    });
+    await admin.callTool({
+      name: "set_workspace_mattermost",
+      arguments: { name: "platform", botTokenSecretName: "MM_BOT", defaultChannelId: "ch2" },
     });
     const got = JSON.parse(text(await admin.callTool({ name: "get_workspace_mattermost", arguments: {} })));
     expect(got.host).toBe("https://mm.corp.io");
-    expect(got.config).toEqual({ botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
+    expect(got.connections).toEqual([
+      { name: "team-alerts", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+      { name: "platform", botTokenSecretName: "MM_BOT", defaultChannelId: "ch2" },
+    ]);
 
-    // unregister → disappears from read.
-    await admin.callTool({ name: "remove_workspace_mattermost", arguments: {} });
+    // removing one leaves the other registered.
+    await admin.callTool({ name: "remove_workspace_mattermost", arguments: { name: "team-alerts" } });
     const after = JSON.parse(text(await admin.callTool({ name: "get_workspace_mattermost", arguments: {} })));
-    expect(after.config).toBeUndefined();
+    expect(after.connections.map((c: { name: string }) => c.name)).toEqual(["platform"]);
   });
 
   it("workspace trace sources: admin registers the pool, member selects pull/export per harness over the SAME pool", async () => {

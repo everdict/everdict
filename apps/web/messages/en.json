@@ -1112,10 +1112,8 @@
   },
   "manageMattermost": {
     "validationToken": "Pick a bot token secret.",
-    "titleTip": "Register your workspace’s bot token and channel against the operator’s Mattermost server, and it posts run/scorecard completions and regressions to a channel automatically. Pick the bot token from workspace secrets or save it inline with “New” — only its name is kept here.",
+    "titleTip": "Register a bot token and channel against the operator’s Mattermost server and it posts run/scorecard completions and regressions to that channel automatically. Register several — one per team or purpose — and every connection with a channel gets the alerts. Pick the bot token from workspace secrets or save it inline with “New” — only its name is kept here.",
     "serverNotConfigured": "No Mattermost server is configured by the operator yet. Set MATTERMOST_HOST in the deployment environment.",
-    "serverUrl": "Server URL",
-    "serverUrlTip": "The Mattermost server URL is configured by the operator (MATTERMOST_HOST) and shared across the workspace. You register your bot token and channel against it.",
     "botTokenSecret": "Bot token secret",
     "botTokenPlaceholder": "Paste bot token",
     "botTokenAria": "Select bot token secret",
@@ -1140,8 +1138,18 @@
     "update": "Update",
     "register": "Register",
     "remove": "Remove",
-    "connectedTo": "Notifications are connected to {host}.",
-    "notConfigured": "Mattermost notifications aren’t set up yet."
+    "notConfigured": "Mattermost notifications aren’t set up yet.",
+    "validationName": "Name the connection.",
+    "empty": "No Mattermost connection yet. Register a bot below and its channel starts getting completion and regression alerts.",
+    "nameLabel": "Connection name",
+    "namePlaceholder": "team-alerts",
+    "noChannel": "No channel",
+    "inboundEnabled": "Chat commands on",
+    "botTokenRef": "Bot token secret: {name}",
+    "addTitle": "Add a connection",
+    "editTitle": "Edit “{name}”",
+    "edit": "Edit",
+    "cancel": "Cancel"
   },
   "manageMembers": {
     "empty": "No members.",
@@ -3069,10 +3077,8 @@
     "tabBudget": "Budget & usage",
     "tabMembers": "Members",
     "githubHint": "Connect private clone/CI via org install and selected repositories.",
-    "githubConnected": "Connected · {count} orgs",
     "notConnected": "Not connected",
     "mattermostHint": "Sends completion and regression alerts and the /everdict slash command.",
-    "mattermostConnected": "Connected · {host}",
     "traceSinkLabel": "Trace sinks",
     "traceSinkHint": "Export judged detail to your observability platform (per-harness).",
     "traceSourceLabel": "Trace sources",
@@ -3083,7 +3089,10 @@
     "imageRegistryHint": "Registries you host elsewhere (GHCR, Harbor, …). Images everdict stores for you live in Settings › Images.",
     "manage": "Manage",
     "collapse": "Collapse",
-    "partialError": "Some settings sections failed to load ({sections}): {error}"
+    "partialError": "Some settings sections failed to load ({sections}): {error}",
+    "githubCount": "{count} orgs",
+    "mattermostCount": "{count} connections",
+    "imageRegistryCount": "{count} registries"
   },
   "shell": {
     "searchPlaceholder": "Search…",

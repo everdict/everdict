@@ -54,11 +54,11 @@ export function buildIntegrations(deps: {
     store: platformEventStore,
     ...(agentUrl && agentInternalToken ? { agentEvents: httpAgentEventSink(agentUrl, agentInternalToken) } : {}),
   });
-  // Completion notifications: when workspace notify settings exist (Mattermost bot + channel), post run/scorecard completion to the channel (consumer slice).
+  // Completion notifications: post run/scorecard completion to every registered Mattermost connection that has a channel (consumer slice).
   const notificationService = new NotificationService({
     settingsFor: (tenant) => settingsStore.get(tenant),
     mattermost: mattermostClient, // outbound channel posting adapter (fetch)
-    // Workspace Mattermost (bot token) — resolve settings.mattermost.botTokenSecretName from shared secrets.
+    // Workspace Mattermost — resolve each connection's botTokenSecretName from shared secrets.
     secretsFor: runtimeSecretsFor,
     ...(mattermostHost ? { mattermostHost } : {}), // operator server URL (MATTERMOST_HOST) — host is no longer stored per workspace
     feed: notificationStore, // personal notification feed (bell inbox) — docs/architecture/notifications.md

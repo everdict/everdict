@@ -43,10 +43,9 @@ export const WorkspaceSettingsSchema = z.object({
   // Default model used to score an inline judge grader (e.g. the WebVoyager preset). The control plane auto-injects it into the job (job.judge).
   // The key is injected separately from secrets (SecretStore); this holds only the model/provider (not a secret). A per-request override takes precedence.
   judge: JudgeRunConfigSchema.optional(),
-  // Workspace-owned Mattermost integration — an admin registers the in-house Mattermost once for the workspace.
-  // Outbound notifications = POST /api/v4/posts with the bot token (SecretStore name-ref). Inbound (slash commands/buttons) is a follow-up (S7/S8).
-  // nullable: DELETE clears it with null (jsonb merge || can't delete a key, so null invalidates it, treated as undefined on read).
-  // Design: docs/architecture/workspace-scoped-integrations.md
+  // (legacy, read-only compat) singular Mattermost connection — superseded by mattermostConnections (plural). When a
+  // service reads and mattermostConnections is absent, it inherits this value as a name="default" entry and clears it
+  // to null on the next write. nullable: the jsonb merge || can't delete a key, so null invalidates it (undefined on read).
   mattermost: z
     .object({
       // (legacy, optional) the in-house Mattermost base URL is now an operator env (MATTERMOST_HOST), shared across
@@ -59,6 +58,21 @@ export const WorkspaceSettingsSchema = z.object({
       inboundToken: z.string().optional(), // inbound routing token (S7/S8)
     })
     .nullable()
+    .optional(),
+  // Workspace-owned Mattermost connections (plural) — an admin registers one bot+channel pair per team/purpose against
+  // the operator's Mattermost server (MATTERMOST_HOST, shared across the deployment — a workspace never inputs a host).
+  // Outbound notifications = POST /api/v4/posts with the bot token (SecretStore name-ref) — completion/regression facts
+  // fan out to EVERY connection that has a defaultChannelId. Inbound (slash commands/buttons) is verified against every
+  // connection's commandTokenSecretName. Design: docs/architecture/workspace-scoped-integrations.md
+  mattermostConnections: z
+    .array(
+      z.object({
+        name: z.string().min(1), // connection name (reference/upsert key, e.g. "team-alerts")
+        botTokenSecretName: z.string().min(1), // SecretStore key name of the bot access token (the value itself is never stored/returned)
+        defaultChannelId: z.string().min(1).optional(), // channel this connection notifies (absent = no outbound posts)
+        commandTokenSecretName: z.string().min(1).optional(), // slash-command/action verification token name (S7/S8)
+      }),
+    )
     .optional(),
   // (legacy, read-only compat) singular image registry — superseded by imageRegistries (plural). When a service reads and
   // imageRegistries is absent, it inherits this value as a name="default" entry and clears it to null on the next write.

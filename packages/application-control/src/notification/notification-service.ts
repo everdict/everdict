@@ -1,4 +1,5 @@
 import type { NotificationRecord, WorkspaceSettings } from "@everdict/contracts";
+import { mattermostConnections } from "@everdict/domain";
 import type { MattermostClient } from "../ports/mattermost-client.js";
 import type { NotificationListOptions, NotificationStore } from "../ports/notification-store.js";
 import type { EmitPlatformEventInput, PlatformEventEmitter } from "../ports/platform-event-emitter.js";
@@ -10,7 +11,7 @@ import type { EmitPlatformEventInput, PlatformEventEmitter } from "../ports/plat
 // Notification failure never affects the run/scorecard result (fire-and-forget — the store is the source of truth).
 export interface NotificationServiceDeps {
   settingsFor: (tenant: string) => Promise<WorkspaceSettings | undefined>;
-  // Workspace Mattermost (bot token) — resolves settings.mattermost.botTokenSecretName from the workspace SecretStore.
+  // Workspace Mattermost (bot token) — resolves each connection's botTokenSecretName from the workspace SecretStore.
   secretsFor?: (tenant: string) => Promise<Record<string, string>>;
   // Operator-configured Mattermost server URL (MATTERMOST_HOST env), shared across the deployment — the host is no
   // longer stored per workspace. If unset, channel posting is silently skipped (feed still writes).
@@ -176,43 +177,59 @@ export class NotificationService implements ChannelPoster {
     }
   }
 
-  // Post to a channel via the workspace-registered Mattermost (bot token). Unset/no-token/failure are silently ignored (notification failure never affects the result).
-  // With `rerun` context + configured inbound (commandTokenSecretName) + a public URL, the post carries an
-  // interactive Rerun button — the click posts back to /integrations/mattermost/action with the embedded
-  // context (the same token the slash-command inbound verifies), re-firing dataset×harness from chat.
+  // Post to EVERY registered Mattermost connection that has a channel (a workspace registers one connection per
+  // team/purpose — each is a channel that asked to be notified), via that connection's own bot token. Unset/no-token/
+  // failure are silently ignored per connection (notification failure never affects the result, and one dead bot must
+  // not silence the others). With `rerun` context + that connection's configured inbound (commandTokenSecretName) + a
+  // public URL, its post carries an interactive Rerun button — the click posts back to
+  // /integrations/mattermost/action with the embedded context (the same token the slash-command inbound verifies),
+  // re-firing dataset×harness from chat.
   private async post(tenant: string, message: string, rerun?: { dataset: string; harness: string }): Promise<void> {
     try {
-      const mm = (await this.deps.settingsFor(tenant))?.mattermost;
       const host = this.deps.mattermostHost;
-      // Only posts if the operator configured a server URL + there's a transport + a defaultChannelId + a bot token in the SecretStore.
-      if (!host || !this.deps.mattermost || !mm?.defaultChannelId || !this.deps.secretsFor) return;
+      // Only posts if the operator configured a server URL + there's a transport + a way to resolve the bot token.
+      if (!host || !this.deps.mattermost || !this.deps.secretsFor) return;
+      const targets = mattermostConnections(await this.deps.settingsFor(tenant)).filter((c) => c.defaultChannelId);
+      if (targets.length === 0) return;
       const secrets = await this.deps.secretsFor(tenant);
-      const token = secrets[mm.botTokenSecretName];
-      if (!token) return;
-      const actionToken = mm.commandTokenSecretName ? secrets[mm.commandTokenSecretName] : undefined;
       const publicUrl = this.deps.apiPublicUrl?.replace(/\/$/, "");
-      const attachments =
-        rerun && actionToken && publicUrl
-          ? [
-              {
-                fallback: "Rerun",
-                actions: [
-                  {
-                    name: "Rerun",
-                    integration: {
-                      url: `${publicUrl}/integrations/mattermost/action?ws=${encodeURIComponent(tenant)}`,
-                      context: { token: actionToken, action: "rerun", dataset: rerun.dataset, harness: rerun.harness },
+      for (const target of targets) {
+        const channelId = target.defaultChannelId;
+        const token = secrets[target.botTokenSecretName];
+        if (!channelId || !token) continue;
+        const actionToken = target.commandTokenSecretName ? secrets[target.commandTokenSecretName] : undefined;
+        const attachments =
+          rerun && actionToken && publicUrl
+            ? [
+                {
+                  fallback: "Rerun",
+                  actions: [
+                    {
+                      name: "Rerun",
+                      integration: {
+                        url: `${publicUrl}/integrations/mattermost/action?ws=${encodeURIComponent(tenant)}`,
+                        context: {
+                          token: actionToken,
+                          action: "rerun",
+                          dataset: rerun.dataset,
+                          harness: rerun.harness,
+                        },
+                      },
                     },
-                  },
-                ],
-              },
-            ]
-          : undefined;
-      await this.deps.mattermost.post(host, token, {
-        channelId: mm.defaultChannelId,
-        message,
-        ...(attachments ? { attachments } : {}),
-      });
+                  ],
+                },
+              ]
+            : undefined;
+        try {
+          await this.deps.mattermost.post(host, token, {
+            channelId,
+            message,
+            ...(attachments ? { attachments } : {}),
+          });
+        } catch {
+          // One connection's outage never blocks the others (nor the result).
+        }
+      }
     } catch {
       // Notification failure never affects the run/scorecard result.
     }

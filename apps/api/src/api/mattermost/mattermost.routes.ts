@@ -14,15 +14,16 @@ export function registerMattermostRoutes(app: FastifyInstance, deps: ServerDeps)
     if (!principal) return reply;
     try {
       gate(principal, "settings:read");
-      // { host? (operator MATTERMOST_HOST env), config? (workspace registration) }
+      // { host? (operator MATTERMOST_HOST env), connections[] (the workspace's bot+channel registrations) }
       return reply.send(await deps.mattermostService.get(principal.workspace));
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // Register/update body — the server URL is operator env (MATTERMOST_HOST), not accepted here. set() verifies the bot token (+ channel) against the live server (strict).
+  // Register/update body — upsert by name (omitted = "default"). The server URL is operator env (MATTERMOST_HOST), not accepted here. set() verifies the bot token (+ channel) against the live server (strict).
   const upsertBody = z.object({
+    name: z.string().min(1).optional(), // connection name (upsert key) — a workspace registers one per team/purpose
     botTokenSecretName: z.string().min(1),
     defaultChannelId: z.string().min(1).optional(),
     commandTokenSecretName: z.string().min(1).optional(), // SecretStore name of the inbound (slash command/button) verification token
@@ -38,6 +39,7 @@ export function registerMattermostRoutes(app: FastifyInstance, deps: ServerDeps)
     try {
       gate(principal, "settings:write");
       const config = await deps.mattermostService.set(principal.workspace, {
+        ...(body.data.name !== undefined ? { name: body.data.name } : {}),
         botTokenSecretName: body.data.botTokenSecretName,
         ...(body.data.defaultChannelId !== undefined ? { defaultChannelId: body.data.defaultChannelId } : {}),
         ...(body.data.commandTokenSecretName !== undefined
@@ -73,23 +75,29 @@ export function registerMattermostRoutes(app: FastifyInstance, deps: ServerDeps)
     }
   });
 
-  app.delete("/workspace/mattermost", { schema: mattermostDocs.remove }, async (req, reply) => {
-    if (!deps.mattermostService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "settings:write");
-      await deps.mattermostService.clear(principal.workspace);
-      return reply.code(204).send();
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  // Remove ONE connection (by name) — the workspace's other connections keep notifying.
+  app.delete<{ Params: { name: string } }>(
+    "/workspace/mattermost/:name",
+    { schema: mattermostDocs.remove },
+    async (req, reply) => {
+      if (!deps.mattermostService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "settings:write");
+        await deps.mattermostService.remove(principal.workspace, req.params.name);
+        return reply.code(204).send();
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
-  // Post a message to the workspace's configured channel as the bot (mattermost:post — member+, distinct from the
-  // admin-only registration above). Powers the conversational agent's post_mattermost_message tool. Gate BEFORE
-  // validate (don't leak body shape to the unauthorized). Config gaps (no bot / no channel) → 400 from the service.
+  // Post a message to a connection's channel as its bot (mattermost:post — member+, distinct from the admin-only
+  // registration above; connection omitted = the first registered one). Powers the conversational agent's
+  // post_mattermost_message tool. Gate BEFORE validate (don't leak body shape to the unauthorized). Config gaps
+  // (no bot / no channel) → 400 from the service.
   app.post("/workspace/mattermost/messages", { schema: mattermostDocs.postMessage }, async (req, reply) => {
     if (!deps.mattermostService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost service not configured" });
@@ -100,10 +108,14 @@ export function registerMattermostRoutes(app: FastifyInstance, deps: ServerDeps)
     } catch (err) {
       return sendError(reply, err);
     }
-    const body = z.object({ message: z.string().min(1) }).safeParse(req.body ?? {});
+    const body = z
+      .object({ message: z.string().min(1), connection: z.string().min(1).optional() })
+      .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
-      return reply.send(await deps.mattermostService.postMessage(principal.workspace, body.data.message));
+      return reply.send(
+        await deps.mattermostService.postMessage(principal.workspace, body.data.message, body.data.connection),
+      );
     } catch (err) {
       return sendError(reply, err);
     }

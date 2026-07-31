@@ -1,4 +1,5 @@
 import type { CapabilityRequirement, WorkspaceSettings } from "@everdict/contracts";
+import { mattermostConnections } from "../workspace/mattermost-connections.js";
 
 // The first-party DEFAULT-toolset selection kernel — the single authority for "does this default apply to this
 // workspace right now". Pure (no I/O): given the workspace's configured integrations, its opt-outs, and the tool names
@@ -24,7 +25,8 @@ export interface DefaultSelectionContext {
 export function configuredIntegrations(settings: WorkspaceSettings | undefined): CapabilityRequirement[] {
   if (!settings) return [];
   const configured: CapabilityRequirement[] = [];
-  if (settings.mattermost) configured.push("mattermost");
+  // Plural connections first; the legacy singular registration still counts (mattermostConnections folds it in).
+  if (mattermostConnections(settings).length > 0) configured.push("mattermost");
   if ((settings.githubApp?.installations.length ?? 0) > 0) configured.push("github");
   // Plural roster first; the legacy singular registry still counts (read-compat, see WorkspaceSettingsSchema).
   if ((settings.imageRegistries?.length ?? 0) > 0 || settings.imageRegistry) configured.push("image-registry");

@@ -1,10 +1,10 @@
 import { getTranslations } from 'next-intl/server'
 
+import type { GithubAppNotice } from '@/features/manage-github-app'
 import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
 import { imageRegistriesResponseSchema, type ImageRegistryConfig } from '@/entities/image-registry'
 import { mattermostResponseSchema, type MattermostResponse } from '@/entities/mattermost'
 import { secretsSchema } from '@/entities/secret'
-import type { GithubAppNotice } from '@/features/manage-github-app'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -15,7 +15,7 @@ import { IntegrationsPanel, type IntegrationKey } from '../integrations-panel'
 
 export const dynamic = 'force-dynamic'
 
-// Each integration is a per-integration summary row → "Manage" expands it in place on this one page (not a sidebar item).
+// Each integration is an icon tile → clicking it expands that integration's manager in place on this one page (not a sidebar item).
 const INTEGRATION_KEYS: IntegrationKey[] = ['github', 'mattermost', 'image-registry']
 
 // Per-section soft-fail: one misbehaving integration must not blank the page. Each read falls back to a default.
@@ -62,10 +62,11 @@ export default async function IntegrationsPage({
     async () => githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx)),
     { installations: [], providers: { githubCom: false } }
   )
-  // Mattermost status: host = operator env server URL (absent = unavailable), config = the workspace registration.
+  // Mattermost status: host = operator env server URL (absent = unavailable; never rendered), connections = the
+  // workspace's registered bot+channel pairs.
   const mattermost: MattermostResponse = await soft(
     async () => mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)),
-    {}
+    { connections: [] }
   )
   const imageRegistries: ImageRegistryConfig[] = await soft(
     async () =>

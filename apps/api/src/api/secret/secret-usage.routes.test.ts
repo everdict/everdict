@@ -74,7 +74,13 @@ describe("GET /secrets/usage", () => {
       version: "1.0.0",
     });
     const mm = usages.find((u) => u.name === "MM_BOT");
-    expect(mm?.refs).toContainEqual({ kind: "mattermost", field: "bot-token", label: "Mattermost" });
+    // detail names WHICH Mattermost connection holds the reference (a workspace registers several).
+    expect(mm?.refs).toContainEqual({
+      kind: "mattermost",
+      field: "bot-token",
+      label: "Mattermost",
+      detail: "default",
+    });
   });
 
   it("reports a referenced-nowhere secret as an orphan (refs = [])", async () => {

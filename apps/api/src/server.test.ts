@@ -629,26 +629,40 @@ describe("API — authorization (roles)", () => {
 });
 
 describe("API — workspace integrations (GitHub App / Mattermost)", () => {
-  it("Mattermost: admin registers (host from operator env, not the body) + reads + unregisters; viewer lacks settings:write → 403", async () => {
+  it("Mattermost (multiple): admin registers connections by name (host from operator env, not the body) + reads + removes one; viewer lacks settings:write → 403", async () => {
     const h = { authorization: "Bearer x" };
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
-    // The server URL is operator env — the body carries only bot/channel/command names; host is never accepted from the client.
+    // The server URL is operator env — the body carries only name/bot/channel/command; host is never accepted from the client.
     const put = await app.inject({
       method: "PUT",
       url: "/workspace/mattermost",
       headers: h,
-      payload: { botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+      payload: { name: "team-alerts", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
     });
     expect(put.statusCode).toBe(200);
-    expect(put.json().config).toEqual({ botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
+    expect(put.json().config).toEqual({
+      name: "team-alerts",
+      botTokenSecretName: "MM_BOT",
+      defaultChannelId: "ch",
+    });
+    // A second connection (another team's channel) lives alongside the first.
+    await app.inject({
+      method: "PUT",
+      url: "/workspace/mattermost",
+      headers: h,
+      payload: { name: "platform", botTokenSecretName: "MM_BOT", defaultChannelId: "ch2" },
+    });
     const get = await app.inject({ method: "GET", url: "/workspace/mattermost", headers: h });
-    // host rides at the status top level (operator env), config holds only the workspace registration.
+    // host rides at the status top level (operator env), connections hold only the workspace registrations.
     expect(get.json().host).toBe("https://mm.corp.io");
-    expect(get.json().config.botTokenSecretName).toBe("MM_BOT");
-    expect((await app.inject({ method: "DELETE", url: "/workspace/mattermost", headers: h })).statusCode).toBe(204);
+    expect(get.json().connections.map((c: { name: string }) => c.name)).toEqual(["team-alerts", "platform"]);
+    // Removing one leaves the other notifying.
     expect(
-      (await app.inject({ method: "GET", url: "/workspace/mattermost", headers: h })).json().config,
-    ).toBeUndefined();
+      (await app.inject({ method: "DELETE", url: "/workspace/mattermost/team-alerts", headers: h })).statusCode,
+    ).toBe(204);
+    expect(
+      (await app.inject({ method: "GET", url: "/workspace/mattermost", headers: h })).json().connections,
+    ).toHaveLength(1);
     await app.close();
 
     const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
@@ -711,7 +725,7 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
         })
       ).statusCode,
     ).toBe(400);
-    // Valid post → 200 with the channel it landed in.
+    // Valid post → 200 with the connection + channel it landed in.
     const posted = await app.inject({
       method: "POST",
       url: "/workspace/mattermost/messages",
@@ -719,7 +733,18 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
       payload: { message: "scorecard regression summary" },
     });
     expect(posted.statusCode).toBe(200);
-    expect(posted.json().channelId).toBe("ch");
+    expect(posted.json()).toEqual({ connection: "default", channelId: "ch" });
+    // An unknown connection name is a 404 (not a silent post to the wrong channel).
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/workspace/mattermost/messages",
+          headers: h,
+          payload: { message: "hi", connection: "nope" },
+        })
+      ).statusCode,
+    ).toBe(404);
     await app.close();
   });
 

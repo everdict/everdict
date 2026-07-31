@@ -34,14 +34,31 @@ feature entirely.
   and its routes/MCP tools/web form were removed.)
 - **Mattermost (full two-way):** the corporate Mattermost **server URL is an operator env
   (`MATTERMOST_HOST`)**, shared across the deployment — the self-hosted operator registers it once,
-  so workspaces never input a host. A workspace admin then registers only the **bot token** (+
-  channel + slash-command token, all SecretStore name-refs) → **outbound** notifications *and*
-  **inbound** slash commands + interactive buttons. **Registration is verified against the live
-  server (strict):** the bot token must authenticate (`/api/v4/users/me`) and, when a channel is
-  given, the channel must be accessible (`/api/v4/channels/{id}`) — a failed connection blocks the
-  save (there is also an explicit `POST /workspace/mattermost/probe`). This is Everdict's **first
-  inbound integration surface** (verified, workspace-scoped) — a deliberate, contained exception to
-  the "no inbound webhooks" stance (which still holds for GitHub App push triggers).
+  so workspaces never input a host (and no surface ever *shows* it: it is deployment infrastructure,
+  not workspace configuration — it only decides whether the integration is available at all). A
+  workspace admin then registers only the **bot token** (+ channel + slash-command token, all
+  SecretStore name-refs) → **outbound** notifications *and* **inbound** slash commands + interactive
+  buttons. **Registration is verified against the live server (strict):** the bot token must
+  authenticate (`/api/v4/users/me`) and, when a channel is given, the channel must be accessible
+  (`/api/v4/channels/{id}`) — a failed connection blocks the save (there is also an explicit
+  `POST /workspace/mattermost/probe`). This is Everdict's **first inbound integration surface**
+  (verified, workspace-scoped) — a deliberate, contained exception to the "no inbound webhooks"
+  stance (which still holds for GitHub App push triggers).
+- **Mattermost is MULTI-connection** (like GitHub's multiple installations): a workspace registers
+  **one connection per team/purpose**, keyed by `name` (bot token + channel + optional slash-command
+  token). What varies per connection is the *bot and channel*, never the host. Consequences, all
+  keyed off the same normalized list (`mattermostConnections()` in `@everdict/domain` — plural field
+  ∪ the legacy singular registration, so every consumer sees one list):
+  - **Outbound fans out**: a completion/regression fact posts to EVERY connection that has a
+    `defaultChannelId`, each through its own bot token. Registering a connection with a channel IS
+    the subscription — there is no separate "primary" flag. One connection's missing secret or MM
+    outage never silences the others (per-connection best-effort, as before).
+  - **Inbound accepts any connection's token**: the request carries only the token, so verification
+    constant-time-compares it against every connection's `commandTokenSecretName` value (fail-closed,
+    and every candidate is compared so the work doesn't depend on which one matched).
+  - **Agent actions select one**: `post_mattermost_message` / `list_mattermost_channels` /
+    `get_mattermost_channel_posts` take an optional `connection` name — omitted = the first
+    registered one; an unknown name is a 404 (never a silent post to the wrong channel).
 - **Remove personal Connected accounts entirely** (github, github-enterprise, mattermost personal
   connections + the applications roster + the OAuth `integrations`). Done **last**, after the
   replacements are live, so no window breaks repo-clone or notifications.
@@ -88,6 +105,8 @@ githubApp: z.object({
 
 // mattermost: the server URL is operator env (MATTERMOST_HOST) → NOT stored here (host is legacy-optional).
 // A workspace stores only the bot/channel/command name-refs; the host is sourced from env at read/post time.
+// The SINGULAR field is legacy read-compat (superseded by mattermostConnections): a reader lifts it in as
+// name="default" and the next write persists the plural list + nulls this one (same shape as imageRegistry).
 mattermost: z.object({
   host: z.string().url().optional(),             // legacy/optional — no longer written (env-sourced)
   botTokenSecretName: z.string().min(1),         // SecretStore key — bot access token (outbound posts, threads, DMs, interactive)
@@ -95,6 +114,15 @@ mattermost: z.object({
   defaultChannelId: z.string().optional(),       // default notify channel
   inboundToken: z.string().optional(),           // vestigial (ws-in-URL routing superseded it)
 }).nullable().optional(),
+
+// The canonical list — one connection per team/purpose, upserted by name. Notifications fan out to every
+// entry with a defaultChannelId; inbound verification accepts any entry's commandTokenSecretName.
+mattermostConnections: z.array(z.object({
+  name: z.string().min(1),                       // connection name (reference/upsert key, e.g. "team-alerts")
+  botTokenSecretName: z.string().min(1),
+  defaultChannelId: z.string().min(1).optional(),
+  commandTokenSecretName: z.string().min(1).optional(),
+})).optional(),
 ```
 
 Installation records hold **no long-lived token** — installation tokens are minted on demand from the
@@ -173,9 +201,11 @@ A corporate Mattermost whose **server URL is operator env (`MATTERMOST_HOST`)**,
 deployment; a workspace admin registers only the workspace's bot + channel. Mattermost is bidirectional,
 so it needs both outbound bot calls and **inbound endpoints**.
 
-**Registration (admin, `settings:write`, self-serve web form).** The server URL is shown read-only (env).
-The admin picks the **bot access token** (SecretStore name-ref) + channel + (for inbound) a
-**slash-command token**. **Registration is strict — verified against the live server before saving**
+**Registration (admin, `settings:write`, self-serve web form).** The server URL is never rendered (env — see the
+decision above). The admin names the connection and picks its **bot access token** (SecretStore name-ref) +
+channel + (for inbound) a **slash-command token**; the form is an upsert keyed by that name, so a workspace
+builds a LIST of connections (`PUT /workspace/mattermost` with `name`, `DELETE /workspace/mattermost/:name`,
+`GET` returning `{ host?, connections[] }`). **Registration is strict — verified against the live server before saving**
 (`MattermostClient.verify`: `/api/v4/users/me` for the token + `/api/v4/channels/{id}` for the channel; a
 failed connection is a `BadRequest`). There is also an explicit `POST /workspace/mattermost/probe`
 (`probe_workspace_mattermost`) that returns a classified `{ reachable, reason?, botUsername?, channelName? }`
@@ -188,12 +218,15 @@ URLs/commands to register on the MM side**:
 it → **routes the request to the right workspace** (multi-tenant inbound with no user session).
 
 **Outbound (Everdict → MM), bot token + REST API** (`/api/v4/posts`):
-- Completion / regression / CI / digest notifications (thread-aware).
+- Completion / regression / CI / digest notifications (thread-aware), fanned out to every connection that has
+  a channel — each posted with that connection's own bot token, and its Rerun button carries that
+  connection's inbound token.
 - Interactive messages: message `attachments[].actions` buttons (Re-run / View scorecard / Compare /
   Acknowledge).
 - **Agent-callable post** (`POST /workspace/mattermost/messages` + MCP `post_mattermost_message`, over
-  `MattermostService.postMessage`): the conversational agent posts an arbitrary message to the workspace's
-  configured default channel as the bot (e.g. "post this regression summary to the team"). Unlike the
+  `MattermostService.postMessage`): the conversational agent posts an arbitrary message to a connection's
+  channel as its bot (e.g. "post this regression summary to the team") — `connection` selects which one,
+  omitted = the first registered. Unlike the
   fire-and-forget notification path, failures are **surfaced** (config gaps → `BadRequest`; a transport/non-2xx
   from MM → the adapter's remapped `UpstreamError`) so the agent (and its HITL approver) learns the post's fate.
   Gated `mattermost:post` (**member+**, not admin) — using the integration is a member's job. The agent gets this
@@ -204,8 +237,9 @@ it → **routes the request to the right workspace** (multi-tenant inbound with 
 - `POST /integrations/mattermost/command` — `/everdict run|leaderboard|status …` → parse → dispatch →
   respond (ephemeral or in-channel/threaded).
 - `POST /integrations/mattermost/action` — button click → perform action → update the message.
-- **Verification:** each request carries MM's `token` field → constant-time compare against the
-  workspace's `commandTokenSecretName` value; `inboundToken` (URL) selects the workspace. Fail-closed.
+- **Verification:** each request carries MM's `token` field → constant-time compare against EVERY connection's
+  `commandTokenSecretName` value (the slash command may be installed on any of them, and the request names
+  none); `?ws=` selects the workspace. Fail-closed.
 
 **AuthZ for chat-triggered actions.** Inbound requests have no OIDC user. Model it like CI: a
 workspace-scoped **`chat` principal** (`via: mattermost`, roles limited to `scorecards:run/read` +

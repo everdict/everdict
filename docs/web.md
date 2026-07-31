@@ -184,10 +184,15 @@ panel/list guidance is not.
   policy (`SettingsForm`), and **owner-only** a danger zone (`features/delete-workspace` `DeleteWorkspaceCard`):
   a hard delete that only enables once you type the workspace name to confirm → `DELETE /workspace` then navigate home (`/`) (the server
   decides visibility by `getWorkspace.owner === principal.subject`; final enforcement is the control plane). The Integrations
-  tab (`features/manage-github-app` + `features/manage-mattermost`) manages workspace-owned external integrations:
+  tab (`features/manage-github-app` + `features/manage-mattermost`) manages workspace-owned external integrations as an
+  **icon tile grid** (the roster keeps growing, so each integration is a brand-tinted glyph + name + connection count;
+  clicking a tile expands its manager in place below the grid — never a drill-in route):
   **GitHub App** (org install → selected repos → workspace-owned installation tokens: private-repo clone · CI setup-PR · runner
   registration; `GET/POST/DELETE /workspace/github-app*`, repo picker `GET /workspace/github-app/repos`) + **Mattermost**
-  (completion/regression notifications + slash commands/buttons; `GET/PUT/DELETE /workspace/mattermost`). `settings:*`=admin.
+  (MULTIPLE connections — one bot + channel per team/purpose, list + add/edit form keyed by name; completion/regression
+  notifications go to every connection that has a channel, plus slash commands/buttons;
+  `GET/PUT /workspace/mattermost` + `DELETE /workspace/mattermost/:name`. The server URL is operator env and is never
+  shown or entered — it only decides whether the integration is available at all). `settings:*`=admin.
   See `architecture/workspace-scoped-integrations.md`.
 - **Account `/{workspace}/account`** (personal — self-scoped, no role gate) — Profile · **Personal secrets** ·
   **API keys** tabs (`account-tabs.tsx`). Personal outbound-OAuth "connected accounts" was removed (S6c) — external integrations are
