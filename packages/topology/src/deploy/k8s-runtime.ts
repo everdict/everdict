@@ -508,13 +508,11 @@ export class K8sTopologyRuntime implements TopologyRuntime {
           ...(pod.cpu !== undefined ? { cpu: pod.cpu } : {}),
           ...(pod.memoryMb !== undefined ? { memoryMb: pod.memoryMb } : {}),
           ...(age !== undefined ? { ageSeconds: age } : {}),
-          events: events
-            .slice(-10)
-            .map((e) => ({
-              ...(e.reason ? { type: e.reason } : {}),
-              message: e.message,
-              ...(e.at ? { at: e.at } : {}),
-            })),
+          events: events.slice(-10).map((e) => ({
+            ...(e.reason ? { type: e.reason } : {}),
+            message: e.message,
+            ...(e.at ? { at: e.at } : {}),
+          })),
         });
       }
       return { deployed: anyPod, runtime: "k8s", namespace: ns, services };

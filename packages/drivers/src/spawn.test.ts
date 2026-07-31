@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { ExecChunk } from "@everdict/contracts";
+import { describe, expect, it } from "vitest";
 import { chunkSinks, runSpawn } from "./spawn.js";
 
 describe("runSpawn (the shared incremental spawn core)", () => {
@@ -13,8 +13,18 @@ describe("runSpawn (the shared incremental spawn core)", () => {
     expect(res.stdout).toContain("one");
     expect(res.stdout).toContain("three");
     expect(res.stderr).toContain("two");
-    expect(chunks.filter((c) => c.stream === "stdout").map((c) => c.data).join("")).toContain("one");
-    expect(chunks.filter((c) => c.stream === "stderr").map((c) => c.data).join("")).toContain("two");
+    expect(
+      chunks
+        .filter((c) => c.stream === "stdout")
+        .map((c) => c.data)
+        .join(""),
+    ).toContain("one");
+    expect(
+      chunks
+        .filter((c) => c.stream === "stderr")
+        .map((c) => c.data)
+        .join(""),
+    ).toContain("two");
   });
 
   it("a chunk arrives BEFORE the exec resolves (the incremental contract, not a post-hoc replay)", async () => {

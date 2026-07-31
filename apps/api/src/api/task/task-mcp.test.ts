@@ -1,7 +1,7 @@
 import { RunService, TaskService } from "@everdict/application-control";
+import type { EmitPlatformEventInput } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import type { EmitPlatformEventInput } from "@everdict/application-control";
 import { InMemoryAgentTaskStore, InMemoryRunStore } from "@everdict/db";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";

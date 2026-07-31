@@ -126,7 +126,11 @@ function appendCapped(events: TraceEvent[], ev: TraceEvent): void {
     return;
   }
   if (events.length === MAX_TASK_EVENTS) {
-    events.push({ t: ev.t, kind: "error", message: `[everdict] event buffer full (${MAX_TASK_EVENTS}) — further events dropped` });
+    events.push({
+      t: ev.t,
+      kind: "error",
+      message: `[everdict] event buffer full (${MAX_TASK_EVENTS}) — further events dropped`,
+    });
   }
 }
 

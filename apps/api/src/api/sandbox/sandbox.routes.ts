@@ -74,27 +74,33 @@ export function registerSandboxRoutes(app: FastifyInstance, deps: ServerDeps): v
 
   // The playground: submit one ad-hoc test case into a live harness session. 202 — the child run is the
   // monitoring handle; its trace is read via the task-trace poll below (and, after settle, /runs/:id/trajectory).
-  app.post<{ Params: { id: string } }>("/sandboxes/:id/tasks", { schema: sandboxDocs.submitTask }, async (req, reply) => {
-    if (!deps.sandboxSessions)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "sandbox sessions not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "runs:submit");
-      const parsed = SubmitSandboxTaskBodySchema.safeParse(req.body);
-      if (!parsed.success)
-        return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
-      return reply.code(202).send(
-        await deps.sandboxSessions.submitTask(
-          { tenant: principal.workspace, subject: principal.subject, isAdmin: principal.roles.includes("admin") },
-          req.params.id,
-          parsed.data,
-        ),
-      );
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.post<{ Params: { id: string } }>(
+    "/sandboxes/:id/tasks",
+    { schema: sandboxDocs.submitTask },
+    async (req, reply) => {
+      if (!deps.sandboxSessions)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "sandbox sessions not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:submit");
+        const parsed = SubmitSandboxTaskBodySchema.safeParse(req.body);
+        if (!parsed.success)
+          return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+        return reply
+          .code(202)
+          .send(
+            await deps.sandboxSessions.submitTask(
+              { tenant: principal.workspace, subject: principal.subject, isAdmin: principal.roles.includes("admin") },
+              req.params.id,
+              parsed.data,
+            ),
+          );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   app.get<{ Params: { id: string; taskId: string }; Querystring: { since?: string } }>(
     "/sandboxes/:id/tasks/:taskId/trace",

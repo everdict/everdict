@@ -32,7 +32,7 @@ import {
   originSource,
 } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
-import type { SubscriptionService, ViewService, ViewSnapshotService, TaskService } from "@everdict/application-control";
+import type { SubscriptionService, TaskService, ViewService, ViewSnapshotService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { SkillService } from "@everdict/application-control";
 import type { FileExecutionService, FsService } from "@everdict/application-control";

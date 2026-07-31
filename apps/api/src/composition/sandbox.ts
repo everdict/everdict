@@ -62,7 +62,8 @@ export function buildSandboxSessions(opts: {
             : undefined;
           const secrets = await scopedSecretsFor(tenant, subject);
           let resolved = spec ? resolveHarnessSecrets(spec, secrets) : undefined;
-          if (resolved && models) resolved = await resolveSpecModel(models, tenant, subject, resolved, scopedSecretsFor);
+          if (resolved && models)
+            resolved = await resolveSpecModel(models, tenant, subject, resolved, scopedSecretsFor);
           const version = resolved?.version ?? ref.version ?? "latest";
           let harness: ReturnType<typeof makeHarness>;
           try {

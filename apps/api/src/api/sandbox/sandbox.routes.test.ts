@@ -335,7 +335,12 @@ describe("sandbox playground routes — a harness in the session, test cases thr
       (await app.inject({ method: "POST", url: "/sandboxes", headers: H, payload: { harness: { id: "ghost" } } }))
         .statusCode,
     ).toBe(404);
-    const session = await app.inject({ method: "POST", url: "/sandboxes", headers: H, payload: { harness: { id: "cc" } } });
+    const session = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { harness: { id: "cc" } },
+    });
     expect(
       (
         await app.inject({
