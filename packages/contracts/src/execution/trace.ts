@@ -39,10 +39,13 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
   }),
   // A structural (non-LLM/non-tool) span preserved through ingest — chain/agent/retriever steps a harness emits that
   // the GenAI-convention normalizer would otherwise drop. `attributes` carries the raw span attributes verbatim.
+  // `durationMs` is the span's own length when the source reported one (OTLP end−start): without it a service's
+  // spans arrive as instants and a cross-plane timeline can only draw where they STARTED, not what they cost.
   z.object({
     t: z.number(),
     kind: z.literal("span"),
     name: z.string(),
+    durationMs: z.number().optional(),
     attributes: z.record(z.string(), z.unknown()).optional(),
   }),
   // The INFRA-plane record of the run's execution — the orchestrator's own account (job submission, blocked

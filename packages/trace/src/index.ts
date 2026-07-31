@@ -28,6 +28,8 @@ export {
   parseOtlpSpans,
   EVERDICT_SEMCONV,
   groupOtlpExportByRun,
+  OTEL_SERVICE_NAME_ATTR,
+  partitionSpansByService,
 } from "./sources/otel.js";
 export {
   MlflowTraceSource,

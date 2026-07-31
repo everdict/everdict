@@ -283,7 +283,18 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
       if (text !== undefined) out.push({ t, kind: "message", role: "assistant", text });
       // Structural span (chain/agent/retriever etc.) — preserved instead of dropped, so a `span` judge requirement is
       // satisfiable and non-LLM steps aren't silently lost. Skip a bare artifact-only span (already emitted above).
-      else if (artifactRef === undefined) out.push({ t, kind: "span", name: s.name, attributes: a });
+      else if (artifactRef === undefined) {
+        // Carry the span's own length through: a service under test emits mostly structural spans, and a
+        // cross-plane timeline needs their duration, not just their start.
+        const durationMs = s.endMs - s.startMs;
+        out.push({
+          t,
+          kind: "span",
+          name: s.name,
+          ...(Number.isFinite(durationMs) && durationMs > 0 ? { durationMs } : {}),
+          attributes: a,
+        });
+      }
     }
   }
   return out;

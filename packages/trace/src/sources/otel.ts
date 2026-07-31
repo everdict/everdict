@@ -56,6 +56,26 @@ export const EVERDICT_SEMCONV = {
   groupId: "everdict.group_id",
 } as const;
 
+// OTel's OWN identity attribute for the emitting process. It is the plane key of a multi-service
+// trajectory (maintainer's decision: the standard attribute, never an everdict-specific one — a service
+// joins a run's trajectory by setting OTEL_SERVICE_NAME and the run-id correlation, nothing else).
+export const OTEL_SERVICE_NAME_ATTR = "service.name";
+
+// One run's spans split by the SERVICE that emitted them — the door's plane grouping. `undefined` keys the
+// spans that declare no service.name: they stay the run's own record instead of inventing a service for
+// them. Insertion order follows first appearance, so the export's own ordering decides the header plane.
+export function partitionSpansByService(spans: Span[]): Map<string | undefined, Span[]> {
+  const out = new Map<string | undefined, Span[]>();
+  for (const span of spans) {
+    const name = span.attrs[OTEL_SERVICE_NAME_ATTR];
+    const key = typeof name === "string" && name !== "" ? name : undefined;
+    const bucket = out.get(key) ?? [];
+    bucket.push(span);
+    out.set(key, bucket);
+  }
+  return out;
+}
+
 // OTLP/HTTP ExportTraceServiceRequest (JSON) → spans grouped by their everdict.run_id (the N0 receiver's
 // core). Resource attributes merge INTO each span's bag (resource attrs correlate whole processes; a
 // span-level attribute overrides). Spans with no run id anywhere cannot join the ledger — counted, never
