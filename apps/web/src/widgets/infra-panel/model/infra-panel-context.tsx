@@ -45,10 +45,14 @@ export type FrameRequest = { tab: InfraTab; path: string; seq: number }
 // does not re-inject the same prefill.
 // `mission` marks a DOMAIN-SPECIFIC entry (Settings › Skills 상세의 "대화로 편집하기" 같은 전용 버튼): 패널 구조는
 // 그대로지만 빈 화면의 라이팅·제안이 그 작업에 맞춰 갈린다. 범용 "대화에서 분석" 진입은 mission 없이 기본 문구를 쓴다.
+// `fresh` marks a CREATION entry ("새 분석" → the blank analysis canvas): the thing being made IS the
+// conversation, so the panel starts a new one instead of appending to whatever thread was open. Edit-intent
+// missions already do this by their intent; fresh is for entries whose mission is analyze/ask.
 export type PendingMention = {
   ref?: AgentReference
   prompt?: string
   mission?: AgentChatMission
+  fresh?: boolean
 }
 
 // postMessage `type` a detail page rendered INSIDE the infra panel's iframe (run / runtime) sends to the PARENT
@@ -91,8 +95,14 @@ type InfraPanelValue = {
   // frames the chat for a domain-specific task (e.g. editing a skill) instead of the generic analysis copy.
   mentionInChat: (ref: AgentReference, mission?: AgentChatMission) => void
   // Open the agent chat with a draft prompt pre-typed (and optionally an entity referenced) — nothing auto-sends.
-  // A mission (studio/edit entry) rides along to frame the chat exactly like mentionInChat's.
-  askAgent: (prompt: string, ref?: AgentReference, mission?: AgentChatMission) => void
+  // A mission (studio/edit entry) rides along to frame the chat exactly like mentionInChat's; `fresh` marks a
+  // creation entry that must start its own conversation.
+  askAgent: (
+    prompt: string,
+    ref?: AgentReference,
+    mission?: AgentChatMission,
+    fresh?: boolean
+  ) => void
   pendingMention: PendingMention | null
   consumePendingMention: () => void
   // Open the agent chat on a specific existing session (a comment thread's discussion session) in watch mode.
@@ -262,8 +272,13 @@ export function InfraPanelProvider({
   // Reveal the agent chat with a draft prompt pre-typed (and optionally an entity referenced) — the "ask the
   // agent to do X with this" entry (e.g. edit a skill from its detail page). The member still presses send.
   const askAgent = useCallback(
-    (prompt: string, ref?: AgentReference, mission?: AgentChatMission) => {
-      setPendingMention({ prompt, ...(ref ? { ref } : {}), ...(mission ? { mission } : {}) })
+    (prompt: string, ref?: AgentReference, mission?: AgentChatMission, fresh?: boolean) => {
+      setPendingMention({
+        prompt,
+        ...(ref ? { ref } : {}),
+        ...(mission ? { mission } : {}),
+        ...(fresh ? { fresh } : {}),
+      })
       setTab('agent')
       setOpen(true)
     },

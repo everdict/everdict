@@ -98,7 +98,12 @@ export function AgentChatPanel({
   onConsumeSession,
   user,
 }: {
-  pendingMention?: { ref?: AgentReference; prompt?: string; mission?: AgentChatMission } | null
+  pendingMention?: {
+    ref?: AgentReference
+    prompt?: string
+    mission?: AgentChatMission
+    fresh?: boolean
+  } | null
   onConsumeMention?: () => void
   pendingSession?: { id: string } | null
   onConsumeSession?: () => void
@@ -706,12 +711,14 @@ export function AgentChatPanel({
   // An EDIT-intent mission additionally lands on a fresh draft when a persisted conversation is open: the task
   // framing only shows on an empty chat, and an editing mission has no business continuing someone else's thread.
   // Analyze/ask missions keep the open thread — comparing two scorecards in one conversation must stay possible —
-  // and their framing simply applies whenever the chat is (or next becomes) empty.
+  // and their framing simply applies whenever the chat is (or next becomes) empty. An entry that CREATES the
+  // thing it talks about ("새 분석" → the blank analysis canvas) asks for the same fresh start explicitly.
   useEffect(() => {
     if (!pendingMention) return
     if (
-      pendingMention.mission &&
-      AGENT_CHAT_MISSION_INTENTS[pendingMention.mission] === 'edit' &&
+      (pendingMention.fresh ||
+        (pendingMention.mission &&
+          AGENT_CHAT_MISSION_INTENTS[pendingMention.mission] === 'edit')) &&
       activeId !== null
     )
       newConversation()

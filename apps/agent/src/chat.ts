@@ -238,7 +238,15 @@ function buildDraftPreamble(state: AgentDraftState): string {
 // update_view take this exact config), so "save this analysis" closes in the same conversation.
 function buildCanvasPreamble(canvas: CanvasState): string {
   const target = canvas.viewId ? `the saved View '${canvas.viewId}'` : "an unsaved analysis on the analyze dashboard";
-  const intro = `The user has the analysis canvas open (${target}). Its CURRENT stored-form config — the exact vocabulary apply_view_config takes — is:`;
+  // A BLANK canvas is the new-analysis entry: the surface has no pickers, so nothing appears on it until this
+  // turn draws it. Say so plainly — "{}" alone reads as "an analysis that happens to be empty".
+  const empty = Object.keys(canvas.config).length === 0;
+  const intro = empty
+    ? `The user has the analysis canvas open (${target}) and it is EMPTY — nothing is drawn yet. The canvas has no ` +
+      "pickers: apply_view_config is the ONLY way anything appears on it, so put a first lens up (ask what they " +
+      "want, or propose a useful breakdown and apply it). Its stored-form config — the exact vocabulary " +
+      "apply_view_config takes — is currently:"
+    : `The user has the analysis canvas open (${target}). Its CURRENT stored-form config — the exact vocabulary apply_view_config takes — is:`;
   const rule =
     "When the user asks to change the visualization or the analysis itself, call apply_view_config with the FULL " +
     "desired config: start from the current one above, change what they asked, and re-send every key you keep " +

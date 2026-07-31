@@ -124,14 +124,23 @@ mem/Pg stores, Zod at every boundary, web is a pure HTTP mirror.
   scorecards list page's analytics segment points at `/analyze`. Existing server endpoints
   (`leaderboard`/`trend`/`diff`) stay for MCP/agents; the web dashboard computes from `listScorecards`.
 - Reuse: by-harness grouping logic, trend SVG sparkline, `shared/lib/format`, `shared/ui/{score,chip,stat-card}`.
-- **Raw-data layer (added 2026-07-29).** The aggregate is never the whole story, so the dashboard also lists the
-  scorecard rows it was computed from, under the chart. It is NOT a fourth `viz` value — `viz` is bound to the
-  domain/API `AnalysisConfig` enum (`analysis-query.ts`), and raw rows are orthogonal to the aggregate shape, so
-  they render for every viz. `filterScorecards`/`groupKeyOf`/`timeDimensionOf` (exported from the same model
-  module the pivot uses) guarantee the table applies the identical predicate — the rows can't disagree with the
-  numbers above them. Clicking any mark (bar, line bucket, table row) scopes the table to that group with a
-  clearable chip; re-shaping the analysis clears the focus, since the group key no longer means anything. The
-  table caps at 50 rows with an explicit "showing N of M" expander — never a silent truncation.
+- **The pickers are GONE (maintainer decision, 2026-07-31).** The dashboard's manual chrome — the stat tiles, the
+  preset row, the free-text search, the filter bar, and the group/pivot/measure/sort/viz strip — was removed:
+  `/{ws}/scorecards/analyze` is now a **blank canvas the conversation draws on** (analysis-studio C). Creating an
+  analysis IS starting a conversation, so the page lands empty with the agent chat open on a NEW conversation, and
+  `apply_view_config` is the only thing that puts a lens on the screen (a saved View / a deep link fills it on
+  arrival instead). `AnalysisConfig`, the URL codec, and `computeAnalysis` are untouched — only the surface that
+  edited them by hand is. What remains on the canvas: the config's own chips (so the lens is readable back), one
+  save control (save as a View / update the open one), the chart or table, and the drill-down below it.
+- **Raw-data layer (added 2026-07-29; drill-down-only since 2026-07-31).** The aggregate is never the whole story,
+  so the canvas can list the scorecard rows it was computed from — but only where the member ASKED: it renders
+  after a mark is clicked, not as a standing dump under every chart. It is NOT a fourth `viz` value — `viz` is
+  bound to the domain/API `AnalysisConfig` enum (`analysis-query.ts`), and raw rows are orthogonal to the
+  aggregate shape, so they render for every viz. `filterScorecards`/`groupKeyOf`/`timeDimensionOf` (exported from
+  the same model module the pivot uses) guarantee the table applies the identical predicate — the rows can't
+  disagree with the numbers above them. Clicking any mark (bar, line bucket, table row) scopes the table to that
+  group with a clearable chip; re-shaping the analysis clears the focus, since the group key no longer means
+  anything. The table caps at 50 rows with an explicit "showing N of M" expander — never a silent truncation.
 - **Charts come from `shared/ui/charts`** (see skill `web`): one palette (`--chart-*`, CVD-validated per surface),
   one axis/grid/tooltip/legend implementation, entity-stable color slots. Ratio measures pin the axis to 0–100%;
   other measures auto-scale to their own range.

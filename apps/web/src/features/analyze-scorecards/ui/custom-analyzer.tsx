@@ -1,19 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { Link2, Search } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Sparkles } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { ScorecardRecord } from '@/entities/scorecard'
 import type { View } from '@/entities/view'
-import {
-  fmtMetricLabel,
-  fmtPct,
-  fmtScore,
-  fmtSubject,
-  HEALTH_TEXT,
-  rateHealth,
-} from '@/shared/lib/format'
+import { fmtPct, fmtScore, fmtSubject, HEALTH_TEXT, rateHealth } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import {
   LineChart,
@@ -22,94 +15,32 @@ import {
   seriesColorAt,
   type ChartSeries,
 } from '@/shared/ui/charts'
-import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
-import { Input } from '@/shared/ui/input'
-import { StatCard } from '@/shared/ui/stat-card'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 import {
   computeAnalysis,
   configToParams,
   configToStored,
+  describeConfig,
   DIMENSION_KEY,
   dimValue,
   filterScorecards,
   groupKeyOf,
   MEASURE_KEY,
-  metricsOf,
   seriesDimensionOf,
   storedToConfig,
   timeDimensionOf,
   type AnalysisConfig,
-  type Dimension,
   type Measure,
-  type Viz,
 } from '../model/analysis'
 import { RawRowsTable } from './raw-rows-table'
-import { SavedViewsBar } from './saved-views-bar'
+import { SaveAnalysisButton } from './save-analysis-button'
 
 type Author = { name: string; avatarUrl?: string }
 
 // What the raw-data table is scoped to after a mark is clicked: one group row (grid key) or one time bucket.
 type Focus = { kind: 'group' | 'bucket'; key: string; label: string }
-
-const GROUP_DIMS: Dimension[] = [
-  'harness',
-  'harnessVersion',
-  'model',
-  'dataset',
-  'datasetVersion',
-  'judgeModel',
-  'status',
-  'originSource',
-  'repo',
-  'owner',
-  'day',
-  'week',
-  'month',
-]
-
-const VIZ: { value: Viz; labelKey: string }[] = [
-  { value: 'table', labelKey: 'vizTable' },
-  { value: 'bars', labelKey: 'vizBars' },
-  { value: 'line', labelKey: 'trend' },
-]
-
-// Presets — "build all 4 lenses from this one dashboard" in a single click.
-const PRESETS: { labelKey: string; patch: Partial<AnalysisConfig> }[] = [
-  {
-    labelKey: 'presetLeaderboard',
-    patch: {
-      groupBy: ['harness', 'model'],
-      measure: 'passRate',
-      viz: 'bars',
-      sort: { by: 'measure', dir: 'desc' },
-    },
-  },
-  {
-    labelKey: 'presetByHarness',
-    patch: { groupBy: ['harness'], pivotBy: 'dataset', measure: 'passRate', viz: 'table' },
-  },
-  {
-    labelKey: 'trend',
-    patch: {
-      groupBy: ['day', 'harness'],
-      measure: 'passRate',
-      viz: 'line',
-      sort: { by: 'label', dir: 'asc' },
-    },
-  },
-  {
-    labelKey: 'presetVersionCompare',
-    patch: {
-      groupBy: ['harnessVersion'],
-      measure: 'passRate',
-      viz: 'table',
-      sort: { by: 'label', dir: 'asc' },
-    },
-  },
-]
 
 function measureCell(value: number | undefined, measure: Measure) {
   if (value === undefined) return <span className="text-faint">–</span>
@@ -122,8 +53,11 @@ function measureCell(value: number | undefined, measure: Measure) {
   )
 }
 
-// Flexible scorecard analysis dashboard — compose leaderboard/by-harness/trend/compare on one screen via filter/group/measure/search.
-// Save a composed analysis as a named View (private|shared); opening a saved view re-runs it against current data (live).
+// The analysis canvas — the conversation's drawing surface (docs/architecture/analysis-studio.md C).
+// It starts BLANK and carries no chrome of its own: no stat tiles, no presets, no search, no filter/shape
+// pickers. A new analysis IS a conversation, and the agent's apply_view_config is what puts the first lens on
+// the screen; a saved View or a shared deep link fills it on arrival instead. The member's only canvas-side
+// action is keeping what the conversation drew (save it as a View) — everything else is said, not clicked.
 export function CustomAnalyzer({
   scorecards,
   authors,
@@ -133,31 +67,33 @@ export function CustomAnalyzer({
   canManage = false,
   isAdmin = false,
   activeViewId,
+  emptyAction,
 }: {
   scorecards: ScorecardRecord[]
   authors: Record<string, Author>
-  initialConfig: AnalysisConfig
+  /** The lens to draw on arrival — a saved View or a deep link. Absent = a blank canvas awaiting the conversation. */
+  initialConfig?: AnalysisConfig
   savedViews?: View[]
   currentSubject?: string
   canManage?: boolean
   isAdmin?: boolean
   activeViewId?: string
+  /** The blank canvas's call to action (the page passes the agent entry — a feature cannot reach the panel). */
+  emptyAction?: ReactNode
 }) {
   const t = useTranslations('analyzeScorecards')
-  const [config, setConfig] = useState<AnalysisConfig>(initialConfig)
-  const [copied, setCopied] = useState(false)
-  // Drill-down target: the group row / time bucket whose underlying records the raw table is scoped to.
-  const [focus, setFocus] = useState<Focus>()
+  const [config, setConfig] = useState<AnalysisConfig | undefined>(initialConfig)
 
   // config → URL (no navigation) — for deep-linking/sharing.
   useEffect(() => {
+    if (!config) return
     const p = configToParams(config)
     window.history.replaceState(null, '', `?${p.toString()}`)
   }, [config])
 
   // The agent drove the canvas (apply_view_config in the chat panel, same window) — apply the streamed
-  // stored-form config live. storedToConfig normalizes defensively, so a malformed payload degrades to defaults;
-  // the member keeps full manual control afterwards (this is just another setConfig).
+  // stored-form config live. storedToConfig normalizes defensively, so a malformed payload degrades to defaults.
+  // This is the ONLY way a blank canvas gets its first lens.
   useEffect(() => {
     const onApply = (e: Event) => {
       const detail = (e as CustomEvent<unknown>).detail
@@ -169,16 +105,18 @@ export function CustomAnalyzer({
 
   // Canvas-state feedback, the reverse direction: the agent chat asks what the canvas CURRENTLY shows right
   // before sending each turn (synchronous same-window request/response), so multi-turn refinement — "make it
-  // a bar chart", "regroup by model" — grounds on the live state including the member's manual picker changes.
+  // a bar chart", "regroup by model" — grounds on the live state. A BLANK canvas announces an empty config
+  // rather than staying silent: "the canvas is open and empty" is exactly what the first turn must know.
   // The same state is also announced unprompted on mount and on every change, so the chat composer can show a
   // live "canvas linked" chip (presence, not just per-send capture).
-  const activeViewName = savedViews.find((v) => v.id === activeViewId)?.name
+  const activeView = savedViews.find((v) => v.id === activeViewId)
+  const activeViewName = activeView?.name
   useEffect(() => {
     const announce = () =>
       window.dispatchEvent(
         new CustomEvent('everdict:canvas-state', {
           detail: {
-            config: configToStored(config),
+            config: config ? configToStored(config) : {},
             ...(activeViewId ? { viewId: activeViewId } : {}),
             ...(activeViewName ? { viewName: activeViewName } : {}),
           },
@@ -197,29 +135,60 @@ export function CustomAnalyzer({
     }
   }, [])
 
-  const resolveOwner = (s: string) => authors[s]?.name ?? (s ? fmtSubject(s) : '—')
-  const patch = (p: Partial<AnalysisConfig>) => setConfig((c) => ({ ...c, ...p }))
-  const setFilter = (k: keyof AnalysisConfig['filters'], v: string) =>
-    setConfig((c) => ({
-      ...c,
-      filters: { ...c.filters, [k]: v ? [v] : undefined },
-    }))
+  if (!config)
+    return (
+      <EmptyState
+        icon={<Sparkles />}
+        title={t('canvasEmptyTitle')}
+        hint={t('canvasEmptyHint')}
+        action={emptyAction}
+      />
+    )
 
-  // Option lists (derived from the scorecards).
-  const opts = useMemo(() => {
-    const uniq = (fn: (sc: ScorecardRecord) => string) =>
-      [...new Set(scorecards.map(fn))].filter((v) => v && v !== '—').sort()
-    return {
-      dataset: uniq((s) => s.dataset.id),
-      harness: uniq((s) => s.harness.id),
-      model: uniq((s) => dimValue(s, 'model')),
-      judgeModel: uniq((s) => dimValue(s, 'judgeModel')),
-      status: uniq((s) => s.status),
-      origin: uniq((s) => dimValue(s, 'originSource')),
-      owner: [...new Set(scorecards.map((s) => s.createdBy ?? '').filter(Boolean))],
-    }
-  }, [scorecards])
-  const metrics = useMemo(() => metricsOf(scorecards), [scorecards])
+  return (
+    <div className="space-y-4">
+      {/* What the canvas is currently showing (the pickers are gone — the chips are how the member reads the
+          lens back) + the one action that outlives the conversation. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {describeConfig(config, t).map((chip, i) => (
+          <span
+            key={i}
+            className="rounded bg-secondary/60 px-1.5 py-0.5 text-[11px] font-[510] text-muted-foreground"
+          >
+            {chip}
+          </span>
+        ))}
+        {canManage && (
+          <SaveAnalysisButton
+            config={config}
+            activeView={activeView}
+            currentSubject={currentSubject}
+            isAdmin={isAdmin}
+          />
+        )}
+      </div>
+
+      <AnalysisBoard scorecards={scorecards} authors={authors} config={config} />
+    </div>
+  )
+}
+
+// The drawn lens itself — chart/table plus the drill-down into the records behind a clicked mark.
+function AnalysisBoard({
+  scorecards,
+  authors,
+  config,
+}: {
+  scorecards: ScorecardRecord[]
+  authors: Record<string, Author>
+  config: AnalysisConfig
+}) {
+  const t = useTranslations('analyzeScorecards')
+  // Drill-down target: the group row / time bucket whose underlying records the raw table is scoped to. The
+  // raw table is NOT part of the resting canvas — it appears only where the member asked "which runs are these?".
+  const [focus, setFocus] = useState<Focus>()
+
+  const resolveOwner = (s: string) => authors[s]?.name ?? (s ? fmtSubject(s) : '—')
 
   const result = useMemo(
     () => computeAnalysis(scorecards, config, resolveOwner, t('all')),
@@ -230,7 +199,7 @@ export function CustomAnalyzer({
   const shapeKey = `${config.groupBy.join(',')}:${config.viz}`
   useEffect(() => setFocus(undefined), [shapeKey])
 
-  // The records the aggregate was computed from — the raw table below, scoped to the focused mark.
+  // The records the aggregate was computed from, scoped to the focused mark.
   const rawRows = useMemo(
     () => filterScorecards(scorecards, config, resolveOwner),
     [scorecards, config, authors]
@@ -273,246 +242,9 @@ export function CustomAnalyzer({
 
   const focusGroup = (key: string, label: string) => setFocus({ kind: 'group', key, label })
 
-  const filterCombo = (
-    label: string,
-    key: keyof AnalysisConfig['filters'],
-    values: string[],
-    render?: (v: string) => string
-  ) => {
-    const options: ComboboxOption[] = [
-      { value: '', label: t('filterAll', { label }) },
-      ...values.map((v) => ({ value: v, label: render ? render(v) : v })),
-    ]
-    return (
-      <Combobox
-        options={options}
-        value={config.filters[key]?.[0] ?? ''}
-        onChange={(v) => setFilter(key, v)}
-        placeholder={label}
-        className="w-[150px]"
-      />
-    )
-  }
-
-  const dimCombo = (
-    value: Dimension | '',
-    onChange: (v: Dimension | '') => void,
-    placeholder: string,
-    exclude: (Dimension | undefined)[] = []
-  ) => (
-    <Combobox
-      options={[
-        { value: '', label: placeholder },
-        ...GROUP_DIMS.filter((d) => !exclude.includes(d)).map((d) => ({
-          value: d,
-          label: t(DIMENSION_KEY[d]),
-        })),
-      ]}
-      value={value}
-      onChange={(v) => onChange(v as Dimension | '')}
-      placeholder={placeholder}
-      searchable={false}
-      className="w-[130px]"
-    />
-  )
-
-  const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      /* clipboard unavailable — ignore */
-    }
-  }
-
   return (
     <div className="space-y-4">
-      <SavedViewsBar
-        config={config}
-        onLoad={setConfig}
-        savedViews={savedViews}
-        currentSubject={currentSubject}
-        canManage={canManage}
-        isAdmin={isAdmin}
-        activeViewId={activeViewId}
-      />
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label={t('statScorecards')} value={result.total} hint={t('filterApplied')} />
-        <StatCard label={t('statBenchmarks')} value={opts.dataset.length} />
-        <StatCard label={t('statHarnesses')} value={opts.harness.length} />
-        <StatCard label={t('statModels')} value={opts.model.length} />
-      </div>
-
-      {/* presets + search + visualization + link */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-          {t('presetLabel')}
-        </span>
-        {PRESETS.map((p) => (
-          <button
-            key={p.labelKey}
-            type="button"
-            onClick={() => patch(p.patch)}
-            className="rounded-md border border-border bg-card px-2.5 py-1 text-[12px] font-[510] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
-          >
-            {t(p.labelKey)}
-          </button>
-        ))}
-        <div className="relative ml-auto min-w-[160px] flex-1 sm:flex-none">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={config.search ?? ''}
-            onChange={(e) => patch({ search: e.target.value || undefined })}
-            placeholder={t('searchPlaceholder')}
-            className="pl-8"
-            aria-label={t('searchAria')}
-          />
-        </div>
-        <button
-          type="button"
-          onClick={copyLink}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <Link2 className="size-3.5" />
-          {copied ? t('copied') : t('link')}
-        </button>
-      </div>
-
-      {/* filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        {filterCombo(t('filterBenchmark'), 'dataset', opts.dataset)}
-        {filterCombo(t('harness'), 'harness', opts.harness)}
-        {filterCombo(t('filterModel'), 'model', opts.model)}
-        {opts.judgeModel.length > 0 &&
-          filterCombo(t('filterJudgeModel'), 'judgeModel', opts.judgeModel)}
-        {filterCombo(t('filterStatus'), 'status', opts.status)}
-        {opts.owner.length > 0 && filterCombo(t('filterOwner'), 'owner', opts.owner, resolveOwner)}
-        {opts.origin.length > 0 && filterCombo(t('filterOrigin'), 'originSource', opts.origin)}
-        <Input
-          type="date"
-          value={config.filters.from ?? ''}
-          onChange={(e) =>
-            setConfig((c) => ({
-              ...c,
-              filters: { ...c.filters, from: e.target.value || undefined },
-            }))
-          }
-          className="w-[140px]"
-          aria-label={t('dateFrom')}
-        />
-        <Input
-          type="date"
-          value={config.filters.to ?? ''}
-          onChange={(e) =>
-            setConfig((c) => ({ ...c, filters: { ...c.filters, to: e.target.value || undefined } }))
-          }
-          className="w-[140px]"
-          aria-label={t('dateTo')}
-        />
-        {/* Include superseded/incomplete cards (excluded by default) — round-trips into a saved View. */}
-        <label className="flex cursor-pointer items-center gap-1.5 text-[12px] font-[510] text-muted-foreground">
-          <input
-            type="checkbox"
-            className="accent-primary"
-            checked={config.includeIncomplete ?? false}
-            onChange={(e) =>
-              setConfig((c) => ({ ...c, includeIncomplete: e.target.checked || undefined }))
-            }
-          />
-          {t('includeIncomplete')}
-        </label>
-      </div>
-
-      {/* shape (group·pivot·measure·sort·visualization) */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card/60 p-2.5">
-        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-          {t('group')}
-        </span>
-        {dimCombo(
-          config.groupBy[0] ?? '',
-          (v) =>
-            patch({
-              groupBy: v
-                ? [v, ...(config.groupBy[1] ? [config.groupBy[1]] : [])]
-                : config.groupBy.slice(1),
-            }),
-          t('group1'),
-          [config.groupBy[1]]
-        )}
-        {dimCombo(
-          config.groupBy[1] ?? '',
-          (v) => patch({ groupBy: [config.groupBy[0] ?? 'harness', ...(v ? [v] : [])] }),
-          t('group2'),
-          [config.groupBy[0]]
-        )}
-        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-          {t('column')}
-        </span>
-        {dimCombo(
-          config.pivotBy ?? '',
-          (v) => patch({ pivotBy: v || undefined }),
-          t('pivotOptional'),
-          config.groupBy
-        )}
-        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-          {t('measure')}
-        </span>
-        <Combobox
-          options={(Object.keys(MEASURE_KEY) as Measure[]).map((m) => ({
-            value: m,
-            label: t(MEASURE_KEY[m]),
-          }))}
-          value={config.measure}
-          onChange={(v) => patch({ measure: v as Measure })}
-          searchable={false}
-          className="w-[120px]"
-        />
-        {metrics.length > 1 && (
-          <Combobox
-            options={[
-              { value: '', label: t('defaultMetric') },
-              // Judge metrics render human-readably ('judge <id> › <criterion>') — the full workspace metric list is the disambiguation context.
-              ...metrics.map((m) => ({ value: m, label: fmtMetricLabel(m, metrics) })),
-            ]}
-            value={config.metric ?? ''}
-            onChange={(v) => patch({ metric: v || undefined })}
-            className="w-[140px]"
-          />
-        )}
-        <button
-          type="button"
-          onClick={() =>
-            patch({
-              sort: { by: config.sort.by, dir: config.sort.dir === 'desc' ? 'asc' : 'desc' },
-            })
-          }
-          className="rounded-md border border-border bg-card px-2 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
-        >
-          {t('sort')} {config.sort.dir === 'desc' ? '↓' : '↑'}
-        </button>
-        <div className="ml-auto inline-flex overflow-hidden rounded-lg border bg-card">
-          {VIZ.map((v, i) => (
-            <button
-              key={v.value}
-              type="button"
-              onClick={() => patch({ viz: v.value })}
-              className={cn(
-                'px-2.5 py-1.5 text-[12px] font-[510] transition-colors',
-                i > 0 && 'border-l border-border',
-                config.viz === v.value
-                  ? 'bg-secondary text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {t(v.labelKey)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* results — every mark is a drill-down handle into the raw rows below */}
+      {/* results — every mark is a drill-down handle into the records behind it */}
       {result.total === 0 ? (
         <EmptyState title={t('customEmptyTitle')} hint={t('customEmptyHint')} />
       ) : result.kind === 'line' ? (
@@ -640,12 +372,16 @@ export function CustomAnalyzer({
         {config.measure === 'passRate' ? t('customSummaryPassRate', { pct: fmtPct(1) }) : ''}
       </p>
 
-      {/* The records behind the aggregate — the chart's table-view twin, and where a clicked mark lands. */}
-      <RawRowsTable
-        rows={focusedRows}
-        {...(config.metric ? { metric: config.metric } : {})}
-        {...(focus ? { focusLabel: focus.label, onClearFocus: () => setFocus(undefined) } : {})}
-      />
+      {/* The chart's table twin — the records behind ONE clicked mark. Nothing is listed until the member
+          drills in: the resting canvas is the lens the conversation drew, not a data dump under it. */}
+      {focus && (
+        <RawRowsTable
+          rows={focusedRows}
+          {...(config.metric ? { metric: config.metric } : {})}
+          focusLabel={focus.label}
+          onClearFocus={() => setFocus(undefined)}
+        />
+      )}
     </div>
   )
 }

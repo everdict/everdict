@@ -199,14 +199,6 @@ function caseCount(cards: ScorecardRecord[], metric: string | undefined): number
   return cases
 }
 
-// All metric names in the workspace (by frequency) + the default metric.
-export function metricsOf(scorecards: ScorecardRecord[]): string[] {
-  const freq = new Map<string, number>()
-  for (const sc of scorecards)
-    for (const s of sc.summary ?? []) freq.set(s.metric, (freq.get(s.metric) ?? 0) + 1)
-  return [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m)
-}
-
 // Passes the filters?
 function passesFilters(
   sc: ScorecardRecord,
@@ -438,6 +430,33 @@ export function storedToConfig(raw: unknown): AnalysisConfig {
 
 const DIMS = new Set<string>(Object.keys(DIMENSION_KEY))
 const isDim = (v: string): v is Dimension => DIMS.has(v)
+
+// Query keys that carry an analysis. The studio canvas starts BLANK — a bare `/scorecards/analyze` must not
+// synthesize a default lens (the conversation draws the first one), so only a deep link that actually names a
+// config fills the canvas on arrival. Kept next to the codec below: a new param belongs in both.
+const CONFIG_PARAM_KEYS = [
+  'dataset',
+  'harness',
+  'model',
+  'judgeModel',
+  'status',
+  'owner',
+  'origin',
+  'from',
+  'to',
+  'group',
+  'pivot',
+  'metric',
+  'measure',
+  'sort',
+  'q',
+  'viz',
+  'incomplete',
+] as const
+
+export function hasAnalysisParams(params: Record<string, string | undefined>): boolean {
+  return CONFIG_PARAM_KEYS.some((k) => (params[k] ?? '').length > 0)
+}
 
 export function paramsToConfig(params: Record<string, string | undefined>): AnalysisConfig {
   const list = (v?: string) => (v ? v.split(',').filter(Boolean) : undefined)

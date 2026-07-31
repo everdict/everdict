@@ -961,6 +961,38 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("tells the model the analysis canvas is EMPTY so a new analysis gets its first lens drawn", async () => {
+    const seenUserTurns: string[] = [];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: async (req) => {
+        const user = [...req.messages].reverse().find((m) => m.role === "user");
+        if (user && typeof user.content === "string") seenUserTurns.push(user.content);
+        return {
+          content: "ok",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
+        };
+      },
+    };
+    const app = buildServer(makeDeps({ resolveModel: async () => ({ transport, model: "test-model" }) }));
+    const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+    // The blank studio canvas (the "new analysis" entry) announces an EMPTY config — it has no pickers, so nothing appears on it
+    // until the agent applies a lens. "{}" alone would read as "an analysis that happens to be empty".
+    await app.inject({
+      method: "POST",
+      url: `/agent/sessions/${session.id}/chat`,
+      headers: auth,
+      payload: { message: "what should we look at first?", canvas: { config: {} } },
+    });
+    const turn = seenUserTurns.at(-1);
+    expect(turn).toContain("EMPTY");
+    expect(turn).toContain("apply_view_config");
+    expect(turn).toContain("create_view");
+    await app.close();
+  });
+
   it("deletes a conversation", async () => {
     const app = buildServer(makeDeps());
     const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();

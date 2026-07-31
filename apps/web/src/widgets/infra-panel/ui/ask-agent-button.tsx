@@ -17,12 +17,15 @@ export function AskAgentButton({
   label,
   variant = 'outline',
   mission,
+  fresh,
 }: {
   prompt: string
   reference?: AgentReference
   label: string
   variant?: 'primary' | 'outline'
   mission?: AgentChatMission
+  /** This entry CREATES the thing (a new analysis) — the chat starts a new conversation for it. */
+  fresh?: boolean
 }) {
   const infra = useInfraPanelOptional()
 
@@ -30,12 +33,12 @@ export function AskAgentButton({
     const framed = typeof window !== 'undefined' && window.self !== window.top
     if (framed) {
       window.parent.postMessage(
-        { type: MENTION_IN_CHAT_MESSAGE, reference, prompt, mission },
+        { type: MENTION_IN_CHAT_MESSAGE, reference, prompt, mission, fresh },
         window.location.origin
       )
       return
     }
-    infra?.askAgent(prompt, reference, mission)
+    infra?.askAgent(prompt, reference, mission, fresh)
   }
 
   return (

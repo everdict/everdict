@@ -66,9 +66,15 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   stable, *unfiltered* key list (color follows the entity, so filtering never repaints survivors), and past
   `MAX_SERIES` the tail folds into "other" or is dropped WITH a visible note — never a generated 6th hue.
   Ratio measures pin the domain to `{min: 0, max: 1}`; everything else auto-scales (never a hardcoded
-  ceiling). Every chart needs a table twin — the values must be readable without color (see the analyze
-  dashboard's raw-data table). A chart with genuinely different semantics (the trend page's baseline
-  threshold + status dots) may stay bespoke, but still takes its series color from `palette.ts`.
+  ceiling). Every chart needs a table twin — the values must be readable without color (the analysis canvas's
+  raw-data table is one click away on any mark). A chart with genuinely different semantics (the trend page's
+  baseline threshold + status dots) may stay bespoke, but still takes its series color from `palette.ts`.
+- **The analysis canvas is conversation-driven, not picker-driven** (`features/analyze-scorecards`,
+  `/{ws}/scorecards/analyze`): it lands BLANK and the agent's `apply_view_config` draws the lens. Do not
+  re-introduce stat tiles, a preset row, a search box, filter combos or a group/measure/viz strip — creating an
+  analysis is starting a conversation, so the entry opens the chat on a fresh one and the canvas carries only the
+  `describeConfig` chips, one save control, the chart/table, and a click-to-drill raw table. Same shape on a saved
+  View's page. See `docs/architecture/analysis-studio.md` (C delta 2026-07-31).
 - **Settings UIs** = Linear settings-list (`shared/ui/settings-list.tsx`, label-left / compact-control-right
   divided rows), not stacked full-width forms. **Settings content width is ONE shared column**: every settings
   tab — form/account (General · Profile · Preferences · API keys · Personal secrets) AND data-dense (Members ·
@@ -101,7 +107,9 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   (`AGENT_CHAT_MISSION_INTENTS`): `edit` (skill/tool/harness/dataset/judge/runtime/environment/agentCraft) lands on
   a FRESH DRAFT when a persisted conversation is open and defaults the button caption to "대화로 편집하기";
   `analyze`/`ask` (view/scorecard/run · knowledge) keep the open thread — comparing two scorecards in one
-  conversation must survive the entry — and only frame the chat when it is empty. Mission state clears on
+  conversation must survive the entry — and only frame the chat when it is empty. An entry that CREATES the thing
+  it talks about (the blank analysis canvas) passes `fresh` alongside its analyze-intent mission to get the
+  edit-intent behavior for that one entry, instead of bending the mission's intent. Mission state clears on
   new-conversation / session switch. A new mission = one enum value + one intent entry + one catalog block in BOTH
   locales + the prop at the entry — never a second chat component. Every detail-page chat entry passes its mission;
   only truly generic surfaces (the @-picker, the trace browser's chip-adder) stay mission-less with default copy.

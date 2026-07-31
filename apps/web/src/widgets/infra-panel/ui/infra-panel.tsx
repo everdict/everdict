@@ -215,6 +215,7 @@ export function InfraPanel({
         reference?: unknown
         prompt?: unknown
         mission?: unknown
+        fresh?: unknown
         sessionId?: unknown
         harnessId?: unknown
         version?: unknown
@@ -227,7 +228,13 @@ export function InfraPanel({
         const prompt =
           typeof data.prompt === 'string' && data.prompt.length > 0 ? data.prompt : undefined
         const mission = agentChatMissionSchema.safeParse(data.mission)
-        if (prompt) askAgent(prompt, parsed.success ? parsed.data : undefined)
+        if (prompt)
+          askAgent(
+            prompt,
+            parsed.success ? parsed.data : undefined,
+            mission.success ? mission.data : undefined,
+            data.fresh === true
+          )
         else if (parsed.success)
           mentionInChat(parsed.data, mission.success ? mission.data : undefined)
         return

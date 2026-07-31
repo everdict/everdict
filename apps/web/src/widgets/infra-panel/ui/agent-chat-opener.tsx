@@ -15,10 +15,13 @@ export function AgentChatOpener({
   prompt,
   reference,
   mission,
+  fresh,
 }: {
   prompt?: string
   reference?: AgentReference
   mission?: AgentChatMission
+  /** This entry CREATES the thing (a new analysis) — start a new conversation instead of continuing one. */
+  fresh?: boolean
 }) {
   const infra = useInfraPanelOptional()
   const opened = useRef(false)
@@ -26,10 +29,10 @@ export function AgentChatOpener({
   useEffect(() => {
     if (opened.current || !infra) return
     opened.current = true
-    if (prompt) infra.askAgent(prompt, reference, mission)
+    if (prompt) infra.askAgent(prompt, reference, mission, fresh)
     else if (reference) infra.mentionInChat(reference, mission)
     else infra.openTab('agent')
-  }, [infra, prompt, reference, mission])
+  }, [infra, prompt, reference, mission, fresh])
 
   return null
 }

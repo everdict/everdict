@@ -54,7 +54,9 @@ The gap is precisely: (a) the agent has **no artifact-emission path** (`ToolResu
    `AnalysisConfig` mutation — the agent drives the SAME pivot engine the pickers drive (`apply_view_config`
    tool → live canvas update). The user can always take over by hand; the agent never renders a chart the UI
    couldn't have produced itself. Free-form analysis beyond the pivot goes through artifacts (below), not a
-   parallel rendering path.
+   parallel rendering path. *(2026-07-31: the pickers themselves are gone — see the C delta. The invariant that
+   survives is the ENGINE one: the agent may only produce a config the pivot engine can draw, so nothing on the
+   canvas is outside the platform's own vocabulary.)*
 2. **LLM output never executes in the APP origin.** *(Revised 2026-07-28 — maintainer feedback: numeric,
    metric-by-metric visualization with baseline/delta comparison is the product core, and a closed spec is
    too rigid for it.)* Two artifact tiers now coexist: **declarative** kinds (ChartSpec/table/markdown —
@@ -156,7 +158,19 @@ both taking the in-context stored-form config), and the panel soft-refreshes the
 after each turn so agent-created entities appear without a manual reload. Finally, the pre-studio
 wizard is REMOVED (maintainer decision): the easy 3-question mode (`ScorecardAnalyzer`) and the
 easy/custom toggle are gone — `/scorecards/analyze` is the one studio canvas, NL chat + pickers over
-a single AnalysisConfig.)* New FSD slices:
+a single AnalysisConfig.)*
+*(Delta 2026-07-31, maintainer decision — **the canvas is conversation-only**: the pickers went the way
+of the wizard. The stat tiles, presets, search box, filter bar and group/pivot/measure/sort/viz strip are
+REMOVED, and the raw-data table now appears only as a drill-down under a clicked mark. `/scorecards/analyze`
+lands BLANK — creating an analysis is starting a conversation, so the entry opens the chat on a NEW
+conversation (`fresh` on the pending mention, the analyze/ask-intent counterpart of an edit mission's fresh
+draft) and `apply_view_config` is the only thing that draws the first lens. A blank canvas still announces
+itself on the `everdict:canvas-state` channel with an EMPTY config, and `buildCanvasPreamble` says so in
+words, so the turn knows nothing is on screen and that the surface has no pickers to fall back on. What
+survives on the canvas: `describeConfig` chips (the lens, readable back), one save control (create a View /
+update the open one — listing, sharing and deleting stay on `/views`), the chart or table, and the
+drill-down. Principle 1 still holds for the ENGINE — one `AnalysisConfig`, one `computeAnalysis` — but the
+direct-manipulation half of the surface is retired; the member steers by talking.)* New FSD slices:
 `entities/analysis-artifact`, `features/analysis-studio`; `features/agent-chat` gains artifact rendering in
 the transcript (chart/table/markdown cards) and an embed mode. Sessions opened from a view carry
 `viewId` (new nullable column on `everdict_agent_sessions`), and the turn's context preamble injects the
