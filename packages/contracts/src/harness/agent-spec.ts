@@ -43,6 +43,10 @@ export const TRIGGERABLE_EVENT_KINDS = [
   // agent (bounded by the activation cooldown; the woken run is enveloped like any other).
   "trace.threshold_crossed",
   "trace.ingestion_throttled",
+  // Task ledger (agent-teams): "new work appeared" / "a dependency cleared" — the team wake-up pair. The
+  // creator never wakes on its own task (causedBy loop guard); cross-agent wakes are the ledger's purpose.
+  "task.created",
+  "task.completed",
 ] as const;
 // Compile-time subset guarantee: every triggerable kind is a real platform-event kind.
 const _triggerableAreKinds: readonly PlatformEventKind[] = TRIGGERABLE_EVENT_KINDS;

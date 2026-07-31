@@ -2,6 +2,7 @@
 // Store interfaces/impls (RunStore, InMemory*/Pg*) stay in @everdict/db — only wire-visible shapes live here.
 export * from "./approval.js";
 export * from "./agent-session.js";
+export * from "./agent-task.js";
 export * from "./agent-member-preference.js";
 export * from "./analysis-artifact.js";
 export * from "./browser-profile.js";

@@ -5,6 +5,7 @@ import type {
   EventConsumerStateStore,
   FsRevisionStore,
   TrajectoryStore,
+  AgentTaskStore,
 } from "@everdict/application-control";
 import {
   type BrowserProfileStore,
@@ -42,6 +43,7 @@ import {
   InMemoryTrajectoryStore,
   InMemoryUsageStore,
   InMemoryUserProfileStore,
+  InMemoryAgentTaskStore,
   InMemoryViewStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
@@ -79,6 +81,7 @@ import {
   PgTrajectoryStore,
   PgUsageStore,
   PgUserProfileStore,
+  PgAgentTaskStore,
   PgViewStore,
   PgWorkspaceInviteStore,
   PgWorkspaceSettingsStore,
@@ -174,6 +177,7 @@ export interface Persistence {
   fsRevisionStore: FsRevisionStore; // workspace-filesystem publication ledger — who published which revision, when
   subscriptionStore: SubscriptionStore; // subscription registry (event → reaction rules, E3 §6)
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
+  taskStore: AgentTaskStore; // workspace task ledger — cross-turn, cross-agent coordination (agent-teams)
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members own) — dual-scoped private|workspace
   skillVersionStore: SkillVersionStore; // a skill's stamped, immutable versions — the line its working copy moves along
@@ -263,6 +267,7 @@ export async function makePersistence(): Promise<Persistence> {
       fsRevisionStore: new InMemoryFsRevisionStore(),
       subscriptionStore: new InMemorySubscriptionStore(),
       viewStore: new InMemoryViewStore(),
+      taskStore: new InMemoryAgentTaskStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
       skillVersionStore: new InMemorySkillVersionStore(),
@@ -313,6 +318,7 @@ export async function makePersistence(): Promise<Persistence> {
     fsRevisionStore: new PgFsRevisionStore(client),
     subscriptionStore: new PgSubscriptionStore(client),
     viewStore: new PgViewStore(client),
+    taskStore: new PgAgentTaskStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),
     skillVersionStore: new PgSkillVersionStore(client),

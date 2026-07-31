@@ -146,6 +146,7 @@ import { registerSkillRoutes } from "./api/skill/skill.routes.js";
 import { registerSubscriptionRoutes } from "./api/subscription/subscription.routes.js";
 import { registerTraceSourceRoutes } from "./api/trace-source/trace-source.routes.js";
 import { registerTrajectoryRoutes } from "./api/trajectory/trajectory.routes.js";
+import { registerTaskRoutes } from "./api/task/task.routes.js";
 import { registerViewRoutes } from "./api/view/view.routes.js";
 import { registerWorkspaceSettingsRoutes } from "./api/workspace/settings.routes.js";
 import { registerWorkspaceRoutes } from "./api/workspace/workspace.routes.js";
@@ -246,6 +247,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerEventRoutes(routes, deps);
     registerCommentRoutes(routes, deps);
     registerViewRoutes(routes, deps);
+    registerTaskRoutes(routes, deps);
     registerSubscriptionRoutes(routes, deps);
     registerKnowledgeRoutes(routes, deps);
     registerGithubAppRoutes(routes, deps);

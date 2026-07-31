@@ -23,7 +23,7 @@ import type { SkillService } from "@everdict/application-control";
 import type { FileExecutionService, FsService } from "@everdict/application-control";
 import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
-import type { SubscriptionService, ViewService, ViewSnapshotService } from "@everdict/application-control";
+import type { SubscriptionService, ViewService, ViewSnapshotService, TaskService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import { type Action, type Principal, authorize } from "@everdict/auth";
@@ -75,6 +75,7 @@ export interface McpDeps {
   queueService?: QueueService; // work queue snapshot (running/waiting/next-scheduled per runtime lane)
   subscriptionService?: SubscriptionService; // subscription registry (event → reaction rules, E3)
   viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
+  taskService?: TaskService; // workspace task ledger — cross-agent coordination
   viewSnapshotService?: ViewSnapshotService; // capture_view_snapshot — write a View's numbers to the workspace filesystem
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;

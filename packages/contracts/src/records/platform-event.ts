@@ -57,6 +57,16 @@ export const PLATFORM_EVENT_KINDS = [
   // at the door, never a silent drop). Emitted with an in-process cooldown so a retrying firehose reads as
   // one signal, not a flood.
   "trace.ingestion_throttled",
+  // Task-ledger lifecycle facts (the workspace coordination substrate, docs/architecture/agent-teams.md) —
+  // emitted by TaskService, the single choke point both transports call. created/completed are the
+  // trigger-matchable pair ("new work appeared" / "a dependency cleared" — the team wake-up signals); claimed/
+  // cancelled are observable coordination news. Loop safety: an agent-created task stamps causedBy
+  // agent:<agentId>:<conversationId> (loop guard #1 — the creator never wakes on its own task), and cross-agent
+  // wakes are the POINT of a team ledger, bounded by activation admission + cooldowns like every trigger.
+  "task.created",
+  "task.claimed",
+  "task.completed",
+  "task.cancelled",
   // Agent-run lifecycle facts (reported BY the agent service) — observable in the feed/fleet view, but NEVER
   // trigger-matchable in v1 (agents watching agents is a runaway vector; see the loop-prevention guardrails).
   "agent.run.started",

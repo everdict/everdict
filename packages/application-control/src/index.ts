@@ -45,6 +45,7 @@ export type { ScheduleStore } from "./ports/schedule-store.js";
 export type { ScorecardListFilter, ScorecardStore } from "./ports/scorecard-store.js";
 export type { SubscriptionStore } from "./ports/subscription-store.js";
 export type { UsageStore } from "./ports/usage-store.js";
+export type { AgentTaskStore } from "./ports/agent-task-store.js";
 export type { ViewStore } from "./ports/view-store.js";
 export type { OAuthStateStore } from "./ports/oauth-state-store.js";
 export type { RunnerStore } from "./ports/runner-store.js";
@@ -76,6 +77,13 @@ export {
   type SubscriptionServiceDeps,
   type UpdateSubscriptionInput,
 } from "./subscription/subscription-service.js";
+export {
+  type CreateTaskInput,
+  type TaskAgentAttribution,
+  TaskService,
+  type TaskServiceDeps,
+  type UpdateTaskInput,
+} from "./task/task-service.js";
 export { type CreateViewInput, type UpdateViewInput, ViewService, type ViewServiceDeps } from "./view/view-service.js";
 export {
   type CaptureViewSnapshotInput,

@@ -24,7 +24,7 @@ apps/api/src/
                          resolvePrincipal/resolveBearerPrincipal) + gate/sendError/zodIssues/constantTimeEq
     mcp-context.ts     ← McpDeps + McpToolContext + ok/fail/run/plain (the MCP twin of route-context)
     <domain>/          ← run · scorecard · harness · dataset · judge · model · runtime · benchmark · bundle ·
-                         schedule · view · secret · member · workspace · profile · notification · comment ·
+                         schedule · view · task · secret · member · workspace · profile · notification · comment ·
                          api-key · runner · github-app · mattermost · trace-sink · image-registry · ci-link ·
                          queue · billing (+ execution/ ops/ = machinery's thin transport surfaces)
       <resource>.routes.ts   ← registerXRoutes(app, deps): thin handlers, zero logic

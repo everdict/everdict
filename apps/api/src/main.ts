@@ -3,6 +3,7 @@ import {
   KnowledgeService,
   registryLatestVersionResolver,
   seedFirstPartyAgents,
+  TaskService,
 } from "@everdict/application-control";
 import { ApprovalService } from "@everdict/application-control";
 import {
@@ -167,6 +168,7 @@ async function main(): Promise<void> {
     fsRevisionStore,
     subscriptionStore,
     viewStore,
+    taskStore,
     browserProfileStore,
     skillStore,
     skillVersionStore,
@@ -609,6 +611,9 @@ async function main(): Promise<void> {
     tenantQuotas,
   });
   const viewService = buildView({ viewStore });
+  // Workspace task ledger (agent-teams): lifecycle facts (task.created/claimed/completed/cancelled) are
+  // emitted here — the single choke point both transports call; created/completed are trigger-matchable.
+  const taskService = new TaskService({ store: taskStore, events: platformEventService });
   const subscriptionService = buildSubscription({ subscriptionStore, agentRegistry });
   // Reverse secret-usage index (GET /secrets/usage) — reads the registries + settings to annotate each workspace
   // secret with its live reference sites. Read-only; scans latest specs per request (nothing cached).
@@ -806,6 +811,7 @@ async function main(): Promise<void> {
     scheduleService,
     queueService,
     viewService,
+    taskService,
     subscriptionService,
     // §5.1 activation admission — the agent service asks this before launching a run (402 past the tenant
     // budget; a pass reserves one run, settled later via the usage bridge below).

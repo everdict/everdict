@@ -77,6 +77,18 @@ The gap is not the loop — it is (a) a **shared message substrate** with addres
 - **Agent drives eval.** The agent's tool surface gains the **write** control-plane tools (run/pin/schedule)
   behind the permission modes/rules; a harness-authoring or file-mutating task runs the eval through the
   existing dispatch → isolated job path (no new sandbox — the orchestrator already isolates).
+- **Task ledger (SHIPPED — the durable half of coordination).** The mailbox coordinates the *conversation*;
+  the **workspace task ledger** coordinates the *work*: `AgentTaskRecord` (subject · description · status
+  pending→in_progress→completed|cancelled · owner · informational `blockedBy` chains · agent-attributed
+  `origin`; mig 0102, workspace-shared by design — no private tier) behind `TaskService`, exposed on BOTH
+  transports (`/tasks` routes + the create_task/list_tasks/get_task/update_task/delete_task MCP family; authz
+  reuses `agents:read`/`agents:write`, delete = creator·admin). Lifecycle FACTS are emitted at the service
+  choke point — `task.created`/`task.claimed`/`task.completed`/`task.cancelled` — and **created/completed are
+  trigger-matchable**: the "new work appeared" / "a dependency cleared" wake-up pair, so a teammate agent picks
+  up work without a human prompt. Loop safety: an agent-created task stamps `causedBy agent:<id>:<conv>` (the
+  creator never wakes on its own task); claiming (→ in_progress) without naming an owner records the claimer.
+  Claude Code's TaskCreate/TaskList tool family, reinterpreted server-side. Web UI (a ledger board) is a
+  deliberate follow-up — agents and the API are the first consumers.
 
 ## Roadmap (staged; each stage is shippable + testable on its own)
 
