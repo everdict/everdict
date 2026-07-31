@@ -12,3 +12,9 @@ export {
   type AcceptedInvite,
   type InvitePreview,
 } from './model/schema'
+export {
+  useMemberDirectory,
+  memberNameOf,
+  type MemberDirectory,
+  type MemberProfile,
+} from './lib/member-directory'

@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { Bot, ChevronDown, GitCompare, Loader2, MessageSquare, RotateCcw, User } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
+import { memberNameOf, useMemberDirectory, type MemberDirectory } from '@/entities/member'
 import type { FsActorView, FsRevisionDiffView, FsRevisionView } from '@/entities/workspace-file'
-import { fmtBytes, fmtDateTimeFull, fmtSubject, fmtTimeAgo } from '@/shared/lib/format'
+import { fmtBytes, fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { CodeEditor } from '@/shared/ui/code-editor'
@@ -51,6 +52,9 @@ export function FileHistory({
   const t = useTranslations('files')
   const locale = useLocale()
   const timeZone = useTimeZone()
+  // Revisions carry the opaque subject; the author line has to read as a person, so resolve it against the
+  // workspace's members (lazy, shared across every history list on the page).
+  const members = useMemberDirectory()
   const [revisions, setRevisions] = useState<FsRevisionView[] | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   // One revision is expanded at a time, either as its CONTENT or as its DIFF against the live file — the two
@@ -176,7 +180,7 @@ export function FileHistory({
                   {t('currentRevision')}
                 </span>
               )}
-              <ActorLine actor={rev.actor} />
+              <ActorLine actor={rev.actor} members={members} />
               <span
                 className="text-[11.5px] text-muted-foreground"
                 title={fmtDateTimeFull(rev.createdAt, { locale, timeZone })}
@@ -254,17 +258,19 @@ export function FileHistory({
 // Authorship in one line. An agent publish names the agent (falling back to its id) and stays visibly distinct
 // from a member's own edit — that difference is the whole point of recording an actor rather than a subject.
 // When the agent ran in a conversation, the line OPENS it: "why did this change?" is answered by the thread the
-// work happened in, not by the file alone.
-function ActorLine({ actor }: { actor: FsActorView }) {
+// work happened in, not by the file alone. People are named, never shown as a raw subject: the id is kept on the
+// title so the audit detail stays reachable without putting it on screen.
+function ActorLine({ actor, members }: { actor: FsActorView; members: MemberDirectory }) {
   const t = useTranslations('files')
   if (actor.kind === 'agent') {
     const label = actor.agentName ?? actor.agentId ?? t('anAgent')
+    const requester = actor.onBehalfOf ?? actor.subject
     const body = (
       <>
         <Bot className="size-3.5 text-primary" />
         {label}
-        <span className="text-muted-foreground">
-          {t('onBehalfOf', { subject: fmtSubject(actor.onBehalfOf ?? actor.subject) })}
+        <span className="text-muted-foreground" title={requester}>
+          {t('onBehalfOf', { name: memberNameOf(members, requester) })}
         </span>
       </>
     )
@@ -287,9 +293,9 @@ function ActorLine({ actor }: { actor: FsActorView }) {
     return <span className="text-[12px] text-muted-foreground">{t('systemActor')}</span>
   }
   return (
-    <span className="flex items-center gap-1 text-[12px] text-foreground">
+    <span className="flex items-center gap-1 text-[12px] text-foreground" title={actor.subject}>
       <User className="size-3.5 text-muted-foreground" />
-      {fmtSubject(actor.subject)}
+      {memberNameOf(members, actor.subject)}
     </span>
   )
 }
