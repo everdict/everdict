@@ -1605,7 +1605,14 @@
     "issues": "Issues",
     "projects": "Projects",
     "initiatives": "Initiatives",
-    "evaluation": "Evaluation"
+    "evaluation": "Evaluation",
+    "yourTeams": "Your teams",
+    "allIssues": "All issues",
+    "workspaceGroup": "Workspace",
+    "more": "More",
+    "members": "Members",
+    "teams": "Teams",
+    "teamHome": "Home"
   },
   "usagePage": {
     "title": "Usage",
@@ -2810,7 +2817,9 @@
     "filesDesc": "The workspace filesystem — browse folders and open a file in the side panel.",
     "images": "Images",
     "imagesDesc": "Images published to everdict's own store",
-    "subscriptions": "Subscriptions"
+    "subscriptions": "Subscriptions",
+    "teams": "Teams",
+    "teamsDesc": "The groups that own issues and name them — a workspace always keeps at least one."
   },
   "knowledge": {
     "title": "Knowledge",
@@ -4689,7 +4698,8 @@
     "historyTitle": "History",
     "discussTitle": "Discussion",
     "githubTitle": "GitHub",
-    "connectGithub": "Connect GitHub to import"
+    "connectGithub": "Connect GitHub to import",
+    "fieldTeam": "Team"
   },
   "issueLinks": {
     "add": "Add link",
@@ -4893,5 +4903,46 @@
       "placement": "Infra",
       "service": "Services"
     }
+  },
+  "manageTeams": {
+    "default": "Default",
+    "isDefault": "This is the workspace's default team",
+    "makeDefault": "Make default",
+    "defaultLabel": "Default team",
+    "defaultHint": "An issue filed without a team lands here.",
+    "keyLabel": "Key",
+    "keyHint": "2–6 uppercase letters or digits. It becomes the prefix of every issue name.",
+    "keyInvalid": "2–6 characters, uppercase letters or digits, starting with a letter.",
+    "keyImmutable": "Baked into every identifier already minted, so it cannot change.",
+    "nameLabel": "Name",
+    "namePlaceholder": "Engineering",
+    "descriptionLabel": "Description",
+    "previewHint": "Issues will be named like {example}.",
+    "newTeam": "New team",
+    "create": "Create",
+    "cancel": "Cancel",
+    "save": "Save",
+    "add": "Add",
+    "remove": "Remove",
+    "delete": "Delete team",
+    "confirmDelete": "Confirm delete",
+    "deleteHint": "The default team, the last remaining team, and a team that still holds issues cannot be deleted.",
+    "dangerTitle": "Delete",
+    "rosterTitle": "Team members",
+    "rosterHint": "Separate from workspace membership — belonging to a team is what puts its issues in your list.",
+    "addMemberPlaceholder": "Pick a workspace member",
+    "rowSummary": "{members} members · {open} open",
+    "rosterPermissionTip": "Being on a team decides what shows up as yours — your team's issues and its projects. It grants no permissions: what you may do comes from your workspace role, on the Members page."
+  },
+  "teamHome": {
+    "title": "Team",
+    "notFound": "This team no longer exists.",
+    "openIssues": "{count, plural, one {# open issue} other {# open issues}}",
+    "totalIssues": "{count, plural, one {# issue total} other {# issues total}}",
+    "members": "{count, plural, one {# member} other {# members}}",
+    "recentIssues": "Recent issues",
+    "projects": "Projects this team is working on",
+    "viewAll": "View all",
+    "noIssues": "No issues in this team yet."
   }
 }

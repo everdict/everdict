@@ -1,0 +1,217 @@
+'use client'
+
+import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
+
+import { memberNameOf, type MemberDirectory } from '@/entities/member'
+import type { TeamMember, TeamWithSummary } from '@/entities/team'
+import { Button } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
+import { Combobox } from '@/shared/ui/combobox'
+import { Input } from '@/shared/ui/input'
+import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
+import { InfoTip } from '@/shared/ui/tooltip'
+
+import {
+  addTeamMemberAction,
+  deleteTeamAction,
+  removeTeamMemberAction,
+  setDefaultTeamAction,
+  updateTeamAction,
+} from '../api/manage-team'
+
+// Settings › Teams › {team} — 한 팀의 일반 설정 + 로스터. Linear 의 팀 설정과 같은 두 덩어리다.
+export function TeamDetailManager({
+  team,
+  members,
+  candidates,
+  directory,
+  workspace,
+  canWrite,
+}: {
+  team: TeamWithSummary
+  members: TeamMember[]
+  candidates: { value: string; label: string }[]
+  // subject → 사람. 이 페이지는 서버에서 이미 워크스페이스 멤버를 읽으므로 클라이언트 조회를 또 하지 않는다
+  // (entities/member 의 지연 디렉토리는 그 데이터가 없는 화면용이다).
+  directory: MemberDirectory
+  workspace: string
+  canWrite: boolean
+}) {
+  const t = useTranslations('manageTeams')
+  const router = useRouter()
+  const [error, setError] = useState<string>()
+  const [name, setName] = useState(team.name)
+  const [description, setDescription] = useState(team.description ?? '')
+  const [addSubject, setAddSubject] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [pending, startTransition] = useTransition()
+
+  function act(run: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) {
+    setError(undefined)
+    startTransition(async () => {
+      const r = await run()
+      if (!r.ok) {
+        setError(r.error)
+        return
+      }
+      after?.()
+    })
+  }
+
+  const dirty = name.trim() !== team.name || description.trim() !== (team.description ?? '')
+  const onRoster = new Set(members.map((m) => m.subject))
+  const addable = candidates.filter((c) => !onRoster.has(c.value))
+
+  return (
+    <div className="space-y-8">
+      {error !== undefined && <Callout tone="danger">{error}</Callout>}
+
+      <section className="space-y-3">
+        <SettingsList>
+          {/* 키는 읽기 전용 — 이 팀이 이미 발행한 모든 식별자에 박혀 있다. */}
+          <SettingsRow label={t('keyLabel')} hint={t('keyImmutable')}>
+            <span className="font-mono text-[13px] text-muted-foreground">{team.key}</span>
+          </SettingsRow>
+          <SettingsRow label={t('nameLabel')} htmlFor="team-name">
+            <Input
+              id="team-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={!canWrite}
+              className="w-56"
+            />
+          </SettingsRow>
+          <SettingsRow label={t('descriptionLabel')} htmlFor="team-description">
+            <Input
+              id="team-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              disabled={!canWrite}
+              className="w-72"
+            />
+          </SettingsRow>
+          <SettingsRow label={t('defaultLabel')} hint={t('defaultHint')}>
+            {team.isDefault ? (
+              <span className="text-xs text-muted-foreground">{t('isDefault')}</span>
+            ) : (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={!canWrite || pending}
+                onClick={() => act(() => setDefaultTeamAction(team.id))}
+              >
+                {t('makeDefault')}
+              </Button>
+            )}
+          </SettingsRow>
+        </SettingsList>
+        {canWrite && dirty && (
+          <Button
+            size="sm"
+            disabled={pending || name.trim() === ''}
+            onClick={() =>
+              act(() =>
+                updateTeamAction(team.id, {
+                  name: name.trim(),
+                  description: description.trim() === '' ? null : description.trim(),
+                })
+              )
+            }
+          >
+            {t('save')}
+          </Button>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="flex items-center gap-1.5 text-[13px] font-[510] text-foreground">
+          {t('rosterTitle')}
+          {/* 팀 소속은 권한이 아니다 — 도메인이 "가시성·소유의 진술이지 두 번째 인가 축이 아니다" 라고 못박고 있고,
+              멤버 목록 바로 옆에 있는 이 화면에서 그 구분을 말해주지 않으면 여기서 권한을 준다고 읽힌다. */}
+          <InfoTip content={t('rosterPermissionTip')} />
+        </h2>
+        <p className="text-xs text-muted-foreground">{t('rosterHint')}</p>
+        <SettingsList>
+          {members.map((m) => (
+            // 로스터 행은 사람이다 — subject 는 불투명한 Keycloak sub 라서 그대로 두면 "누가 이 팀인지" 를
+            // id 로 읽게 된다(리비전 히스토리에서 같은 이유로 고쳤던 것과 같은 결함).
+            <SettingsRow key={m.subject} label={memberNameOf(directory, m.subject)}>
+              {canWrite ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={() => act(() => removeTeamMemberAction(team.id, m.subject))}
+                >
+                  {t('remove')}
+                </Button>
+              ) : null}
+            </SettingsRow>
+          ))}
+        </SettingsList>
+        {canWrite && addable.length > 0 && (
+          <div className="flex flex-col gap-2 @sm:flex-row">
+            <Combobox
+              value={addSubject}
+              onChange={setAddSubject}
+              options={addable}
+              placeholder={t('addMemberPlaceholder')}
+              className="min-w-0 flex-1"
+            />
+            <Button
+              size="sm"
+              disabled={addSubject === '' || pending}
+              onClick={() =>
+                act(
+                  () => addTeamMemberAction(team.id, addSubject),
+                  () => setAddSubject('')
+                )
+              }
+            >
+              {t('add')}
+            </Button>
+          </div>
+        )}
+      </section>
+
+      {canWrite && (
+        <section className="space-y-2">
+          <h2 className="text-[13px] font-[510] text-foreground">{t('dangerTitle')}</h2>
+          {/* 기본팀·마지막 팀·이슈를 든 팀은 서버가 거절한다 — 여기서 미리 감추지 않고 이유를 그대로 보여준다. */}
+          <p className="text-xs text-muted-foreground">{t('deleteHint')}</p>
+          {confirmDelete ? (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={pending}
+                onClick={() =>
+                  act(
+                    () => deleteTeamAction(team.id),
+                    () => router.push(`/${workspace}/settings/teams`)
+                  )
+                }
+              >
+                {t('confirmDelete')}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={pending}
+                onClick={() => setConfirmDelete(false)}
+              >
+                {t('cancel')}
+              </Button>
+            </div>
+          ) : (
+            <Button size="sm" variant="destructive" onClick={() => setConfirmDelete(true)}>
+              {t('delete')}
+            </Button>
+          )}
+        </section>
+      )}
+    </div>
+  )
+}

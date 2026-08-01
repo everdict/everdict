@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -17,6 +17,13 @@ import { Kbd } from '@/shared/ui/kbd'
 import { NAV_SECTIONS, RESOURCES_SECTION } from './nav-config'
 import { SETTINGS_NAV_GROUPS } from './settings-nav-config'
 
+export interface SidebarTeam {
+  id: string
+  key: string
+  name: string
+  isDefault: boolean
+}
+
 export interface SidebarProps {
   workspace: string
   workspaces: Workspace[]
@@ -26,6 +33,7 @@ export interface SidebarProps {
   showLogin: boolean
   email?: string
   profile?: { name?: string; username?: string; avatarUrl?: string }
+  teams?: SidebarTeam[]
 }
 
 // Open the Cmd+K palette — a module-level custom event (wires the search button ↔ palette without context plumbing).
@@ -56,11 +64,26 @@ function navRowClass(active: boolean) {
 // 사용자가 한 번 펼친 그룹은 다음 방문에도 펼쳐진 채로 남는다.
 const NAV_GROUP_STORAGE_PREFIX = 'everdict-nav-group:'
 
-function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: () => void }) {
+function NavLinks({
+  workspace,
+  teams,
+  onNavigate,
+}: {
+  workspace: string
+  teams: SidebarTeam[]
+  onNavigate?: () => void
+}) {
   const pathname = usePathname()
   const t = useTranslations('nav')
-  // Eval nav + the pinned Resources group (guide + agent-connect entry points) render as one sectioned list.
+  // Eval nav + the pinned Resources group (guide + agent-connect entry points) render as one sectioned list,
+  // with "Your teams" spliced in AFTER the eval nav and BEFORE Resources: teams are where issues live, so they
+  // belong with the tracker at the top, not below the onboarding links.
   const sections = [...NAV_SECTIONS, RESOURCES_SECTION]
+  // "Your teams" 는 Workspace 그룹 바로 다음 — 이슈가 사는 곳이라 트래커 축 안에 있어야 하고, 평가 primitive
+  // 들보다 앞선다. (헤딩 키로 찾는다: 섹션이 늘거나 줄어도 위치가 어긋나지 않는다.)
+  const teamsAfterIndex = NAV_SECTIONS.findIndex(
+    (section) => section.headingKey === 'workspaceGroup'
+  )
   // 사용자가 직접 토글한 그룹만 기록한다(미기록 = 기본 접힘 + 활성 경로 자동 펼침).
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   // localStorage 는 렌더 중에 읽으면 하이드레이션이 어긋나므로 마운트 후에 반영한다. 첫 페인트는 기본값(접힘)이라
@@ -93,67 +116,232 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
         const holdsActive = section.items.some((item) => isActiveItem(item.href, item.exact))
         const open = !section.collapsible || holdsActive || (openGroups[key] ?? false)
         return (
-          <div key={key} className="flex flex-col gap-0.5">
-            {section.collapsible && section.headingKey ? (
-              <button
-                type="button"
-                onClick={() => toggleGroup(section.headingKey ?? key, !open)}
-                aria-expanded={open}
-                className="group flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5 text-[11px] font-[510] tracking-wide text-faint transition-colors hover:text-secondary-foreground"
-              >
-                <ChevronRight
-                  className={cn('size-3 transition-transform duration-150', open && 'rotate-90')}
-                  strokeWidth={2.25}
-                />
-                {t(section.headingKey)}
-              </button>
-            ) : (
-              (section.headingKey || section.heading) && (
-                <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">
-                  {section.headingKey ? t(section.headingKey) : section.heading}
-                </p>
-              )
-            )}
-            {open &&
-              section.items.map((item) => {
-                const href = `/${workspace}${item.href}` // suffix → prefixed with the active workspace
-                const active = isActiveItem(item.href, item.exact)
-                const Icon = item.icon
-                return (
-                  <Link
-                    key={item.href}
-                    href={href}
-                    onClick={onNavigate}
-                    aria-current={active ? 'page' : undefined}
-                    // data-tour: 온보딩 투어의 스포트라이트 앵커(nav-harnesses 등). 접이식 그룹 안의 앵커는 투어가 해당
-                    // 라우트로 먼저 이동하면서(step.href) 자동 펼침이 걸려 살아난다 — 앵커를 못 찾아도 투어는 카드만
-                    // 중앙에 띄우고 계속된다.
-                    data-tour={`nav-${item.labelKey}`}
-                    className={navRowClass(active)}
-                  >
-                    <span
-                      className={cn(
-                        'absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
-                        active ? 'opacity-100' : 'opacity-0'
-                      )}
-                    />
-                    <Icon
-                      className={cn(
-                        'size-[17px] shrink-0 transition-colors',
-                        active
-                          ? 'text-foreground'
-                          : 'text-muted-foreground group-hover:text-foreground'
-                      )}
-                      strokeWidth={1.75}
-                    />
-                    {t(item.labelKey)}
-                  </Link>
+          <Fragment key={key}>
+            <div className="flex flex-col gap-0.5">
+              {section.collapsible && section.headingKey ? (
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(section.headingKey ?? key, !open)}
+                  aria-expanded={open}
+                  className="group flex items-center gap-1 rounded-md px-2 pb-1 pt-0.5 text-[11px] font-[510] tracking-wide text-faint transition-colors hover:text-secondary-foreground"
+                >
+                  <ChevronRight
+                    className={cn('size-3 transition-transform duration-150', open && 'rotate-90')}
+                    strokeWidth={2.25}
+                  />
+                  {t(section.headingKey)}
+                </button>
+              ) : (
+                (section.headingKey || section.heading) && (
+                  <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">
+                    {section.headingKey ? t(section.headingKey) : section.heading}
+                  </p>
                 )
-              })}
-          </div>
+              )}
+              {open &&
+                section.items.map((item) => {
+                  const href = `/${workspace}${item.href}` // suffix → prefixed with the active workspace
+                  const active = isActiveItem(item.href, item.exact)
+                  const Icon = item.icon
+                  // children 을 가진 항목(Workspace › More)은 링크가 아니라 그 자리에서 펼쳐지는 버튼이다 —
+                  // 별도 섹션으로 빼면 Workspace 그룹 밖으로 나가버린다.
+                  if (item.children) {
+                    const itemKey = `item:${item.labelKey}`
+                    const holdsActiveChild = item.children.some((c) =>
+                      isActiveItem(c.href, c.exact)
+                    )
+                    const childrenOpen = holdsActiveChild || (openGroups[itemKey] ?? false)
+                    return (
+                      <div key={item.href} className="flex flex-col gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(itemKey, !childrenOpen)}
+                          aria-expanded={childrenOpen}
+                          className={cn(rowClass, 'relative w-full text-left')}
+                        >
+                          <Icon className={iconClass} strokeWidth={1.75} />
+                          {t(item.labelKey)}
+                          <ChevronRight
+                            className={cn(
+                              'ml-auto size-3 shrink-0 text-faint transition-transform duration-150',
+                              childrenOpen && 'rotate-90'
+                            )}
+                            strokeWidth={2.25}
+                          />
+                        </button>
+                        {childrenOpen && (
+                          <div className="ml-[13px] flex flex-col gap-0.5 border-l border-border/60 pl-2">
+                            {item.children.map((child) => {
+                              const childActive = isActiveItem(child.href, child.exact)
+                              return (
+                                <Link
+                                  key={child.href}
+                                  href={`/${workspace}${child.href}`}
+                                  onClick={onNavigate}
+                                  aria-current={childActive ? 'page' : undefined}
+                                  className={navRowClass(childActive)}
+                                >
+                                  <span className="truncate">{t(child.labelKey)}</span>
+                                </Link>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  }
+                  return (
+                    <Link
+                      key={item.href}
+                      href={href}
+                      onClick={onNavigate}
+                      aria-current={active ? 'page' : undefined}
+                      // data-tour: 온보딩 투어의 스포트라이트 앵커(nav-harnesses 등). 접이식 그룹 안의 앵커는 투어가 해당
+                      // 라우트로 먼저 이동하면서(step.href) 자동 펼침이 걸려 살아난다 — 앵커를 못 찾아도 투어는 카드만
+                      // 중앙에 띄우고 계속된다.
+                      data-tour={`nav-${item.labelKey}`}
+                      className={navRowClass(active)}
+                    >
+                      <span
+                        className={cn(
+                          'absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
+                          active ? 'opacity-100' : 'opacity-0'
+                        )}
+                      />
+                      <Icon
+                        className={cn(
+                          'size-[17px] shrink-0 transition-colors',
+                          active
+                            ? 'text-foreground'
+                            : 'text-muted-foreground group-hover:text-foreground'
+                        )}
+                        strokeWidth={1.75}
+                      />
+                      {t(item.labelKey)}
+                    </Link>
+                  )
+                })}
+            </div>
+            {i === teamsAfterIndex && (
+              <TeamsNav workspace={workspace} teams={teams} onNavigate={onNavigate} />
+            )}
+          </Fragment>
         )
       })}
     </nav>
+  )
+}
+
+// 사이드바의 팀 섹션 — Linear 의 "Your teams", 그리고 이 제품에서 이슈의 유일한 집. 내가 속한 팀만 보여준다
+// (팀 멤버십이 워크스페이스 멤버십과 별도 로스터인 이유가 이것이다).
+//
+// 팀은 링크가 아니라 펼쳐지는 그룹이다: 이슈는 `teamId` 가 필수이고 식별자도 `<KEY>-123` 으로 팀이 발번하므로,
+// 팀은 이슈를 거르는 필터가 아니라 이슈가 사는 곳이다. 그래서 최상단의 평평한 "Issues" 항목을 없애고 각 팀이
+// 자기 이슈 목록을 소유하게 했다. 프로젝트는 팀에 속하지 않고(레코드에 teamId 가 없다) 이니셔티브로 묶이므로
+// 워크스페이스 레벨에 그대로 두되, 팀 안에는 "그 팀이 이슈를 갖고 있는 프로젝트" 뷰를 둔다 — 서버가 이슈에서
+// 파생해 답한다.
+//
+// 팀이 하나뿐이어도 감추지 않는다. 예전에는 감췄지만, 그러면 이슈가 팀에 속한다는 사실 자체가 화면에서 사라져
+// 워크스페이스 전역 목록처럼 보인다 — 팀 키(`ENG`)는 이슈 번호에 이미 박혀 있으니 하나뿐인 팀도 보여줄 값이 있다.
+function TeamsNav({
+  workspace,
+  teams,
+  onNavigate,
+}: {
+  workspace: string
+  teams: SidebarTeam[]
+  onNavigate?: () => void
+}) {
+  const pathname = usePathname()
+  const search = useSearchParams()
+  const t = useTranslations('nav')
+  const [openTeams, setOpenTeams] = useState<Record<string, boolean>>({})
+  // 현재 보고 있는 화면이 어느 팀 스코프인지 — 이슈/프로젝트 두 목적지가 같은 쿼리 파라미터를 쓴다.
+  // 어느 팀 스코프를 보고 있나 — 목록 두 곳은 쿼리 파라미터로, 팀 Home 은 경로로 팀을 지목한다.
+  const teamHomeMatch = pathname.match(new RegExp(`^/${workspace}/teams/([^/]+)$`))
+  const scopedTeam =
+    teamHomeMatch?.[1] !== undefined
+      ? decodeURIComponent(teamHomeMatch[1])
+      : pathname === `/${workspace}/issues` || pathname === `/${workspace}/projects`
+        ? search.get('team')
+        : null
+  if (teams.length === 0) return null
+  return (
+    <div className="flex flex-col gap-0.5">
+      <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">{t('yourTeams')}</p>
+      {teams.map((team) => {
+        // 활성 스코프인 팀은 저장된 상태와 무관하게 펼친다(접힌 그룹이 지금 보는 화면을 숨기면 안 된다).
+        // 팀이 하나뿐이면 접을 이유도 없으니 기본으로 펼쳐 둔다.
+        const holdsActive = scopedTeam === team.id
+        const open = holdsActive || (openTeams[team.id] ?? teams.length === 1)
+        // Home 은 팀의 요약(라우트가 팀 id 를 갖는 유일한 자식)이고, Issues/Projects 는 워크스페이스 목록을
+        // 팀으로 스코프한 같은 화면이다 — 목록을 두 벌 만들지 않기 위해 쿼리 파라미터로 좁힌다.
+        const home = `/${workspace}/teams/${encodeURIComponent(team.id)}`
+        const children = [
+          { href: home, labelKey: 'teamHome', page: 'home' },
+          {
+            href: `/${workspace}/issues?team=${encodeURIComponent(team.id)}`,
+            labelKey: 'issues',
+            page: 'issues',
+          },
+          {
+            href: `/${workspace}/projects?team=${encodeURIComponent(team.id)}`,
+            labelKey: 'projects',
+            page: 'projects',
+          },
+        ]
+        return (
+          <div key={team.id} className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              onClick={() => setOpenTeams((prev) => ({ ...prev, [team.id]: !open }))}
+              aria-expanded={open}
+              className={cn(rowClass, 'relative w-full text-left')}
+            >
+              <ChevronRight
+                className={cn(
+                  'size-3 shrink-0 text-faint transition-transform duration-150',
+                  open && 'rotate-90'
+                )}
+                strokeWidth={2.25}
+              />
+              <span className="inline-flex size-[17px] shrink-0 items-center justify-center rounded-sm bg-muted font-mono text-[9px] font-semibold uppercase text-muted-foreground">
+                {team.key.slice(0, 2)}
+              </span>
+              <span className="truncate">{team.name}</span>
+            </button>
+            {open && (
+              <div className="ml-[13px] flex flex-col gap-0.5 border-l border-border/60 pl-2">
+                {children.map((child) => {
+                  const active =
+                    holdsActive &&
+                    (child.page === 'home'
+                      ? teamHomeMatch !== null
+                      : pathname === `/${workspace}/${child.page}`)
+                  return (
+                    <Link
+                      key={child.page}
+                      href={child.href}
+                      onClick={onNavigate}
+                      aria-current={active ? 'page' : undefined}
+                      className={navRowClass(active)}
+                    >
+                      <span
+                        className={cn(
+                          'absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
+                          active ? 'opacity-100' : 'opacity-0'
+                        )}
+                      />
+                      <span className="truncate">{t(child.labelKey)}</span>
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -359,7 +547,7 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
 
       {/* Same chromeless rail as the settings nav — the app nav scrolls on short viewports without painting a bar. */}
       <div className="flex-1 overflow-y-auto scrollbar-none">
-        <NavLinks workspace={props.workspace} onNavigate={onNavigate} />
+        <NavLinks workspace={props.workspace} teams={props.teams ?? []} onNavigate={onNavigate} />
       </div>
 
       <SidebarFooter

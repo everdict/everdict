@@ -1605,7 +1605,14 @@
     "issues": "이슈",
     "projects": "프로젝트",
     "initiatives": "이니셔티브",
-    "evaluation": "평가"
+    "evaluation": "평가",
+    "yourTeams": "내 팀",
+    "allIssues": "전체 이슈",
+    "workspaceGroup": "워크스페이스",
+    "more": "더 보기",
+    "members": "멤버",
+    "teams": "팀",
+    "teamHome": "홈"
   },
   "usagePage": {
     "title": "사용량",
@@ -2810,7 +2817,9 @@
     "filesDesc": "워크스페이스 파일시스템 — 폴더를 탐색하고, 파일을 선택하면 우측 패널에 표시됩니다.",
     "images": "이미지",
     "imagesDesc": "everdict 자체 스토어에 발행한 이미지",
-    "subscriptions": "구독 규칙"
+    "subscriptions": "구독 규칙",
+    "teams": "팀",
+    "teamsDesc": "이슈를 소유하고 이름 붙이는 그룹 — 워크스페이스는 항상 팀을 최소 하나 유지합니다."
   },
   "knowledge": {
     "title": "지식",
@@ -4689,7 +4698,8 @@
     "historyTitle": "이력",
     "discussTitle": "논의",
     "githubTitle": "GitHub",
-    "connectGithub": "GitHub 연결하고 가져오기"
+    "connectGithub": "GitHub 연결하고 가져오기",
+    "fieldTeam": "팀"
   },
   "issueLinks": {
     "add": "링크 추가",
@@ -4893,5 +4903,46 @@
       "placement": "인프라",
       "service": "서비스"
     }
+  },
+  "manageTeams": {
+    "default": "기본",
+    "isDefault": "이 워크스페이스의 기본팀입니다",
+    "makeDefault": "기본팀으로",
+    "defaultLabel": "기본팀",
+    "defaultHint": "팀을 지정하지 않고 만든 이슈가 여기로 들어갑니다.",
+    "keyLabel": "키",
+    "keyHint": "2~6자 영문 대문자·숫자. 이슈 이름의 접두사가 됩니다.",
+    "keyInvalid": "2~6자, 영문자로 시작하는 대문자·숫자만 쓸 수 있습니다.",
+    "keyImmutable": "이미 발행된 식별자에 박혀 있어 바꿀 수 없습니다.",
+    "nameLabel": "이름",
+    "namePlaceholder": "엔지니어링",
+    "descriptionLabel": "설명",
+    "previewHint": "이슈는 {example} 처럼 이름이 붙습니다.",
+    "newTeam": "팀 만들기",
+    "create": "만들기",
+    "cancel": "취소",
+    "save": "저장",
+    "add": "추가",
+    "remove": "제거",
+    "delete": "팀 삭제",
+    "confirmDelete": "정말 삭제",
+    "deleteHint": "기본팀·마지막 팀·이슈가 남아 있는 팀은 삭제할 수 없습니다.",
+    "dangerTitle": "삭제",
+    "rosterTitle": "팀 멤버",
+    "rosterHint": "워크스페이스 멤버십과 별개입니다 — 팀에 속해야 그 팀 이슈가 내 목록에 뜹니다.",
+    "addMemberPlaceholder": "워크스페이스 멤버 선택",
+    "rowSummary": "멤버 {members} · 열린 이슈 {open}",
+    "rosterPermissionTip": "팀 소속은 무엇이 내 것으로 보일지를 정합니다 — 그 팀의 이슈와 프로젝트요. 권한은 주지 않습니다. 무엇을 할 수 있는지는 멤버 화면의 워크스페이스 역할이 정합니다."
+  },
+  "teamHome": {
+    "title": "팀",
+    "notFound": "이 팀은 더 이상 존재하지 않습니다.",
+    "openIssues": "열린 이슈 {count}개",
+    "totalIssues": "전체 이슈 {count}개",
+    "members": "멤버 {count}명",
+    "recentIssues": "최근 이슈",
+    "projects": "이 팀이 작업 중인 프로젝트",
+    "viewAll": "전체 보기",
+    "noIssues": "아직 이 팀에 이슈가 없습니다."
   }
 }

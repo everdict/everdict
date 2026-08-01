@@ -484,6 +484,34 @@ export const controlPlane = {
     }),
   deleteTask: (auth: AuthContext, id: string) =>
     callVoid(auth, `/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 팀 — 워크스페이스 안에서 이슈를 소유하고 이름 붙이는 그룹(docs/tracker.md).
+  // 읽기 teams:read(viewer+) / 쓰기 teams:write(admin). 목록 읽기가 곧 불변식 복구 지점이라
+  // (기본팀이 없으면 서버가 만든다) 첫 진입에서 팀이 비어 보이는 상태는 존재하지 않는다.
+  listTeams: <T>(auth: AuthContext, filter?: { mine?: boolean }) =>
+    call<T>(auth, filter?.mine ? '/teams?mine=true' : '/teams'),
+  getTeam: <T>(auth: AuthContext, id: string) => call<T>(auth, `/teams/${encodeURIComponent(id)}`),
+  createTeam: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/teams', { method: 'POST', body: JSON.stringify(body) }),
+  updateTeam: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/teams/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  setDefaultTeam: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/teams/${encodeURIComponent(id)}/default`, { method: 'POST' }),
+  deleteTeam: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/teams/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  listTeamMembers: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/teams/${encodeURIComponent(id)}/members`),
+  addTeamMember: <T>(auth: AuthContext, id: string, subject: string) =>
+    call<T>(auth, `/teams/${encodeURIComponent(id)}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ subject }),
+    }),
+  removeTeamMember: (auth: AuthContext, id: string, subject: string) =>
+    callVoid(auth, `/teams/${encodeURIComponent(id)}/members/${encodeURIComponent(subject)}`, {
+      method: 'DELETE',
+    }),
   // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer over the
   // capabilities. One authz pair for all three (issues:read viewer+ / issues:write member+); delete is
   // additionally creator-or-admin, decided server-side.
@@ -491,6 +519,8 @@ export const controlPlane = {
     auth: AuthContext,
     filter?: {
       status?: string
+      team?: string
+      mine?: boolean
       project?: string
       assignee?: string
       linkType?: string
@@ -500,6 +530,8 @@ export const controlPlane = {
   ) => {
     const q = new URLSearchParams()
     if (filter?.status) q.set('status', filter.status)
+    if (filter?.team) q.set('team', filter.team)
+    if (filter?.mine) q.set('mine', 'true')
     if (filter?.project) q.set('project', filter.project)
     if (filter?.assignee) q.set('assignee', filter.assignee)
     // The reverse lookup ("which issues watch this harness") needs both halves or the route 400s.
@@ -574,13 +606,16 @@ export const controlPlane = {
   // Detach drops the remote link only — the local issue and its whole history stay.
   detachIssueGithub: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/github`, { method: 'DELETE' }),
+  // `team` is derived server-side (a project has no team of its own — it means "the projects this team has
+  // issues in"), which is why the sidebar's per-team Projects entry can be a plain query param.
   listProjects: <T>(
     auth: AuthContext,
-    filter?: { status?: string; initiative?: string; limit?: number }
+    filter?: { status?: string; initiative?: string; team?: string; limit?: number }
   ) => {
     const q = new URLSearchParams()
     if (filter?.status) q.set('status', filter.status)
     if (filter?.initiative) q.set('initiative', filter.initiative)
+    if (filter?.team) q.set('team', filter.team)
     if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
     const qs = q.toString()
     return call<T>(auth, qs ? `/projects?${qs}` : '/projects')

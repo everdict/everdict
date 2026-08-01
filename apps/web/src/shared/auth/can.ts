@@ -46,6 +46,8 @@ export type WebAction =
   // The eval tracker (issues + projects + initiatives) — one action pair for all three, mirroring the control plane.
   | 'issues:read'
   | 'issues:write'
+  | 'teams:read'
+  | 'teams:write'
   | 'images:push'
 
 const PERMS: Record<string, WebAction[]> = {
@@ -67,6 +69,7 @@ const PERMS: Record<string, WebAction[]> = {
     'members:read', // team read is viewer+
     'comments:read', // comment read is viewer+
     'issues:read', // reading the tracker (what the team is evaluating) is viewer+
+    'teams:read', // 어떤 팀이 있는지 아는 건 멤버 목록만큼 무해 → viewer+
   ],
   member: [
     'runs:read',
@@ -98,6 +101,7 @@ const PERMS: Record<string, WebAction[]> = {
     'comments:write', // comment creation is member+ (deletion is author-or-admin, the server decides)
     'issues:read',
     'issues:write', // filing/resolving/linking tracker work → member+ (deletion is creator-or-admin, server-side)
+    'teams:read', // 멤버는 팀에 이슈를 넣으므로 목록은 봐야 한다(생성은 admin)
     'images:push', // publishing/retracting a workspace image is harness authoring → member+ (mirrors the control plane)
   ],
   admin: [
@@ -145,6 +149,8 @@ const PERMS: Record<string, WebAction[]> = {
     'comments:write',
     'issues:read',
     'issues:write',
+    'teams:read',
+    'teams:write', // 팀 생성은 식별자 접두사를 찍고 이슈가 누구 목록에 뜰지 정한다 → 워크스페이스 운영
     'images:push',
   ],
 }

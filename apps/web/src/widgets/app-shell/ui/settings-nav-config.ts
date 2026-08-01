@@ -18,6 +18,7 @@ import {
   Telescope,
   UserCircle,
   Users,
+  UsersRound,
   Wallet,
   Wrench,
   Zap,
@@ -70,6 +71,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         exact: true,
       },
       { href: '/members', labelKey: 'members', icon: Users, requiredAction: 'members:read' },
+      { href: '/teams', labelKey: 'teams', icon: UsersRound, requiredAction: 'teams:read' },
       { href: '/secrets', labelKey: 'secrets', icon: Shield, requiredAction: 'secrets:read' },
       { href: '/models', labelKey: 'models', icon: Cpu, requiredAction: 'models:read' },
       {

@@ -6,6 +6,7 @@ import {
   Boxes,
   CircleDot,
   Database,
+  Ellipsis,
   FolderKanban,
   Gavel,
   LayoutDashboard,
@@ -14,6 +15,8 @@ import {
   Rocket,
   Store,
   Terminal,
+  Users,
+  UsersRound,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -25,6 +28,9 @@ export interface NavItem {
   icon: LucideIcon
   exact?: boolean
   keywords?: string // command palette fuzzy-match aid words (Korean/English side by side)
+  // 항목 자체가 펼쳐지는 경우(리니어의 Workspace › More). 섹션이 아니라 항목이 여는 이유는 이것이 워크스페이스
+  // 그룹의 일부이기 때문이다 — 별도 섹션으로 빼면 Workspace 밖으로 나가버린다.
+  children?: NavItem[]
 }
 
 export interface NavSection {
@@ -36,6 +42,11 @@ export interface NavSection {
   collapsible?: boolean
 }
 
+// Issues are NOT a top-level entry: every issue carries a required `teamId` and its identifier is minted by the
+// team (`ENG-123`), so the team is where issues live, not a filter over a global list. Each team in the sidebar's
+// "Your teams" group owns its Issues (and a team-scoped Projects view) — see TeamsNav in sidebar.tsx. The
+// `/issues` route still exists (workspace-wide, reachable by URL and from the command palette); it just is not
+// the way you navigate to work, which is what made the team axis invisible before.
 // The sidebar leads with the TRACKER (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue. That is the deliberate
 // order of the product's questions: "why are we evaluating this, and can we ship" comes first, and the eval
 // primitives that answer "what ran" (harness · dataset · scorecard · judge · store · view · agent) sit under a
@@ -58,11 +69,20 @@ export const NAV_SECTIONS: NavSection[] = [
         exact: true,
         keywords: 'overview home',
       },
+    ],
+  },
+  // Workspace — what spans every team. Initiatives group projects; projects span teams (a project record carries
+  // an initiative, never a team); Views are the saved analysis lenses. `More` holds the workspace rosters, which
+  // are configuration screens you visit rarely — they live under /settings and are LINKED here rather than moved,
+  // so there is exactly one Members page in the product.
+  {
+    headingKey: 'workspaceGroup',
+    items: [
       {
-        href: '/issues',
-        labelKey: 'issues',
-        icon: CircleDot,
-        keywords: 'issue bug regression triage tracker 이슈 회귀 트래커',
+        href: '/initiatives',
+        labelKey: 'initiatives',
+        icon: Rocket,
+        keywords: 'initiative release readiness ship 이니셔티브 릴리스 준비',
       },
       {
         href: '/projects',
@@ -71,10 +91,32 @@ export const NAV_SECTIONS: NavSection[] = [
         keywords: 'project milestone target date rollup 프로젝트 마일스톤 목표일',
       },
       {
-        href: '/initiatives',
-        labelKey: 'initiatives',
-        icon: Rocket,
-        keywords: 'initiative release readiness ship 이니셔티브 릴리스 준비',
+        href: '/views',
+        labelKey: 'views',
+        icon: Bookmark,
+        keywords: 'view analysis saved dashboard leaderboard trend compare pivot',
+      },
+      // ⚠ The two rosters are /settings routes on purpose — the sidebar surfaces them, Settings owns them,
+      // so the product has exactly one Members page. Clicking one hands the sidebar over to Settings.
+      {
+        href: '/settings/members',
+        labelKey: 'more',
+        icon: Ellipsis,
+        keywords: 'more member team roster 더보기 멤버 팀',
+        children: [
+          {
+            href: '/settings/members',
+            labelKey: 'members',
+            icon: Users,
+            keywords: 'member people invite role 멤버 초대 역할',
+          },
+          {
+            href: '/settings/teams',
+            labelKey: 'teams',
+            icon: UsersRound,
+            keywords: 'team roster key 팀 로스터',
+          },
+        ],
       },
     ],
   },
@@ -105,12 +147,6 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'judges',
         icon: Gavel,
         keywords: 'judge grader model harness rubric verdict score',
-      },
-      {
-        href: '/views',
-        labelKey: 'views',
-        icon: Bookmark,
-        keywords: 'view analysis saved dashboard leaderboard trend compare pivot',
       },
       {
         href: '/store',
@@ -161,4 +197,17 @@ export const RESOURCES_SECTION: NavSection = {
   ],
 }
 
-export const ALL_NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items)
+// The workspace-wide issue list has no sidebar row (issues belong to a team — see the note above), but it stays
+// in the palette: cross-team triage is a real question, and Cmd+K is where you ask one without leaving a team.
+const WORKSPACE_ISSUES_ITEM: NavItem = {
+  href: '/issues',
+  labelKey: 'allIssues',
+  icon: CircleDot,
+  keywords: 'issue bug regression triage tracker all teams 이슈 회귀 트래커 전체',
+}
+
+export const ALL_NAV_ITEMS: NavItem[] = [
+  // children 까지 평탄화 — 펼치지 않아도 Cmd+K 로는 닿아야 한다.
+  ...NAV_SECTIONS.flatMap((s) => s.items.flatMap((item) => item.children ?? [item])),
+  WORKSPACE_ISSUES_ITEM,
+]
