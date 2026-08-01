@@ -283,6 +283,44 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
     expect(bad.statusCode).toBe(400);
   });
 
+  // The agent counts tokens (only it can) but carries no pricing table — the domain owns exactly one, and the
+  // usage meter already prices agent tokens with it. So a reported model call arrives at usd 0 and is priced
+  // HERE, before sealing; otherwise the evidence would show tokens at zero dollars forever, and `usage` (which
+  // sums llm_call costs) would report free runs.
+  it("prices a reported model call at seal, and leaves a harness-reported cost untouched", async () => {
+    const { app, trajectories } = ledgerHarness();
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({}),
+    });
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({
+        kind: "agent.run.completed",
+        message: "run completed",
+        trace: [
+          {
+            t: 0,
+            kind: "llm_call",
+            model: "claude-sonnet-4-5",
+            cost: { inputTokens: 1000, outputTokens: 500, usd: 0 },
+          },
+          // A cost the emitter already knows (a harness reporting its own spend) is authoritative — never repriced.
+          { t: 1, kind: "llm_call", model: "claude-sonnet-4-5", cost: { inputTokens: 10, outputTokens: 10, usd: 4.2 } },
+        ],
+      }),
+    });
+    const sealed = await trajectories.get("acme", "run-a1");
+    const [priced, verbatim] = sealed?.events ?? [];
+    expect(priced).toMatchObject({ kind: "llm_call" });
+    expect(priced?.kind === "llm_call" && priced.cost?.usd).toBeGreaterThan(0);
+    expect(verbatim?.kind === "llm_call" && verbatim.cost?.usd).toBe(4.2);
+  });
+
   it("cause=chat opens a MEMBER-caused interactive run, seals its transcript, and stays off the event log (O1)", async () => {
     const runStore = new InMemoryRunStore();
     const trajectories = new InMemoryTrajectoryStore();

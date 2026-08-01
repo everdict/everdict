@@ -54,7 +54,8 @@ app/        Next App Router — landing(/), [workspace]/{layout(shell+membership
             account, settings} — Linear-style /{workspaceSlug}/... ; top-level entry points without a workspace slug
             onboarding·new-workspace·invite ; api/auth/[...nextauth] ; middleware(first URL segment → injects x-everdict-active-workspace header)
 widgets/    page-level composition: app-shell (sidebar+topbar), workspace-switcher (Linear-style sidebar dropdown:
-            current workspace + switch (= navigate to /{workspace}) + "new workspace"), scorecard-summary, runs-table, trace-timeline
+            current workspace + switch (= navigate to /{workspace}) + "new workspace"), scorecard-summary, runs-table
+            (trace reading is NOT a widget — the one surface is features/browse-traces TrajectoryView, see Run detail)
 features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard, create-workspace, manage-workspace-secrets, manage-github-app + manage-mattermost (workspace-owned integrations: GitHub App org install→selected repos, Mattermost notifications/slash commands) (client form/action → control plane; workspace switching is a URL navigation, so there is no separate action)
 entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime, workspace, secret, github-app, mattermost)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state/callout/section-header/theme-toggle), lib (utils, control-plane),
@@ -82,7 +83,15 @@ panel/list guidance is not.
 - **Runs `/{workspace}/runs`** — full runs table (rows link to detail). Like schedules/runtimes, not linked
   from the UI at all — the infra panel is THE surface for infra concerns (sidebar is eval-only, the palette's
   infra group opens the panel); the route remains URL-reachable only.
-- **Run detail `/{workspace}/runs/[id]`** — status, meta, scores, **trace timeline**, snapshot, error.
+- **Run detail `/{workspace}/runs/[id]`** — the ledger holds five executable families, so the page is a shared
+  skeleton with ONE slot that swaps per `kind`: identity meta (whose two axes are relabelled per kind — an agent
+  turn's harness column IS its agent spec, a sandbox's caseId IS its image) · request (`caseSpec.task`) ·
+  **outcome** (eval = the served `verdict` + a metric table whose rows expand to the grader's reasoning, failures
+  open by default; agent = the activation cause + "open conversation"; sandbox = image · TTL · teardown reason) ·
+  **evidence** (`TrajectoryView`, the SAME component Settings › Observability opens a sealed trajectory with) ·
+  snapshot · comments. Live panels (logs/terminal) render only for the channels the run DECLARES in `attach`.
+  Every section hides entirely when empty — "no scores yet" on a run family that can never have scores was the
+  bug this replaced. Causation (`origin.causedByRunId`) and the group (scorecard/conversation/session) link out.
 - **Harnesses `/{workspace}/harnesses`** — owned vs `_shared` harnesses with versions. **Detail
   `/{workspace}/harnesses/[id]`** shows the active version's **Config panel** — the raw, editable config
   (template-category ref `id@version` + slot→value pins, via `GET /harnesses/:id/:version/instance` +
@@ -174,8 +183,23 @@ panel/list guidance is not.
   via secrets, not the spec) with `authSecret`/`server`/`kubeconfigSecret` fields + a **test connection** button (nomad/k8s) that runs
   the live probe (`POST /runtimes/probe`) to confirm the cluster actually responds before committing. The scorecard
   run form gains a runtime selector. See `docs/runtimes.md`.
+- **Sidebar teams section** (`widgets/app-shell` `TeamsNav`) — Linear's "Your teams": the teams the signed-in
+  member belongs to, each linking to that team's issues (`/issues?team=<id>`). Hidden entirely while the workspace has
+  fewer than two teams — a group with no choice in it is decoration, and the tracker's own "Issues" entry is already
+  that destination. The list is fetched once in `[workspace]/layout.tsx` and threaded through `ShellSwitch` → `AppShell`
+  → `Sidebar`; a failed read degrades to no section rather than breaking the shell. The issue list carries the matching
+  key chips and the create dialog a team picker (both appear only past two teams), and every issue reads as `ENG-12` —
+  the identifier is stored on the record, so neither surface re-reads the team to render it.
 - **Workspace settings `/{workspace}/settings`** — admin-gated tabs: General · **Secrets** ·
-  **Integrations**(GitHub App · Mattermost) · CI · Shared runners · Members. **Secrets tab**: provider-token curation +
+  **Integrations**(GitHub App · Mattermost) · CI · Shared runners · Members · **Teams**.
+  **Teams tab** (`features/manage-team`, `teams:read` to see / `teams:write` = admin to change): the settings-list of
+  teams — each row is a drill-in to `/settings/teams/{id}` (key badge · name · default chip on the left, roster size +
+  open issues on the right). The detail is the team's General block (key READ-ONLY — it is baked into every identifier
+  the team has minted — name/description, and "make default" which hands the flag over) plus its **roster**, which is
+  separate from workspace membership: belonging to a team is what puts its issues in your list. Deletion is offered
+  but the server refuses the default team, the last remaining team, and a team that still holds issues — the reason is
+  surfaced verbatim rather than pre-hidden. Reading the list is also the invariant's repair point: a workspace that has
+  never had a team gets its default from that read. See `docs/tracker.md` § Team. **Secrets tab**: provider-token curation +
   a **single list** of directly-added secrets — the SecretStore is one flat namespace, so one list (splitting by purpose
   showed the same secrets twice); multi-line values (kubeconfig) are a toggle on the add form, and legacy
   `?tab=model|cluster` deep links land on this tab. **General tab**: the workspace card (`features/workspace-settings`

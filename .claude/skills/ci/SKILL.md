@@ -26,7 +26,8 @@ if it blocks you wrongly, fix the hook, don't dodge it.
 
 ## What the gate runs (mirror of ci.yml, 3 jobs)
 1. **core**: `pnpm lint` → `typecheck` → `test` → `build` → `cone` (agent-cone guard) →
-   `web-imports` (web runtime-decoupling guard) → `node scripts/live/empty-env-boot.mjs`.
+   `web-imports` (web runtime-decoupling guard) → `artifact-frame` (the agent's sandboxed-dashboard design
+   system must stay in step across contracts/web/theme) → `node scripts/live/empty-env-boot.mjs`.
 2. **web (self-contained)**: `pnpm -F @everdict/web lint` + `build`. ⚠ `next build` runs its own
    tsc — the root typecheck does NOT catch web type errors, and the web's type anchors need
    `@everdict/contracts` built first (in ci.yml an explicit step; locally the root build covers it).

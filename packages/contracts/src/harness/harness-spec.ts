@@ -296,6 +296,12 @@ export const TargetAcquireSchema = z.discriminatedUnion("mode", [
     open: z.string(), // session start — "POST /sessions" (method+path; wiring {var} interpolation)
     coordinates: z.record(z.string()), // wiring variable name → dot-path in the open response JSON (e.g. { target_cdp_url: "cdp_url" })
     close: z.string().optional(), // session cleanup — "DELETE /sessions/{session_id}" (on dispose; {var} ← wiring+coordinates)
+    // Dot-path in the open response to a CONTROL-PLANE-REACHABLE CDP HTTP base for this session's browser. Distinct from
+    // any agent-facing coordinate in `coordinates` (that one is an internal alias the observer usually cannot reach).
+    // Declaring it is what makes a session-acquired browser observable: it fills TargetEnvHandle.cdpBase, so the
+    // environment recorder (network/console/nav + screencast → replay) and the live-screen capture both work — without it
+    // Everdict owns no browser to look at. Optional: absent = today (trace-only, no live view).
+    cdpBase: z.string().optional(),
     // Readiness gate — right after open the session exists, but until its client (browser etc.) self-registers via back-connect,
     // a front-door command bounces with 404. If ready is present, poll until the status URL is 200 (2xx), then hand over the coordinates.
     // service = the service to check readiness on (unset = acquire.service). poll = "GET /ready" (method+path; wiring+coordinates {var} interpolation).

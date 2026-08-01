@@ -84,6 +84,12 @@ export const PLATFORM_EVENT_KINDS = [
   // regresses" as a payload filter instead of forcing a kind per outcome. Facts, not judgments: `regression`
   // states that a linked scorecard's pass rate fell below the resolution scorecard's — arithmetic over sealed
   // results. Durable per-issue history lives ON the record (the log is swept); these facts are the live half.
+  // Teams group issues inside a workspace (records/team.ts). Creation and roster changes are workspace-shaping
+  // news — who can now file under which prefix — so they are facts; a rename is content editing and emits none,
+  // the same split the issue aggregate already makes between update() and its status transitions.
+  "team.created",
+  "team.member_added",
+  "team.member_removed",
   "issue.created",
   "issue.status_changed",
   "issue.linked", // a capability (harness/dataset/judge/scorecard/run/view) was attached to an issue

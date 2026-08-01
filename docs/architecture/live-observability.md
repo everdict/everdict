@@ -52,25 +52,44 @@ the newest RUNNING alloc/pod). undefined = no live container.
 - Authz is tightened beyond `runs:read`: exec runs arbitrary (mutating) commands in the sandbox, so
   it's **the run's creator or a workspace admin only** (403 otherwise). The sandbox is already
   untrusted+isolated — this gates WHO may look in, not what runs there.
-- Web: `LiveTerminal` on the run detail — a **persistent interactive shell over WebSocket** (⑥ below).
-  `SandboxTerminal` (one-shot exec) remains for scripted/stateless use, but the run detail now mounts the
-  interactive one.
+- Web: `LiveTerminal` on the run detail — a **persistent interactive shell over WebSocket** (⑥ below). A shell is a
+  real process in the sandbox, so the widget attaches only when the reader presses "open a shell"; mounting it
+  eagerly would open one per viewer of every running run. `SandboxTerminal` (one-shot exec) remains for
+  scripted/stateless use.
 
 Live-verified on Nomad: `whoami && ls /app` returned root + the image tree from inside a running
 case; a failing command surfaced its stderr and exit 1.
 
 ## ⑤ Live screen — the desktop/browser frame while it runs
 
-**`GET /runs/:id/screen`** → `{supported, found, dataUrl}`. For an **os-use** (desktop) case it
-execs `DISPLAY=<display> scrot -o … && base64` via the ④ seam and returns a PNG data URL; the web
-`LiveScreen` widget polls it every 2s into an `<img>`. `supported:false` for non-desktop env kinds
-(no single-container screen — the widget renders nothing). Creator-or-admin, same as exec.
+**`GET /runs/:id/screen`** → `{supported, found, dataUrl}` (+ MCP `get_run_screen`). For an **os-use** (desktop)
+case it execs `DISPLAY=<display> scrot -o … && base64` via the ④ seam and returns a PNG data URL; the web
+`LiveScreen` widget polls it every 2s into an `<img>`. Creator-or-admin, same as exec.
+
+**`supported` reports what could actually be captured, not what the case's declared env kind implies.** The env
+kind is a poor proxy in both directions: a `browser` case on a lane with no per-case rediscovery (K8s topology)
+would answer `supported:true` forever and park the viewer in front of a frame that could never arrive, while a
+service harness drives a real browser with its case env set to `prompt` (the browser belongs to the topology, not
+to the case) and was never even offered one. So the capture attempt IS the support test — the per-case browser is
+tried for any run with a runtime lane, and `supported:false` means "nothing here we can reach", at which point the
+widget renders nothing at all. The cost of the old answer was a permanently empty box that read as a hang.
 
 The env kind + display come from the persisted `caseSpec.env` (mig 0051), so the screen route needs
 no extra state. Live-verified: the base64 frame transport round-tripped through `Backend.exec`
 (PNGDATA and a 1×1 PNG in unit tests → `data:image/png;base64,…`), and the route correctly reported
 `supported:true` for an os-use case (with `found:false` on the slim image, which has no scrot —
 graceful). Full desktop capture is the same exec against an Xvfb image (remaining live check).
+
+**A session-acquired browser** (`target.acquire.mode: "service"` — the harness's own playwright-server/Browserbase-
+style session API, no Everdict container) is observable when the session API says where to look: `acquire.cdpBase`
+is a dot-path into the open response yielding a **control-plane-reachable** CDP base, distinct from the agent-facing
+coordinate in `coordinates`, which is usually an internal alias the observer cannot reach. It fills
+`TargetEnvHandle.cdpBase`, which is what both the environment recorder (replay ②) and the live screen key off — so
+one declaration lights up network/console/nav + screencast recording AND the live view. `ServiceTopologyBackend`
+publishes that address per runId for the duration of the drive, because `captureScreen` runs on a different call
+stack than `dispatch` and can otherwise only ask the runtime to rediscover a browser IT provisioned (which also
+resolves the zone-correct address — the rediscovery call could not see the trust zone). Declared-but-unresolvable
+degrades visibly: the run's trajectory carries an `infra` event saying the session returned no reachable CDP.
 
 **browser-use (topology)** now works too: the per-case browser is a SIBLING container reached via CDP,
 so the control plane rediscovers it by the CP-minted runId (`ServiceTopologyBackend` prefers

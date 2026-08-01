@@ -31,6 +31,9 @@ jobs:
       - run: pnpm cone
       # Web runtime-decoupling guard — apps/web may import only TYPE-ONLY @everdict/contracts.
       - run: pnpm web-imports
+      # Artifact-frame guard — the design system the agent's sandboxed dashboards compose from must stay in
+      # step across contracts (the brief + the gate), the web frame (tokens + stylesheet) and the theme.
+      - run: pnpm artifact-frame
       # Self-host minimal-profile contract — the control plane must boot with zero optional env.
       - run: node scripts/live/empty-env-boot.mjs
 

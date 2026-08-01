@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spica-playwright-server"
+version = "0.1.0"
+description = "Session API over spica-client's remote mode — start N extension-loaded browsers, get back session ids."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  # PINNED, and it must match the Playwright base image tag in the Dockerfile: the package looks for
+  # browser binaries under a version-stamped path, so an open range resolves to a newer release whose
+  # browsers the image does not carry, and every launch fails with "Executable doesn't exist".
+  "playwright==1.49.1",
+  "psutil>=6.1",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src", "."]

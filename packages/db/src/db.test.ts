@@ -307,6 +307,38 @@ describe("InMemoryRunStore — usage derivation", () => {
     expect((await store.get("r1"))?.usage?.totalTokens).toBe(2);
     expect((await store.list("acme"))[0]?.usage?.usd).toBeCloseTo(0.02);
   });
+
+  // The case verdict rides the same derived read as usage, so the run detail can STATE "this case passed"
+  // instead of leaving every reader to sum pass badges — and so no client re-implements the authority
+  // ranking (the mirrors of it were deleted in re-architecture P1g; the server is the one authority).
+  it("derives the case verdict from result.scores by authority rank — ground truth outranks the judge", async () => {
+    const store = new InMemoryRunStore();
+    await store.create(base);
+    expect((await store.get("r1"))?.verdict).toBeUndefined(); // queued, no result
+
+    // A judge that disagrees with the ground-truth grader must not flip the verdict.
+    await store.update("r1", {
+      status: "succeeded",
+      result: {
+        ...RESULT,
+        scores: [
+          { graderId: "pytest", metric: "tests_pass", value: 1, pass: true },
+          { graderId: "rubric", metric: "judge", value: 0.2, pass: false },
+        ],
+      },
+    });
+    expect((await store.get("r1"))?.verdict).toBe(true);
+    expect((await store.list("acme"))[0]?.verdict).toBe(true);
+  });
+
+  it("leaves the verdict undefined when no grader decided one (an agent turn, a scoreless run)", async () => {
+    const store = new InMemoryRunStore();
+    await store.create({ ...base, id: "r2", kind: "agent" });
+    await store.update("r2", { status: "succeeded", result: { ...RESULT, scores: [] } });
+    const rec = await store.get("r2");
+    expect(rec?.verdict).toBeUndefined();
+    expect(rec?.usage?.totalTokens).toBe(2); // usage still derives — the two are independent
+  });
 });
 
 describe("InMemoryRunStore — scorecard child-run filter", () => {

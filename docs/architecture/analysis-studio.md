@@ -302,6 +302,30 @@ cover the 80% (pivot + charts + reports) with zero new attack surface.
   free-form `html` artifacts ship alongside the declarative kinds. The invariant is CONTAINMENT, not
   prohibition — LLM-emitted markup executes only in an opaque-origin sandboxed iframe under a deny-all
   CSP, never in the app origin.
+- **The structured `dashboard` kind is the default; `html` is the escape hatch.** (2026-07-31.) A dashboard
+  is a list of blocks — `metrics` · `chart` · `table` · `note` — each drawn by the renderer its kind already
+  has, so a dashboard is a LAYOUT over the primitives, not a second rendering system. It needs no design
+  gate because it has no vocabulary for a color, a size or a font: off-theme is not something to catch, it
+  is something that cannot be expressed. Two semantics carry the quality and both live on OUR side: the
+  agent sends `baseline` and never a delta (we subtract, round and format, so no model arithmetic and one
+  rounding rule everywhere), and `higherIsBetter` decides the color — a rising cost is a regression, and
+  without that flag the chip would be colored by the sign of the difference instead of by its meaning.
+  Extending the dashboard means adding a block kind, never letting a block carry styling.
+- **No agent-authored design.** (2026-07-31, maintainer feedback: generated dashboards were reading as a
+  foreign widget pasted into the product.) An `html` artifact authors STRUCTURE and NUMBERS; the frame
+  authors the look. Because the sandbox is opaque-origin it inherits no stylesheet, no `html.dark` and no
+  font, so the frame **hands** it the design system: `ArtifactCard` reads the LIVE value of
+  `ARTIFACT_FRAME_TOKENS` off the running theme, bakes them into `srcDoc` (re-baked on theme toggle — the
+  frame cannot read the parent), and ships a class vocabulary (`.metric` / `.delta up|down|flat` /
+  `.panel` / `.grid`) built from the same parts the app's own surfaces use. `HtmlSpecSchema` then
+  **rejects** markup that paints outside it — hex/rgb/hsl literals, named colors, gradients, `font-family`
+  and emoji — as a correctable tool error, because a literal cannot follow the member's light/dark theme.
+  The color rules read only **styling regions** (`<style>`, `style=""`, paint attributes), never the
+  dashboard's content: an eval dashboard legitimately prints "case #4521" or a commit "#a8d39b", and a gate
+  that bounces DATA as design would order the model to recolor text it must not touch — and, in an
+  unattended report turn, burn its budget doing it.
+  The frame also measures its own content and reports the height up, so a model never guesses one.
+  Extending the vocabulary means extending the frame's stylesheet + tokens, never relaxing the gate.
 - **No color-only encoding.** Every chart has a table twin: the pivot canvas renders the raw scorecard
   rows under the aggregate (drill-down scopes them to the clicked mark), and artifact tables/reports carry
   their own values. A value must never be readable only by hue or bar length.

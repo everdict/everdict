@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "spica-client (fixture)",
+  "version": "0.1.0",
+  "description": "A stand-in for spica-client: the same panel flow (menu -> remote view -> start) and the same session id, so the server can be exercised without the real extension.",
+  "permissions": ["tabs", "storage"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "spica (fixture)" },
+  "side_panel": { "default_path": "sidepanel.html" }
+}

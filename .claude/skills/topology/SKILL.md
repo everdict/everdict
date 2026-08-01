@@ -288,6 +288,12 @@ seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`.
   (`{service?, poll:"GET /path", intervalMs, timeoutMs}`) polls the status URL (injectable `ProbeFn`, default
   `fetchProbe` = 2xx?; path `{var}`-interpolated with wiring+coordinates, e.g. `{session_id}`) until 2xx **before**
   handing back coordinates. Timeout ⇒ best-effort `close` (no leak) then `UpstreamError`. Absent = no gate (today).
+- **`acquire.cdpBase` — the session's watchable address.** A dot-path into the open response yielding a
+  **control-plane-reachable** CDP base (NOT the agent-facing coordinate — that one is an internal alias). It fills
+  `TargetEnvHandle.cdpBase`, which is the single switch behind the CDP environment recorder AND the live screen,
+  and `ServiceTopologyBackend` publishes it per runId for the drive (`captureScreen` runs on another call stack and
+  can otherwise only rediscover a browser the runtime itself provisioned). Observability never fails an eval:
+  missing/malformed = no live view, recorded as an `infra` event on the trajectory. Absent = today (trace-only).
 
 ## Observation delivery (`HOW-observe`) — pluggable seam
 *How* the observation reaches the grader/judge is now a third axis (sibling of `TopologyRuntime`=WHERE,

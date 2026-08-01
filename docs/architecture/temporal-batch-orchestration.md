@@ -39,10 +39,13 @@ scorecardBatchWorkflow(input: {scorecardId, tenant, dataset ref, harness ref, ju
 
 - **Determinism**: the workflow holds only ids and counters; every I/O (registry resolve, dispatch,
   judge, persist) is an activity — same rule the repo already enforces for `workflows.ts`.
-- **Failure classes map to Temporal retry policies**: `retryable` infra → activity retry with
-  backoff (replaces `runSuite`'s inline retry); `config`/`harness`/fatal-infra → non-retryable
-  `ApplicationFailure` carrying the `CaseFailure` payload — the case settles as a classified failure
-  exactly as today.
+- ~~**Failure classes map to Temporal retry policies**~~ — **this half of the design was deliberately
+  NOT implemented, and the reversal matters when justifying Temporal.** Case-level retry stayed
+  CP-side (`scorecard-batch-service.ts`, the `for (attempt…)` loop over `failure.retryable`): the
+  workflow's generous activity retry is for **TRANSPORT** failures (the control plane unreachable),
+  never for eval semantics. So "Temporal gives us retry" is NOT a reason this design holds — the
+  reasons are durable timers, cross-restart progress, and (below) batch ownership across MORE THAN ONE
+  control plane. Keeping the retry story here would have split the failure taxonomy across two engines.
 - **Resume for free**: workflow history replaces `orchestration`+child-run reconstruction. Boot
   recovery stays for the non-Temporal deployment; when `EVERDICT_TEMPORAL_ADDRESS` is set, submit
   starts the workflow instead of `void this.track(...)` and recovery skips Temporal-owned batches

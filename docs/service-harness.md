@@ -319,6 +319,10 @@ any of them (`{{playwright_server_url}}`, `{{session_id}}`, …).
   tears it down on `dispose()` ({var}-interpolated with the coordinates). Observation comes via `delivery`
   (`sentinel`/`egress`) or a `{kind:"prompt"}` trace-only snapshot. A coordinate-mapping failure best-effort-closes
   the half-open session (no leak — same discipline as the topology cleanup-on-failure).
+  Add **`cdpBase`** (a dot-path into the open response) to make the session's browser watchable: it must be an
+  address the CONTROL PLANE can reach, unlike the agent-facing coordinates, and it is what turns on the environment
+  recorder (network/console/nav + screencast, replay ②) and `GET /runs/:id/screen` for this case. Optional and
+  best-effort — a session that returns no such address still runs, it just cannot be watched.
 
 See `docs/architecture/target-acquisition-generalization.md`.
 

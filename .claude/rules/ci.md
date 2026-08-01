@@ -13,7 +13,7 @@ See skill `ci`.
   gate invalidates the stamp — re-run `pnpm ci:local` (turbo cache makes it fast). Never work
   around the hook (no stamp forging, no pushing from outside the tool).
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `node scripts/live/empty-env-boot.mjs`, the self-contained web job
+  `pnpm web-imports`, `pnpm artifact-frame`, `node scripts/live/empty-env-boot.mjs`, the self-contained web job
   (contracts build + `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
 - `pnpm lint` is check-only and safe to run repo-wide; **fixes** stay scoped to files you
   changed — never run repo-wide formatters in this shared WIP tree.

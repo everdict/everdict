@@ -47,7 +47,11 @@ Grader families (`packages/graders/src/index.ts`): outcome `tests-pass`/`command
 from `GraderSpec` in `makeGraders` (`packages/graders/src/make-graders.ts`); `judge` throws there (needs a `Judge`).
 Case verdict is **authority-ranked** (`packages/suite/src/scorecard.ts` `caseVerdict`): ground-truth
 (`state`/`tests_pass`) > objective (`answer_match`/`url_matches`/`dom_contains`) > `judge` — a VLM/LLM judge
-never overturns an objective grader. `scorecardPassRate` aggregates over `caseVerdict`; `summarizeScorecard`
+never overturns an objective grader. **The ranking has exactly one implementation and is SERVED, never
+recomputed by a client**: a scorecard's per-case `verdict` and `RunRecord.verdict` (derived on read next to
+`usage`, in `withRunUsage`) both come from this function, and the web's client-side mirrors were deleted in
+re-architecture P1g. A surface that needs "did this pass" reads the served field.
+`scorecardPassRate` aggregates over `caseVerdict`; `summarizeScorecard`
 gives per-metric count/mean/passRate (auto) — plus, for a metric whose scores carry `label`, a
 `distribution` (label→count; ordinal order for an ordered enum, else by frequency) + `mode` instead of a
 meaningless mean. The web dashboard is

@@ -22,9 +22,11 @@ courier, not an auth authority**: it forwards the user's Keycloak token and trus
    mutations are `'use server'` server actions that forward the token then `revalidatePath`.
 5. **Role-gate UI** with the `shared/auth/can.ts` mirror (`can(roles, action)`) — enforcement is still the
    control plane's (403). Hide the CTA; don't rely on it for security.
-6. Web is SELF-CONTAINED (own eslint/prettier, excluded from root Biome/turbo). Tooling:
-   `pnpm --filter @everdict/web {dev,build,lint}` (dev = port 3001). **Never run repo-wide formatters** in
-   this shared WIP tree — format only files you changed.
+6. Web owns its LINTING (eslint/prettier, excluded from root Biome — its `lint` is a separate CI job), but its
+   `build` and `test` run in the root turbo gate: a `*.test.ts` under `apps/web/src` is picked up by `pnpm test`
+   with no extra wiring (vitest comes from the ROOT devDependency; the web declares none and needs no config).
+   Tooling: `pnpm --filter @everdict/web {dev,build,lint,test}` (dev = port 3001). **Never run repo-wide
+   formatters** in this shared WIP tree — format only files you changed.
 
 ## Reference impl
 A full slice: `features/submit-run/` — `ui/submit-run-form.tsx` (`'use client'` react-hook-form island) +
@@ -75,6 +77,25 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   analysis is starting a conversation, so the entry opens the chat on a fresh one and the canvas carries only the
   `describeConfig` chips, one save control, the chart/table, and a click-to-drill raw table. Same shape on a saved
   View's page. See `docs/architecture/analysis-studio.md` (C delta 2026-07-31).
+- **An agent dashboard is DATA, not markup** (`entities/analysis-artifact/ui/artifact-card.tsx`): the
+  `dashboard` kind is a list of blocks (`metrics`/`chart`/`table`/`note`) each drawn by the renderer its kind
+  already has — `StatCard`, `shared/ui/charts`, the table atoms, `Markdown`. Prefer it over `html`. The agent
+  sends `baseline`, never a delta: `lib/metric-delta.ts` subtracts, formats (ratios in POINTS, everything else
+  in relative percent, zero-baseline falls back to absolute) and colors it, and `higherIsBetter` — not the sign
+  — decides good vs bad, so a rising cost reads as the regression it is. ⚠ Two traps this cost us: the metrics
+  grid is **container**-queried (`@container` + `@md:`/`@2xl:`), never viewport-queried, because the same card
+  renders in a narrow chat rail and a full-width gallery; and `bg-success/x` / `bg-faint/x` generate **no
+  utility** (they are our own `@theme inline` colors, unlike shadcn's `destructive`/`muted`) — a chip written
+  that way is silently transparent, so use `bg-[var(--color-success)]/15` as `shared/ui/badge.tsx` does.
+- **The agent never authors design** (`entities/analysis-artifact/ui/artifact-card.tsx`): an `html` artifact
+  supplies structure + numbers, the FRAME supplies the look. Its sandbox is opaque-origin, so it inherits no
+  stylesheet, no `html.dark` and no font — `HtmlView` therefore reads the LIVE token values off the running
+  theme (`FRAME_TOKENS`, mirroring `ARTIFACT_FRAME_TOKENS` in contracts; the web may not import the value),
+  bakes them into `srcDoc`, re-bakes on theme toggle via a `MutationObserver` on `html`'s class, ships
+  `FRAME_STYLESHEET` (the `.metric` / `.delta up|down|flat` / `.panel` / `.grid` vocabulary + our table
+  treatment), and takes the frame's own `postMessage` height report instead of a model-guessed one. The
+  emission schema rejects color/font literals, so agent markup CANNOT go off-theme — to give it a new visual,
+  extend the stylesheet and tokens, never loosen the gate. Same rule as charts: no invented hues, ever.
 - **Settings UIs** = Linear settings-list (`shared/ui/settings-list.tsx`, label-left / compact-control-right
   divided rows), not stacked full-width forms. **Settings content width is ONE shared column**: every settings
   tab — form/account (General · Profile · Preferences · API keys · Personal secrets) AND data-dense (Members ·
@@ -113,6 +134,23 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   new-conversation / session switch. A new mission = one enum value + one intent entry + one catalog block in BOTH
   locales + the prop at the entry — never a second chat component. Every detail-page chat entry passes its mission;
   only truly generic surfaces (the @-picker, the trace browser's chip-adder) stay mission-less with default copy.
+- **Reading a trace has ONE surface**: `TrajectoryView` (`features/browse-traces`) — rollup · plane chips (one
+  lane per emitter) · event list left / FULL payload right. Settings › Observability's sealed-trajectory dialog
+  and the run detail's evidence section render the same component, so a payload read in one place is the payload
+  read in the other. It is its own `@container` (2-pane by ITS width, not the viewport's) and needs a definite
+  height from the host. Never write a page-local timeline again — the run detail's was deleted for this.
+  `entities/run/lib/trace.ts` (`summarizeTraceEvent`/`traceKindColor`) stays for the LIVE/compact lanes only
+  (replay player, playground stream), never for settled evidence. A caller holding one stream (a legacy row
+  embed) wraps it with `asSingleSegment`.
+- **A run detail is a shared skeleton with ONE per-`kind` slot**, not an eval page: the ledger holds five
+  executable families (`eval|agent|command|sandbox|analysis`) and the SAME columns mean different things in each
+  (`harness` is the agent spec for an agent run, `caseId` is the image for a sandbox) — relabel per kind rather
+  than printing "case chat". Scores are the EVAL outcome, not the universal one: the outcome slot swaps
+  (eval = verdict + metric table, agent = cause + open-conversation, sandbox = the session), and a family that
+  can never have scores shows no scores section at all. The pass/fail **verdict is SERVED** (`RunRecord.verdict`,
+  derived by the control plane with `caseVerdict` on the same read as `usage`) — never recompute the authority
+  ranking in the web (those mirrors were deleted in re-architecture P1g; one authority, one answer). Live attach
+  panels (logs/exec/terminal/screen) render only for channels the run declares in `attach`.
 - **State toggles** = a status icon + click dropdown (`shared/ui/dropdown-menu.tsx`; e.g.
   `widgets/notification-bell/`), not text links.
 - **Infra split view** (`widgets/infra-panel`): infra concerns (schedules · runtimes · runs · work queue · a

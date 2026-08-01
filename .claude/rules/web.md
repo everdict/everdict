@@ -3,7 +3,9 @@ paths: "apps/web/**"
 ---
 # Web (apps/web) rules (push) — Next.js + FSD
 
-See `docs/web.md`. This app is SELF-CONTAINED (own eslint+prettier; excluded from root Biome/turbo gate).
+See `docs/web.md`. This app owns its LINTING (eslint+prettier; excluded from root Biome — `pnpm -F @everdict/web
+lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gate, so `pnpm test` covers
+`apps/web/**/*.test.ts` (vitest, via the root devDependency — the web declares no vitest of its own).
 
 - **FSD layers** under `src/`: app → widgets → features → entities → shared. Imports go DOWNWARD only
   (a layer never imports a higher one). Barrels (`index.ts`) expose a slice's public surface.

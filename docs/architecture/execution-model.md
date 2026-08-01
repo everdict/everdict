@@ -446,6 +446,13 @@ can be discussed like any other entity, and the knowledge layer can promote what
 - **O2 — Is an agent transcript a trace?** *Recommendation: yes*, this is what makes agent runs first-class
   everywhere. Risk: the trace contract was built for harness output; agent-specific fields (approvals,
   todos, sub-agents) may need extension rather than shoe-horning.
+  **Shipped, with a correction the first drill found:** the transcript alone is NOT the whole trace. A
+  transcript is chat protocol — it records what was said, never that a model was called or what it cost — so
+  projecting it alone sealed evidence in which the agent typed and used tools but never called a model, and
+  `usage` (the sum of `llm_call` costs) read zero for exactly the runs that spend money. The turn's own token
+  counters now ride back with the transcript and close the stream as one `llm_call`; the agent counts tokens,
+  the control plane prices them at seal (`priceUsd` — the meter's table, not a second one). A run whose evidence
+  lives only in the trajectory store gets its `usage` from there on the detail read.
 - **O3 — Does the group get its own record, or does `ScorecardRecord` generalize?** *Recommendation:
   generalize in concept, keep the table* — an experiment is a scorecard row with no scoring, presented
   under a different name. A new table forks the analysis/diff/leaderboard surface for no user-visible gain.
