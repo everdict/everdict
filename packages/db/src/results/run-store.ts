@@ -1,9 +1,18 @@
 import type { RunRecord } from "@everdict/contracts";
-import { usageFromTrace } from "@everdict/domain";
+import { caseVerdict, usageFromTrace } from "@everdict/domain";
 
-// On read, fills the usage summary from result.trace (no stored column → always matches the trace, no migration needed).
+// On read, fills the DERIVED fields from the run's result — usage from the trace, the case verdict from the
+// scores (no stored columns → they always match the result, and neither needs a migration). The verdict is
+// served rather than recomputed per client: the scorecard's per-case verdict already works this way, and the
+// authority ranking (ground truth > objective > judge) must have exactly one implementation.
 export function withRunUsage(r: RunRecord): RunRecord {
-  return r.result ? { ...r, usage: usageFromTrace(r.result.trace) } : r;
+  if (!r.result) return r;
+  const verdict = caseVerdict(r.result);
+  return {
+    ...r,
+    usage: usageFromTrace(r.result.trace),
+    ...(verdict !== undefined ? { verdict } : {}),
+  };
 }
 
 import type { OutboxEvent, PlatformEventStore, RunListOptions, RunStore } from "@everdict/application-control";

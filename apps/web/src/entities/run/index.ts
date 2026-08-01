@@ -1,4 +1,5 @@
 export {
+  runCaseSpecSchema,
   runSchema,
   runsSchema,
   scoreSchema,
@@ -7,6 +8,7 @@ export {
   resultSchema,
   usageSchema,
   type Run,
+  type RunCaseSpec,
   type RunStatus,
   type Score,
   type TraceEvent,
@@ -15,3 +17,4 @@ export {
 } from './model/schema'
 export { summarizeTraceEvent, traceKindColor } from './lib/trace'
 export { RunRow, sourceLabel, costLabel, type RunRowData } from './ui/run-row'
+export { RunOutcome } from './ui/run-outcome'

@@ -23,7 +23,9 @@ import {
   type RunTransition,
   type UsageMeter,
   billingCharges,
+  priceUsd,
   resolveHarnessSecrets,
+  usageFromTrace,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
@@ -197,6 +199,19 @@ export interface RunServiceDeps {
   fetch?: typeof fetch; // for the webhook (test injection)
 }
 
+// Price the model calls of a reported trace before it is sealed. The agent counts tokens (it is the only one
+// who can) but must not carry a pricing table — the domain owns exactly one, and the usage meter already
+// prices agent tokens with it. So a reported llm_call arrives with usd 0 and gets its price here; anything
+// that already carries a cost (a harness that reports its own spend, e.g. Claude's total_cost_usd) is left
+// untouched. Without this the sealed evidence would show tokens at zero dollars forever.
+function pricedTrace(trace: TraceEvent[]): TraceEvent[] {
+  return trace.map((event) => {
+    if (event.kind !== "llm_call" || !event.cost || event.cost.usd > 0) return event;
+    const { inputTokens, outputTokens } = event.cost;
+    return { ...event, cost: { ...event.cost, usd: priceUsd(event.model, { inputTokens, outputTokens }) } };
+  });
+}
+
 // Manages a run's async lifecycle: accept (202) → delegate to the dispatcher → on completion, update the store + webhook.
 // Unit-testable independent of HTTP. AppError is thrown as-is so the caller (server) maps it to a status code.
 export class RunService {
@@ -270,7 +285,21 @@ export class RunService {
   async get(id: string): Promise<(RunRecord & { liveTrace?: LiveTraceRef }) | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
-    return this.withLiveTrace(record);
+    return this.withLiveTrace(await this.withTrajectoryUsage(record));
+  }
+
+  // Usage for the runs whose evidence is NOT a row embed. The store derives usage from `result.trace`, which
+  // an eval run has and an agent turn never does (its transcript is sealed in the trajectory store, per O10 —
+  // new runs write refs, not embeds). The result was that the executions which actually spend money reported
+  // no cost on their own detail, while the invoice knew. So when a record has no result, fall back to the
+  // sealed trajectory — the same derivation over the same events, one extra read on the DETAIL path only
+  // (the list keeps its single query; a per-row trajectory read would be N+1).
+  private async withTrajectoryUsage(record: RunRecord): Promise<RunRecord> {
+    if (record.result || record.usage || !this.deps.trajectories) return record;
+    const sealed = await this.deps.trajectories.get(record.tenant, record.id).catch(() => undefined);
+    if (!sealed || sealed.events.length === 0) return record;
+    const usage = usageFromTrace(sealed.events);
+    return usage.calls > 0 ? { ...record, usage } : record;
   }
 
   // Live trace deep-link (observability ③, derived — never stored): while the run is still active AND its
@@ -312,8 +341,11 @@ export class RunService {
     return { record, result };
   }
 
-  // Live screen frame (observability ⑤) — captures the case's current screen via an in-sandbox exec and returns a
-  // PNG data URL. os-use (desktop): scrot on the case's DISPLAY. Other env kinds have no single-container screen → undefined.
+  // Live screen frame (observability ⑤) — the case's current screen as a PNG data URL, from whichever source can
+  // actually reach it: a frame the runner pushed, the per-case browser over CDP, or a desktop screenshot exec'd in
+  // the sandbox. `supported` reports what we COULD capture, never what the case's declared env kind suggests we
+  // ought to be able to — a lane that can't reach the screen must read as unsupported (the viewer then shows
+  // nothing) instead of parking the operator in front of a permanently empty frame.
   async screen(
     id: string,
   ): Promise<{ record: RunRecord; dataUrl: string | undefined; supported: boolean } | undefined> {
@@ -324,14 +356,15 @@ export class RunService {
     // is how a browser-use command harness (env.kind "prompt", self-driven Chromium) surfaces its live screen.
     const pushed = this.deps.liveFrame?.(runId);
     if (pushed) return { record, dataUrl: `data:image/png;base64,${pushed}`, supported: true };
-    const env = record.caseSpec?.env;
-    // browser (topology) — capture the per-case browser via CDP, keyed by the CP-minted runId derivable from the record.
-    if (env?.kind === "browser") {
-      if (!this.deps.captureBrowserScreen) return { record, dataUrl: undefined, supported: false };
+    // Per-case browser over CDP. Deliberately NOT gated on the case's env kind: a service harness drives a real
+    // browser while its case env is `prompt` (the browser belongs to the topology, not to the case), and a case
+    // declaring `browser` may run on a lane with no rediscovery at all. The capture attempt is the only honest test.
+    if (record.runtime && this.deps.captureBrowserScreen) {
       const b64 = await this.deps.captureBrowserScreen(record.tenant, record.runtime, runId).catch(() => undefined);
-      return { record, dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined, supported: true };
+      if (b64) return { record, dataUrl: `data:image/png;base64,${b64}`, supported: true };
     }
-    // os-use (desktop) — scrot on the case's DISPLAY via an in-sandbox exec.
+    const env = record.caseSpec?.env;
+    // os-use (desktop) — scrot on the case's DISPLAY via an in-sandbox exec. The display only exists for this env kind.
     if (env?.kind !== "os-use" || !this.deps.execInSandbox) return { record, dataUrl: undefined, supported: false };
     const display = env.display ?? ":99";
     const shot = "/tmp/.everdict-live.png";
@@ -341,7 +374,7 @@ export class RunService {
       .execInSandbox(record.tenant, record.runtime, record.caseId, command)
       .catch(() => undefined);
     const b64 = out && out.exitCode === 0 ? out.stdout.trim() : "";
-    return { record, dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined, supported: true };
+    return { record, dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined, supported: Boolean(b64) };
   }
 
   // Case-scoped placement read (runtime debugging) — the record (for authz/scoping) + where the case's job stands
@@ -403,16 +436,16 @@ export class RunService {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
     // Pushed runner log (self-hosted) wins for the default (stdout) view — a self-hosted runner has no backend the
-    // control plane can tail, so it pushes its per-case lifecycle log instead. It's a single stream; the stderr toggle
-    // stays a managed-backend concern (falls through). Same runId derivation as screen().
-    if (stream !== "stderr" && this.deps.pushLogs) {
-      const pushed = this.deps.pushLogs(RunService.runIdFor(record));
-      if (pushed) return { record, text: pushed };
-    }
+    // control plane can tail, so it pushes its per-case lifecycle log instead. Same runId derivation as screen().
+    const pushed = this.deps.pushLogs?.(RunService.runIdFor(record));
+    if (stream !== "stderr" && pushed) return { record, text: pushed };
     const text = this.deps.readCaseLogs
       ? await this.deps.readCaseLogs(record.tenant, record.runtime, record.caseId, stream).catch(() => undefined)
       : undefined;
-    return { record, text };
+    // A lane with no orchestrator job carries ONE stream, so the stderr view falls back to that same pushed log —
+    // otherwise switching streams on a self-hosted run reads as "this run wrote nothing to stderr", which is a
+    // statement about the run rather than the truth, which is that this lane has no second stream to offer.
+    return { record, text: text ?? pushed };
   }
 
   // Persisted replay recording (docs/architecture/replay.md) — the sealed screen frames + logs + env/runtime tracks of a
@@ -657,7 +690,7 @@ export class RunService {
     // lost. Best-effort like every dual-write — the settle below is the durable half.
     if (trace && trace.length > 0)
       void this.deps.trajectories
-        ?.seal({ runId: id, tenant: current.tenant, source: "run", events: trace })
+        ?.seal({ runId: id, tenant: current.tenant, source: "run", events: pricedTrace(trace) })
         .catch(() => {});
     const run = Run.from(current);
     if (run.isTerminal()) return; // first terminal write wins (a retried terminal report)

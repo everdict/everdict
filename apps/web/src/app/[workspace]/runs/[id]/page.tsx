@@ -2,16 +2,24 @@ import Link from 'next/link'
 import { ChevronLeft, Download } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
-import { MentionInChatButton } from '@/widgets/infra-panel'
+import { MentionInChatButton, OpenConversationButton } from '@/widgets/infra-panel'
 import { LiveLogs } from '@/widgets/live-logs'
+import { ReplayPlayer } from '@/widgets/replay-player'
 import { RunPlacement } from '@/widgets/run-placement'
 import { RunTopology } from '@/widgets/run-topology'
-import { ReplayPlayer } from '@/widgets/replay-player'
-import { LiveScreen, SandboxTerminal } from '@/widgets/sandbox-terminal'
-import { TraceTimeline } from '@/widgets/trace-timeline'
+import { LiveScreen, LiveTerminal } from '@/widgets/sandbox-terminal'
+import { asSingleSegment, TrajectoryView, type TrajectorySegment } from '@/features/browse-traces'
 import { CommentsSection } from '@/features/discuss'
 import { membersSchema } from '@/entities/member'
-import { runSchema, trajectoryResponseSchema, type Run } from '@/entities/run'
+import {
+  runCaseSpecSchema,
+  RunOutcome,
+  runSchema,
+  trajectoryResponseSchema,
+  type Run,
+  type RunCaseSpec,
+} from '@/entities/run'
+import { traceEventSchema, type TraceEvent } from '@/entities/trace'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { fmtSubject, fmtTokens, fmtUsd } from '@/shared/lib/format'
@@ -19,9 +27,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { RuntimeChip } from '@/shared/ui/chip'
-import { MetricLabel } from '@/shared/ui/metric-label'
 import { PageHeader } from '@/shared/ui/page-header'
-import { ScoreDetail } from '@/shared/ui/score-detail'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatusPill } from '@/shared/ui/status-pill'
 
@@ -56,6 +62,20 @@ function snapshotHasContent(s: NonNullable<Run['result']>['snapshot']): boolean 
     default:
       return Boolean(s.url || s.dom || s.output?.trim())
   }
+}
+
+// The evidence view (TrajectoryView, shared with Settings › Observability) reads the CONTRACT-shaped trace union,
+// while this page parses the run record loosely on purpose (`entities/run`'s passthrough consumer view, so a
+// server-side trace-kind addition never rejects the whole run). Re-parse the same array through the strict lens,
+// PER EVENT: an event kind this build doesn't model yet drops out of the evidence view instead of blanking the
+// page. No extra fetch — same bytes, second lens.
+function toEvidence(events: unknown[]): TraceEvent[] {
+  const evidence: TraceEvent[] = []
+  for (const event of events) {
+    const parsed = traceEventSchema.safeParse(event)
+    if (parsed.success) evidence.push(parsed.data)
+  }
+  return evidence
 }
 
 // Source (the activity view's source axis) → the shared human label (reused from the runs-table). Unset = direct API.
@@ -122,8 +142,13 @@ export default async function RunDetailPage({
 
   let run: Run | undefined
   let error: string | undefined
+  // caseSpec 은 같은 응답을 좁은 렌즈로 한 번 더 읽는다(runCaseSpecSchema 주석 참고 — 전체 EvalCase 를
+  // 미러링하면 드리프트 가드가 깨진다). 실패해도 상세는 그대로 뜬다: 요청 섹션만 빠진다.
+  let caseSpec: RunCaseSpec | undefined
   try {
-    run = runSchema.parse(await controlPlane.getRun(ctx, id))
+    const raw = await controlPlane.getRun(ctx, id)
+    run = runSchema.parse(raw)
+    caseSpec = runCaseSpecSchema.safeParse(raw).data?.caseSpec
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -138,23 +163,40 @@ export default async function RunDetailPage({
     )
   }
 
-  const scores = run.result?.scores ?? []
   const snapshot = run.result?.snapshot
   const usage = run.usage
 
   // Trace: the row embed first (legacy eval runs), else the OWNED trajectory store (N1 look-inward) — the
   // sealed evidence is how agent/sandbox/OTLP runs render at all (they never carry a result embed).
   // Soft-fail: an unsealed run simply has no trace section yet.
+  //
+  // `segments` is what the evidence view reads: one plane per EMITTER (the execution's own stream plus each
+  // service that pushed its own OTel spans into this run). The run-scoped read carries them, so one fetch
+  // serves both — and a row embed is a single plane the page builds with no fetch at all.
   let trace = run.result?.trace ?? []
   let trajectorySource: string | undefined
+  let segments: TrajectorySegment[] = []
   if (trace.length === 0) {
     try {
-      const sealed = trajectoryResponseSchema.parse(await controlPlane.getRunTrajectory(ctx, id))
-      trace = sealed.events
-      trajectorySource = sealed.meta.source
+      const runScoped = trajectoryResponseSchema.parse(await controlPlane.getRunTrajectory(ctx, id))
+      trace = runScoped.events
+      trajectorySource = runScoped.meta.source
+      segments =
+        runScoped.segments.length > 0
+          ? runScoped.segments.map((segment) => ({
+              ...segment,
+              // The execution segment omits its events on the wire (never shipped twice) — rehydrate it here.
+              events: toEvidence(segment.events ?? runScoped.events),
+            }))
+          : // 세그먼트를 아직 안 보내는 봉인 기록(다중 평면 등급 이전에 봉인된 것들 — 오늘 살아 있는 에이전트
+            // 턴이 전부 여기 해당한다)은 실행 자신의 스트림이 곧 궤적 전체다. 이 폴백이 없으면 이벤트가 있는데도
+            // 증거 섹션이 통째로 사라진다. browse-trajectories 액션이 같은 폴백을 갖고 있다.
+            asSingleSegment(toEvidence(runScoped.events), 'run')
     } catch {
       // 404 = nothing sealed (and no embed) — the page just omits the trace sections.
     }
+  } else {
+    segments = asSingleSegment(toEvidence(trace), 'run')
   }
 
   // Replay is available for any settled run that produced an agent trace (EVERY harness does) or a recording —
@@ -190,8 +232,33 @@ export default async function RunDetailPage({
   const runtime = run.runtime
   const runtimeIsSelfHosted = runtime === 'self' || (runtime?.startsWith('self:') ?? false)
 
+  // 메타 카드의 두 축은 컬럼이 같고 의미가 kind 마다 다르다 — 도메인의 팩토리가 그렇게 채운다(하네스 컬럼에
+  // 에이전트 스펙/환경 capability 가 들어가고, caseId 에 깨운 원인/이미지가 들어간다). 라벨을 harness/case 로
+  // 고정해 두면 챗 턴이 "case chat", 샌드박스가 "case ubuntu:24.04" 로 읽히는 거짓말이 남는다.
+  const subjectLabel =
+    run.kind === 'agent' ? 'agent' : run.kind === 'sandbox' ? 'environment' : 'harness'
+  const objectLabel = run.kind === 'agent' ? 'cause' : run.kind === 'sandbox' ? 'image' : 'case'
+
+  // 라이브 패널은 run 이 선언한 채널만 연다. 선언이 없는 예전 eval/command run 은 기존 동작(로그+터미널)을
+  // 그대로 유지하고, 에이전트/분석 run 은 붙을 컨테이너 자체가 없으므로 아무것도 열지 않는다 — 예전에는
+  // 여기서 영원히 "대기 중"인 로그 카드와 "컨테이너 없음"만 답하는 터미널이 떴다.
+  const attach = run.attach
+  const containerBacked = run.kind === undefined || run.kind === 'eval' || run.kind === 'command'
+  const showLiveLogs = attach ? attach.includes('logs') : containerBacked
+  const showTerminal = attach
+    ? attach.includes('exec') || attach.includes('terminal')
+    : containerBacked
+
+  // 이 run 을 일으킨 run — 수요 그래프의 간선(에이전트가 제출한 실행이 대표적). 부모 그룹은 스코어카드면
+  // 메타 카드가 이미 링크하므로, 여기서는 그 밖의 그룹(플레이그라운드 세션의 케이스)만 세운다.
+  const causedByRunId = run.origin?.causedByRunId
+  const sessionRunId =
+    run.group?.role === 'case' && !run.parentScorecardId ? run.group.id : undefined
+
   return (
-    <div className="space-y-7">
+    // @container: the sections below size off THIS column's width, not the viewport's — the infra panel splits
+    // the page, so a viewport breakpoint would keep promising space this column no longer has.
+    <div className="@container space-y-7">
       <div className="space-y-3">
         <BackLink workspace={workspace} label={t('title')} />
         <PageHeader
@@ -206,6 +273,9 @@ export default async function RunDetailPage({
                 reference={{ type: 'run', id: run.id, label: run.id.slice(0, 8) }}
                 mission="runAnalyze"
               />
+              {/* 실행 패밀리 — eval 이 아닌 run 만 배지를 단다(활동 콘솔의 행과 같은 규칙). 이게 없으면
+                  에이전트 턴과 샌드박스 세션이 하네스 eval 처럼 읽힌다: 컬럼은 같고 의미가 다르다. */}
+              {run.kind && run.kind !== 'eval' && <Badge tone="info">{run.kind}</Badge>}
               {/* 재생 가능한 run이면 "리플레이" 배지 → 아래 #replay 섹션으로 점프(발견성). agent trace만 있어도
                   재생되므로(하네스 무관) recordingRef 없이 trace만으로도 노출한다. */}
               {hasReplay && (
@@ -213,15 +283,22 @@ export default async function RunDetailPage({
                   <Badge tone="info">{t('replay')}</Badge>
                 </a>
               )}
+              {/* 세션 run 은 `running` 이 "진행 중"이 아니라 "살아 있음"이고, `succeeded` 는 "회수됨"이다 —
+                  상태 옆에 그 사실을 세워 두지 않으면 ops 뷰가 건강한 세션을 멈춘 배치로 읽는다. */}
+              {run.lifetime === 'session' && (
+                <Badge tone="neutral">
+                  {run.status === 'running' ? t('sessionAlive') : t('sessionClosed')}
+                </Badge>
+              )}
               <StatusPill status={run.status} />
             </div>
           }
         />
       </div>
 
-      <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-        <Prop label="harness" value={`${run.harness.id}@${run.harness.version}`} />
-        <Prop label="case" value={run.caseId} />
+      <Card className="grid grid-cols-2 gap-4 p-4 @2xl:grid-cols-4">
+        <Prop label={subjectLabel} value={`${run.harness.id}@${run.harness.version}`} />
+        <Prop label={objectLabel} value={run.caseId} />
         {/* Runtime (where it ran) — registered runtime links out; a self-hosted runner shows a label only. Hidden if unset (legacy / default backend). */}
         {runtime && (
           <MetaItem label={t('metaRuntime')}>
@@ -260,7 +337,61 @@ export default async function RunDetailPage({
             </Link>
           </MetaItem>
         )}
+        {/* 이 run 을 일으킨 run — 클릭 가능한 인과 간선. 에이전트가 제출한 실행이면 여기서 그 에이전트 턴으로
+            거슬러 올라갈 수 있다(수요 그래프이자 감사 추적). */}
+        {causedByRunId && (
+          <MetaItem label={t('metaCausedBy')}>
+            <Link
+              href={`/${workspace}/runs/${encodeURIComponent(causedByRunId)}`}
+              className="inline-flex items-center gap-1 font-mono text-[13px] text-link transition-colors hover:text-foreground"
+            >
+              {causedByRunId.slice(0, 8)} →
+            </Link>
+          </MetaItem>
+        )}
+        {/* 세션 안에서 제출된 케이스(플레이그라운드) → 그 세션 run 으로. 스코어카드 자식은 위 셀이 맡는다. */}
+        {sessionRunId && (
+          <MetaItem label={t('metaSessionRun')}>
+            <Link
+              href={`/${workspace}/runs/${encodeURIComponent(sessionRunId)}`}
+              className="inline-flex items-center gap-1 font-mono text-[13px] text-link transition-colors hover:text-foreground"
+            >
+              {sessionRunId.slice(0, 8)} →
+            </Link>
+          </MetaItem>
+        )}
       </Card>
+
+      {/* 요청 — 무엇을 시켰나. 케이스 본문을 persist 하는 run(단독 제출·플레이그라운드 케이스)만 가지며,
+          이게 없어서 "이 run 이 무슨 과제를 받았는지"를 상세에서 전혀 볼 수 없었다. 없으면 섹션도 없다. */}
+      {caseSpec && caseSpec.task.trim() !== '' && (
+        <section className="space-y-2.5">
+          <SectionHeader
+            title={t('requestTitle')}
+            action={
+              caseSpec.timeoutSec !== undefined ? (
+                <span className="font-mono text-[11px] text-faint">
+                  {t('requestTimeout', { sec: caseSpec.timeoutSec })}
+                </span>
+              ) : undefined
+            }
+          />
+          <Card className="p-4">
+            <p className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-[13px] leading-relaxed">
+              {caseSpec.task}
+            </p>
+            {caseSpec.tags.length > 0 && (
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {caseSpec.tags.map((tag) => (
+                  <Badge key={tag} tone="outline">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </Card>
+        </section>
+      )}
 
       {/* Usage (this run's own economics) — cost · tokens · calls, derived from the trace. A scorecard only aggregates
           these across cases; a single run reports its own. Hidden until there's a non-zero trace-derived usage. */}
@@ -276,6 +407,11 @@ export default async function RunDetailPage({
             })}
           />
           <UsageStat label={t('usageCalls')} value={String(usage.calls)} />
+          {/* 위임받은 예산의 캡 — 이 run 이 어느 봉투에서 끌어 쓰는지(에이전트가 위임한 슬라이스가 대표적).
+              캡이 없으면 셀 자체가 없다. */}
+          {run.envelope?.capUsd !== undefined && (
+            <UsageStat label={t('usageBudget')} value={fmtUsd(run.envelope.capUsd)} />
+          )}
         </Card>
       )}
 
@@ -310,19 +446,26 @@ export default async function RunDetailPage({
           {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시 프레임으로
               2초마다 폴링; 라이브 화면이 없는 run이면 위젯이 self-null (빈 섹션 없음) */}
           <LiveScreen runId={run.id} initialStatus={run.status} />
-          <div className="space-y-2.5">
-            <SectionHeader title={t('liveLogs')} />
-            <Card className="p-4">
-              <LiveLogs runId={run.id} initialStatus={run.status} />
-            </Card>
-          </div>
-          {/* 샌드박스 터미널 — 실행 중인 케이스 컨테이너로 한 번씩 exec (creator/admin, 컨트롤플레인이 강제) */}
-          <div className="space-y-2.5">
-            <SectionHeader title={t('sandbox')} />
-            <Card className="p-4">
-              <SandboxTerminal runId={run.id} />
-            </Card>
-          </div>
+          {/* 로그·터미널은 run 이 선언한 채널(attach)일 때만 — 붙을 곳 없는 run 에서 영원히 비어 있는 패널을
+              띄우지 않는다. 선언이 없는 예전 eval/command run 은 종전대로 둘 다 연다. */}
+          {showLiveLogs && (
+            <div className="space-y-2.5">
+              <SectionHeader title={t('liveLogs')} />
+              <Card className="p-4">
+                <LiveLogs runId={run.id} initialStatus={run.status} />
+              </Card>
+            </div>
+          )}
+          {/* 샌드박스 터미널 — 실행 중인 케이스 컨테이너로 들어가는 대화형 셸(cd·env 유지). 셸은 샌드박스의 실제
+              프로세스라 "셸 열기"를 눌렀을 때만 붙는다 (creator/admin, 컨트롤플레인이 강제) */}
+          {showTerminal && (
+            <div className="space-y-2.5">
+              <SectionHeader title={t('sandbox')} />
+              <Card className="p-4">
+                <LiveTerminal runId={run.id} />
+              </Card>
+            </div>
+          )}
         </section>
       )}
 
@@ -334,51 +477,38 @@ export default async function RunDetailPage({
         </div>
       )}
 
-      <section className="space-y-2.5">
-        <SectionHeader title={t('scores')} />
-        {scores.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">{t('noScores')}</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-            {/* key includes the metric — a multi-criteria judge emits several scores under one graderId. */}
-            {scores.map((s) => (
-              <Card key={`${s.graderId}:${s.metric}`} className="p-3.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate text-[13px] font-[510]">{s.graderId}</span>
-                  {s.pass != null && (
-                    <Badge tone={s.pass ? 'success' : 'danger'} className="shrink-0">
-                      {s.pass ? 'pass' : 'fail'}
-                    </Badge>
-                  )}
-                </div>
-                <div className="mt-1.5 break-words font-mono text-2xl font-[560] tabular-nums tracking-tight">
-                  {s.value}
-                </div>
-                <div className="text-[12px] text-faint">
-                  <MetricLabel metric={s.metric} siblings={scores.map((x) => x.metric)} />
-                </div>
-                {/* Verdict reasoning (judge rubric reasoning, command output, structured code-judge verdict, etc.) —
-                    shows the "why". A structured detail renders as a collapsible JSON tree; prose stays verbatim. */}
-                <ScoreDetail detail={s.detail} className="mt-2" />
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
+      {/* 결과 — kind 마다 갈아끼우는 단 하나의 슬롯. eval 이면 판정 한 줄 + 지표 표(근거는 행 확장), 에이전트
+          턴이면 그 대화로 건너가기, 샌드박스면 세션 요약. 점수는 eval 의 결과일 뿐 보편 결과가 아니므로,
+          점수가 없는 패밀리에서 "아직 점수가 없어요"를 띄우던 영구 빈 섹션은 사라졌다. */}
+      <RunOutcome
+        run={run}
+        action={
+          run.group?.role === 'turn' ? (
+            <OpenConversationButton sessionId={run.group.id} />
+          ) : undefined
+        }
+      />
 
-      <section className="space-y-2.5">
-        <SectionHeader title={t('trace')} />
-        {/* Served from the owned store (no row embed): say so — the evidence survives independent of any
-            external platform, and `source` is its provenance (run | otlp | import). */}
-        {trajectorySource !== undefined && (
-          <p className="text-xs text-muted-foreground">
-            {t('sealedEvidence', { source: trajectorySource })}
-          </p>
-        )}
-        <Card className="p-4">
-          <TraceTimeline trace={trace} />
-        </Card>
-      </section>
+      {/* Evidence — the SAME reading surface as Settings › Observability's sealed-trajectory detail (rollup ·
+          plane chips · event list left / full payload right). The run page's bespoke vertical timeline is gone:
+          one trace UI, so a payload read here is the payload read there. Hidden entirely when there is nothing
+          sealed yet (empty sections are never placeholders). The panes scroll on their own, so the card fixes a
+          height; TrajectoryView is its own @container, so it stacks when the infra panel narrows this column. */}
+      {segments.length > 0 && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('trace')} />
+          {/* Served from the owned store (no row embed): say so — the evidence survives independent of any
+              external platform, and `source` is its provenance (run | otlp | import). */}
+          {trajectorySource !== undefined && (
+            <p className="text-xs text-muted-foreground">
+              {t('sealedEvidence', { source: trajectorySource })}
+            </p>
+          )}
+          <Card className="h-[68vh] min-h-[420px] p-4">
+            <TrajectoryView segments={segments} />
+          </Card>
+        </section>
+      )}
 
       {snapshot && snapshotHasContent(snapshot) && (
         <section className="space-y-2.5">

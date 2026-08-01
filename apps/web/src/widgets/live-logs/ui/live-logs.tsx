@@ -61,7 +61,9 @@ export function LiveLogs({ runId, initialStatus }: { runId: string; initialStatu
     if (nearBottom) el.scrollTop = el.scrollHeight
   }, [text])
 
-  const live = !TERMINAL.has(status)
+  // "Streaming" claims a stream exists. A run whose lane has no job to tail (a service harness drives a warm
+  // topology, not a case container) would otherwise pulse green at an empty box for its whole duration.
+  const live = !TERMINAL.has(status) && found
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
@@ -71,7 +73,10 @@ export function LiveLogs({ runId, initialStatus }: { runId: string; initialStatu
             <span className="relative inline-flex size-2 rounded-full bg-[var(--color-success)]" />
           </span>
         )}
-        <span className="text-[11.5px] text-faint">{live ? t('streaming') : t('finished')}</span>
+        {/* Silent while a running lane has produced nothing: "finished" would be as wrong as "streaming". */}
+        {(live || TERMINAL.has(status)) && (
+          <span className="text-[11.5px] text-faint">{live ? t('streaming') : t('finished')}</span>
+        )}
         <div className="ml-auto flex items-center gap-0.5 rounded-md border border-border p-0.5">
           {STREAMS.map((s) => (
             <button

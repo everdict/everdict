@@ -125,6 +125,10 @@ export const runSchema = z.object({
     .optional(),
   result: resultSchema.optional(),
   usage: usageSchema.optional(),
+  // 케이스 판정 — 서버가 result.scores 에서 권위 순위(@everdict/domain caseVerdict: 실측 > 객관 비교 > 저지)로
+  // 계산해 usage 와 같은 read 에서 실어 보낸다. 클라이언트는 절대 재계산하지 않는다(P1g 에서 지운 미러를
+  // 되살리지 않는다 — 스코어카드의 케이스 판정과 같은 규칙, 같은 출처). undefined = 판정할 그레이더가 없었다.
+  verdict: z.boolean().optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
   // provenance (activity view source axis): web|mcp|api|scorecard|schedule|front-door… unset=direct API.
   trigger: z.string().optional(),
@@ -134,6 +138,33 @@ export const runSchema = z.object({
   runtime: z.string().optional(),
   // the scorecard batch this run belongs to (if any). The control plane excludes children (where set) from the activity list by default.
   parentScorecardId: z.string().optional(),
+  // 이 run이 속한 오케스트레이션 — 스코어카드의 케이스, 대화의 턴, 일반 자식(parentScorecardId 의 일반화).
+  // 에이전트 턴이면 group.id 가 대화 id 라서, 상세에서 그 대화로 건너갈 수 있는 유일한 좌표다.
+  group: z.object({ id: z.string(), role: z.enum(['case', 'turn', 'child']) }).optional(),
+  // 구조화된 WHY(자유문자 trigger 의 후계). causedByRunId 가 핵심이다 — run 이 run 을 낳은 간선이라
+  // "이 실행은 누가 시켰나"가 상세에서 처음으로 클릭 가능한 사실이 된다(수요 그래프 = 감사 추적).
+  origin: z
+    .object({
+      cause: z.enum(['member', 'schedule', 'event', 'run', 'ci', 'api']),
+      actor: z.string().optional(),
+      scheduleId: z.string().optional(),
+      eventId: z.string().optional(),
+      eventKind: z.string().optional(),
+      causedByRunId: z.string().optional(),
+    })
+    .optional(),
+  // 살아 있는 동안 이 run 이 여는 채널. 라이브 패널을 이걸로 건다 — 선언 안 한 채널의 패널을 띄우면
+  // (에이전트 턴의 터미널처럼) 영원히 "컨테이너 없음"만 답하는 죽은 UI가 된다.
+  attach: z.array(z.enum(['logs', 'exec', 'terminal', 'screen', 'cdp', 'tasks'])).optional(),
+  // 위임받은 예산(§5.2) — 캡이 있으면 경제 카드가 "얼마 중 얼마"를 말할 수 있다.
+  envelope: z
+    .object({
+      id: z.string(),
+      capUsd: z.number().optional(),
+      capTokens: z.number().optional(),
+      capRuns: z.number().optional(),
+    })
+    .optional(),
   // live trace deep-link (derived, present only while active + the harness exports a platform trace)
   liveTrace: z.object({ kind: z.string(), endpoint: z.string(), runId: z.string() }).optional(),
   createdAt: z.string(),
@@ -141,6 +172,22 @@ export const runSchema = z.object({
 })
 
 export const runsSchema = z.array(runSchema)
+
+// 제출된 케이스 본문에서 "무엇을 시켰나"만 뽑아 읽는 좁은 렌즈 — 상세가 요청 프롬프트를 보여주기 위한 것이다
+// (특히 플레이그라운드 케이스: 무슨 과제를 던졌는지가 화면 어디에도 없었다). runSchema 에 넣지 않는 이유는
+// 드리프트 가드다: 와이어의 caseSpec 은 환경·그레이더까지 갖춘 EvalCase 라, 부분만 모델링하면 "웹 ⊆ 와이어"가
+// 깨진다(가드를 느슨하게 만드는 것보다 렌즈를 따로 두는 쪽이 옳다). 같은 응답 바이트를 두 번 읽을 뿐이다.
+export const runCaseSpecSchema = z.object({
+  caseSpec: z
+    .object({
+      id: z.string(),
+      task: z.string(),
+      timeoutSec: z.number().optional(),
+      tags: z.array(z.string()).default([]),
+    })
+    .optional(),
+})
+export type RunCaseSpec = NonNullable<z.infer<typeof runCaseSpecSchema>['caseSpec']>
 
 // The exported Run = the wire DTO's FLAT fields + the web's loose `result`/`usage` view. Deleting the flat-field mirror
 // is the win: id/harness/status/liveTrace/trigger/… now come from the contract, so a wire rename breaks the web build.

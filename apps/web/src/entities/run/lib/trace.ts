@@ -1,8 +1,10 @@
 import type { TraceEvent } from '../model/schema'
 
-// Agent-plane trace helpers — shared by the static trace timeline (widgets/trace-timeline) and the replay
-// player's agent lane (widgets/replay-player). Both render the same TraceEvent[] on the wall-clock timeline;
-// FSD forbids widget→widget imports, so the shared summary/colour lives here in the entities layer.
+// Agent-plane trace helpers — shared by the replay player's agent lane (widgets/replay-player) and the
+// playground's live trace list (features/harness-playground). Both render a TraceEvent[] as one-line rows
+// while it is still streaming; FSD forbids widget→widget imports, so the shared summary/colour lives here.
+// The SETTLED evidence is a different surface: TrajectoryView (features/browse-traces) reads the sealed
+// trajectory in full — these helpers are for the live/compact lanes only.
 
 // A single trace event → a one-line human summary (role/model/tool call/result/error/log).
 export function summarizeTraceEvent(e: TraceEvent): string {
@@ -24,7 +26,9 @@ export function summarizeTraceEvent(e: TraceEvent): string {
       return `[${String(a.stream ?? '')}] ${String(a.text ?? '').slice(0, 140)}`
     case 'infra': {
       // 인프라 플레인 기록(배치/서비스) — [scope/service] event: message (node)
-      const head = a.service ? `${String(a.scope ?? '')}/${String(a.service)}` : String(a.scope ?? '')
+      const head = a.service
+        ? `${String(a.scope ?? '')}/${String(a.service)}`
+        : String(a.scope ?? '')
       const event = a.event ? `${String(a.event)}: ` : ''
       const node = a.node ? ` @${String(a.node)}` : ''
       return `[${head}] ${event}${String(a.message ?? '').slice(0, 140)}${node}`

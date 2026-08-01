@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { AnsiText } from '@/shared/ui/ansi-text'
+import { Button } from '@/shared/ui/button'
 import { Input } from '@/shared/ui/input'
 
 // Interactive sandbox terminal (observability ⑥) — a PERSISTENT shell over WebSocket: unlike the one-shot exec,
@@ -15,6 +16,7 @@ export function LiveTerminal({ runId }: { runId: string }) {
   const [lines, setLines] = useState<string[]>([])
   const [command, setCommand] = useState('')
   const [state, setState] = useState<'connecting' | 'open' | 'closed'>('connecting')
+  const [attached, setAttached] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
 
@@ -28,6 +30,7 @@ export function LiveTerminal({ runId }: { runId: string }) {
   }
 
   useEffect(() => {
+    if (!attached) return // a shell is a real process in the sandbox — open one only when the reader asks for it
     let ws: WebSocket | undefined
     let stopped = false
     ;(async () => {
@@ -58,7 +61,7 @@ export function LiveTerminal({ runId }: { runId: string }) {
       stopped = true
       ws?.close()
     }
-  }, [runId])
+  }, [runId, attached])
 
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight
@@ -71,6 +74,17 @@ export function LiveTerminal({ runId }: { runId: string }) {
     append(`$ ${cmd}\n`) // local echo (the shell has no TTY)
     wsRef.current.send(`${cmd}\n`)
     setCommand('')
+  }
+
+  if (!attached) {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" size="sm" variant="secondary" onClick={() => setAttached(true)}>
+          {t('attach')}
+        </Button>
+        <span className="text-[12px] text-muted-foreground">{t('hint')}</span>
+      </div>
+    )
   }
 
   return (

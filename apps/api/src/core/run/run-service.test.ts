@@ -8,7 +8,7 @@ import {
   type HarnessSpec,
   UpstreamError,
 } from "@everdict/contracts";
-import { InMemoryRecordingStore, InMemoryRunStore, type RunRecord } from "@everdict/db";
+import { InMemoryRecordingStore, InMemoryRunStore, InMemoryTrajectoryStore, type RunRecord } from "@everdict/db";
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 
@@ -811,18 +811,41 @@ describe("RunService.screen — browser (topology) live frame (observability ⑦
     expect(seen).toEqual([`evd-run-${rec.id}`]); // the standalone-run correlation id
   });
 
-  it("supported:true but no frame when the browser isn't reachable (dataUrl undefined)", async () => {
+  it("reports unsupported — not an empty frame — when the case declares a browser its lane cannot reach", async () => {
     const store = new InMemoryRunStore();
     const svc = new RunService({
       dispatcher: okDispatcher,
       store,
       newId: ids,
-      captureBrowserScreen: async () => undefined,
+      captureBrowserScreen: async () => undefined, // e.g. a K8s topology, which has no per-case browser rediscovery
     });
     const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: browserCase, runtime: "rt" });
     await store.update(rec.id, { status: "running" });
     const out = await svc.screen(rec.id);
-    expect(out).toMatchObject({ supported: true, dataUrl: undefined });
+    // The declared env kind used to be taken as proof a screen existed, so the viewer waited for a frame that could
+    // never arrive. Support now follows the capture attempt.
+    expect(out).toMatchObject({ supported: false, dataUrl: undefined });
+  });
+
+  it("captures a service harness's browser even though its case env is prompt (the browser belongs to the topology)", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: ids,
+      captureBrowserScreen: async () => "SESSIONB64",
+    });
+    const promptCase: EvalCase = {
+      id: "p9",
+      env: { kind: "prompt" },
+      task: "t",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    };
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: promptCase, runtime: "rt" });
+    await store.update(rec.id, { status: "running" });
+    expect(await svc.screen(rec.id)).toMatchObject({ supported: true, dataUrl: "data:image/png;base64,SESSIONB64" });
   });
 
   it("serves a frame PUSHED by a self-hosted runner for a run whose env has no single-container screen (browser-use)", async () => {
@@ -922,7 +945,29 @@ describe("RunService.logs — pushed runner log wins over the backend tail (obse
     await store.update(rec.id, { status: "running" });
 
     expect((await svc.logs(rec.id))?.text).toBe("backend:stdout"); // no pushed log → backend
-    expect((await svc.logs(rec.id, "stderr"))?.text).toBe("backend:stderr"); // stderr never uses the pushed (single-stream) log
+    expect((await svc.logs(rec.id, "stderr"))?.text).toBe("backend:stderr"); // a real second stream still wins
+  });
+
+  it("serves the pushed log on the stderr view too when the lane has no second stream to offer", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: ids,
+      pushLogs: () => "▶ Started",
+      readCaseLogs: async () => undefined, // self-hosted: no orchestrator job to tail on either stream
+    });
+    const rec = await svc.submit({
+      tenant: "t",
+      harness: { id: "s", version: "0" },
+      case: promptCase,
+      runtime: "self:x",
+    });
+    await store.update(rec.id, { status: "running" });
+
+    // Empty here would read as "this run wrote nothing to stderr" — a claim about the run, when the truth is that
+    // this lane carries a single stream.
+    expect((await svc.logs(rec.id, "stderr"))?.text).toBe("▶ Started");
   });
 });
 
@@ -968,5 +1013,74 @@ describe("RunService — terminal writes are domain-guarded (first terminal writ
     const outcome = await svc.resume(before as RunRecord, late);
     expect(outcome).toBe(false);
     expect(await store.get(rec.id)).toEqual(before); // untouched
+  });
+});
+
+// A run whose evidence lives ONLY in the trajectory store (an agent turn: no CaseResult, per O10 — new runs
+// write refs, not row embeds) still has to report what it cost. The store's derivation reads `result.trace`,
+// which such a run never has, so the executions that actually spend money were reporting no cost at all while
+// the invoice knew. The detail read falls back to the sealed evidence.
+describe("RunService.get — usage for runs whose evidence is the sealed trajectory", () => {
+  const agentRun = (id: string): RunRecord => ({
+    id,
+    tenant: "acme",
+    harness: { id: "assistant", version: "latest" },
+    caseId: "chat",
+    status: "succeeded",
+    kind: "agent",
+    createdAt: "t0",
+    updatedAt: "t1",
+  });
+
+  it("derives cost/tokens from the sealed trajectory when the record carries no result", async () => {
+    const store = new InMemoryRunStore();
+    const trajectories = new InMemoryTrajectoryStore();
+    await store.create(agentRun("run-agent"));
+    await trajectories.seal({
+      runId: "run-agent",
+      tenant: "acme",
+      source: "run",
+      events: [
+        { t: 0, kind: "message", role: "assistant", text: "done" },
+        { t: 1, kind: "llm_call", model: "m", cost: { inputTokens: 900, outputTokens: 120, usd: 0.31 } },
+      ],
+    });
+    const svc = new RunService({ dispatcher: okDispatcher, store, trajectories, newId: ids });
+
+    const run = await svc.get("run-agent");
+    expect(run?.usage).toEqual({
+      promptTokens: 900,
+      completionTokens: 120,
+      totalTokens: 1020,
+      usd: 0.31,
+      calls: 1,
+    });
+  });
+
+  it("leaves usage unset when the sealed evidence has no model call (nothing to price)", async () => {
+    const store = new InMemoryRunStore();
+    const trajectories = new InMemoryTrajectoryStore();
+    await store.create(agentRun("run-quiet"));
+    await trajectories.seal({
+      runId: "run-quiet",
+      tenant: "acme",
+      source: "run",
+      events: [{ t: 0, kind: "message", role: "user", text: "hi" }],
+    });
+    const svc = new RunService({ dispatcher: okDispatcher, store, trajectories, newId: ids });
+
+    expect((await svc.get("run-quiet"))?.usage).toBeUndefined();
+  });
+
+  it("never reaches for the trajectory when the record already carries a result (the store derived it)", async () => {
+    const store = new InMemoryRunStore();
+    const trajectories = new InMemoryTrajectoryStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store, trajectories, newId: ids });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "scripted", version: "0" }, case: CASE });
+    await flush();
+    const spy = vi.spyOn(trajectories, "get");
+
+    await svc.get(rec.id);
+    expect(spy).not.toHaveBeenCalled();
   });
 });

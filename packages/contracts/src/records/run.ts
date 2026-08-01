@@ -114,6 +114,12 @@ export const RunRecordSchema = z.object({
   caseSpec: EvalCaseSchema.optional(),
   // Usage summary — not stored, derived from result.trace (filled on read). Lets the client see tokens/cost without parsing the trace.
   usage: RunUsageSummarySchema.optional(),
+  // Case verdict — not stored either, derived from result.scores by the domain's authority ranking
+  // (`caseVerdict`: ground truth > objective comparison > judge) and filled on the same read as `usage`.
+  // SERVED, never recomputed by a client: the scorecard's per-case verdict works exactly this way, and the
+  // client-side mirrors of this rule were deleted in re-architecture P1g — one authority, one answer.
+  // Undefined = nothing decided it (no pass-bearing grader, or a kind that is not scored at all).
+  verdict: z.boolean().optional(),
   error: RunErrorSchema.optional(),
   // Which scorecard batch this run is a child of (if any). Filled by the scorecard as it fans out a child run per case.
   // Unset = standalone (one-off) run. The activity list hides children by default (prevents flooding) → see the list option.

@@ -101,6 +101,31 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   );
 
   server.registerTool(
+    "get_run_screen",
+    {
+      description:
+        "The current screen of a run's environment as a PNG data URL — the browser the agent is driving or its " +
+        "desktop, captured live (poll while running; a settled run has no screen). Use it to SEE what the agent is " +
+        "doing when the trace alone is ambiguous. Creator-or-admin only. supported=false = this run has no screen " +
+        "we can reach; found=false = supported but no frame captured yet",
+      inputSchema: { id: z.string().describe("run id") },
+    },
+    ({ id }: { id: string }) =>
+      run(principal, "runs:read", async () => {
+        const out = await deps.service.screen(id);
+        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+          return fail("FORBIDDEN: only the run's creator or an admin can view the screen.");
+        return ok({
+          status: out.record.status,
+          supported: out.supported,
+          found: out.dataUrl !== undefined,
+          dataUrl: out.dataUrl ?? "",
+        });
+      }),
+  );
+
+  server.registerTool(
     "get_run_placement",
     {
       description:
