@@ -75,6 +75,12 @@ export type Action =
   // creator-or-admin in the service, like skills and comments.
   | "issues:read"
   | "issues:write"
+  // Teams (records/team.ts) shape the workspace rather than fill it: creating one mints an identifier prefix
+  // every future issue inherits, and the roster decides whose list an issue lands in. That is administration,
+  // so it does not ride issues:write (member+) the way tracker CONTENT does — read stays viewer+ because
+  // knowing the teams is as benign as knowing the members.
+  | "teams:read"
+  | "teams:write"
   // Minting workspace image-registry push credentials — the only member action where a credential 'value' leaves to the caller,
   // so it's honestly named as a separate action instead of reusing harnesses:register (viewer+) (register/unregister = settings:write, read = harnesses:read).
   | "images:push"
@@ -112,6 +118,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "members:read", // reading the team (workspace members) is benign → viewer+
     "comments:read", // reading comments = benign (viewing collaborative discussion) → viewer+
     "issues:read", // reading the tracker (what the team is evaluating and why) is benign → viewer+
+    "teams:read", // knowing which teams exist is as benign as knowing the members → viewer+
   ]),
   member: new Set<Action>([
     "runs:read",
@@ -145,6 +152,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "comments:write", // writing comments = collaborative content (discussing which model was run) → member+ (deletion = author-or-admin, service layer)
     "issues:read",
     "issues:write", // filing/resolving/linking tracker work = collaborative content → member+ (deletion = creator-or-admin, service layer)
+    "teams:read", // a member files into a team, so it must be able to list them (creating one stays admin)
     "images:push", // workspace registry push credential — harness authoring (image publishing) is a member's job
     "mattermost:post", // posting to the workspace Mattermost channel (using the integration) — a member's job, unlike admin-only registration (settings:write)
     "github:write", // creating a GitHub issue/comment via the workspace App (using the integration) — a member's job, unlike admin-only App registration (settings:write)
@@ -199,6 +207,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "comments:write",
     "issues:read",
     "issues:write",
+    "teams:read",
+    "teams:write", // creating a team mints an identifier prefix + decides whose list issues land in → workspace administration
     "images:push",
     "mattermost:post",
     "github:write",

@@ -58,6 +58,7 @@ export type { SubscriptionStore } from "./ports/subscription-store.js";
 export type { UsageStore } from "./ports/usage-store.js";
 export type { AgentTaskStore } from "./ports/agent-task-store.js";
 export type { IssueListFilter, IssueStore } from "./ports/issue-store.js";
+export type { IssueNumberGrant, TeamListFilter, TeamStore } from "./ports/team-store.js";
 export type { ProjectListFilter, ProjectStore } from "./ports/project-store.js";
 export type { InitiativeListFilter, InitiativeStore } from "./ports/initiative-store.js";
 export type { ViewStore } from "./ports/view-store.js";
@@ -106,8 +107,17 @@ export {
   type IssueGithubPusher,
   IssueService,
   type IssueServiceDeps,
+  type IssueTeamAllocator,
   type SetIssueStatusInput,
 } from "./issue/issue-service.js";
+export {
+  type CreateTeamInput,
+  DEFAULT_TEAM_KEY,
+  DEFAULT_TEAM_NAME,
+  type TeamActor,
+  TeamService,
+  type TeamServiceDeps,
+} from "./team/team-service.js";
 export { REGRESSION_WATCH_ACTOR, regressionWatch, type RegressionWatchDeps } from "./issue/regression-watch.js";
 export {
   GithubIssueSync,

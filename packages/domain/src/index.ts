@@ -104,6 +104,14 @@ export {
   type NewInitiativeInput,
 } from "./tracker/initiative.js";
 export { initiativeReadiness, projectRollup } from "./tracker/readiness.js";
+export {
+  type IssueNumberAllocation,
+  type NewTeamInput,
+  normalizeTeamKey,
+  Team,
+  type TeamEditInput,
+  type TeamTransition,
+} from "./tracker/team.js";
 
 // member — the last-admin invariant (from apps/api core/member)
 export { MembershipPolicy } from "./member/membership-policy.js";

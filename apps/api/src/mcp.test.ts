@@ -500,6 +500,7 @@ describe("MCP tools", () => {
       "get_run_logs",
       "get_run_placement",
       "get_run_recording",
+      "get_run_screen",
       "get_run_topology",
       "get_run_trajectory",
       "get_runtime",

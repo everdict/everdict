@@ -2,6 +2,7 @@ import {
   GithubIssueSync,
   InitiativeService,
   IssueService,
+  TeamService,
   KnowledgeEntryService,
   KnowledgeService,
   ProjectService,
@@ -175,6 +176,7 @@ async function main(): Promise<void> {
     subscriptionStore,
     viewStore,
     taskStore,
+    teamStore,
     issueStore,
     projectStore,
     initiativeStore,
@@ -651,8 +653,15 @@ async function main(): Promise<void> {
   // weakening the "one choke point for facts and pushes" invariant — the pusher closure reads the holder at
   // CALL time, by which point it is populated.
   const githubSyncRef: { current?: GithubIssueSync } = {};
+  // Teams come first: they are the allocator IssueService calls to resolve an owning team and mint ENG-12.
+  const teamService = new TeamService({
+    store: teamStore,
+    issues: issueStore,
+    events: platformEventService,
+  });
   const issueService = new IssueService({
     store: issueStore,
+    teams: teamService,
     scorecards: scorecardStore,
     events: platformEventService,
     github: { pushStatus: async (record, actor) => githubSyncRef.current?.pushStatus(record, actor) },
@@ -661,6 +670,7 @@ async function main(): Promise<void> {
   const githubIssueSync = new GithubIssueSync({
     store: issueStore,
     issues: issueService,
+    teams: teamService,
     tokens: githubAppService,
     writers: githubRepoWriterFactory(),
     ...(process.env.WEB_BASE_URL ? { webBaseUrl: process.env.WEB_BASE_URL } : {}),
@@ -887,6 +897,7 @@ async function main(): Promise<void> {
     queueService,
     viewService,
     taskService,
+    teamService,
     issueService,
     issueSync: githubIssueSync,
     projectService,

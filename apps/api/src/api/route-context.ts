@@ -36,6 +36,7 @@ import type {
   GithubIssueSync,
   InitiativeService,
   IssueService,
+  TeamService,
   ProjectService,
   SubscriptionService,
   TaskService,
@@ -157,6 +158,7 @@ export interface ServerDeps {
   viewService?: ViewService; // saved scorecard-analysis View CRUD (route disabled if absent)
   taskService?: TaskService; // workspace task ledger — cross-agent coordination (route disabled if absent)
   // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).
+  teamService?: TeamService; // teams own issues and name them (ENG-12); a workspace always keeps one default
   issueService?: IssueService;
   projectService?: ProjectService;
   initiativeService?: InitiativeService;

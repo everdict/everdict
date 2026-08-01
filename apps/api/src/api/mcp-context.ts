@@ -27,6 +27,7 @@ import type {
   GithubIssueSync,
   InitiativeService,
   IssueService,
+  TeamService,
   ProjectService,
   SubscriptionService,
   TaskService,
@@ -86,6 +87,7 @@ export interface McpDeps {
   viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
   taskService?: TaskService; // workspace task ledger — cross-agent coordination
   // The eval tracker (docs/tracker.md) — an agent triages its own regressions through these.
+  teamService?: TeamService;
   issueService?: IssueService;
   projectService?: ProjectService;
   initiativeService?: InitiativeService;

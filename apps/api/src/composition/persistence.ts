@@ -7,6 +7,7 @@ import type {
   FsRevisionStore,
   InitiativeStore,
   IssueStore,
+  TeamStore,
   ProjectStore,
   TrajectoryStore,
 } from "@everdict/application-control";
@@ -28,11 +29,15 @@ import {
   InMemoryEnvelopeStore,
   InMemoryEventConsumerStateStore,
   InMemoryFsRevisionStore,
+  InMemoryInitiativeStore,
+  InMemoryIssueStore,
+  InMemoryTeamStore,
   InMemoryKnowledgeEntryStore,
   InMemoryKnowledgeStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
   InMemoryPlatformEventStore,
+  InMemoryProjectStore,
   InMemoryRecordingStore,
   InMemoryRunStore,
   InMemoryRunnerJobStore,
@@ -66,11 +71,15 @@ import {
   PgEnvelopeStore,
   PgEventConsumerStateStore,
   PgFsRevisionStore,
+  PgInitiativeStore,
+  PgIssueStore,
+  PgTeamStore,
   PgKnowledgeEntryStore,
   PgKnowledgeStore,
   PgNotificationStore,
   PgOAuthStateStore,
   PgPlatformEventStore,
+  PgProjectStore,
   PgRecordingStore,
   PgRunStore,
   PgRunnerJobStore,
@@ -113,12 +122,6 @@ import {
   makePool,
   migrate,
   sqlClient,
-  InMemoryIssueStore,
-  InMemoryProjectStore,
-  InMemoryInitiativeStore,
-  PgIssueStore,
-  PgProjectStore,
-  PgInitiativeStore,
 } from "@everdict/db";
 import {
   type AgentRegistry,
@@ -188,6 +191,7 @@ export interface Persistence {
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
   taskStore: AgentTaskStore; // workspace task ledger — cross-turn, cross-agent coordination (agent-teams)
   // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer.
+  teamStore: TeamStore;
   issueStore: IssueStore;
   projectStore: ProjectStore;
   initiativeStore: InitiativeStore;
@@ -281,6 +285,7 @@ export async function makePersistence(): Promise<Persistence> {
       subscriptionStore: new InMemorySubscriptionStore(),
       viewStore: new InMemoryViewStore(),
       taskStore: new InMemoryAgentTaskStore(),
+      teamStore: new InMemoryTeamStore(),
       issueStore: new InMemoryIssueStore(),
       projectStore: new InMemoryProjectStore(),
       initiativeStore: new InMemoryInitiativeStore(),
@@ -335,6 +340,7 @@ export async function makePersistence(): Promise<Persistence> {
     subscriptionStore: new PgSubscriptionStore(client),
     viewStore: new PgViewStore(client),
     taskStore: new PgAgentTaskStore(client),
+    teamStore: new PgTeamStore(client),
     issueStore: new PgIssueStore(client),
     projectStore: new PgProjectStore(client),
     initiativeStore: new PgInitiativeStore(client),

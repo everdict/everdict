@@ -1,6 +1,6 @@
 import type { PermissionHook } from "@everdict/agent-runtime";
 import type { AgentMailbox } from "./agent-mailbox.js";
-import { type ChatDeps, contentToString, runChat } from "./chat.js";
+import { type ChatDeps, type ChatResult, contentToString, runChat } from "./chat.js";
 import type { Authenticate } from "./principal.js";
 
 // A3 (docs/architecture/agent-execution-auth.md + agent-teams.md S3): run ONE request-less turn for a teammate. Unlike
@@ -17,20 +17,22 @@ export async function runTeammateTurn(
   agentToken: string,
   signal?: AbortSignal,
   permit?: PermissionHook,
-): Promise<void> {
+  // Returns what the turn spent on the model, so the caller can put it in the run's sealed evidence (O2).
+  // undefined = nothing ran (drained empty) or the turn died before its first model call.
+): Promise<ChatResult["usage"]> {
   const headers = { authorization: `Bearer ${agentToken}` };
   try {
     // The agt_ token resolves to the agent principal (workspace + the creator it acts as). The SAME token is forwarded
     // to the MCP tools inside runChat, so every tool call is authenticated + RBAC-bounded exactly like the creator.
     const principal = await authenticate(headers);
     const drained = mailbox.drain(principal.workspace, sessionId);
-    if (drained.length === 0) return; // woken but nothing to react to (e.g. already drained by a prior turn)
+    if (drained.length === 0) return undefined; // woken but nothing to react to (e.g. already drained by a prior turn)
     // The incoming messages (peer/event, attribution-rendered) are this turn's prompt; further messages that arrive
     // mid-turn are pulled by the loop's own drainInput at each turn boundary.
     const prompt = drained.map((m) => contentToString(m.content)).join("\n\n");
     // persistentRetry: an unattended turn has no user waiting on it — surviving a capacity dip (429/529 waited
     // out, Retry-After honored) beats failing fast and losing the reaction.
-    await runChat(
+    const result = await runChat(
       { ...deps, persistentRetry: true },
       principal,
       headers,
@@ -46,7 +48,9 @@ export async function runTeammateTurn(
         ...(permit ? { permit } : {}),
       },
     );
+    return result.usage;
   } catch (err) {
     console.error(`[agent] teammate turn failed for ${sessionId}:`, err instanceof Error ? err.message : err);
+    return undefined;
   }
 }
