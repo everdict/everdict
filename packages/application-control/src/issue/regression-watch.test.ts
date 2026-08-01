@@ -7,6 +7,17 @@ import type { ScorecardListFilter, ScorecardStore } from "../ports/scorecard-sto
 import { IssueService } from "./issue-service.js";
 import { regressionWatch } from "./regression-watch.js";
 
+// Teams are a peer concern: an issue is numbered by its team, and the tests only need that to be deterministic.
+const teamAllocator = (() => {
+  let n = 0;
+  return {
+    async allocateForIssue() {
+      n += 1;
+      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
+    },
+  };
+})();
+
 const RESOLVED_AT = "2026-07-01T00:00:00.000Z";
 const NOW = "2026-07-31T00:00:00.000Z";
 
@@ -21,6 +32,9 @@ class FakeIssueStore implements IssueStore {
   async get(tenant: string, id: string): Promise<IssueRecord | undefined> {
     const record = this.byId.get(id);
     return record && record.tenant === tenant ? record : undefined;
+  }
+  async getByIdentifier(tenant: string, identifier: string): Promise<IssueRecord | undefined> {
+    return [...this.byId.values()].find((r) => r.tenant === tenant && r.identifier === identifier);
   }
   async getByGithub(): Promise<IssueRecord | undefined> {
     return undefined;
@@ -106,9 +120,7 @@ function scorecard(id: string, over: { passes: number; createdAt: string; harnes
         trace: [],
         snapshot: { kind: "repo" as const, diff: "", changedFiles: [], headSha: "abc" },
         // caseVerdict reads `pass` (the ground-truth verdict), not the raw value.
-        scores: [
-          { graderId: "tests", metric: "tests_pass", value: i < over.passes ? 1 : 0, pass: i < over.passes },
-        ],
+        scores: [{ graderId: "tests", metric: "tests_pass", value: i < over.passes ? 1 : 0, pass: i < over.passes }],
       })),
     },
     createdAt: over.createdAt,
@@ -138,7 +150,7 @@ describe("regressionWatch", () => {
   function watcher() {
     return regressionWatch({
       issues,
-      issueService: new IssueService({ store: issues, scorecards, now: () => NOW }),
+      issueService: new IssueService({ store: issues, scorecards, teams: teamAllocator, now: () => NOW }),
       scorecards,
       feed,
     });
@@ -148,6 +160,9 @@ describe("regressionWatch", () => {
     const record: IssueRecord = {
       id: "iss-1",
       tenant: "acme",
+      teamId: "team-eng",
+      number: 1,
+      identifier: "ENG-1",
       title: "Agent drops the tool result on retry",
       status: "done",
       labels: [],

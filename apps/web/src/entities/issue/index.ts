@@ -21,5 +21,6 @@ export {
   type IssueStatus,
   type TrackerHistoryEntry,
 } from './model/schema'
+export { issueHref } from './lib/href'
 export { issueStatusTone, type IssueStatusTone } from './model/status'
 export { IssueStatusBadge, IssueStatusIcon, issueStatusIcon } from './ui/issue-status-badge'

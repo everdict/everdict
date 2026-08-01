@@ -20,6 +20,17 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { type McpDeps, buildMcpServer } from "../../mcp.js";
 
+// An issue is numbered by its owning team; these transport tests only need that to be deterministic.
+const teamAllocator = (() => {
+  let n = 0;
+  return {
+    async allocateForIssue() {
+      n += 1;
+      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
+    },
+  };
+})();
+
 // BFF↔MCP parity for the eval tracker — the surface an agent triages its own regressions through. The agent
 // attribution bound at initialize rides into the service, so an agent's transitions stamp causedBy (loop guard #1).
 
@@ -47,13 +58,12 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
     },
   });
   const writers: GithubRepoWriterFactory = { for: () => idleWriter };
-  const issueService = new IssueService({ store: issueStore, scorecards: new InMemoryScorecardStore(), events });
+  const issueService = new IssueService({ teams: teamAllocator, store: issueStore, scorecards: new InMemoryScorecardStore(), events });
   return {
     deps: {
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
       issueService,
-      issueSync: new GithubIssueSync({
-        store: issueStore,
+      issueSync: new GithubIssueSync({ teams: teamAllocator, store: issueStore,
         issues: issueService,
         tokens: { tokenForRepository: async () => ({ token: "tok" }) },
         writers,

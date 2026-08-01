@@ -62,7 +62,13 @@ export function initiativeReadiness(
     openIssues += rollup.open;
     for (const issue of issues) {
       if (!isOpenIssueStatus(issue.status)) continue;
-      blockers.push({ projectId: project.id, issueId: issue.id, title: issue.title, status: issue.status });
+      blockers.push({
+        projectId: project.id,
+        issueId: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        status: issue.status,
+      });
     }
   }
   // Regressions first, then the rest: the readiness card should lead with what broke, not with the backlog.

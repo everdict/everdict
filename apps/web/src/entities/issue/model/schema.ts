@@ -71,6 +71,8 @@ export const trackerHistoryEventSchema = z.enum([
   'github_push_failed',
   'completed',
   'cancelled',
+  'member_added',
+  'member_removed',
 ])
 
 export const trackerHistoryEntrySchema = z.object({
@@ -115,6 +117,10 @@ export const issueGithubSchema = z.object({
 export const issueSchema = z.object({
   id: z.string(),
   tenant: z.string(),
+  // 이슈는 정확히 한 팀에 속하고, 그 팀이 찍은 이름(`ENG-12`)을 들고 다닌다.
+  teamId: z.string(),
+  number: z.number(),
+  identifier: z.string(),
   title: z.string(),
   description: z.string().optional(),
   status: issueStatusSchema,

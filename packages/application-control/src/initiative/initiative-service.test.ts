@@ -1,10 +1,10 @@
 import type { InitiativeRecord, IssueRecord, ProjectRecord } from "@everdict/contracts";
-import type { OutboxEvent } from "../ports/run-store.js";
 import { ConflictError } from "@everdict/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { InitiativeListFilter, InitiativeStore } from "../ports/initiative-store.js";
 import type { IssueListFilter, IssueStore } from "../ports/issue-store.js";
 import type { ProjectListFilter, ProjectStore } from "../ports/project-store.js";
+import type { OutboxEvent } from "../ports/run-store.js";
 import { InitiativeService } from "./initiative-service.js";
 
 const NOW = "2026-07-31T00:00:00.000Z";
@@ -40,6 +40,9 @@ class FakeStore<T extends { id: string; tenant: string }> {
 }
 
 class FakeIssueStore extends FakeStore<IssueRecord> implements IssueStore {
+  async getByIdentifier(tenant: string, identifier: string): Promise<IssueRecord | undefined> {
+    return [...this.byId.values()].find((r) => r.tenant === tenant && r.identifier === identifier);
+  }
   async getByGithub(): Promise<IssueRecord | undefined> {
     return undefined;
   }
@@ -67,6 +70,9 @@ function issue(id: string, projectId: string, status: IssueRecord["status"]): Is
   return {
     id,
     tenant: "acme",
+    teamId: "team-eng",
+    number: 1,
+    identifier: "ENG-1",
     title: `issue ${id}`,
     status,
     projectId,

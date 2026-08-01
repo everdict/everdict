@@ -10,6 +10,9 @@ function newIssue(overrides: Partial<Parameters<typeof Issue.newIssue>[0]> = {})
   return Issue.newIssue({
     id: "iss-1",
     tenant: "acme",
+    teamId: "team-eng",
+    number: 1,
+    identifier: "ENG-1",
     title: "Agent drops the tool result on retry",
     createdBy: "dana",
     now: NOW,
@@ -59,8 +62,14 @@ describe("Issue — the tracker's unit of intent", () => {
         kind: "issue.status_changed",
         subject: { type: "issue", id: "iss-1" },
         actor: "dana",
-        payload: { from: "backlog", to: "in_progress", cause: "manual" },
-        message: "Issue backlog → in_progress — Agent drops the tool result on retry",
+        payload: {
+          from: "backlog",
+          to: "in_progress",
+          cause: "manual",
+          teamId: "team-eng",
+          identifier: "ENG-1",
+        },
+        message: "ENG-1 backlog → in_progress — Agent drops the tool result on retry",
       },
     ]);
   });

@@ -103,7 +103,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         "One issue in full — its links, how it was resolved (including the scorecard that proved it), its " +
         "GitHub copy, and the durable history of every move. Read this before re-investigating something the " +
         "team already closed.",
-      inputSchema: { id: z.string() },
+      inputSchema: { id: z.string().describe("issue id, or the identifier a member would name it by (ENG-12)") },
     },
     (a) => run(principal, "issues:read", async () => ok(await issues.get(ws, a.id))),
   );

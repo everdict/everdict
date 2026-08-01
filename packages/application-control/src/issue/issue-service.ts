@@ -8,6 +8,7 @@ import {
   type IssueStatusCause,
   NotFoundError,
   type ScorecardRecord,
+  parseIssueIdentifier,
 } from "@everdict/contracts";
 import { Issue, type IssueEditInput, type IssueTransition, type NewIssueLinkInput } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -33,6 +34,9 @@ export interface IssueActor {
 export interface CreateIssueInput {
   tenant: string;
   createdBy: string;
+  // Absent = the workspace's default team. Teams exist so an issue has an owner; making the caller name one
+  // every time would just push that decision onto every transport for no gain.
+  teamId?: string;
   title: string;
   description?: string;
   status?: IssueStatus;
@@ -55,8 +59,21 @@ export interface IssueGithubPusher {
   pushStatus(record: IssueRecord, actor: IssueActor): Promise<void>;
 }
 
+// Composed the same way as the GitHub pusher: this service owns the issue transition, the collaborator owns
+// team resolution and the identifier sequence. TeamService satisfies it structurally, so the two stay peers
+// instead of one reaching into the other.
+export interface IssueTeamAllocator {
+  allocateForIssue(
+    tenant: string,
+    teamId: string | undefined,
+    by: string,
+  ): Promise<{ team: { id: string }; grant: { number: number; identifier: string } }>;
+}
+
 export interface IssueServiceDeps {
   store: IssueStore;
+  // Required: an issue cannot exist without an owning team, so there is no degraded mode to fall back to.
+  teams: IssueTeamAllocator;
   // Evidence validation only — `resolution.scorecardId` must exist in this workspace. Plain links stay
   // unvalidated pointers (platform-event subject semantics).
   scorecards?: ScorecardStore;
@@ -83,9 +100,13 @@ export class IssueService {
   }
 
   async create(input: CreateIssueInput): Promise<IssueRecord> {
+    const { team, grant } = await this.deps.teams.allocateForIssue(input.tenant, input.teamId, input.createdBy);
     const record = Issue.newIssue({
       id: this.newId(),
       tenant: input.tenant,
+      teamId: team.id,
+      number: grant.number,
+      identifier: grant.identifier,
       title: input.title,
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
@@ -117,9 +138,19 @@ export class IssueService {
     return this.deps.store.list(tenant, filter);
   }
 
-  async get(tenant: string, id: string): Promise<IssueRecord> {
-    const record = await this.deps.store.get(tenant, id);
-    if (!record) throw new NotFoundError("NOT_FOUND", { id }, `issue '${id}' not found.`);
+  // An issue is addressed by its id OR by the identifier its team minted (`ENG-12`) — the name that appears in
+  // URLs, pull requests and chat. Resolving here rather than per transport means every caller (HTTP, MCP, the
+  // regression watch) accepts both without a second lookup path, and every mutation below routes through it.
+  // An identifier-shaped ref is read off the identifier index FIRST and falls back to the id, so the two
+  // namespaces cannot shadow each other even where an id happens to read like a name; a ref that cannot be an
+  // identifier costs exactly one lookup, as before.
+  async get(tenant: string, ref: string): Promise<IssueRecord> {
+    const identifier = parseIssueIdentifier(ref);
+    const record =
+      identifier !== undefined
+        ? ((await this.deps.store.getByIdentifier(tenant, identifier)) ?? (await this.deps.store.get(tenant, ref)))
+        : await this.deps.store.get(tenant, ref);
+    if (!record) throw new NotFoundError("NOT_FOUND", { id: ref }, `issue '${ref}' not found.`);
     return record;
   }
 
@@ -208,15 +239,15 @@ export class IssueService {
     return { scorecards: ordered, linked };
   }
 
-  async remove(tenant: string, id: string, actor: { subject: string; isAdmin: boolean }): Promise<void> {
-    const record = await this.get(tenant, id);
+  async remove(tenant: string, ref: string, actor: { subject: string; isAdmin: boolean }): Promise<void> {
+    const record = await this.get(tenant, ref);
     if (record.createdBy !== actor.subject && !actor.isAdmin)
       throw new ForbiddenError(
         "FORBIDDEN",
-        { id, action: "issues:delete" },
+        { id: record.id, action: "issues:delete" },
         "You are not allowed to delete this issue (creator or workspace admin only).",
       );
-    await this.deps.store.remove(tenant, id);
+    await this.deps.store.remove(tenant, record.id); // the resolved id — the ref may have been an identifier
   }
 
   private async persistNew(record: IssueRecord, agent: IssueAgentAttribution | undefined): Promise<IssueRecord> {

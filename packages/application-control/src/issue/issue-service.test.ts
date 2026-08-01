@@ -6,6 +6,17 @@ import type { OutboxEvent } from "../ports/run-store.js";
 import type { ScorecardListFilter, ScorecardStore } from "../ports/scorecard-store.js";
 import { IssueService } from "./issue-service.js";
 
+// Teams are a peer concern: an issue is numbered by its team, and the tests only need that to be deterministic.
+const teamAllocator = (() => {
+  let n = 0;
+  return {
+    async allocateForIssue() {
+      n += 1;
+      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
+    },
+  };
+})();
+
 const NOW = "2026-07-31T00:00:00.000Z";
 
 // A minimal in-memory issue store — the db package owns the real one; here we only need the port's behaviour
@@ -21,6 +32,9 @@ class FakeIssueStore implements IssueStore {
   async get(tenant: string, id: string): Promise<IssueRecord | undefined> {
     const record = this.byId.get(id);
     return record && record.tenant === tenant ? record : undefined;
+  }
+  async getByIdentifier(tenant: string, identifier: string): Promise<IssueRecord | undefined> {
+    return [...this.byId.values()].find((r) => r.tenant === tenant && r.identifier === identifier);
   }
   async getByGithub(): Promise<IssueRecord | undefined> {
     return undefined;
@@ -93,6 +107,7 @@ describe("IssueService", () => {
 
   function service(deps: { scorecards?: ScorecardStore } = {}) {
     return new IssueService({
+      teams: teamAllocator,
       store,
       ...(deps.scorecards !== undefined ? { scorecards: deps.scorecards } : {}),
       newId: () => `id-${++ids}`,
@@ -120,6 +135,30 @@ describe("IssueService", () => {
       agent: { agentId: "triage-bot", conversationId: "c-1" },
     });
     expect(store.events[0]?.causedBy).toBe("agent:triage-bot:c-1");
+  });
+
+  it("addresses an issue by the identifier its team minted, case-insensitively", async () => {
+    const svc = service();
+    const record = await svc.create({ tenant: "acme", createdBy: "dana", title: "t" });
+
+    expect((await svc.get("acme", record.identifier)).id).toBe(record.id);
+    expect((await svc.get("acme", record.identifier.toLowerCase())).id).toBe(record.id); // a pasted lowercase URL
+    expect((await svc.get("acme", record.id)).id).toBe(record.id); // the id still addresses it — old links keep working
+
+    // A mutation arriving by identifier writes against the RESOLVED id, so the transition lands on the row.
+    const moved = await svc.setStatus("acme", record.identifier, { status: "in_progress" }, actor);
+    expect(moved.status).toBe("in_progress");
+    expect(store.byId.get(record.id)?.status).toBe("in_progress");
+
+    // Another workspace's identifier reads as nonexistent — the same no-existence-leak rule the id path has.
+    await expect(svc.get("globex", record.identifier)).rejects.toThrow(/not found/);
+  });
+
+  it("deletes the issue the identifier resolves to, not the ref it was given", async () => {
+    const svc = service();
+    const record = await svc.create({ tenant: "acme", createdBy: "dana", title: "t" });
+    await svc.remove("acme", record.identifier, { subject: "dana", isAdmin: false });
+    expect(store.byId.has(record.id)).toBe(false);
   });
 
   it("setStatus routes to the transition that fits the current state — move, resolve, then reopen", async () => {
@@ -223,6 +262,9 @@ describe("IssueService", () => {
     const record: IssueRecord = {
       id: "iss-1",
       tenant: "acme",
+      teamId: "team-eng",
+      number: 1,
+      identifier: "ENG-1",
       title: "t",
       status: "todo",
       labels: [],
@@ -242,6 +284,7 @@ describe("IssueService", () => {
     };
     await store.create(record);
     const svc = new IssueService({
+      teams: teamAllocator,
       store,
       github: {
         pushStatus: async (r) => {

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { getFormatter } from 'next-intl/server'
 
-import type { Issue } from '@/entities/issue'
+import { issueHref, type Issue } from '@/entities/issue'
 import { Card } from '@/shared/ui/card'
 
 // 회귀 경보 — 닫아둔 이슈의 평가가 무너진 것들. 아무도 안 보고 있는 이슈라서 홈이 대신 들이민다.
@@ -19,7 +19,7 @@ export async function RegressedIssues({
       {issues.map((issue) => (
         <Link
           key={issue.id}
-          href={`/${workspace}/issues/${issue.id}`}
+          href={issueHref(workspace, issue.identifier)}
           className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-elevated"
         >
           <span className="size-1.5 shrink-0 rounded-full bg-destructive" />

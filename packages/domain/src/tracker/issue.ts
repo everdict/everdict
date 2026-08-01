@@ -31,6 +31,12 @@ export interface NewIssueLinkInput {
 export interface NewIssueInput {
   id: string;
   tenant: string;
+  // The owning team plus the identity it minted. The caller (IssueService) resolves the team — explicit or the
+  // workspace default — and allocates the number from that team's counter, so the aggregate only records what
+  // was decided rather than reaching for a store.
+  teamId: string;
+  number: number;
+  identifier: string;
   title: string;
   description?: string;
   // Import maps a remote state onto our vocabulary (open → todo, closed → done); a member-filed issue starts in
@@ -94,6 +100,9 @@ export class Issue {
     return {
       id: input.id,
       tenant: input.tenant,
+      teamId: input.teamId,
+      number: input.number,
+      identifier: input.identifier,
       title: input.title,
       ...(input.description !== undefined ? { description: input.description } : {}),
       status,
@@ -137,12 +146,14 @@ export class Issue {
         payload: {
           status: record.status,
           source: record.github !== undefined ? "github" : "manual",
+          teamId: record.teamId,
+          identifier: record.identifier,
           ...(record.projectId !== undefined ? { projectId: record.projectId } : {}),
           ...(record.github !== undefined
             ? { repository: record.github.repository, number: record.github.number }
             : {}),
         },
-        message: `Issue filed — ${record.title}`,
+        message: `${record.identifier} filed — ${record.title}`,
       },
     ];
   }
@@ -524,10 +535,12 @@ export class Issue {
             from,
             to,
             cause,
+            teamId: this.record.teamId,
+            identifier: this.record.identifier,
             ...(this.record.projectId !== undefined ? { projectId: this.record.projectId } : {}),
             ...(options.scorecardId !== undefined ? { scorecardId: options.scorecardId } : {}),
           },
-          message: `Issue ${from} → ${to} — ${this.record.title}`,
+          message: `${this.record.identifier} ${from} → ${to} — ${this.record.title}`,
         },
       ],
     };

@@ -7,6 +7,9 @@ import { InMemoryIssueStore, PgIssueStore } from "./issue-store.js";
 const issue = (over: Partial<IssueRecord>): IssueRecord => ({
   id: "iss-1",
   tenant: "acme",
+  teamId: "team-eng",
+  number: 1,
+  identifier: "ENG-1",
   title: "Agent drops the tool result on retry",
   status: "todo",
   labels: [],
@@ -72,6 +75,15 @@ describe("InMemoryIssueStore", () => {
     expect((await store.list("acme", { syncPull: true })).map((r) => r.id)).toEqual(["a"]);
   });
 
+  it("resolves the addressable identifier within the tenant only", async () => {
+    const store = new InMemoryIssueStore();
+    await store.create(issue({ id: "a", identifier: "ENG-7" }));
+    await store.create(issue({ id: "other", tenant: "globex", identifier: "ENG-7" }));
+    expect((await store.getByIdentifier("acme", "ENG-7"))?.id).toBe("a");
+    expect((await store.getByIdentifier("globex", "ENG-7"))?.id).toBe("other"); // same name, different workspace
+    expect(await store.getByIdentifier("acme", "ENG-8")).toBeUndefined();
+  });
+
   it("persists the outbox facts alongside the write", async () => {
     const store = new InMemoryIssueStore();
     await store.create(issue({ id: "a" }), [event("ev-1")]);
@@ -135,11 +147,21 @@ describe("PgIssueStore", () => {
     expect(queries[0]?.params).toEqual(["acme", "acme/agent", 42, null]);
   });
 
+  it("looks the identifier up on the (tenant, identifier) unique index", async () => {
+    const { client, queries } = fakeClient();
+    await new PgIssueStore(client).getByIdentifier("acme", "ENG-7");
+    expect(queries[0]?.text).toContain("WHERE tenant=$1 AND identifier=$2");
+    expect(queries[0]?.params).toEqual(["acme", "ENG-7"]);
+  });
+
   it("maps rows back through the record schema (jsonb columns, null → absent)", async () => {
     const { client } = fakeClient([
       {
         id: "a",
         tenant: "acme",
+        team_id: "team-eng",
+        number: 12,
+        identifier: "ENG-12",
         title: "t",
         description: null,
         status: "regressed",

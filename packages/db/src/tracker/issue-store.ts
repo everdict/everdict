@@ -10,6 +10,8 @@ import { type TrackerRow, iso, trackerHistory } from "./row.js";
 function matchesFilter(record: IssueRecord, filter: IssueListFilter | undefined): boolean {
   if (!filter) return true;
   if (filter.status !== undefined && record.status !== filter.status) return false;
+  if (filter.teamId !== undefined && record.teamId !== filter.teamId) return false;
+  if (filter.teamIds !== undefined && !filter.teamIds.includes(record.teamId)) return false;
   if (filter.projectId !== undefined && record.projectId !== filter.projectId) return false;
   if (filter.assignee !== undefined && record.assignee !== filter.assignee) return false;
   if (filter.githubRepository !== undefined && record.github?.repository !== filter.githubRepository) return false;
@@ -33,6 +35,10 @@ export class InMemoryIssueStore implements IssueStore {
   async get(tenant: string, id: string): Promise<IssueRecord | undefined> {
     const record = this.byId.get(id);
     return record && record.tenant === tenant ? record : undefined; // another workspace's row reads as nonexistent
+  }
+
+  async getByIdentifier(tenant: string, identifier: string): Promise<IssueRecord | undefined> {
+    return [...this.byId.values()].find((record) => record.tenant === tenant && record.identifier === identifier);
   }
 
   async getByGithub(
@@ -83,6 +89,9 @@ export class InMemoryIssueStore implements IssueStore {
 }
 
 interface IssueRow extends TrackerRow {
+  team_id: string;
+  number: number;
+  identifier: string;
   title: string;
   description: string | null;
   status: string;
@@ -96,14 +105,17 @@ interface IssueRow extends TrackerRow {
 }
 
 const ISSUE_COLUMNS =
-  "(id, tenant, title, description, status, project_id, assignee, labels, links, resolution, github, history, created_by, origin, created_at, updated_at)";
+  "(id, tenant, team_id, number, identifier, title, description, status, project_id, assignee, labels, links, resolution, github, history, created_by, origin, created_at, updated_at)";
 const ISSUE_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13,$14::jsonb,$15::timestamptz,$16::timestamptz)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17::jsonb,$18::timestamptz,$19::timestamptz)";
 
 function insertParams(record: IssueRecord): unknown[] {
   return [
     record.id,
     record.tenant,
+    record.teamId,
+    record.number,
+    record.identifier,
     record.title,
     record.description ?? null,
     record.status,
@@ -125,6 +137,9 @@ function rowToRecord(row: IssueRow): IssueRecord {
   return IssueRecordSchema.parse({
     id: row.id,
     tenant: row.tenant,
+    teamId: row.team_id,
+    number: row.number,
+    identifier: row.identifier,
     title: row.title,
     ...(row.description !== null ? { description: row.description } : {}),
     status: row.status,
@@ -169,6 +184,16 @@ export class PgIssueStore implements IssueStore {
     return rows[0] ? rowToRecord(rows[0]) : undefined;
   }
 
+  // Served by the (tenant, identifier) unique index from migration 0105 — the same index that makes the
+  // identifier a safe URL key in the first place.
+  async getByIdentifier(tenant: string, identifier: string): Promise<IssueRecord | undefined> {
+    const { rows } = await this.client.query<IssueRow>(
+      "SELECT * FROM everdict_issues WHERE tenant=$1 AND identifier=$2",
+      [tenant, identifier],
+    );
+    return rows[0] ? rowToRecord(rows[0]) : undefined;
+  }
+
   async getByGithub(
     tenant: string,
     repository: string,
@@ -192,6 +217,18 @@ export class PgIssueStore implements IssueStore {
     if (filter?.status !== undefined) {
       conds.push(`status = $${i++}`);
       params.push(filter.status);
+    }
+    if (filter?.teamId !== undefined) {
+      conds.push(`team_id = $${i++}`);
+      params.push(filter.teamId);
+    }
+    if (filter?.teamIds !== undefined) {
+      // Empty roster = no rows, expressed as a false predicate rather than an `IN ()` the parser rejects.
+      if (filter.teamIds.length === 0) conds.push("false");
+      else {
+        conds.push(`team_id = ANY($${i++}::text[])`);
+        params.push(filter.teamIds);
+      }
     }
     if (filter?.projectId !== undefined) {
       conds.push(`project_id = $${i++}`);

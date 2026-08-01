@@ -8,6 +8,9 @@ function issue(id: string, status: IssueStatus, scorecardId?: string): IssueReco
   return {
     id,
     tenant: "acme",
+    teamId: "team-eng",
+    number: 1,
+    identifier: `ENG-${id}`,
     title: `issue ${id}`,
     status,
     labels: [],
@@ -72,7 +75,9 @@ describe("initiativeReadiness", () => {
     );
     expect(readiness.ready).toBe(false);
     expect(readiness.openIssues).toBe(1);
-    expect(readiness.blockers).toEqual([{ projectId: "p1", issueId: "a", title: "issue a", status: "regressed" }]);
+    expect(readiness.blockers).toEqual([
+      { projectId: "p1", issueId: "a", identifier: "ENG-a", title: "issue a", status: "regressed" },
+    ]);
   });
 
   it("ignores a cancelled project's work — it is off the release, not pending", () => {

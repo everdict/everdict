@@ -9,8 +9,15 @@ import {
 } from '@/features/import-github-issues'
 import { CreateIssueButton } from '@/features/manage-issue'
 import { githubAppViewSchema } from '@/entities/github-app'
-import { ISSUE_STATUSES, issuesSchema, IssueStatusIcon, type Issue } from '@/entities/issue'
+import {
+  ISSUE_STATUSES,
+  issueHref,
+  issuesSchema,
+  IssueStatusIcon,
+  type Issue,
+} from '@/entities/issue'
 import { projectsSchema, type Project } from '@/entities/project'
+import { teamsWithSummarySchema, type TeamWithSummary } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -30,10 +37,10 @@ export default async function IssuesPage({
   searchParams,
 }: {
   params: Promise<{ workspace: string }>
-  searchParams: Promise<{ status?: string; project?: string }>
+  searchParams: Promise<{ status?: string; project?: string; team?: string }>
 }) {
   const { workspace } = await params
-  const { status, project } = await searchParams
+  const { status, project, team } = await searchParams
   const t = await getTranslations('issuesPage')
   const tracker = await getTranslations('tracker')
   const timeZone = await getTimeZone()
@@ -45,12 +52,19 @@ export default async function IssuesPage({
     issues = issuesSchema.parse(
       await controlPlane.listIssues(ctx, {
         ...(status ? { status } : {}),
+        ...(team ? { team } : {}),
         ...(project ? { project } : {}),
       })
     )
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
+
+  // 팀은 필터 칩과 행의 키 배지 양쪽에 쓰인다. 목록이 팀 조회 실패로 비어서는 안 되므로 실패는 빈 목록으로 흡수한다.
+  const teams: TeamWithSummary[] = await controlPlane
+    .listTeams(ctx)
+    .then((r) => teamsWithSummarySchema.parse(r))
+    .catch(() => [])
 
   // Projects power both the filter and the per-row project name; a failure here must not blank the list.
   const projects: Project[] = await controlPlane
@@ -99,12 +113,14 @@ export default async function IssuesPage({
       })
   }
 
-  function filterHref(next: { status?: string; project?: string }): string {
+  function filterHref(next: { status?: string; project?: string; team?: string }): string {
     const q = new URLSearchParams()
     const nextStatus = 'status' in next ? next.status : status
     const nextProject = 'project' in next ? next.project : project
+    const nextTeam = 'team' in next ? next.team : team
     if (nextStatus) q.set('status', nextStatus)
     if (nextProject) q.set('project', nextProject)
+    if (nextTeam) q.set('team', nextTeam)
     const qs = q.toString()
     return `/${workspace}/issues${qs ? `?${qs}` : ''}`
   }
@@ -146,6 +162,10 @@ export default async function IssuesPage({
               <CreateIssueButton
                 workspace={workspace}
                 projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+                teams={teams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
+                {...(teams.find((x) => x.isDefault)?.id !== undefined
+                  ? { defaultTeamId: teams.find((x) => x.isDefault)?.id }
+                  : {})}
               />
             </div>
           ) : null
@@ -161,6 +181,21 @@ export default async function IssuesPage({
             {tracker(`issueStatus.${s}`)}
           </Link>
         ))}
+        {/* 팀 칩은 워크스페이스에 팀이 둘 이상일 때만 — 하나뿐이면 모든 이슈가 그 팀이라 필터가 아무것도 안 한다. */}
+        {teams.length > 1 && (
+          <>
+            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+            {teams.map((x) => (
+              <Link
+                key={x.id}
+                href={filterHref({ team: team === x.id ? undefined : x.id })}
+                className={chip(team === x.id)}
+              >
+                <span className="font-mono">{x.key}</span>
+              </Link>
+            ))}
+          </>
+        )}
         {projects.length > 0 && (
           <span className="ml-2 flex flex-wrap items-center gap-1.5 border-l border-border pl-3">
             <Link href={filterHref({ project: undefined })} className={chip(!project)}>
@@ -192,7 +227,7 @@ export default async function IssuesPage({
           {issues.map((issue) => (
             <Link
               key={issue.id}
-              href={`/${workspace}/issues/${encodeURIComponent(issue.id)}`}
+              href={issueHref(workspace, issue.identifier)}
               className={cn(
                 'group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated',
                 // A regression is the one row that has to catch the eye across the whole list.
@@ -201,7 +236,15 @@ export default async function IssuesPage({
             >
               <IssueStatusIcon status={issue.status} />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-[510] text-foreground">{issue.title}</p>
+                <p className="flex min-w-0 items-baseline gap-2">
+                  {/* 사람이 부르는 이름 — `ENG-12`. 팀이 찍어 이슈에 저장된 값이라 팀을 다시 읽지 않는다. */}
+                  <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">
+                    {issue.identifier}
+                  </span>
+                  <span className="truncate text-[13px] font-[510] text-foreground">
+                    {issue.title}
+                  </span>
+                </p>
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground">
                   {issue.projectId && (
                     <span className="truncate">

@@ -53,8 +53,9 @@ export const issueDocs: Record<
   get: {
     summary: "Get an issue",
     description:
-      "One issue with its links, resolution, GitHub copy and durable history. Another workspace's id returns " +
-      "404 (no existence leak). Requires issues:read.",
+      "One issue with its links, resolution, GitHub copy and durable history. `:id` is the issue id OR the " +
+      "identifier its team minted (`ENG-12`, case-insensitive) — the same name the web URL uses, so a pasted " +
+      "link resolves. Another workspace's id returns 404 (no existence leak). Requires issues:read.",
     tags: ["issue"],
     response: {
       200: { description: "The issue", ...toJsonSchema(IssueRecordSchema) },

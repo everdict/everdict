@@ -35,6 +35,7 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
         await deps.issueService.create({
           tenant: principal.workspace,
           createdBy: principal.subject,
+          ...(body.teamId !== undefined ? { teamId: body.teamId } : {}),
           title: body.title,
           ...(body.description !== undefined ? { description: body.description } : {}),
           ...(body.status !== undefined ? { status: body.status } : {}),
@@ -62,6 +63,10 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
     const query = z
       .object({
         status: IssueStatusSchema.optional(),
+        // One team, or every team the caller belongs to. `mine` resolves through the roster rather than
+        // trusting a client-supplied id list.
+        team: z.string().min(1).optional(),
+        mine: z.enum(["true", "false"]).optional(),
         project: z.string().min(1).optional(),
         assignee: z.string().min(1).optional(),
         // "Which issues watch this harness" — the capability detail pages' reverse lookup.
@@ -71,12 +76,19 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
       })
       .safeParse(req.query);
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
-    const { status, project, assignee, linkType, linkId, limit } = query.data;
+    const { status, team, mine, project, assignee, linkType, linkId, limit } = query.data;
     if ((linkType === undefined) !== (linkId === undefined))
       return reply.code(400).send({ code: "BAD_REQUEST", message: "linkType and linkId must be given together." });
+    // "My teams" is resolved here, not in the store: the roster lookup belongs to the team service, and the
+    // store stays a plain id filter. An empty roster narrows to nothing rather than silently widening to all.
+    const myTeamIds = mine === "true" && deps.teamService
+      ? await deps.teamService.teamIdsFor(principal.workspace, principal.subject)
+      : undefined;
     return reply.send(
       await deps.issueService.list(principal.workspace, {
         ...(status !== undefined ? { status } : {}),
+        ...(team !== undefined ? { teamId: team } : {}),
+        ...(myTeamIds !== undefined ? { teamIds: myTeamIds } : {}),
         ...(project !== undefined ? { projectId: project } : {}),
         ...(assignee !== undefined ? { assignee } : {}),
         ...(linkType !== undefined && linkId !== undefined ? { link: { type: linkType, id: linkId } } : {}),

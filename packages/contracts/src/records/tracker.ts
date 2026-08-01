@@ -5,7 +5,8 @@ import { z } from "zod";
 // intent — the problem under evaluation — and it gathers the capabilities that verify it, so a team discusses at
 // the issue level: how it was resolved, which scorecard closed it, and why it came back. Projects group issues
 // under a target date; an Initiative is the deployment umbrella whose readiness gates a release.
-// Linear's Teams layer is deliberately omitted: a workspace already IS the team boundary.
+// Teams (records/team.ts) group ISSUES inside a workspace and name them (`ENG-12`); projects and initiatives stay
+// workspace-level on purpose, so a release several teams contribute to is still one readiness gate.
 
 // --- Issue status (Linear's six + one) ---
 // `regressed` is our addition and the reason the tracker exists: a done issue whose evaluation later degraded is
@@ -60,6 +61,11 @@ export const TRACKER_HISTORY_EVENTS = [
   "github_push_failed",
   "completed",
   "cancelled",
+  // Team roster changes (records/team.ts) — who could file under this prefix, and when. The durable half of the
+  // matching `team.member_*` facts, for the same reason every other tracker history entry exists: the event log
+  // is swept, and "who was on this team when that issue was filed" is a question asked long after.
+  "member_added",
+  "member_removed",
 ] as const;
 export const TrackerHistoryEventSchema = z.enum(TRACKER_HISTORY_EVENTS);
 export type TrackerHistoryEvent = z.infer<typeof TrackerHistoryEventSchema>;
@@ -145,6 +151,14 @@ export type IssueGithub = z.infer<typeof IssueGithubSchema>;
 export const IssueRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
+  // Every issue belongs to exactly one team — required, because "which team owns this" has no sensible empty
+  // answer and an optional owner would grow an unowned bucket nobody triages. A caller that names no team gets
+  // the workspace's default team, so the requirement costs the caller nothing.
+  teamId: z.string(),
+  // The team-scoped sequence and its rendered form (`ENG-12`). Stored rather than derived: the team key is
+  // immutable, so the identifier is stable for the life of the issue and readable without loading the team.
+  number: z.number().int().positive(),
+  identifier: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),
   status: IssueStatusSchema,
@@ -234,6 +248,9 @@ export type ProjectRollup = z.infer<typeof ProjectRollupSchema>;
 export const InitiativeBlockerSchema = z.object({
   projectId: z.string().optional(),
   issueId: z.string(),
+  // The blocker's human name (`ENG-12`) — carried so a readiness card can both NAME the issue and link to it by
+  // the identifier the rest of the product addresses issues with, without re-reading the issue.
+  identifier: z.string(),
   title: z.string(),
   status: IssueStatusSchema,
 });

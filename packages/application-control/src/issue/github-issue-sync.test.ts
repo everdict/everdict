@@ -11,6 +11,17 @@ import type { OutboxEvent } from "../ports/run-store.js";
 import { GithubIssueSync } from "./github-issue-sync.js";
 import { IssueService } from "./issue-service.js";
 
+// Teams are a peer concern: an issue is numbered by its team, and the tests only need that to be deterministic.
+const teamAllocator = (() => {
+  let n = 0;
+  return {
+    async allocateForIssue() {
+      n += 1;
+      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
+    },
+  };
+})();
+
 const NOW = "2026-07-31T00:00:00.000Z";
 const actor = { subject: "dana" };
 
@@ -25,6 +36,9 @@ class FakeIssueStore implements IssueStore {
   async get(tenant: string, id: string): Promise<IssueRecord | undefined> {
     const record = this.byId.get(id);
     return record && record.tenant === tenant ? record : undefined;
+  }
+  async getByIdentifier(tenant: string, identifier: string): Promise<IssueRecord | undefined> {
+    return [...this.byId.values()].find((r) => r.tenant === tenant && r.identifier === identifier);
   }
   async getByGithub(
     tenant: string,
@@ -139,10 +153,11 @@ describe("GithubIssueSync — import", () => {
   let remote: RemoteState;
 
   function build() {
-    const issues = new IssueService({ store, now: () => NOW });
+    const issues = new IssueService({ store, teams: teamAllocator, now: () => NOW });
     const sync = new GithubIssueSync({
       store,
       issues,
+      teams: teamAllocator,
       tokens: { tokenForRepository: async () => ({ token: "tok" }) },
       writers: fakeWriters(remote),
       now: () => NOW,
@@ -213,10 +228,11 @@ describe("GithubIssueSync — pull", () => {
   let remote: RemoteState;
 
   function build() {
-    const issues = new IssueService({ store, now: () => NOW });
+    const issues = new IssueService({ store, teams: teamAllocator, now: () => NOW });
     const sync = new GithubIssueSync({
       store,
       issues,
+      teams: teamAllocator,
       tokens: { tokenForRepository: async () => ({ token: "tok" }) },
       writers: fakeWriters(remote),
       now: () => NOW,
@@ -302,10 +318,11 @@ describe("GithubIssueSync — push", () => {
   let remote: RemoteState;
 
   function build() {
-    const issues = new IssueService({ store, now: () => NOW });
+    const issues = new IssueService({ store, teams: teamAllocator, now: () => NOW });
     const sync = new GithubIssueSync({
       store,
       issues,
+      teams: teamAllocator,
       tokens: { tokenForRepository: async () => ({ token: "tok" }) },
       writers: fakeWriters(remote),
       webBaseUrl: "https://everdict.example.com",

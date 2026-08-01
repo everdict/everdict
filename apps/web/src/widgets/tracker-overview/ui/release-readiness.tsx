@@ -3,7 +3,7 @@ import { CheckCircle2, Rocket, TriangleAlert } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import type { InitiativeDetail } from '@/entities/initiative'
-import { IssueStatusIcon } from '@/entities/issue'
+import { issueHref, IssueStatusIcon } from '@/entities/issue'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
@@ -84,7 +84,7 @@ export async function ReleaseReadiness({
                 {readiness.blockers.slice(0, BLOCKER_PREVIEW).map((blocker) => (
                   <li key={blocker.issueId}>
                     <Link
-                      href={`/${workspace}/issues/${blocker.issueId}`}
+                      href={issueHref(workspace, blocker.identifier)}
                       className="group flex items-center gap-2 text-[12.5px] text-secondary-foreground hover:text-foreground"
                     >
                       <IssueStatusIcon status={blocker.status} className="size-3.5 shrink-0" />

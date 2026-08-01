@@ -5,7 +5,7 @@ import { getTimeZone, getTranslations } from 'next-intl/server'
 import { CommentsSection } from '@/features/discuss'
 import { InitiativeActions, InitiativeStatusControl } from '@/features/manage-initiative'
 import { initiativeDetailSchema, type InitiativeDetail } from '@/entities/initiative'
-import { IssueStatusIcon } from '@/entities/issue'
+import { issueHref, IssueStatusIcon } from '@/entities/issue'
 import { membersSchema } from '@/entities/member'
 import { isPastDue, ProjectStatusBadge } from '@/entities/project'
 import { can } from '@/shared/auth/can'
@@ -176,7 +176,7 @@ export default async function InitiativeDetailPage({
             {readiness.blockers.map((blocker) => (
               <Link
                 key={blocker.issueId}
-                href={`/${workspace}/issues/${encodeURIComponent(blocker.issueId)}`}
+                href={issueHref(workspace, blocker.identifier)}
                 className={cn(
                   'flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated',
                   blocker.status === 'regressed' && 'border-destructive/40 bg-destructive/5'

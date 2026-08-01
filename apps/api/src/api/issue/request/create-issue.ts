@@ -11,6 +11,9 @@ export const IssueLinkInputSchema = z.object({
 });
 
 export const CreateIssueBodySchema = z.object({
+  // Absent = the workspace's default team. Teams give an issue an owner; making every caller name one would
+  // just move that decision outward for no gain.
+  teamId: z.string().min(1).max(200).optional(),
   title: z.string().min(1).max(300),
   description: z.string().max(50_000).optional(),
   // A member filing by hand usually starts in the backlog; `done` is refused here because closing an issue

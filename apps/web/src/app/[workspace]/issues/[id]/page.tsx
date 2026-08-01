@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { ChevronLeft, Clock, FolderKanban, Github, Link2, User } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
@@ -7,7 +8,7 @@ import { IssueGithubPanel } from '@/features/import-github-issues'
 import { IssueEvaluationHistory, type IssueEvaluationEntry } from '@/features/issue-evaluation'
 import { IssueLinks } from '@/features/issue-links'
 import { IssueActions, IssueStatusControl } from '@/features/manage-issue'
-import { issueSchema, issueScorecardsSchema, type Issue } from '@/entities/issue'
+import { issueHref, issueSchema, issueScorecardsSchema, type Issue } from '@/entities/issue'
 import { membersSchema } from '@/entities/member'
 import { projectsSchema, type Project } from '@/entities/project'
 import { can } from '@/shared/auth/can'
@@ -18,6 +19,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { EntityRef } from '@/shared/ui/chip'
+import { Markdown } from '@/shared/ui/markdown'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 
@@ -40,9 +42,10 @@ function BackLink({ workspace, label }: { workspace: string; label: string }) {
 export default async function IssueDetailPage({
   params,
 }: {
+  // `id` 세그먼트는 REF 다 — 슬러그(`ENG-12`)가 정규형이고, 예전에 복사된 uuid 링크도 제어 평면이 같이 받는다.
   params: Promise<{ workspace: string; id: string }>
 }) {
-  const { workspace, id } = await params
+  const { workspace, id: ref } = await params
   const t = await getTranslations('issuesPage')
   const tracker = await getTranslations('tracker')
   const timeZone = await getTimeZone()
@@ -51,7 +54,7 @@ export default async function IssueDetailPage({
   let issue: Issue | undefined
   let error: string | undefined
   try {
-    issue = issueSchema.parse(await controlPlane.getIssue(ctx, id))
+    issue = issueSchema.parse(await controlPlane.getIssue(ctx, ref))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -66,10 +69,12 @@ export default async function IssueDetailPage({
     )
   }
   const current = issue
+  // 주소를 정규화한다 — uuid 로 들어왔거나 소문자로 붙여넣은 링크는 팀이 찍은 이름으로 바꿔 준다.
+  if (ref !== current.identifier) redirect(issueHref(workspace, current.identifier))
 
   // Supplementary reads — the detail still renders if any of them fails.
   const evaluation = await controlPlane
-    .listIssueScorecards(ctx, id)
+    .listIssueScorecards(ctx, current.id)
     .then((r) => issueScorecardsSchema.parse(r))
     .catch(() => ({ scorecards: [], linked: [] }))
   const projects: Project[] = await controlPlane
@@ -117,9 +122,17 @@ export default async function IssueDetailPage({
       <div className="space-y-3">
         <BackLink workspace={workspace} label={t('backToList')} />
         <PageHeader
+          // 사람이 부르는 이름을 제목 앞에 둔다 — `ENG-12 · 제목`. 팀이 찍어 이슈에 저장된 값이다.
           // 제목은 이 화면의 본문이므로 잘라내지 않고 줄바꿈으로 전부 보여준다(목록 행에서만 한 줄로 자른다).
           wrapTitle
-          title={current.title}
+          title={
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="shrink-0 font-mono text-[0.8em] text-muted-foreground">
+                {current.identifier}
+              </span>
+              <span className="min-w-0 break-words">{current.title}</span>
+            </span>
+          }
           actions={
             <div className="flex items-center gap-2">
               <IssueStatusControl
@@ -194,9 +207,8 @@ export default async function IssueDetailPage({
       {current.description && (
         <section className="space-y-3">
           <SectionHeader title={t('descriptionTitle')} />
-          <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
-            {current.description}
-          </p>
+          {/* An imported GitHub issue's body IS markdown — render it as such (GFM), never as flat text. */}
+          <Markdown content={current.description} />
         </section>
       )}
 

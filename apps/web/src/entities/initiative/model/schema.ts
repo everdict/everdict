@@ -37,6 +37,8 @@ export const initiativesSchema = z.array(initiativeSchema)
 export const initiativeBlockerSchema = z.object({
   projectId: z.string().optional(),
   issueId: z.string(),
+  // 이슈를 부르는 이름(`ENG-12`) — 릴리스 카드가 이슈를 다시 읽지 않고도 슬러그로 링크한다.
+  identifier: z.string(),
   title: z.string(),
   status: issueStatusSchema,
 })

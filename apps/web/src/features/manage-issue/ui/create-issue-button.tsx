@@ -6,7 +6,7 @@ import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import type { IssueStatus } from '@/entities/issue'
+import { issueHref, type IssueStatus } from '@/entities/issue'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
@@ -27,9 +27,14 @@ const CREATABLE_STATUSES: IssueStatus[] = [
 export function CreateIssueButton({
   workspace,
   projects,
+  teams = [],
+  defaultTeamId,
 }: {
   workspace: string
   projects: { id: string; name: string }[]
+  // 팀이 하나뿐이면 고를 게 없다 — 필드를 숨기고 서버가 기본팀으로 보낸다.
+  teams?: { id: string; key: string; name: string }[]
+  defaultTeamId?: string
 }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
@@ -39,6 +44,7 @@ export function CreateIssueButton({
   const [description, setDescription] = useState('')
   const [status, setStatus] = useState<IssueStatus>('backlog')
   const [projectId, setProjectId] = useState('')
+  const [teamId, setTeamId] = useState(defaultTeamId ?? '')
   const [pending, startTransition] = useTransition()
 
   function submit() {
@@ -49,6 +55,7 @@ export function CreateIssueButton({
         title: trimmed,
         ...(description.trim() ? { description: description.trim() } : {}),
         status,
+        ...(teamId ? { teamId } : {}),
         ...(projectId ? { projectId } : {}),
       })
       if (!r.ok || !r.issue) {
@@ -59,7 +66,7 @@ export function CreateIssueButton({
       setTitle('')
       setDescription('')
       setProjectId('')
-      router.push(`/${workspace}/issues/${encodeURIComponent(r.issue.id)}`)
+      router.push(issueHref(workspace, r.issue.identifier))
     })
   }
 
@@ -110,6 +117,17 @@ export function CreateIssueButton({
                 }))}
               />
             </div>
+            {teams.length > 1 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="issue-team">{t('fieldTeam')}</Label>
+                <Combobox
+                  id="issue-team"
+                  value={teamId}
+                  onChange={setTeamId}
+                  options={teams.map((x) => ({ value: x.id, label: `${x.key} · ${x.name}` }))}
+                />
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="issue-project">{t('fieldProject')}</Label>
               <Combobox

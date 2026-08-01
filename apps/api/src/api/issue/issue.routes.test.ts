@@ -10,6 +10,17 @@ import {
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 
+// An issue is numbered by its owning team; these transport tests only need that to be deterministic.
+const teamAllocator = (() => {
+  let n = 0;
+  return {
+    async allocateForIssue() {
+      n += 1;
+      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
+    },
+  };
+})();
+
 const unusedDispatcher: Dispatcher = {
   async dispatch() {
     throw new Error("dispatcher is unused in tracker tests");
@@ -25,7 +36,7 @@ function build() {
   const scorecardStore = new InMemoryScorecardStore();
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-    issueService: new IssueService({ store: issueStore, scorecards: scorecardStore }),
+    issueService: new IssueService({ teams: teamAllocator, store: issueStore, scorecards: scorecardStore }),
     projectService: new ProjectService({ store: projectStore, issues: issueStore }),
     initiativeService: new InitiativeService({
       store: initiativeStore,
@@ -74,6 +85,41 @@ describe("issue routes", () => {
       headers: H,
     });
     expect(unlinked.json().links).toEqual([]);
+    await app.close();
+  });
+
+  // The web addresses an issue by the name its team minted — `/{workspace}/issues/ENG-12` — so the same ref has
+  // to reach the control plane's reads AND mutations, or a link people paste only half works.
+  it("addresses an issue by its identifier as well as its id, on reads and mutations alike", async () => {
+    const { app } = build();
+    const issue = await createIssue(app, { title: "t", status: "todo" });
+
+    const bySlug = await app.inject({ method: "GET", url: `/issues/${issue.identifier}`, headers: H });
+    expect(bySlug.statusCode).toBe(200);
+    expect(bySlug.json().id).toBe(issue.id);
+
+    const lowercased = await app.inject({
+      method: "GET",
+      url: `/issues/${issue.identifier.toLowerCase()}`,
+      headers: H,
+    });
+    expect(lowercased.json().id).toBe(issue.id);
+
+    const evaluation = await app.inject({ method: "GET", url: `/issues/${issue.identifier}/scorecards`, headers: H });
+    expect(evaluation.statusCode).toBe(200);
+
+    const moved = await app.inject({
+      method: "POST",
+      url: `/issues/${issue.identifier}/status`,
+      headers: H,
+      payload: { status: "in_progress" },
+    });
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json().id).toBe(issue.id);
+    expect(moved.json().status).toBe("in_progress");
+
+    // An identifier nobody minted is a 404, exactly like an unknown id.
+    expect((await app.inject({ method: "GET", url: "/issues/ENG-9999", headers: H })).statusCode).toBe(404);
     await app.close();
   });
 
