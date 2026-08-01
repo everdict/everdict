@@ -28,6 +28,7 @@ import { PermissionRegistry } from "./permission-registry.js";
 import { PermissionRules } from "./permission-rules.js";
 import type { Authenticate, ForwardHeaders, Principal } from "./principal.js";
 import { runReportTurn } from "./report-turn.js";
+import type { AgentTurnUsage } from "./run-trace.js";
 import { runSkillTry } from "./skill-try.js";
 import { TeammateSupervisor } from "./teammate-supervisor.js";
 import { runTeammateTurn } from "./teammate-turn.js";
@@ -49,7 +50,11 @@ export interface AgentServerDeps extends ChatDeps {
   // §5.1 activation admission — the CP tenant-budget ask every launch path passes (absent = unadmitted dev).
   admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
   // Test seam: the activation run executor. Default = the teammate-turn machinery (one request-less loop turn).
-  activationRunTurn?: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<void>;
+  activationRunTurn?: (
+    sessionId: string,
+    agentToken: string,
+    signal: AbortSignal,
+  ) => Promise<AgentTurnUsage | undefined>;
   // agent.run.* lifecycle facts + the P3 ledger correlation → the control plane (fleet observability,
   // agent-automation A5). The report shape has ONE definition (usage.ts) — a hand-copied twin here silently
   // dropped `trace` from the declared surface once already.

@@ -47,4 +47,26 @@ describe("transcriptToTrace — the turn transcript projected as the platform Tr
   it("empty-content rows project nothing (no blank message events)", () => {
     expect(transcriptToTrace([record({ seq: 0, role: "assistant" })])).toEqual([]);
   });
+
+  // The transcript is chat protocol — it records what was SAID, never that a model was called or what it cost.
+  // Projecting it alone produced evidence in which the agent typed but never called a model, so `usage`
+  // (derived from llm_call costs) read zero for exactly the runs that spend money.
+  it("closes the stream with the turn's model call so the evidence carries its cost", () => {
+    const trace = transcriptToTrace([record({ seq: 0, role: "assistant", content: "done" })], {
+      model: "claude-sonnet-5",
+      inputTokens: 900,
+      outputTokens: 120,
+    });
+    expect(trace).toEqual([
+      { t: 0, kind: "message", role: "assistant", text: "done" },
+      // usd stays 0 on the wire: the agent counts tokens, the control plane prices them at seal (one table).
+      { t: 1, kind: "llm_call", model: "claude-sonnet-5", cost: { inputTokens: 900, outputTokens: 120, usd: 0 } },
+    ]);
+  });
+
+  it("omits the model call when the turn consumed nothing (aborted before its first call)", () => {
+    expect(transcriptToTrace([record({ seq: 0, role: "assistant", content: "done" })])).toEqual([
+      { t: 0, kind: "message", role: "assistant", text: "done" },
+    ]);
+  });
 });

@@ -27,6 +27,7 @@ import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelByIdResolver, ModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
 import type { ProfileResolver } from "./profile.js";
+import type { AgentTurnUsage } from "./run-trace.js";
 import { buildEnvironmentSection } from "./system-prompt.js";
 import { buildViewConfigTool } from "./view-config-tool.js";
 
@@ -243,10 +244,7 @@ function buildCanvasPreamble(canvas: CanvasState): string {
   // turn draws it. Say so plainly — "{}" alone reads as "an analysis that happens to be empty".
   const empty = Object.keys(canvas.config).length === 0;
   const intro = empty
-    ? `The user has the analysis canvas open (${target}) and it is EMPTY — nothing is drawn yet. The canvas has no ` +
-      "pickers: apply_view_config is the ONLY way anything appears on it, so put a first lens up (ask what they " +
-      "want, or propose a useful breakdown and apply it). Its stored-form config — the exact vocabulary " +
-      "apply_view_config takes — is currently:"
+    ? `The user has the analysis canvas open (${target}) and it is EMPTY — nothing is drawn yet. The canvas has no pickers: apply_view_config is the ONLY way anything appears on it, so put a first lens up (ask what they want, or propose a useful breakdown and apply it). Its stored-form config — the exact vocabulary apply_view_config takes — is currently:`
     : `The user has the analysis canvas open (${target}). Its CURRENT stored-form config — the exact vocabulary apply_view_config takes — is:`;
   const rule =
     "When the user asks to change the visualization or the analysis itself, call apply_view_config with the FULL " +
@@ -343,7 +341,7 @@ export interface ChatResult {
   // What the turn spent on the model, summed across the loop's calls. It already goes to the meter (billing);
   // this hands the SAME numbers to the ledger, so the turn's own run detail can state its cost instead of
   // leaving it to the invoice. Absent when the turn consumed nothing (an aborted turn before the first call).
-  usage?: { model: string; inputTokens: number; outputTokens: number };
+  usage?: AgentTurnUsage;
 }
 
 // Streaming hooks (SSE): onEvent forwards the loop's live events (text deltas, tool call/result); onRecord fires
@@ -857,8 +855,7 @@ export async function runChat(
       // projects it into the sealed trajectory as an llm_call — so the run detail can state what the turn cost
       // instead of the invoice being the only place it exists. Recorded whatever the billing rule says: an
       // own-pays/personal-key turn still SPENT these tokens, and evidence is not an invoice.
-      if (inputTokens + outputTokens > 0)
-        turnUsage = { model: model.model, inputTokens, outputTokens };
+      if (inputTokens + outputTokens > 0) turnUsage = { model: model.model, inputTokens, outputTokens };
       // Meter the conversation's LLM cost against the workspace when it ran on a workspace-billed model — the same
       // rule as the harness (own-pays/personal-key/dev conversations are not metered). In a finally so a FAILED or
       // aborted turn's consumed tokens are still billed. Best-effort: never fail the chat.

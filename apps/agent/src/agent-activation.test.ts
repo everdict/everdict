@@ -11,6 +11,7 @@ import type {
 import { describe, expect, it } from "vitest";
 import { type ActivationEvent, AgentActivator, triggerMatches } from "./agent-activation.js";
 import { AgentMailbox } from "./agent-mailbox.js";
+import type { AgentTurnUsage } from "./run-trace.js";
 
 function spec(over: Partial<AgentSpec> = {}): AgentSpec {
   return {
@@ -122,7 +123,12 @@ function sessionsStub() {
 
 function activator(opts: {
   registry: AgentRegistry;
-  runTurn?: (sessionId: string, token: string, signal?: AbortSignal, permit?: PermissionHook) => Promise<void>;
+  runTurn?: (
+    sessionId: string,
+    token: string,
+    signal?: AbortSignal,
+    permit?: PermissionHook,
+  ) => Promise<AgentTurnUsage | undefined>;
   sessions?: ReturnType<typeof sessionsStub>;
   keyStore?: ReturnType<typeof keyStoreStub>;
   cooldownMs?: number;
@@ -143,6 +149,7 @@ function activator(opts: {
       opts.runTurn ??
       (async (sessionId, token) => {
         runs.push({ sessionId, token });
+        return undefined;
       }),
     reportRunEvent: async (input) => {
       reports.push({
@@ -271,6 +278,9 @@ describe("AgentActivator", () => {
             createdAt: "t2",
           },
         ]);
+        // What the turn spent — the loop's counters, handed back so the projection can close the stream
+        // with the model call the transcript itself never records.
+        return { model: "claude-sonnet-5", inputTokens: 120, outputTokens: 40 };
       },
     });
 
@@ -284,6 +294,15 @@ describe("AgentActivator", () => {
       { t: 1, kind: "message", role: "assistant", text: "Checked the regression." },
       { t: 2, kind: "tool_call", id: "call-1", name: "get_scorecard", args: { id: "sc-1" } },
       { t: 3, kind: "tool_result", id: "call-1", ok: true, output: "ok" },
+      // The turn's model call closes the evidence. Without it the trajectory claims the agent typed and used
+      // tools but never called a model, and usage (derived from llm_call costs) reads zero for a run that
+      // spent money. `usd` is 0 on the wire on purpose — the control plane prices it at seal.
+      {
+        t: 4,
+        kind: "llm_call",
+        model: "claude-sonnet-5",
+        cost: { inputTokens: 120, outputTokens: 40, usd: 0 },
+      },
     ]);
     // started stays a light lifecycle ping — the transcript rides only the terminal report.
     expect(reports.find((r) => r.kind === "agent.run.started")?.trace).toBeUndefined();
@@ -317,6 +336,7 @@ describe("AgentActivator", () => {
       runTurn: async (_sessionId, _token, _signal, permit) => {
         const decision = await permit?.({ name: "create_dataset", isReadOnly: false, input: {} });
         approvals.push(`create_dataset:${decision}`);
+        return undefined;
       },
       waitApproval: async (_sessionId, request) => {
         approvals.push(`asked:${request.name}`);
@@ -353,6 +373,7 @@ describe("AgentActivator", () => {
       runTurn: async (_sessionId, _token, _signal, permit) => {
         decisions.push(await permit?.({ name: "create_dataset", isReadOnly: false, input: {} }));
         decisions.push(await permit?.({ name: "delete_dataset", isReadOnly: false, input: {} }));
+        return undefined;
       },
       newId: (() => {
         let n = 0;
@@ -401,6 +422,7 @@ describe("AgentActivator.resumeApproval — the A6 resume leg", () => {
         if (!permit) throw new Error("permit expected under default mode");
         seen.push(await permit({ name: "write_file", isReadOnly: false, input: {} }));
         seen.push(await permit({ name: "write_file", isReadOnly: false, input: {} }));
+        return undefined;
       },
     });
     const res = await instance.resumeApproval({

@@ -64,8 +64,9 @@ export async function withChatTurnRun(
     kind: "agent.run.completed" | "agent.run.failed" | "agent.run.cancelled",
     message: string,
     messages?: ChatResult["messages"],
+    usage?: ChatResult["usage"],
   ): void => {
-    const trace = messages ? transcriptToTrace(messages) : [];
+    const trace = messages ? transcriptToTrace(messages, usage) : [];
     void report({
       workspace,
       kind,
@@ -83,7 +84,7 @@ export async function withChatTurnRun(
 
   try {
     const result = await turn();
-    settle("agent.run.completed", `Chat turn completed in conversation ${sessionId}.`, result.messages);
+    settle("agent.run.completed", `Chat turn completed in conversation ${sessionId}.`, result.messages, result.usage);
     return result;
   } catch (err) {
     // A stopped turn is cancelled, not failed — the transcript is evidence either way, but the ledger must not

@@ -61,7 +61,8 @@ describe("buildReportPrompt", () => {
     const base = { workspace: "acme", createdBy: "creator", scheduleId: "s1", scheduleName: "Weekly", view: "v-1" };
     const plain = buildReportPrompt(base);
     expect(plain).toContain('get_view(id: "v-1")');
-    expect(plain).toContain("render_html once");
+    expect(plain).toContain("render_dashboard once");
+    expect(plain).toContain("baseline");
     expect(plain).toContain("write_report once");
     expect(plain).not.toContain("preceding period");
     const compared = buildReportPrompt({ ...base, compare: "previous-period", instructions: "focus on judge" });

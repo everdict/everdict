@@ -5,7 +5,7 @@ import { issueAgentToken } from "@everdict/db";
 import { eventSelectorMatches } from "@everdict/domain";
 import { isGuardedAction } from "./action-policy.js";
 import type { AgentMailbox } from "./agent-mailbox.js";
-import { transcriptToTrace } from "./run-trace.js";
+import { type AgentTurnUsage, transcriptToTrace } from "./run-trace.js";
 import type { AgentRunEventReport } from "./usage.js";
 
 // Registry-driven activation (docs/architecture/agent-automation.md A3): a platform event matches an ENABLED
@@ -40,7 +40,14 @@ export interface AgentActivatorDeps {
   mailbox: AgentMailbox;
   // One request-less turn over the run's session (the teammate-turn machinery) — injected so tests own it.
   // permit is the run's mode-derived approval hook (undefined = bypass: no gate).
-  runTurn: (sessionId: string, agentToken: string, signal: AbortSignal, permit?: PermissionHook) => Promise<void>;
+  // Resolves with what the turn spent on the model (undefined = nothing ran / died before its first call) —
+  // the activation seals it into the run's trajectory, so a headless run reports its own cost like a chat turn.
+  runTurn: (
+    sessionId: string,
+    agentToken: string,
+    signal: AbortSignal,
+    permit?: PermissionHook,
+  ) => Promise<AgentTurnUsage | undefined>;
   // Park a mutation for member approval (agent-automation A6): the shared PermissionRegistry the fleet view
   // discovers via GET /pending and answers via POST /permission. Absent → headless mutations are DENIED under
   // default/auto (never silently allowed — fail closed when there is no one to ask).
@@ -320,7 +327,7 @@ export class AgentActivator {
             return base(request);
           }
         : undefined;
-      await this.deps.runTurn(sessionId, token, controller.signal, permit);
+      const spent = await this.deps.runTurn(sessionId, token, controller.signal, permit);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
       await this.deps.sessions.setSessionStatus(workspace, sessionId, settled, this.deps.now());
       void this.report(
@@ -330,7 +337,7 @@ export class AgentActivator {
         sessionId,
         `Agent ${agentId} run ${settled} (resumed after approval).`,
         runRef,
-        await this.turnTrace(workspace, sessionId, baseSeq),
+        await this.turnTrace(workspace, sessionId, baseSeq, spent),
       );
     } catch (err) {
       const settled = this.stopped.has(sessionId) ? "cancelled" : "failed";
@@ -510,7 +517,7 @@ export class AgentActivator {
         });
       }
       const permit = this.buildPermit(event, agentId, sessionId, spec, controller.signal, runRef);
-      await this.deps.runTurn(sessionId, token, controller.signal, permit);
+      const spent = await this.deps.runTurn(sessionId, token, controller.signal, permit);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
       await this.deps.sessions.setSessionStatus(event.workspace, sessionId, settled, this.deps.now());
       void this.report(
@@ -520,7 +527,7 @@ export class AgentActivator {
         sessionId,
         `Agent ${agentId} run ${settled} (${event.kind}).`,
         runRef,
-        await this.turnTrace(event.workspace, sessionId), // fresh session — the whole transcript is this run's
+        await this.turnTrace(event.workspace, sessionId, undefined, spent), // fresh session — the whole transcript is this run's
       );
     } catch (err) {
       const settled = this.stopped.has(sessionId) ? "cancelled" : "failed";
@@ -616,10 +623,15 @@ export class AgentActivator {
   // O2: the turn's transcript slice (rows after sinceSeq), projected to TraceEvent — attached to the terminal
   // report so the CP seals it as the run's trajectory. Best-effort: a session-store hiccup must never turn a
   // settled run into a lost report (the report just goes without a trace).
-  private async turnTrace(workspace: string, sessionId: string, sinceSeq?: number): Promise<TraceEvent[] | undefined> {
+  private async turnTrace(
+    workspace: string,
+    sessionId: string,
+    sinceSeq?: number,
+    usage?: AgentTurnUsage,
+  ): Promise<TraceEvent[] | undefined> {
     try {
       const messages = await this.deps.sessions.listMessages(workspace, sessionId, sinceSeq);
-      const trace = transcriptToTrace(messages);
+      const trace = transcriptToTrace(messages, usage);
       return trace.length > 0 ? trace : undefined;
     } catch {
       return undefined;

@@ -43,9 +43,10 @@ export function buildReportPrompt(input: ReportTurnInput): string {
     );
   }
   lines.push(
-    `REQUIRED: call render_html once, titled "${input.scheduleName}" — a self-contained dashboard: metric cards`,
-    "(current value, baseline, ▲/▼ delta with color), per-group inline-SVG bars/lines for the decision-relevant",
-    "movements, and a compact comparison table. No external resources (they are blocked).",
+    `REQUIRED: call render_dashboard once, titled "${input.scheduleName}" — a metrics block leading with the`,
+    "headline numbers (each carrying its `baseline` so the change is computed and colored for you, and",
+    "higherIsBetter:false on cost/latency), a chart block per decision-relevant movement, a compact comparison",
+    "table, and at most one short note. Send meaning, not markup — the product draws it.",
     "Then call write_report once with a BRIEF markdown companion (3-6 bullets: what moved, why it matters, what",
     "to look at next). The dashboard carries the numbers; the report carries the judgement.",
   );
@@ -92,11 +93,15 @@ export async function runReportTurn(
     await deps.keyStore.revoke(input.workspace, keyId, input.createdBy).catch(() => {}); // one-shot credential
   }
   // The deliverables: EVERY artifact this report session produced belongs to the View's archive (the dashboard,
-  // its companion report, any extra charts). Primary = the newest html dashboard, else the newest report.
+  // its companion report, any extra charts). Primary = the newest dashboard (structured first, then the
+  // free-form escape hatch), else the newest report — archives predating the structured kind still resolve.
   const artifacts = await deps.artifacts.listBySession(input.workspace, sessionId);
   for (const artifact of artifacts) await deps.artifacts.attachToView(input.workspace, artifact.id, input.view);
   const newestFirst = [...artifacts].reverse();
-  const primary = newestFirst.find((a) => a.kind === "html") ?? newestFirst.find((a) => a.kind === "report");
+  const primary =
+    newestFirst.find((a) => a.kind === "dashboard") ??
+    newestFirst.find((a) => a.kind === "html") ??
+    newestFirst.find((a) => a.kind === "report");
   if (!primary) return { sessionId };
   return { sessionId, artifactId: primary.id };
 }

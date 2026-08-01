@@ -79,15 +79,87 @@ describe("artifact emission tools", () => {
     if (!html) throw new Error("render_html missing");
     expect(html.isReadOnly).toBe(true); // presentation-only; execution containment is the web's sandboxed iframe
 
-    const result = await html.call(
-      { title: "Pass-rate dashboard", html: "<style>b{color:red}</style><b>60%</b> ▲ +4.2pt", height: 320 },
-      toolCtx,
-    );
+    const markup =
+      '<div class="metric"><span class="metric-label">Pass rate</span>' +
+      '<span class="metric-value">60%</span><span class="delta up">▲ 4.2pt</span></div>';
+    const result = await html.call({ title: "Pass-rate dashboard", html: markup, height: 320 }, toolCtx);
     expect(result.isError).toBe(false);
     const stored = await store.listBySession("acme", "s1");
     expect(stored[0]).toMatchObject({ kind: "html", title: "Pass-rate dashboard" });
-    expect(stored[0]?.spec).toEqual({ html: "<style>b{color:red}</style><b>60%</b> ▲ +4.2pt", height: 320 });
+    expect(stored[0]?.spec).toEqual({ html: markup, height: 320 });
     expect(emitted).toHaveLength(1);
+  });
+
+  it("render_html refuses markup that paints outside the design system, and persists nothing", async () => {
+    const { ctx, store } = makeContext();
+    const html = buildArtifactTools(ctx).find((t) => t.name === "render_html");
+    if (!html) throw new Error("render_html missing");
+
+    // An invented palette cannot follow the member's light/dark theme — the frame publishes tokens for exactly
+    // this. The throw becomes a correctable tool error, so the model re-emits with tokens.
+    await expect(html.call({ title: "bad", html: '<b style="color:#22c55e">60%</b>' }, toolCtx)).rejects.toThrow(
+      /var\(--chart-1\)/,
+    );
+    expect(await store.listBySession("acme", "s1")).toEqual([]);
+  });
+
+  it("render_html states the frame's token and class vocabulary so the model composes instead of inventing", async () => {
+    const { ctx } = makeContext();
+    const html = buildArtifactTools(ctx).find((t) => t.name === "render_html");
+    if (!html) throw new Error("render_html missing");
+    expect(html.description).toContain("--chart-1");
+    expect(html.description).toContain("metric-value");
+    expect(html.description).toContain("REJECTED");
+  });
+
+  it("render_dashboard persists a structured dashboard the product draws itself", async () => {
+    const { ctx, store, emitted } = makeContext();
+    const dashboard = buildArtifactTools(ctx).find((t) => t.name === "render_dashboard");
+    if (!dashboard) throw new Error("render_dashboard missing");
+    expect(dashboard.isReadOnly).toBe(true);
+
+    const blocks = [
+      {
+        type: "metrics",
+        metrics: [
+          { label: "Pass rate", value: 0.624, unit: "ratio", baseline: 0.582 },
+          { label: "Cost / case", value: 0.284, unit: "usd", baseline: 0.241, higherIsBetter: false },
+        ],
+      },
+      { type: "note", markdown: "Cost rose with the retry change." },
+    ];
+    const result = await dashboard.call({ title: "Weekly eval report", blocks }, toolCtx);
+    expect(result.isError).toBe(false);
+
+    const stored = await store.listBySession("acme", "s1");
+    expect(stored[0]).toMatchObject({ kind: "dashboard", title: "Weekly eval report" });
+    expect(stored[0]?.spec).toEqual({ blocks });
+    expect(emitted).toHaveLength(1);
+  });
+
+  it("render_dashboard refuses a block whose type and payload disagree, and persists nothing", async () => {
+    const { ctx, store } = makeContext();
+    const dashboard = buildArtifactTools(ctx).find((t) => t.name === "render_dashboard");
+    if (!dashboard) throw new Error("render_dashboard missing");
+    await expect(
+      dashboard.call({ title: "bad", blocks: [{ type: "chart", markdown: "not a chart" }] }, toolCtx),
+    ).rejects.toThrow();
+    expect(await store.listBySession("acme", "s1")).toEqual([]);
+  });
+
+  it("steers the model to the structured kind: dashboard is preferred, html is the escape hatch", async () => {
+    const { ctx } = makeContext();
+    const tools = buildArtifactTools(ctx);
+    // Ordering matters as much as wording — the preferred tool is the one the model reads first.
+    expect(tools[0]?.name).toBe("render_dashboard");
+    const dashboard = tools.find((t) => t.name === "render_dashboard");
+    const html = tools.find((t) => t.name === "render_html");
+    expect(dashboard?.description).toContain("PREFERRED");
+    // The two instructions that carry the quality: no self-computed deltas, and polarity on cost/latency.
+    expect(dashboard?.description).toContain("NEVER a delta");
+    expect(dashboard?.description).toContain("higherIsBetter:false");
+    expect(html?.description).toContain("ESCAPE HATCH");
+    expect(html?.description).toContain("render_dashboard");
   });
 
   it("an invalid chart spec throws (the loop turns it into a correctable tool error) and persists nothing", async () => {

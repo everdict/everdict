@@ -7,7 +7,23 @@ import type { AgentMessageRecord, TraceEvent } from "@everdict/contracts";
 // (real call ids), tool rows → tool_result paired by toolCallId. `t` is a monotonic step index (graders that
 // need wall-clock read llm_call latency, which a transcript doesn't carry). Reasoning text stays display-only
 // on the session record — it is not part of the evidence stream.
-export function transcriptToTrace(messages: AgentMessageRecord[]): TraceEvent[] {
+// What one turn spent on the model. The meter (billing) and the ledger (evidence) take the SAME numbers from
+// the loop's counters, so there is one type rather than two shapes drifting apart.
+export interface AgentTurnUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export function transcriptToTrace(
+  messages: AgentMessageRecord[],
+  // What the turn spent on the model. The transcript rows do not carry it (they are chat protocol, not
+  // telemetry), so the loop's own counters ride in separately and become ONE llm_call event closing the
+  // stream. Without this the evidence says the agent typed but never called a model, and `usage` — derived
+  // from llm_call costs — reads zero for exactly the runs that cost money. `usd` is left to the control
+  // plane: the agent counts tokens, the domain prices them (one pricing table, same as the meter).
+  usage?: AgentTurnUsage,
+): TraceEvent[] {
   const trace: TraceEvent[] = [];
   let t = 0;
   for (const m of messages) {
@@ -34,5 +50,12 @@ export function transcriptToTrace(messages: AgentMessageRecord[]): TraceEvent[] 
       });
     }
   }
+  if (usage)
+    trace.push({
+      t: t++,
+      kind: "llm_call",
+      model: usage.model,
+      cost: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, usd: 0 },
+    });
   return trace;
 }
