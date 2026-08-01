@@ -146,6 +146,11 @@ export function serviceAcquirer(
 
       const closeWiring = { ...wiring, ...coords };
 
+      // Observation coordinate (optional): the control-plane-reachable CDP base of the browser THIS session opened.
+      // Unlike the agent-facing coordinates above it is never required to drive the case, so a missing/malformed value
+      // must never fail the eval — the caller records the miss instead (an observability field cannot break an eval).
+      const cdpBase = acquire.cdpBase ? reachableString(getField(res, acquire.cdpBase)) : undefined;
+
       // Readiness gate: the session is open, but until its client (browser etc.) self-registers via back-connect, front-door
       // commands bounce with 404. If ready is set, poll the status URL until 200 — on timeout, close (don't leak the open session) then fail.
       if (acquire.ready) {
@@ -188,6 +193,7 @@ export function serviceAcquirer(
 
       return {
         wiring: coords,
+        ...(cdpBase ? { cdpBase } : {}),
         async snapshot() {
           return { kind: "prompt", output: "" }; // No Everdict-owned stage — the real observation is delivered via delivery (sentinel/egress).
         },
@@ -197,6 +203,12 @@ export function serviceAcquirer(
       };
     },
   };
+}
+
+// A declared observation coordinate is only usable as a URL base. Anything else (absent, wrong type, empty) reads as
+// "this session exposes no reachable CDP" — undefined, never a throw: the eval must not fail over an observability field.
+function reachableString(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 async function closeSession(

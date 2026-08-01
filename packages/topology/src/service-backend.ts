@@ -112,6 +112,13 @@ export interface ServiceTopologyBackendOptions {
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
 // ensure warm topology → per-case browser → drive (front-door, per-run wiring) → collectTrace → observe → grade.
 export class ServiceTopologyBackend implements Backend, ScreenCapturable, TopologyInspectable {
+  // Live target lookup for in-flight cases: runId → the control-plane-reachable CDP base of THIS case's browser,
+  // recorded once the target is acquired and dropped when it is released. `captureScreen` is a separate call stack
+  // from `dispatch` (an API request vs the running dispatch), so without this it can only ask the runtime to
+  // rediscover a browser IT provisioned — which finds nothing for a session-acquired target, and asks the wrong
+  // namespace for a zoned tenant. In-memory + live-only, like the frame store the captured frames land in.
+  private readonly liveTargets = new Map<string, string>();
+
   constructor(private readonly opts: ServiceTopologyBackendOptions) {}
 
   // Topology observability (TopologyInspectable): the live per-service health roster of this harness's warm
@@ -173,7 +180,11 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Topolo
   // Live browser frame (observability ⑦): rediscover this run's browser CDP endpoint (by runId) and capture a
   // PNG. undefined when the runtime has no per-case browser rediscovery or none is running. base64, no data: prefix.
   async captureScreen(runId: string): Promise<string | undefined> {
-    const base = await this.opts.runtime.browserCdpBase?.(runId).catch(() => undefined);
+    // The live case's own target wins: it covers BOTH acquisition modes (a session-acquired browser is not ours to
+    // rediscover) and carries the zone-correct address. The runtime rediscovery stays as the fallback for a browser
+    // this process did not dispatch (another replica / after a restart).
+    const base =
+      this.liveTargets.get(runId) ?? (await this.opts.runtime.browserCdpBase?.(runId).catch(() => undefined));
     if (!base) return undefined;
     return await captureCdpScreenshot(base).catch(() => undefined);
   }
@@ -228,11 +239,30 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Topolo
           zone,
         })
       : undefined;
+    // Publish this case's reachable browser for the whole drive, so an out-of-band live read (GET /runs/:id/screen)
+    // can look at the SAME browser the agent is driving — for a session-acquired target that address exists nowhere else.
+    if (target?.cdpBase) this.liveTargets.set(runId, target.cdpBase);
+    // A DECLARED observation coordinate that resolved to nothing degrades visibly instead of leaving the operator
+    // staring at an empty live view: the run's own trajectory says the session returned no reachable CDP.
+    const targetInfra: TraceEvent[] =
+      spec.target?.acquire?.mode === "service" && spec.target.acquire.cdpBase && !target?.cdpBase
+        ? [
+            {
+              t: 0,
+              kind: "infra",
+              scope: "service",
+              service: spec.target.acquire.service,
+              event: "target_unobservable",
+              message: `The session API declared a live CDP coordinate (${spec.target.acquire.cdpBase}) but returned no reachable address — this case has no live screen or environment recording.`,
+            },
+          ]
+        : [];
     // Release the target no matter what (finally) — an early release right after observation retrieval makes later calls a no-op (flag idempotency).
     let targetReleased = false;
     const releaseTarget = async (): Promise<void> => {
       if (!target || targetReleased) return;
       targetReleased = true;
+      this.liveTargets.delete(runId); // the browser is going away — stop pointing live readers at a dead address
       await target.dispose();
     };
     // Environment-plane recorder (replay ②) — declared here so the finally can always stop it. Started below once the
@@ -518,7 +548,7 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Topolo
       return {
         caseId: job.evalCase.id,
         harness: `${spec.id}@${spec.version}`,
-        trace: [...trace, ...infra],
+        trace: [...trace, ...targetInfra, ...infra],
         snapshot,
         scores,
       };

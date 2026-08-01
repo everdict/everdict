@@ -2181,6 +2181,64 @@ describe("ServiceTopologyBackend.captureScreen (observability ⑦)", () => {
     const backend = new ServiceTopologyBackend({ runtime, traceSource, specFor: () => SPEC });
     expect(await backend.captureScreen("evd-run-1")).toBeUndefined();
   });
+
+  it("looks at the session's own browser for a service-acquired case, instead of rediscovering one it never provisioned", async () => {
+    const rediscovery: string[] = [];
+    const job: CaseJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: { id: "c1", env: { kind: "browser" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    };
+    const SPEC_ACQ: ServiceHarnessSpec = {
+      ...SPEC,
+      target: {
+        kind: "browser",
+        engine: "chromium",
+        lifecycle: "per-case-instance",
+        observe: ["dom"],
+        acquire: {
+          mode: "service",
+          service: "agent-server",
+          open: "POST /sessions",
+          coordinates: { session_id: "id" },
+          cdpBase: "observe.cdp",
+        },
+      },
+    };
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        throw new Error("unused");
+      },
+      async browserCdpBase(runId) {
+        rediscovery.push(runId);
+        return undefined;
+      },
+    };
+    let liveDuringDrive: string[] | undefined;
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource,
+      specFor: () => SPEC_ACQ,
+      // 127.0.0.1:1 refuses immediately — the capture itself is covered by capture-cdp.test.ts; what matters here is
+      // WHICH address the live read reaches for, so we assert the runtime was never asked to rediscover a browser.
+      acquireRequest: async (method) => (method === "POST" ? { id: "s1", observe: { cdp: "http://127.0.0.1:1" } } : {}),
+      submit: async () => {
+        await backend.captureScreen("fixed"); // an out-of-band live read, while the case is still driving
+        liveDuringDrive = [...rediscovery];
+      },
+      newRunId: () => "fixed",
+    });
+
+    await backend.dispatch(job);
+
+    expect(liveDuringDrive).toEqual([]); // the acquired session's address short-circuits runtime rediscovery
+    // Once the case releases its target the address is dropped, so a late reader falls back to the runtime.
+    await backend.captureScreen("fixed");
+    expect(rediscovery).toEqual(["fixed"]);
+  });
 });
 
 // trace completion — the run's trace reaching a terminal state on the platform IS the completion signal;

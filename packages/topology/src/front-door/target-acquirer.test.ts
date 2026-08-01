@@ -144,6 +144,45 @@ describe("serviceAcquirer", () => {
     // Don't leak the open session — close by the coordinate (session_id).
     expect(calls.some((c) => c.method === "DELETE" && c.url === "http://browsers:7000/sessions/sess-7")).toBe(true);
   });
+
+  it("exposes the session's own CDP base when the spec declares where to read it", async () => {
+    const { fn } = fakeRequest({
+      "POST http://browsers:7000/sessions": {
+        id: "sess-7",
+        cdp_url: "ws://internal/7",
+        observe: { cdp: "http://h:31" },
+      },
+    });
+    const acq = serviceAcquirer({ ...SERVICE_ACQUIRE, cdpBase: "observe.cdp" }, fn);
+
+    const handle = await acq.acquire({
+      spec: SPEC,
+      runId: "r1",
+      endpoints: { browsers: "http://browsers:7000" },
+      wiring: { run_id: "r1" },
+    });
+
+    // The observation address is deliberately NOT the agent-facing coordinate — that one is an internal alias.
+    expect(handle.cdpBase).toBe("http://h:31");
+    expect(handle.wiring.target_cdp_url).toBe("ws://internal/7");
+  });
+
+  it("acquires the session anyway when the declared CDP base is missing — observability never fails an eval", async () => {
+    const { fn } = fakeRequest({
+      "POST http://browsers:7000/sessions": { id: "sess-7", cdp_url: "ws://internal/7" },
+    });
+    const acq = serviceAcquirer({ ...SERVICE_ACQUIRE, cdpBase: "observe.cdp" }, fn);
+
+    const handle = await acq.acquire({
+      spec: SPEC,
+      runId: "r1",
+      endpoints: { browsers: "http://browsers:7000" },
+      wiring: { run_id: "r1" },
+    });
+
+    expect(handle.cdpBase).toBeUndefined();
+    expect(handle.wiring.session_id).toBe("sess-7"); // the case still runs
+  });
 });
 
 describe("fetchAcquire", () => {
