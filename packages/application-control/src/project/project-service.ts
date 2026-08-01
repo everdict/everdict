@@ -66,8 +66,22 @@ export class ProjectService {
     return record;
   }
 
-  list(tenant: string, filter?: ProjectListFilter): Promise<ProjectRecord[]> {
-    return this.deps.store.list(tenant, filter);
+  // `teamId` is DERIVED, not stored: a project carries an initiative, never a team, because a project may span
+  // teams. "This team's projects" therefore means "the projects this team has issues in", which is a join the
+  // project store cannot do on its own — so the composition lives here, in the service, rather than pushing an
+  // issue dependency into both store implementations. A team with no issues yields no projects, which is the
+  // honest answer: the team has not started work on any of them.
+  async list(tenant: string, filter?: ProjectListFilter & { teamId?: string }): Promise<ProjectRecord[]> {
+    if (filter?.teamId === undefined) return this.deps.store.list(tenant, filter);
+    const { teamId, ...rest } = filter;
+    const issues = await this.deps.issues.list(tenant, { teamId });
+    const projectIds = new Set(issues.map((issue) => issue.projectId).filter((id): id is string => id !== undefined));
+    if (projectIds.size === 0) return [];
+    // The limit applies AFTER the team narrowing — asking for "10 of this team's projects" must not first take
+    // 10 of the workspace's and then discard the ones that were not the team's.
+    const { limit, ...unlimited } = rest;
+    const scoped = (await this.deps.store.list(tenant, unlimited)).filter((project) => projectIds.has(project.id));
+    return limit === undefined ? scoped : scoped.slice(0, limit);
   }
 
   async get(tenant: string, id: string): Promise<ProjectRecord> {

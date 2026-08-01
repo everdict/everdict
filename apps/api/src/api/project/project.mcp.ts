@@ -46,11 +46,13 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
     "list_projects",
     {
       description:
-        "The workspace's projects. Filter by status (planned | in_progress | completed | cancelled) or by the " +
-        "initiative they sit under. Rows carry no issue counts — call get_project for the rollup of one.",
+        "The workspace's projects. Filter by status (planned | in_progress | completed | cancelled), by the " +
+        "initiative they sit under, or by the TEAM working them — a project has no team of its own, so `team` " +
+        "means the projects that team has issues in. Rows carry no issue counts — call get_project for one.",
       inputSchema: {
         status: ProjectStatusSchema.optional(),
         initiative: z.string().optional().describe("only projects under this initiative id"),
+        team: z.string().optional().describe("only projects this team has issues in"),
         limit: z.number().int().positive().max(200).optional(),
       },
     },
@@ -60,6 +62,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
           await projects.list(ws, {
             ...(a.status !== undefined ? { status: a.status } : {}),
             ...(a.initiative !== undefined ? { initiativeId: a.initiative } : {}),
+            ...(a.team !== undefined ? { teamId: a.team } : {}),
             ...(a.limit !== undefined ? { limit: a.limit } : {}),
           }),
         ),

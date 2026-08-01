@@ -28,13 +28,15 @@ export const projectDocs: Record<"create" | "list" | "get" | "update" | "setStat
   list: {
     summary: "List the workspace's projects",
     description:
-      "The workspace's projects. Filter by status or by the initiative they sit under. Rows carry no rollup — " +
-      "read one project for its issue counts. Requires issues:read.",
+      "The workspace's projects. Filter by status, by the initiative they sit under, or by the TEAM working " +
+      'them — a project carries no team of its own, so `team` means "the projects this team has issues in". ' +
+      "Rows carry no rollup — read one project for its issue counts. Requires issues:read.",
     tags: ["project"],
     querystring: toJsonSchema(
       z.object({
         status: ProjectStatusSchema.optional(),
         initiative: z.string().optional(),
+        team: z.string().optional(),
         limit: z.coerce.number().int().positive().max(200).optional(),
       }),
     ),

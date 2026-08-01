@@ -60,15 +60,19 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ServerDeps): v
         status: ProjectStatusSchema.optional(),
         // "Which projects sit under this initiative" — the readiness page's drill-down.
         initiative: z.string().min(1).optional(),
+        // "Which projects is this team working on" — the sidebar's per-team Projects entry. Derived from the
+        // team's issues (a project has no team of its own), so it answers what the team has actually touched.
+        team: z.string().min(1).optional(),
         limit: z.coerce.number().int().positive().max(200).optional(),
       })
       .safeParse(req.query);
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
-    const { status, initiative, limit } = query.data;
+    const { status, initiative, team, limit } = query.data;
     return reply.send(
       await deps.projectService.list(principal.workspace, {
         ...(status !== undefined ? { status } : {}),
         ...(initiative !== undefined ? { initiativeId: initiative } : {}),
+        ...(team !== undefined ? { teamId: team } : {}),
         ...(limit !== undefined ? { limit } : {}),
       }),
     );

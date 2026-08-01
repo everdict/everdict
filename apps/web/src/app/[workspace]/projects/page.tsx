@@ -29,10 +29,10 @@ export default async function ProjectsPage({
   searchParams,
 }: {
   params: Promise<{ workspace: string }>
-  searchParams: Promise<{ status?: string; initiative?: string }>
+  searchParams: Promise<{ status?: string; initiative?: string; team?: string }>
 }) {
   const { workspace } = await params
-  const { status, initiative } = await searchParams
+  const { status, initiative, team } = await searchParams
   const t = await getTranslations('projectsPage')
   const tracker = await getTranslations('tracker')
   const timeZone = await getTimeZone()
@@ -45,6 +45,7 @@ export default async function ProjectsPage({
       await controlPlane.listProjects(ctx, {
         ...(status ? { status } : {}),
         ...(initiative ? { initiative } : {}),
+        ...(team ? { team } : {}),
       })
     )
   } catch (e) {
@@ -62,6 +63,8 @@ export default async function ProjectsPage({
     const q = new URLSearchParams()
     if (nextStatus) q.set('status', nextStatus)
     if (initiative) q.set('initiative', initiative)
+    // 팀 스코프는 상태 칩을 눌러도 유지된다 — 팀 안에서 필터링하는 것이지 워크스페이스 전체로 빠져나오는 게 아니다.
+    if (team) q.set('team', team)
     const qs = q.toString()
     return `/${workspace}/projects${qs ? `?${qs}` : ''}`
   }
