@@ -117,6 +117,8 @@ export default async function IssueDetailPage({
       <div className="space-y-3">
         <BackLink workspace={workspace} label={t('backToList')} />
         <PageHeader
+          // 제목은 이 화면의 본문이므로 잘라내지 않고 줄바꿈으로 전부 보여준다(목록 행에서만 한 줄로 자른다).
+          wrapTitle
           title={current.title}
           actions={
             <div className="flex items-center gap-2">
