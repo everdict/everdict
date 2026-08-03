@@ -16,6 +16,7 @@ import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Kbd } from '@/shared/ui/kbd'
 
 import { NAV_SECTIONS, RESOURCES_SECTION } from './nav-config'
+import { navGroupOpen } from './nav-group-open'
 import { SETTINGS_NAV_GROUPS } from './settings-nav-config'
 
 export interface SidebarTeam {
@@ -115,9 +116,10 @@ function NavLinks({
     <nav className="flex flex-col gap-4">
       {sections.map((section, i) => {
         const key = section.headingKey ?? section.heading ?? `s-${i}`
-        // 접힌 그룹이 현재 보고 있는 화면을 숨기면 안 된다 — 활성 항목을 품고 있으면 저장된 상태와 무관하게 펼친다.
+        // 활성 항목을 품은 그룹은 기본으로 펼치되, 사용자가 직접 접었으면 그 뜻이 이긴다(navGroupOpen).
         const holdsActive = section.items.some((item) => isActiveItem(item.href, item.exact))
-        const open = !section.collapsible || holdsActive || (openGroups[key] ?? false)
+        const open =
+          !section.collapsible || navGroupOpen({ recorded: openGroups[key], holdsActive })
         return (
           <Fragment key={key}>
             <div className="flex flex-col gap-0.5">
@@ -153,7 +155,10 @@ function NavLinks({
                     const holdsActiveChild = item.children.some((c) =>
                       isActiveItem(c.href, c.exact)
                     )
-                    const childrenOpen = holdsActiveChild || (openGroups[itemKey] ?? false)
+                    const childrenOpen = navGroupOpen({
+                      recorded: openGroups[itemKey],
+                      holdsActive: holdsActiveChild,
+                    })
                     return (
                       <div key={item.href} className="flex flex-col gap-0.5">
                         <button
@@ -268,10 +273,14 @@ function TeamsNav({
     <div className="flex flex-col gap-0.5">
       <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">{t('yourTeams')}</p>
       {teams.map((team) => {
-        // 활성 스코프인 팀은 저장된 상태와 무관하게 펼친다(접힌 그룹이 지금 보는 화면을 숨기면 안 된다).
-        // 팀이 하나뿐이면 접을 이유도 없으니 기본으로 펼쳐 둔다.
+        // 활성 스코프인 팀은 기본으로 펼치되, 사용자가 접었으면 접힌 채로 둔다. 팀이 하나뿐이면 접을 이유도
+        // 없으니 그때의 기본은 펼침이다.
         const holdsActive = scopedTeamKey === team.key
-        const open = holdsActive || (openTeams[team.id] ?? teams.length === 1)
+        const open = navGroupOpen({
+          recorded: openTeams[team.id],
+          holdsActive,
+          whenUnrecorded: teams.length === 1,
+        })
         // 팀이 소유하는 것은 전부 팀 아래의 경로 자원이다 — `/{workspace}/teams/ENG/issues`. 목록은 여전히
         // 한 벌이지만(같은 컴포넌트, 다른 주소), 팀마다 가진 것이 다르다는 사실은 URL 이 말한다.
         // 하네스·데이터셋·저지도 팀 소유지만 사이드바 행은 주지 않는다: 이름을 대고 찾아가는 것은
