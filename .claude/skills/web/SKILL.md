@@ -77,6 +77,18 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
 `shared/lib/utils.ts`; shadcn new-york atoms under `shared/ui/`. Dropdowns are always `shared/ui/combobox`.
 
 ## Established UI conventions (enforced — reuse, don't reinvent)
+- **Every route segment has a loading boundary, and slow reads sit behind `Suspense`.** Pages are
+  `force-dynamic`, so without a `loading.tsx` a navigation BLOCKS: the old screen stays frozen until the whole
+  server render lands, and — the quieter half — `<Link>` prefetch does nothing at all, because Next.js prefetches
+  a dynamic route only as far as its nearest loading boundary. `app/[workspace]/loading.tsx` is the default;
+  a segment whose shape is distinctive overrides it (the issue list's `IssueListSkeleton`, and the team's short
+  address renders that list, so its boundary carries the list shape too). Placeholders come from
+  `shared/ui/skeleton.tsx` (`Skeleton`/`SkeletonLines`/`ListPageSkeleton`) and are sized by the CALLER, never
+  self-sized, or the screen jumps when the real thing arrives. Inside a page, anything the primary content does
+  not need — a toolbar's data, a side panel — goes in its OWN async component behind `<Suspense>` and streams;
+  it must never join the `Promise.all` the rows are waiting on. A read with two consumers (the team list: the
+  filter chips and the create dialog) is started ONCE as a promise and awaited only on the path that renders it,
+  so the screen that does not draw it does not wait for it.
 - **Format atoms**: score/model/version/time formatting goes through `shared/lib/format.ts` +
   `shared/ui/{score,chip}.tsx`, NEVER per-page inline.
 - **Image refs** render through `shared/lib/image-ref.ts` (`displayImageRef`, with the raw ref on `title`), never

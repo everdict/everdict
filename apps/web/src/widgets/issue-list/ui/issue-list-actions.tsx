@@ -1,0 +1,125 @@
+import Link from 'next/link'
+import { getTranslations } from 'next-intl/server'
+
+import {
+  ImportGithubIssuesButton,
+  PullGithubIssuesButton,
+  type SyncedRepository,
+} from '@/features/import-github-issues'
+import { CreateIssueButton } from '@/features/manage-issue'
+import { githubAppViewSchema } from '@/entities/github-app'
+import { issuePageSchema, type IssueSummary } from '@/entities/issue'
+import type { TeamWithSummary } from '@/entities/team'
+import { authContext } from '@/shared/auth/principal'
+import { controlPlane } from '@/shared/lib/control-plane'
+import { Skeleton } from '@/shared/ui/skeleton'
+
+// 동기화 저장소 목록을 만들기 위한 상한. 저장소 이름을 세는 게 목적이라 한 장이면 충분하다.
+const MAX_SYNCED_ROSTER = 200
+
+// 목록 헤더의 쓰기 버튼들 — 「가져오기」·「불러오기」·「이슈 만들기」.
+//
+// 이 셋이 자기 컴포넌트로 나와 있는 이유는 렌더가 아니라 **대기** 때문이다. 버튼 세 개를 그리자고 읽어야 하는
+// 것이 GitHub App 설치 상태 + 동기화 저장소 목록(이슈 200행) + 팀 목록인데, 예전에는 그 셋이 목록과 같은
+// `Promise.all` 에 묶여 있었다: 이슈 50행은 벌써 도착했는데 툴바가 못 와서 화면 전체가 서 있었다. 이제 이
+// 컴포넌트는 Suspense 경계 뒤에서 스트리밍되고, 목록은 자기 데이터만 기다린다.
+//
+// 팀 목록은 PROMISE 로 받는다 — 워크스페이스 전체 목록에서는 팀 칩이 이미 그 값을 쓰므로 부모가 기다린
+// 결과를 그대로 넘겨받고(중복 호출 없음), 팀 스코프에서는 칩이 렌더되지 않아 부모가 기다리지 않는다.
+// 어느 쪽이든 호출은 한 번, 임계 경로에는 필요한 화면에서만 오른다.
+export async function IssueListActions({
+  workspace,
+  teams,
+  projects,
+  defaultTeamId,
+  canReadIntegrations,
+  team,
+}: {
+  workspace: string
+  teams: Promise<TeamWithSummary[]>
+  projects: { id: string; name: string }[]
+  defaultTeamId?: string
+  // 가져오기 픽커는 워크스페이스 App 의 저장소 목록을 읽어야 하고 그건 settings:read(관리자)다 — 끝까지
+  // 진행할 수 있는 사람에게만 입구를 내민다.
+  canReadIntegrations: boolean
+  // 팀 스코프면 그 팀의 동기화 저장소만 센다.
+  team?: TeamWithSummary
+}) {
+  const t = await getTranslations('issuesPage')
+  const ctx = await authContext()
+
+  const [resolvedTeams, githubConnected, syncedRoster] = await Promise.all([
+    teams,
+    controlPlane
+      .getGithubApp(ctx)
+      .then((r) => githubAppViewSchema.parse(r).installations.length > 0)
+      .catch(() => false),
+    // 대량 불러오기는 저장소 단위라, 버튼은 새로고칠 것이 있는 저장소만 내민다. 좁히기는 SERVER 가 한다
+    // (`syncPull`) — 예전에는 필터 없는 이슈 목록을 통째로 다시 읽어 여기서 걸렀고, 저장소 이름 몇 개를
+    // 부르자고 전체 테이블을 한 번 더 읽는 꼴이었다.
+    controlPlane
+      .listIssues(ctx, {
+        syncPull: true,
+        ...(team ? { team: team.id } : {}),
+        limit: MAX_SYNCED_ROSTER,
+      })
+      .then((r) => issuePageSchema.parse(r).items)
+      .catch((): IssueSummary[] => []),
+  ])
+
+  const syncedRepositories: SyncedRepository[] = []
+  for (const issue of syncedRoster) {
+    const github = issue.github
+    if (!github || !github.pull) continue
+    const existing = syncedRepositories.find(
+      (r) => r.repository === github.repository && r.host === github.host
+    )
+    if (existing) existing.issues += 1
+    else
+      syncedRepositories.push({
+        repository: github.repository,
+        ...(github.host ? { host: github.host } : {}),
+        issues: 1,
+      })
+  }
+
+  // 새 이슈가 처음 앉을 팀: 팀 목록 안에서 열었으면 그 팀, 아니면 워크스페이스의 기본 팀. 지금 보고 있는
+  // 목록에 나타나지 않을 곳에 이슈를 만드는 일이 없도록 한다.
+  const initialTeamId = defaultTeamId ?? resolvedTeams.find((x) => x.isDefault)?.id
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <PullGithubIssuesButton repositories={syncedRepositories} />
+      {githubConnected ? (
+        <ImportGithubIssuesButton workspace={workspace} projects={projects} />
+      ) : (
+        // Never a dead import button: with no reachable installation the only useful move is connecting
+        // the App, so link there instead of opening a picker that has nothing to show.
+        canReadIntegrations && (
+          <Link
+            href={`/${workspace}/settings/integrations`}
+            className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {t('connectGithub')}
+          </Link>
+        )
+      )}
+      <CreateIssueButton
+        workspace={workspace}
+        projects={projects}
+        teams={resolvedTeams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
+        {...(initialTeamId !== undefined ? { defaultTeamId: initialTeamId } : {})}
+      />
+    </div>
+  )
+}
+
+// 툴바가 도착하기 전의 자리. 버튼이 늦게 튀어나와 제목 줄을 밀어내지 않도록 같은 높이를 미리 잡아 둔다.
+export function IssueListActionsSkeleton() {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Skeleton className="h-8 w-24" />
+      <Skeleton className="h-8 w-28" />
+    </div>
+  )
+}
