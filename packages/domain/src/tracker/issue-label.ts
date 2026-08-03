@@ -49,8 +49,7 @@ export class IssueLabel {
 
   static newLabel(input: NewIssueLabelInput): IssueLabelRecord {
     const name = normalizeIssueLabelName(input.name);
-    if (name.length === 0)
-      throw new BadRequestError("BAD_REQUEST", { name: input.name }, "A label needs a name.");
+    if (name.length === 0) throw new BadRequestError("BAD_REQUEST", { name: input.name }, "A label needs a name.");
     return {
       id: input.id,
       tenant: input.tenant,
@@ -83,8 +82,7 @@ export class IssueLabel {
 
     if (fields.name !== undefined) {
       const name = normalizeIssueLabelName(fields.name);
-      if (name.length === 0)
-        throw new BadRequestError("BAD_REQUEST", { name: fields.name }, "A label needs a name.");
+      if (name.length === 0) throw new BadRequestError("BAD_REQUEST", { name: fields.name }, "A label needs a name.");
       if (name !== this.record.name) {
         patch.name = name;
         changed.push("name");

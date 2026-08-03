@@ -93,9 +93,7 @@ export class InMemoryIssueLabelStore implements IssueLabelStore {
   }
 
   async list(tenant: string): Promise<IssueLabelRecord[]> {
-    return [...this.byId.values()]
-      .filter((x) => x.tenant === tenant)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return [...this.byId.values()].filter((x) => x.tenant === tenant).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async update(
@@ -222,10 +220,7 @@ export class PgIssueLabelStore implements IssueLabelStore {
           [...base, ...ev.params],
         );
       }
-      return await run(
-        `UPDATE everdict_issue_labels SET ${sets} WHERE tenant=$1 AND id=$2 RETURNING *`,
-        base,
-      );
+      return await run(`UPDATE everdict_issue_labels SET ${sets} WHERE tenant=$1 AND id=$2 RETURNING *`, base);
     } catch (e) {
       // The UNIQUE index is the authority on "that name is taken"; remap it rather than leaking a driver error.
       if (e instanceof Error && /everdict_issue_labels_tenant_name/.test(e.message)) throw duplicateName(next.name);

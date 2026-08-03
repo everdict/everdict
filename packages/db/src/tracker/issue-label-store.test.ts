@@ -1,7 +1,7 @@
 import type { IssueLabelRecord, IssueRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { InMemoryIssueStore } from "./issue-store.js";
 import { InMemoryIssueLabelStore } from "./issue-label-store.js";
+import { InMemoryIssueStore } from "./issue-store.js";
 
 const label = (over: Partial<IssueLabelRecord>): IssueLabelRecord => ({
   id: "lbl-1",

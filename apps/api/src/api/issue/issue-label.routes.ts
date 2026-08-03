@@ -67,55 +67,44 @@ export function registerIssueLabelRoutes(app: FastifyInstance, deps: ServerDeps)
     }
   });
 
-  app.patch<{ Params: { id: string } }>(
-    "/issue-labels/:id",
-    { schema: issueLabelDocs.update },
-    async (req, reply) => {
-      if (!deps.issueLabelService)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "issue label service not configured" });
-      const principal = await resolvePrincipal(req, reply, deps);
-      if (!principal) return reply;
-      try {
-        gate(principal, "issues:write");
-      } catch (err) {
-        return sendError(reply, err);
-      }
-      const parsed = UpdateIssueLabelBodySchema.safeParse(req.body);
-      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-      try {
-        return reply.send(
-          await deps.issueLabelService.update(
-            principal.workspace,
-            req.params.id,
-            parsed.data,
-            { subject: principal.subject },
-          ),
-        );
-      } catch (err) {
-        return sendError(reply, err);
-      }
-    },
-  );
+  app.patch<{ Params: { id: string } }>("/issue-labels/:id", { schema: issueLabelDocs.update }, async (req, reply) => {
+    if (!deps.issueLabelService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "issue label service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = UpdateIssueLabelBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await deps.issueLabelService.update(principal.workspace, req.params.id, parsed.data, {
+          subject: principal.subject,
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 
   // Deleting strips the label off every issue that wears it, in the store's own transaction. The count is on the
   // read side (`usage`) so a UI can warn before it happens rather than after.
-  app.delete<{ Params: { id: string } }>(
-    "/issue-labels/:id",
-    { schema: issueLabelDocs.remove },
-    async (req, reply) => {
-      if (!deps.issueLabelService)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "issue label service not configured" });
-      const principal = await resolvePrincipal(req, reply, deps);
-      if (!principal) return reply;
-      try {
-        gate(principal, "issues:write");
-        await deps.issueLabelService.remove(principal.workspace, req.params.id, { subject: principal.subject });
-        return reply.code(204).send();
-      } catch (err) {
-        return sendError(reply, err);
-      }
-    },
-  );
+  app.delete<{ Params: { id: string } }>("/issue-labels/:id", { schema: issueLabelDocs.remove }, async (req, reply) => {
+    if (!deps.issueLabelService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "issue label service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:write");
+      await deps.issueLabelService.remove(principal.workspace, req.params.id, { subject: principal.subject });
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 
   app.get<{ Params: { id: string } }>(
     "/issue-labels/:id/usage",

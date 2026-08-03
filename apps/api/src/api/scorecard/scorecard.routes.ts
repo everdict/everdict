@@ -226,8 +226,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
               : undefined;
         // ?team= COMBINES with the narrows above rather than replacing them — it answers "of these, which are
         // ours", which is the question the team sidebar asks. Reads stay workspace-wide; this is a filter.
-        const filter =
-          team === undefined ? narrow : { ...(narrow ?? {}), teamId: team };
+        const filter = team === undefined ? narrow : { ...(narrow ?? {}), teamId: team };
         return reply.send(await deps.scorecardService.list(principal.workspace, filter));
       } catch (err) {
         return sendError(reply, err);

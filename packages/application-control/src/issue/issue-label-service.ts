@@ -2,8 +2,8 @@ import { type IssueLabelColor, type IssueLabelRecord, NotFoundError, type Platfo
 import { IssueLabel, type IssueLabelEditInput } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { IssueLabelStore } from "../ports/issue-label-store.js";
-import type { OutboxEvent } from "../ports/run-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
+import type { OutboxEvent } from "../ports/run-store.js";
 
 // The label registry's use-cases (docs/tracker.md). Same shape as the issue service: every mutation funnels
 // through one place that turns a domain transition into stamped facts + a same-tx outbox write, so no transport
@@ -63,9 +63,7 @@ export class IssueLabelService {
     });
     // The store rejects a duplicate name (ConflictError) — uniqueness is a concurrency property, not a rule the
     // aggregate could enforce from the one record it can see.
-    await this.persist(input.tenant, IssueLabel.creationFacts(record), (outbox) =>
-      this.labels.create(record, outbox),
-    );
+    await this.persist(input.tenant, IssueLabel.creationFacts(record), (outbox) => this.labels.create(record, outbox));
     return record;
   }
 
