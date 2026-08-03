@@ -54,7 +54,7 @@ export async function repinHarnessImages(
         throw new BadRequestError(
           "BAD_REQUEST",
           { slot, image },
-          `pin '${slot}' is not in digest form (needs @sha256:…). Tags move and break reproducibility — pass allowTags:true if intended.`,
+          `pin '${slot}' is not in digest form (needs @sha256:…). Tags move and break reproducibility — pin as 'repo:tag@sha256:…' to keep the version readable, or pass allowTags:true if intended.`,
         );
       }
     }

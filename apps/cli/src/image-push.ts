@@ -10,7 +10,7 @@ import {
   type EnvironmentImageSpec,
   UpstreamError,
 } from "@everdict/contracts";
-import { dockerAuthConfigJson, parseImageRef } from "@everdict/domain";
+import { dockerAuthConfigJson, imageRepositoryOf, parseImageRef, pinDigest } from "@everdict/domain";
 import { z } from "zod";
 
 const pexecFile = promisify(execFile);
@@ -233,15 +233,19 @@ export function parsePlatform(stdout: string): { os?: string; arch?: string } {
   return { ...(os ? { os } : {}), ...(arch ? { arch } : {}) };
 }
 
-// The pushed digest out of the target's RepoDigests — registering `repo@sha256:…` instead of the mutable tag is what
-// makes the environment reproducible. Undefined when docker reported none (older daemon / no push metadata).
+// The pushed digest out of the target's RepoDigests — pinning `…@sha256:…` instead of the mutable tag is what makes
+// the environment reproducible. The pushed TAG is kept alongside it (`repo:tag@sha256:…`): the digest still decides
+// what runs, and the tag is what the environment/topology views read the version off. Undefined when docker reported
+// none (older daemon / no push metadata).
 export function pickRepoDigest(stdout: string, target: string): string | undefined {
-  const repository = target.slice(0, target.lastIndexOf(":"));
+  const repository = imageRepositoryOf(target);
   if (repository.length === 0) return undefined;
-  return stdout
+  const line = stdout
     .split(/\s+/)
-    .map((line) => line.trim())
-    .find((line) => line.startsWith(`${repository}@`));
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${repository}@`));
+  if (line === undefined) return undefined;
+  return pinDigest(target, line.slice(repository.length + 1));
 }
 
 // Assemble the capability from what the push actually knows: the published ref, the local image's platform, and the
@@ -317,22 +321,21 @@ export async function registerEnvironment(
   return SavedCapabilitySchema.parse(body);
 }
 
-// The digest the MANAGED registry actually stored, as `repo@sha256:…`. Best-effort like every other input to the
-// registration: a failed read degrades the pin to the tag, it never fails a push that already succeeded.
+// The digest the MANAGED registry actually stored, pinned onto the pushed ref as `repo:tag@sha256:…`. Best-effort
+// like every other input to the registration: a failed read degrades the pin to the tag, it never fails a push that
+// already succeeded.
 export async function fetchManagedDigest(apiUrl: string, apiKey: string, target: string): Promise<string | undefined> {
   const parsed = parseImageRef(target);
   const reference = parsed.digest ?? parsed.tag ?? "latest";
-  const repositoryPath = parsed.path;
   const url = new URL("/workspace/images/manifest", apiUrl);
-  url.searchParams.set("repository", repositoryPath);
+  url.searchParams.set("repository", parsed.path);
   url.searchParams.set("reference", reference);
   try {
     const res = await fetch(url, { headers: { authorization: `Bearer ${apiKey}` } });
     if (!res.ok) return undefined;
     const body = (await res.json()) as { digest?: string };
     if (!body.digest) return undefined;
-    const host = parsed.host ? `${parsed.host}/` : "";
-    return `${host}${repositoryPath}@${body.digest}`;
+    return pinDigest(target, body.digest);
   } catch {
     return undefined;
   }

@@ -2,6 +2,7 @@ import { Boxes, Database, DoorOpen, Globe, Radio } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { envValueText, type HarnessSpec } from '@/entities/harness'
+import { displayImageRef } from '@/shared/lib/image-ref'
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
 
@@ -59,11 +60,12 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
               </div>
               {s.image && (
                 <div className="mt-2 flex min-w-0 items-center gap-2">
+                  {/* Digest abbreviated so the tag — the only readable version — survives the truncation. */}
                   <span
                     className="truncate font-mono text-[12px] text-muted-foreground"
                     title={s.image}
                   >
-                    {s.image}
+                    {displayImageRef(s.image)}
                   </span>
                   <ImageClassBadge
                     cls={spec.imageClasses?.find((x) => x.image === s.image)?.class}

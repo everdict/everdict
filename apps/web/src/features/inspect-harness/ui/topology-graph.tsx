@@ -5,6 +5,7 @@ import { Boxes, Cloud, Database, DoorOpen, Globe, Layers, Radio } from 'lucide-r
 import { useTranslations } from 'next-intl'
 
 import type { HarnessSpec, TopologyDependency, TopologyService } from '@/entities/harness'
+import { displayImageRef } from '@/shared/lib/image-ref'
 import { cn } from '@/shared/lib/utils'
 
 // Draws the infra relationships of a service (topology) harness as a measurement-based SVG diagram.
@@ -305,11 +306,12 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
                 }
               >
                 {s.image && (
+                  // A node box is narrow — abbreviate the digest so the tag (the version) is not what gets cut.
                   <div
                     className="mt-1 truncate font-mono text-[10px] text-muted-foreground"
                     title={s.image}
                   >
-                    {s.image}
+                    {displayImageRef(s.image, 8)}
                   </div>
                 )}
                 {s.perRun.length > 0 && (

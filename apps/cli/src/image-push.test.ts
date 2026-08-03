@@ -42,7 +42,16 @@ describe("buildDockerAuthConfig — temporary DOCKER_CONFIG contents", () => {
 describe("pickRepoDigest — the pushed digest out of docker's RepoDigests", () => {
   it("picks the digest of the pushed repository, ignoring digests of other repositories", () => {
     const stdout = "docker.io/acme/other@sha256:aaa\nghcr.io/acme/officeqa-env@sha256:bbb\n";
-    expect(pickRepoDigest(stdout, "ghcr.io/acme/officeqa-env:v3")).toBe("ghcr.io/acme/officeqa-env@sha256:bbb");
+    expect(pickRepoDigest(stdout, "ghcr.io/acme/officeqa-env:v3")).toBe("ghcr.io/acme/officeqa-env:v3@sha256:bbb");
+  });
+
+  it("keeps the pushed tag on the pin — docker reports the digest alone, and a tagless pin has no readable version", () => {
+    const stdout = "registry.acme.dev:5000/team/env@sha256:ccc";
+    expect(pickRepoDigest(stdout, "registry.acme.dev:5000/team/env:2026.7")).toBe(
+      "registry.acme.dev:5000/team/env:2026.7@sha256:ccc",
+    );
+    // An untagged target has nothing to keep — the pin is the digest alone.
+    expect(pickRepoDigest("ghcr.io/acme/env@sha256:ddd", "ghcr.io/acme/env")).toBe("ghcr.io/acme/env@sha256:ddd");
   });
 
   it("is undefined when docker reported no digest for the pushed repository — the caller falls back to the tag", () => {

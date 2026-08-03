@@ -5,6 +5,7 @@ import { Container } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { CapabilityImageClass } from '@/entities/capability'
+import { displayImageRef } from '@/shared/lib/image-ref'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -96,8 +97,11 @@ export function EnvironmentPicker({ onPick }: { onPick: (env: StoreEnvironment) 
                     </Badge>
                   ))}
               </span>
-              <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
-                {env.image}
+              <span
+                className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground"
+                title={env.image}
+              >
+                {displayImageRef(env.image)}
               </span>
             </span>
           </DropdownItem>

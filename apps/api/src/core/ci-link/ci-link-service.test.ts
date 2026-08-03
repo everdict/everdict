@@ -173,6 +173,10 @@ describe("CiLinkService.openSetupPr — workflow YAML synthesis + branch/commit/
     expect(yaml).toContain("id-token: write"); // OIDC keyless
     expect(yaml).toContain("context: services/x"); // monorepo path
     expect(yaml).toContain("build-svc-x"); // slot build step + digest output reference
+    // The pin carries the commit-sha tag AND the digest — a digest-only pin is reproducible but unreadable.
+    expect(yaml).toContain(
+      '"svc-x":"ghcr.io/${{ github.repository }}/svc-x:${{ steps.head.outputs.sha }}@${{ steps.build-svc-x.outputs.digest }}"',
+    );
     expect(yaml).toContain("api-url: https://everdict.example.com");
     expect(yaml).toContain("concurrency:"); // superseding
   });
@@ -369,7 +373,7 @@ describe("renderCiWorkflow", () => {
     );
     expect(yaml).toContain("registry: containers.ghe.acme.io");
     expect(yaml).toContain("tags: containers.ghe.acme.io/${{ github.repository }}/web:${{ steps.head.outputs.sha }}");
-    expect(yaml).toContain('"web":"containers.ghe.acme.io/${{ github.repository }}/web@');
+    expect(yaml).toContain('"web":"containers.ghe.acme.io/${{ github.repository }}/web:${{ steps.head.outputs.sha }}@');
     expect(yaml).not.toContain("ghcr.io");
   });
 

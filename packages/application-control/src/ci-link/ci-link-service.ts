@@ -228,10 +228,13 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
       ].join("\n"),
     )
     .join("\n");
+  // The pin carries BOTH halves of the image's identity: the commit-sha tag it was pushed under and the digest that
+  // decides what actually runs (`repo:sha@sha256:…`). A digest-only pin is just as reproducible but leaves every
+  // topology/scorecard view showing a bare `repo@sha256:…` — reproducible and unidentifiable.
   const imagesJson = `{${slots
     .map(
       ([slot]) =>
-        `"${slot}":"${registry}/\${{ github.repository }}/${slot}@\${{ steps.build-${slot}.outputs.digest }}"`,
+        `"${slot}":"${registry}/\${{ github.repository }}/${slot}:\${{ steps.head.outputs.sha }}@\${{ steps.build-${slot}.outputs.digest }}"`,
     )
     .join(",")}}`;
   // Placement is always self-hosted (design D6) — CI (run-eval) must reach the control plane even on a private network, so there is no GitHub-hosted

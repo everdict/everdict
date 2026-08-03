@@ -5,6 +5,7 @@ import type { TopologyStatus } from '@everdict/contracts/wire'
 import { useTranslations } from 'next-intl'
 
 import { fmtDurationMs } from '@/shared/lib/format'
+import { displayImageRef } from '@/shared/lib/image-ref'
 import { cn } from '@/shared/lib/utils'
 import { AnsiText } from '@/shared/ui/ansi-text'
 import { Card } from '@/shared/ui/card'
@@ -98,8 +99,7 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
         )}
         {topology.services.map((svc) => {
           // 라이브 상세 요약 줄 — 값이 있는 항목만 · 구분자로 잇는다(빈 섹션 숨김 관례).
-          const detail = [
-            svc.image,
+          const rest = [
             svc.port !== undefined ? `:${svc.port}` : undefined,
             svc.node,
             svc.cpu !== undefined ? `cpu ${svc.cpu}` : undefined,
@@ -108,6 +108,12 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
               ? t('age', { age: fmtDurationMs(svc.ageSeconds * 1000) })
               : undefined,
           ].filter(Boolean)
+          // The image carries an abbreviated digest — a 71-character digest eats the whole line and the tag, which
+          // is the only readable version, is exactly what gets truncated away. The full ref stays on the title.
+          const detail = [svc.image ? displayImageRef(svc.image) : undefined, ...rest].filter(
+            Boolean
+          )
+          const detailTitle = [svc.image, ...rest].filter(Boolean).join(' · ')
           return (
             <div key={svc.name} className="px-4 py-2.5">
               <div className="flex items-center gap-2">
@@ -155,7 +161,7 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
               {detail.length > 0 && (
                 <p
                   className="mt-1 truncate font-mono text-[11px] text-muted-foreground/80"
-                  title={detail.join(' · ')}
+                  title={detailTitle}
                 >
                   {detail.join(' · ')}
                 </p>

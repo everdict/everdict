@@ -190,9 +190,12 @@ everdict image push officeqa-env:v3 --register-environment officeqa-env \
   [--env-name N] [--env-description T] [--benchmark B] [--instructions file.md] [--visibility V]
 ```
 
-- **Digest-pinned when possible.** `docker image inspect` on the target reads back the pushed
-  `RepoDigests`; the registration pins `repo@sha256:…` (the tag ref is the fallback, announced).
-  This is the reproducibility answer to the store doc's digest-pinning open question for the CLI path.
+- **Digest-pinned when possible, and the tag rides along.** `docker image inspect` on the target reads back the
+  pushed `RepoDigests`; the registration pins `repo:tag@sha256:…` (the tag ref alone is the fallback, announced).
+  This is the reproducibility answer to the store doc's digest-pinning open question for the CLI path. The tag half
+  is not decoration: the digest is what resolves, but it is also the only thing a reader can get a VERSION from, and
+  a digest-only pin renders every environment/topology view as an unidentifiable `repo@sha256:…`
+  (`pinDigest` in `@everdict/domain` is the one place that composes it).
 - **os/arch come from the local image**, packages/preset do not — the CLI registers only what it can
   observe. Without `--instructions` the body is a **provenance line**, never fabricated guidance.
 - **Reach defaults to `workspace`** (the team's) — the same kind-dependent default the service now applies

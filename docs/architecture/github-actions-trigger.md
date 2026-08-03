@@ -137,9 +137,12 @@ Two lifecycles, two registry treatments:
   — sugar over the existing raw-instance read + `POST /harnesses`: load latest raw `HarnessInstanceSpec`, merge
   pins, bump version, register. Idempotent (same pins ⇒ same version returned, no new registration). A monorepo
   CI run passes **multiple slots in one call** → exactly one vN+1 (no intermediate version spam).
-- **Digest-only pins.** CI must pin `ghcr.io/…@sha256:…`, never a moving tag — otherwise scorecard
+- **Digest pins, tag kept.** CI must pin a digest (`…@sha256:…`), never a moving tag — otherwise scorecard
   reproducibility and the per-version leaderboard comparison break silently. The re-pin route rejects tag-only
-  refs (`BadRequestError`) unless the instance opts out.
+  refs (`BadRequestError`) unless the instance opts out. The generated workflow emits the COMBINED form
+  `ghcr.io/<repo>/<slot>:<sha>@sha256:…`: the digest still decides what runs, and the commit-sha tag is what makes
+  the pinned version readable in the topology/scorecard views (a digest-only pin is reproducible and
+  unidentifiable).
 
 Baseline for a PR diff = latest **succeeded** scorecard of the same instance lineage (the dev channel). Reuses
 `diffScorecards`; needs only a "latest succeeded scorecard for harness id" lookup.

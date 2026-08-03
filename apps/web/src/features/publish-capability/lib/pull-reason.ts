@@ -10,12 +10,12 @@ export function pullReasonLabel(
   return t('importedNotPullableBadge')
 }
 
-// ref 를 digest 로 고정 — 태그(또는 무태그)를 떼고 `repo@sha256:…` 로. host:port 의 콜론은 태그가 아니므로
-// 마지막 슬래시 뒤에 있는 콜론만 태그로 본다. 이미 digest 가 박혀 있으면 그 digest 를 교체한다.
+// Pin the ref to a digest, keeping the tag it already carries — `repo:tag@sha256:…`. The digest is what resolves
+// (an OCI client ignores the tag when a digest is present), so the pin is exactly as reproducible as a bare
+// `repo@sha256:…`; the tag is the only place a reader gets a VERSION from, and dropping it left the environment and
+// topology views showing an image nobody could identify. An already-pinned digest is replaced.
 export function withDigest(image: string, digest: string): string {
   const at = image.indexOf('@')
   const base = at >= 0 ? image.slice(0, at) : image
-  const lastColon = base.lastIndexOf(':')
-  const repository = lastColon > base.lastIndexOf('/') ? base.slice(0, lastColon) : base
-  return `${repository}@${digest}`
+  return `${base}@${digest}`
 }
