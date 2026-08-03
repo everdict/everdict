@@ -1,8 +1,13 @@
-import type { OutboxEvent, ProjectListFilter, ProjectStore } from "@everdict/application-control";
-import { type ProjectRecord, ProjectRecordSchema } from "@everdict/contracts";
+import type { OutboxEvent, ProjectListFilter, ProjectStore, ProjectUpdateStore } from "@everdict/application-control";
+import {
+  type ProjectRecord,
+  ProjectRecordSchema,
+  type ProjectUpdateRecord,
+  ProjectUpdateRecordSchema,
+} from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
-import { type TrackerRow, iso, trackerHistory } from "./row.js";
+import { type TrackerRow, iso, trackerHistory, trackerIds } from "./row.js";
 
 export class InMemoryProjectStore implements ProjectStore {
   private readonly byId = new Map<string, ProjectRecord>();
@@ -24,7 +29,10 @@ export class InMemoryProjectStore implements ProjectStore {
         (record) =>
           record.tenant === tenant &&
           (filter?.status === undefined || record.status === filter.status) &&
-          (filter?.initiativeId === undefined || record.initiativeId === filter.initiativeId),
+          (filter?.initiativeId === undefined || record.initiativeIds.includes(filter.initiativeId)) &&
+          (filter?.initiativeIds === undefined ||
+            record.initiativeIds.some((id) => filter.initiativeIds?.includes(id) === true)) &&
+          (filter?.teamId === undefined || record.teamIds.includes(filter.teamId)),
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return filter?.limit !== undefined ? rows.slice(0, filter.limit) : rows;
@@ -58,14 +66,20 @@ interface ProjectRow extends TrackerRow {
   name: string;
   description: string | null;
   status: string;
-  initiative_id: string | null;
+  team_ids: unknown;
+  initiative_ids: unknown;
+  lead: string | null;
+  member_ids: unknown;
+  health: string | null;
+  milestones: unknown;
   target_date: string | null;
   completed_at: string | Date | null;
 }
 
 const PROJECT_COLUMNS =
-  "(id, tenant, name, description, status, initiative_id, target_date, completed_at, history, created_by, created_at, updated_at)";
-const PROJECT_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::jsonb,$10,$11::timestamptz,$12::timestamptz)";
+  "(id, tenant, name, description, status, team_ids, initiative_ids, lead, member_ids, health, milestones, target_date, completed_at, history, created_by, created_at, updated_at)";
+const PROJECT_VALUES =
+  "($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9::jsonb,$10,$11::jsonb,$12,$13::timestamptz,$14::jsonb,$15,$16::timestamptz,$17::timestamptz)";
 
 function insertParams(record: ProjectRecord): unknown[] {
   return [
@@ -74,7 +88,12 @@ function insertParams(record: ProjectRecord): unknown[] {
     record.name,
     record.description ?? null,
     record.status,
-    record.initiativeId ?? null,
+    JSON.stringify(record.teamIds),
+    JSON.stringify(record.initiativeIds),
+    record.lead ?? null,
+    JSON.stringify(record.memberIds),
+    record.health ?? null,
+    JSON.stringify(record.milestones),
     record.targetDate ?? null,
     record.completedAt ?? null,
     JSON.stringify(record.history),
@@ -91,7 +110,12 @@ function rowToRecord(row: ProjectRow): ProjectRecord {
     name: row.name,
     ...(row.description !== null ? { description: row.description } : {}),
     status: row.status,
-    ...(row.initiative_id !== null ? { initiativeId: row.initiative_id } : {}),
+    teamIds: trackerIds(row.team_ids),
+    initiativeIds: trackerIds(row.initiative_ids),
+    ...(row.lead !== null ? { lead: row.lead } : {}),
+    memberIds: trackerIds(row.member_ids),
+    ...(row.health !== null ? { health: row.health } : {}),
+    milestones: Array.isArray(row.milestones) ? row.milestones : [],
     ...(row.target_date !== null ? { targetDate: row.target_date } : {}),
     ...(row.completed_at !== null ? { completedAt: iso(row.completed_at) } : {}),
     history: trackerHistory(row.history),
@@ -136,9 +160,21 @@ export class PgProjectStore implements ProjectStore {
       conds.push(`status = $${i++}`);
       params.push(filter.status);
     }
+    // Containment over the jsonb lists (GIN-indexed in migration 0108) — a project belongs to every initiative
+    // and every team it names, so both filters are `@>`, never an equality on a scalar column.
     if (filter?.initiativeId !== undefined) {
-      conds.push(`initiative_id = $${i++}`);
-      params.push(filter.initiativeId);
+      conds.push(`initiative_ids @> $${i++}::jsonb`);
+      params.push(JSON.stringify([filter.initiativeId]));
+    }
+    if (filter?.initiativeIds !== undefined) {
+      // `?|` = "shares any element with", which is the roll-up's question: does this project belong to the
+      // initiative or to any of its descendants.
+      conds.push(`initiative_ids ?| $${i++}::text[]`);
+      params.push(filter.initiativeIds);
+    }
+    if (filter?.teamId !== undefined) {
+      conds.push(`team_ids @> $${i++}::jsonb`);
+      params.push(JSON.stringify([filter.teamId]));
     }
     let sql = `SELECT * FROM everdict_projects WHERE ${conds.join(" AND ")} ORDER BY updated_at DESC`;
     if (filter?.limit !== undefined) {
@@ -158,15 +194,21 @@ export class PgProjectStore implements ProjectStore {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
     const next: ProjectRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
-    const sets = `name=$3, description=$4, status=$5, initiative_id=$6, target_date=$7,
-       completed_at=$8::timestamptz, history=$9::jsonb, updated_at=$10::timestamptz`;
+    const sets = `name=$3, description=$4, status=$5, team_ids=$6::jsonb, initiative_ids=$7::jsonb,
+       lead=$8, member_ids=$9::jsonb, health=$10, milestones=$11::jsonb,
+       target_date=$12, completed_at=$13::timestamptz, history=$14::jsonb, updated_at=$15::timestamptz`;
     const params: unknown[] = [
       tenant,
       id,
       next.name,
       next.description ?? null,
       next.status,
-      next.initiativeId ?? null,
+      JSON.stringify(next.teamIds),
+      JSON.stringify(next.initiativeIds),
+      next.lead ?? null,
+      JSON.stringify(next.memberIds),
+      next.health ?? null,
+      JSON.stringify(next.milestones),
       next.targetDate ?? null,
       next.completedAt ?? null,
       JSON.stringify(next.history),
@@ -193,5 +235,67 @@ export class PgProjectStore implements ProjectStore {
 
   async remove(tenant: string, id: string): Promise<void> {
     await this.client.query("DELETE FROM everdict_projects WHERE tenant=$1 AND id=$2", [tenant, id]);
+  }
+}
+
+// --- The posted updates -------------------------------------------------------------------------------------
+// Append-only: an update is what somebody said at a moment, so there is no edit path and nothing to invalidate.
+
+export class InMemoryProjectUpdateStore implements ProjectUpdateStore {
+  private readonly rows: ProjectUpdateRecord[] = [];
+
+  async create(record: ProjectUpdateRecord): Promise<void> {
+    this.rows.push(record);
+  }
+
+  async list(tenant: string, projectId: string, limit?: number): Promise<ProjectUpdateRecord[]> {
+    const rows = this.rows
+      .filter((row) => row.tenant === tenant && row.projectId === projectId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return limit === undefined ? rows : rows.slice(0, limit);
+  }
+}
+
+interface ProjectUpdateRow {
+  id: string;
+  tenant: string;
+  project_id: string;
+  health: string;
+  body: string;
+  created_by: string;
+  created_at: string | Date;
+}
+
+export class PgProjectUpdateStore implements ProjectUpdateStore {
+  constructor(private readonly client: SqlClient) {}
+
+  async create(record: ProjectUpdateRecord): Promise<void> {
+    await this.client.query(
+      `INSERT INTO everdict_project_updates (id, tenant, project_id, health, body, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::timestamptz)`,
+      [record.id, record.tenant, record.projectId, record.health, record.body, record.createdBy, record.createdAt],
+    );
+  }
+
+  async list(tenant: string, projectId: string, limit?: number): Promise<ProjectUpdateRecord[]> {
+    const params: unknown[] = [tenant, projectId];
+    let sql = `SELECT * FROM everdict_project_updates
+       WHERE tenant=$1 AND project_id=$2 ORDER BY created_at DESC`;
+    if (limit !== undefined) {
+      sql += " LIMIT $3";
+      params.push(limit);
+    }
+    const { rows } = await this.client.query<ProjectUpdateRow>(sql, params);
+    return rows.map((row) =>
+      ProjectUpdateRecordSchema.parse({
+        id: row.id,
+        tenant: row.tenant,
+        projectId: row.project_id,
+        health: row.health,
+        body: row.body,
+        createdBy: row.created_by,
+        createdAt: iso(row.created_at),
+      }),
+    );
   }
 }

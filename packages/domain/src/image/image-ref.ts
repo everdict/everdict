@@ -71,6 +71,23 @@ export function classifyImageRef(
   return parsed.path.includes("/") ? "external" : "unqualified";
 }
 
+// The repository coordinates of a ref — "host/path" (or bare "path" for a docker.io shorthand), tag and digest
+// stripped. The identity a tag/digest hangs off.
+export function imageRepositoryOf(ref: string): string {
+  const parsed = parseImageRef(ref);
+  return parsed.host ? `${parsed.host}/${parsed.path}` : parsed.path;
+}
+
+// Pin a reference to a digest WITHOUT discarding its tag — `repo:tag@sha256:…`. Both halves of an image's
+// identity survive: the digest is what actually resolves (an OCI client ignores the tag when a digest is present,
+// so reproducibility is untouched), and the tag is the only place a human reads a VERSION off. Dropping it — what
+// every pin path used to do — leaves the topology view showing a bare `repo@sha256:…`: a perfectly reproducible
+// image nobody can identify. An already-pinned digest is replaced.
+export function pinDigest(ref: string, digest: string): string {
+  const { tag } = parseImageRef(ref);
+  return `${imageRepositoryOf(ref)}${tag ? `:${tag}` : ""}@${digest.trim()}`;
+}
+
 // Registry image prefix — "host[/namespace]/". Used by the client to assemble the target ref.
 export function imageRegistryPrefix(registry: ImageRegistryCoordinates): string {
   return registry.namespace ? `${registry.host}/${registry.namespace}/` : `${registry.host}/`;

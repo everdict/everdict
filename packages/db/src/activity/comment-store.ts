@@ -1,7 +1,7 @@
 import { type CommentRecord, CommentRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 
-import type { CommentStore, CommentUpdatePatch } from "@everdict/application-control";
+import type { CommentResourceCount, CommentStore, CommentUpdatePatch } from "@everdict/application-control";
 
 export class InMemoryCommentStore implements CommentStore {
   private readonly rows: CommentRecord[] = [];
@@ -14,6 +14,16 @@ export class InMemoryCommentStore implements CommentStore {
     return this.rows
       .filter((r) => r.tenant === tenant && r.resourceType === resourceType && r.resourceId === resourceId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async countByResource(tenant: string, resourceType: string, resourceIds: string[]): Promise<CommentResourceCount[]> {
+    const wanted = new Set(resourceIds);
+    const counts = new Map<string, number>();
+    for (const row of this.rows) {
+      if (row.tenant !== tenant || row.resourceType !== resourceType || !wanted.has(row.resourceId)) continue;
+      counts.set(row.resourceId, (counts.get(row.resourceId) ?? 0) + 1);
+    }
+    return [...counts].map(([resourceId, count]) => ({ resourceId, count }));
   }
 
   async get(tenant: string, id: string): Promise<CommentRecord | undefined> {
@@ -124,6 +134,20 @@ export class PgCommentStore implements CommentStore {
       [tenant, resourceType, resourceId],
     );
     return res.rows.map(rowToRecord);
+  }
+
+  // One GROUP BY over the ids a page is showing — a list draws the NUMBER, so it must never fetch the threads.
+  // Replies count too: a row's badge answers "how much conversation is on this", not "how many top-level posts".
+  async countByResource(tenant: string, resourceType: string, resourceIds: string[]): Promise<CommentResourceCount[]> {
+    if (resourceIds.length === 0) return []; // an empty page asks nothing of the database
+    const res = await this.client.query<{ resource_id: string; count: string | number }>(
+      `SELECT resource_id, count(*) AS count
+       FROM everdict_comments
+       WHERE tenant = $1 AND resource_type = $2 AND resource_id = ANY($3::text[])
+       GROUP BY resource_id`,
+      [tenant, resourceType, resourceIds],
+    );
+    return res.rows.map((row) => ({ resourceId: row.resource_id, count: Number(row.count) }));
   }
 
   async get(tenant: string, id: string): Promise<CommentRecord | undefined> {

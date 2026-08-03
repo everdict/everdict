@@ -24,6 +24,49 @@ export const ISSUE_STATUSES = [
 export const IssueStatusSchema = z.enum(ISSUE_STATUSES);
 export type IssueStatus = z.infer<typeof IssueStatusSchema>;
 
+// --- Status CATEGORIES (Linear's five) ---
+// Every status belongs to exactly one category, and category is what PROGRAMMATIC decisions read: the release
+// gate, the rollups, the regression watch. Linear calls these the workflow-state `type`, and it is the reason a
+// team can rename or add states without breaking anything — the name is for humans, the category is for code.
+//
+// `regressed` maps to `started`, which is the whole argument for having categories at all: a resolution that
+// stopped holding is WORK IN FLIGHT, not an untouched backlog item and not a finished one. Every open/closed
+// judgment in the tracker now derives from this table instead of repeating a pair of literals.
+export const ISSUE_STATUS_CATEGORIES = ["backlog", "unstarted", "started", "completed", "canceled"] as const;
+export const IssueStatusCategorySchema = z.enum(ISSUE_STATUS_CATEGORIES);
+export type IssueStatusCategory = z.infer<typeof IssueStatusCategorySchema>;
+
+export const ISSUE_STATUS_CATEGORY: Record<IssueStatus, IssueStatusCategory> = {
+  backlog: "backlog",
+  todo: "unstarted",
+  in_progress: "started",
+  in_review: "started",
+  done: "completed",
+  cancelled: "canceled",
+  regressed: "started",
+};
+
+// The CLOSED half of the vocabulary, DERIVED from the category table above rather than listed again — the
+// stores' aggregate counts pass this very array into SQL, so "open" has to mean the same thing whether it is
+// decided in TypeScript or by Postgres, and two hand-maintained lists would eventually disagree. `regressed` is
+// absent because its category is `started`: a resolution that stopped holding is work in flight.
+export const CLOSED_ISSUE_STATUSES: readonly IssueStatus[] = ISSUE_STATUSES.filter(
+  (status) => ISSUE_STATUS_CATEGORY[status] === "completed" || ISSUE_STATUS_CATEGORY[status] === "canceled",
+);
+
+// Calendar dates, not instants: "did we finish evaluation by the 14th" is a date question, and storing the
+// literal YYYY-MM-DD round-trips exactly with no timezone reinterpretation on the way in or out.
+const CalendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.");
+
+// --- Priority (Linear's five) ---
+// A closed STRING vocabulary rather than Linear's 0–4 integers (`none`=0, `urgent`=1 … `low`=4 on the wire
+// there). The values mean the same thing; the spelling is ours because a magic integer whose zero sorts LAST
+// is exactly the kind of encoded rule this codebase keeps out of records — `issuePriorityRank`
+// (@everdict/domain) owns the ordering instead, in one place, where it can be read.
+export const ISSUE_PRIORITIES = ["none", "urgent", "high", "medium", "low"] as const;
+export const IssuePrioritySchema = z.enum(ISSUE_PRIORITIES);
+export type IssuePriority = z.infer<typeof IssuePrioritySchema>;
+
 // What kind of everdict object an issue points at. Links are POINTERS (same semantics as a platform event's
 // subject) — unvalidated by design, resolved through the normal RBAC-gated reads at render time. The one
 // exception is `resolution.scorecardId`, which the service validates because it is evidence, not a pointer.
@@ -97,6 +140,13 @@ export const TRACKER_HISTORY_EVENTS = [
   "github_push_failed",
   "completed",
   "cancelled",
+  // An issue changed hands between teams. It is its own event rather than an `updated` with a changed field
+  // because it re-mints the issue's IDENTIFIER: the durable answer to "why is this issue called PLT-3 when every
+  // link in the pull request says ENG-12" lives here, and nowhere else once the event log is swept.
+  "moved",
+  // A project update was posted — the health judgment plus the sentence explaining it. Its own event because a
+  // reader scanning the timeline is looking for exactly these, not for the edits between them.
+  "update_posted",
   // Team roster changes (records/team.ts) — who could file under this prefix, and when. The durable half of the
   // matching `team.member_*` facts, for the same reason every other tracker history entry exists: the event log
   // is swept, and "who was on this team when that issue was filed" is a question asked long after.
@@ -195,9 +245,48 @@ export const IssueRecordSchema = z.object({
   // immutable, so the identifier is stable for the life of the issue and readable without loading the team.
   number: z.number().int().positive(),
   identifier: z.string().min(1),
+  // Every identifier this issue has answered to before, oldest first. Moving an issue to another team re-mints
+  // its name from the new team's counter (that is what makes the prefix mean "whose list is this on"), which
+  // would otherwise break every link already pasted into a pull request or a chat message. Keeping the old
+  // names resolvable — the lookup falls back to this list and the web redirects to the canonical slug — is what
+  // lets the address change without any of its existing spellings dying.
+  formerIdentifiers: z.array(z.string()).default([]),
   title: z.string().min(1),
   description: z.string().optional(),
   status: IssueStatusSchema,
+  // How urgent, independent of where it sits in the workflow: a backlog item can be urgent and an in-progress
+  // one can be nobody's priority. Defaulted rather than optional because "unprioritised" is a real answer that
+  // every list has to draw, and an absent field would make every consumer invent the same fallback.
+  priority: IssuePrioritySchema.default("none"),
+  // Team-scoped points. A bare number here on purpose: the SCALE (linear / fibonacci / t-shirt) is a team
+  // setting, so the same 3 renders as "3" or "M" depending on the owning team — the record stores the value,
+  // never its rendering.
+  estimate: z.number().int().nonnegative().max(1000).optional(),
+  // When this issue is due — a calendar date like a project's target date, and for the same reason: "is it late"
+  // is a date question, and the literal YYYY-MM-DD round-trips with no timezone reinterpretation.
+  dueDate: CalendarDateSchema.optional(),
+  // The issue this one breaks out of. Sub-issues are ordinary issues in every other respect — they carry their
+  // own status, their own team, and count in every rollup — so this is a pointer, not a containment. The
+  // service refuses a cycle (nothing may be its own ancestor) and refuses deleting an issue that still has
+  // children rather than silently orphaning them.
+  parentId: z.string().optional(),
+  // The team iteration this issue is pulled into (records/cycle.ts). A cycle belongs to a team, so this only
+  // ever names one of the OWNING team's cycles — the service refuses another team's, because an issue in a
+  // cycle it cannot appear in is invisible work.
+  cycleId: z.string().optional(),
+  // The project checkpoint this issue belongs to. Only ever one of ITS project's milestones — the service
+  // refuses another project's, because a checkpoint an issue cannot appear under is work made invisible.
+  milestoneId: z.string().optional(),
+  // Which of the owning team's named workflow states the issue sits in (records/workflow-state.ts). The
+  // canonical `status` above stays the programmatic answer; this is the team's spelling of it, and absent means
+  // "the team's default state for that status" — which is every issue that predates the board, and every one
+  // the regression watch moved (nobody dragged it into a column).
+  stateId: z.string().optional(),
+  // Triage: the issue arrived from outside the team's workflow (an import, an agent, a request) and has not
+  // been accepted into it yet. A flag rather than a status, deliberately — the status vocabulary is the
+  // WORKFLOW, and something waiting to enter the workflow has not started it. Accepting clears the flag;
+  // declining cancels the issue.
+  inTriage: z.boolean().default(false),
   projectId: z.string().optional(),
   assignee: z.string().optional(),
   // Ids into the workspace label registry above — NOT names. A reader that needs to draw a chip joins against
@@ -223,14 +312,108 @@ export const IssueRecordSchema = z.object({
 });
 export type IssueRecord = z.infer<typeof IssueRecordSchema>;
 
+// --- The LIST projection ---
+// A list screen draws an identifier, a title, a status and a few chips; it never draws a description or an
+// audit trail. Serving the full record anyway made `GET /issues` read and Zod-parse every row's `history` and
+// `description` — 4 MB and 150 ms for a 2,000-issue workspace, of which the page used a few kilobytes. This is
+// the same split `ScorecardStore.list` already makes by omitting per-case results: the LIST is a projection,
+// the DETAIL (`GET /issues/:id`) stays the whole record.
+//
+// What is dropped and why: `description`/`history` (unbounded, detail-only), `formerIdentifiers`/`origin`
+// (never rendered in a row), `links` → `linkCount` (rows show the count), and the GitHub copy → the three
+// fields a row actually needs, because the full one carries a 50-comment slice.
+export const IssueSummaryGithubSchema = z.object({
+  host: z.string().optional(),
+  repository: z.string().min(1),
+  pull: z.boolean(), // whether the bulk sync's working set includes this issue
+});
+export type IssueSummaryGithub = z.infer<typeof IssueSummaryGithubSchema>;
+
+export const IssueSummarySchema = z.object({
+  id: z.string(),
+  tenant: z.string(),
+  teamId: z.string(),
+  number: z.number().int().positive(),
+  identifier: z.string().min(1),
+  title: z.string().min(1),
+  status: IssueStatusSchema,
+  // Drawn in a row: the priority icon, the "late" treatment on a due date, the estimate chip, and the marker
+  // that says this row is somebody's sub-issue. All four are scalars, so projecting them costs a row nothing.
+  priority: IssuePrioritySchema.default("none"),
+  estimate: z.number().int().nonnegative().optional(),
+  dueDate: CalendarDateSchema.optional(),
+  parentId: z.string().optional(),
+  cycleId: z.string().optional(),
+  milestoneId: z.string().optional(),
+  stateId: z.string().optional(),
+  inTriage: z.boolean().default(false),
+  projectId: z.string().optional(),
+  assignee: z.string().optional(),
+  labelIds: z.array(z.string()).default([]),
+  linkCount: z.number().int().nonnegative(),
+  // How much conversation is on this issue — the thread badge a list row carries, replies included. It does NOT
+  // come from the issue table (comments are their own store), so `IssueService` fills it from one batched
+  // count per page. Deliberately OPTIONAL rather than defaulted to 0: absent means "nobody counted", 0 means
+  // "counted, and there are none". A default would make an unwired comment store report every issue as silent.
+  commentCount: z.number().int().nonnegative().optional(),
+  // Kept despite being detail-ish: a regressed row names the scorecard it fell from, and that is the one thing
+  // a regression alarm has to show without a second read.
+  resolution: IssueResolutionSchema.optional(),
+  github: IssueSummaryGithubSchema.optional(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type IssueSummary = z.infer<typeof IssueSummarySchema>;
+
+// One PAGE of the issue list, in the house pagination shape (`{ items, nextCursor? }`, opaque base64url token,
+// absent = last page) — the same contract `TrajectoryStore.list` serves.
+export const IssuePageSchema = z.object({
+  items: z.array(IssueSummarySchema),
+  nextCursor: z.string().optional(),
+});
+export type IssuePage = z.infer<typeof IssuePageSchema>;
+
+// --- Project health (the "update" Linear posts) ---
+// A judgment a HUMAN makes, unlike everything else the tracker records — which is exactly why it lives on a
+// posted update with a body rather than being inferred from the rollup. "Behind on issue count" is arithmetic;
+// "at risk" is somebody saying so, and the sentence they said it in is the useful half.
+export const PROJECT_HEALTH = ["on_track", "at_risk", "off_track"] as const;
+export const ProjectHealthSchema = z.enum(PROJECT_HEALTH);
+export type ProjectHealth = z.infer<typeof ProjectHealthSchema>;
+
+export const ProjectUpdateRecordSchema = z.object({
+  id: z.string(),
+  tenant: z.string(),
+  projectId: z.string(),
+  health: ProjectHealthSchema,
+  body: z.string().max(50_000),
+  createdBy: z.string(),
+  createdAt: z.string(),
+});
+export type ProjectUpdateRecord = z.infer<typeof ProjectUpdateRecordSchema>;
+
+// --- Milestones: the checkpoints inside a project ---
+// Embedded on the project rather than a table of their own: there are a handful per project, they are never
+// read without it, and an issue points at one by id. `sortOrder` is what makes them a SEQUENCE — milestones are
+// steps toward a date, so the order is the meaning, not a display preference.
+export const ProjectMilestoneSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  targetDate: CalendarDateSchema.optional(),
+  sortOrder: z.number().int().nonnegative(),
+});
+export type ProjectMilestone = z.infer<typeof ProjectMilestoneSchema>;
+
 // --- Project: issues under one target date ---
-export const PROJECT_STATUSES = ["planned", "in_progress", "completed", "cancelled"] as const;
+// Linear's six, under our spelling: `in_progress` is its "started" (the issue vocabulary already spells the
+// middle of a workflow that way, and one product should not name the same idea twice). `backlog` is work that
+// is not scheduled yet and `paused` is work that stopped without being abandoned — the distinction a status
+// list that only knows planned/in_progress loses, which is how a stalled project keeps reading as active.
+export const PROJECT_STATUSES = ["backlog", "planned", "in_progress", "paused", "completed", "cancelled"] as const;
 export const ProjectStatusSchema = z.enum(PROJECT_STATUSES);
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
-
-// Calendar dates, not instants: "did we finish evaluation by the 14th" is a date question, and storing the
-// literal YYYY-MM-DD round-trips exactly with no timezone reinterpretation on the way in or out.
-const CalendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.");
 
 export const ProjectRecordSchema = z.object({
   id: z.string(),
@@ -238,7 +421,27 @@ export const ProjectRecordSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   status: ProjectStatusSchema,
-  initiativeId: z.string().optional(),
+  // The teams contributing to this project, and the reason it is a LIST: a project is the unit a release is
+  // planned in, and a release only one team may join is not a release — it is that team's backlog with a date
+  // on it. Stored rather than derived from the project's issues, because the derived answer was "no teams" for
+  // exactly as long as the project was still being planned, which is when the question gets asked. Empty is
+  // legal and means workspace-wide; the service defaults a creation with no teams to the workspace's default
+  // team, the same courtesy `teamId` gets on an issue.
+  teamIds: z.array(z.string()).default([]),
+  // Who is answerable for the project, and who is on it. The lead is a subject (the same identity every other
+  // actor field carries), and membership is a plain list rather than a roster table: a project's members are a
+  // statement about this project, not a second workspace directory.
+  lead: z.string().optional(),
+  memberIds: z.array(z.string()).default([]),
+  // The health of the LATEST update, kept on the project so a list row can show it without reading the update
+  // timeline per row. Absent = nobody has posted an update, which is different from "on track".
+  health: ProjectHealthSchema.optional(),
+  // The checkpoints inside the project, in order.
+  milestones: z.array(ProjectMilestoneSchema).default([]),
+  // The initiatives this project rolls up into — also a list, because one project routinely serves two umbrellas
+  // (a migration that is both "Q3 reliability" and "cost down"), and forcing a single choice silently drops
+  // whichever umbrella lost. Readiness counts the project under EVERY initiative that claims it.
+  initiativeIds: z.array(z.string()).default([]),
   targetDate: CalendarDateSchema.optional(),
   completedAt: z.string().optional(),
   history: z.array(TrackerHistoryEntrySchema).default([]),
@@ -259,6 +462,11 @@ export const InitiativeRecordSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   status: InitiativeStatusSchema,
+  // An initiative may sit under another one, so a big bet decomposes instead of flattening into a wall of
+  // projects. Readiness rolls UP: a parent counts its own projects plus every descendant's, which is the only
+  // reading that keeps "can we ship this" true for the umbrella a human actually points at. The service refuses
+  // a cycle (nothing may be its own ancestor) — a cycle would make that roll-up non-terminating.
+  parentId: z.string().optional(),
   targetDate: CalendarDateSchema.optional(),
   completedAt: z.string().optional(),
   history: z.array(TrackerHistoryEntrySchema).default([]),
@@ -298,6 +506,9 @@ export type InitiativeBlocker = z.infer<typeof InitiativeBlockerSchema>;
 export const InitiativeProjectSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
+  // Which initiative actually claims this project: absent = this one directly, set = the descendant it came up
+  // through. Readiness is one flat verdict, but a blocked release still has to say WHERE the block sits.
+  viaInitiativeId: z.string().optional(),
   status: ProjectStatusSchema,
   targetDate: CalendarDateSchema.optional(),
   completedAt: z.string().optional(),

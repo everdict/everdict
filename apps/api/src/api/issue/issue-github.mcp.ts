@@ -122,4 +122,35 @@ export function registerIssueGithubTools(server: McpServer, ctx: McpToolContext)
         ok(await sync.setSync(ws, a.id, { pull: a.pull, push: a.push }, actor)),
       ),
   );
+
+  server.registerTool(
+    "get_github_issue_attachment",
+    {
+      description:
+        "The image behind an attachment URL in an imported issue's description or comments. An imported body is " +
+        "the remote's own markdown, so a screenshot in it is a GitHub URL that nothing outside GitHub can read — " +
+        "on Enterprise, and on any private repository, it needs the workspace App's installation. Call this with " +
+        "a URL copied verbatim from the body when the picture is what the issue is actually about; a URL on any " +
+        "other host is refused. Returns the image itself, not a link.",
+      inputSchema: {
+        id: z.string().describe("the everdict issue id (an imported copy)"),
+        url: z.string().describe("attachment URL exactly as it appears in the body"),
+      },
+    },
+    (a) =>
+      run(principal, "issues:read", async () => {
+        const asset = await sync.fetchAttachment(ws, a.id, a.url);
+        // An image content block, not JSON: handing the model a base64 blob inside a text envelope would make it
+        // unreadable by the very thing that can look at it.
+        return {
+          content: [
+            {
+              type: "image" as const,
+              data: Buffer.from(asset.bytes).toString("base64"),
+              mimeType: asset.contentType,
+            },
+          ],
+        };
+      }),
+  );
 }

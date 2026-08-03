@@ -63,7 +63,11 @@ export default async function InitiativesPage({
         title={t('title')}
         description={t('description')}
         actions={
-          canWrite ? <CreateInitiativeButton workspace={workspace} timeZone={timeZone} /> : null
+          canWrite ? <CreateInitiativeButton
+                workspace={workspace}
+                timeZone={timeZone}
+                initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
+              /> : null
         }
       />
 
@@ -91,7 +95,11 @@ export default async function InitiativesPage({
           hint={t('emptyHint')}
           // 빈 목록은 시작하는 사람이 가장 오래 보는 화면이다 — 만드는 길을 여기서 바로 내준다(헤더 버튼과 같은 표면).
           action={
-            canWrite ? <CreateInitiativeButton workspace={workspace} timeZone={timeZone} /> : null
+            canWrite ? <CreateInitiativeButton
+                workspace={workspace}
+                timeZone={timeZone}
+                initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
+              /> : null
           }
         />
       ) : (

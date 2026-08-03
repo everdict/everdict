@@ -1615,7 +1615,9 @@
     "teamHome": "Home",
     "agent": "Agent",
     "tools": "Tools",
-    "skills": "Skills"
+    "skills": "Skills",
+    "cycles": "Cycles",
+    "triage": "Triage"
   },
   "usagePage": {
     "title": "Usage",
@@ -3115,7 +3117,9 @@
     "partialError": "Some settings sections failed to load ({sections}): {error}",
     "githubCount": "{count} orgs",
     "mattermostCount": "{count} connections",
-    "imageRegistryCount": "{count} registries"
+    "imageRegistryCount": "{count} registries",
+    "teamStatesTitle": "Workflow states",
+    "teamStatesTip": "A team's own names for its board columns. Each declares the canonical status it maps to, so renaming one never reaches the release gate, the rollups or the regression watch."
   },
   "shell": {
     "searchPlaceholder": "Search…",
@@ -3741,6 +3745,7 @@
     "errorSend": "Couldn’t send the message. Try again.",
     "errorBusy": "A reply is already in progress in this conversation — reconnected to the live stream.",
     "errorGeneric": "Something went wrong.",
+    "errorTurn": "The turn failed. The conversation is intact — send again to continue.",
     "mentionAdd": "Reference a workspace entity",
     "sendToChat": "Analyze in chat",
     "editInChat": "Edit in chat",
@@ -4614,11 +4619,20 @@
       "cancelled": "Cancelled",
       "regressed": "Regressed"
     },
+    "issuePriority": {
+      "none": "No priority",
+      "urgent": "Urgent",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
     "projectStatus": {
       "planned": "Planned",
       "in_progress": "In progress",
       "completed": "Completed",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "backlog": "Backlog",
+      "paused": "Paused"
     },
     "initiativeStatus": {
       "active": "Active",
@@ -4678,8 +4692,20 @@
       "githubPulledFields": "synced {fields} from GitHub",
       "githubPushed": "pushed to GitHub",
       "githubPushFailed": "couldn't push to GitHub",
+      "moved": "moved it to another team",
       "memberAdded": "added a member",
-      "memberRemoved": "removed a member"
+      "memberRemoved": "removed a member",
+      "updatePosted": "posted an update"
+    },
+    "cycleState": {
+      "upcoming": "Upcoming",
+      "active": "Active",
+      "completed": "Completed"
+    },
+    "projectHealth": {
+      "on_track": "On track",
+      "at_risk": "At risk",
+      "off_track": "Off track"
     }
   },
   "issuesPage": {
@@ -4724,6 +4750,8 @@
     "emptyTitle": "No issues yet",
     "emptyHint": "File the first problem you want evaluated, then link the harness or dataset that verifies it.",
     "rowLinkCount": "{count} linked",
+    "rowCommentCount": "{count} comments",
+    "loadMore": "Load more",
     "backToList": "Issues",
     "detailFallbackTitle": "Issue",
     "metaCreated": "Created",
@@ -4752,7 +4780,34 @@
     "labelCreate": "Create label “{name}”",
     "labelCreateError": "Couldn't create the label.",
     "labelRemove": "Remove {name}",
-    "labelNoMatch": "No labels match."
+    "labelNoMatch": "No labels match.",
+    "teamControlLabel": "This issue's team",
+    "teamMoveTo": "Move to another team",
+    "teamUnknown": "No team",
+    "moveError": "Could not move the issue",
+    "fieldPriority": "Priority",
+    "fieldEstimate": "Estimate",
+    "fieldEstimateNone": "None",
+    "fieldDueDate": "Due date",
+    "overdue": "Overdue",
+    "priorityControlLabel": "This issue's priority",
+    "prioritySetTo": "Change priority",
+    "priorityError": "Could not change the priority",
+    "subIssuesTitle": "{count} sub-issues",
+    "subIssuesProgress": "{done}/{total} done",
+    "subIssueAdd": "Add sub-issue",
+    "fieldCycle": "Cycle",
+    "triageBanner": "This issue is still in triage, outside the team's workflow.",
+    "triageAccept": "Accept",
+    "triageAcceptInto": "Accept into",
+    "triageDecline": "Decline",
+    "triageDeclineNote": "Why (optional)",
+    "triageAcceptError": "Could not accept the issue",
+    "triageDeclineError": "Could not decline the issue",
+    "triageTitle": "Triage",
+    "triageDescription": "Incoming work waiting to enter this team's workflow — accept it into the board, or decline it.",
+    "triageEmptyTitle": "The inbox is empty",
+    "triageEmptyHint": "New issues filed into this team land here first."
   },
   "issueLinks": {
     "add": "Add link",
@@ -4786,7 +4841,13 @@
     "fieldNamePlaceholder": "e.g. Browser suite hardening",
     "fieldDescription": "Description",
     "fieldInitiative": "Initiative",
-    "fieldInitiativeNone": "No initiative",
+    "fieldTeams": "Teams",
+    "fieldTeamsPlaceholder": "Search teams",
+    "fieldTeamsEmpty": "No teams to choose from",
+    "fieldTeamRemove": "Remove the {name} team",
+    "fieldInitiativePlaceholder": "Search initiatives",
+    "fieldInitiativeEmpty": "No initiatives to choose from",
+    "fieldInitiativeRemove": "Remove from {name}",
     "fieldTargetDate": "Target date",
     "statusError": "Couldn't move the project.",
     "statusControlLabel": "Change status",
@@ -4818,7 +4879,16 @@
     "rollupEvaluatedTip": "Done AND closed with a scorecard. “Resolved” and “resolved with evidence” are different claims, and a release conversation cares about the second one.",
     "issuesTitle": "Issues ({count})",
     "historyTitle": "History",
-    "discussTitle": "Discussion"
+    "discussTitle": "Discussion",
+    "fieldHealth": "Health",
+    "fieldLead": "Lead",
+    "fieldMembers": "Members",
+    "milestonesTitle": "{count} milestones",
+    "milestoneIssues": "{count} issues",
+    "updatesTitle": "Updates",
+    "postUpdate": "Post update",
+    "updatePlaceholder": "What changed, and why does it read that way?",
+    "updateError": "Could not post the update"
   },
   "initiativesPage": {
     "title": "Initiatives",
@@ -4840,6 +4910,11 @@
     "fieldName": "Name",
     "fieldNamePlaceholder": "e.g. 2026 Q3 release",
     "fieldDescription": "Description",
+    "fieldParent": "Parent initiative",
+    "fieldParentNone": "None (top level)",
+    "nestingTitle": "Nesting",
+    "nestingParent": "Parent",
+    "nestingChild": "Sub-initiative",
     "fieldDescriptionPlaceholder": "What has to land together, and what does shipping it mean?",
     "fieldTargetDate": "Target date",
     "fieldTargetDatePast": "That date has already passed — this initiative will read as overdue as soon as it exists.",
@@ -4992,7 +5067,26 @@
     "rosterHint": "Separate from workspace membership — belonging to a team is what puts its issues in your list.",
     "addMemberPlaceholder": "Pick a workspace member",
     "rowSummary": "{members} members · {open} open",
-    "rosterPermissionTip": "Being on a team decides what shows up as yours — your team's issues and its projects. It grants no permissions: what you may do comes from your workspace role, on the Members page."
+    "rosterPermissionTip": "Being on a team decides what shows up as yours — your team's issues and its projects. It grants no permissions: what you may do comes from your workspace role, on the Members page.",
+    "parentLabel": "Parent team",
+    "parentNone": "None (top level)",
+    "rowParent": "under {name}",
+    "parentHint": "A sub-team still owns its own issues and mints its own identifiers.",
+    "cycleWeeksLabel": "Cycle length (weeks)",
+    "cycleWeeksHint": "The span proposed when you plan the next cycle.",
+    "triageLabel": "Triage",
+    "triageHint": "Incoming work waits in an inbox before entering the workflow.",
+    "triageOn": "On",
+    "triageOff": "Off",
+    "stateAdd": "Add state",
+    "stateNamePlaceholder": "Column name (e.g. In QA)",
+    "stateMoveUp": "Move up",
+    "stateMoveDown": "Move down",
+    "stateDelete": "Delete state",
+    "privateLabel": "Private team",
+    "privateOn": "Private",
+    "privateOff": "Public",
+    "privateHint": "A private team's issues are visible to its roster only. Visibility, not permission — workspace admins still see it."
   },
   "teamHome": {
     "title": "Team",
@@ -5084,5 +5178,42 @@
       "judge": "Judge",
       "benchmark": "Benchmark"
     }
+  },
+  "cyclesPage": {
+    "title": "Cycles",
+    "description": "What a team is doing this iteration — a numbered, dated window.",
+    "create": "New cycle",
+    "createTitle": "Plan the next iteration",
+    "createSubmit": "Create",
+    "createHint": "Leave the dates empty to take the window proposed from the team's cadence (2 weeks by default).",
+    "createError": "Could not create the cycle",
+    "halfWindow": "Give both dates or neither.",
+    "fieldName": "Name",
+    "fieldNamePlaceholder": "most cycles are just their number",
+    "fieldDescription": "Description",
+    "fieldStartsAt": "Starts",
+    "fieldEndsAt": "Ends (inclusive)",
+    "fieldWindow": "Window",
+    "fieldCompletedAt": "Closed",
+    "complete": "Close iteration",
+    "completeTitle": "Close this iteration?",
+    "completeBody": "{count} issues are still open. This is not a gate — closing is fine, and what is left moves to the cycle you pick below.",
+    "completeBodyClean": "Nothing is left open. Closing makes it a record; it can no longer be edited.",
+    "completeError": "Could not close the cycle",
+    "carryTo": "Carry unfinished work to",
+    "carryToNone": "Leave it on this cycle",
+    "cancel": "Cancel",
+    "backToList": "Cycles",
+    "statOpen": "Open",
+    "statDone": "Done",
+    "statScope": "Points done/total",
+    "statEstimated": "Estimated",
+    "issuesTitle": "{count} issues",
+    "issuesTip": "Counts count issues, points count estimates — an unestimated issue is real work worth zero points.",
+    "historyTitle": "History",
+    "emptyTitle": "No cycles yet",
+    "emptyHint": "Plan the first iteration for {team}.",
+    "loadError": "Could not load: {error}",
+    "detailFallbackTitle": "Cycle"
   }
 }

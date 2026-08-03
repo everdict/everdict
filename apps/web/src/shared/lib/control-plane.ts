@@ -79,6 +79,25 @@ async function callWithEnvelope(
   return { ok: res.ok, status: res.status, body }
 }
 
+// 응답이 JSON 이 아니라 바이트인 호출 — 원격 이미지 프록시가 유일한 사용처다. content-type 을 함께 돌려주는 건
+// 브라우저에 그대로 넘겨야 하기 때문이다(우리가 추측하면 GitHub 이 준 형식과 어긋난다).
+async function callBytes(
+  auth: AuthContext,
+  path: string,
+  init?: RequestInit
+): Promise<{ bytes: ArrayBuffer; contentType: string }> {
+  const res = await fetch(`${env.CONTROL_PLANE_URL.replace(/\/$/, '')}${path}`, {
+    ...init,
+    headers: requestHeaders(auth, init),
+    cache: 'no-store',
+  })
+  if (!res.ok) throw controlPlaneError(path, res.status, await res.text())
+  return {
+    bytes: await res.arrayBuffer(),
+    contentType: res.headers.get('content-type') ?? 'application/octet-stream',
+  }
+}
+
 // For 204 (No Content) responses only — mutations with no body where res.json() must not be called (e.g. secret set/delete).
 async function callVoid(auth: AuthContext, path: string, init?: RequestInit): Promise<void> {
   const res = await fetch(`${env.CONTROL_PLANE_URL.replace(/\/$/, '')}${path}`, {
@@ -511,6 +530,26 @@ export const controlPlane = {
     call<T>(auth, `/teams/${encodeURIComponent(id)}/default`, { method: 'POST' }),
   deleteTeam: (auth: AuthContext, id: string) =>
     callVoid(auth, `/teams/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 팀의 보드 — 컬럼 이름·색·순서, 그리고 각 컬럼이 어느 정규 상태인지.
+  listWorkflowStates: <T>(auth: AuthContext, teamId: string) =>
+    call<T>(auth, `/teams/${encodeURIComponent(teamId)}/states`),
+  createWorkflowState: <T>(auth: AuthContext, teamId: string, body: unknown) =>
+    call<T>(auth, `/teams/${encodeURIComponent(teamId)}/states`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateWorkflowState: <T>(auth: AuthContext, teamId: string, stateId: string, patch: unknown) =>
+    call<T>(
+      auth,
+      `/teams/${encodeURIComponent(teamId)}/states/${encodeURIComponent(stateId)}`,
+      { method: 'PATCH', body: JSON.stringify(patch) }
+    ),
+  deleteWorkflowState: (auth: AuthContext, teamId: string, stateId: string) =>
+    call<unknown>(
+      auth,
+      `/teams/${encodeURIComponent(teamId)}/states/${encodeURIComponent(stateId)}`,
+      { method: 'DELETE' }
+    ),
   listTeamMembers: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/teams/${encodeURIComponent(id)}/members`),
   addTeamMember: <T>(auth: AuthContext, id: string, subject: string) =>
@@ -539,6 +578,8 @@ export const controlPlane = {
   // 삭제 전에 "몇 개 이슈에서 떨어져 나가는지"를 보여주기 위한 카운트.
   issueLabelUsage: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issue-labels/${encodeURIComponent(id)}/usage`),
+  // 한 PAGE 를 준다 — `{ items, nextCursor? }`. 행은 축약본(issueSummarySchema)이고, 본문·이력·링크 목록은
+  // 상세(`getIssue`)에만 있다. 전체를 훑어야 하는 화면은 `nextCursor` 를 되돌려 넣어 다음 장을 잇는다.
   listIssues: <T>(
     auth: AuthContext,
     filter?: {
@@ -547,9 +588,18 @@ export const controlPlane = {
       mine?: boolean
       project?: string
       assignee?: string
+      priority?: string
+      // 한 부모의 하위 이슈들, 또는 `none` 으로 최상위만. 자식이 목록에 두 번(자기 줄 + 부모 아래) 나오지
+      // 않게 하려면 보드는 후자를 쓴다.
+      parent?: string
+      cycle?: string
+      triage?: boolean
       linkType?: string
       linkId?: string
+      // GitHub 대량 동기화의 작업 집합. 전체 목록을 받아 클라이언트에서 거르는 대신 서버가 좁힌다.
+      syncPull?: boolean
       limit?: number
+      cursor?: string
     }
   ) => {
     const q = new URLSearchParams()
@@ -558,12 +608,18 @@ export const controlPlane = {
     if (filter?.mine) q.set('mine', 'true')
     if (filter?.project) q.set('project', filter.project)
     if (filter?.assignee) q.set('assignee', filter.assignee)
+    if (filter?.priority) q.set('priority', filter.priority)
+    if (filter?.parent) q.set('parent', filter.parent)
+    if (filter?.cycle) q.set('cycle', filter.cycle)
+    if (filter?.triage !== undefined) q.set('triage', filter.triage ? 'true' : 'false')
     // The reverse lookup ("which issues watch this harness") needs both halves or the route 400s.
     if (filter?.linkType && filter.linkId) {
       q.set('linkType', filter.linkType)
       q.set('linkId', filter.linkId)
     }
+    if (filter?.syncPull) q.set('syncPull', 'true')
     if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
+    if (filter?.cursor) q.set('cursor', filter.cursor)
     const qs = q.toString()
     return call<T>(auth, qs ? `/issues?${qs}` : '/issues')
   },
@@ -582,6 +638,65 @@ export const controlPlane = {
     call<T>(auth, `/issues/${encodeURIComponent(id)}/status`, {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  // 팀 이동 — 상태 이동과 같은 이유로 전용 엔드포인트다: 식별자를 다시 찍는 전이라서, 이름 바꾸기 곁다리로
+  // 일어나면 안 된다. 응답의 identifier 가 새 이름이다(예전 이름도 계속 해석된다).
+  // 프로젝트 업데이트 — 트래커가 기록하는 유일한 판단(판정 + 그렇게 읽히는 이유).
+  postProjectUpdate: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/projects/${encodeURIComponent(id)}/updates`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  listProjectUpdates: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/projects/${encodeURIComponent(id)}/updates`),
+  addProjectMilestone: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/projects/${encodeURIComponent(id)}/milestones`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  removeProjectMilestone: <T>(auth: AuthContext, id: string, milestoneId: string) =>
+    call<T>(
+      auth,
+      `/projects/${encodeURIComponent(id)}/milestones/${encodeURIComponent(milestoneId)}`,
+      { method: 'DELETE' }
+    ),
+  // --- 사이클(팀 이터레이션) ---
+  listCycles: <T>(auth: AuthContext, filter?: { team?: string; open?: boolean; limit?: number }) => {
+    const q = new URLSearchParams()
+    if (filter?.team) q.set('team', filter.team)
+    if (filter?.open) q.set('open', 'true')
+    if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
+    const qs = q.toString()
+    return call<T>(auth, `/cycles${qs ? `?${qs}` : ''}`)
+  },
+  getCycle: <T>(auth: AuthContext, id: string) => call<T>(auth, `/cycles/${encodeURIComponent(id)}`),
+  createCycle: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/cycles', { method: 'POST', body: JSON.stringify(body) }),
+  updateCycle: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/cycles/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  // 종료는 게이트가 아니다 — 남은 일은 이월 대상 사이클로 함께 넘어간다.
+  completeCycle: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/cycles/${encodeURIComponent(id)}/complete`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteCycle: (auth: AuthContext, id: string) =>
+    call<unknown>(auth, `/cycles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 트리아지 — 워크플로 앞의 인박스에서 나가는 두 길.
+  acceptTriage: <T>(auth: AuthContext, id: string, status: string) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/triage/accept`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
+  declineTriage: <T>(auth: AuthContext, id: string, note?: string) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/triage/decline`, {
+      method: 'POST',
+      body: JSON.stringify(note !== undefined ? { note } : {}),
+    }),
+  moveIssue: <T>(auth: AuthContext, id: string, teamId: string) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/team`, {
+      method: 'POST',
+      body: JSON.stringify({ teamId }),
     }),
   addIssueLink: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/links`, {
@@ -630,6 +745,11 @@ export const controlPlane = {
   // Detach drops the remote link only — the local issue and its whole history stay.
   detachIssueGithub: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/github`, { method: 'DELETE' }),
+  // 이슈 본문·코멘트에 박힌 GitHub 첨부 이미지의 바이트. GHE 첨부(그리고 비공개 리포 첨부)는 리포와 똑같은 인증
+  // 뒤에 있고 이 화면을 보는 브라우저에는 그 세션이 없다 — 그래서 컨트롤플레인이 워크스페이스 App 설치로 대신
+  // 받아온다. 이슈:read 한 번으로 게이트되고, url 은 저쪽에서 그 이슈의 GitHub 호스트로 고정 검사된다.
+  getIssueAttachment: (auth: AuthContext, id: string, url: string) =>
+    callBytes(auth, `/issues/${encodeURIComponent(id)}/attachment?url=${encodeURIComponent(url)}`),
   // `team` is derived server-side (a project has no team of its own — it means "the projects this team has
   // issues in"), which is why the sidebar's per-team Projects entry can be a plain query param.
   listProjects: <T>(

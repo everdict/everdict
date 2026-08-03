@@ -1,7 +1,7 @@
-import { ProjectStatusSchema } from "@everdict/contracts";
+import { ProjectHealthSchema, ProjectStatusSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type McpToolContext, ok, run } from "../mcp-context.js";
+import { type McpToolContext, ok, resolveTeam, run } from "../mcp-context.js";
 
 const CalendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.");
 
@@ -23,7 +23,16 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
       inputSchema: {
         name: z.string().min(1).max(300),
         description: z.string().max(50_000).optional(),
-        initiativeId: z.string().optional().describe("the initiative umbrella this project ships under"),
+        lead: z.string().optional().describe("who is answerable for it"),
+        memberIds: z.array(z.string()).optional(),
+        teamIds: z
+          .array(z.string())
+          .optional()
+          .describe("the teams contributing — omit to land it on the workspace's default team"),
+        initiativeIds: z
+          .array(z.string())
+          .optional()
+          .describe("the initiative umbrellas this project ships under; a project may serve several"),
         targetDate: CalendarDate.optional().describe("YYYY-MM-DD — the date the project is meant to be done by"),
       },
     },
@@ -35,7 +44,10 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
             createdBy: principal.subject,
             name: a.name,
             ...(a.description !== undefined ? { description: a.description } : {}),
-            ...(a.initiativeId !== undefined ? { initiativeId: a.initiativeId } : {}),
+            ...(a.lead !== undefined ? { lead: a.lead } : {}),
+            ...(a.memberIds !== undefined ? { memberIds: a.memberIds } : {}),
+            ...(a.teamIds !== undefined ? { teamIds: a.teamIds } : {}),
+            ...(a.initiativeIds !== undefined ? { initiativeIds: a.initiativeIds } : {}),
             ...(a.targetDate !== undefined ? { targetDate: a.targetDate } : {}),
           }),
         ),
@@ -47,12 +59,12 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
     {
       description:
         "The workspace's projects. Filter by status (planned | in_progress | completed | cancelled), by the " +
-        "initiative they sit under, or by the TEAM working them — a project has no team of its own, so `team` " +
-        "means the projects that team has issues in. Rows carry no issue counts — call get_project for one.",
+        "initiative they sit under, or by the TEAM working them (a project names its teams, so this answers " +
+        "what the team is on even before its first issue). Rows carry no issue counts — call get_project.",
       inputSchema: {
         status: ProjectStatusSchema.optional(),
         initiative: z.string().optional().describe("only projects under this initiative id"),
-        team: z.string().optional().describe("only projects this team has issues in"),
+        team: z.string().optional().describe("only projects this team contributes to"),
         limit: z.number().int().positive().max(200).optional(),
       },
     },
@@ -62,7 +74,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
           await projects.list(ws, {
             ...(a.status !== undefined ? { status: a.status } : {}),
             ...(a.initiative !== undefined ? { initiativeId: a.initiative } : {}),
-            ...(a.team !== undefined ? { teamId: a.team } : {}),
+            ...(a.team !== undefined ? { teamId: await resolveTeam(ctx, a.team) } : {}),
             ...(a.limit !== undefined ? { limit: a.limit } : {}),
           }),
         ),
@@ -85,13 +97,15 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
     "update_project",
     {
       description:
-        "Edit a project's content (name, description, owning initiative, target date). Status moves use " +
-        "set_project_status instead. Pass null to clear description/initiativeId/targetDate.",
+        "Edit a project's content (name, description, teams, initiatives, target date). Status moves use " +
+        "set_project_status instead. Pass null to clear description/targetDate; a LIST replaces what is there, " +
+        "so pass [] to detach every team or every initiative.",
       inputSchema: {
         id: z.string(),
         name: z.string().min(1).max(300).optional(),
         description: z.string().max(50_000).nullable().optional(),
-        initiativeId: z.string().nullable().optional(),
+        teamIds: z.array(z.string()).optional(),
+        initiativeIds: z.array(z.string()).optional(),
         targetDate: CalendarDate.nullable().optional(),
       },
     },
@@ -100,6 +114,69 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
         const { id, ...fields } = a;
         return ok(await projects.update(ws, id, fields, actor));
       }),
+  );
+
+  server.registerTool(
+    "post_project_update",
+    {
+      description:
+        "Post a project update — the one JUDGMENT the tracker records. `health` is on_track | at_risk | " +
+        "off_track and the BODY is required: a health flag with no sentence is a colour nobody can explain. " +
+        "The project keeps the latest health, and the emitted fact is trigger-matchable, so 'wake me when a " +
+        "project goes off track' is a payload filter on it.",
+      inputSchema: {
+        id: z.string(),
+        health: ProjectHealthSchema,
+        body: z.string().min(1).max(50_000).describe("what changed, and why it reads that way"),
+      },
+    },
+    (a) =>
+      run(principal, "issues:write", async () =>
+        ok(await projects.postUpdate(ws, a.id, { health: a.health, body: a.body }, actor)),
+      ),
+  );
+
+  server.registerTool(
+    "list_project_updates",
+    {
+      description:
+        "The project's posted updates, newest first. This is where the health colour is EXPLAINED — read it " +
+        "before reporting on a project whose status you did not watch change.",
+      inputSchema: { id: z.string(), limit: z.number().int().positive().max(100).optional() },
+    },
+    (a) => run(principal, "issues:read", async () => ok(await projects.listUpdates(ws, a.id, a.limit ?? 20))),
+  );
+
+  server.registerTool(
+    "add_project_milestone",
+    {
+      description:
+        "Add a checkpoint inside a project. Order is the meaning (milestones are steps toward a date), so a " +
+        "new one goes at the end. A duplicate name is refused. Issues join a milestone through update_issue.",
+      inputSchema: {
+        id: z.string(),
+        name: z.string().min(1).max(200),
+        description: z.string().max(2000).optional(),
+        targetDate: CalendarDate.optional(),
+      },
+    },
+    (a) =>
+      run(principal, "issues:write", async () => {
+        const { id, ...milestone } = a;
+        return ok(await projects.addMilestone(ws, id, milestone, actor));
+      }),
+  );
+
+  server.registerTool(
+    "remove_project_milestone",
+    {
+      description:
+        "Remove a checkpoint. Every issue that pointed at it is DETACHED in the same operation, so no issue is " +
+        "left naming a milestone that no longer exists.",
+      inputSchema: { id: z.string(), milestoneId: z.string() },
+    },
+    (a) =>
+      run(principal, "issues:write", async () => ok(await projects.removeMilestone(ws, a.id, a.milestoneId, actor))),
   );
 
   server.registerTool(

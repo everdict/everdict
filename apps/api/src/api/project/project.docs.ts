@@ -1,9 +1,10 @@
-import { ProjectRecordSchema, ProjectStatusSchema } from "@everdict/contracts";
+import { ProjectRecordSchema, ProjectStatusSchema, ProjectUpdateRecordSchema } from "@everdict/contracts";
 import { ProjectDetailResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CreateProjectBodySchema } from "./request/create-project.js";
+import { AddMilestoneBodySchema, PostProjectUpdateBodySchema } from "./request/project-update.js";
 import { SetProjectStatusBodySchema } from "./request/set-project-status.js";
 import { UpdateProjectBodySchema } from "./request/update-project.js";
 
@@ -12,7 +13,19 @@ import { UpdateProjectBodySchema } from "./request/update-project.js";
 // release gate: refused while issues are open, overridable with force, recorded either way. Authz reuses the
 // issue pair (read = issues:read, write = issues:write); delete additionally creator-or-admin. Facts
 // project.created / project.status_changed feed the event log.
-export const projectDocs: Record<"create" | "list" | "get" | "update" | "setStatus" | "delete", FastifySchema> = {
+export const projectDocs: Record<
+  | "create"
+  | "list"
+  | "get"
+  | "update"
+  | "setStatus"
+  | "postUpdate"
+  | "listUpdates"
+  | "addMilestone"
+  | "removeMilestone"
+  | "delete",
+  FastifySchema
+> = {
   create: {
     summary: "Create a project on the eval tracker",
     description:
@@ -81,6 +94,54 @@ export const projectDocs: Record<"create" | "list" | "get" | "update" | "setStat
     response: {
       200: { description: "The moved project", ...toJsonSchema(ProjectRecordSchema) },
       ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  postUpdate: {
+    summary: "Post a project update",
+    description:
+      "The one JUDGMENT the tracker records: `health` (on_track | at_risk | off_track) WITH the sentence that " +
+      "explains it — the body is required, because a health flag with no sentence is a colour nobody can " +
+      "explain. The project keeps the latest health so a list row shows it without reading the timeline. Emits " +
+      "the trigger-matchable project.update_posted fact, so 'wake me when a project goes off track' is a " +
+      "payload filter. Requires issues:write.",
+    tags: ["project"],
+    body: toJsonSchema(PostProjectUpdateBodySchema),
+    response: {
+      201: { description: "The posted update", ...toJsonSchema(ProjectUpdateRecordSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  listUpdates: {
+    summary: "The project's update timeline",
+    description: "Posted updates, newest first (capped). Requires issues:read.",
+    tags: ["project"],
+    response: {
+      200: { description: "Updates, newest first", ...toJsonSchema(z.array(ProjectUpdateRecordSchema)) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  addMilestone: {
+    summary: "Add a milestone to a project",
+    description:
+      "A checkpoint inside the project. Order is the meaning — milestones are steps toward a date — so a new " +
+      "one goes at the end and `sortOrder` is the server's. A duplicate name is a 409. Requires issues:write.",
+    tags: ["project"],
+    body: toJsonSchema(AddMilestoneBodySchema),
+    response: {
+      200: { description: "The project with the new milestone", ...toJsonSchema(ProjectRecordSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  removeMilestone: {
+    summary: "Remove a milestone",
+    description:
+      "Deleting a checkpoint DETACHES every issue that pointed at it in the same operation — a milestoneId " +
+      "that resolves to nothing is exactly the dangling reference the label registry refuses to allow. " +
+      "Requires issues:write.",
+    tags: ["project"],
+    response: {
+      200: { description: "The project without the milestone", ...toJsonSchema(ProjectRecordSchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   delete: {

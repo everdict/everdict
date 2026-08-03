@@ -1,4 +1,4 @@
-import { IssueLinkTypeSchema, IssueStatusSchema } from "@everdict/contracts";
+import { IssueLinkTypeSchema, IssuePrioritySchema, IssueStatusSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
@@ -29,6 +29,12 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         title: z.string().min(1).max(300),
         description: z.string().max(50_000).optional(),
         status: IssueStatusSchema.exclude(["done", "regressed"]).optional(),
+        priority: IssuePrioritySchema.optional().describe(
+          "urgent | high | medium | low | none (default) — urgency, independent of the workflow status",
+        ),
+        estimate: z.number().int().nonnegative().max(1000).optional().describe("points on the team's scale"),
+        dueDate: z.string().optional().describe("YYYY-MM-DD — when this issue is due"),
+        parentId: z.string().optional().describe("file it as a sub-issue of this issue (id or identifier)"),
         projectId: z.string().optional().describe("the project this issue belongs to"),
         assignee: z.string().optional(),
         labelIds: z.array(z.string()).max(50).optional(),
@@ -55,6 +61,10 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
             title: a.title,
             ...(a.description !== undefined ? { description: a.description } : {}),
             ...(a.status !== undefined ? { status: a.status } : {}),
+            ...(a.priority !== undefined ? { priority: a.priority } : {}),
+            ...(a.estimate !== undefined ? { estimate: a.estimate } : {}),
+            ...(a.dueDate !== undefined ? { dueDate: a.dueDate } : {}),
+            ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
             ...(a.projectId !== undefined ? { projectId: a.projectId } : {}),
             ...(a.assignee !== undefined ? { assignee: a.assignee } : {}),
             ...(a.labelIds !== undefined ? { labelIds: a.labelIds } : {}),
@@ -69,28 +79,37 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
     "list_issues",
     {
       description:
-        "The workspace's issues, newest activity first. Filter by status (backlog | todo | in_progress | " +
-        "in_review | done | cancelled | regressed), project, assignee, or by the capability an issue links " +
-        "(linkType + linkId) — that last one answers 'which issues watch this harness/dataset', the lookup to " +
-        "run before investigating a failing batch.",
+        "One PAGE of the workspace's issues, newest activity first: `{ items, nextCursor? }` — pass `nextCursor` " +
+        "back as `cursor` for the next page (absent = last page). Rows are SUMMARIES (identifier, title, status, " +
+        "labels, link count, assignee); the description, the full links and the move history live on get_issue. " +
+        "Filter by status (backlog | todo | in_progress | in_review | done | cancelled | regressed), project, " +
+        "assignee, or by the capability an issue links (linkType + linkId) — that last one answers 'which issues " +
+        "watch this harness/dataset', the lookup to run before investigating a failing batch. `parent` takes an " +
+        "issue id for its sub-issues, or the literal `none` for the top-level issues only.",
       inputSchema: {
         status: IssueStatusSchema.optional(),
         project: z.string().optional(),
         assignee: z.string().optional(),
+        priority: IssuePrioritySchema.optional(),
+        parent: z.string().optional().describe("an issue id for its sub-issues, or `none` for top-level only"),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
-        limit: z.number().int().positive().max(200).optional(),
+        limit: z.number().int().positive().max(200).optional().describe("page size (default 50, max 200)"),
+        cursor: z.string().optional().describe("page token from a prior page's nextCursor (next page)"),
       },
     },
     (a) =>
       run(principal, "issues:read", async () =>
         ok(
-          await issues.list(ws, {
+          await issues.listSummaries(ws, {
             ...(a.status !== undefined ? { status: a.status } : {}),
             ...(a.project !== undefined ? { projectId: a.project } : {}),
             ...(a.assignee !== undefined ? { assignee: a.assignee } : {}),
+            ...(a.priority !== undefined ? { priority: a.priority } : {}),
+            ...(a.parent !== undefined ? { parentId: a.parent === "none" ? null : a.parent } : {}),
             ...(a.linkType !== undefined && a.linkId !== undefined ? { link: { type: a.linkType, id: a.linkId } } : {}),
             ...(a.limit !== undefined ? { limit: a.limit } : {}),
+            ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),
           }),
         ),
       ),
@@ -112,8 +131,10 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
     "update_issue",
     {
       description:
-        "Edit an issue's content (title, description, labels, assignee, project). Status moves use " +
-        "set_issue_status instead. Pass null to clear assignee/projectId/description.",
+        "Edit an issue's content (title, description, labels, assignee, project, priority, estimate, due date, " +
+        "parent). Status moves use set_issue_status instead, and team moves use move_issue. Pass null to clear " +
+        "assignee/projectId/description/estimate/dueDate/parentId. Re-parenting an issue under one of its own " +
+        "sub-issues is refused — that would close the loop.",
       inputSchema: {
         id: z.string(),
         title: z.string().min(1).max(300).optional(),
@@ -121,6 +142,10 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         labelIds: z.array(z.string()).max(50).optional(),
         assignee: z.string().nullable().optional(),
         projectId: z.string().nullable().optional(),
+        priority: IssuePrioritySchema.optional(),
+        estimate: z.number().int().nonnegative().max(1000).nullable().optional(),
+        dueDate: z.string().nullable().optional(),
+        parentId: z.string().nullable().optional(),
       },
     },
     (a) =>
@@ -128,6 +153,22 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         const { id, ...fields } = a;
         return ok(await issues.update(ws, id, fields, actor));
       }),
+  );
+
+  server.registerTool(
+    "move_issue",
+    {
+      description:
+        "Hand an issue to another team. Its identifier is RE-MINTED from the destination team's counter — the " +
+        "prefix says whose list an issue is on — so the issue you moved comes back under a NEW name. Every " +
+        "name it has answered to keeps resolving, so a reference you already handed someone still works; use " +
+        "the returned identifier from here on. Moving it to the team it is already on is refused.",
+      inputSchema: {
+        id: z.string().describe("issue id or identifier (ENG-12)"),
+        teamId: z.string().describe("the destination team"),
+      },
+    },
+    (a) => run(principal, "issues:write", async () => ok(await issues.move(ws, a.id, a.teamId, actor))),
   );
 
   server.registerTool(

@@ -1,4 +1,5 @@
-import type { IssueRecord } from "@everdict/contracts";
+import type { IssuePage, IssueRecord } from "@everdict/contracts";
+import { issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
   GithubIssue,
@@ -6,7 +7,7 @@ import type {
   GithubRepoWriter,
   GithubRepoWriterFactory,
 } from "../ports/github-repo-writer.js";
-import type { IssueListFilter, IssueStore } from "../ports/issue-store.js";
+import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import { GithubIssueSync } from "./github-issue-sync.js";
 import { IssueService } from "./issue-service.js";
@@ -62,6 +63,13 @@ class FakeIssueStore implements IssueStore {
         (filter?.syncPull !== true || r.github?.sync.pull === true),
     );
   }
+  // Derived from this fake's own `list` via the kernel helpers, so it cannot disagree with production.
+  async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
+    return { items: (await this.list(tenant, filter)).map(issueSummaryOf) };
+  }
+  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
+    return issueCountsByTeam(await this.list(tenant));
+  }
   async update(
     tenant: string,
     id: string,
@@ -87,6 +95,7 @@ interface RemoteState {
   postedComments: Array<{ number: number; body: string }>;
   failWrites?: string;
   listCalls: Array<{ since?: string; state?: string }>;
+  assetCalls: string[];
 }
 
 function remoteIssue(over: Partial<GithubIssue> & { number: number }): GithubIssue {
@@ -144,6 +153,10 @@ function fakeWriters(remote: RemoteState): GithubRepoWriterFactory {
       remote.postedComments.push({ number, body });
       return { url: "https://github.com/acme/agent/issues/1#issuecomment-1" };
     },
+    async fetchAsset(url) {
+      remote.assetCalls.push(url);
+      return { bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), contentType: "image/png" };
+    },
   };
   return { for: () => writer };
 }
@@ -170,7 +183,7 @@ describe("GithubIssueSync — import", () => {
 
   beforeEach(() => {
     store = new FakeIssueStore();
-    remote = { issues: new Map(), comments: [], patched: [], postedComments: [], listCalls: [] };
+    remote = { issues: new Map(), comments: [], patched: [], postedComments: [], listCalls: [], assetCalls: [] };
   });
 
   it("copies an open issue as todo and a closed one as done WITHOUT inventing evidence", async () => {
@@ -248,7 +261,7 @@ describe("GithubIssueSync — pull", () => {
 
   beforeEach(() => {
     store = new FakeIssueStore();
-    remote = { issues: new Map(), comments: [], patched: [], postedComments: [], listCalls: [] };
+    remote = { issues: new Map(), comments: [], patched: [], postedComments: [], listCalls: [], assetCalls: [] };
   });
 
   async function imported(over: Partial<GithubIssue> & { number: number } = { number: 1 }) {
@@ -342,7 +355,7 @@ describe("GithubIssueSync — push", () => {
 
   beforeEach(() => {
     store = new FakeIssueStore();
-    remote = { issues: new Map(), comments: [], patched: [], postedComments: [], listCalls: [] };
+    remote = { issues: new Map(), comments: [], patched: [], postedComments: [], listCalls: [], assetCalls: [] };
     remote.issues.set(1, remoteIssue({ number: 1 }));
   });
 
@@ -402,5 +415,95 @@ describe("GithubIssueSync — push", () => {
     await sync.pushStatus(resolved, actor);
     expect(remote.patched).toEqual([]);
     expect(remote.postedComments).toEqual([]);
+  });
+});
+
+describe("GithubIssueSync — attachments", () => {
+  const GHE = "https://github.sec.example.net";
+  let store: FakeIssueStore;
+  let remote: RemoteState;
+  let tokenScopes: Array<{ repository: string; permissions: Record<string, string>; host?: string }>;
+
+  function build() {
+    const issues = new IssueService({ store, teams: teamAllocator, now: () => NOW });
+    const sync = new GithubIssueSync({
+      store,
+      issues,
+      teams: teamAllocator,
+      tokens: {
+        tokenForRepository: async (_tenant, repository, permissions, host) => {
+          tokenScopes.push({ repository, permissions, ...(host !== undefined ? { host } : {}) });
+          return { token: "tok", ...(host !== undefined ? { host } : {}) };
+        },
+      },
+      writers: fakeWriters(remote),
+      labels: { resolveNames: async (_tenant: string, names: string[]) => names.map((n) => `lbl_${n}`) },
+      now: () => NOW,
+    });
+    return { issues, sync };
+  }
+
+  beforeEach(() => {
+    store = new FakeIssueStore();
+    tokenScopes = [];
+    remote = { issues: new Map(), comments: [], patched: [], postedComments: [], listCalls: [], assetCalls: [] };
+  });
+
+  // An Enterprise copy — the case that motivated the proxy: every attachment on that host is behind the same
+  // session the repo is, so the reader's browser can never fetch one itself.
+  async function importedFrom(host?: string) {
+    remote.issues.set(1, remoteIssue({ number: 1 }));
+    const { sync } = build();
+    const [record] = (
+      await sync.import("acme", { repository: "acme/agent", numbers: [1], ...(host ? { host } : {}) }, actor)
+    ).created;
+    if (!record) throw new Error("import failed");
+    return { sync, record };
+  }
+
+  it("fetches an Enterprise attachment through the installation the issue was imported with", async () => {
+    const { sync, record } = await importedFrom(GHE);
+    const asset = await sync.fetchAttachment("acme", record.id, `${GHE}/user-attachments/assets/abc-123`);
+
+    expect(asset.contentType).toBe("image/png");
+    expect(asset.bytes).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+    expect(remote.assetCalls).toEqual([`${GHE}/user-attachments/assets/abc-123`]);
+    // Scoped to the issue's own repo and host — never a token wider than the read it serves.
+    expect(tokenScopes.at(-1)).toMatchObject({ repository: "acme/agent", host: GHE });
+  });
+
+  it("refuses a url on any host other than the issue's own, so a body cannot aim a credentialed fetch", async () => {
+    const { sync, record } = await importedFrom(GHE);
+    await expect(sync.fetchAttachment("acme", record.id, "https://evil.example/steal")).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    // A look-alike that only differs in scheme is refused too — the installation is https.
+    await expect(
+      sync.fetchAttachment("acme", record.id, "http://github.sec.example.net/user-attachments/assets/abc"),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(remote.assetCalls).toEqual([]);
+  });
+
+  it("accepts github.com's user-content hosts for a github.com issue", async () => {
+    const { sync, record } = await importedFrom();
+    await sync.fetchAttachment("acme", record.id, "https://github.com/user-attachments/assets/abc");
+    await sync.fetchAttachment("acme", record.id, "https://private-user-images.githubusercontent.com/1/a.png");
+    expect(remote.assetCalls).toHaveLength(2);
+    // A GHE url on a github.com issue is still the wrong host.
+    await expect(sync.fetchAttachment("acme", record.id, `${GHE}/user-attachments/assets/abc`)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+  });
+
+  it("refuses an issue that was never imported — there is no installation to read it with", async () => {
+    const { sync } = build();
+    const local = await new IssueService({ store, teams: teamAllocator, now: () => NOW }).create({
+      tenant: "acme",
+      title: "filed here",
+      createdBy: "dana",
+    });
+    await expect(
+      sync.fetchAttachment("acme", local.id, "https://github.com/user-attachments/assets/abc"),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });

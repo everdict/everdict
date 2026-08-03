@@ -1,8 +1,11 @@
 import {
   BadRequestError,
+  ConflictError,
   ForbiddenError,
   type IssueGithubSync,
   type IssueLinkType,
+  type IssuePage,
+  type IssuePriority,
   type IssueRecord,
   type IssueStatus,
   type IssueStatusCause,
@@ -12,7 +15,8 @@ import {
 } from "@everdict/contracts";
 import { Issue, type IssueEditInput, type IssueTransition, type NewIssueLinkInput } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
-import type { IssueListFilter, IssueStore } from "../ports/issue-store.js";
+import type { CommentStore } from "../ports/comment-store.js";
+import type { IssueListFilter, IssuePageFilter, IssueStore } from "../ports/issue-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 
@@ -40,6 +44,17 @@ export interface CreateIssueInput {
   title: string;
   description?: string;
   status?: IssueStatus;
+  // File it into the team's triage inbox instead of straight into the workflow — what an import or an agent
+  // does when the team asked for a queue in front of it.
+  inTriage?: boolean;
+  priority?: IssuePriority;
+  estimate?: number;
+  dueDate?: string;
+  // The issue this one breaks out of — a sub-issue is an ordinary issue with a parent, not a nested record.
+  parentId?: string;
+  // The team iteration it is pulled into, and the project checkpoint it belongs to.
+  cycleId?: string;
+  milestoneId?: string;
   projectId?: string;
   assignee?: string;
   // Registry ids — the caller (route/MCP/import) resolved any names first.
@@ -50,6 +65,10 @@ export interface CreateIssueInput {
 
 export interface SetIssueStatusInput {
   status: IssueStatus;
+  // Which board column the move landed in, when the caller moved by column. Validated against the issue's own
+  // team, and its canonical status wins over `status` — the column IS the status, so a body that disagreed
+  // with itself would otherwise silently pick one.
+  stateId?: string;
   resolution?: { scorecardId?: string; note?: string };
   cause?: IssueStatusCause;
 }
@@ -71,6 +90,23 @@ export interface IssueTeamAllocator {
   ): Promise<{ team: { id: string }; grant: { number: number; identifier: string } }>;
 }
 
+// The cycle half is composed like the GitHub and team collaborators: this service owns the issue transition,
+// the seam answers "does this cycle exist, and whose is it". Absent = cycles are simply not validated, which is
+// the P0 shape (a deployment without the cycle service still tracks issues).
+export interface IssueCycleResolver {
+  get(tenant: string, id: string): Promise<{ id: string; teamId: string } | undefined>;
+}
+
+// "Is this checkpoint one of that project's" — the only question an issue asks about a milestone. Composed like
+// the cycle resolver; absent = milestones are not validated in this deployment.
+export interface IssueStateResolver {
+  get(tenant: string, id: string): Promise<{ id: string; teamId: string; status: IssueStatus } | undefined>;
+}
+
+export interface IssueMilestoneResolver {
+  get(tenant: string, projectId: string): Promise<{ milestones: readonly { id: string }[] } | undefined>;
+}
+
 export interface IssueServiceDeps {
   store: IssueStore;
   // Required: an issue cannot exist without an owning team, so there is no degraded mode to fall back to.
@@ -78,6 +114,17 @@ export interface IssueServiceDeps {
   // Evidence validation only — `resolution.scorecardId` must exist in this workspace. Plain links stay
   // unvalidated pointers (platform-event subject semantics).
   scorecards?: ScorecardStore;
+  // Read-only, and only for the LIST: a row shows how much conversation is on an issue. Injected as the store
+  // rather than reached for through CommentService — a peer service edge is exactly what the layering forbids,
+  // and all this needs is a count. Absent = rows carry no `commentCount` at all (see the schema: absent is
+  // "nobody counted", which is the truth when nothing is wired to count).
+  comments?: CommentStore;
+  // "Does this cycle exist, and whose is it" — the one question an issue asks about an iteration. Absent =
+  // cycles are not composed in this deployment, and the field is simply not validated.
+  cycles?: IssueCycleResolver;
+  projects?: IssueMilestoneResolver;
+  // "Which column is this, and whose board is it on" — the only question an issue asks about a workflow state.
+  states?: IssueStateResolver;
   events?: PlatformEventEmitter;
   github?: IssueGithubPusher;
   newId?: () => string;
@@ -85,6 +132,10 @@ export interface IssueServiceDeps {
 }
 
 const EVALUATION_HISTORY_LIMIT = 100;
+
+// The comment store's key for an issue thread — the same string the detail page's CommentsSection posts under
+// (`COMMENT_RESOURCE_TYPES`). Named here so the list's count and the thread itself can never key differently.
+const ISSUE_COMMENT_RESOURCE = "issue";
 
 function causedByOf(agent: IssueAgentAttribution | undefined): string | undefined {
   if (!agent?.agentId) return undefined;
@@ -101,7 +152,10 @@ export class IssueService {
   }
 
   async create(input: CreateIssueInput): Promise<IssueRecord> {
+    // A parent has to exist in this workspace before it can be one — the child's whole meaning is the link.
+    if (input.parentId !== undefined) await this.get(input.tenant, input.parentId);
     const { team, grant } = await this.deps.teams.allocateForIssue(input.tenant, input.teamId, input.createdBy);
+    if (input.cycleId !== undefined) await this.assertCycleOfTeam(input.tenant, input.cycleId, team.id);
     const record = Issue.newIssue({
       id: this.newId(),
       tenant: input.tenant,
@@ -111,6 +165,13 @@ export class IssueService {
       title: input.title,
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.priority !== undefined ? { priority: input.priority } : {}),
+      ...(input.estimate !== undefined ? { estimate: input.estimate } : {}),
+      ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      ...(input.cycleId !== undefined ? { cycleId: input.cycleId } : {}),
+      ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {}),
+      ...(input.inTriage !== undefined ? { inTriage: input.inTriage } : {}),
       ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
       ...(input.labelIds !== undefined ? { labelIds: input.labelIds } : {}),
@@ -139,6 +200,26 @@ export class IssueService {
     return this.deps.store.list(tenant, filter);
   }
 
+  // What the LIST transports serve: one page of the projection (docs/tracker.md). Whole records stay on `list`
+  // for the callers that need them — the rollups, the regression watch, the GitHub sync.
+  //
+  // The comment totals are attached here because they live in another store, and they cost exactly ONE extra
+  // query for the whole page — never one per row, which is the shape this list was rebuilt to eliminate.
+  async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
+    const page = await this.deps.store.listSummaries(tenant, filter);
+    const comments = this.deps.comments;
+    if (!comments || page.items.length === 0) return page;
+    const counts = await comments.countByResource(
+      tenant,
+      ISSUE_COMMENT_RESOURCE,
+      page.items.map((item) => item.id),
+    );
+    const byId = new Map(counts.map((row) => [row.resourceId, row.count]));
+    // An issue absent from the aggregate has no comments — a real zero, not a missing value: the row WAS
+    // counted, the count is nought.
+    return { ...page, items: page.items.map((item) => ({ ...item, commentCount: byId.get(item.id) ?? 0 })) };
+  }
+
   // An issue is addressed by its id OR by the identifier its team minted (`ENG-12`) — the name that appears in
   // URLs, pull requests and chat. Resolving here rather than per transport means every caller (HTTP, MCP, the
   // regression watch) accepts both without a second lookup path, and every mutation below routes through it.
@@ -157,7 +238,152 @@ export class IssueService {
 
   async update(tenant: string, id: string, fields: IssueEditInput, actor: IssueActor): Promise<IssueRecord> {
     const record = await this.get(tenant, id);
-    return this.applyTransition(record, Issue.from(record).update(fields, actor.subject, this.now()), actor);
+    // The aggregate refuses "my parent is me"; only the live tree can refuse "my parent is my own descendant",
+    // which is the move that would make the sub-issue walk circular. The parent is resolved through `get`, so a
+    // caller may name it by identifier (`ENG-12`) exactly as they do everywhere else — and what gets stored is
+    // always the id that resolution produced.
+    let edits = fields;
+    if (fields.parentId !== undefined && fields.parentId !== null) {
+      const parent = await this.get(tenant, fields.parentId);
+      edits = { ...fields, parentId: parent.id };
+      if (await this.isDescendant(tenant, parent.id, record.id))
+        throw new ConflictError(
+          "CONFLICT",
+          { issue: record.id, parent: parent.id },
+          "That issue is a sub-issue of this one — making it the parent would close the loop.",
+        );
+    }
+    // A cycle belongs to a team, so an issue can only be pulled into one of ITS team's iterations — otherwise
+    // the issue sits on a board it can never appear on, which is work made invisible rather than planned.
+    if (fields.cycleId !== undefined && fields.cycleId !== null)
+      await this.assertCycleOfTeam(tenant, fields.cycleId, record.teamId);
+    // A checkpoint belongs to a project, so an issue can only sit under one of ITS project's — the same reason
+    // a cycle has to be its team's. `projectId` may be changing in the same edit, so the check reads whichever
+    // project the issue will end up in.
+    if (fields.milestoneId !== undefined && fields.milestoneId !== null) {
+      const projectId =
+        fields.projectId !== undefined && fields.projectId !== null ? fields.projectId : record.projectId;
+      await this.assertMilestoneOfProject(tenant, fields.milestoneId, projectId);
+    }
+    return this.applyTransition(record, Issue.from(record).update(edits, actor.subject, this.now()), actor);
+  }
+
+  private async resolveState(
+    tenant: string,
+    stateId: string,
+    teamId: string,
+  ): Promise<{ id: string; status: IssueStatus } | undefined> {
+    if (!this.deps.states) return undefined; // the board is not composed — the caller's canonical status stands
+    const state = await this.deps.states.get(tenant, stateId);
+    if (!state) throw new NotFoundError("NOT_FOUND", { state: stateId }, `workflow state '${stateId}' not found.`);
+    if (state.teamId !== teamId)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { state: stateId, team: teamId },
+        "That column belongs to another team's board.",
+      );
+    return { id: state.id, status: state.status };
+  }
+
+  private async assertMilestoneOfProject(
+    tenant: string,
+    milestoneId: string,
+    projectId: string | undefined,
+  ): Promise<void> {
+    if (!this.deps.projects) return; // projects not composed — nothing to validate against
+    if (projectId === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { milestone: milestoneId },
+        "A milestone is a checkpoint inside a project — put the issue in the project first.",
+      );
+    const project = await this.deps.projects.get(tenant, projectId);
+    if (!project?.milestones.some((m) => m.id === milestoneId))
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { milestone: milestoneId, project: projectId },
+        "That milestone is not on this issue's project.",
+      );
+  }
+
+  private async assertCycleOfTeam(tenant: string, cycleId: string, teamId: string): Promise<void> {
+    if (!this.deps.cycles) return; // cycles not composed — nothing to validate against
+    const cycle = await this.deps.cycles.get(tenant, cycleId);
+    if (!cycle) throw new NotFoundError("NOT_FOUND", { cycle: cycleId }, `cycle '${cycleId}' not found.`);
+    if (cycle.teamId !== teamId)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { cycle: cycleId, team: teamId },
+        "That cycle belongs to another team — an issue can only join its own team's iterations.",
+      );
+  }
+
+  // Walks UP from `candidate` looking for `ancestor`. Bounded by a visited set, so even a cycle written by an
+  // older build terminates instead of hanging the request.
+  private async isDescendant(tenant: string, candidate: string, ancestor: string): Promise<boolean> {
+    const seen = new Set<string>();
+    let current: string | undefined = candidate;
+    while (current !== undefined && !seen.has(current)) {
+      if (current === ancestor) return true;
+      seen.add(current);
+      const record: IssueRecord | undefined = await this.deps.store.get(tenant, current);
+      current = record?.parentId;
+    }
+    return false;
+  }
+
+  // Triage: accept the issue into the team's workflow, or decline it (which is a cancellation with a reason —
+  // the issue stays on the record rather than vanishing, because "we said no to this" is an answer somebody
+  // will look for). Both route through the same choke point as every other transition.
+  async acceptTriage(tenant: string, ref: string, to: IssueStatus, actor: IssueActor): Promise<IssueRecord> {
+    const record = await this.get(tenant, ref);
+    return this.applyTransition(record, Issue.from(record).acceptFromTriage(to, actor.subject, this.now()), actor);
+  }
+
+  async declineTriage(tenant: string, ref: string, note: string | undefined, actor: IssueActor): Promise<IssueRecord> {
+    const record = await this.get(tenant, ref);
+    if (!record.inTriage)
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: record.id },
+        "This issue is not in triage — it is already in the workflow.",
+      );
+    const cancelled = await this.applyTransition(
+      record,
+      Issue.from(record).setStatus("cancelled", actor.subject, this.now(), {
+        ...(note !== undefined ? { note } : {}),
+      }),
+      actor,
+    );
+    // The flag clears with the decline: a declined issue is settled, and leaving it in the inbox would make the
+    // queue grow with things nobody has to look at again.
+    const cleared = await this.deps.store.update(tenant, cancelled.id, { inTriage: false, updatedAt: this.now() });
+    return cleared ?? cancelled;
+  }
+
+  // Hand the issue to another team. The number comes from the DESTINATION's counter through the same allocator
+  // filing uses, so a moved issue is numbered exactly like one filed there — and the old identifier keeps
+  // resolving (the record remembers it), which is what makes re-minting safe for links already in the wild.
+  async move(tenant: string, ref: string, teamId: string, actor: IssueActor): Promise<IssueRecord> {
+    const record = await this.get(tenant, ref);
+    // The aggregate refuses a no-op move too; this earlier copy of the guard exists so the refusal does not
+    // burn a number off the destination's counter on the way to being rejected.
+    if (record.teamId === teamId)
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: record.id, team: teamId },
+        "This issue already belongs to that team.",
+      );
+    const { team, grant } = await this.deps.teams.allocateForIssue(tenant, teamId, actor.subject);
+    return this.applyTransition(
+      record,
+      Issue.from(record).moveToTeam(
+        { teamId: team.id, number: grant.number, identifier: grant.identifier },
+        actor.subject,
+        this.now(),
+      ),
+      actor,
+    );
   }
 
   // The one status entry point: it routes to the domain transition that fits the current state, so callers
@@ -167,15 +393,19 @@ export class IssueService {
     const issue = Issue.from(record);
     const now = this.now();
     const cause = input.cause ?? "manual";
+    // Moving by column: the column names the canonical status, so it decides — and it has to be one of the
+    // issue's OWN team's columns, for the same reason a cycle has to be its team's.
+    const state = input.stateId === undefined ? undefined : await this.resolveState(tenant, input.stateId, record.teamId);
+    const to = state?.status ?? input.status;
     let transition: IssueTransition;
-    if (input.status === "done") {
+    if (to === "done") {
       const resolution = input.resolution ?? {};
       if (resolution.scorecardId !== undefined) await this.assertScorecard(tenant, resolution.scorecardId);
       transition = issue.resolve(resolution, actor.subject, now, cause);
     } else if (record.status === "done" || record.status === "cancelled") {
       transition = issue.reopen(
         {
-          to: input.status,
+          to,
           cause,
           ...(input.resolution?.scorecardId !== undefined ? { scorecardId: input.resolution.scorecardId } : {}),
           ...(input.resolution?.note !== undefined ? { note: input.resolution.note } : {}),
@@ -184,7 +414,10 @@ export class IssueService {
         now,
       );
     } else {
-      transition = issue.setStatus(input.status, actor.subject, now, { cause });
+      transition = issue.setStatus(to, actor.subject, now, {
+        cause,
+        ...(state !== undefined ? { stateId: state.id } : {}),
+      });
     }
     return this.applyTransition(record, transition, actor);
   }
@@ -247,6 +480,16 @@ export class IssueService {
         "FORBIDDEN",
         { id: record.id, action: "issues:delete" },
         "You are not allowed to delete this issue (creator or workspace admin only).",
+      );
+    // Deleting a parent would strand its sub-issues pointing at an id that resolves to nothing. Where they
+    // should go instead (up a level, under a sibling, deleted too) is the member's decision, so it is refused
+    // with the count rather than guessed at — the same gate a project with issues has.
+    const children = await this.deps.store.list(tenant, { parentId: record.id, limit: 1 });
+    if (children.length > 0)
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: record.id },
+        "This issue still has sub-issues — move or delete them first.",
       );
     await this.deps.store.remove(tenant, record.id); // the resolved id — the ref may have been an identifier
   }

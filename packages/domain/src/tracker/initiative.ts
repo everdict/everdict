@@ -14,6 +14,9 @@ export interface NewInitiativeInput {
   tenant: string;
   name: string;
   description?: string;
+  // The initiative this one rolls up into. Readiness walks DOWN the tree, so a parent's release gate answers for
+  // every descendant's projects too — the service validates existence + acyclicity before the link is written.
+  parentId?: string;
   targetDate?: string;
   createdBy: string;
   now: string;
@@ -22,6 +25,8 @@ export interface NewInitiativeInput {
 export interface InitiativeEditInput {
   name?: string;
   description?: string | null;
+  // `null` detaches it from its parent (it becomes a top-level initiative again).
+  parentId?: string | null;
   targetDate?: string | null;
 }
 
@@ -51,8 +56,16 @@ export class Initiative {
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
       status: "active",
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
-      history: [{ at: input.now, by: input.createdBy, event: "created", detail: { status: "active" } }],
+      history: [
+        {
+          at: input.now,
+          by: input.createdBy,
+          event: "created",
+          detail: { status: "active", ...(input.parentId !== undefined ? { parentId: input.parentId } : {}) },
+        },
+      ],
       createdBy: input.createdBy,
       createdAt: input.now,
       updatedAt: input.now,
@@ -90,6 +103,19 @@ export class Initiative {
       if (next !== this.record.description) {
         patch.description = next;
         changed.push("description");
+      }
+    }
+    if (fields.parentId !== undefined) {
+      const next = fields.parentId === null ? undefined : fields.parentId;
+      if (next === this.record.id)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { initiative: this.record.id },
+          "An initiative cannot be its own parent.",
+        );
+      if (next !== this.record.parentId) {
+        patch.parentId = next;
+        changed.push("parent");
       }
     }
     if (fields.targetDate !== undefined) {

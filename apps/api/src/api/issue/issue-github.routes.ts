@@ -126,6 +126,40 @@ export function registerIssueGithubRoutes(app: FastifyInstance, deps: ServerDeps
     },
   );
 
+  // The one READ in this file, and the one response that is not JSON: an image embedded in an imported issue.
+  // Everything else here is a member asking everdict to talk to GitHub; this is a browser that cannot. It gates
+  // issues:read because seeing the picture in a description is seeing the description.
+  app.get<{ Params: { id: string }; Querystring: { url?: string } }>(
+    "/issues/:id/attachment",
+    { schema: issueGithubDocs.attachment },
+    async (req, reply) => {
+      if (!deps.issueSync)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "issue GitHub sync not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:read");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const query = z.object({ url: z.string().min(1) }).safeParse(req.query);
+      if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
+      try {
+        const asset = await deps.issueSync.fetchAttachment(principal.workspace, req.params.id, query.data.url);
+        return (
+          reply
+            .type(asset.contentType)
+            // Private to this reader and short-lived: the bytes are only theirs because their principal could read
+            // the issue, so a shared cache must never keep a copy.
+            .header("cache-control", "private, max-age=300")
+            .send(Buffer.from(asset.bytes))
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.put<{ Params: { id: string } }>("/issues/:id/github", { schema: issueGithubDocs.setSync }, async (req, reply) => {
     if (!deps.issueService) return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

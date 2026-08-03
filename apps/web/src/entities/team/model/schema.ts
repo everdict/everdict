@@ -25,8 +25,17 @@ export const teamSchema = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string().optional(),
+  // 상위 팀 — 조직 표현일 뿐이다. 하위 팀도 자기 이슈를 소유하고 자기 식별자를 발번한다.
+  parentId: z.string().optional(),
   isDefault: z.boolean(),
+  // 팀의 이터레이션 주기(주). 스케줄이 아니라 다음 사이클을 제안할 때 쓰는 기본 폭이다.
+  cycleDurationWeeks: z.number().default(2),
+  // 들어오는 일이 워크플로 앞의 인박스에 먼저 앉는가. 기본은 꺼짐.
+  triageEnabled: z.boolean().default(false),
+  // 비공개 팀의 일은 로스터(그리고 워크스페이스 관리자)에게만 보인다. 권한 축이 아니라 가시성 필터다.
+  isPrivate: z.boolean().default(false),
   issueCounter: z.number(),
+  cycleCounter: z.number().default(0),
   history: z.array(trackerHistoryEntrySchema).default([]),
   createdBy: z.string(),
   createdAt: z.string(),

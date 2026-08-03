@@ -95,6 +95,7 @@ import { registerBundleRoutes } from "./api/bundle/bundle.routes.js";
 import { registerCapabilityRoutes } from "./api/capability/capability.routes.js";
 import { registerCiLinkRoutes } from "./api/ci-link/ci-link.routes.js";
 import { registerCommentRoutes } from "./api/comment/comment.routes.js";
+import { registerCycleRoutes } from "./api/cycle/cycle.routes.js";
 import { registerDatasetRoutes } from "./api/dataset/dataset.routes.js";
 import { registerEnvironmentAdoptionRoutes } from "./api/environment-adoption/environment-adoption.routes.js";
 import { registerEventRoutes } from "./api/event/event.routes.js";
@@ -255,6 +256,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerViewRoutes(routes, deps);
     registerTaskRoutes(routes, deps);
     registerTeamRoutes(routes, deps);
+    registerCycleRoutes(routes, deps);
     registerIssueRoutes(routes, deps);
     registerIssueLabelRoutes(routes, deps);
     registerIssueGithubRoutes(routes, deps);

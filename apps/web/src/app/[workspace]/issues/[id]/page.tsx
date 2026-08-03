@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import {
+  CalendarClock,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -15,14 +16,27 @@ import { CommentsSection } from '@/features/discuss'
 import { IssueGithubPanel } from '@/features/import-github-issues'
 import { IssueEvaluationHistory, type IssueEvaluationEntry } from '@/features/issue-evaluation'
 import { IssueLinks } from '@/features/issue-links'
-import { IssueActions, IssueStatusControl } from '@/features/manage-issue'
 import {
+  CreateIssueButton,
+  IssueActions,
+  IssuePriorityControl,
+  IssueStatusControl,
+  IssueTeamControl,
+  IssueTriageActions,
+} from '@/features/manage-issue'
+import { cycleLabel, cycleSchema, type Cycle } from '@/entities/cycle'
+import {
+  isOpenIssueStatus,
   ISSUE_CAPABILITY_LINK_TYPES,
+  issueAttachmentProxy,
   issueHref,
+  issuePageSchema,
+  IssuePriorityIcon,
   issueSchema,
   issueScorecardsSchema,
-  issuesSchema,
+  IssueStatusIcon,
   type Issue,
+  type IssueSummary,
 } from '@/entities/issue'
 import {
   IssueLabelChips,
@@ -31,9 +45,15 @@ import {
   type IssueLabel,
 } from '@/entities/issue-label'
 import { memberDirectoryOf, memberNameOf, membersSchema, type Member } from '@/entities/member'
-import { projectsSchema, type Project } from '@/entities/project'
-import { TeamKeyBadge, teamWithSummarySchema, type TeamWithSummary } from '@/entities/team'
+import { isPastDue, projectsSchema, type Project } from '@/entities/project'
+import {
+  teamHref,
+  teamsWithSummarySchema,
+  teamWithSummarySchema,
+  type TeamWithSummary,
+} from '@/entities/team'
 import { TrackerHistory } from '@/entities/tracker-history'
+import { workflowStatesSchema, type WorkflowState } from '@/entities/workflow-state'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -77,7 +97,8 @@ function SiblingLink({
   label,
 }: {
   workspace: string
-  issue: Issue | undefined
+  // 이웃은 목록에서 온 축약본이다 — 화살표는 식별자와 제목만 필요하므로 전체 레코드를 읽을 이유가 없다.
+  issue: IssueSummary | undefined
   direction: 'prev' | 'next'
   label: string
 }) {
@@ -147,7 +168,19 @@ export default async function IssueDetailPage({
 
   // Supplementary reads — the detail still renders if any of them fails, so they run together and a failure
   // degrades only its own slot (팀을 못 읽으면 브레드크럼이 한 칸 짧아질 뿐이다).
-  const [evaluation, projects, members, team, siblings, labels] = await Promise.all([
+  const [
+    evaluation,
+    projects,
+    members,
+    team,
+    teams,
+    states,
+    siblings,
+    labels,
+    children,
+    cycle,
+    parent,
+  ] = await Promise.all([
     controlPlane
       .listIssueScorecards(ctx, current.id)
       .then((r) => issueScorecardsSchema.parse(r))
@@ -164,17 +197,49 @@ export default async function IssueDetailPage({
       .getTeam(ctx, current.teamId)
       .then((r) => teamWithSummarySchema.parse(r))
       .catch((): TeamWithSummary | undefined => undefined),
+    // 팀 목록은 "다른 팀으로 넘기기" 하나 때문에 읽는다 — 컨트롤이 고를 것이 없으면 드롭다운을 내지 않는다.
+    controlPlane
+      .listTeams(ctx)
+      .then((r) => teamsWithSummarySchema.parse(r))
+      .catch((): TeamWithSummary[] => []),
+    // 이 이슈가 속한 팀의 보드 — 상태 드롭다운이 팀이 붙인 이름을 쓴다.
+    controlPlane
+      .listWorkflowStates(ctx, current.teamId)
+      .then((r) => workflowStatesSchema.parse(r))
+      .catch((): WorkflowState[] => []),
     controlPlane
       .listIssues(ctx, { team: current.teamId, limit: SIBLING_WINDOW })
-      .then((r) => issuesSchema.parse(r))
-      .catch((): Issue[] => []),
+      .then((r) => issuePageSchema.parse(r).items)
+      .catch((): IssueSummary[] => []),
     controlPlane
       .listIssueLabels(ctx)
       .then((r) => issueLabelsSchema.parse(r))
       .catch((): IssueLabel[] => []),
+    // 하위 이슈 — 목록 투영이면 충분하다(행이 그리는 것만 그린다).
+    controlPlane
+      .listIssues(ctx, { parent: current.id })
+      .then((r) => issuePageSchema.parse(r).items)
+      .catch((): IssueSummary[] => []),
+    current.cycleId === undefined
+      ? Promise.resolve(undefined)
+      : controlPlane
+          .getCycle(ctx, current.cycleId)
+          .then((r) => cycleSchema.parse(r))
+          .catch((): Cycle | undefined => undefined),
+    current.parentId === undefined
+      ? Promise.resolve(undefined)
+      : controlPlane
+          .getIssue(ctx, current.parentId)
+          .then((r) => issueSchema.parse(r))
+          .catch((): Issue | undefined => undefined),
   ])
 
   const canWrite = can(principal?.roles ?? [], 'issues:write')
+  // 닫힌 이슈의 지난 기한은 경고가 아니다 — 이미 끝난 일에 붉은 배지를 다는 건 소음이다.
+  const dueOverdue =
+    current.status !== 'done' &&
+    current.status !== 'cancelled' &&
+    isPastDue(current.dueDate, timeZone)
   const project = current.projectId ? projects.find((p) => p.id === current.projectId) : undefined
   // 이력·담당자·해결 기록이 같은 이름·같은 얼굴을 쓰도록 subject → 프로필을 한 번만 만든다.
   const actors = memberDirectoryOf(members)
@@ -235,10 +300,23 @@ export default async function IssueDetailPage({
               <>
                 <ChevronRight className="size-3 shrink-0 text-faint" />
                 <Link
-                  href={`/${workspace}/teams/${encodeURIComponent(team.id)}`}
+                  href={teamHref(workspace, team.key)}
                   className="truncate text-muted-foreground transition-colors hover:text-foreground"
                 >
                   {team.name}
+                </Link>
+              </>
+            )}
+            {parent && (
+              <>
+                <ChevronRight className="size-3 shrink-0 text-faint" />
+                {/* 하위 이슈는 부모를 경로에 이고 다닌다 — 이 이슈가 무엇에서 쪼개져 나왔는지가 곧 위치다. */}
+                <Link
+                  href={issueHref(workspace, parent.identifier)}
+                  title={parent.title}
+                  className="truncate text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <span className="font-mono text-[12px]">{parent.identifier}</span>
                 </Link>
               </>
             )}
@@ -286,6 +364,18 @@ export default async function IssueDetailPage({
                 status={current.status}
                 canWrite={canWrite}
                 scorecards={resolvable}
+                states={states.map((state) => ({
+                  id: state.id,
+                  name: state.name,
+                  status: state.status,
+                }))}
+              />
+            </PropertyRow>
+            <PropertyRow label={t('fieldPriority')}>
+              <IssuePriorityControl
+                id={current.id}
+                priority={current.priority}
+                canWrite={canWrite}
               />
             </PropertyRow>
             {assignee && (
@@ -300,17 +390,19 @@ export default async function IssueDetailPage({
                 </span>
               </PropertyRow>
             )}
-            {team && (
-              <PropertyRow label={t('fieldTeam')}>
-                <Link
-                  href={`/${workspace}/teams/${encodeURIComponent(team.id)}`}
-                  className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
-                >
-                  <TeamKeyBadge teamKey={team.key} />
-                  <span className="truncate">{team.name}</span>
-                </Link>
-              </PropertyRow>
-            )}
+            <PropertyRow label={t('fieldTeam')}>
+              {/* 팀은 상태와 함께 속성 열 안에서 바꿀 수 있는 둘뿐인 속성이다 — 옮기면 식별자가 다시 찍히므로
+                  컨트롤이 성공 후 새 슬러그로 주소를 바꾼다. */}
+              <IssueTeamControl
+                workspace={workspace}
+                id={current.id}
+                {...(team !== undefined
+                  ? { team: { id: team.id, key: team.key, name: team.name } }
+                  : { team: undefined })}
+                teams={teams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
+                canWrite={canWrite}
+              />
+            </PropertyRow>
             {project && (
               <PropertyRow label={t('fieldProject')}>
                 <Link
@@ -320,6 +412,36 @@ export default async function IssueDetailPage({
                   <FolderKanban className="size-3.5 shrink-0 text-faint" />
                   <span className="truncate">{project.name}</span>
                 </Link>
+              </PropertyRow>
+            )}
+            {cycle && (
+              <PropertyRow label={t('fieldCycle')}>
+                <Link
+                  href={`/${workspace}/cycles/${encodeURIComponent(cycle.id)}`}
+                  className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
+                >
+                  <CalendarClock className="size-3.5 shrink-0 text-faint" />
+                  <span className="truncate">{cycleLabel(cycle)}</span>
+                </Link>
+              </PropertyRow>
+            )}
+            {current.estimate !== undefined && (
+              <PropertyRow label={t('fieldEstimate')}>
+                <span className="font-mono tabular-nums">{current.estimate}</span>
+              </PropertyRow>
+            )}
+            {current.dueDate !== undefined && (
+              <PropertyRow label={t('fieldDueDate')}>
+                {/* 기한은 지났을 때만 색이 붙는다 — 안 지난 날짜에까지 색을 주면 경고가 배경이 된다. */}
+                <span
+                  className={cn(
+                    'inline-flex flex-wrap items-center gap-1.5',
+                    dueOverdue && 'text-destructive'
+                  )}
+                >
+                  <time dateTime={current.dueDate}>{current.dueDate}</time>
+                  {dueOverdue && <Badge tone="danger">{t('overdue')}</Badge>}
+                </span>
               </PropertyRow>
             )}
             {current.labelIds.length > 0 && (
@@ -388,7 +510,63 @@ export default async function IssueDetailPage({
         <div className="min-w-0 space-y-7 @3xl:col-start-1 @3xl:row-start-1">
           {/* 설명은 제목 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 이슈 그 자체다.
               An imported GitHub issue's body IS markdown — render it as such (GFM), never as flat text. */}
-          {current.description && <Markdown content={current.description} />}
+          {/* imageProxy: 본문의 GitHub 첨부 이미지는 브라우저가 직접 못 받아온다(GHE·비공개 리포는 리포와 같은
+              인증 뒤에 있고 크로스사이트 img 요청에는 그 세션이 안 실린다) — 우리 라우트를 거쳐 서버가 받아온다. */}
+          {/* 트리아지에 있는 이슈에 지금 할 일은 "받을까 말까" 하나뿐이라, 본문 맨 위에 선다. */}
+          {current.inTriage && canWrite && <IssueTriageActions id={current.id} />}
+
+          {current.description && (
+            <Markdown
+              content={current.description}
+              imageProxy={issueAttachmentProxy(current.id, current.github)}
+            />
+          )}
+
+          {/* 하위 이슈 — 빈 섹션은 내지 않는다(하우스 규칙). 진행도는 저장하지 않고 여기서 센다: 이슈 목록을
+              이미 들고 있으니 산술이 공짜고, 저장했다면 자식이 움직일 때마다 무효화해야 할 캐시가 된다. */}
+          {children.length > 0 && (
+            <section className="space-y-3">
+              <SectionHeader
+                title={t('subIssuesTitle', { count: children.length })}
+                action={
+                  <>
+                    <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                      {t('subIssuesProgress', {
+                        done: children.filter((child) => !isOpenIssueStatus(child.status)).length,
+                        total: children.length,
+                      })}
+                    </span>
+                    {canWrite && (
+                      <CreateIssueButton
+                        workspace={workspace}
+                        projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+                        parentId={current.id}
+                        label={t('subIssueAdd')}
+                      />
+                    )}
+                  </>
+                }
+              />
+              <div className="space-y-1.5">
+                {children.map((child) => (
+                  <Link
+                    key={child.id}
+                    href={issueHref(workspace, child.identifier)}
+                    className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+                  >
+                    <IssueStatusIcon status={child.status} />
+                    <IssuePriorityIcon priority={child.priority} />
+                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                      {child.identifier}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                      {child.title}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Only an imported issue has a remote half — an issue filed here shows nothing (hide-empty rule). */}
           {current.github && (

@@ -1615,7 +1615,9 @@
     "teamHome": "홈",
     "agent": "에이전트",
     "tools": "도구",
-    "skills": "스킬"
+    "skills": "스킬",
+    "cycles": "사이클",
+    "triage": "트리아지"
   },
   "usagePage": {
     "title": "사용량",
@@ -3115,7 +3117,9 @@
     "partialError": "일부 설정 정보를 불러오지 못했습니다 ({sections}): {error}",
     "githubCount": "조직 {count}개",
     "mattermostCount": "연결 {count}개",
-    "imageRegistryCount": "레지스트리 {count}개"
+    "imageRegistryCount": "레지스트리 {count}개",
+    "teamStatesTitle": "워크플로 상태",
+    "teamStatesTip": "팀이 자기 보드의 컬럼에 붙인 이름이에요. 각 컬럼은 정규 상태 하나를 가리키고, 이름을 바꿔도 릴리스 게이트·롤업·회귀 감시는 영향을 받지 않아요."
   },
   "shell": {
     "searchPlaceholder": "검색·이동",
@@ -3741,6 +3745,7 @@
     "errorSend": "메시지를 보내지 못했어요. 다시 시도해 주세요.",
     "errorBusy": "이 대화에서 이미 응답이 진행 중이에요. 진행 중인 스트림에 다시 연결했어요.",
     "errorGeneric": "문제가 발생했어요.",
+    "errorTurn": "이번 턴이 실패했어요. 대화는 그대로예요 — 다시 보내면 이어집니다.",
     "mentionAdd": "워크스페이스 엔티티 참조",
     "sendToChat": "대화에서 분석",
     "editInChat": "대화로 편집하기",
@@ -4614,11 +4619,20 @@
       "cancelled": "취소됨",
       "regressed": "회귀"
     },
+    "issuePriority": {
+      "none": "없음",
+      "urgent": "긴급",
+      "high": "높음",
+      "medium": "보통",
+      "low": "낮음"
+    },
     "projectStatus": {
       "planned": "계획됨",
       "in_progress": "진행 중",
       "completed": "완료",
-      "cancelled": "취소됨"
+      "cancelled": "취소됨",
+      "backlog": "백로그",
+      "paused": "멈춤"
     },
     "initiativeStatus": {
       "active": "진행 중",
@@ -4678,8 +4692,20 @@
       "githubPulledFields": "님이 GitHub에서 {fields} 항목을 받아왔어요",
       "githubPushed": "님이 GitHub로 반영했어요",
       "githubPushFailed": "님이 GitHub로 반영하지 못했어요",
+      "moved": "님이 다른 팀으로 옮겼어요",
       "memberAdded": "님이 멤버를 추가했어요",
-      "memberRemoved": "님이 멤버를 제거했어요"
+      "memberRemoved": "님이 멤버를 제거했어요",
+      "updatePosted": "님이 업데이트를 올렸어요"
+    },
+    "cycleState": {
+      "upcoming": "예정",
+      "active": "진행 중",
+      "completed": "종료"
+    },
+    "projectHealth": {
+      "on_track": "정상",
+      "at_risk": "위험",
+      "off_track": "이탈"
     }
   },
   "issuesPage": {
@@ -4724,6 +4750,8 @@
     "emptyTitle": "아직 이슈가 없습니다",
     "emptyHint": "평가하고 싶은 문제를 먼저 등록하고, 그것을 검증할 하니스나 데이터셋을 연결해보세요.",
     "rowLinkCount": "링크 {count}건",
+    "rowCommentCount": "댓글 {count}개",
+    "loadMore": "더 보기",
     "backToList": "이슈",
     "detailFallbackTitle": "이슈",
     "metaCreated": "생성",
@@ -4752,7 +4780,34 @@
     "labelCreate": "「{name}」 라벨 만들기",
     "labelCreateError": "라벨을 만들지 못했습니다.",
     "labelRemove": "{name} 제거",
-    "labelNoMatch": "일치하는 라벨이 없습니다."
+    "labelNoMatch": "일치하는 라벨이 없습니다.",
+    "teamControlLabel": "이 이슈의 팀",
+    "teamMoveTo": "다른 팀으로 넘기기",
+    "teamUnknown": "팀 없음",
+    "moveError": "팀을 옮기지 못했어요",
+    "fieldPriority": "우선순위",
+    "fieldEstimate": "추정치",
+    "fieldEstimateNone": "없음",
+    "fieldDueDate": "기한",
+    "overdue": "기한 초과",
+    "priorityControlLabel": "이 이슈의 우선순위",
+    "prioritySetTo": "우선순위 바꾸기",
+    "priorityError": "우선순위를 바꾸지 못했어요",
+    "subIssuesTitle": "하위 이슈 {count}개",
+    "subIssuesProgress": "{done}/{total} 완료",
+    "subIssueAdd": "하위 이슈 추가",
+    "fieldCycle": "사이클",
+    "triageBanner": "이 이슈는 아직 팀의 워크플로 밖, 트리아지에 있어요.",
+    "triageAccept": "받아들이기",
+    "triageAcceptInto": "어디로 들여보낼까요",
+    "triageDecline": "거절",
+    "triageDeclineNote": "거절 사유(선택)",
+    "triageAcceptError": "받아들이지 못했어요",
+    "triageDeclineError": "거절하지 못했어요",
+    "triageTitle": "트리아지",
+    "triageDescription": "이 팀의 워크플로에 들어오기를 기다리는 일 — 보드로 받아들이거나 돌려보냅니다.",
+    "triageEmptyTitle": "인박스가 비어 있어요",
+    "triageEmptyHint": "이 팀으로 접수된 새 이슈가 먼저 여기 앉습니다."
   },
   "issueLinks": {
     "add": "링크 추가",
@@ -4786,7 +4841,13 @@
     "fieldNamePlaceholder": "예: 브라우저 스위트 안정화",
     "fieldDescription": "설명",
     "fieldInitiative": "이니셔티브",
-    "fieldInitiativeNone": "이니셔티브 없음",
+    "fieldTeams": "팀",
+    "fieldTeamsPlaceholder": "팀 검색",
+    "fieldTeamsEmpty": "고를 팀이 없어요",
+    "fieldTeamRemove": "{name} 팀 빼기",
+    "fieldInitiativePlaceholder": "이니셔티브 검색",
+    "fieldInitiativeEmpty": "고를 이니셔티브가 없어요",
+    "fieldInitiativeRemove": "{name} 이니셔티브에서 빼기",
     "fieldTargetDate": "목표일",
     "statusError": "프로젝트 상태를 바꾸지 못했습니다.",
     "statusControlLabel": "상태 변경",
@@ -4818,7 +4879,16 @@
     "rollupEvaluatedTip": "완료된 이슈 중 스코어카드까지 남긴 것. 「해결했다」와 「증거를 남기고 해결했다」는 다른 주장이고, 릴리스 판단에 필요한 쪽은 후자입니다.",
     "issuesTitle": "이슈 ({count})",
     "historyTitle": "이력",
-    "discussTitle": "논의"
+    "discussTitle": "논의",
+    "fieldHealth": "상태 보고",
+    "fieldLead": "책임자",
+    "fieldMembers": "참여자",
+    "milestonesTitle": "마일스톤 {count}개",
+    "milestoneIssues": "이슈 {count}개",
+    "updatesTitle": "업데이트",
+    "postUpdate": "업데이트 올리기",
+    "updatePlaceholder": "무엇이 바뀌었고, 왜 그렇게 읽히나요?",
+    "updateError": "업데이트를 올리지 못했어요"
   },
   "initiativesPage": {
     "title": "이니셔티브",
@@ -4840,6 +4910,11 @@
     "fieldName": "이름",
     "fieldNamePlaceholder": "예: 2026 3분기 릴리스",
     "fieldDescription": "설명",
+    "fieldParent": "상위 이니셔티브",
+    "fieldParentNone": "없음(최상위)",
+    "nestingTitle": "상·하위 이니셔티브",
+    "nestingParent": "상위",
+    "nestingChild": "하위",
     "fieldDescriptionPlaceholder": "무엇이 함께 나가야 하고, 릴리스했다는 건 무엇을 뜻하는지 적어주세요.",
     "fieldTargetDate": "목표일",
     "fieldTargetDatePast": "이미 지난 날짜입니다 — 만드는 즉시 기한 초과로 보입니다.",
@@ -4992,7 +5067,26 @@
     "rosterHint": "워크스페이스 멤버십과 별개입니다 — 팀에 속해야 그 팀 이슈가 내 목록에 뜹니다.",
     "addMemberPlaceholder": "워크스페이스 멤버 선택",
     "rowSummary": "멤버 {members} · 열린 이슈 {open}",
-    "rosterPermissionTip": "팀 소속은 무엇이 내 것으로 보일지를 정합니다 — 그 팀의 이슈와 프로젝트요. 권한은 주지 않습니다. 무엇을 할 수 있는지는 멤버 화면의 워크스페이스 역할이 정합니다."
+    "rosterPermissionTip": "팀 소속은 무엇이 내 것으로 보일지를 정합니다 — 그 팀의 이슈와 프로젝트요. 권한은 주지 않습니다. 무엇을 할 수 있는지는 멤버 화면의 워크스페이스 역할이 정합니다.",
+    "parentLabel": "상위 팀",
+    "parentNone": "없음(최상위)",
+    "rowParent": "{name} 하위",
+    "parentHint": "하위 팀도 자기 이슈를 소유하고 자기 식별자를 발번해요.",
+    "cycleWeeksLabel": "사이클 주기(주)",
+    "cycleWeeksHint": "다음 사이클을 만들 때 제안되는 기간이에요.",
+    "triageLabel": "트리아지",
+    "triageHint": "켜면 들어오는 일이 워크플로 앞의 인박스에 먼저 앉아요.",
+    "triageOn": "켜짐",
+    "triageOff": "꺼짐",
+    "stateAdd": "상태 추가",
+    "stateNamePlaceholder": "컬럼 이름(예: QA 중)",
+    "stateMoveUp": "위로",
+    "stateMoveDown": "아래로",
+    "stateDelete": "상태 삭제",
+    "privateLabel": "비공개 팀",
+    "privateOn": "비공개",
+    "privateOff": "공개",
+    "privateHint": "비공개면 이 팀의 이슈는 로스터에게만 보여요. 권한이 아니라 가시성이고, 워크스페이스 관리자는 계속 볼 수 있어요."
   },
   "teamHome": {
     "title": "팀",
@@ -5084,5 +5178,42 @@
       "judge": "저지",
       "benchmark": "벤치마크"
     }
+  },
+  "cyclesPage": {
+    "title": "사이클",
+    "description": "팀이 한 주기 동안 무엇을 하는지 — 번호와 기간을 가진 이터레이션이에요.",
+    "create": "새 사이클",
+    "createTitle": "다음 이터레이션 계획",
+    "createSubmit": "만들기",
+    "createHint": "날짜를 비우면 팀 주기(기본 2주)에서 이어지는 창이 제안돼요.",
+    "createError": "사이클을 만들지 못했어요",
+    "halfWindow": "시작일과 종료일은 함께 주거나 함께 비워요.",
+    "fieldName": "이름",
+    "fieldNamePlaceholder": "대부분은 번호가 전부예요",
+    "fieldDescription": "설명",
+    "fieldStartsAt": "시작일",
+    "fieldEndsAt": "종료일(포함)",
+    "fieldWindow": "기간",
+    "fieldCompletedAt": "종료 시각",
+    "complete": "이터레이션 닫기",
+    "completeTitle": "이 이터레이션을 닫을까요?",
+    "completeBody": "아직 열린 이슈가 {count}개예요. 게이트가 아니니 닫을 수 있고, 남은 일은 아래에서 고른 사이클로 함께 옮겨져요.",
+    "completeBodyClean": "남은 일이 없어요. 닫으면 기록으로 남고 더는 편집할 수 없어요.",
+    "completeError": "사이클을 닫지 못했어요",
+    "carryTo": "남은 일 옮길 곳",
+    "carryToNone": "옮기지 않음(닫힌 사이클에 남김)",
+    "cancel": "취소",
+    "backToList": "사이클 목록",
+    "statOpen": "열림",
+    "statDone": "완료",
+    "statScope": "완료 포인트/전체",
+    "statEstimated": "추정된 이슈",
+    "issuesTitle": "이슈 {count}개",
+    "issuesTip": "개수는 이슈를, 포인트는 추정치를 세요. 추정 없는 이슈는 0포인트짜리 실제 작업이에요.",
+    "historyTitle": "이력",
+    "emptyTitle": "아직 사이클이 없어요",
+    "emptyHint": "{team} 팀의 첫 이터레이션을 계획해 보세요.",
+    "loadError": "불러오지 못했어요: {error}",
+    "detailFallbackTitle": "사이클"
   }
 }

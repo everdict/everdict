@@ -33,6 +33,9 @@ export async function createTeamAction(input: {
   name: string
   description?: string
   isDefault?: boolean
+  isPrivate?: boolean
+  // 상위 팀 — 조직 표현일 뿐이다. 하위 팀도 자기 이슈를 소유하고 자기 식별자를 발번한다.
+  parentId?: string
 }): Promise<TeamMutationResult> {
   const ctx = await authContext()
   return mutate(() => controlPlane.createTeam<{ id: string }>(ctx, input))
@@ -40,7 +43,15 @@ export async function createTeamAction(input: {
 
 export async function updateTeamAction(
   id: string,
-  patch: { name?: string; description?: string | null }
+  // null 은 상위에서 떼어내 최상위 팀으로 되돌린다. 자기 하위로 옮기는 시도는 서버가 409로 거절한다.
+  patch: {
+    name?: string
+    description?: string | null
+    parentId?: string | null
+    cycleDurationWeeks?: number
+    triageEnabled?: boolean
+    isPrivate?: boolean
+  }
 ): Promise<TeamMutationResult> {
   const ctx = await authContext()
   return mutate(() => controlPlane.updateTeam(ctx, id, patch))
@@ -69,4 +80,33 @@ export async function removeTeamMemberAction(
 ): Promise<TeamMutationResult> {
   const ctx = await authContext()
   return mutate(() => controlPlane.removeTeamMember(ctx, id, subject))
+}
+
+// --- 팀의 보드(워크플로 상태) ---------------------------------------------------------------------------
+// 이름·색·순서를 바꾸는 것은 화장이고, `status` 를 바꾸는 것은 그 컬럼에 있던 이슈들을 실제로 옮긴다(서버가
+// 같은 동작에서 한다). 컬럼을 지우려면 먼저 비워야 한다.
+
+export async function createWorkflowStateAction(
+  teamId: string,
+  input: { name: string; status: string; color: string }
+): Promise<TeamMutationResult> {
+  const ctx = await authContext()
+  return mutate(() => controlPlane.createWorkflowState<{ id: string }>(ctx, teamId, input))
+}
+
+export async function updateWorkflowStateAction(
+  teamId: string,
+  stateId: string,
+  patch: { name?: string; color?: string; position?: number; status?: string }
+): Promise<TeamMutationResult> {
+  const ctx = await authContext()
+  return mutate(() => controlPlane.updateWorkflowState(ctx, teamId, stateId, patch))
+}
+
+export async function deleteWorkflowStateAction(
+  teamId: string,
+  stateId: string
+): Promise<TeamMutationResult> {
+  const ctx = await authContext()
+  return mutate(() => controlPlane.deleteWorkflowState(ctx, teamId, stateId))
 }

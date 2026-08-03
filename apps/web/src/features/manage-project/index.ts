@@ -1,4 +1,7 @@
 export {
+  addProjectMilestoneAction,
+  postProjectUpdateAction,
+  removeProjectMilestoneAction,
   createProjectAction,
   deleteProjectAction,
   setProjectStatusAction,
@@ -8,3 +11,4 @@ export {
 export { CreateProjectButton } from './ui/create-project-button'
 export { ProjectActions } from './ui/project-actions'
 export { ProjectStatusControl } from './ui/project-status-control'
+export { ProjectUpdatePanel } from './ui/project-update-panel'

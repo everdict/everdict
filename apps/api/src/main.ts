@@ -1,4 +1,5 @@
 import {
+  CycleService,
   GithubIssueSync,
   InitiativeService,
   IssueLabelService,
@@ -8,6 +9,7 @@ import {
   ProjectService,
   TaskService,
   TeamService,
+  WorkflowStateService,
   registryLatestVersionResolver,
   seedFirstPartyAgents,
 } from "@everdict/application-control";
@@ -179,6 +181,9 @@ async function main(): Promise<void> {
     viewStore,
     taskStore,
     teamStore,
+    cycleStore,
+    workflowStateStore,
+    projectUpdateStore,
     issueStore,
     issueLabelStore,
     projectStore,
@@ -673,8 +678,11 @@ async function main(): Promise<void> {
   // CALL time, by which point it is populated.
   const githubSyncRef: { current?: GithubIssueSync } = {};
   // Teams come first: they are the allocator IssueService calls to resolve an owning team and mint ENG-12.
+  // A team's board — seeded when a team is born, edited from Settings › Teams.
+  const workflowStateService = new WorkflowStateService({ store: workflowStateStore, issues: issueStore });
   const teamService = new TeamService({
     store: teamStore,
+    workflowStates: workflowStateService,
     issues: issueStore,
     events: platformEventService,
   });
@@ -687,6 +695,14 @@ async function main(): Promise<void> {
     store: issueStore,
     teams: teamService,
     scorecards: scorecardStore,
+    // "Does this cycle exist, and whose is it" — the only question an issue asks about an iteration.
+    cycles: cycleStore,
+    // "Is this checkpoint one of that project's" — the same question about a milestone.
+    projects: projectStore,
+    // "Which column is this, and whose board" — moving an issue by board column.
+    states: workflowStateStore,
+    // Read-only, for the list row's thread badge — one batched count per page, never a read per row.
+    comments: commentStore,
     events: platformEventService,
     github: { pushStatus: async (record, actor) => githubSyncRef.current?.pushStatus(record, actor) },
   });
@@ -716,9 +732,22 @@ async function main(): Promise<void> {
       feed: notificationStore,
     }),
   );
+  // A team's iterations. Composed before the issue service so an issue can validate the cycle it names.
+  const cycleService = new CycleService({
+    store: cycleStore,
+    teams: teamStore,
+    issues: issueStore,
+    events: platformEventService,
+  });
   const projectService = new ProjectService({
     store: projectStore,
     issues: issueStore,
+    // A project's team/initiative edges are validated against these on write, and an unnamed team falls back to
+    // the workspace default — both are store reads, never peer-service calls.
+    teams: teamStore,
+    initiatives: initiativeStore,
+    // The posted-update timeline — the project's health is what the latest one said.
+    updates: projectUpdateStore,
     events: platformEventService,
   });
   const initiativeService = new InitiativeService({

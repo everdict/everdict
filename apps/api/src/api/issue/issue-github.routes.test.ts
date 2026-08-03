@@ -73,6 +73,9 @@ function build(opts: { issues?: GithubIssue[]; tokenError?: Error } = {}) {
     async createIssueComment() {
       return { url: "u" };
     },
+    async fetchAsset() {
+      return { bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), contentType: "image/png" };
+    },
   };
   const writers: GithubRepoWriterFactory = { for: () => writer };
   const store = new InMemoryIssueStore();
@@ -204,6 +207,55 @@ describe("issue GitHub sync routes", () => {
     });
     expect(pulled.statusCode).toBe(200);
     expect(pulled.json()).toEqual([expect.objectContaining({ number: 1, changed: false })]);
+  });
+
+  // The attachment proxy: an imported body's images are GitHub URLs, and on Enterprise (or any private repo) the
+  // reader's browser cannot fetch one — the control plane serves the bytes with the same installation instead.
+  it("serves an imported issue's attachment as image bytes", async () => {
+    const { app } = build();
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/issues/import",
+        headers: H,
+        payload: { repository: "acme/agent", numbers: [1] },
+      })
+    ).json().created[0];
+
+    const asset = await app.inject({
+      method: "GET",
+      url: `/issues/${created.id}/attachment?url=${encodeURIComponent("https://github.com/user-attachments/assets/a")}`,
+      headers: H,
+    });
+    expect(asset.statusCode).toBe(200);
+    expect(asset.headers["content-type"]).toContain("image/png");
+    // A shared cache must never keep bytes that are only this reader's to see.
+    expect(asset.headers["cache-control"]).toContain("private");
+    expect(asset.rawPayload.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    await app.close();
+  });
+
+  it("refuses an attachment url on a host the issue did not come from, and requires the url at all", async () => {
+    const { app } = build();
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/issues/import",
+        headers: H,
+        payload: { repository: "acme/agent", numbers: [1] },
+      })
+    ).json().created[0];
+
+    const elsewhere = await app.inject({
+      method: "GET",
+      url: `/issues/${created.id}/attachment?url=${encodeURIComponent("https://evil.example/steal")}`,
+      headers: H,
+    });
+    expect(elsewhere.statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: `/issues/${created.id}/attachment`, headers: H })).statusCode).toBe(
+      400,
+    );
+    await app.close();
   });
 
   it("refuses sync toggles on an issue that was never imported", async () => {

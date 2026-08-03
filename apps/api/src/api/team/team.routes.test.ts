@@ -168,8 +168,8 @@ describe("issues are named by their team", () => {
     await app.inject({ method: "POST", url: "/issues", headers: ADMIN, payload: { title: "core one" } });
     await app.inject({ method: "POST", url: "/issues", headers: ADMIN, payload: { teamId: eng.id, title: "eng one" } });
     const res = await app.inject({ method: "GET", url: `/issues?team=${eng.id}`, headers: ADMIN });
-    expect(res.json()).toHaveLength(1);
-    expect(res.json()[0].identifier).toBe("ENG-1");
+    expect(res.json().items).toHaveLength(1);
+    expect(res.json().items[0].identifier).toBe("ENG-1");
   });
 });
 
@@ -198,6 +198,77 @@ describe("team roster", () => {
       await app.inject({ method: "POST", url: "/teams", headers: ADMIN, payload: { key: "ENG", name: "Eng" } })
     ).json();
     const res = await app.inject({ method: "DELETE", url: `/teams/${eng.id}/members/nobody`, headers: ADMIN });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// The team's key is its SLUG — the web addresses a team (and everything scoped to it) as `/{workspace}/teams/ENG/…`,
+// so the control plane has to answer to the same name the URL carries. Same rule the issue identifier already has.
+describe("a team is addressed by its key", () => {
+  it("GETs by key, case-insensitively, and by id — one resource, two names", async () => {
+    const { app } = build();
+    const eng = (
+      await app.inject({ method: "POST", url: "/teams", headers: ADMIN, payload: { key: "ENG", name: "Eng" } })
+    ).json();
+    for (const ref of ["ENG", "eng", eng.id]) {
+      const res = await app.inject({ method: "GET", url: `/teams/${ref}`, headers: ADMIN });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().id).toBe(eng.id);
+    }
+  });
+
+  it("404s on a key nobody in this workspace holds", async () => {
+    const { app } = build();
+    expect((await app.inject({ method: "GET", url: "/teams/MOB", headers: ADMIN })).statusCode).toBe(404);
+  });
+
+  it("mutates through the key too — a slug that only reads is half a resource", async () => {
+    const { app } = build();
+    const eng = (
+      await app.inject({ method: "POST", url: "/teams", headers: ADMIN, payload: { key: "ENG", name: "Eng" } })
+    ).json();
+    const renamed = await app.inject({
+      method: "PATCH",
+      url: "/teams/eng",
+      headers: ADMIN,
+      payload: { name: "Engineering" },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json()).toMatchObject({ id: eng.id, name: "Engineering" });
+    const roster = await app.inject({
+      method: "POST",
+      url: "/teams/ENG/members",
+      headers: ADMIN,
+      payload: { subject: "alice" },
+    });
+    expect(roster.statusCode).toBe(201);
+    expect(roster.json().teamId).toBe(eng.id);
+  });
+
+  it("scopes a list by key — the filter takes the same ref the URL does", async () => {
+    const { app } = build();
+    const eng = (
+      await app.inject({ method: "POST", url: "/teams", headers: ADMIN, payload: { key: "ENG", name: "Eng" } })
+    ).json();
+    const mob = (
+      await app.inject({ method: "POST", url: "/teams", headers: ADMIN, payload: { key: "MOB", name: "Mobile" } })
+    ).json();
+    await app.inject({ method: "POST", url: "/issues", headers: ADMIN, payload: { title: "flaky", teamId: eng.id } });
+    await app.inject({
+      method: "POST",
+      url: "/issues",
+      headers: ADMIN,
+      payload: { title: "elsewhere", teamId: mob.id },
+    });
+    const scoped = await app.inject({ method: "GET", url: "/issues?team=ENG", headers: ADMIN });
+    expect(scoped.statusCode).toBe(200);
+    expect(scoped.json().items.map((i: { title: string }) => i.title)).toEqual(["flaky"]);
+  });
+
+  it("404s a list scoped to a team that does not exist, rather than answering with an empty one", async () => {
+    // An empty list reads as "this team has nothing"; the honest answer to a bad slug is that there is no such team.
+    const { app } = build();
+    const res = await app.inject({ method: "GET", url: "/issues?team=NOPE", headers: ADMIN });
     expect(res.statusCode).toBe(404);
   });
 });

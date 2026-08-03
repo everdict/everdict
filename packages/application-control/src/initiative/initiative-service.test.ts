@@ -1,8 +1,9 @@
-import type { InitiativeRecord, IssueRecord, ProjectRecord } from "@everdict/contracts";
+import type { InitiativeRecord, IssuePage, IssueRecord, ProjectRecord } from "@everdict/contracts";
 import { ConflictError } from "@everdict/contracts";
+import { issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { InitiativeListFilter, InitiativeStore } from "../ports/initiative-store.js";
-import type { IssueListFilter, IssueStore } from "../ports/issue-store.js";
+import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
 import type { ProjectListFilter, ProjectStore } from "../ports/project-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import { InitiativeService } from "./initiative-service.js";
@@ -49,12 +50,21 @@ class FakeIssueStore extends FakeStore<IssueRecord> implements IssueStore {
   async list(tenant: string, filter?: IssueListFilter): Promise<IssueRecord[]> {
     return this.all(tenant).filter((r) => filter?.projectId === undefined || r.projectId === filter.projectId);
   }
+  // Derived from this fake's own `list` via the kernel helpers, so it cannot disagree with production.
+  async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
+    return { items: (await this.list(tenant, filter)).map(issueSummaryOf) };
+  }
+  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
+    return issueCountsByTeam(await this.list(tenant));
+  }
 }
 
 class FakeProjectStore extends FakeStore<ProjectRecord> implements ProjectStore {
   async list(tenant: string, filter?: ProjectListFilter): Promise<ProjectRecord[]> {
     const rows = this.all(tenant).filter(
-      (r) => filter?.initiativeId === undefined || r.initiativeId === filter.initiativeId,
+      (r) =>
+        (filter?.initiativeId === undefined || r.initiativeIds.includes(filter.initiativeId)) &&
+        (filter?.initiativeIds === undefined || r.initiativeIds.some((id) => filter.initiativeIds?.includes(id))),
     );
     return filter?.limit !== undefined ? rows.slice(0, filter.limit) : rows;
   }
@@ -73,8 +83,11 @@ function issue(id: string, projectId: string, status: IssueRecord["status"]): Is
     teamId: "team-eng",
     number: 1,
     identifier: "ENG-1",
+    formerIdentifiers: [],
     title: `issue ${id}`,
     status,
+    priority: "none",
+    inTriage: false,
     projectId,
     labelIds: [],
     links: [],
@@ -94,7 +107,10 @@ function project(id: string, initiativeId: string, status: ProjectRecord["status
     tenant: "acme",
     name: `project ${id}`,
     status,
-    initiativeId,
+    teamIds: [],
+    initiativeIds: [initiativeId],
+    memberIds: [],
+    milestones: [],
     history: [],
     createdBy: "dana",
     createdAt: NOW,
@@ -182,6 +198,39 @@ describe("InitiativeService — the release gate", () => {
     const initiative = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
     await projects.create(project("p1", initiative.id, "in_progress"));
     await expect(svc.remove("acme", initiative.id, { subject: "dana", isAdmin: true })).rejects.toThrow(ConflictError);
+  });
+
+  it("counts a sub-initiative's projects, so nesting cannot hide work from the release gate", async () => {
+    // Given: a parent whose own project is settled, and a child holding open work
+    const svc = service();
+    const parent = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
+    const child = await svc.create({ tenant: "acme", createdBy: "dana", name: "storage", parentId: parent.id });
+    await projects.create(project("p1", parent.id, "in_progress"));
+    await projects.create(project("p2", child.id, "in_progress"));
+    await issues.create(issue("a", "p1", "done"));
+    await issues.create(issue("b", "p2", "todo"));
+    // When: the parent's readiness is read
+    const readiness = await svc.readiness("acme", parent.id);
+    // Then: the child's open issue blocks the parent, and the summary says where it sits
+    expect(readiness.ready).toBe(false);
+    expect(readiness.openIssues).toBe(1);
+    expect(readiness.projects.find((p) => p.id === "p2")?.viaInitiativeId).toBe(child.id);
+    // And: completing the parent hits the same gate
+    await expect(svc.setStatus("acme", parent.id, { status: "completed" }, actor)).rejects.toThrow(ConflictError);
+  });
+
+  it("refuses to re-parent an initiative under its own descendant", async () => {
+    const svc = service();
+    const parent = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
+    const child = await svc.create({ tenant: "acme", createdBy: "dana", name: "storage", parentId: parent.id });
+    await expect(svc.update("acme", parent.id, { parentId: child.id }, actor)).rejects.toThrow(ConflictError);
+  });
+
+  it("refuses to delete an initiative that still has sub-initiatives", async () => {
+    const svc = service();
+    const parent = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
+    await svc.create({ tenant: "acme", createdBy: "dana", name: "storage", parentId: parent.id });
+    await expect(svc.remove("acme", parent.id, { subject: "dana", isAdmin: true })).rejects.toThrow(/sub-initiative/);
   });
 
   it("scopes every read to the workspace — another tenant's initiative does not resolve", async () => {

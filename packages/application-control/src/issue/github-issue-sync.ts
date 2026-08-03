@@ -6,7 +6,7 @@ import {
   type IssueRecord,
 } from "@everdict/contracts";
 import { Issue } from "@everdict/domain";
-import type { GithubIssue, GithubRepoWriterFactory } from "../ports/github-repo-writer.js";
+import type { GithubAsset, GithubIssue, GithubRepoWriterFactory } from "../ports/github-repo-writer.js";
 import type { IssueStore } from "../ports/issue-store.js";
 import type { IssueActor, IssueService, IssueTeamAllocator } from "./issue-service.js";
 
@@ -77,11 +77,54 @@ export interface IssueLabelResolver {
 }
 
 const DEFAULT_SYNC: IssueGithubSync = { pull: true, push: false };
+// One attachment's ceiling. GitHub caps a body upload well under this, so the bound is a memory guard against a
+// URL that resolves to something else entirely, not a limit anyone should meet in normal use.
+const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 const LIST_PER_PAGE = 100;
 const LIST_MAX_PAGES = 5;
 // A minute of slack on the incremental watermark: `since` is compared against GitHub's own clock, and an update
 // landing in the same second as our last read would otherwise be skipped forever.
 const SINCE_SKEW_MS = 60_000;
+
+// A configured GitHub Enterprise base ("https://ghe.acme.io", possibly with a trailing slash or no scheme) and a
+// URL from an issue body point at the same place. Protocol is part of the comparison: an https installation must
+// not be satisfied by a plaintext look-alike.
+function hostMatches(target: URL, host: string): boolean {
+  const trimmed = host.replace(/\/+$/, "");
+  let base: URL;
+  try {
+    base = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+  } catch {
+    return false;
+  }
+  return target.protocol === base.protocol && target.host.toLowerCase() === base.host.toLowerCase();
+}
+
+// Pin an attachment URL to the GitHub host the issue was imported from. This URL is UNTRUSTED — it arrives from
+// whatever markdown the remote body carries — and the fetch behind it rides an installation token, so without
+// this check anyone who can read one issue could aim a credentialed request anywhere. Enterprise serves
+// attachments from the issue's own origin; github.com adds its user-content hosts.
+function assertIssueHostAsset(url: string, host: string | undefined): void {
+  let target: URL;
+  try {
+    target = new URL(url);
+  } catch {
+    throw new BadRequestError("BAD_REQUEST", { url }, "The attachment url must be an absolute http(s) URL.");
+  }
+  if (target.protocol !== "https:" && target.protocol !== "http:")
+    throw new BadRequestError("BAD_REQUEST", { url }, "The attachment url must be an absolute http(s) URL.");
+  const hostname = target.hostname.toLowerCase();
+  const allowed =
+    host === undefined
+      ? hostname === "github.com" || hostname === "www.github.com" || hostname.endsWith(".githubusercontent.com")
+      : hostMatches(target, host);
+  if (!allowed)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { url, ...(host ? { host } : {}) },
+      `The attachment url is not served by this issue's GitHub host${host ? ` (${host})` : " (github.com)"}.`,
+    );
+}
 
 function githubOf(record: IssueRecord): IssueGithub {
   const github = record.github;
@@ -194,6 +237,19 @@ export class GithubIssueSync {
       .listIssueComments(github.repository, github.number, { maxComments: ISSUE_GITHUB_COMMENT_LIMIT })
       .catch(() => []);
     return (await this.applyRemote(tenant, record, remote, comments, actor)).record;
+  }
+
+  // The bytes behind an image embedded in an imported issue's description or comments. The body we store is the
+  // remote's own markdown, so its images are GitHub URLs — and on GitHub Enterprise (as on any private repo)
+  // those are behind the same authentication the repo is. The browser reading the issue here carries no GitHub
+  // session, so linking them draws a broken image forever; the control plane fetches them the same way it
+  // fetched the body, through the workspace App's installation. A read, so it gates issues:read at the edge.
+  async fetchAttachment(tenant: string, id: string, url: string): Promise<GithubAsset> {
+    const record = await this.deps.issues.get(tenant, id);
+    const github = githubOf(record);
+    assertIssueHostAsset(url, github.host);
+    const writer = await this.writerFor(tenant, github.repository, { contents: "read", issues: "read" }, github.host);
+    return writer.fetchAsset(url, { maxBytes: ATTACHMENT_MAX_BYTES });
   }
 
   // The manual bulk pull: ONE incremental list call for the whole repo, then per-issue apply. A failure on one

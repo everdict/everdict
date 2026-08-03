@@ -7,13 +7,20 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { Project } from '@/entities/project'
+import { TeamKeyBadge } from '@/entities/team'
 import { Button } from '@/shared/ui/button'
-import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { MultiSelect } from '@/shared/ui/multi-select'
 
 import { deleteProjectAction, updateProjectAction } from '../api/projects'
+
+// 목록 필드는 순서까지 그대로일 때만 "안 바뀜"이다 — 서버는 받은 목록으로 통째로 대체하므로, 바뀐 것이
+// 없는데 보내면 이력에 빈 변경이 남는다.
+function sameIds(next: readonly string[], previous: readonly string[]): boolean {
+  return next.length === previous.length && next.every((id, i) => id === previous[i])
+}
 
 // PATCH semantics: `null` clears an optional field, `undefined` leaves it alone.
 function cleared(next: string, previous: string | undefined): string | null | undefined {
@@ -28,10 +35,12 @@ export function ProjectActions({
   workspace,
   project,
   initiatives,
+  teams,
 }: {
   workspace: string
   project: Project
   initiatives: { id: string; name: string }[]
+  teams: { id: string; key: string; name: string }[]
 }) {
   const t = useTranslations('projectsPage')
   const router = useRouter()
@@ -39,7 +48,8 @@ export function ProjectActions({
   const [confirming, setConfirming] = useState(false)
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description ?? '')
-  const [initiativeId, setInitiativeId] = useState(project.initiativeId ?? '')
+  const [initiativeIds, setInitiativeIds] = useState<string[]>(project.initiativeIds)
+  const [teamIds, setTeamIds] = useState<string[]>(project.teamIds)
   const [targetDate, setTargetDate] = useState(project.targetDate ?? '')
   const [pending, startTransition] = useTransition()
 
@@ -49,9 +59,8 @@ export function ProjectActions({
       ...(cleared(description, project.description) !== undefined
         ? { description: cleared(description, project.description) }
         : {}),
-      ...(initiativeId !== (project.initiativeId ?? '')
-        ? { initiativeId: initiativeId === '' ? null : initiativeId }
-        : {}),
+      ...(sameIds(initiativeIds, project.initiativeIds) ? {} : { initiativeIds }),
+      ...(sameIds(teamIds, project.teamIds) ? {} : { teamIds }),
       ...(targetDate !== (project.targetDate ?? '')
         ? { targetDate: targetDate === '' ? null : targetDate }
         : {}),
@@ -134,27 +143,42 @@ export function ProjectActions({
           </div>
           <div className="grid gap-3 @md:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="edit-project-initiative">{t('fieldInitiative')}</Label>
-              <Combobox
-                id="edit-project-initiative"
-                value={initiativeId}
-                onChange={setInitiativeId}
-                placeholder={t('fieldInitiativeNone')}
-                options={[
-                  { value: '', label: t('fieldInitiativeNone') },
-                  ...initiatives.map((i) => ({ value: i.id, label: i.name })),
-                ]}
+              <Label htmlFor="edit-project-teams">{t('fieldTeams')}</Label>
+              <MultiSelect
+                id="edit-project-teams"
+                selected={teamIds}
+                onChange={setTeamIds}
+                placeholder={t('fieldTeamsPlaceholder')}
+                emptyLabel={t('fieldTeamsEmpty')}
+                removeLabel={(teamName) => t('fieldTeamRemove', { name: teamName })}
+                options={teams.map((x) => ({
+                  value: x.id,
+                  label: x.name,
+                  badge: <TeamKeyBadge teamKey={x.key} />,
+                }))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="edit-project-target">{t('fieldTargetDate')}</Label>
-              <Input
-                id="edit-project-target"
-                type="date"
-                value={targetDate}
-                onChange={(e) => setTargetDate(e.target.value)}
+              <Label htmlFor="edit-project-initiative">{t('fieldInitiative')}</Label>
+              <MultiSelect
+                id="edit-project-initiative"
+                selected={initiativeIds}
+                onChange={setInitiativeIds}
+                placeholder={t('fieldInitiativePlaceholder')}
+                emptyLabel={t('fieldInitiativeEmpty')}
+                removeLabel={(initiativeName) => t('fieldInitiativeRemove', { name: initiativeName })}
+                options={initiatives.map((i) => ({ value: i.id, label: i.name }))}
               />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-project-target">{t('fieldTargetDate')}</Label>
+            <Input
+              id="edit-project-target"
+              type="date"
+              value={targetDate}
+              onChange={(e) => setTargetDate(e.target.value)}
+            />
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(false)}>

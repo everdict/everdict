@@ -4,13 +4,22 @@ import type {
   IssueGithubSync,
   IssueLink,
   IssueLinkType,
+  IssuePriority,
   IssueRecord,
   IssueResolution,
   IssueStatus,
+  IssueStatusCategory,
   IssueStatusCause,
+  IssueSummary,
   PlatformFact,
 } from "@everdict/contracts";
-import { BadRequestError, ConflictError, ISSUE_GITHUB_COMMENT_LIMIT, NotFoundError } from "@everdict/contracts";
+import {
+  BadRequestError,
+  ConflictError,
+  ISSUE_GITHUB_COMMENT_LIMIT,
+  ISSUE_STATUS_CATEGORY,
+  NotFoundError,
+} from "@everdict/contracts";
 import { appendHistory } from "./history.js";
 
 // The Issue aggregate — the tracker's unit of intent (docs/tracker.md). Transitions return {patch, facts} (E0,
@@ -42,6 +51,14 @@ export interface NewIssueInput {
   // Import maps a remote state onto our vocabulary (open → todo, closed → done); a member-filed issue starts in
   // the backlog unless they said otherwise.
   status?: IssueStatus;
+  priority?: IssuePriority;
+  estimate?: number;
+  dueDate?: string;
+  parentId?: string;
+  cycleId?: string;
+  milestoneId?: string;
+  stateId?: string;
+  inTriage?: boolean;
   projectId?: string;
   assignee?: string;
   // Registry ids, already resolved by the caller — the aggregate is pure, so name→id resolution (and the
@@ -61,10 +78,31 @@ export interface IssueEditInput {
   labelIds?: string[];
   assignee?: string | null;
   projectId?: string | null;
+  priority?: IssuePriority;
+  // `null` clears them: no estimate, no due date, no parent (the issue becomes top-level again).
+  estimate?: number | null;
+  dueDate?: string | null;
+  parentId?: string | null;
+  // Pulling an issue into an iteration (or out of one) is a plan change, not a workflow transition — it rides
+  // the ordinary edit and leaves one `updated` history entry.
+  cycleId?: string | null;
+  // The project checkpoint. `null` detaches it.
+  milestoneId?: string | null;
+}
+
+// A team move carries the destination AND the identity that team minted for the issue — the same pairing
+// creation uses, because the aggregate must never reach for a store to learn its own name.
+export interface IssueMoveInput {
+  teamId: string;
+  number: number;
+  identifier: string;
 }
 
 export interface IssueStatusChangeOptions {
   cause?: IssueStatusCause;
+  // The team state the issue landed in, when the caller moved it by board column rather than by canonical
+  // status. The status is still what everything programmatic reads; this records which column that was.
+  stateId?: string;
   scorecardId?: string;
   note?: string;
 }
@@ -78,14 +116,87 @@ export interface IssueReopenInput {
   note?: string;
 }
 
+// Sort order for a list, and the ONE place the priority vocabulary turns into an ordering. `none` ranks LAST
+// rather than first — an unprioritised issue is not the most urgent thing in the workspace, which is exactly
+// the trap Linear's `priority = 0` encoding sets for anyone who sorts numerically without knowing the rule.
+const PRIORITY_RANK: Record<IssuePriority, number> = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
+
+export function issuePriorityRank(priority: IssuePriority): number {
+  return PRIORITY_RANK[priority];
+}
+
 // OPEN = not done and not cancelled. `regressed` is deliberately open: a resolution that stopped holding is
 // unfinished work, and the initiative readiness must treat it exactly like an unstarted issue.
+// The closed half is `CLOSED_ISSUE_STATUSES` in the contracts, shared with the stores' aggregate counts — the
+// SQL that counts open issues per team passes that same array, so the two readings cannot drift apart.
+// The category IS the judgment: a status is open unless its category is completed or canceled. Derived rather
+// than listed, so a state a team renames (or adds) can never change what "open" means — and `regressed`, whose
+// category is `started`, keeps blocking a release exactly like unstarted work.
+export function issueStatusCategory(status: IssueStatus): IssueStatusCategory {
+  return ISSUE_STATUS_CATEGORY[status];
+}
+
 export function isOpenIssueStatus(status: IssueStatus): boolean {
-  return status !== "done" && status !== "cancelled";
+  const category = ISSUE_STATUS_CATEGORY[status];
+  return category !== "completed" && category !== "canceled";
 }
 
 function isTerminal(status: IssueStatus): boolean {
-  return status === "done" || status === "cancelled";
+  return !isOpenIssueStatus(status);
+}
+
+// Record → LIST projection (docs/tracker.md). A pure narrowing, so it lives in the kernel and every holder of a
+// whole record answers the list question identically — the in-memory store, the test fakes, anything that has
+// records rather than rows. The Postgres store does NOT go through here: it projects in SQL, so the columns
+// this function would drop are never read. Both must agree, and `IssueSummarySchema` is what says how.
+export function issueSummaryOf(record: IssueRecord): IssueSummary {
+  return {
+    id: record.id,
+    tenant: record.tenant,
+    teamId: record.teamId,
+    number: record.number,
+    identifier: record.identifier,
+    title: record.title,
+    status: record.status,
+    priority: record.priority,
+    ...(record.estimate !== undefined ? { estimate: record.estimate } : {}),
+    ...(record.dueDate !== undefined ? { dueDate: record.dueDate } : {}),
+    ...(record.parentId !== undefined ? { parentId: record.parentId } : {}),
+    ...(record.cycleId !== undefined ? { cycleId: record.cycleId } : {}),
+    ...(record.milestoneId !== undefined ? { milestoneId: record.milestoneId } : {}),
+    ...(record.stateId !== undefined ? { stateId: record.stateId } : {}),
+    inTriage: record.inTriage,
+    ...(record.projectId !== undefined ? { projectId: record.projectId } : {}),
+    ...(record.assignee !== undefined ? { assignee: record.assignee } : {}),
+    labelIds: record.labelIds,
+    linkCount: record.links.length,
+    ...(record.resolution !== undefined ? { resolution: record.resolution } : {}),
+    ...(record.github !== undefined
+      ? {
+          github: {
+            ...(record.github.host !== undefined ? { host: record.github.host } : {}),
+            repository: record.github.repository,
+            pull: record.github.sync.pull,
+          },
+        }
+      : {}),
+    createdBy: record.createdBy,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+// Counts per team over records already in hand — the in-memory half of `IssueStore.countByTeam`, shared so a
+// fake and the real in-memory store cannot disagree about what "open" means.
+export function issueCountsByTeam(records: readonly IssueRecord[]): { teamId: string; total: number; open: number }[] {
+  const counts = new Map<string, { teamId: string; total: number; open: number }>();
+  for (const record of records) {
+    const entry = counts.get(record.teamId) ?? { teamId: record.teamId, total: 0, open: 0 };
+    entry.total += 1;
+    if (isOpenIssueStatus(record.status)) entry.open += 1;
+    counts.set(record.teamId, entry);
+  }
+  return [...counts.values()];
 }
 
 // The addressable identity of the GitHub issue a copy came from, in the ONE shape every audit surface reads:
@@ -117,9 +228,20 @@ export class Issue {
       teamId: input.teamId,
       number: input.number,
       identifier: input.identifier,
+      formerIdentifiers: [],
       title: input.title,
       ...(input.description !== undefined ? { description: input.description } : {}),
       status,
+      priority: input.priority ?? "none",
+      // A filed issue is IN the workflow; triage is the queue in front of it, entered explicitly by the
+      // surfaces that bring work in from outside (import, an agent) — never the default for a member filing.
+      inTriage: input.inTriage ?? false,
+      ...(input.estimate !== undefined ? { estimate: input.estimate } : {}),
+      ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      ...(input.cycleId !== undefined ? { cycleId: input.cycleId } : {}),
+      ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {}),
+      ...(input.stateId !== undefined ? { stateId: input.stateId } : {}),
       ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
       labelIds: input.labelIds ?? [],
@@ -224,10 +346,132 @@ export class Issue {
         changed.push("project");
       }
     }
+    if (fields.priority !== undefined && fields.priority !== this.record.priority) {
+      patch.priority = fields.priority;
+      changed.push("priority");
+    }
+    if (fields.estimate !== undefined) {
+      const next = fields.estimate === null ? undefined : fields.estimate;
+      if (next !== this.record.estimate) {
+        patch.estimate = next;
+        changed.push("estimate");
+      }
+    }
+    if (fields.dueDate !== undefined) {
+      const next = fields.dueDate === null ? undefined : fields.dueDate;
+      if (next !== this.record.dueDate) {
+        patch.dueDate = next;
+        changed.push("dueDate");
+      }
+    }
+    if (fields.cycleId !== undefined) {
+      const next = fields.cycleId === null ? undefined : fields.cycleId;
+      if (next !== this.record.cycleId) {
+        patch.cycleId = next;
+        changed.push("cycle");
+      }
+    }
+    if (fields.milestoneId !== undefined) {
+      const next = fields.milestoneId === null ? undefined : fields.milestoneId;
+      if (next !== this.record.milestoneId) {
+        patch.milestoneId = next;
+        changed.push("milestone");
+      }
+    }
+    if (fields.parentId !== undefined) {
+      const next = fields.parentId === null ? undefined : fields.parentId;
+      // The aggregate can only see the obvious cycle; "my new parent is my own descendant" needs the live tree
+      // and is refused by the service, which holds the store.
+      if (next === this.record.id)
+        throw new BadRequestError("BAD_REQUEST", { issue: this.record.id }, "An issue cannot be its own parent.");
+      if (next !== this.record.parentId) {
+        patch.parentId = next;
+        changed.push("parent");
+      }
+    }
     if (changed.length === 0) throw new BadRequestError("BAD_REQUEST", { issue: this.record.id }, "Nothing to update.");
     patch.history = appendHistory(this.record.history, { at: now, by, event: "updated", detail: { changed } });
     patch.updatedAt = now;
     return { patch, facts: [] };
+  }
+
+  // Hand the issue to another team. The identifier is RE-MINTED from the destination's counter — the prefix's
+  // whole job is to say whose list the issue is on, so a moved issue keeping `ENG-12` under the Platform team
+  // would make the name a lie. The previous name is kept on the record (and stays resolvable) so every link
+  // already pasted into a pull request still lands here, which is what makes re-minting affordable at all.
+  // The service allocates the number from the destination team, exactly as filing does.
+  moveToTeam(input: IssueMoveInput, by: string, now: string): IssueTransition {
+    if (input.teamId === this.record.teamId)
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: this.record.id, team: input.teamId },
+        "This issue already belongs to that team.",
+      );
+    const fromTeamId = this.record.teamId;
+    const fromIdentifier = this.record.identifier;
+    const detail = { fromTeamId, toTeamId: input.teamId, fromIdentifier, toIdentifier: input.identifier };
+    return {
+      patch: {
+        teamId: input.teamId,
+        number: input.number,
+        identifier: input.identifier,
+        // Counters only ever move forward, so a re-mint can never collide with a name this issue already had —
+        // the Set is here for the shape's own sake, not to paper over a possible duplicate.
+        formerIdentifiers: [...new Set([...this.record.formerIdentifiers, fromIdentifier])],
+        history: appendHistory(this.record.history, { at: now, by, event: "moved", detail }),
+        updatedAt: now,
+      },
+      facts: [
+        {
+          kind: "issue.moved",
+          subject: { type: "issue", id: this.record.id },
+          actor: by,
+          payload: detail,
+          message: `${fromIdentifier} moved to another team as ${input.identifier}`,
+        },
+      ],
+    };
+  }
+
+  // Accept the issue INTO the team's workflow: the triage flag clears and the issue lands where the member
+  // said (`todo` by default). It is its own transition rather than an `update`, because leaving the queue is a
+  // lifecycle move — the history has to be able to answer "when did this stop being a request".
+  acceptFromTriage(to: IssueStatus, by: string, now: string): IssueTransition {
+    if (!this.record.inTriage)
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: this.record.id },
+        "This issue is not in triage — it is already in the workflow.",
+      );
+    if (to === "done" || to === "regressed")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { issue: this.record.id, status: to },
+        "Accepting an issue puts it into the workflow — close it afterwards, with its evidence.",
+      );
+    const from = this.record.status;
+    return {
+      patch: {
+        inTriage: false,
+        status: to,
+        history: appendHistory(this.record.history, {
+          at: now,
+          by,
+          event: "status_changed",
+          detail: { from, to, triage: "accepted" },
+        }),
+        updatedAt: now,
+      },
+      facts: [
+        {
+          kind: "issue.status_changed",
+          subject: { type: "issue", id: this.record.id },
+          actor: by,
+          payload: { from, to, cause: "manual", triage: "accepted", identifier: this.record.identifier },
+          message: `${this.record.identifier} accepted from triage`,
+        },
+      ],
+    };
   }
 
   // Ordinary workflow movement between OPEN states, plus cancellation. Reaching `done` goes through resolve()
@@ -552,6 +796,10 @@ export class Issue {
     return {
       patch: {
         status: to,
+        // The board column the move landed in, when the caller moved by column. A move made by canonical status
+        // (the regression watch, a GitHub sync, an agent) leaves it alone — the issue is then in no column, and
+        // a reader falls back to the team's default state for that status, which is the honest reading.
+        ...(options.stateId !== undefined ? { stateId: options.stateId } : {}),
         history: appendHistory(this.record.history, { at: now, by, event, detail }),
         updatedAt: now,
       },

@@ -15,7 +15,7 @@ export type { KnowledgeEntryStore } from "./ports/knowledge-entry-store.js";
 export type { CapabilityStore } from "./ports/capability-store.js";
 export type { AgentMemberPreferenceStore } from "./ports/agent-member-preference-store.js";
 export type { CallbackStore } from "./ports/callback-store.js";
-export type { CommentStore, CommentUpdatePatch } from "./ports/comment-store.js";
+export type { CommentResourceCount, CommentStore, CommentUpdatePatch } from "./ports/comment-store.js";
 export type { DiscussionTurnRunner } from "./ports/discussion-turn-runner.js";
 export type { NotificationListOptions, NotificationStore } from "./ports/notification-store.js";
 export type { AgentEventSink } from "./ports/agent-event-sink.js";
@@ -59,7 +59,21 @@ export type { ScorecardListFilter, ScorecardStore } from "./ports/scorecard-stor
 export type { SubscriptionStore } from "./ports/subscription-store.js";
 export type { UsageStore } from "./ports/usage-store.js";
 export type { AgentTaskStore } from "./ports/agent-task-store.js";
-export type { IssueListFilter, IssueStore } from "./ports/issue-store.js";
+export type { CycleListFilter, CycleStore } from "./ports/cycle-store.js";
+export type { WorkflowStateStore } from "./ports/workflow-state-store.js";
+export {
+  type CreateWorkflowStateInput,
+  WorkflowStateService,
+  type WorkflowStateServiceDeps,
+} from "./team/workflow-state-service.js";
+export {
+  type CreateCycleInput,
+  type CycleActor,
+  type CycleDetail,
+  CycleService,
+  type CycleServiceDeps,
+} from "./cycle/cycle-service.js";
+export type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "./ports/issue-store.js";
 export {
   type CreateIssueLabelInput,
   type IssueLabelActor,
@@ -68,7 +82,7 @@ export {
 } from "./issue/issue-label-service.js";
 export type { IssueLabelStore } from "./ports/issue-label-store.js";
 export type { IssueNumberGrant, TeamListFilter, TeamStore } from "./ports/team-store.js";
-export type { ProjectListFilter, ProjectStore } from "./ports/project-store.js";
+export type { ProjectListFilter, ProjectStore, ProjectUpdateStore } from "./ports/project-store.js";
 export type { InitiativeListFilter, InitiativeStore } from "./ports/initiative-store.js";
 export type { ViewStore } from "./ports/view-store.js";
 export type { OAuthStateStore } from "./ports/oauth-state-store.js";
@@ -313,6 +327,7 @@ export {
 export { scopedComputeHandle } from "./session/scoped-compute.js";
 export { FIRST_PARTY_AGENT_TEMPLATES, seedFirstPartyAgents } from "./agent/first-party-agents.js";
 export type {
+  GithubAsset,
   GithubFileContent,
   GithubIssue,
   GithubIssueComment,

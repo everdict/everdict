@@ -12,6 +12,7 @@ import { registerBundleTools } from "./api/bundle/bundle.mcp.js";
 import { registerCapabilityTools } from "./api/capability/capability.mcp.js";
 import { registerCiLinkTools } from "./api/ci-link/ci-link.mcp.js";
 import { registerCommentTools } from "./api/comment/comment.mcp.js";
+import { registerCycleTools } from "./api/cycle/cycle.mcp.js";
 import { registerDatasetTools } from "./api/dataset/dataset.mcp.js";
 import { registerEnvironmentAdoptionTools } from "./api/environment-adoption/environment-adoption.mcp.js";
 import { registerEventTools } from "./api/event/event.mcp.js";
@@ -99,6 +100,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerViewTools(server, ctx);
   registerTaskTools(server, ctx);
   registerTeamTools(server, ctx);
+  registerCycleTools(server, ctx);
   registerIssueTools(server, ctx);
   registerIssueLabelTools(server, ctx);
   registerIssueGithubTools(server, ctx);

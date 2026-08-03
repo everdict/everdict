@@ -29,6 +29,15 @@ export interface GithubIssueComment {
   url: string;
 }
 
+// One attachment fetched from GitHub — the image a reporter pasted into an issue or comment body. On a private
+// repo (and on ANY GitHub Enterprise repo) the attachment URL is behind the same authentication the repo is, so
+// the bytes have to be fetched with the installation token rather than linked to; `contentType` is what the
+// upstream served, which is what the reader's browser must be told.
+export interface GithubAsset {
+  bytes: Uint8Array;
+  contentType: string;
+}
+
 // Outbound GitHub repo-ops port (re-architecture P2d) — read + write operations on one repo behind a resolved
 // installation token. The setup-PR use-case decides the WRITE order (branch → file → PR) and reuse semantics; the
 // agent's repo tools use the READ side (get file / list issues). The adapter owns the REST endpoints, response
@@ -74,6 +83,11 @@ export interface GithubRepoWriter {
   createIssue(repository: string, opts: { title: string; body?: string }): Promise<{ number: number; url: string }>;
   // Add a comment to an issue or PR (PRs are issues via the issues API); returns the comment's html_url.
   createIssueComment(repository: string, issueNumber: number, body: string): Promise<{ url: string }>;
+  // Fetch a body attachment by its ABSOLUTE url with the installation token. Unlike everything above this is not
+  // a REST endpoint — attachment URLs are web routes on the GitHub host, and they are the one GitHub read whose
+  // caller (a browser rendering an issue) cannot authenticate itself. The URL is not trusted: the use-case pins
+  // it to the issue's own host before calling. `maxBytes` bounds what a single image may pull into memory.
+  fetchAsset(url: string, opts: { maxBytes: number }): Promise<GithubAsset>;
 }
 
 // Writers are minted per (installation token, host) — the use-case resolves the token via the

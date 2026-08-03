@@ -5,10 +5,12 @@ import {
   dockerAuthConfigJson,
   imageRegistryPrefix,
   imageRepoFor,
+  imageRepositoryOf,
   imageUsesRegistryHost,
   imageWarnings,
   parseImageRef,
   pickRegistryAuth,
+  pinDigest,
   registryAuthsForImages,
   registryAuthsOf,
 } from "./image-ref.js";
@@ -102,6 +104,41 @@ describe("imageRegistryPrefix — prefix for assembling the target ref", () => {
   it("builds host[/namespace]/ depending on whether a namespace is present", () => {
     expect(imageRegistryPrefix(acme)).toBe("ghcr.io/acme/");
     expect(imageRegistryPrefix({ host: "registry.acme.dev:5000" })).toBe("registry.acme.dev:5000/");
+  });
+});
+
+describe("pinDigest — a digest pin keeps the tag it was pushed under", () => {
+  it("renders repo:tag@digest — the digest decides what runs, the tag is what a reader gets a version from", () => {
+    expect(pinDigest("ghcr.io/acme/agent:v3", "sha256:abc")).toBe("ghcr.io/acme/agent:v3@sha256:abc");
+    // A host port is not a tag.
+    expect(pinDigest("registry.acme.dev:5000/team/app", "sha256:abc")).toBe(
+      "registry.acme.dev:5000/team/app@sha256:abc",
+    );
+    // docker.io shorthand keeps its host-less form.
+    expect(pinDigest("mendhak/http-https-echo:1.2", "sha256:abc")).toBe("mendhak/http-https-echo:1.2@sha256:abc");
+  });
+
+  it("replaces an existing digest rather than appending a second one", () => {
+    expect(pinDigest("ghcr.io/acme/agent:v3@sha256:old", "sha256:new")).toBe("ghcr.io/acme/agent:v3@sha256:new");
+  });
+
+  it("stays a digest pin for the pin gate — a tagged pin without a digest is what that gate rejects", () => {
+    const pinned = pinDigest("ghcr.io/acme/agent:v3", `sha256:${"a".repeat(64)}`);
+    expect(/@sha256:[0-9a-f]{64}$/.test(pinned)).toBe(true);
+    expect(parseImageRef(pinned)).toEqual({
+      host: "ghcr.io",
+      path: "acme/agent",
+      tag: "v3",
+      digest: `sha256:${"a".repeat(64)}`,
+    });
+  });
+});
+
+describe("imageRepositoryOf — the repository coordinates a tag/digest hangs off", () => {
+  it("strips tag and digest, keeping host/path (or the bare path for a docker.io shorthand)", () => {
+    expect(imageRepositoryOf("ghcr.io/acme/agent:v3@sha256:abc")).toBe("ghcr.io/acme/agent");
+    expect(imageRepositoryOf("registry.acme.dev:5000/team/app")).toBe("registry.acme.dev:5000/team/app");
+    expect(imageRepositoryOf("mendhak/http-https-echo:latest")).toBe("mendhak/http-https-echo");
   });
 });
 

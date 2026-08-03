@@ -59,4 +59,21 @@ describe("InMemoryCommentStore", () => {
     expect(c?.agentSessionId).toBe("s-1"); // untouched
     expect(c?.body).toBe("hello"); // untouched
   });
+
+  // What a list row's thread badge reads. Replies count too — the badge answers "how much conversation is on
+  // this", not "how many top-level posts" — and the answer is scoped to one workspace and one resource kind.
+  it("counts comments per resource for a whole page, replies included and other resources excluded", async () => {
+    const store = new InMemoryCommentStore();
+    await store.add(rec("c1", { resourceType: "issue", resourceId: "iss-1" }));
+    await store.add(rec("c2", { resourceType: "issue", resourceId: "iss-1", parentId: "c1" })); // a reply
+    await store.add(rec("c3", { resourceType: "issue", resourceId: "iss-2" }));
+    await store.add(rec("c4", { resourceType: "harness", resourceId: "iss-1" })); // same id, other kind
+    await store.add(rec("c5", { resourceType: "issue", resourceId: "iss-1", tenant: "globex" })); // other workspace
+
+    const counts = await store.countByResource("acme", "issue", ["iss-1", "iss-2", "iss-3"]);
+    const byId = new Map(counts.map((row) => [row.resourceId, row.count]));
+    expect(byId.get("iss-1")).toBe(2);
+    expect(byId.get("iss-2")).toBe(1);
+    expect(byId.has("iss-3")).toBe(false); // an issue with no comments has no entry — the caller reads it as 0
+  });
 });

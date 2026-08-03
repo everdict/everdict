@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 
 import { isPastDue } from '@/entities/project'
 import { Button } from '@/shared/ui/button'
+import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label, Textarea } from '@/shared/ui/input'
 
@@ -16,8 +17,12 @@ import { createInitiativeAction } from '../api/initiatives'
 export function CreateInitiativeButton({
   workspace,
   timeZone,
+  initiatives,
 }: {
   workspace: string
+  // 상위로 걸 수 있는 이니셔티브들. 하나만 고르는 자리이므로 Combobox — 프로젝트의 팀/이니셔티브와 달리
+  // 부모는 하나다.
+  initiatives: { id: string; name: string }[]
   // 목표일이 이미 지났는지 판정할 기준. 목록의 "기한 초과" 배지와 같은 시간대를 써야 방금 만든 것이
   // 왜 초과로 보이는지가 어긋나지 않는다.
   timeZone: string
@@ -29,6 +34,7 @@ export function CreateInitiativeButton({
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [parentId, setParentId] = useState('')
   const [targetDate, setTargetDate] = useState('')
   const [pending, startTransition] = useTransition()
 
@@ -43,6 +49,7 @@ export function CreateInitiativeButton({
       const r = await createInitiativeAction({
         name: trimmed,
         ...(description.trim() ? { description: description.trim() } : {}),
+        ...(parentId ? { parentId } : {}),
         ...(targetDate ? { targetDate } : {}),
       })
       if (!r.ok || !r.initiative) {
@@ -52,6 +59,7 @@ export function CreateInitiativeButton({
       setOpen(false)
       setName('')
       setDescription('')
+      setParentId('')
       setTargetDate('')
       router.push(`/${workspace}/initiatives/${encodeURIComponent(r.initiative.id)}`)
     })
@@ -96,6 +104,19 @@ export function CreateInitiativeButton({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t('fieldDescriptionPlaceholder')}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${formId}-parent`}>{t('fieldParent')}</Label>
+            <Combobox
+              id={`${formId}-parent`}
+              value={parentId}
+              onChange={setParentId}
+              placeholder={t('fieldParentNone')}
+              options={[
+                { value: '', label: t('fieldParentNone') },
+                ...initiatives.map((i) => ({ value: i.id, label: i.name })),
+              ]}
             />
           </div>
           <div className="space-y-1.5">

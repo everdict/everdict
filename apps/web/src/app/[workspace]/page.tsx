@@ -10,7 +10,7 @@ import {
   initiativesSchema,
   type InitiativeDetail,
 } from '@/entities/initiative'
-import { issuesSchema } from '@/entities/issue'
+import { issuePageSchema, type IssueSummary } from '@/entities/issue'
 import { runsSchema } from '@/entities/run'
 import { scorecardsSchema } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
@@ -47,7 +47,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
   let error: string | undefined
   let runs = runsSchema.parse([])
   let scorecards = scorecardsSchema.parse([])
-  let regressed = issuesSchema.parse([])
+  let regressed: IssueSummary[] = []
   let readiness: InitiativeDetail[] = []
   try {
     const [r, sc, active, reg] = await Promise.all([
@@ -58,7 +58,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
     ])
     runs = runsSchema.parse(r)
     scorecards = scorecardsSchema.parse(sc)
-    regressed = issuesSchema.parse(reg)
+    regressed = issuePageSchema.parse(reg).items
     // 이니셔티브별 readiness 는 도메인 산식이라 서버가 계산한다 — 웹이 다시 구현하면 두 곳이 갈라진다.
     // 하나가 실패해도 나머지 카드는 살린다.
     readiness = (

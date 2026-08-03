@@ -1,9 +1,10 @@
 import { ProjectStatusSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, resolveTeamRef, sendError } from "../route-context.js";
 import { projectDocs } from "./project.docs.js";
 import { CreateProjectBodySchema } from "./request/create-project.js";
+import { AddMilestoneBodySchema, PostProjectUpdateBodySchema } from "./request/project-update.js";
 import { SetProjectStatusBodySchema } from "./request/set-project-status.js";
 import { UpdateProjectBodySchema } from "./request/update-project.js";
 
@@ -36,7 +37,10 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ServerDeps): v
           createdBy: principal.subject,
           name: body.name,
           ...(body.description !== undefined ? { description: body.description } : {}),
-          ...(body.initiativeId !== undefined ? { initiativeId: body.initiativeId } : {}),
+          ...(body.teamIds !== undefined ? { teamIds: body.teamIds } : {}),
+          ...(body.initiativeIds !== undefined ? { initiativeIds: body.initiativeIds } : {}),
+          ...(body.lead !== undefined ? { lead: body.lead } : {}),
+          ...(body.memberIds !== undefined ? { memberIds: body.memberIds } : {}),
           ...(body.targetDate !== undefined ? { targetDate: body.targetDate } : {}),
         }),
       );
@@ -60,22 +64,28 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ServerDeps): v
         status: ProjectStatusSchema.optional(),
         // "Which projects sit under this initiative" — the readiness page's drill-down.
         initiative: z.string().min(1).optional(),
-        // "Which projects is this team working on" — the sidebar's per-team Projects entry. Derived from the
-        // team's issues (a project has no team of its own), so it answers what the team has actually touched.
+        // "Which projects is this team working on" — the sidebar's per-team Projects entry. A project NAMES
+        // its teams, so this is containment on the project itself, not a detour through its issues.
         team: z.string().min(1).optional(),
         limit: z.coerce.number().int().positive().max(200).optional(),
       })
       .safeParse(req.query);
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
     const { status, initiative, team, limit } = query.data;
-    return reply.send(
-      await deps.projectService.list(principal.workspace, {
-        ...(status !== undefined ? { status } : {}),
-        ...(initiative !== undefined ? { initiativeId: initiative } : {}),
-        ...(team !== undefined ? { teamId: team } : {}),
-        ...(limit !== undefined ? { limit } : {}),
-      }),
-    );
+    try {
+      // Named by id or by key (`?team=ENG`) — the same ref the team-scoped URL carries.
+      const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
+      return reply.send(
+        await deps.projectService.list(principal.workspace, {
+          ...(status !== undefined ? { status } : {}),
+          ...(initiative !== undefined ? { initiativeId: initiative } : {}),
+          ...(teamId !== undefined ? { teamId } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
   });
 
   // Detail carries the issue rollup; the list stays lean (the rollup is derived per read, so serving it in a
@@ -96,6 +106,102 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ServerDeps): v
       return sendError(reply, err); // another workspace's id → 404 (tenant-scoped store, no existence leak)
     }
   });
+
+  // The posted-update timeline — the one judgment the tracker records, and the read a reader goes to when the
+  // health colour changed.
+  app.post<{ Params: { id: string } }>(
+    "/projects/:id/updates",
+    { schema: projectDocs.postUpdate },
+    async (req, reply) => {
+      if (!deps.projectService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "project service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:write");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const body = PostProjectUpdateBodySchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        return reply.code(201).send(
+          await deps.projectService.postUpdate(principal.workspace, req.params.id, body.data, {
+            subject: principal.subject,
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/projects/:id/updates",
+    { schema: projectDocs.listUpdates },
+    async (req, reply) => {
+      if (!deps.projectService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "project service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:read");
+        return reply.send(await deps.projectService.listUpdates(principal.workspace, req.params.id, 50));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/projects/:id/milestones",
+    { schema: projectDocs.addMilestone },
+    async (req, reply) => {
+      if (!deps.projectService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "project service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:write");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const body = AddMilestoneBodySchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        return reply.send(
+          await deps.projectService.addMilestone(principal.workspace, req.params.id, body.data, {
+            subject: principal.subject,
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Removing a checkpoint detaches every issue that pointed at it, in the same operation — a milestoneId that
+  // resolves to nothing is exactly the dangling reference the label registry refuses to allow.
+  app.delete<{ Params: { id: string; milestoneId: string } }>(
+    "/projects/:id/milestones/:milestoneId",
+    { schema: projectDocs.removeMilestone },
+    async (req, reply) => {
+      if (!deps.projectService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "project service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:write");
+        return reply.send(
+          await deps.projectService.removeMilestone(principal.workspace, req.params.id, req.params.milestoneId, {
+            subject: principal.subject,
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   app.patch<{ Params: { id: string } }>("/projects/:id", { schema: projectDocs.update }, async (req, reply) => {
     if (!deps.projectService)

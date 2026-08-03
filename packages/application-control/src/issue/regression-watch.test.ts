@@ -1,6 +1,13 @@
-import type { IssueRecord, NotificationRecord, PlatformEventRecord, ScorecardRecord } from "@everdict/contracts";
+import type {
+  IssuePage,
+  IssueRecord,
+  NotificationRecord,
+  PlatformEventRecord,
+  ScorecardRecord,
+} from "@everdict/contracts";
+import { issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { IssueListFilter, IssueStore } from "../ports/issue-store.js";
+import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
 import type { NotificationStore } from "../ports/notification-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import type { ScorecardListFilter, ScorecardStore } from "../ports/scorecard-store.js";
@@ -46,6 +53,13 @@ class FakeIssueStore implements IssueStore {
         (filter?.status === undefined || r.status === filter.status) &&
         (filter?.link === undefined || r.links.some((l) => l.type === filter.link?.type && l.id === filter.link.id)),
     );
+  }
+  // Derived from this fake's own `list` via the kernel helpers, so it cannot disagree with production.
+  async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
+    return { items: (await this.list(tenant, filter)).map(issueSummaryOf) };
+  }
+  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
+    return issueCountsByTeam(await this.list(tenant));
   }
   async update(
     tenant: string,
@@ -163,8 +177,11 @@ describe("regressionWatch", () => {
       teamId: "team-eng",
       number: 1,
       identifier: "ENG-1",
+      formerIdentifiers: [],
       title: "Agent drops the tool result on retry",
       status: "done",
+      priority: "none",
+      inTriage: false,
       labelIds: [],
       links: [
         { type: "dataset", id: "regression-suite", addedBy: "dana", addedAt: RESOLVED_AT },

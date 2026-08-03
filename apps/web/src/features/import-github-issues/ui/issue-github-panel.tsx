@@ -6,13 +6,14 @@ import { Github, Link2, Loader2, RefreshCw, Unlink } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import type { Issue } from '@/entities/issue'
+import { issueAttachmentProxy, type Issue } from '@/entities/issue'
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { Dialog } from '@/shared/ui/dialog'
+import { Markdown } from '@/shared/ui/markdown'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import {
@@ -210,9 +211,13 @@ export function IssueGithubPanel({
                     {t('viewOnGithub')}
                   </a>
                 </div>
-                <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground">
-                  {comment.body}
-                </p>
+                {/* 코멘트도 원격이 쓴 마크다운이다 — 설명과 같은 뷰어로 그려야 스크린샷·코드블록·표가 살아난다.
+                    첨부 이미지는 설명과 똑같이 우리 프록시를 거친다(직접 받아올 수 없는 주소다). */}
+                <Markdown
+                  content={comment.body}
+                  imageProxy={issueAttachmentProxy(issueId, github)}
+                  className="mt-1.5"
+                />
               </li>
             ))}
           </ul>

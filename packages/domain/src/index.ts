@@ -81,6 +81,8 @@ export { Approval, type ApprovalTransition, type NewPendingApprovalInput } from 
 // a release (docs/tracker.md).
 export {
   Issue,
+  issueCountsByTeam,
+  issueSummaryOf,
   isOpenIssueStatus,
   type IssueEditInput,
   type IssueReopenInput,
@@ -88,6 +90,7 @@ export {
   type IssueTransition,
   type NewIssueInput,
   type NewIssueLinkInput,
+  issueStatusCategory,
 } from "./tracker/issue.js";
 export {
   IssueLabel,
@@ -112,6 +115,16 @@ export {
   type NewInitiativeInput,
 } from "./tracker/initiative.js";
 export { initiativeReadiness, projectRollup } from "./tracker/readiness.js";
+export {
+  addCalendarDays,
+  Cycle,
+  type CycleEditInput,
+  cycleProgress,
+  cycleStateOf,
+  type CycleTransition,
+  type NewCycleInput,
+  nextCycleWindow,
+} from "./tracker/cycle.js";
 export {
   type IssueNumberAllocation,
   type NewTeamInput,
@@ -209,10 +222,12 @@ export {
   dockerAuthConfigJson,
   imageRegistryPrefix,
   imageRepoFor,
+  imageRepositoryOf,
   imageUsesRegistryHost,
   imageWarnings,
   parseImageRef,
   pickRegistryAuth,
+  pinDigest,
   registryAuthsForImages,
   registryAuthsOf,
 } from "./image/image-ref.js";

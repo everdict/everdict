@@ -39,6 +39,10 @@ export interface TeamStore {
   allocateIssueNumber(tenant: string, id: string, now: string): Promise<IssueNumberGrant | undefined>;
 
   listMembers(tenant: string, teamId: string): Promise<TeamMemberRecord[]>;
+  // Roster sizes for every team in the workspace, in one aggregate — the team list's `memberCount` column.
+  // A team with an empty roster simply has no entry. The per-team `listMembers` stays for the detail view,
+  // where the caller actually wants the names.
+  countMembersByTeam(tenant: string): Promise<{ teamId: string; count: number }[]>;
   addMember(record: TeamMemberRecord, events?: OutboxEvent[]): Promise<void>;
   removeMember(tenant: string, teamId: string, subject: string, events?: OutboxEvent[]): Promise<boolean>;
 }

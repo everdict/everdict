@@ -1,4 +1,11 @@
-import type { PlatformFact, ProjectRecord, ProjectStatus } from "@everdict/contracts";
+import type {
+  PlatformFact,
+  ProjectHealth,
+  ProjectMilestone,
+  ProjectRecord,
+  ProjectStatus,
+  ProjectUpdateRecord,
+} from "@everdict/contracts";
 import { BadRequestError, ConflictError } from "@everdict/contracts";
 import { appendHistory } from "./history.js";
 
@@ -15,7 +22,12 @@ export interface NewProjectInput {
   name: string;
   description?: string;
   status?: ProjectStatus;
-  initiativeId?: string;
+  // The contributing teams and the umbrellas this project rolls up into — both lists, because a project spans
+  // teams and can serve more than one initiative (records/tracker.ts explains why neither may be a single id).
+  teamIds?: string[];
+  initiativeIds?: string[];
+  lead?: string;
+  memberIds?: string[];
   targetDate?: string;
   createdBy: string;
   now: string;
@@ -24,8 +36,24 @@ export interface NewProjectInput {
 export interface ProjectEditInput {
   name?: string;
   description?: string | null;
-  initiativeId?: string | null;
+  // A list REPLACES what is there (an empty array detaches everything) — there is no add/remove verb, because a
+  // membership editor sends the resulting set and a patch that merged would make removal unexpressible.
+  teamIds?: string[];
+  initiativeIds?: string[];
+  // `null` clears the lead (nobody is answerable yet); the member list REPLACES, like the other lists.
+  lead?: string | null;
+  memberIds?: string[];
   targetDate?: string | null;
+}
+
+// Deduped, order preserved: the caller's order is the display order, and a list that silently kept a repeat
+// would double-count the same team in every rollup that walks it.
+function normalizeIds(ids: readonly string[]): string[] {
+  return [...new Set(ids)];
+}
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
 export interface ProjectStatusChangeInput {
@@ -52,15 +80,28 @@ export class Project {
 
   static newProject(input: NewProjectInput): ProjectRecord {
     const status = input.status ?? "planned";
+    const teamIds = normalizeIds(input.teamIds ?? []);
+    const initiativeIds = normalizeIds(input.initiativeIds ?? []);
     return {
       id: input.id,
       tenant: input.tenant,
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
       status,
-      ...(input.initiativeId !== undefined ? { initiativeId: input.initiativeId } : {}),
+      teamIds,
+      initiativeIds,
+      ...(input.lead !== undefined ? { lead: input.lead } : {}),
+      memberIds: normalizeIds(input.memberIds ?? []),
+      milestones: [],
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
-      history: [{ at: input.now, by: input.createdBy, event: "created", detail: { status } }],
+      history: [
+        {
+          at: input.now,
+          by: input.createdBy,
+          event: "created",
+          detail: { status, teamIds, initiativeIds },
+        },
+      ],
       createdBy: input.createdBy,
       createdAt: input.now,
       updatedAt: input.now,
@@ -75,7 +116,8 @@ export class Project {
         actor: record.createdBy,
         payload: {
           status: record.status,
-          ...(record.initiativeId !== undefined ? { initiativeId: record.initiativeId } : {}),
+          teamIds: record.teamIds,
+          initiativeIds: record.initiativeIds,
           ...(record.targetDate !== undefined ? { targetDate: record.targetDate } : {}),
         },
         message: `Project created — ${record.name}`,
@@ -101,11 +143,32 @@ export class Project {
         changed.push("description");
       }
     }
-    if (fields.initiativeId !== undefined) {
-      const next = fields.initiativeId === null ? undefined : fields.initiativeId;
-      if (next !== this.record.initiativeId) {
-        patch.initiativeId = next;
-        changed.push("initiative");
+    if (fields.teamIds !== undefined) {
+      const next = normalizeIds(fields.teamIds);
+      if (!sameIds(next, this.record.teamIds)) {
+        patch.teamIds = next;
+        changed.push("teams");
+      }
+    }
+    if (fields.initiativeIds !== undefined) {
+      const next = normalizeIds(fields.initiativeIds);
+      if (!sameIds(next, this.record.initiativeIds)) {
+        patch.initiativeIds = next;
+        changed.push("initiatives");
+      }
+    }
+    if (fields.lead !== undefined) {
+      const next = fields.lead === null ? undefined : fields.lead;
+      if (next !== this.record.lead) {
+        patch.lead = next;
+        changed.push("lead");
+      }
+    }
+    if (fields.memberIds !== undefined) {
+      const next = normalizeIds(fields.memberIds);
+      if (!sameIds(next, this.record.memberIds)) {
+        patch.memberIds = next;
+        changed.push("members");
       }
     }
     if (fields.targetDate !== undefined) {
@@ -120,6 +183,115 @@ export class Project {
     patch.history = appendHistory(this.record.history, { at: now, by, event: "updated", detail: { changed } });
     patch.updatedAt = now;
     return { patch, facts: [] };
+  }
+
+  // Posting an update. This is the one JUDGMENT the tracker records — "at risk" is somebody saying so, not
+  // arithmetic over the rollup — so the health rides WITH the sentence that explains it. The project keeps the
+  // latest health so a list row can show it without reading the timeline per row; the update itself is the
+  // record, and the record is what a reader goes to when the colour changed.
+  postUpdate(
+    update: { id: string; health: ProjectHealth; body: string },
+    by: string,
+    now: string,
+  ): { transition: ProjectTransition; record: ProjectUpdateRecord } {
+    if (update.body.trim().length === 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { project: this.record.id },
+        "An update says what changed — a health flag with no sentence is not an update.",
+      );
+    const from = this.record.health;
+    return {
+      transition: {
+        patch: {
+          health: update.health,
+          history: appendHistory(this.record.history, {
+            at: now,
+            by,
+            event: "update_posted",
+            detail: { health: update.health, ...(from !== undefined ? { from } : {}) },
+          }),
+          updatedAt: now,
+        },
+        facts: [
+          {
+            kind: "project.update_posted",
+            subject: { type: "project", id: this.record.id },
+            actor: by,
+            payload: {
+              health: update.health,
+              ...(from !== undefined ? { from } : {}),
+              teamIds: this.record.teamIds,
+              initiativeIds: this.record.initiativeIds,
+            },
+            message: `${this.record.name} — ${update.health.replace("_", " ")}`,
+          },
+        ],
+      },
+      record: {
+        id: update.id,
+        tenant: this.record.tenant,
+        projectId: this.record.id,
+        health: update.health,
+        body: update.body,
+        createdBy: by,
+        createdAt: now,
+      },
+    };
+  }
+
+  // Milestones are the project's own checkpoints, so they are content editing (one history entry, no fact) —
+  // the same split every other structural edit makes. The order is the meaning: a milestone list is a sequence
+  // of steps toward a date, so a new one goes at the end and `sortOrder` is what a reorder rewrites.
+  addMilestone(milestone: Omit<ProjectMilestone, "sortOrder">, by: string, now: string): ProjectTransition {
+    if (this.record.milestones.some((m) => m.name === milestone.name))
+      throw new ConflictError(
+        "CONFLICT",
+        { project: this.record.id, name: milestone.name },
+        "This project already has a milestone with that name.",
+      );
+    const sortOrder = this.record.milestones.reduce((max, m) => Math.max(max, m.sortOrder + 1), 0);
+    const next = [...this.record.milestones, { ...milestone, sortOrder }];
+    return {
+      patch: {
+        milestones: next,
+        history: appendHistory(this.record.history, {
+          at: now,
+          by,
+          event: "updated",
+          detail: { changed: ["milestones"], added: milestone.name },
+        }),
+        updatedAt: now,
+      },
+      facts: [],
+    };
+  }
+
+  removeMilestone(milestoneId: string, by: string, now: string): ProjectTransition {
+    const gone = this.record.milestones.find((m) => m.id === milestoneId);
+    if (!gone)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { project: this.record.id, milestone: milestoneId },
+        "That milestone is not on this project.",
+      );
+    return {
+      patch: {
+        milestones: this.record.milestones.filter((m) => m.id !== milestoneId),
+        history: appendHistory(this.record.history, {
+          at: now,
+          by,
+          event: "updated",
+          detail: { changed: ["milestones"], removed: gone.name },
+        }),
+        updatedAt: now,
+      },
+      facts: [],
+    };
+  }
+
+  get milestones(): readonly ProjectMilestone[] {
+    return this.record.milestones;
   }
 
   // The gate the whole tracker exists for: completing a project while its issues are open is refused, and the
@@ -169,7 +341,8 @@ export class Project {
             from,
             to,
             openIssues,
-            ...(this.record.initiativeId !== undefined ? { initiativeId: this.record.initiativeId } : {}),
+            teamIds: this.record.teamIds,
+            initiativeIds: this.record.initiativeIds,
             ...(onTime !== undefined ? { onTime } : {}),
             ...(forced ? { forced: true } : {}),
           },

@@ -89,6 +89,15 @@ export class InMemoryTeamStore implements TeamStore {
       .sort((a, b) => a.subject.localeCompare(b.subject));
   }
 
+  async countMembersByTeam(tenant: string): Promise<{ teamId: string; count: number }[]> {
+    const counts = new Map<string, number>();
+    for (const member of this.members) {
+      if (member.tenant !== tenant) continue;
+      counts.set(member.teamId, (counts.get(member.teamId) ?? 0) + 1);
+    }
+    return [...counts].map(([teamId, count]) => ({ teamId, count }));
+  }
+
   async addMember(record: TeamMemberRecord, events?: OutboxEvent[]): Promise<void> {
     const existing = this.members.find(
       (m) => m.tenant === record.tenant && m.teamId === record.teamId && m.subject === record.subject,
@@ -115,6 +124,8 @@ interface TeamRow extends TrackerRow {
   key: string;
   name: string;
   description: string | null;
+  parent_id: string | null;
+  is_private: boolean;
   is_default: boolean;
   issue_counter: number;
 }
@@ -128,8 +139,8 @@ interface TeamMemberRow {
 }
 
 const TEAM_COLUMNS =
-  "(id, tenant, key, name, description, is_default, issue_counter, history, created_by, created_at, updated_at)";
-const TEAM_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10::timestamptz,$11::timestamptz)";
+  "(id, tenant, key, name, description, parent_id, is_private, is_default, issue_counter, history, created_by, created_at, updated_at)";
+const TEAM_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12::timestamptz,$13::timestamptz)";
 
 function insertParams(record: TeamRecord): unknown[] {
   return [
@@ -138,6 +149,8 @@ function insertParams(record: TeamRecord): unknown[] {
     record.key,
     record.name,
     record.description ?? null,
+    record.parentId ?? null,
+    record.isPrivate,
     record.isDefault,
     record.issueCounter,
     JSON.stringify(record.history),
@@ -154,6 +167,8 @@ function rowToRecord(row: TeamRow): TeamRecord {
     key: row.key,
     name: row.name,
     ...(row.description !== null ? { description: row.description } : {}),
+    ...(row.parent_id !== null ? { parentId: row.parent_id } : {}),
+    isPrivate: row.is_private,
     isDefault: row.is_default,
     issueCounter: row.issue_counter,
     history: trackerHistory(row.history),
@@ -177,6 +192,8 @@ function rowToMember(row: TeamMemberRow): TeamMemberRecord {
 const PATCH_COLUMNS: Record<string, string> = {
   name: "name",
   description: "description",
+  parentId: "parent_id",
+  isPrivate: "is_private",
   isDefault: "is_default",
   issueCounter: "issue_counter",
   history: "history",
@@ -310,6 +327,16 @@ export class PgTeamStore implements TeamStore {
       [tenant, teamId],
     );
     return rows.map(rowToMember);
+  }
+
+  // Every team's roster size in one aggregate — the team list needs the NUMBER, not the names, and reading the
+  // roster per row is a query per team for a single integer.
+  async countMembersByTeam(tenant: string): Promise<{ teamId: string; count: number }[]> {
+    const { rows } = await this.client.query<{ team_id: string; count: string | number }>(
+      "SELECT team_id, count(*) AS count FROM everdict_team_members WHERE tenant=$1 GROUP BY team_id",
+      [tenant],
+    );
+    return rows.map((row) => ({ teamId: row.team_id, count: Number(row.count) }));
   }
 
   async addMember(record: TeamMemberRecord, events?: OutboxEvent[]): Promise<void> {

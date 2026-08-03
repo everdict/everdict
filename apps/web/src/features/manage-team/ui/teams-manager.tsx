@@ -1,12 +1,18 @@
 'use client'
 
-import Link from 'next/link'
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 
-import { TEAM_KEY_PATTERN, TeamKeyBadge, type TeamWithSummary } from '@/entities/team'
+import {
+  TEAM_KEY_PATTERN,
+  TeamKeyBadge,
+  teamSettingsHref,
+  type TeamWithSummary,
+} from '@/entities/team'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { Combobox } from '@/shared/ui/combobox'
 import { Input } from '@/shared/ui/input'
 import { SettingsList } from '@/shared/ui/settings-list'
 
@@ -28,6 +34,7 @@ export function TeamsManager({
   const [creating, setCreating] = useState(false)
   const [key, setKey] = useState('')
   const [name, setName] = useState('')
+  const [parentId, setParentId] = useState('')
   const [pending, startTransition] = useTransition()
 
   const normalizedKey = key.trim().toUpperCase()
@@ -36,7 +43,11 @@ export function TeamsManager({
   function onCreate() {
     setError(undefined)
     startTransition(async () => {
-      const r = await createTeamAction({ key: normalizedKey, name: name.trim() })
+      const r = await createTeamAction({
+        key: normalizedKey,
+        name: name.trim(),
+        ...(parentId ? { parentId } : {}),
+      })
       if (!r.ok) {
         setError(r.error)
         return
@@ -44,6 +55,7 @@ export function TeamsManager({
       setCreating(false)
       setKey('')
       setName('')
+      setParentId('')
     })
   }
 
@@ -58,7 +70,7 @@ export function TeamsManager({
             className="flex min-h-[60px] flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
           >
             <Link
-              href={`/${workspace}/settings/teams/${encodeURIComponent(team.id)}`}
+              href={teamSettingsHref(workspace, team.key)}
               className="flex min-w-0 items-center gap-2 hover:underline"
             >
               <TeamKeyBadge teamKey={team.key} />
@@ -70,6 +82,13 @@ export function TeamsManager({
               )}
             </Link>
             <span className="shrink-0 text-xs text-muted-foreground">
+              {team.parentId !== undefined && (
+                <span className="mr-2">
+                  {t('rowParent', {
+                    name: teams.find((x) => x.id === team.parentId)?.name ?? team.parentId,
+                  })}
+                </span>
+              )}
               {t('rowSummary', {
                 members: team.summary.memberCount,
                 open: team.summary.openIssues,
@@ -112,11 +131,36 @@ export function TeamsManager({
                 </p>
               </div>
             </div>
+            <div className="space-y-1">
+              <label htmlFor="team-parent" className="block text-[13px] font-[510]">
+                {t('parentLabel')}
+              </label>
+              {/* 상위 팀은 조직 표현일 뿐이다 — 하위 팀도 자기 이슈를 소유하고 자기 번호를 발번한다. */}
+              <Combobox
+                id="team-parent"
+                value={parentId}
+                onChange={setParentId}
+                placeholder={t('parentNone')}
+                options={[
+                  { value: '', label: t('parentNone') },
+                  ...teams.map((team) => ({ value: team.id, label: `${team.key} · ${team.name}` })),
+                ]}
+              />
+            </div>
             <div className="flex gap-2">
-              <Button size="sm" disabled={!keyValid || name.trim() === '' || pending} onClick={onCreate}>
+              <Button
+                size="sm"
+                disabled={!keyValid || name.trim() === '' || pending}
+                onClick={onCreate}
+              >
                 {t('create')}
               </Button>
-              <Button size="sm" variant="ghost" disabled={pending} onClick={() => setCreating(false)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={pending}
+                onClick={() => setCreating(false)}
+              >
                 {t('cancel')}
               </Button>
             </div>

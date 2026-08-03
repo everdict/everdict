@@ -14,6 +14,7 @@ import {
   InMemoryProjectStore,
   InMemoryRunStore,
   InMemoryScorecardStore,
+  InMemoryTeamStore,
 } from "@everdict/db";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -44,6 +45,7 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
   const pushed: OutboxEvent[] = [];
   const issueStore = new InMemoryIssueStore();
   const projectStore = new InMemoryProjectStore();
+  const initiativeStore = new InMemoryInitiativeStore();
   const events = {
     emit: async () => undefined,
     pushPersisted: async (batch: Array<{ record: OutboxEvent }>) => {
@@ -75,9 +77,17 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
         tokens: { tokenForRepository: async () => ({ token: "tok" }) },
         writers,
       }),
-      projectService: new ProjectService({ store: projectStore, issues: issueStore, events }),
+      projectService: new ProjectService({
+        store: projectStore,
+        issues: issueStore,
+        teams: new InMemoryTeamStore(),
+        // The SAME store the initiative service writes to — a project's initiative edge is validated against
+        // the workspace, so a second (empty) store here would reject every real id.
+        initiatives: initiativeStore,
+        events,
+      }),
       initiativeService: new InitiativeService({
-        store: new InMemoryInitiativeStore(),
+        store: initiativeStore,
         projects: projectStore,
         issues: issueStore,
         events,
@@ -145,6 +155,7 @@ describe("eval tracker MCP tools", () => {
       "pull_github_issues",
       "sync_github_issue",
       "set_issue_github_sync",
+      "get_github_issue_attachment",
     ]) {
       expect(names).toContain(name);
     }
@@ -187,7 +198,10 @@ describe("eval tracker MCP tools", () => {
     );
     const project = JSON.parse(
       textOf(
-        await client.callTool({ name: "create_project", arguments: { name: "quality", initiativeId: initiative.id } }),
+        await client.callTool({
+          name: "create_project",
+          arguments: { name: "quality", initiativeIds: [initiative.id] },
+        }),
       ),
     );
     await client.callTool({
@@ -221,6 +235,7 @@ describe("eval tracker MCP tools", () => {
     const found = JSON.parse(
       textOf(await client.callTool({ name: "list_issues", arguments: { linkType: "harness", linkId: "web-agent" } })),
     );
-    expect(found.map((i: { id: string }) => i.id)).toEqual([issue.id]);
+    // Parity with the HTTP twin: one page of summaries, not a bare array of whole records.
+    expect(found.items.map((i: { id: string }) => i.id)).toEqual([issue.id]);
   });
 });

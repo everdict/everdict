@@ -1,9 +1,16 @@
-import { IssueLinkTypeSchema, IssueRecordSchema, IssueStatusSchema } from "@everdict/contracts";
+import {
+  IssueLinkTypeSchema,
+  IssuePageSchema,
+  IssuePrioritySchema,
+  IssueRecordSchema,
+  IssueStatusSchema,
+} from "@everdict/contracts";
 import { IssueScorecardsResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CreateIssueBodySchema, IssueLinkInputSchema } from "./request/create-issue.js";
+import { AcceptTriageBodySchema, DeclineTriageBodySchema, MoveIssueBodySchema } from "./request/move-issue.js";
 import { SetIssueStatusBodySchema } from "./request/set-issue-status.js";
 import { UpdateIssueBodySchema } from "./request/update-issue.js";
 
@@ -13,7 +20,18 @@ import { UpdateIssueBodySchema } from "./request/update-issue.js";
 // additionally creator-or-admin. Facts issue.created / issue.status_changed / issue.linked feed the event log;
 // the first two are trigger-matchable (payload.cause distinguishes a regression from a member's move).
 export const issueDocs: Record<
-  "create" | "list" | "get" | "update" | "setStatus" | "link" | "unlink" | "scorecards" | "delete",
+  | "create"
+  | "list"
+  | "get"
+  | "update"
+  | "setStatus"
+  | "move"
+  | "acceptTriage"
+  | "declineTriage"
+  | "link"
+  | "unlink"
+  | "scorecards"
+  | "delete",
   FastifySchema
 > = {
   create: {
@@ -32,21 +50,32 @@ export const issueDocs: Record<
   list: {
     summary: "List the workspace's issues",
     description:
-      "The workspace's issues, newest activity first. Filter by status, project, assignee, or by the capability " +
-      "an issue links (linkType + linkId — 'which issues watch this harness'). Requires issues:read.",
+      "One PAGE of the workspace's issues, newest activity first: `{ items, nextCursor? }` — pass nextCursor " +
+      "back as `cursor` for the next page (absent = last page). Rows are SUMMARIES: the description, the full " +
+      "link list and the move history are on GET /issues/:id, because a list row draws none of them. Filter by " +
+      "status, project, assignee, priority, team (or mine=true for every team you belong to), syncPull (the " +
+      "GitHub bulk sync's working set), parent (an issue id for its sub-issues, `none` for the top-level ones), " +
+      "or by the capability an issue links (linkType + linkId — 'which issues watch this harness'). " +
+      "Requires issues:read.",
     tags: ["issue"],
     querystring: toJsonSchema(
       z.object({
         status: IssueStatusSchema.optional(),
+        team: z.string().optional(),
+        mine: z.enum(["true", "false"]).optional(),
         project: z.string().optional(),
         assignee: z.string().optional(),
+        priority: IssuePrioritySchema.optional(),
+        parent: z.string().optional(),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
+        syncPull: z.enum(["true", "false"]).optional(),
         limit: z.coerce.number().int().positive().max(200).optional(),
+        cursor: z.string().optional(),
       }),
     ),
     response: {
-      200: { description: "Issues, newest activity first", ...toJsonSchema(z.array(IssueRecordSchema)) },
+      200: { description: "One page of issue summaries, newest activity first", ...toJsonSchema(IssuePageSchema) },
       ...errorResponses(400, 401, 403),
     },
   },
@@ -65,8 +94,10 @@ export const issueDocs: Record<
   update: {
     summary: "Edit an issue's content",
     description:
-      "Title, description, labels, assignee, project. Status moves go through POST /issues/:id/status so a " +
-      "transition is never a side effect of a rename. null clears an optional field. Requires issues:write.",
+      "Title, description, labels, assignee, project, priority, estimate, due date, parent. Status moves go " +
+      "through POST /issues/:id/status and team moves through POST /issues/:id/team, so neither is ever a side " +
+      "effect of a rename. null clears an optional field; re-parenting an issue under one of its own " +
+      "sub-issues is a 409. Requires issues:write.",
     tags: ["issue"],
     body: toJsonSchema(UpdateIssueBodySchema),
     response: {
@@ -86,6 +117,44 @@ export const issueDocs: Record<
     body: toJsonSchema(SetIssueStatusBodySchema),
     response: {
       200: { description: "The moved issue", ...toJsonSchema(IssueRecordSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  move: {
+    summary: "Move an issue to another team",
+    description:
+      "Hand the issue to another team. Its identifier is RE-MINTED from the destination team's counter (the " +
+      "prefix says whose list an issue is on, so a moved issue keeping its old name would be a lie), and the " +
+      "previous name keeps resolving — links already pasted elsewhere still land here, and reads redirect to " +
+      "the canonical one. Moving it to the team it is already on is a 409. Requires issues:write.",
+    tags: ["issue"],
+    body: toJsonSchema(MoveIssueBodySchema),
+    response: {
+      200: { description: "The moved issue, under its new identifier", ...toJsonSchema(IssueRecordSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  acceptTriage: {
+    summary: "Accept an issue out of triage",
+    description:
+      "Move an issue from the team's triage inbox INTO its workflow, landing on the status you name (`todo` by " +
+      "default). An issue that is not in triage is a 409. Requires issues:write.",
+    tags: ["issue"],
+    body: toJsonSchema(AcceptTriageBodySchema),
+    response: {
+      200: { description: "The accepted issue", ...toJsonSchema(IssueRecordSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  declineTriage: {
+    summary: "Decline an issue in triage",
+    description:
+      "Say no: the issue is cancelled with an optional note and leaves the inbox. It stays on the record — " +
+      "'we declined this' is an answer somebody looks for later. Requires issues:write.",
+    tags: ["issue"],
+    body: toJsonSchema(DeclineTriageBodySchema),
+    response: {
+      200: { description: "The declined issue", ...toJsonSchema(IssueRecordSchema) },
       ...errorResponses(400, 401, 403, 404, 409),
     },
   },

@@ -93,19 +93,23 @@ describe("Team default flag — exactly one per workspace", () => {
 
 describe("Team.assertDeletable — a workspace keeps at least one team", () => {
   it("refuses to delete the default team", () => {
-    expect(() => Team.from(newTeam()).assertDeletable(2, 0)).toThrow(ConflictError);
+    expect(() => Team.from(newTeam()).assertDeletable(2, 0, 0)).toThrow(ConflictError);
   });
 
   it("refuses to delete the last remaining team", () => {
-    expect(() => Team.from(newTeam({ isDefault: false })).assertDeletable(0, 0)).toThrow(ConflictError);
+    expect(() => Team.from(newTeam({ isDefault: false })).assertDeletable(0, 0, 0)).toThrow(ConflictError);
   });
 
   it("refuses to delete a team that still holds issues, naming the count", () => {
-    expect(() => Team.from(newTeam({ isDefault: false })).assertDeletable(1, 3)).toThrow(/3 issue/);
+    expect(() => Team.from(newTeam({ isDefault: false })).assertDeletable(1, 3, 0)).toThrow(/3 issue/);
   });
 
-  it("allows deleting a non-default, empty team while another remains", () => {
-    expect(() => Team.from(newTeam({ isDefault: false })).assertDeletable(1, 0)).not.toThrow();
+  it("refuses to delete a team that still has sub-teams, naming the count", () => {
+    expect(() => Team.from(newTeam({ isDefault: false })).assertDeletable(1, 0, 2)).toThrow(/2 sub-team/);
+  });
+
+  it("allows deleting a non-default, empty, childless team while another remains", () => {
+    expect(() => Team.from(newTeam({ isDefault: false })).assertDeletable(1, 0, 0)).not.toThrow();
   });
 });
 

@@ -23,6 +23,9 @@ export const COMMENT_RESOURCE_TYPES = [
   "run",
   "runtime",
   "issue",
+  // A cycle's retro is a discussion about that iteration — threading it anywhere else splits the record from
+  // the numbers it is about.
+  "cycle",
   "project",
   "initiative",
 ] as const;

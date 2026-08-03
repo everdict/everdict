@@ -17,6 +17,13 @@ export interface NewTeamInput {
   name: string;
   description?: string;
   isDefault: boolean;
+  cycleDurationWeeks?: number;
+  triageEnabled?: boolean;
+  isPrivate?: boolean;
+  // The team this one sits under. Organisational only — a sub-team still mints its own identifiers and owns its
+  // own issues, so nesting never touches an issue's address. The service validates that the parent exists in the
+  // same workspace and that the link introduces no cycle.
+  parentId?: string;
   createdBy: string;
   now: string;
 }
@@ -24,6 +31,11 @@ export interface NewTeamInput {
 export interface TeamEditInput {
   name?: string;
   description?: string | null;
+  cycleDurationWeeks?: number;
+  triageEnabled?: boolean;
+  isPrivate?: boolean;
+  // `null` detaches the team from its parent (it becomes top-level again).
+  parentId?: string | null;
 }
 
 // An allocation is a number AND the patch that consumed it: the caller cannot render an identifier without also
@@ -59,14 +71,25 @@ export class Team {
       key,
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       isDefault: input.isDefault,
       issueCounter: 0,
+      cycleCounter: 0,
+      // The team's own pace and whether work queues before its workflow — both editable afterwards, both with
+      // the defaults a team that never thinks about either would want.
+      cycleDurationWeeks: input.cycleDurationWeeks ?? 2,
+      triageEnabled: input.triageEnabled ?? false,
+      isPrivate: input.isPrivate ?? false,
       history: [
         {
           at: input.now,
           by: input.createdBy,
           event: "created",
-          detail: { key, isDefault: input.isDefault },
+          detail: {
+            key,
+            isDefault: input.isDefault,
+            ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+          },
         },
       ],
       createdBy: input.createdBy,
@@ -116,6 +139,27 @@ export class Team {
         changed.push("description");
       }
     }
+    if (fields.cycleDurationWeeks !== undefined && fields.cycleDurationWeeks !== this.record.cycleDurationWeeks) {
+      patch.cycleDurationWeeks = fields.cycleDurationWeeks;
+      changed.push("cycleDuration");
+    }
+    if (fields.triageEnabled !== undefined && fields.triageEnabled !== this.record.triageEnabled) {
+      patch.triageEnabled = fields.triageEnabled;
+      changed.push("triage");
+    }
+    if (fields.isPrivate !== undefined && fields.isPrivate !== this.record.isPrivate) {
+      patch.isPrivate = fields.isPrivate;
+      changed.push("visibility");
+    }
+    if (fields.parentId !== undefined) {
+      const next = fields.parentId === null ? undefined : fields.parentId;
+      if (next === this.record.id)
+        throw new BadRequestError("BAD_REQUEST", { team: this.record.id }, "A team cannot be its own parent.");
+      if (next !== this.record.parentId) {
+        patch.parentId = next;
+        changed.push("parent");
+      }
+    }
     if (changed.length === 0) throw new BadRequestError("BAD_REQUEST", { team: this.record.id }, "Nothing to update.");
     patch.history = appendHistory(this.record.history, { at: now, by, event: "updated", detail: { changed } });
     patch.updatedAt = now;
@@ -152,7 +196,7 @@ export class Team {
   // The default team is the landing place for every issue filed without one, so removing it would leave the
   // workspace with no answer to "where does this go". Hand the flag to another team first — a deliberate,
   // explicit act rather than a silent re-election the member never asked for.
-  assertDeletable(remainingTeams: number, openIssues: number): void {
+  assertDeletable(remainingTeams: number, openIssues: number, childTeams: number): void {
     if (this.record.isDefault)
       throw new ConflictError(
         "CONFLICT",
@@ -171,6 +215,14 @@ export class Team {
         { team: this.record.id, openIssues },
         `This team still holds ${openIssues} issue(s) — move them to another team first.`,
       );
+    // Deleting a parent would strand its sub-teams under an id that resolves to nothing. Re-parenting them is a
+    // decision (do they move up, or under a sibling?), so it stays the member's, made explicitly.
+    if (childTeams > 0)
+      throw new ConflictError(
+        "CONFLICT",
+        { team: this.record.id, childTeams },
+        `This team still has ${childTeams} sub-team(s) — move or delete them first.`,
+      );
   }
 
   // `<key>-<n>`, and the patch that consumes n. Callers persist the patch in the same write as the issue insert.
@@ -181,6 +233,25 @@ export class Team {
       number: next,
       identifier: formatIssueIdentifier(this.record.key, next),
     };
+  }
+
+  // `Cycle n`, and the patch that consumes n — the same pairing as an issue number, for the same reason: the
+  // caller cannot render the number without also persisting the move that spent it.
+  allocateCycleNumber(now: string): { patch: Partial<TeamRecord>; number: number } {
+    const next = this.record.cycleCounter + 1;
+    return { patch: { cycleCounter: next, updatedAt: now }, number: next };
+  }
+
+  get cycleDurationWeeks(): number {
+    return this.record.cycleDurationWeeks;
+  }
+
+  get triageEnabled(): boolean {
+    return this.record.triageEnabled;
+  }
+
+  get isPrivate(): boolean {
+    return this.record.isPrivate;
   }
 
   memberAdded(subject: string, by: string, now: string): TeamTransition {

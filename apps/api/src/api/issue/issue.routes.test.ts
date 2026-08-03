@@ -6,6 +6,7 @@ import {
   InMemoryProjectStore,
   InMemoryRunStore,
   InMemoryScorecardStore,
+  InMemoryTeamStore,
 } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
@@ -33,11 +34,17 @@ function build() {
   const issueStore = new InMemoryIssueStore();
   const projectStore = new InMemoryProjectStore();
   const initiativeStore = new InMemoryInitiativeStore();
+  const teamStore = new InMemoryTeamStore();
   const scorecardStore = new InMemoryScorecardStore();
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     issueService: new IssueService({ teams: teamAllocator, store: issueStore, scorecards: scorecardStore }),
-    projectService: new ProjectService({ store: projectStore, issues: issueStore }),
+    projectService: new ProjectService({
+      store: projectStore,
+      issues: issueStore,
+      teams: teamStore,
+      initiatives: initiativeStore,
+    }),
     initiativeService: new InitiativeService({
       store: initiativeStore,
       projects: projectStore,
@@ -74,9 +81,14 @@ describe("issue routes", () => {
       url: "/issues?linkType=harness&linkId=web-agent",
       headers: H,
     });
-    expect(byLink.json()).toHaveLength(1);
+    // The list serves a PAGE of summaries — `{ items, nextCursor? }` — so a row carries the link COUNT rather
+    // than the links themselves; `GET /issues/:id` is where the link list lives.
+    expect(byLink.json().items).toHaveLength(1);
+    expect(byLink.json().items[0]).toMatchObject({ identifier: issue.identifier, linkCount: 1 });
+    expect(byLink.json().items[0].description).toBeUndefined();
+    expect(byLink.json().nextCursor).toBeUndefined(); // one page, nothing after it
     expect(
-      (await app.inject({ method: "GET", url: "/issues?linkType=harness&linkId=other", headers: H })).json(),
+      (await app.inject({ method: "GET", url: "/issues?linkType=harness&linkId=other", headers: H })).json().items,
     ).toHaveLength(0);
 
     const unlinked = await app.inject({
@@ -220,7 +232,52 @@ describe("issue routes", () => {
     const issue = await createIssue(app, { title: "t" });
     const other = { "x-everdict-tenant": "globex" };
     expect((await app.inject({ method: "GET", url: `/issues/${issue.id}`, headers: other })).statusCode).toBe(404);
-    expect((await app.inject({ method: "GET", url: "/issues", headers: other })).json()).toEqual([]);
+    expect((await app.inject({ method: "GET", url: "/issues", headers: other })).json()).toEqual({ items: [] });
+    await app.close();
+  });
+
+  // The list is a PAGE, and it has to stay one across the whole set: an issue must appear on exactly one page,
+  // and the walk must terminate. Both are properties of the cursor, so the test walks the pages rather than
+  // asserting the shape of a single one.
+  it("serves the list one page at a time — every issue exactly once, then no cursor", async () => {
+    const { app } = build();
+    for (let n = 0; n < 5; n += 1) await createIssue(app, { title: `issue ${n}` });
+
+    const seen: string[] = [];
+    let url = "/issues?limit=2";
+    let pages = 0;
+    for (;;) {
+      const body = (await app.inject({ method: "GET", url, headers: H })).json();
+      seen.push(...body.items.map((row: { identifier: string }) => row.identifier));
+      pages += 1;
+      if (!body.nextCursor) break;
+      url = `/issues?limit=2&cursor=${encodeURIComponent(body.nextCursor)}`;
+    }
+    expect(pages).toBe(3); // 2 + 2 + 1
+    expect(new Set(seen).size).toBe(5);
+    await app.close();
+  });
+
+  it("narrows to the GitHub bulk sync's working set server-side, instead of making the caller read everything", async () => {
+    const { app, issueStore } = build();
+    const github = {
+      repository: "acme/agent",
+      number: 1,
+      url: "https://github.com/acme/agent/issues/1",
+      state: "open" as const,
+      comments: [],
+    };
+    const pulling = await createIssue(app, { title: "pulled" });
+    const notPulling = await createIssue(app, { title: "local only" });
+    await issueStore.update("acme", pulling.id, { github: { ...github, sync: { pull: true, push: false } } });
+    await issueStore.update("acme", notPulling.id, {
+      github: { ...github, number: 2, sync: { pull: false, push: false } },
+    });
+
+    const page = (await app.inject({ method: "GET", url: "/issues?syncPull=true", headers: H })).json();
+    expect(page.items.map((row: { id: string }) => row.id)).toEqual([pulling.id]);
+    // The row keeps exactly what a repository roster needs, and not the comment slice the record carries.
+    expect(page.items[0].github).toEqual({ repository: "acme/agent", pull: true });
     await app.close();
   });
 });
@@ -241,7 +298,7 @@ describe("project + initiative routes — the release gate", () => {
       method: "POST",
       url: "/projects",
       headers: H,
-      payload: { name: "conversation quality", initiativeId, targetDate: "2026-08-15" },
+      payload: { name: "conversation quality", initiativeIds: [initiativeId], targetDate: "2026-08-15" },
     });
     expect(project.statusCode).toBe(201);
     const projectId = project.json().id;
@@ -297,7 +354,12 @@ describe("project + initiative routes — the release gate", () => {
       await app.inject({ method: "POST", url: "/initiatives", headers: H, payload: { name: "v1" } })
     ).json().id;
     const projectId = (
-      await app.inject({ method: "POST", url: "/projects", headers: H, payload: { name: "p", initiativeId } })
+      await app.inject({
+        method: "POST",
+        url: "/projects",
+        headers: H,
+        payload: { name: "p", initiativeIds: [initiativeId] },
+      })
     ).json().id;
     const issue = await createIssue(app, { title: "fixed then broke", status: "in_progress", projectId });
     await app.inject({

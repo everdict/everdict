@@ -1,7 +1,8 @@
-import type { IssueRecord, TeamMemberRecord, TeamRecord } from "@everdict/contracts";
+import type { IssuePage, IssueRecord, TeamMemberRecord, TeamRecord } from "@everdict/contracts";
 import { ConflictError, NotFoundError, formatIssueIdentifier } from "@everdict/contracts";
+import { issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { IssueListFilter, IssueStore } from "../ports/issue-store.js";
+import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
 import type { IssueNumberGrant, TeamListFilter, TeamStore } from "../ports/team-store.js";
 import { TeamService } from "./team-service.js";
 
@@ -61,6 +62,15 @@ class FakeTeamStore implements TeamStore {
   async listMembers(tenant: string, teamId: string): Promise<TeamMemberRecord[]> {
     return this.members.filter((m) => m.tenant === tenant && m.teamId === teamId);
   }
+  // The batched roster count the team list reads — the per-team `listMembers` above stays for the detail view.
+  async countMembersByTeam(tenant: string): Promise<{ teamId: string; count: number }[]> {
+    const counts = new Map<string, number>();
+    for (const member of this.members) {
+      if (member.tenant !== tenant) continue;
+      counts.set(member.teamId, (counts.get(member.teamId) ?? 0) + 1);
+    }
+    return [...counts].map(([teamId, count]) => ({ teamId, count }));
+  }
   async addMember(record: TeamMemberRecord): Promise<void> {
     if (!this.members.some((m) => m.teamId === record.teamId && m.subject === record.subject))
       this.members.push(record);
@@ -89,6 +99,14 @@ class FakeIssueStore implements IssueStore {
   }
   async list(tenant: string, filter?: IssueListFilter): Promise<IssueRecord[]> {
     return this.rows.filter((r) => r.tenant === tenant && (filter?.teamId === undefined || r.teamId === filter.teamId));
+  }
+  // Load-bearing here, not decoration: the team summary and the delete gate BOTH read their counts through
+  // this now, so these tests are what prove the aggregate answers what the per-team fetch used to.
+  async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
+    return { items: (await this.list(tenant, filter)).map(issueSummaryOf) };
+  }
+  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
+    return issueCountsByTeam(await this.list(tenant));
   }
   async update(): Promise<IssueRecord | undefined> {
     return undefined;
@@ -260,9 +278,178 @@ describe("TeamService roster", () => {
     await expect(ctx.svc.removeMember("acme", team.id, "erin", DANA)).rejects.toThrow(NotFoundError);
   });
 
+  // The counts a team LIST row shows, for every row at once. They used to be gathered a team at a time, each
+  // one listing that team's issues in full; this asserts the batched answer is the same one, per team, and that
+  // a team with nothing yet reports zeroes instead of vanishing from its own list.
+  it("summarizes every team in one batch — issue counts per team, regressed counting as open", async () => {
+    const eng = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
+    const ops = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "OPS", name: "Ops" });
+    const empty = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "NEW", name: "New" });
+    for (const [team, status] of [
+      [eng, "todo"],
+      [eng, "regressed"],
+      [eng, "done"],
+      [ops, "cancelled"],
+    ] as const)
+      ctx.issues.rows.push({
+        id: `${team.id}-${status}`,
+        tenant: "acme",
+        teamId: team.id,
+        priority: "none",
+        inTriage: false,
+        number: 1,
+        identifier: `${team.key}-1`,
+        formerIdentifiers: [],
+        title: "t",
+        status,
+        labelIds: [],
+        links: [],
+        history: [],
+        createdBy: "dana",
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+
+    const summaries = await ctx.svc.summaries("acme", [eng.id, ops.id, empty.id]);
+    expect(summaries.get(eng.id)).toEqual({ memberCount: 1, totalIssues: 3, openIssues: 2 });
+    expect(summaries.get(ops.id)).toEqual({ memberCount: 1, totalIssues: 1, openIssues: 0 });
+    expect(summaries.get(empty.id)).toEqual({ memberCount: 1, totalIssues: 0, openIssues: 0 });
+    // The single-team read is the same arithmetic, so the list and the detail can never disagree.
+    expect(await ctx.svc.summary("acme", eng.id)).toEqual(summaries.get(eng.id));
+  });
+
   it("lists only the teams a subject belongs to", async () => {
     const eng = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
     await ctx.svc.create({ tenant: "acme", createdBy: "erin", key: "OPS", name: "Ops" });
     expect(await ctx.svc.teamIdsFor("acme", "dana")).toEqual([eng.id]);
+  });
+});
+
+describe("TeamService — sub-teams", () => {
+  let ctx: ReturnType<typeof service>;
+  beforeEach(() => {
+    ctx = service();
+  });
+
+  it("nests a team under another one", async () => {
+    const platform = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "PLT", name: "Platform" });
+    const runtime = await ctx.svc.create({
+      tenant: "acme",
+      createdBy: "dana",
+      key: "RNT",
+      name: "Runtime",
+      parentId: platform.id,
+    });
+    expect(runtime.parentId).toBe(platform.id);
+  });
+
+  it("404s on a parent from another workspace, so nesting cannot leak that it exists", async () => {
+    await expect(
+      ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "RNT", name: "Runtime", parentId: "team-elsewhere" }),
+    ).rejects.toThrow(NotFoundError);
+  });
+
+  it("refuses to re-parent a team under its own descendant — that would make the tree circular", async () => {
+    const platform = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "PLT", name: "Platform" });
+    const runtime = await ctx.svc.create({
+      tenant: "acme",
+      createdBy: "dana",
+      key: "RNT",
+      name: "Runtime",
+      parentId: platform.id,
+    });
+    await expect(ctx.svc.update("acme", platform.id, { parentId: runtime.id }, DANA)).rejects.toThrow(ConflictError);
+  });
+
+  it("refuses to delete a team that still has sub-teams", async () => {
+    // Given: a workspace whose default is elsewhere, so the delete reaches the sub-team guard
+    await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "CORE", name: "Core" });
+    const platform = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "PLT", name: "Platform" });
+    await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "RNT", name: "Runtime", parentId: platform.id });
+    await expect(ctx.svc.remove("acme", platform.id, DANA)).rejects.toThrow(/sub-team/);
+  });
+});
+
+describe("TeamService.get — a team is addressed by its key as well as its id", () => {
+  it("resolves the key people actually use, case-insensitively", async () => {
+    const { svc } = service();
+    const eng = await svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Engineering" });
+    expect((await svc.get("acme", "ENG")).id).toBe(eng.id);
+    expect((await svc.get("acme", "eng")).id).toBe(eng.id);
+    expect((await svc.get("acme", eng.id)).id).toBe(eng.id);
+  });
+
+  it("404s on a key no team in this workspace holds, instead of answering with someone else's team", async () => {
+    const { svc } = service();
+    await svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Engineering" });
+    await expect(svc.get("acme", "MOB")).rejects.toThrow(NotFoundError);
+  });
+
+  it("keeps the two namespaces apart — the same ref in another workspace is not this team", async () => {
+    const { svc } = service();
+    await svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Engineering" });
+    await expect(svc.get("other", "ENG")).rejects.toThrow(NotFoundError);
+  });
+
+  it("hands a key-addressed mutation the resolved id, so the write lands on the team that was named", async () => {
+    const { svc, store } = service();
+    await svc.create({ tenant: "acme", createdBy: "dana", key: "CORE", name: "Core" });
+    const eng = await svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Engineering" });
+    await svc.addMember("acme", "eng", "sam", DANA);
+    expect((await store.listMembers("acme", eng.id)).map((m) => m.subject)).toContain("sam");
+    await svc.removeMember("acme", "ENG", "sam", DANA);
+    expect((await store.listMembers("acme", eng.id)).map((m) => m.subject)).not.toContain("sam");
+    await svc.remove("acme", "ENG", DANA);
+    expect(await store.get("acme", eng.id)).toBeUndefined();
+  });
+
+  it("resolves a parent named by key, and stores the id it resolved to", async () => {
+    const { svc } = service();
+    const platform = await svc.create({ tenant: "acme", createdBy: "dana", key: "PLT", name: "Platform" });
+    const runtime = await svc.create({ tenant: "acme", createdBy: "dana", key: "RNT", name: "Runtime" });
+    const nested = await svc.update("acme", "RNT", { parentId: "PLT" }, DANA);
+    expect(nested.id).toBe(runtime.id);
+    expect(nested.parentId).toBe(platform.id);
+  });
+});
+
+describe("TeamService — private teams are a VISIBILITY filter, never an authz axis", () => {
+  let ctx: ReturnType<typeof service>;
+  beforeEach(() => {
+    ctx = service();
+  });
+
+  it("returns no filter at all when nothing is private — an undefined answer means 'see everything'", async () => {
+    await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
+    expect(await ctx.svc.visibleTeamIds("acme", "erin", false)).toBeUndefined();
+  });
+
+  it("hides a private team from a non-member, and keeps the public ones", async () => {
+    const open = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
+    const secret = await ctx.svc.create({
+      tenant: "acme",
+      createdBy: "dana",
+      key: "SEC",
+      name: "Security",
+      isPrivate: true,
+    });
+    // Given: erin is on neither roster (dana created both, so dana is on both)
+    const visible = await ctx.svc.visibleTeamIds("acme", "erin", false);
+    expect(visible).toEqual([open.id]);
+    expect(await ctx.svc.canSeeTeam("acme", secret.id, "erin", false)).toBe(false);
+    // The creator is on the roster, so they still see it.
+    expect(await ctx.svc.canSeeTeam("acme", secret.id, "dana", false)).toBe(true);
+  });
+
+  it("shows everything to an admin — hiding it from someone who can join in one click is theatre", async () => {
+    const secret = await ctx.svc.create({
+      tenant: "acme",
+      createdBy: "dana",
+      key: "SEC",
+      name: "Security",
+      isPrivate: true,
+    });
+    expect(await ctx.svc.visibleTeamIds("acme", "erin", true)).toBeUndefined();
+    expect(await ctx.svc.canSeeTeam("acme", secret.id, "erin", true)).toBe(true);
   });
 });

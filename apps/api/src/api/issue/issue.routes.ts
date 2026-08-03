@@ -1,11 +1,12 @@
-import { IssueLinkTypeSchema, IssueStatusSchema } from "@everdict/contracts";
+import { IssueLinkTypeSchema, IssuePrioritySchema, IssueStatusSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, resolveTeamRef, sendError } from "../route-context.js";
 import { issueDocs } from "./issue.docs.js";
 import { CreateIssueBodySchema } from "./request/create-issue.js";
 import { IssueLinkInputSchema } from "./request/create-issue.js";
+import { AcceptTriageBodySchema, DeclineTriageBodySchema, MoveIssueBodySchema } from "./request/move-issue.js";
 import { SetIssueStatusBodySchema } from "./request/set-issue-status.js";
 import { UpdateIssueBodySchema } from "./request/update-issue.js";
 
@@ -39,6 +40,10 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
           title: body.title,
           ...(body.description !== undefined ? { description: body.description } : {}),
           ...(body.status !== undefined ? { status: body.status } : {}),
+          ...(body.priority !== undefined ? { priority: body.priority } : {}),
+          ...(body.estimate !== undefined ? { estimate: body.estimate } : {}),
+          ...(body.dueDate !== undefined ? { dueDate: body.dueDate } : {}),
+          ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
           ...(body.projectId !== undefined ? { projectId: body.projectId } : {}),
           ...(body.assignee !== undefined ? { assignee: body.assignee } : {}),
           ...(body.labelIds !== undefined ? { labelIds: body.labelIds } : {}),
@@ -69,14 +74,40 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
         mine: z.enum(["true", "false"]).optional(),
         project: z.string().min(1).optional(),
         assignee: z.string().min(1).optional(),
+        priority: IssuePrioritySchema.optional(),
+        // One parent's sub-issues, or `none` for the TOP-LEVEL issues — what a board shows so a child never
+        // appears twice, once on its own and once under its parent.
+        parent: z.string().min(1).optional(),
+        // One iteration's board, and the team's triage inbox.
+        cycle: z.string().min(1).optional(),
+        triage: z.enum(["true", "false"]).optional(),
         // "Which issues watch this harness" — the capability detail pages' reverse lookup.
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().min(1).optional(),
+        // The bulk GitHub sync's working set. Exposed because the alternative a caller is left with is reading
+        // the whole list and filtering client-side, which is what the issues page used to do.
+        syncPull: z.enum(["true", "false"]).optional(),
         limit: z.coerce.number().int().positive().max(200).optional(),
+        cursor: z.string().min(1).optional(), // opaque token from a prior page's nextCursor
       })
       .safeParse(req.query);
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
-    const { status, team, mine, project, assignee, linkType, linkId, limit } = query.data;
+    const {
+      status,
+      team,
+      mine,
+      project,
+      assignee,
+      priority,
+      parent,
+      cycle,
+      triage,
+      linkType,
+      linkId,
+      syncPull,
+      limit,
+      cursor,
+    } = query.data;
     if ((linkType === undefined) !== (linkId === undefined))
       return reply.code(400).send({ code: "BAD_REQUEST", message: "linkType and linkId must be given together." });
     // "My teams" is resolved here, not in the store: the roster lookup belongs to the team service, and the
@@ -85,15 +116,43 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
       mine === "true" && deps.teamService
         ? await deps.teamService.teamIdsFor(principal.workspace, principal.subject)
         : undefined;
+    // A private team's issues are not the workspace's issues. The narrowing rides the SAME `teamIds` filter the
+    // "my teams" view uses, so there is one code path in the store and no second place to forget it. When the
+    // caller also asked for `mine`, the two intersect — you see your teams, minus the ones you may not.
+    const visibleTeamIds = deps.teamService
+      ? await deps.teamService.visibleTeamIds(principal.workspace, principal.subject, principal.roles.includes("admin"))
+      : undefined;
+    const teamScope =
+      visibleTeamIds === undefined
+        ? myTeamIds
+        : myTeamIds === undefined
+          ? visibleTeamIds
+          : myTeamIds.filter((id) => visibleTeamIds.includes(id));
+    // The filter names a team by id or by key (`?team=ENG`), because that is what the URL showing this list is
+    // scoped by. An unknown ref 404s here rather than filtering to nothing.
+    let teamId: string | undefined;
+    try {
+      teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    // One PAGE of the list projection (`{ items, nextCursor? }`) — a row's description and audit trail never
+    // leave the database. `GET /issues/:id` is where the whole record lives.
     return reply.send(
-      await deps.issueService.list(principal.workspace, {
+      await deps.issueService.listSummaries(principal.workspace, {
         ...(status !== undefined ? { status } : {}),
-        ...(team !== undefined ? { teamId: team } : {}),
-        ...(myTeamIds !== undefined ? { teamIds: myTeamIds } : {}),
+        ...(teamId !== undefined ? { teamId } : {}),
+        ...(teamScope !== undefined ? { teamIds: teamScope } : {}),
         ...(project !== undefined ? { projectId: project } : {}),
         ...(assignee !== undefined ? { assignee } : {}),
+        ...(priority !== undefined ? { priority } : {}),
+        ...(parent !== undefined ? { parentId: parent === "none" ? null : parent } : {}),
+        ...(cycle !== undefined ? { cycleId: cycle } : {}),
+        ...(triage !== undefined ? { inTriage: triage === "true" } : {}),
         ...(linkType !== undefined && linkId !== undefined ? { link: { type: linkType, id: linkId } } : {}),
+        ...(syncPull === "true" ? { syncPull: true } : {}),
         ...(limit !== undefined ? { limit } : {}),
+        ...(cursor !== undefined ? { cursor } : {}),
       }),
     );
   });
@@ -108,7 +167,19 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
       return sendError(reply, err);
     }
     try {
-      return reply.send(await deps.issueService.get(principal.workspace, req.params.id));
+      const issue = await deps.issueService.get(principal.workspace, req.params.id);
+      // Same rule as a cross-workspace read: an issue you may not see is ABSENT, not forbidden.
+      if (
+        deps.teamService &&
+        !(await deps.teamService.canSeeTeam(
+          principal.workspace,
+          issue.teamId,
+          principal.subject,
+          principal.roles.includes("admin"),
+        ))
+      )
+        return reply.code(404).send({ code: "NOT_FOUND", message: `issue '${req.params.id}' not found.` });
+      return reply.send(issue);
     } catch (err) {
       return sendError(reply, err); // another workspace's id → 404 (tenant-scoped store, no existence leak)
     }
@@ -192,6 +263,93 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
       return sendError(reply, err); // an illegal move is the domain's 409/400, verbatim
     }
   });
+
+  // The team move. A transition, not an edit: it re-mints the identifier and emits `issue.moved`, so it gets
+  // its own endpoint exactly like the status move does.
+  app.post<{ Params: { id: string } }>("/issues/:id/team", { schema: issueDocs.move }, async (req, reply) => {
+    if (!deps.issueService) return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const body = MoveIssueBodySchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      const agent = agentAttributionFrom(req.headers);
+      return reply.send(
+        await deps.issueService.move(principal.workspace, req.params.id, body.data.teamId, {
+          subject: principal.subject,
+          ...(agent ? { agent } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // already on that team → the domain's 409, verbatim
+    }
+  });
+
+  // Triage — the queue in front of a team's workflow. Accepting puts the issue INTO the workflow; declining
+  // cancels it with a reason (the issue stays on the record, because "we said no to this" is an answer somebody
+  // will look for later).
+  app.post<{ Params: { id: string } }>(
+    "/issues/:id/triage/accept",
+    { schema: issueDocs.acceptTriage },
+    async (req, reply) => {
+      if (!deps.issueService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:write");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const body = AcceptTriageBodySchema.safeParse(req.body ?? {});
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        const agent = agentAttributionFrom(req.headers);
+        return reply.send(
+          await deps.issueService.acceptTriage(principal.workspace, req.params.id, body.data.status, {
+            subject: principal.subject,
+            ...(agent ? { agent } : {}),
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err); // not in triage → the domain's 409
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/issues/:id/triage/decline",
+    { schema: issueDocs.declineTriage },
+    async (req, reply) => {
+      if (!deps.issueService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:write");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const body = DeclineTriageBodySchema.safeParse(req.body ?? {});
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        const agent = agentAttributionFrom(req.headers);
+        return reply.send(
+          await deps.issueService.declineTriage(principal.workspace, req.params.id, body.data.note, {
+            subject: principal.subject,
+            ...(agent ? { agent } : {}),
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   app.post<{ Params: { id: string } }>("/issues/:id/links", { schema: issueDocs.link }, async (req, reply) => {
     if (!deps.issueService) return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });

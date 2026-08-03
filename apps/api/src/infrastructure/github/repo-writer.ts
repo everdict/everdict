@@ -59,6 +59,15 @@ function headers(token: string): Record<string, string> {
   };
 }
 
+// What an attachment is allowed to come back as. GitHub answers an unauthenticated attachment request with a
+// LOGIN PAGE (200 text/html) rather than a 401, so a content-type check is the only thing that separates "here is
+// your image" from "here is a sign-in form" — without it a broken image would be replaced by a broken image that
+// also costs a round trip, and nobody could tell from the outside that the token was the problem.
+function isRenderableAsset(contentType: string): boolean {
+  const type = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return type.startsWith("image/") || type.startsWith("video/") || type === "application/pdf";
+}
+
 async function upstream(res: Response, prefix: string): Promise<UpstreamError> {
   const text = await res.text().catch(() => "");
   return new UpstreamError(
@@ -227,6 +236,37 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
           if (!res.ok) throw await upstream(res, "comment creation failed");
           const comment = z.object({ html_url: z.string() }).parse(await res.json());
           return { url: comment.html_url };
+        },
+        async fetchAsset(url, opts) {
+          // Deliberately NOT headers(token): an attachment is a web route, not the JSON API, so the API media type
+          // and content-type would be wrong. The token still rides as the bearer, which is what makes a private /
+          // Enterprise attachment resolve at all. redirect:"follow" is required — GitHub answers with a 302 to
+          // signed object storage, and the fetch spec drops the authorization header on that cross-origin hop, so
+          // our token never reaches the storage host.
+          const res = await doFetch(url, {
+            headers: {
+              authorization: `Bearer ${token}`,
+              accept: "image/*,video/*,application/pdf;q=0.9,*/*;q=0.8",
+              "user-agent": "everdict-control-plane",
+            },
+            redirect: "follow",
+          });
+          if (!res.ok) throw await upstream(res, "attachment fetch failed");
+          const contentType = res.headers.get("content-type") ?? "application/octet-stream";
+          if (!isRenderableAsset(contentType))
+            throw new UpstreamError(
+              "UPSTREAM_ERROR",
+              { url, contentType },
+              `GitHub answered with ${contentType}, not an attachment. An HTML answer means the installation token was not accepted for this attachment.`,
+            );
+          const bytes = new Uint8Array(await res.arrayBuffer());
+          if (bytes.byteLength > opts.maxBytes)
+            throw new UpstreamError(
+              "UPSTREAM_ERROR",
+              { url, size: bytes.byteLength, maxBytes: opts.maxBytes },
+              `The attachment is larger than the ${opts.maxBytes} byte limit.`,
+            );
+          return { bytes, contentType };
         },
       };
     },

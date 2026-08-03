@@ -30,11 +30,15 @@ export function IssueStatusControl({
   status,
   canWrite,
   scorecards,
+  states = [],
 }: {
   id: string
   status: IssueStatus
   canWrite: boolean
   scorecards: ResolvableScorecard[]
+  // 이 이슈가 속한 팀의 보드 컬럼들. 있으면 팀이 붙인 이름으로 고르고(리니어와 같은 동선), 없으면 정규
+  // 어휘로 떨어진다 — 어느 쪽이든 서버가 받는 것은 같은 전이다.
+  states?: { id: string; name: string; status: IssueStatus }[]
 }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
@@ -42,9 +46,9 @@ export function IssueStatusControl({
   const [resolving, setResolving] = useState(false)
   const [pending, startTransition] = useTransition()
 
-  function move(to: IssueStatus, resolution?: { scorecardId?: string; note?: string }) {
+  function move(to: IssueStatus, resolution?: { scorecardId?: string; note?: string }, stateId?: string) {
     startTransition(async () => {
-      const r = await setIssueStatusAction(id, to, resolution)
+      const r = await setIssueStatusAction(id, to, resolution, stateId)
       if (!r.ok) {
         // An illegal move is the domain's own refusal — surface it verbatim rather than guessing a next step.
         toast.error(r.error ?? t('statusError'))
@@ -90,15 +94,28 @@ export function IssueStatusControl({
         )}
       >
         <DropdownLabel>{t('statusMoveTo')}</DropdownLabel>
-        {reachableFrom(status).map((next) => {
-          const Icon = issueStatusIcon(next)
+        {/* 팀 보드가 있으면 그 이름들로 — 닿을 수 있는 정규 상태에 매핑된 컬럼만 낸다. */}
+        {(states.length > 0
+          ? states
+              .filter((state) => reachableFrom(status).includes(state.status))
+              .map((state) => ({ key: state.id, label: state.name, to: state.status, stateId: state.id }))
+          : reachableFrom(status).map((next) => ({
+              key: next,
+              label: tracker(`issueStatus.${next}`),
+              to: next,
+              stateId: undefined,
+            }))
+        ).map((option) => {
+          const Icon = issueStatusIcon(option.to)
           return (
             <DropdownItem
-              key={next}
+              key={option.key}
               icon={<Icon className="size-3.5" />}
-              onSelect={() => (next === 'done' ? setResolving(true) : move(next))}
+              onSelect={() =>
+                option.to === 'done' ? setResolving(true) : move(option.to, undefined, option.stateId)
+              }
             >
-              {tracker(`issueStatus.${next}`)}
+              {option.label}
             </DropdownItem>
           )
         })}

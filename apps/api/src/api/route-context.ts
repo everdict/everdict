@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
+import type { WorkflowStateService } from "@everdict/application-control";
 import type { ApprovalService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
 import type { TrajectoryStore } from "@everdict/application-control";
@@ -33,6 +34,7 @@ import {
 } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type {
+  CycleService,
   GithubIssueSync,
   InitiativeService,
   IssueLabelService,
@@ -161,6 +163,8 @@ export interface ServerDeps {
   taskService?: TaskService; // workspace task ledger — cross-agent coordination (route disabled if absent)
   // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).
   teamService?: TeamService; // teams own issues and name them (ENG-12); a workspace always keeps one default
+  cycleService?: CycleService;
+  workflowStateService?: WorkflowStateService;
   issueService?: IssueService;
   // The workspace label registry an issue's labelIds point at (docs/tracker.md).
   issueLabelService?: IssueLabelService;
@@ -498,12 +502,28 @@ export async function teamForNew(
   deps: ServerDeps,
   requested?: string,
 ): Promise<{ teamId?: string; gate: ResourceScope }> {
-  if (requested !== undefined) return { teamId: requested, gate: { teamId: requested } };
+  if (requested !== undefined) {
+    // Resolved before it is gated: the caller may name the team by key (`ENG`), and comparing a key against the
+    // id list a principal carries would refuse a member of the very team they named.
+    const teamId = await resolveTeamRef(deps, principal.workspace, requested);
+    return { teamId, gate: { teamId } };
+  }
   const own = principal.teams?.[0];
   if (own !== undefined) return { teamId: own, gate: {} };
   const all = (await deps.teamService?.list(principal.workspace).catch(() => [])) ?? [];
   const preferred = all.find((team) => team.isDefault) ?? all[0];
   return preferred ? { teamId: preferred.id, gate: {} } : { gate: {} };
+}
+
+// A team-shaped URL segment or query value → the team id a store/registry indexes by. A team is addressed by its
+// id OR by its key (`ENG`), the same way an issue is addressed by `ENG-12`: the resolution lives in TeamService
+// so every transport accepts both, and this is the one line a route needs to opt in. An unknown ref 404s rather
+// than passing through — a filter that keeps a bad ref answers with an empty list, which reads as "this team has
+// nothing" instead of "no such team". A deployment with no team service keeps the ref verbatim (nothing to
+// resolve against), so team-less compositions behave exactly as before.
+export async function resolveTeamRef(deps: ServerDeps, tenant: string, ref: string): Promise<string> {
+  if (!deps.teamService) return ref;
+  return deps.teamService.resolveId(tenant, ref);
 }
 
 // authorize wrapper — throws ForbiddenError as-is so sendError maps it to 403.

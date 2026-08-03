@@ -1,4 +1,5 @@
 import type { CiLinkService } from "@everdict/application-control";
+import type { WorkflowStateService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
 import type { TrajectoryStore } from "@everdict/application-control";
 import type { ApprovalService } from "@everdict/application-control";
@@ -24,6 +25,7 @@ import type { FileExecutionService, FsService } from "@everdict/application-cont
 import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type {
+  CycleService,
   GithubIssueSync,
   InitiativeService,
   IssueLabelService,
@@ -77,6 +79,8 @@ import type { AgentAttribution } from "./fs/fs-actor.js";
 // Each tool is authorized by the Principal's roles and scoped to workspace (the control plane is the auth/authz authority).
 export interface McpDeps {
   service: RunService;
+  cycleService?: CycleService;
+  workflowStateService?: WorkflowStateService;
   scorecardService?: ScorecardService;
   driverOps?: DriverOpsService; // Driver ops surface v0 — describe/cancel the durable Temporal driver by ledger id
   approvalService?: ApprovalService; // durable agent approvals (A6) — list/decide
@@ -203,6 +207,14 @@ export async function run(
     if (err instanceof AppError) return failFrom(err);
     return fail(err instanceof Error ? err.message : String(err));
   }
+}
+
+// A team named by id or by key (`ENG`) → the id a store indexes by. The MCP twin of the routes' resolveTeamRef,
+// so an agent may name a team the way a person does — and gets a 404-shaped failure for an unknown one instead
+// of an empty list that reads as "this team has nothing".
+export async function resolveTeam(ctx: McpToolContext, ref: string): Promise<string> {
+  const teams = ctx.deps.teamService;
+  return teams ? teams.resolveId(ctx.ws, ref) : ref;
 }
 
 // Tools with no role gate (workspace self-serve list/create). AppError → isError conversion only.

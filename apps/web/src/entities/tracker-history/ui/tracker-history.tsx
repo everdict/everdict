@@ -11,6 +11,7 @@ import {
   Github,
   History,
   Link2,
+  Megaphone,
   Pencil,
   Plus,
   RotateCcw,
@@ -64,7 +65,7 @@ const STEP = 20
 
 // 이력을 가진 트래커 레코드. 상태 어휘가 종류마다 달라(이슈 7 · 프로젝트 4 · 이니셔티브 3) 상태 칩을
 // 고를 때만 쓰인다.
-export type TrackerKind = 'issue' | 'project' | 'initiative'
+export type TrackerKind = 'issue' | 'cycle' | 'project' | 'initiative'
 
 // `updated` 가 싣는 변경 필드 이름 — 카탈로그에 있는 것만 번역하고 모르는 키는 원문 그대로 보여준다
 // (제어 평면이 새 필드를 추가해도 이력이 깨지지 않는다).
@@ -362,6 +363,32 @@ function HistoryRow({
               {message}
             </span>
           ) : null,
+        }
+      }
+      case 'update_posted': {
+        // 프로젝트가 어떤 상태라고 말했는지 — 판정은 배지로, 문장은 업데이트 타임라인이 갖는다.
+        const health = detailString(detail, 'health')
+        return {
+          icon: Megaphone,
+          tone: health === 'off_track' ? 'danger' : health === 'at_risk' ? 'warning' : 'success',
+          text: t('history.updatePosted'),
+          values: health ? <Badge tone="outline">{t(`projectHealth.${health}`)}</Badge> : null,
+        }
+      }
+      case 'moved': {
+        // 팀 이동은 이름이 바뀌는 유일한 사건이다 — 어느 이름에서 어느 이름으로 갔는지가 이 줄의 전부다.
+        const from = detailString(detail, 'fromIdentifier')
+        const to = detailString(detail, 'toIdentifier')
+        return {
+          icon: ArrowRightLeft,
+          tone: 'neutral',
+          text: t('history.moved'),
+          values: (
+            <>
+              {from && <Badge tone="outline">{from}</Badge>}
+              {to && <Badge tone="neutral">{to}</Badge>}
+            </>
+          ),
         }
       }
       case 'member_added':

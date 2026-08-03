@@ -4,7 +4,12 @@ import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
 import { InitiativeActions, InitiativeStatusControl } from '@/features/manage-initiative'
-import { initiativeDetailSchema, type InitiativeDetail } from '@/entities/initiative'
+import {
+  initiativeDetailSchema,
+  initiativesSchema,
+  type Initiative,
+  type InitiativeDetail,
+} from '@/entities/initiative'
 import { issueHref, IssueStatusIcon } from '@/entities/issue'
 import { memberDirectoryOf, membersSchema } from '@/entities/member'
 import { isPastDue, ProjectStatusBadge } from '@/entities/project'
@@ -70,10 +75,23 @@ export default async function InitiativeDetailPage({
   const current = initiative
   const { readiness } = current
 
-  const members = await controlPlane
-    .listMembers(ctx)
-    .then((r) => membersSchema.parse(r))
-    .catch(() => [])
+  const [members, initiatives] = await Promise.all([
+    controlPlane
+      .listMembers(ctx)
+      .then((r) => membersSchema.parse(r))
+      .catch(() => []),
+    controlPlane
+      .listInitiatives(ctx)
+      .then((r) => initiativesSchema.parse(r))
+      .catch((): Initiative[] => []),
+  ])
+  // 이 이니셔티브가 어디에 걸려 있고, 무엇을 품고 있는지. 준비도는 이미 하위까지 합산된 값이므로 여기서는
+  // 「어디를 눌러 들어가면 되는지」만 답한다.
+  const parent = current.parentId
+    ? initiatives.find((i) => i.id === current.parentId)
+    : undefined
+  const children = initiatives.filter((i) => i.parentId === current.id)
+  const initiativeName = new Map(initiatives.map((i) => [i.id, i.name]))
   const canWrite = can(principal?.roles ?? [], 'issues:write')
   const overdue = current.status === 'active' && isPastDue(current.targetDate, timeZone)
   const actors = memberDirectoryOf(members)
@@ -92,7 +110,13 @@ export default async function InitiativeDetailPage({
                 status={current.status}
                 canWrite={canWrite}
               />
-              {canWrite && <InitiativeActions workspace={workspace} initiative={current} />}
+              {canWrite && (
+                <InitiativeActions
+                  workspace={workspace}
+                  initiative={current}
+                  initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
+                />
+              )}
             </div>
           }
         />
@@ -191,6 +215,40 @@ export default async function InitiativeDetailPage({
         </section>
       )}
 
+      {(parent !== undefined || children.length > 0) && (
+        <section className="space-y-3">
+          <SectionHeader title={t('nestingTitle')} />
+          <div className="space-y-2">
+            {parent && (
+              <Link
+                href={`/${workspace}/initiatives/${encodeURIComponent(parent.id)}`}
+                className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+              >
+                <Badge tone="outline">{t('nestingParent')}</Badge>
+                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                  {parent.name}
+                </span>
+              </Link>
+            )}
+            {children.map((child) => (
+              <Link
+                key={child.id}
+                href={`/${workspace}/initiatives/${encodeURIComponent(child.id)}`}
+                className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+              >
+                <Badge tone="neutral">{t('nestingChild')}</Badge>
+                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                  {child.name}
+                </span>
+                <span className="hidden shrink-0 text-[11px] text-muted-foreground @md:block">
+                  {tracker(`initiativeStatus.${child.status}`)}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
       {readiness.projects.length > 0 && (
         <section className="space-y-3">
           <SectionHeader title={t('projectsTitle', { count: readiness.projects.length })} />
@@ -203,6 +261,13 @@ export default async function InitiativeDetailPage({
               >
                 <span className="min-w-0 flex-1 truncate text-[13px] font-[510] text-foreground">
                   {p.name}
+                  {/* 하위 이니셔티브를 거쳐 올라온 프로젝트는 어디에 걸려 있는지까지 말해야, 막힌 릴리스가
+                      우산이 아니라 실제 지점을 가리킨다. */}
+                  {p.viaInitiativeId !== undefined && (
+                    <span className="ml-2 text-[11.5px] font-normal text-muted-foreground">
+                      {initiativeName.get(p.viaInitiativeId) ?? p.viaInitiativeId}
+                    </span>
+                  )}
                 </span>
                 <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
                   {t('projectRollup', {

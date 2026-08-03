@@ -47,6 +47,8 @@ export function EditIssueDialog({
   const [assignee, setAssignee] = useState(issue.assignee ?? '')
   const [projectId, setProjectId] = useState(issue.projectId ?? '')
   const [labelIds, setLabelIds] = useState(issue.labelIds)
+  const [estimate, setEstimate] = useState(issue.estimate === undefined ? '' : String(issue.estimate))
+  const [dueDate, setDueDate] = useState(issue.dueDate ?? '')
   const [pending, startTransition] = useTransition()
 
   function submit() {
@@ -64,6 +66,11 @@ export function EditIssueDialog({
       // 순서까지 포함해 비교한다 — 같은 집합이면 PATCH 를 보내지 않는다. 구분자는 이슈 id 에 나올 수 없는
       // 공백이면 충분하다(예전 코드는 여기에 리터럴 NUL 바이트를 넣어 파일 전체를 grep 에 안 잡히게 만들었다).
       ...(labelIds.join(' ') !== issue.labelIds.join(' ') ? { labelIds } : {}),
+      // 빈 칸은 "비우기"(null)다 — 숫자 입력에서 지운 것과 손대지 않은 것을 구분해야 한다.
+      ...(estimate !== (issue.estimate === undefined ? '' : String(issue.estimate))
+        ? { estimate: estimate === '' ? null : Number(estimate) }
+        : {}),
+      ...(dueDate !== (issue.dueDate ?? '') ? { dueDate: dueDate === '' ? null : dueDate } : {}),
     }
     if (Object.keys(patch).length === 0) {
       onClose()
@@ -123,6 +130,29 @@ export function EditIssueDialog({
                 { value: '', label: t('fieldProjectNone') },
                 ...projects.map((p) => ({ value: p.id, label: p.name })),
               ]}
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 @md:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-issue-estimate">{t('fieldEstimate')}</Label>
+            <Input
+              id="edit-issue-estimate"
+              type="number"
+              min={0}
+              max={1000}
+              value={estimate}
+              onChange={(e) => setEstimate(e.target.value)}
+              placeholder={t('fieldEstimateNone')}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-issue-due">{t('fieldDueDate')}</Label>
+            <Input
+              id="edit-issue-due"
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
             />
           </div>
         </div>

@@ -6,26 +6,35 @@ import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { TeamKeyBadge } from '@/entities/team'
 import { Button } from '@/shared/ui/button'
-import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { MultiSelect } from '@/shared/ui/multi-select'
 
 import { createProjectAction } from '../api/projects'
 
 export function CreateProjectButton({
   workspace,
   initiatives,
+  teams,
+  defaultTeamIds,
 }: {
   workspace: string
   initiatives: { id: string; name: string }[]
+  // 프로젝트는 여러 팀이 함께 한다. 아무 팀도 고르지 않으면 제어 평면이 워크스페이스 기본 팀에 올려 준다.
+  teams: { id: string; key: string; name: string }[]
+  // 팀 아래(`/teams/ENG/projects`)에서 열었으면 그 팀이 미리 골라져 있다 — 방금 보고 있던 목록에 나타나지
+  // 않을 곳에 프로젝트를 만드는 일이 없도록. 여전히 바꿀 수 있다(프로젝트는 여러 팀의 것일 수 있다).
+  defaultTeamIds?: string[]
 }) {
   const t = useTranslations('projectsPage')
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [initiativeId, setInitiativeId] = useState('')
+  const [initiativeIds, setInitiativeIds] = useState<string[]>([])
+  const [teamIds, setTeamIds] = useState<string[]>(defaultTeamIds ?? [])
   const [targetDate, setTargetDate] = useState('')
   const [pending, startTransition] = useTransition()
 
@@ -36,7 +45,8 @@ export function CreateProjectButton({
       const r = await createProjectAction({
         name: trimmed,
         ...(description.trim() ? { description: description.trim() } : {}),
-        ...(initiativeId ? { initiativeId } : {}),
+        ...(initiativeIds.length > 0 ? { initiativeIds } : {}),
+        ...(teamIds.length > 0 ? { teamIds } : {}),
         ...(targetDate ? { targetDate } : {}),
       })
       if (!r.ok || !r.project) {
@@ -46,7 +56,8 @@ export function CreateProjectButton({
       setOpen(false)
       setName('')
       setDescription('')
-      setInitiativeId('')
+      setInitiativeIds([])
+      setTeamIds(defaultTeamIds ?? [])
       setTargetDate('')
       router.push(`/${workspace}/projects/${encodeURIComponent(r.project.id)}`)
     })
@@ -87,27 +98,42 @@ export function CreateProjectButton({
           </div>
           <div className="grid gap-3 @md:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="project-initiative">{t('fieldInitiative')}</Label>
-              <Combobox
-                id="project-initiative"
-                value={initiativeId}
-                onChange={setInitiativeId}
-                placeholder={t('fieldInitiativeNone')}
-                options={[
-                  { value: '', label: t('fieldInitiativeNone') },
-                  ...initiatives.map((i) => ({ value: i.id, label: i.name })),
-                ]}
+              <Label htmlFor="project-teams">{t('fieldTeams')}</Label>
+              <MultiSelect
+                id="project-teams"
+                selected={teamIds}
+                onChange={setTeamIds}
+                placeholder={t('fieldTeamsPlaceholder')}
+                emptyLabel={t('fieldTeamsEmpty')}
+                removeLabel={(name) => t('fieldTeamRemove', { name })}
+                options={teams.map((x) => ({
+                  value: x.id,
+                  label: x.name,
+                  badge: <TeamKeyBadge teamKey={x.key} />,
+                }))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="project-target">{t('fieldTargetDate')}</Label>
-              <Input
-                id="project-target"
-                type="date"
-                value={targetDate}
-                onChange={(e) => setTargetDate(e.target.value)}
+              <Label htmlFor="project-initiative">{t('fieldInitiative')}</Label>
+              <MultiSelect
+                id="project-initiative"
+                selected={initiativeIds}
+                onChange={setInitiativeIds}
+                placeholder={t('fieldInitiativePlaceholder')}
+                emptyLabel={t('fieldInitiativeEmpty')}
+                removeLabel={(name) => t('fieldInitiativeRemove', { name })}
+                options={initiatives.map((i) => ({ value: i.id, label: i.name }))}
               />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="project-target">{t('fieldTargetDate')}</Label>
+            <Input
+              id="project-target"
+              type="date"
+              value={targetDate}
+              onChange={(e) => setTargetDate(e.target.value)}
+            />
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(false)}>

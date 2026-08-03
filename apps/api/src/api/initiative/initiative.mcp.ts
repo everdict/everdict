@@ -20,10 +20,14 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
         "Create an initiative — the deployment umbrella over projects, the level at which 'can we ship' is " +
         "asked. Use it for a release or milestone that several projects feed; a single project needs no " +
         "initiative. It starts `active`. Projects join it from the project side (create_project/update_project " +
-        "with initiativeId).",
+        "with initiativeIds), and an initiative may itself sit under another one.",
       inputSchema: {
         name: z.string().min(1).max(300),
         description: z.string().max(50_000).optional(),
+        parentId: z
+          .string()
+          .optional()
+          .describe("roll this initiative up into another one — the parent's readiness then answers for it too"),
         targetDate: CalendarDate.optional().describe("YYYY-MM-DD — the intended ship date"),
       },
     },
@@ -35,6 +39,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
             createdBy: principal.subject,
             name: a.name,
             ...(a.description !== undefined ? { description: a.description } : {}),
+            ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
             ...(a.targetDate !== undefined ? { targetDate: a.targetDate } : {}),
           }),
         ),
@@ -67,7 +72,8 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
     "get_initiative",
     {
       description:
-        "One initiative plus its release readiness: every project under it with that project's issue rollup, " +
+        "One initiative plus its release readiness: every project under it OR under any sub-initiative, with " +
+        "that project's issue rollup (`viaInitiativeId` names the descendant a project came up through), " +
         "the total open count, and the specific blocking issues (capped). Open issues are counted across every " +
         "non-cancelled project REGARDLESS of that project's own status — a project marked completed whose issue " +
         "later regressed still blocks the release. This is the read that answers 'can we ship'.",
@@ -80,12 +86,15 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
     "update_initiative",
     {
       description:
-        "Edit an initiative's content (name, description, target date). Status moves use set_initiative_status " +
-        "instead, and projects are attached from the project side. Pass null to clear description/targetDate.",
+        "Edit an initiative's content (name, description, parent, target date). Status moves use " +
+        "set_initiative_status instead, and projects are attached from the project side. Pass null to clear " +
+        "description/targetDate/parentId (detaching it back to the top level). Re-parenting under one of its " +
+        "own descendants is refused — that would make the readiness roll-up circular.",
       inputSchema: {
         id: z.string(),
         name: z.string().min(1).max(300).optional(),
         description: z.string().max(50_000).nullable().optional(),
+        parentId: z.string().nullable().optional(),
         targetDate: CalendarDate.nullable().optional(),
       },
     },

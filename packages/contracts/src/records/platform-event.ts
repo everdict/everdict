@@ -92,7 +92,14 @@ export const PLATFORM_EVENT_KINDS = [
   "team.member_removed",
   "issue.created",
   "issue.status_changed",
+  // An issue changed teams — which re-mints its identifier, so this is the fact that explains why the name in
+  // everyone's links stopped being the name in the list. It carries both identifiers and both team ids.
+  "issue.moved",
   "issue.linked", // a capability (harness/dataset/judge/scorecard/run/view) was attached to an issue
+  // A team's iteration was planned, or closed with whatever was left. `cycle.completed` carries `carriedOver`,
+  // which is the number a retro actually asks for — and the wake signal for "write the iteration summary".
+  "cycle.created",
+  "cycle.completed",
   // The workspace label vocabulary (records/tracker.ts). Defining or retiring a label reshapes how the whole
   // workspace classifies its work — that is news in the same sense a new team is. A recolour/rename is content
   // editing on an existing label, so it emits `updated` rather than pretending to be a new definition.
@@ -101,6 +108,10 @@ export const PLATFORM_EVENT_KINDS = [
   "issue_label.deleted",
   "project.created",
   "project.status_changed",
+  // Somebody posted a project update — the one JUDGMENT the tracker records, because a human made it. The
+  // payload carries the health, so "wake me when a project goes off track" is a payload filter rather than a
+  // kind per outcome, exactly like the issue transitions.
+  "project.update_posted",
   "initiative.created",
   "initiative.status_changed",
   // Agent-run lifecycle facts (reported BY the agent service) — observable in the feed/fleet view, but NEVER

@@ -59,7 +59,12 @@ export const TRIGGERABLE_EVENT_KINDS = [
   "issue.created",
   "issue.status_changed",
   "project.status_changed",
+  // "A project went off track" — a payload filter (health eq off_track) over the posted update.
+  "project.update_posted",
   "initiative.status_changed",
+  // "The iteration closed — write the summary, and say what carried over." A cycle ends once, so this wakes
+  // once; `cycle.created` stays observable-only (planning the next fortnight is not a signal to act on).
+  "cycle.completed",
 ] as const;
 // Compile-time subset guarantee: every triggerable kind is a real platform-event kind.
 const _triggerableAreKinds: readonly PlatformEventKind[] = TRIGGERABLE_EVENT_KINDS;

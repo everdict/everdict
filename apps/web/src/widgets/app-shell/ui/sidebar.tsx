@@ -2,11 +2,12 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
+import { teamHref, teamSectionHref } from '@/entities/team'
 import type { Workspace } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { cn } from '@/shared/lib/utils'
@@ -22,6 +23,8 @@ export interface SidebarTeam {
   key: string
   name: string
   isDefault: boolean
+  // 트리아지를 켠 팀만 인박스 줄을 갖는다.
+  triageEnabled: boolean
 }
 
 export interface SidebarProps {
@@ -63,9 +66,6 @@ function navRowClass(active: boolean) {
 // 접이식 섹션의 열림 상태 저장소 키. next-themes 없이 localStorage 를 쓰는 테마 토글과 같은 방식 — 의존성 추가 없이
 // 사용자가 한 번 펼친 그룹은 다음 방문에도 펼쳐진 채로 남는다.
 const NAV_GROUP_STORAGE_PREFIX = 'everdict-nav-group:'
-
-// 팀으로 좁혀 볼 수 있는 목록 화면들 — 이 경로에서 ?team= 이 붙어 있으면 그 팀을 보고 있는 것이다.
-const TEAM_SCOPED_PAGES = ['issues', 'projects', 'scorecards'] as const
 
 function NavLinks({
   workspace,
@@ -256,18 +256,13 @@ function TeamsNav({
   onNavigate?: () => void
 }) {
   const pathname = usePathname()
-  const search = useSearchParams()
   const t = useTranslations('nav')
   const [openTeams, setOpenTeams] = useState<Record<string, boolean>>({})
-  // 현재 보고 있는 화면이 어느 팀 스코프인지 — 이슈/프로젝트 두 목적지가 같은 쿼리 파라미터를 쓴다.
-  // 어느 팀 스코프를 보고 있나 — 목록 두 곳은 쿼리 파라미터로, 팀 Home 은 경로로 팀을 지목한다.
-  const teamHomeMatch = pathname.match(new RegExp(`^/${workspace}/teams/([^/]+)$`))
-  const scopedTeam =
-    teamHomeMatch?.[1] !== undefined
-      ? decodeURIComponent(teamHomeMatch[1])
-      : TEAM_SCOPED_PAGES.some((page) => pathname === `/${workspace}/${page}`)
-        ? search.get('team')
-        : null
+  // 어느 팀의 화면을 보고 있나 — 이제 전부 경로가 말한다(`/{workspace}/teams/ENG/…`). 쿼리 파라미터를
+  // 읽던 시절에는 팀 홈만 경로였고 목록들은 `?team=` 이라 판정이 두 갈래였다.
+  const scoped = pathname.match(new RegExp(`^/${workspace}/teams/([^/]+)(?:/([^/]+))?$`))
+  const scopedTeamKey = scoped?.[1] !== undefined ? decodeURIComponent(scoped[1]) : null
+  const scopedSection = scoped?.[2] ?? (scopedTeamKey === null ? null : 'home')
   if (teams.length === 0) return null
   return (
     <div className="flex flex-col gap-0.5">
@@ -275,20 +270,45 @@ function TeamsNav({
       {teams.map((team) => {
         // 활성 스코프인 팀은 저장된 상태와 무관하게 펼친다(접힌 그룹이 지금 보는 화면을 숨기면 안 된다).
         // 팀이 하나뿐이면 접을 이유도 없으니 기본으로 펼쳐 둔다.
-        const holdsActive = scopedTeam === team.id
+        const holdsActive = scopedTeamKey === team.key
         const open = holdsActive || (openTeams[team.id] ?? teams.length === 1)
-        // Home 은 팀의 요약(라우트가 팀 id 를 갖는 유일한 자식)이고, Issues/Projects 는 워크스페이스 목록을
-        // 팀으로 스코프한 같은 화면이다 — 목록을 두 벌 만들지 않기 위해 쿼리 파라미터로 좁힌다.
-        const home = `/${workspace}/teams/${encodeURIComponent(team.id)}`
-        // 팀이 소유하는 것 — 이슈·프로젝트, 그리고 평가 결과인 스코어카드. 하네스·데이터셋·저지도 팀 소유지만
-        // 사이드바 행은 주지 않는다: 이름을 대고 찾아가는 것은 스코어카드이고, 나머지는 그 스코어카드나 팀에서
-        // 도달한다. 행이 늘어날수록 팀 그룹이 목록이 아니라 벽이 된다.
-        const scoped = (page: string) => `/${workspace}/${page}?team=${encodeURIComponent(team.id)}`
+        // 팀이 소유하는 것은 전부 팀 아래의 경로 자원이다 — `/{workspace}/teams/ENG/issues`. 목록은 여전히
+        // 한 벌이지만(같은 컴포넌트, 다른 주소), 팀마다 가진 것이 다르다는 사실은 URL 이 말한다.
+        // 하네스·데이터셋·저지도 팀 소유지만 사이드바 행은 주지 않는다: 이름을 대고 찾아가는 것은
+        // 스코어카드이고, 나머지는 그 스코어카드나 팀에서 도달한다. 행이 늘어날수록 팀 그룹이 벽이 된다.
         const children = [
-          { href: home, labelKey: 'teamHome', page: 'home' },
-          { href: scoped('issues'), labelKey: 'issues', page: 'issues' },
-          { href: scoped('projects'), labelKey: 'projects', page: 'projects' },
-          { href: scoped('scorecards'), labelKey: 'scorecards', page: 'scorecards' },
+          { href: teamHref(workspace, team.key), labelKey: 'teamHome', page: 'home' },
+          {
+            href: teamSectionHref(workspace, team.key, 'issues'),
+            labelKey: 'issues',
+            page: 'issues',
+          },
+          // 사이클은 팀의 것이다 — 팀 밖에 두면 "Cycle 3"이 누구의 세 번째인지 알 수 없다.
+          {
+            href: teamSectionHref(workspace, team.key, 'cycles'),
+            labelKey: 'cycles',
+            page: 'cycles',
+          },
+          // 트리아지는 그 팀이 켰을 때만 — 큐를 요청하지 않은 팀에게 빈 인박스를 보여줄 이유가 없다.
+          ...(team.triageEnabled
+            ? [
+                {
+                  href: teamSectionHref(workspace, team.key, 'triage'),
+                  labelKey: 'triage',
+                  page: 'triage',
+                },
+              ]
+            : []),
+          {
+            href: teamSectionHref(workspace, team.key, 'projects'),
+            labelKey: 'projects',
+            page: 'projects',
+          },
+          {
+            href: teamSectionHref(workspace, team.key, 'scorecards'),
+            labelKey: 'scorecards',
+            page: 'scorecards',
+          },
         ]
         return (
           <div key={team.id} className="flex flex-col gap-0.5">
@@ -313,11 +333,8 @@ function TeamsNav({
             {open && (
               <div className="ml-[13px] flex flex-col gap-0.5 border-l border-border/60 pl-2">
                 {children.map((child) => {
-                  const active =
-                    holdsActive &&
-                    (child.page === 'home'
-                      ? teamHomeMatch !== null
-                      : pathname === `/${workspace}/${child.page}`)
+                  // 경로 하나로 판정된다 — 어느 팀인지도, 그 팀의 어느 자원인지도 URL 이 들고 있다.
+                  const active = holdsActive && scopedSection === child.page
                   return (
                     <Link
                       key={child.page}

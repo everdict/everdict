@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 
 import type { Initiative } from '@/entities/initiative'
 import { Button } from '@/shared/ui/button'
+import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Input, Label, Textarea } from '@/shared/ui/input'
@@ -25,9 +26,13 @@ function cleared(next: string, previous: string | undefined): string | null | un
 export function InitiativeActions({
   workspace,
   initiative,
+  initiatives,
 }: {
   workspace: string
   initiative: Initiative
+  // 상위 후보 — 자기 자신은 뺀다. 자기 하위로 옮기는 시도는 제어 평면이 409 로 거절하므로, 여기서는
+  // 명백히 불가능한 선택지(자기 자신)만 지운다.
+  initiatives: { id: string; name: string }[]
 }) {
   const t = useTranslations('initiativesPage')
   const router = useRouter()
@@ -35,6 +40,7 @@ export function InitiativeActions({
   const [confirming, setConfirming] = useState(false)
   const [name, setName] = useState(initiative.name)
   const [description, setDescription] = useState(initiative.description ?? '')
+  const [parentId, setParentId] = useState(initiative.parentId ?? '')
   const [targetDate, setTargetDate] = useState(initiative.targetDate ?? '')
   const [pending, startTransition] = useTransition()
 
@@ -43,6 +49,9 @@ export function InitiativeActions({
       ...(name.trim() !== initiative.name && name.trim() !== '' ? { name: name.trim() } : {}),
       ...(cleared(description, initiative.description) !== undefined
         ? { description: cleared(description, initiative.description) }
+        : {}),
+      ...(parentId !== (initiative.parentId ?? '')
+        ? { parentId: parentId === '' ? null : parentId }
         : {}),
       ...(targetDate !== (initiative.targetDate ?? '')
         ? { targetDate: targetDate === '' ? null : targetDate }
@@ -126,6 +135,21 @@ export function InitiativeActions({
               id="edit-initiative-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-initiative-parent">{t('fieldParent')}</Label>
+            <Combobox
+              id="edit-initiative-parent"
+              value={parentId}
+              onChange={setParentId}
+              placeholder={t('fieldParentNone')}
+              options={[
+                { value: '', label: t('fieldParentNone') },
+                ...initiatives
+                  .filter((i) => i.id !== initiative.id)
+                  .map((i) => ({ value: i.id, label: i.name })),
+              ]}
             />
           </div>
           <div className="space-y-1.5">

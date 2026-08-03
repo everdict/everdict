@@ -2,6 +2,7 @@ import type {
   AgentMemberPreferenceStore,
   AgentTaskStore,
   ApprovalStore,
+  CycleStore,
   EnvelopeStore,
   EventConsumerStateStore,
   FsRevisionStore,
@@ -9,8 +10,10 @@ import type {
   IssueLabelStore,
   IssueStore,
   ProjectStore,
+  ProjectUpdateStore,
   TeamStore,
   TrajectoryStore,
+  WorkflowStateStore,
 } from "@everdict/application-control";
 import {
   type BrowserProfileStore,
@@ -27,6 +30,7 @@ import {
   InMemoryCallbackStore,
   InMemoryCapabilityStore,
   InMemoryCommentStore,
+  InMemoryCycleStore,
   InMemoryEnvelopeStore,
   InMemoryEventConsumerStateStore,
   InMemoryFsRevisionStore,
@@ -39,6 +43,7 @@ import {
   InMemoryOAuthStateStore,
   InMemoryPlatformEventStore,
   InMemoryProjectStore,
+  InMemoryProjectUpdateStore,
   InMemoryRecordingStore,
   InMemoryRunStore,
   InMemoryRunnerJobStore,
@@ -55,6 +60,7 @@ import {
   InMemoryUsageStore,
   InMemoryUserProfileStore,
   InMemoryViewStore,
+  InMemoryWorkflowStateStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
@@ -70,6 +76,7 @@ import {
   PgCallbackStore,
   PgCapabilityStore,
   PgCommentStore,
+  PgCycleStore,
   PgEnvelopeStore,
   PgEventConsumerStateStore,
   PgFsRevisionStore,
@@ -82,6 +89,7 @@ import {
   PgOAuthStateStore,
   PgPlatformEventStore,
   PgProjectStore,
+  PgProjectUpdateStore,
   PgRecordingStore,
   PgRunStore,
   PgRunnerJobStore,
@@ -98,6 +106,7 @@ import {
   PgUsageStore,
   PgUserProfileStore,
   PgViewStore,
+  PgWorkflowStateStore,
   PgWorkspaceInviteStore,
   PgWorkspaceSettingsStore,
   PgWorkspaceStore,
@@ -195,6 +204,9 @@ export interface Persistence {
   taskStore: AgentTaskStore; // workspace task ledger — cross-turn, cross-agent coordination (agent-teams)
   // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer.
   teamStore: TeamStore;
+  cycleStore: CycleStore;
+  workflowStateStore: WorkflowStateStore;
+  projectUpdateStore: ProjectUpdateStore;
   issueStore: IssueStore;
   issueLabelStore: IssueLabelStore;
   projectStore: ProjectStore;
@@ -296,6 +308,9 @@ export async function makePersistence(): Promise<Persistence> {
       viewStore: new InMemoryViewStore(),
       taskStore: new InMemoryAgentTaskStore(),
       teamStore: new InMemoryTeamStore(),
+      cycleStore: new InMemoryCycleStore(),
+      workflowStateStore: new InMemoryWorkflowStateStore(),
+      projectUpdateStore: new InMemoryProjectUpdateStore(),
       issueStore: inMemoryIssues,
       issueLabelStore: inMemoryIssueLabels,
       projectStore: new InMemoryProjectStore(),
@@ -352,6 +367,9 @@ export async function makePersistence(): Promise<Persistence> {
     viewStore: new PgViewStore(client),
     taskStore: new PgAgentTaskStore(client),
     teamStore: new PgTeamStore(client),
+    cycleStore: new PgCycleStore(client),
+    workflowStateStore: new PgWorkflowStateStore(client),
+    projectUpdateStore: new PgProjectUpdateStore(client),
     issueStore: new PgIssueStore(client),
     issueLabelStore: new PgIssueLabelStore(client),
     projectStore: new PgProjectStore(client),

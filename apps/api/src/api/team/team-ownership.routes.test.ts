@@ -98,6 +98,35 @@ describe("team ownership — an eval asset belongs to a team, and writes respect
     await other.close();
   });
 
+  it("names the owning team by KEY too — the same ref the URL carries", async () => {
+    const ctx = await build();
+    const app = serverFor(ctx, ["member"], [ctx.web.id]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges",
+      headers: bearer,
+      payload: { ...judge("by-key"), teamId: "WEB" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(await ctx.judgeRegistry.teamOfVersion?.("acme", "by-key", "1.0.0")).toBe(ctx.web.id);
+    await app.close();
+  });
+
+  it("404s a team that does not exist rather than failing as a server error", async () => {
+    // Resolving the ref moved in front of the gate, so an unknown team must come back as the store's 404 —
+    // an unhandled throw here used to leave the route as a 500.
+    const ctx = await build();
+    const app = serverFor(ctx, ["admin"], [], "root");
+    const res = await app.inject({
+      method: "POST",
+      url: "/judges",
+      headers: bearer,
+      payload: { ...judge("ghost"), teamId: "NOPE" },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
   it("lets an admin write across teams — a team they are not on must not be un-administrable", async () => {
     const ctx = await build();
     const app = serverFor(ctx, ["admin"], [], "root");
@@ -110,5 +139,161 @@ describe("team ownership — an eval asset belongs to a team, and writes respect
     expect(res.statusCode).toBe(201);
     expect(await ctx.judgeRegistry.teamOfVersion?.("acme", "governed", "1.0.0")).toBe(ctx.mobile.id);
     await app.close();
+  });
+});
+
+describe("POST /issues/:id/team — an issue changes hands, and its address changes with it", () => {
+  // A real TeamService here (not a stub allocator): the point of the move is that the destination team mints
+  // the new number, so the test needs two teams with their own counters.
+  async function server() {
+    const ctx = await build();
+    const issueStore = new InMemoryIssueStore();
+    const app = buildServer({
+      service: new RunService({ dispatcher: ctx.unusedDispatcher, store: new InMemoryRunStore() }),
+      teamService: ctx.teamService,
+      issueService: new IssueService({ teams: ctx.teamService, store: issueStore }),
+    });
+    return { app, ctx };
+  }
+  const H = { "x-everdict-tenant": "acme" };
+
+  it("re-mints the identifier under the destination team and keeps the old one resolving", async () => {
+    // Given: an issue filed on Web
+    const { app, ctx } = await server();
+    const filed = await app.inject({
+      method: "POST",
+      url: "/issues",
+      headers: H,
+      payload: { title: "flaky retry", teamId: ctx.web.id },
+    });
+    expect(filed.json().identifier).toBe("WEB-1");
+    // When: it moves to Mobile
+    const moved = await app.inject({
+      method: "POST",
+      url: `/issues/${filed.json().identifier}/team`,
+      headers: H,
+      payload: { teamId: ctx.mobile.id },
+    });
+    // Then: it answers to a Mobile name now …
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json()).toMatchObject({ teamId: ctx.mobile.id, identifier: "MOB-1", formerIdentifiers: ["WEB-1"] });
+    // … and the name in every link already pasted elsewhere still lands on it
+    const byOldName = await app.inject({ method: "GET", url: "/issues/WEB-1", headers: H });
+    expect(byOldName.json()).toMatchObject({ id: filed.json().id, identifier: "MOB-1" });
+    await app.close();
+  });
+
+  it("409s on a move to the team the issue is already on", async () => {
+    const { app, ctx } = await server();
+    const filed = await app.inject({
+      method: "POST",
+      url: "/issues",
+      headers: H,
+      payload: { title: "flaky retry", teamId: ctx.web.id },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/issues/${filed.json().id}/team`,
+      headers: H,
+      payload: { teamId: ctx.web.id },
+    });
+    expect(res.statusCode).toBe(409);
+    await app.close();
+  });
+
+  it("403s for a viewer — moving an issue is a write", async () => {
+    const ctx = await build();
+    const app = buildServer({
+      service: new RunService({ dispatcher: ctx.unusedDispatcher, store: new InMemoryRunStore() }),
+      teamService: ctx.teamService,
+      issueService: new IssueService({ teams: ctx.teamService, store: new InMemoryIssueStore() }),
+      requireAuth: true,
+      authenticator: {
+        async authenticate() {
+          return { subject: "v", workspace: "acme", roles: ["viewer"], via: "oidc" as const };
+        },
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/issues/any/team",
+      headers: bearer,
+      payload: { teamId: ctx.mobile.id },
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+});
+
+describe("private teams — a visibility filter, and a 404 rather than a 403", () => {
+  async function build() {
+    const teamStore = new InMemoryTeamStore();
+    const issueStore = new InMemoryIssueStore();
+    const teamService = new TeamService({ store: teamStore, issues: issueStore });
+    const open = await teamService.create({ tenant: "acme", key: "WEB", name: "Web", createdBy: "dana" });
+    const secret = await teamService.create({
+      tenant: "acme",
+      key: "SEC",
+      name: "Security",
+      createdBy: "dana",
+      isPrivate: true,
+    });
+    const issueService = new IssueService({ teams: teamService, store: issueStore });
+    const hidden = await issueService.create({
+      tenant: "acme",
+      createdBy: "dana",
+      teamId: secret.id,
+      title: "an embargoed finding",
+    });
+    return { teamService, issueService, open, secret, hidden };
+  }
+
+  function serverFor(ctx: Awaited<ReturnType<typeof build>>, roles: string[], subject: string) {
+    return buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      teamService: ctx.teamService,
+      issueService: ctx.issueService,
+      requireAuth: true,
+      authenticator: {
+        async authenticate() {
+          return { subject, workspace: "acme", roles, via: "oidc" as const };
+        },
+      },
+    });
+  }
+
+  it("drops a private team from the list, and its issues from the workspace list", async () => {
+    // Given: erin is a member of the workspace but on no roster
+    const ctx = await build();
+    const app = serverFor(ctx, ["member"], "erin");
+    const teams = (await app.inject({ method: "GET", url: "/teams", headers: bearer })).json();
+    expect(teams.map((t: { key: string }) => t.key)).toEqual(["WEB"]);
+    const issues = (await app.inject({ method: "GET", url: "/issues", headers: bearer })).json();
+    expect(issues.items).toEqual([]);
+    await app.close();
+  });
+
+  it("answers 404 — never 403 — for a private team's issue, so the error cannot confirm it exists", async () => {
+    const ctx = await build();
+    const app = serverFor(ctx, ["member"], "erin");
+    const res = await app.inject({ method: "GET", url: `/issues/${ctx.hidden.id}`, headers: bearer });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("shows it to the roster, and to an admin who could join in one click anyway", async () => {
+    const ctx = await build();
+    // dana created the team, so dana is on its roster
+    const asMember = serverFor(ctx, ["member"], "dana");
+    expect(
+      (await asMember.inject({ method: "GET", url: `/issues/${ctx.hidden.id}`, headers: bearer })).statusCode,
+    ).toBe(200);
+    await asMember.close();
+
+    const asAdmin = serverFor(ctx, ["admin"], "erin");
+    expect((await asAdmin.inject({ method: "GET", url: `/issues/${ctx.hidden.id}`, headers: bearer })).statusCode).toBe(
+      200,
+    );
+    await asAdmin.close();
   });
 });

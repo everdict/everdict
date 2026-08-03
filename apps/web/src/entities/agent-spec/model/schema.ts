@@ -62,7 +62,10 @@ export const TRIGGERABLE_EVENT_KINDS = [
   'issue.created',
   'issue.status_changed',
   'project.status_changed',
+  'project.update_posted',
   'initiative.status_changed',
+  // 이터레이션이 닫혔다 — 회고 요약을 쓰라는 신호. 사이클은 한 번 닫히므로 한 번만 깨운다.
+  'cycle.completed',
 ] as const
 
 // 이벤트 payload 에 대한 선언적 필터 하나 — filters 는 AND 결합(예: passRate < 1 = 실패 케이스 있는 배치).

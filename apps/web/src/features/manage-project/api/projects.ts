@@ -3,7 +3,12 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
-import { projectSchema, type Project, type ProjectStatus } from '@/entities/project'
+import {
+  projectSchema,
+  type Project,
+  type ProjectHealth,
+  type ProjectStatus,
+} from '@/entities/project'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -35,7 +40,8 @@ function revalidateProjects(): void {
 export async function createProjectAction(input: {
   name: string
   description?: string
-  initiativeId?: string
+  teamIds?: string[]
+  initiativeIds?: string[]
   targetDate?: string
 }): Promise<ProjectActionResult> {
   const ctx = await authContext()
@@ -53,7 +59,9 @@ export async function updateProjectAction(
   patch: {
     name?: string
     description?: string | null
-    initiativeId?: string | null
+    // 목록은 통째로 대체된다 — 빈 배열이 "전부 떼기"를 표현하는 유일한 방법이다.
+    teamIds?: string[]
+    initiativeIds?: string[]
     targetDate?: string | null
   }
 ): Promise<ProjectActionResult> {
@@ -91,6 +99,50 @@ export async function setProjectStatusAction(
       ...(message ? { error: message } : {}),
       ...(res.status === 409 && gate?.success ? { blockedBy: gate.data.openIssues } : {}),
     }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 업데이트 올리기 — 판정과 그 이유를 함께. 본문 없는 판정은 서버가 400 으로 거절한다.
+export async function postProjectUpdateAction(
+  id: string,
+  input: { health: ProjectHealth; body: string }
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await authContext()
+  try {
+    await controlPlane.postProjectUpdate(ctx, id, input)
+    revalidateProjects()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export async function addProjectMilestoneAction(
+  id: string,
+  input: { name: string; description?: string; targetDate?: string }
+): Promise<ProjectActionResult> {
+  const ctx = await authContext()
+  try {
+    const project = projectSchema.parse(await controlPlane.addProjectMilestone(ctx, id, input))
+    revalidateProjects()
+    return { ok: true, project }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 체크포인트를 지우면 그걸 가리키던 이슈들이 같은 동작에서 떨어져 나온다(서버가 한다).
+export async function removeProjectMilestoneAction(
+  id: string,
+  milestoneId: string
+): Promise<ProjectActionResult> {
+  const ctx = await authContext()
+  try {
+    const project = projectSchema.parse(await controlPlane.removeProjectMilestone(ctx, id, milestoneId))
+    revalidateProjects()
+    return { ok: true, project }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

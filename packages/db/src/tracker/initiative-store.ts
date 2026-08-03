@@ -53,13 +53,14 @@ interface InitiativeRow extends TrackerRow {
   name: string;
   description: string | null;
   status: string;
+  parent_id: string | null;
   target_date: string | null;
   completed_at: string | Date | null;
 }
 
 const INITIATIVE_COLUMNS =
-  "(id, tenant, name, description, status, target_date, completed_at, history, created_by, created_at, updated_at)";
-const INITIATIVE_VALUES = "($1,$2,$3,$4,$5,$6,$7::timestamptz,$8::jsonb,$9,$10::timestamptz,$11::timestamptz)";
+  "(id, tenant, name, description, status, parent_id, target_date, completed_at, history, created_by, created_at, updated_at)";
+const INITIATIVE_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::jsonb,$10,$11::timestamptz,$12::timestamptz)";
 
 function insertParams(record: InitiativeRecord): unknown[] {
   return [
@@ -68,6 +69,7 @@ function insertParams(record: InitiativeRecord): unknown[] {
     record.name,
     record.description ?? null,
     record.status,
+    record.parentId ?? null,
     record.targetDate ?? null,
     record.completedAt ?? null,
     JSON.stringify(record.history),
@@ -84,6 +86,7 @@ function rowToRecord(row: InitiativeRow): InitiativeRecord {
     name: row.name,
     ...(row.description !== null ? { description: row.description } : {}),
     status: row.status,
+    ...(row.parent_id !== null ? { parentId: row.parent_id } : {}),
     ...(row.target_date !== null ? { targetDate: row.target_date } : {}),
     ...(row.completed_at !== null ? { completedAt: iso(row.completed_at) } : {}),
     history: trackerHistory(row.history),
@@ -146,14 +149,15 @@ export class PgInitiativeStore implements InitiativeStore {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
     const next: InitiativeRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
-    const sets = `name=$3, description=$4, status=$5, target_date=$6, completed_at=$7::timestamptz,
-       history=$8::jsonb, updated_at=$9::timestamptz`;
+    const sets = `name=$3, description=$4, status=$5, parent_id=$6, target_date=$7, completed_at=$8::timestamptz,
+       history=$9::jsonb, updated_at=$10::timestamptz`;
     const params: unknown[] = [
       tenant,
       id,
       next.name,
       next.description ?? null,
       next.status,
+      next.parentId ?? null,
       next.targetDate ?? null,
       next.completedAt ?? null,
       JSON.stringify(next.history),

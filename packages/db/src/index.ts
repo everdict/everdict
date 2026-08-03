@@ -167,10 +167,17 @@ export { InMemoryCommentStore, PgCommentStore } from "./activity/comment-store.j
 export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent-session-store.js";
 export { InMemoryAgentTaskStore, PgAgentTaskStore } from "./activity/agent-task-store.js";
 // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, facts on the E0 same-tx outbox.
+export { InMemoryCycleStore, PgCycleStore } from "./tracker/cycle-store.js";
 export { InMemoryIssueStore, PgIssueStore } from "./tracker/issue-store.js";
 export { InMemoryIssueLabelStore, PgIssueLabelStore } from "./tracker/issue-label-store.js";
 export { InMemoryTeamStore, PgTeamStore } from "./tracker/team-store.js";
-export { InMemoryProjectStore, PgProjectStore } from "./tracker/project-store.js";
+export { InMemoryWorkflowStateStore, PgWorkflowStateStore } from "./tracker/workflow-state-store.js";
+export {
+  InMemoryProjectStore,
+  InMemoryProjectUpdateStore,
+  PgProjectStore,
+  PgProjectUpdateStore,
+} from "./tracker/project-store.js";
 export { InMemoryInitiativeStore, PgInitiativeStore } from "./tracker/initiative-store.js";
 export { InMemoryAnalysisArtifactStore, PgAnalysisArtifactStore } from "./activity/analysis-artifact-store.js";
 export { InMemoryRunnerStore, PgRunnerStore, generateRunnerToken } from "./workspace/runner-store.js";

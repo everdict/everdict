@@ -6,7 +6,7 @@ import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import { issueHref, type IssueStatus } from '@/entities/issue'
+import { ISSUE_PRIORITIES, issueHref, type IssuePriority, type IssueStatus } from '@/entities/issue'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
@@ -29,12 +29,18 @@ export function CreateIssueButton({
   projects,
   teams = [],
   defaultTeamId,
+  parentId,
+  label,
 }: {
   workspace: string
   projects: { id: string; name: string }[]
   // 팀이 하나뿐이면 고를 게 없다 — 필드를 숨기고 서버가 기본팀으로 보낸다.
   teams?: { id: string; key: string; name: string }[]
   defaultTeamId?: string
+  // 하위 이슈로 접수할 부모. 있으면 트리거가 "하위 이슈 추가"로 읽히고, 만든 뒤에도 부모 화면에 남는다 —
+  // 쪼개는 중에 매번 자식 화면으로 튕겨 나가면 다음 조각을 이어서 적을 수 없다.
+  parentId?: string
+  label?: string
 }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
@@ -45,6 +51,9 @@ export function CreateIssueButton({
   const [status, setStatus] = useState<IssueStatus>('backlog')
   const [projectId, setProjectId] = useState('')
   const [teamId, setTeamId] = useState(defaultTeamId ?? '')
+  const [priority, setPriority] = useState<IssuePriority>('none')
+  const [estimate, setEstimate] = useState('')
+  const [dueDate, setDueDate] = useState('')
   const [pending, startTransition] = useTransition()
 
   function submit() {
@@ -57,6 +66,10 @@ export function CreateIssueButton({
         status,
         ...(teamId ? { teamId } : {}),
         ...(projectId ? { projectId } : {}),
+        ...(priority !== 'none' ? { priority } : {}),
+        ...(estimate ? { estimate: Number(estimate) } : {}),
+        ...(dueDate ? { dueDate } : {}),
+        ...(parentId ? { parentId } : {}),
       })
       if (!r.ok || !r.issue) {
         toast.error(r.error ?? t('createError'))
@@ -66,15 +79,24 @@ export function CreateIssueButton({
       setTitle('')
       setDescription('')
       setProjectId('')
-      router.push(issueHref(workspace, r.issue.identifier))
+      setPriority('none')
+      setEstimate('')
+      setDueDate('')
+      // 하위 이슈를 만들 때는 부모 화면에 머문다(다음 조각을 이어서 적는 흐름) — 그 외에는 만든 이슈로 간다.
+      if (parentId !== undefined) router.refresh()
+      else router.push(issueHref(workspace, r.issue.identifier))
     })
   }
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
+      <Button
+        size={parentId === undefined ? 'sm' : 'xs'}
+        variant={parentId === undefined ? 'primary' : 'secondary'}
+        onClick={() => setOpen(true)}
+      >
         <Plus className="size-3.5" />
-        {t('create')}
+        {label ?? t('create')}
       </Button>
       <Dialog open={open} onClose={() => setOpen(false)} className="max-w-lg">
         <form
@@ -128,6 +150,39 @@ export function CreateIssueButton({
                 />
               </div>
             )}
+            <div className="space-y-1.5">
+              <Label htmlFor="issue-priority">{t('fieldPriority')}</Label>
+              <Combobox
+                id="issue-priority"
+                value={priority}
+                onChange={(v) => setPriority(v as IssuePriority)}
+                options={ISSUE_PRIORITIES.map((p) => ({
+                  value: p,
+                  label: tracker(`issuePriority.${p}`),
+                }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="issue-estimate">{t('fieldEstimate')}</Label>
+              <Input
+                id="issue-estimate"
+                type="number"
+                min={0}
+                max={1000}
+                value={estimate}
+                onChange={(e) => setEstimate(e.target.value)}
+                placeholder={t('fieldEstimateNone')}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="issue-due">{t('fieldDueDate')}</Label>
+              <Input
+                id="issue-due"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+              />
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="issue-project">{t('fieldProject')}</Label>
               <Combobox

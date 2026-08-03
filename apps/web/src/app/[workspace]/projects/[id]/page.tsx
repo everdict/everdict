@@ -1,19 +1,31 @@
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Rocket } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Flag, Rocket } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
-import { ProjectActions, ProjectStatusControl } from '@/features/manage-project'
+import { ProjectActions, ProjectStatusControl, ProjectUpdatePanel } from '@/features/manage-project'
 import { initiativesSchema, type Initiative } from '@/entities/initiative'
 import {
   ISSUE_STATUSES,
   issueHref,
-  issuesSchema,
+  issuePageSchema,
   IssueStatusIcon,
-  type Issue,
+  type IssueSummary,
 } from '@/entities/issue'
-import { memberDirectoryOf, membersSchema } from '@/entities/member'
-import { isPastDue, projectDetailSchema, type ProjectDetail } from '@/entities/project'
+import { memberDirectoryOf, memberNameOf, membersSchema } from '@/entities/member'
+import {
+  isPastDue,
+  projectDetailSchema,
+  projectUpdatesSchema,
+  type ProjectDetail,
+  type ProjectUpdate,
+} from '@/entities/project'
+import {
+  teamHref,
+  TeamKeyBadge,
+  teamsWithSummarySchema,
+  type TeamWithSummary,
+} from '@/entities/team'
 import { TrackerHistory } from '@/entities/tracker-history'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -30,6 +42,10 @@ import { SectionHeader } from '@/shared/ui/section-header'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 export const dynamic = 'force-dynamic'
+
+// 상태별 보드에 그릴 이슈 상한. 프로젝트의 진짜 총계는 서버가 파생하는 rollup 이 답하므로, 보드는
+// 최근 활동순 한 장이면 된다 — 목록 전체를 끌어와야 하는 화면이 아니다.
+const PROJECT_ISSUE_ROWS = 200
 
 function BackLink({ workspace, label }: { workspace: string; label: string }) {
   return (
@@ -83,11 +99,13 @@ export default async function ProjectDetailPage({
 
   // Supplementary reads — the detail still renders if any of them fails, so they run together and a failure
   // degrades only its own slot.
-  const [issues, initiatives, members] = await Promise.all([
+  const [issues, initiatives, members, teams, updates] = await Promise.all([
     controlPlane
-      .listIssues(ctx, { project: id })
-      .then((r) => issuesSchema.parse(r))
-      .catch((): Issue[] => []),
+      // 프로젝트 상세의 상태별 보드 — 한 프로젝트의 이슈는 한 장에 들어가는 규모이고, 롤업 숫자는 서버가
+      // 따로 파생한다(rollup). 여기서 필요한 건 그릴 행뿐이다.
+      .listIssues(ctx, { project: id, limit: PROJECT_ISSUE_ROWS })
+      .then((r) => issuePageSchema.parse(r).items)
+      .catch((): IssueSummary[] => []),
     controlPlane
       .listInitiatives(ctx)
       .then((r) => initiativesSchema.parse(r))
@@ -96,12 +114,27 @@ export default async function ProjectDetailPage({
       .listMembers(ctx)
       .then((r) => membersSchema.parse(r))
       .catch(() => []),
+    controlPlane
+      .listTeams(ctx)
+      .then((r) => teamsWithSummarySchema.parse(r))
+      .catch((): TeamWithSummary[] => []),
+    // 올라온 업데이트 — health 색이 바뀐 이유가 여기 있다.
+    controlPlane
+      .listProjectUpdates(ctx, id)
+      .then((r) => projectUpdatesSchema.parse(r))
+      .catch((): ProjectUpdate[] => []),
   ])
 
   const canWrite = can(principal?.roles ?? [], 'issues:write')
-  const initiative = current.initiativeId
-    ? initiatives.find((i) => i.id === current.initiativeId)
-    : undefined
+  // 프로젝트는 여러 우산 아래 놓일 수 있다. 브레드크럼은 첫 번째만 이고 가고(경로는 하나여야 한다), 나머지는
+  // 오른쪽 속성 열이 전부 보여 준다.
+  const projectInitiatives = current.initiativeIds
+    .map((initiativeId) => initiatives.find((i) => i.id === initiativeId))
+    .filter((i): i is Initiative => i !== undefined)
+  const initiative = projectInitiatives[0]
+  const projectTeams = current.teamIds
+    .map((teamId) => teams.find((x) => x.id === teamId))
+    .filter((x): x is TeamWithSummary => x !== undefined)
   const overdue =
     current.status !== 'completed' &&
     current.status !== 'cancelled' &&
@@ -150,6 +183,7 @@ export default async function ProjectDetailPage({
             workspace={workspace}
             project={current}
             initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
+            teams={teams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
           />
         )}
       </div>
@@ -166,15 +200,67 @@ export default async function ProjectDetailPage({
             <PropertyRow label={t('fieldStatus')}>
               <ProjectStatusControl id={current.id} status={current.status} canWrite={canWrite} />
             </PropertyRow>
-            {initiative && (
+            {projectInitiatives.length > 0 && (
               <PropertyRow label={t('fieldInitiative')}>
-                <Link
-                  href={`/${workspace}/initiatives/${encodeURIComponent(initiative.id)}`}
-                  className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
+                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                  {projectInitiatives.map((row) => (
+                    <Link
+                      key={row.id}
+                      href={`/${workspace}/initiatives/${encodeURIComponent(row.id)}`}
+                      className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
+                    >
+                      <Rocket className="size-3.5 shrink-0 text-faint" />
+                      <span className="truncate">{row.name}</span>
+                    </Link>
+                  ))}
+                </span>
+              </PropertyRow>
+            )}
+            {current.health !== undefined && (
+              <PropertyRow label={t('fieldHealth')}>
+                <Badge
+                  tone={
+                    current.health === 'off_track'
+                      ? 'danger'
+                      : current.health === 'at_risk'
+                        ? 'warning'
+                        : 'success'
+                  }
                 >
-                  <Rocket className="size-3.5 shrink-0 text-faint" />
-                  <span className="truncate">{initiative.name}</span>
-                </Link>
+                  {tracker(`projectHealth.${current.health}`)}
+                </Badge>
+              </PropertyRow>
+            )}
+            {current.lead !== undefined && (
+              <PropertyRow label={t('fieldLead')}>
+                <span className="truncate">{memberNameOf(actors, current.lead)}</span>
+              </PropertyRow>
+            )}
+            {current.memberIds.length > 0 && (
+              <PropertyRow label={t('fieldMembers')}>
+                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  {current.memberIds.map((subject) => (
+                    <span key={subject} className="truncate">
+                      {memberNameOf(actors, subject)}
+                    </span>
+                  ))}
+                </span>
+              </PropertyRow>
+            )}
+            {projectTeams.length > 0 && (
+              <PropertyRow label={t('fieldTeams')}>
+                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  {projectTeams.map((row) => (
+                    <Link
+                      key={row.id}
+                      href={teamHref(workspace, row.key)}
+                      className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
+                    >
+                      <TeamKeyBadge teamKey={row.key} />
+                      <span className="truncate">{row.name}</span>
+                    </Link>
+                  ))}
+                </span>
               </PropertyRow>
             )}
             {current.targetDate && (
@@ -282,6 +368,79 @@ export default async function ProjectDetailPage({
               ))}
             </section>
           )}
+
+          {/* 마일스톤 — 프로젝트 안의 체크포인트. 순서가 곧 의미라 sortOrder 대로 세운다. */}
+          {current.milestones.length > 0 && (
+            <section className="space-y-3">
+              <SectionHeader title={t('milestonesTitle', { count: current.milestones.length })} />
+              <div className="space-y-1.5">
+                {[...current.milestones]
+                  .sort((a, b) => a.sortOrder - b.sortOrder)
+                  .map((milestone) => (
+                    <div
+                      key={milestone.id}
+                      className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2 shadow-raise"
+                    >
+                      <Flag className="size-3.5 shrink-0 text-faint" />
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                        {milestone.name}
+                      </span>
+                      {milestone.targetDate && (
+                        <time className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                          {milestone.targetDate}
+                        </time>
+                      )}
+                      <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                        {t('milestoneIssues', {
+                          count: issues.filter((issue) => issue.milestoneId === milestone.id)
+                            .length,
+                        })}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </section>
+          )}
+
+          {/* 업데이트 — 트래커가 기록하는 유일한 판단. 색이 왜 바뀌었는지가 여기 문장으로 남는다. */}
+          <section className="space-y-3">
+            <SectionHeader title={t('updatesTitle')} />
+            {canWrite && <ProjectUpdatePanel id={current.id} />}
+            {updates.length > 0 && (
+              <div className="space-y-2">
+                {updates.map((update) => (
+                  <article key={update.id} className="rounded-lg border bg-card p-3 shadow-raise">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge
+                        tone={
+                          update.health === 'off_track'
+                            ? 'danger'
+                            : update.health === 'at_risk'
+                              ? 'warning'
+                              : 'success'
+                        }
+                      >
+                        {tracker(`projectHealth.${update.health}`)}
+                      </Badge>
+                      <span className="text-[12px] text-muted-foreground">
+                        {memberNameOf(actors, update.createdBy)}
+                      </span>
+                      <time
+                        className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground"
+                        dateTime={update.createdAt}
+                        title={fmtDateTimeFull(update.createdAt, { timeZone })}
+                      >
+                        {fmtDateTime(update.createdAt, timeZone)}
+                      </time>
+                    </div>
+                    <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground">
+                      {update.body}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
           {current.history.length > 0 && (
             <section className="space-y-3">

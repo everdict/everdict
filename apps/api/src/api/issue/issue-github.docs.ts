@@ -30,7 +30,7 @@ const GithubCandidateSchema = z.object({
 });
 
 export const issueGithubDocs: Record<
-  "candidates" | "import" | "pullRepository" | "pullIssue" | "setSync" | "detach",
+  "candidates" | "import" | "pullRepository" | "pullIssue" | "setSync" | "detach" | "attachment",
   FastifySchema
 > = {
   candidates: {
@@ -118,6 +118,24 @@ export const issueGithubDocs: Record<
     tags: ["issue"],
     response: {
       200: { description: "The detached issue", ...toJsonSchema(IssueRecordSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  attachment: {
+    summary: "Fetch an image embedded in an imported issue",
+    description:
+      "The bytes behind an attachment URL in this issue's description or comments, read with the workspace " +
+      "GitHub App installation the issue was imported through. An attachment on GitHub Enterprise — or on any " +
+      "private repository — is behind the same authentication the repository is, and a browser rendering the " +
+      "issue here has no GitHub session to offer, so it can only be served through this endpoint. The URL is " +
+      "pinned to the issue's own GitHub host: anything else is a 400. Unlike everything else in this file the " +
+      "response is the raw image, not JSON. Requires issues:read.",
+    tags: ["issue"],
+    querystring: toJsonSchema(
+      z.object({ url: z.string().describe("absolute attachment URL taken from the issue body") }),
+    ),
+    response: {
+      200: { description: "The attachment bytes, with GitHub's own content-type", type: "string", format: "binary" },
       ...errorResponses(400, 401, 403, 404),
     },
   },

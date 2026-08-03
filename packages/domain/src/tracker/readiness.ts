@@ -38,7 +38,13 @@ export function projectRollup(issues: readonly IssueRecord[]): ProjectRollup {
 // The deployment verdict. Open issues are counted across every non-cancelled project REGARDLESS of that
 // project's own status: a project marked completed whose issue later regressed still blocks the release. The
 // project status is history; readiness is live truth.
+//
+// `projects` is everything claimed by THIS initiative or any of its descendants — the service walks the tree
+// (it holds the store); the arithmetic here stays pure. A project that does not name the initiative directly
+// came up through a descendant, and the summary says which, so a blocked release can point at where the block
+// actually sits instead of just at the umbrella.
 export function initiativeReadiness(
+  initiativeId: string,
   projects: readonly ProjectRecord[],
   issuesByProject: ReadonlyMap<string, readonly IssueRecord[]>,
 ): InitiativeReadiness {
@@ -49,9 +55,15 @@ export function initiativeReadiness(
   for (const project of projects) {
     const issues = issuesByProject.get(project.id) ?? [];
     const rollup = projectRollup(issues);
+    // Directly claimed = no "via". Otherwise the first descendant on the project's list — a project serving two
+    // descendants of the same initiative is one umbrella's business either way.
+    const via = project.initiativeIds.includes(initiativeId)
+      ? undefined
+      : project.initiativeIds.find((id) => id !== initiativeId);
     summaries.push({
       id: project.id,
       name: project.name,
+      ...(via !== undefined ? { viaInitiativeId: via } : {}),
       status: project.status,
       ...(project.targetDate !== undefined ? { targetDate: project.targetDate } : {}),
       ...(project.completedAt !== undefined ? { completedAt: project.completedAt } : {}),

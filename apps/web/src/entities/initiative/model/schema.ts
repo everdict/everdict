@@ -25,6 +25,8 @@ export const initiativeSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   status: initiativeStatusSchema,
+  // 상위 이니셔티브 — 준비도(readiness)는 하위까지 훑어 올라오므로, 큰 베팅을 쪼개도 릴리스 게이트는 하나다.
+  parentId: z.string().optional(),
   targetDate: calendarDateSchema.optional(),
   completedAt: z.string().optional(),
   history: z.array(trackerHistoryEntrySchema).default([]),
@@ -46,6 +48,8 @@ export const initiativeBlockerSchema = z.object({
 export const initiativeProjectSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
+  // 이 프로젝트를 실제로 품은 이니셔티브 — 없으면 이 이니셔티브 직속, 있으면 그 하위를 거쳐 올라온 것.
+  viaInitiativeId: z.string().optional(),
   status: projectStatusSchema,
   targetDate: calendarDateSchema.optional(),
   completedAt: z.string().optional(),

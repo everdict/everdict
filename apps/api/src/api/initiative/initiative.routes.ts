@@ -35,6 +35,7 @@ export function registerInitiativeRoutes(app: FastifyInstance, deps: ServerDeps)
           createdBy: principal.subject,
           name: body.name,
           ...(body.description !== undefined ? { description: body.description } : {}),
+          ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
           ...(body.targetDate !== undefined ? { targetDate: body.targetDate } : {}),
         }),
       );

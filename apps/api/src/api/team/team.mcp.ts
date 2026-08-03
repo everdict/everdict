@@ -23,9 +23,12 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
       run(principal, "teams:read", async () => {
         await teams.ensureDefault(ws, principal.subject);
         const rows = await teams.list(ws, { ...(a.mine === true ? { member: principal.subject } : {}) });
-        return ok(
-          await Promise.all(rows.map(async (team) => ({ ...team, summary: await teams.summary(ws, team.id) }))),
+        // Batched exactly like the HTTP twin — the counts come from two workspace aggregates, not a read per row.
+        const summaries = await teams.summaries(
+          ws,
+          rows.map((team) => team.id),
         );
+        return ok(rows.map((team) => ({ ...team, summary: summaries.get(team.id) })));
       }),
   );
 
@@ -54,6 +57,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
         name: z.string().min(1).max(200),
         description: z.string().max(2000).optional(),
         isDefault: z.boolean().optional().describe("promote to the workspace default, demoting the incumbent"),
+        parentId: z.string().optional().describe("nest this team under another — organisational only"),
         members: z.array(z.string()).max(200).optional(),
       },
     },
@@ -66,6 +70,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
             key: a.key,
             name: a.name,
             ...(a.description !== undefined ? { description: a.description } : {}),
+            ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
             ...(a.isDefault !== undefined ? { isDefault: a.isDefault } : {}),
             ...(a.members !== undefined ? { members: a.members } : {}),
           }),
@@ -77,12 +82,14 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
     "update_team",
     {
       description:
-        "Rename a team or edit its description. The key cannot change — it is baked into every identifier the " +
-        "team has already minted. Requires admin.",
+        "Rename a team, edit its description, or re-parent it. The key cannot change — it is baked into every " +
+        "identifier the team has already minted. Pass parentId null to detach it back to the top level; " +
+        "nesting it under one of its own sub-teams is refused. Requires admin.",
       inputSchema: {
         id: z.string(),
         name: z.string().min(1).max(200).optional(),
         description: z.string().max(2000).nullable().optional(),
+        parentId: z.string().nullable().optional(),
       },
     },
     (a) =>
@@ -94,6 +101,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
             {
               ...(a.name !== undefined ? { name: a.name } : {}),
               ...(a.description !== undefined ? { description: a.description } : {}),
+              ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
             },
             actor,
           ),

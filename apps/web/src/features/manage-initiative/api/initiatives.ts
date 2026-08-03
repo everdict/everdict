@@ -32,6 +32,8 @@ function revalidateInitiatives(): void {
 export async function createInitiativeAction(input: {
   name: string
   description?: string
+  // 상위 이니셔티브 — 준비도는 하위까지 훑어 올라오므로, 쪼개도 릴리스 게이트는 하나로 남는다.
+  parentId?: string
   targetDate?: string
 }): Promise<InitiativeActionResult> {
   const ctx = await authContext()
@@ -47,7 +49,13 @@ export async function createInitiativeAction(input: {
 // Projects join an initiative from the PROJECT side (PATCH /projects/:id), so membership is not editable here.
 export async function updateInitiativeAction(
   id: string,
-  patch: { name?: string; description?: string | null; targetDate?: string | null }
+  patch: {
+    name?: string
+    description?: string | null
+    // null 은 상위에서 떼어내 최상위로 되돌린다.
+    parentId?: string | null
+    targetDate?: string | null
+  }
 ): Promise<InitiativeActionResult> {
   const ctx = await authContext()
   try {

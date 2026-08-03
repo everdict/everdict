@@ -1,8 +1,10 @@
 import { TeamMemberRecordSchema, TeamRecordSchema, TeamSummarySchema } from "@everdict/contracts";
+import { WorkflowStateRecordSchema } from "@everdict/contracts";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { AddTeamMemberBodySchema, CreateTeamBodySchema, UpdateTeamBodySchema } from "./request/create-team.js";
+import { CreateWorkflowStateBodySchema, UpdateWorkflowStateBodySchema } from "./request/workflow-state.js";
 
 // OpenAPI descriptors for the tracker's teams (doc-only — never validates/serializes; see api/openapi.ts).
 // A team owns ISSUES and names them (`ENG-12`); projects and initiatives stay workspace-level so a release
@@ -12,7 +14,19 @@ import { AddTeamMemberBodySchema, CreateTeamBodySchema, UpdateTeamBodySchema } f
 const TeamWithSummarySchema = TeamRecordSchema.extend({ summary: TeamSummarySchema });
 
 export const teamDocs: Record<
-  "create" | "list" | "get" | "update" | "makeDefault" | "delete" | "listMembers" | "addMember" | "removeMember",
+  | "create"
+  | "list"
+  | "get"
+  | "update"
+  | "makeDefault"
+  | "delete"
+  | "listStates"
+  | "createState"
+  | "updateState"
+  | "deleteState"
+  | "listMembers"
+  | "addMember"
+  | "removeMember",
   FastifySchema
 > = {
   create: {
@@ -77,6 +91,53 @@ export const teamDocs: Record<
     description:
       "Refuses (409) for the default team, for the last remaining team, and for a team that still holds " +
       "issues — naming the count. Creator-or-admin. Requires teams:write.",
+    tags: ["team"],
+    response: { 204: { description: "Deleted" }, ...errorResponses(401, 403, 404, 409) },
+  },
+  listStates: {
+    summary: "The team's workflow states",
+    description:
+      "A team's own names for the positions in its workflow, in board order. Each state declares the CANONICAL " +
+      "status it is a view onto — which is what lets a team rename a column, recolour it, reorder the board or " +
+      "add one without any of it reaching the release gate, the rollups or the regression watch. A team with " +
+      "no board yet gets the default six here. Requires teams:read.",
+    tags: ["team"],
+    response: {
+      200: { description: "States in board order", ...toJsonSchema(z.array(WorkflowStateRecordSchema)) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  createState: {
+    summary: "Add a workflow state",
+    description:
+      "A new column at the end of the board, declaring which canonical status it is. `regressed` is refused: " +
+      "an issue reaches it by a resolution falling, never by somebody dragging a card. A duplicate name is a " +
+      "409. Requires teams:write.",
+    tags: ["team"],
+    body: toJsonSchema(CreateWorkflowStateBodySchema),
+    response: {
+      201: { description: "The new state", ...toJsonSchema(WorkflowStateRecordSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  updateState: {
+    summary: "Rename, recolour, reorder or re-map a state",
+    description:
+      "Renaming and recolouring are cosmetic; changing `position` reorders the board; changing `status` " +
+      "RE-MAPS the column, which moves every issue in it to that canonical status in the same operation — the " +
+      "board and the record can never disagree. Requires teams:write.",
+    tags: ["team"],
+    body: toJsonSchema(UpdateWorkflowStateBodySchema),
+    response: {
+      200: { description: "The updated state", ...toJsonSchema(WorkflowStateRecordSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  deleteState: {
+    summary: "Remove a workflow state",
+    description:
+      "Refused with a 409 while the state still holds issues (they would name a column that no longer exists) " +
+      "and refused for the last remaining state. Requires teams:write.",
     tags: ["team"],
     response: { 204: { description: "Deleted" }, ...errorResponses(401, 403, 404, 409) },
   },

@@ -29,6 +29,7 @@ export interface CreateInitiativeInput {
   createdBy: string;
   name: string;
   description?: string;
+  parentId?: string;
   targetDate?: string;
 }
 
@@ -51,11 +52,13 @@ export class InitiativeService {
   }
 
   async create(input: CreateInitiativeInput): Promise<InitiativeRecord> {
+    if (input.parentId !== undefined) await this.get(input.tenant, input.parentId); // 404 if it is not ours
     const record = Initiative.newInitiative({
       id: this.newId(),
       tenant: input.tenant,
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
       createdBy: input.createdBy,
       now: this.now(),
@@ -84,13 +87,40 @@ export class InitiativeService {
     return { ...record, readiness: await this.readiness(tenant, id) };
   }
 
-  // The deployment verdict: every project under the umbrella, each project's issues, one answer.
+  // The deployment verdict: every project under the umbrella — including the ones claimed by a DESCENDANT
+  // initiative — each project's issues, one answer. Nesting exists so a big bet can decompose, and a parent
+  // that reported "ready" while a sub-initiative was still blocked would make the decomposition a way to hide
+  // work from the release gate.
   async readiness(tenant: string, id: string): Promise<InitiativeReadiness> {
-    const projects = await this.deps.projects.list(tenant, { initiativeId: id });
+    const scope = await this.subtreeIds(tenant, id);
+    const projects = await this.deps.projects.list(tenant, { initiativeIds: scope });
     const issuesByProject = new Map<string, IssueRecord[]>();
     for (const project of projects)
       issuesByProject.set(project.id, await this.deps.issues.list(tenant, { projectId: project.id }));
-    return initiativeReadiness(projects, issuesByProject);
+    return initiativeReadiness(id, projects, issuesByProject);
+  }
+
+  // The initiative plus every descendant. One list of the workspace's initiatives and an in-memory walk: a
+  // workspace holds a handful of them, and a query per level would cost a round trip per level of nesting for
+  // the same answer. Visited-set guarded, so even a cycle written by an older build terminates here.
+  private async subtreeIds(tenant: string, rootId: string): Promise<string[]> {
+    const all = await this.deps.store.list(tenant);
+    const childrenOf = new Map<string, string[]>();
+    for (const initiative of all) {
+      if (initiative.parentId === undefined) continue;
+      childrenOf.set(initiative.parentId, [...(childrenOf.get(initiative.parentId) ?? []), initiative.id]);
+    }
+    const scope: string[] = [];
+    const seen = new Set<string>();
+    const queue = [rootId];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (current === undefined || seen.has(current)) continue;
+      seen.add(current);
+      scope.push(current);
+      queue.push(...(childrenOf.get(current) ?? []));
+    }
+    return scope;
   }
 
   async update(
@@ -100,6 +130,19 @@ export class InitiativeService {
     actor: InitiativeActor,
   ): Promise<InitiativeRecord> {
     const record = await this.get(tenant, id);
+    // Re-parenting is checked against the LIVE tree, not the record: the illegal move is not "my new parent is
+    // me" (the aggregate catches that) but "my new parent is one of my own descendants", which would make the
+    // readiness walk loop forever and the umbrella unanswerable.
+    if (fields.parentId !== undefined && fields.parentId !== null) {
+      await this.get(tenant, fields.parentId);
+      const descendants = await this.subtreeIds(tenant, id);
+      if (descendants.includes(fields.parentId))
+        throw new ConflictError(
+          "CONFLICT",
+          { initiative: id, parent: fields.parentId },
+          "That initiative sits under this one — moving it there would make the tree circular.",
+        );
+    }
     return this.applyTransition(record, Initiative.from(record).update(fields, actor.subject, this.now()));
   }
 
@@ -133,6 +176,15 @@ export class InitiativeService {
         "CONFLICT",
         { initiative: id },
         "This initiative still holds projects — move them out first.",
+      );
+    // Same reason a team with sub-teams cannot be deleted: the children would point at an id that resolves to
+    // nothing, and where they should go instead is the member's decision.
+    const children = (await this.deps.store.list(tenant)).filter((initiative) => initiative.parentId === id);
+    if (children.length > 0)
+      throw new ConflictError(
+        "CONFLICT",
+        { initiative: id, children: children.length },
+        `This initiative still has ${children.length} sub-initiative(s) — move or delete them first.`,
       );
     await this.deps.store.remove(tenant, id);
   }

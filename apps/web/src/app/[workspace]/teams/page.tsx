@@ -1,7 +1,12 @@
 import Link from 'next/link'
 import { getTranslations } from 'next-intl/server'
 
-import { TeamKeyBadge, teamsWithSummarySchema, type TeamWithSummary } from '@/entities/team'
+import {
+  teamHref,
+  TeamKeyBadge,
+  teamsWithSummarySchema,
+  type TeamWithSummary,
+} from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -65,7 +70,7 @@ export default async function TeamsDirectoryPage({
             <li key={team.id}>
               {/* 행 전체가 팀 홈으로 — 리스트의 행이 엔티티면 이름이 곧 드릴인이다. */}
               <Link
-                href={`/${workspace}/teams/${encodeURIComponent(team.id)}`}
+                href={teamHref(workspace, team.key)}
                 className="flex items-center gap-3 px-3 py-2.5 hover:bg-accent/40"
               >
                 <TeamKeyBadge teamKey={team.key} />

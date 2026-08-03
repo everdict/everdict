@@ -25,6 +25,7 @@ import {
 export function TeamDetailManager({
   team,
   members,
+  parents,
   candidates,
   directory,
   workspace,
@@ -32,6 +33,8 @@ export function TeamDetailManager({
 }: {
   team: TeamWithSummary
   members: TeamMember[]
+  // 상위로 걸 수 있는 팀들(자기 자신 제외). 자기 하위로 옮기는 시도는 제어 평면이 409로 거절한다.
+  parents: { value: string; label: string }[]
   candidates: { value: string; label: string }[]
   // subject → 사람. 이 페이지는 서버에서 이미 워크스페이스 멤버를 읽으므로 클라이언트 조회를 또 하지 않는다
   // (entities/member 의 지연 디렉토리는 그 데이터가 없는 화면용이다).
@@ -44,6 +47,10 @@ export function TeamDetailManager({
   const [error, setError] = useState<string>()
   const [name, setName] = useState(team.name)
   const [description, setDescription] = useState(team.description ?? '')
+  const [parentId, setParentId] = useState(team.parentId ?? '')
+  const [cycleWeeks, setCycleWeeks] = useState(String(team.cycleDurationWeeks))
+  const [triage, setTriage] = useState(team.triageEnabled)
+  const [isPrivate, setIsPrivate] = useState(team.isPrivate)
   const [addSubject, setAddSubject] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -60,7 +67,13 @@ export function TeamDetailManager({
     })
   }
 
-  const dirty = name.trim() !== team.name || description.trim() !== (team.description ?? '')
+  const dirty =
+    name.trim() !== team.name ||
+    description.trim() !== (team.description ?? '') ||
+    parentId !== (team.parentId ?? '') ||
+    cycleWeeks !== String(team.cycleDurationWeeks) ||
+    triage !== team.triageEnabled ||
+    isPrivate !== team.isPrivate
   const onRoster = new Set(members.map((m) => m.subject))
   const addable = candidates.filter((c) => !onRoster.has(c.value))
 
@@ -92,6 +105,51 @@ export function TeamDetailManager({
               className="w-72"
             />
           </SettingsRow>
+          <SettingsRow label={t('parentLabel')} htmlFor="team-parent" hint={t('parentHint')}>
+            <Combobox
+              id="team-parent"
+              value={parentId}
+              onChange={setParentId}
+              disabled={!canWrite}
+              placeholder={t('parentNone')}
+              className="w-72"
+              options={[{ value: '', label: t('parentNone') }, ...parents]}
+            />
+          </SettingsRow>
+          <SettingsRow label={t('cycleWeeksLabel')} htmlFor="team-cycle-weeks" hint={t('cycleWeeksHint')}>
+            <Input
+              id="team-cycle-weeks"
+              type="number"
+              min={1}
+              max={12}
+              value={cycleWeeks}
+              onChange={(e) => setCycleWeeks(e.target.value)}
+              disabled={!canWrite}
+              className="w-24"
+            />
+          </SettingsRow>
+          <SettingsRow label={t('triageLabel')} hint={t('triageHint')}>
+            {/* 큐를 요청하지 않은 팀에게 빈 인박스를 보여주지 않도록, 켠 팀만 사이드바에 트리아지 줄을 갖는다. */}
+            <Button
+              size="sm"
+              variant={triage ? 'primary' : 'secondary'}
+              disabled={!canWrite}
+              onClick={() => setTriage((on) => !on)}
+            >
+              {triage ? t('triageOn') : t('triageOff')}
+            </Button>
+          </SettingsRow>
+          <SettingsRow label={t('privateLabel')} hint={t('privateHint')}>
+            {/* 가시성 필터일 뿐 권한 축이 아니다 — 관리자는 어차피 로스터에 자신을 한 번에 넣을 수 있어서 계속 본다. */}
+            <Button
+              size="sm"
+              variant={isPrivate ? 'primary' : 'secondary'}
+              disabled={!canWrite}
+              onClick={() => setIsPrivate((on) => !on)}
+            >
+              {isPrivate ? t('privateOn') : t('privateOff')}
+            </Button>
+          </SettingsRow>
           <SettingsRow label={t('defaultLabel')} hint={t('defaultHint')}>
             {team.isDefault ? (
               <span className="text-xs text-muted-foreground">{t('isDefault')}</span>
@@ -116,6 +174,10 @@ export function TeamDetailManager({
                 updateTeamAction(team.id, {
                   name: name.trim(),
                   description: description.trim() === '' ? null : description.trim(),
+                  parentId: parentId === '' ? null : parentId,
+                  cycleDurationWeeks: Number(cycleWeeks),
+                  triageEnabled: triage,
+                  isPrivate,
                 })
               )
             }
