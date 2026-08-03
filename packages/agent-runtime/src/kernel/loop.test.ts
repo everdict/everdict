@@ -421,6 +421,103 @@ describe("runAgentLoop", () => {
     expect(result.turns).toBe(3);
   });
 
+  it("keeps watching when the identical tool call keeps returning a changed result", async () => {
+    let polls = 0;
+    const getScorecard: ToolDefinition = {
+      name: "get_scorecard",
+      description: "scorecard status",
+      parametersJsonSchema: { type: "object", properties: { id: { type: "string" } } },
+      isReadOnly: true,
+      // The world moves between identical questions — the answer is never the same twice.
+      call: async () => ({ content: `running ${++polls * 8}/50 cases`, isError: false }),
+    };
+    // Watching an async job re-sends the same arguments by design: four identical batches, each answered differently.
+    const { transport } = fakeTransport([
+      toolCallResult("c1", "get_scorecard", '{"id":"sc1"}'),
+      toolCallResult("c2", "get_scorecard", '{"id":"sc1"}'),
+      toolCallResult("c3", "get_scorecard", '{"id":"sc1"}'),
+      toolCallResult("c4", "get_scorecard", '{"id":"sc1"}'),
+      textResult("the batch finished"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([getScorecard]),
+    });
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.content).toBe("the batch finished");
+    expect(polls).toBe(4);
+  });
+
+  it("parks the run with stopReason waiting when the agent calls wait_for", async () => {
+    const { transport } = fakeTransport([
+      toolCallResult(
+        "c1",
+        "wait_for",
+        JSON.stringify({
+          kinds: ["scorecard.completed"],
+          filters: [{ field: "id", op: "eq", value: "sc1" }],
+          note: "watching scorecard sc1 to report its pass rate",
+          timeout_seconds: 900,
+        }),
+      ),
+      textResult("unreached — the run ended at the wait"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      waitFor: { kinds: ["scorecard.completed", "scorecard.failed"] },
+    });
+    // Waiting is NOT end_turn: the work continues and the agent still owes an answer.
+    expect(result.stopReason).toBe("waiting");
+    expect(result.waitRequest).toEqual({
+      kinds: ["scorecard.completed"],
+      filters: [{ field: "id", op: "eq", value: "sc1" }],
+      note: "watching scorecard sc1 to report its pass rate",
+      timeoutSeconds: 900,
+    });
+    // The transcript ends balanced — the wait_for call has its tool result, so the conversation replays verbatim.
+    const last = result.produced[result.produced.length - 1];
+    expect(last?.role).toBe("tool");
+  });
+
+  it("rejects a wait on an event kind the host cannot resume on, and keeps going", async () => {
+    const { transport } = fakeTransport([
+      toolCallResult("c1", "wait_for", JSON.stringify({ kinds: ["invented.kind"], note: "watching" })),
+      textResult("picked a different approach"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      waitFor: { kinds: ["scorecard.completed"] },
+    });
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.waitRequest).toBeUndefined();
+    const toolText = result.produced.filter((m) => m.role === "tool").map((m) => (m as { content: string }).content);
+    expect(toolText[0]).toContain("is not a waitable event kind");
+  });
+
+  it("does not offer wait_for when the host cannot resume conversations", async () => {
+    const { transport, requests } = fakeTransport([textResult("done")]);
+    await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+    });
+    const offered = (requests[0]?.tools ?? []).map((t) => t.name);
+    expect(offered).not.toContain("wait_for");
+  });
+
   it("recovers from a context-overflow (413) by compacting once and retrying the same turn", async () => {
     // A long history with big old tool results so rung-1 microcompact can reclaim tokens on the reactive path.
     const big = "R".repeat(600);

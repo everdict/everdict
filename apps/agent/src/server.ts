@@ -33,6 +33,7 @@ import { runSkillTry } from "./skill-try.js";
 import { TeammateSupervisor } from "./teammate-supervisor.js";
 import { runTeammateTurn } from "./teammate-turn.js";
 import type { AgentRunEventReport } from "./usage.js";
+import { buildWakeResumer } from "./wake-resume.js";
 
 export interface AgentServerDeps extends ChatDeps {
   authenticate: Authenticate;
@@ -310,6 +311,20 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         })
       : undefined;
   app.decorate("agentActivator", activator);
+
+  // Resuming parked conversations (LESSON 051). Distinct from the activator above: that one starts a NEW run when a
+  // fact matches a crafted agent's triggers; this one continues the EXISTING conversation that asked to be woken by
+  // exactly this fact — the agent finishing what it started, where the member is already looking.
+  const resumer = deps.keyStore
+    ? buildWakeResumer({
+        chat: deps,
+        authenticate: deps.authenticate,
+        keyStore: deps.keyStore,
+        isLive: (workspace, sessionId) => liveTurns.isLive(workspace, sessionId),
+      })
+    : undefined;
+
+  app.decorate("wakeResumer", resumer);
 
   app.get("/healthz", async () => ({ ok: true }));
 
@@ -985,10 +1000,21 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         })
         .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-      const { workspace, recipient, kind, source, message } = parsed.data;
+      const { workspace, recipient, kind, source, message, payload } = parsed.data;
       const notified = recipient !== undefined ? fanEvent(workspace, recipient, kind, source, message) : 0;
       const activated = activator ? await activator.onEvent({ workspace, ...eventOf(parsed.data) }) : 0;
-      return reply.send({ notified, activated });
+      // Third consumer of the same fact: conversations that PARKED on it. Awaited like the activation so the caller's
+      // 200 means "delivered everywhere", and failures inside are already contained per-session.
+      const resumed = resumer
+        ? await resumer.onEvent({
+            workspace,
+            kind,
+            message,
+            ...(source ? { source } : {}),
+            ...(payload ? { payload } : {}),
+          })
+        : 0;
+      return reply.send({ notified, activated, resumed });
     }
     const principal = await principalOf(req, reply);
     if (!principal) return reply;
@@ -1005,7 +1031,16 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const activated = activator
       ? await activator.onEvent({ workspace: principal.workspace, ...eventOf(parsed.data) })
       : 0;
-    return reply.send({ notified, activated });
+    const resumed = resumer
+      ? await resumer.onEvent({
+          workspace: principal.workspace,
+          kind: parsed.data.kind,
+          message: parsed.data.message,
+          ...(parsed.data.source ? { source: parsed.data.source } : {}),
+          ...(parsed.data.payload ? { payload: parsed.data.payload } : {}),
+        })
+      : 0;
+    return reply.send({ notified, activated, resumed });
   });
 
   // A View's pinned artifacts (the Studio gallery / report archive — analysis-studio V3). The view's

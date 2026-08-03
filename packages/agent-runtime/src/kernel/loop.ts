@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { UpstreamError } from "@everdict/contracts";
 import type { LlmTransport, LlmUsage, ReasoningCarrier, ReasoningRequest, StreamResult } from "@everdict/llm";
 import { compactStep } from "../context/compaction.js";
@@ -22,10 +23,21 @@ import { buildSendMessageTool } from "../tools/send-message-tool.js";
 import { buildSpawnTeammateTool } from "../tools/spawn-teammate-tool.js";
 import { buildSpawnAgentTool } from "../tools/spawn-tool.js";
 import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoReminder } from "../tools/todo-tool.js";
+import { type WaitRequest, buildWaitForTool } from "../tools/wait-for-tool.js";
 import { normalizeHistory } from "./normalize.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 
-export type StopReason = "end_turn" | "max_turns" | "token_budget" | "no_progress" | "aborted" | "interrupted";
+// How a run ended. "waiting" is deliberately distinct from "end_turn": end_turn means the agent is DONE and the ball
+// is the member's, while waiting means the work continues elsewhere and the agent still owes an answer — the host
+// keeps the conversation armed (AgentLoopResult.waitRequest) and resumes it when the world moves.
+export type StopReason =
+  | "end_turn"
+  | "max_turns"
+  | "token_budget"
+  | "no_progress"
+  | "aborted"
+  | "interrupted"
+  | "waiting";
 
 // A specialized sub-agent type the model can select via spawn_agent(subagent_type). A type is a ROLE (an instruction
 // appended to the sub-task prompt) plus an optional model tier; its tools stay read-only (the isolation invariant).
@@ -90,6 +102,11 @@ export interface AgentLoopOptions {
   // AgentLoopResult.structuredOutput. A run that tries to finish without submitting is nudged ONCE, then accepted
   // (the host can treat a missing value as a soft failure).
   outputSchema?: Record<string, unknown>;
+  // Waiting (LESSON 051): offer the `wait_for` tool, listing the event kinds this host can resume the conversation
+  // on. When the agent calls it the run ends with stopReason "waiting" and the request rides out on the result, for
+  // the host to persist as a durable wake intent. Absent → the tool is not registered and an agent that started slow
+  // work can only end its turn (handing the job back to the member) or spin.
+  waitFor?: { kinds: readonly string[] };
   // Resilience: a cheaper/alternate model to fall back to when the primary keeps failing transiently (sustained
   // 429/overloaded) even after retries. Switched to for the rest of the run; a fallback is both a cost tier and an SLA.
   fallback?: { transport: LlmTransport; model: string };
@@ -164,6 +181,9 @@ export interface AgentLoopResult {
   // The value the model submitted via the structured_output tool (only with opts.outputSchema; absent when the
   // model never submitted — the nudge is best-effort, not a hard guarantee).
   structuredOutput?: unknown;
+  // Set together with stopReason "waiting": what the agent parked itself on. The host stamps the deadline and
+  // persists it as the conversation's wake intent — the kernel neither reads a clock nor owns durability.
+  waitRequest?: WaitRequest;
 }
 
 // A high safety cap, not a task budget — the token budget (+ compaction) is the primary limiter for long tasks. 12
@@ -311,12 +331,21 @@ function parseArgs(raw: string): { ok: true; value: Record<string, unknown> } | 
   }
 }
 
-// A stable signature of a turn's tool-call batch (name + arguments, order-independent) — used by the no-progress guard.
+// A stable signature of a turn's tool-call batch (name + arguments, order-independent) — the QUESTION half of the
+// no-progress guard.
 function toolCallSignature(calls: { name: string; arguments: string }[]): string {
   return calls
     .map((c) => `${c.name}(${c.arguments})`)
     .sort()
     .join("|");
+}
+
+// The ANSWER half: a digest of what those calls returned. Hashed because a tool result is unbounded (the loop keeps
+// only the digest, never the text). Taken from the PRE-offload content — an offload id embeds the turn number, so
+// digesting the stored form would make every large result look new and disarm the guard entirely.
+function toolResultSignature(outputs: ToolResult[]): string {
+  const joined = outputs.map((o) => `${o.isError === true ? "err" : "ok"}:${o.content.length}:${o.content}`).join("|");
+  return createHash("sha1").update(joined).digest("hex");
 }
 
 // Invoke a tool under a wall-clock deadline: the tool runs with a signal that fires on timeout OR run-abort (so a
@@ -511,6 +540,17 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         },
       ]
     : [];
+  // Waiting: the agent parks the conversation on an event instead of ending the turn. TURN registry only, like the
+  // tools above — a sub-agent has no conversation to be resumed into, so it must not be offered the move.
+  let waitRequest: WaitRequest | undefined;
+  const waitTools: ToolDefinition[] =
+    opts.waitFor && opts.waitFor.kinds.length > 0
+      ? [
+          buildWaitForTool(opts.waitFor.kinds, (request) => {
+            waitRequest = request;
+          }),
+        ]
+      : [];
   const registry = new ToolRegistry([
     ...opts.registry.list(),
     buildTodoTool((t) => {
@@ -520,6 +560,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     ...spawnTools,
     ...planTools,
     ...structuredTools,
+    ...waitTools,
   ]);
   // Soft-interrupt state: the CURRENT step's controller (the model stream or the tool batch in flight) and the
   // sticky flag the boundaries consume. The trigger is handed to the host once, up front.
@@ -548,8 +589,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
   let finalText = "";
   let compactionCount = 0;
-  // No-progress guard state: the previous turn's tool-call signature + how many turns in a row it has repeated.
+  // No-progress guard state: the previous turn's question (tool-call signature) AND answer (result digest), plus how
+  // many turns in a row BOTH have repeated. Both halves are needed — see the verdict site below.
   let lastSignature = "";
+  let lastResultSignature = "";
   let repeatRun = 0;
   const toolCalls: { name: string; ok: boolean }[] = [];
   // The messages produced this run, accumulated as they are appended — NOT a tail slice of `messages`, which
@@ -566,6 +609,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       produced,
       toolCalls,
       ...(hasStructuredOutput ? { structuredOutput } : {}),
+      ...(waitRequest ? { waitRequest } : {}),
     };
   };
 
@@ -808,10 +852,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       return finish("end_turn", turn);
     }
 
-    // No-progress guard: track whether this turn's tool-call batch is identical to the previous turns'.
+    // No-progress guard, half 1: this turn's tool-call signature. The repeat count is NOT decided here — an
+    // identical REQUEST is not evidence of a stall on its own (watching an async job re-asks the same question
+    // by design). The verdict waits for the results below: same question AND same answer.
     const signature = toolCallSignature(result.toolCalls);
-    repeatRun = signature === lastSignature ? repeatRun + 1 : 1;
-    lastSignature = signature;
 
     const turnImages: ToolResultImage[] = []; // images returned by this turn's tools → one follow-up multimodal turn
     for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments });
@@ -939,6 +983,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     // transcript ends balanced). Still-running background sub-agents are abandoned: the submission is final.
     if (hasStructuredOutput) return finish("end_turn", turn);
 
+    // The agent parked itself on the world (wait_for). Every tool_call in this batch is answered, so the transcript
+    // ends balanced and the conversation can be replayed verbatim on resume. Ranked below an interrupt (the member
+    // outranks the wait) and below a final submission, but above everything else: once the agent has decided to
+    // wait, spending more turns is exactly the spin it chose to avoid.
+    if (waitRequest) return finish("waiting", turn);
+
     // Multimodal tool results: after ALL tool_calls are answered (pairing intact), surface any images the tools
     // returned in ONE follow-up user turn so the model can actually SEE them (chat.completions image_url content).
     // In-run context only — NOT pushed to `produced`/onMessage (base64 must not bloat the durable transcript).
@@ -956,8 +1006,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       messages = [...messages, imageMessage];
     }
 
-    // No-progress stop: the model has now asked for the identical tool batch NO_PROGRESS_LIMIT turns running (it saw
-    // the same results and repeated anyway). The transcript is balanced (results appended) — stop the spin.
+    // No-progress guard, half 2 — the verdict. A turn counts as a repeat only when the identical batch came back with
+    // the identical results: the model asked the same question AND the world gave the same answer. Judging on the
+    // question alone would convict every WATCHER, since polling an async job re-sends the same arguments by design
+    // (a scorecard walking 3/50 → 11/50 → 24/50 is progress the loop must not mistake for a spin). The transcript is
+    // balanced here (all results appended), so stopping is safe.
+    const resultSignature = toolResultSignature(outputs);
+    repeatRun = signature === lastSignature && resultSignature === lastResultSignature ? repeatRun + 1 : 1;
+    lastSignature = signature;
+    lastResultSignature = resultSignature;
     if (repeatRun >= NO_PROGRESS_LIMIT) return finish("no_progress", turn);
 
     // Hybrid budget: the model's reported usage + an estimate of everything appended since (tool results, image turn).

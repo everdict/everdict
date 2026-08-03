@@ -6,8 +6,20 @@ import {
   type AgentRunStatus,
   type AgentSessionRecord,
   AgentSessionRecordSchema,
+  type AgentWakeIntent,
 } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+
+// Arm or clear a record's wake intent by REPLACING it — the field is optional, so clearing means producing a record
+// without the key rather than deleting from the object in place.
+function withWakeIntent(
+  record: AgentSessionRecord,
+  intent: AgentWakeIntent | null,
+  updatedAt: string,
+): AgentSessionRecord {
+  const { wakeIntent: _cleared, ...rest } = record;
+  return { ...rest, ...(intent === null ? {} : { wakeIntent: intent }), updatedAt };
+}
 
 export class InMemoryAgentSessionStore implements AgentSessionStore {
   private readonly sessions: AgentSessionRecord[] = [];
@@ -87,6 +99,38 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     s.runId = runId;
   }
 
+  async setSessionWakeIntent(
+    tenant: string,
+    id: string,
+    intent: AgentWakeIntent | null,
+    updatedAt: string,
+  ): Promise<void> {
+    const index = this.sessions.findIndex((r) => r.tenant === tenant && r.id === id);
+    const current = this.sessions[index];
+    if (!current) return;
+    this.sessions[index] = withWakeIntent(current, intent, updatedAt);
+  }
+
+  async claimWakeIntent(tenant: string, id: string, updatedAt: string): Promise<boolean> {
+    // Mirrors the Pg claim's "only a row that still has an intent can be cleared" — the caller learns whether it won.
+    const index = this.sessions.findIndex((r) => r.tenant === tenant && r.id === id);
+    const current = this.sessions[index];
+    if (!current || current.wakeIntent === undefined) return false;
+    this.sessions[index] = withWakeIntent(current, null, updatedAt);
+    return true;
+  }
+
+  async listWaitingSessions(tenant: string): Promise<AgentSessionRecord[]> {
+    return this.sessions.filter((s) => s.tenant === tenant && s.wakeIntent !== undefined);
+  }
+
+  async listExpiredWakeIntents(now: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
+    return this.sessions
+      .filter((s) => s.wakeIntent !== undefined && s.wakeIntent.deadlineAt <= now)
+      .sort((a, b) => (a.wakeIntent?.deadlineAt ?? "").localeCompare(b.wakeIntent?.deadlineAt ?? ""))
+      .slice(0, opts?.limit ?? 50);
+  }
+
   async hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean> {
     return this.sessions.some(
       (s) => s.tenant === tenant && s.origin?.agentId === agentId && s.origin?.eventId === eventId,
@@ -141,12 +185,13 @@ interface SessionRow {
   origin: unknown;
   status: string | null;
   run_id: string | null;
+  wake_intent: unknown;
   created_at: string | Date;
   updated_at: string | Date;
 }
 
 const SESSION_COLUMNS =
-  "id, tenant, owner, title, model, permission_mode, memory, memory_through_seq, visibility, origin, status, run_id, created_at, updated_at";
+  "id, tenant, owner, title, model, permission_mode, memory, memory_through_seq, visibility, origin, status, run_id, wake_intent, created_at, updated_at";
 
 function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
   return AgentSessionRecordSchema.parse({
@@ -162,6 +207,7 @@ function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
     ...(row.origin !== null && row.origin !== undefined ? { origin: row.origin } : {}),
     ...(row.status !== null ? { status: row.status } : {}),
     ...(row.run_id !== null ? { runId: row.run_id } : {}),
+    ...(row.wake_intent !== null && row.wake_intent !== undefined ? { wakeIntent: row.wake_intent } : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
@@ -312,6 +358,54 @@ export class PgAgentSessionStore implements AgentSessionStore {
       "UPDATE everdict_agent_sessions SET run_id = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
       [tenant, id, runId, updatedAt],
     );
+  }
+
+  async setSessionWakeIntent(
+    tenant: string,
+    id: string,
+    intent: AgentWakeIntent | null,
+    updatedAt: string,
+  ): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_agent_sessions SET wake_intent = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
+      [tenant, id, intent === null ? null : JSON.stringify(intent), updatedAt],
+    );
+  }
+
+  async claimWakeIntent(tenant: string, id: string, updatedAt: string): Promise<boolean> {
+    // The claim IS the WHERE clause: only a row that still has an intent can be cleared, and RETURNING tells the
+    // caller whether it won. Two resumers racing the same session therefore produce exactly one resumed turn.
+    const res = await this.client.query<{ id: string }>(
+      `UPDATE everdict_agent_sessions SET wake_intent = NULL, updated_at = $3
+       WHERE tenant = $1 AND id = $2 AND wake_intent IS NOT NULL
+       RETURNING id`,
+      [tenant, id, updatedAt],
+    );
+    return res.rows.length > 0;
+  }
+
+  async listWaitingSessions(tenant: string): Promise<AgentSessionRecord[]> {
+    const res = await this.client.query<SessionRow>(
+      `SELECT ${SESSION_COLUMNS}
+       FROM everdict_agent_sessions WHERE tenant = $1 AND wake_intent IS NOT NULL
+       ORDER BY updated_at DESC, id DESC`,
+      [tenant],
+    );
+    return res.rows.map(sessionRowToRecord);
+  }
+
+  async listExpiredWakeIntents(now: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
+    // Cross-tenant on purpose: the sweep is an operator-side reaper, not a workspace read. Ordered by deadline so a
+    // backlog drains oldest-first, and bounded so one pass can never fan out unboundedly.
+    const res = await this.client.query<SessionRow>(
+      `SELECT ${SESSION_COLUMNS}
+       FROM everdict_agent_sessions
+       WHERE wake_intent IS NOT NULL AND wake_intent->>'deadlineAt' <= $1
+       ORDER BY wake_intent->>'deadlineAt' ASC
+       LIMIT $2`,
+      [now, opts?.limit ?? 50],
+    );
+    return res.rows.map(sessionRowToRecord);
   }
 
   async hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean> {

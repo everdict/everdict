@@ -1,4 +1,28 @@
 import { z } from "zod";
+import { EventSelectorFilterSchema } from "./event-selector.js";
+
+// A conversation parked on the world. When an agent calls `wait_for`, its turn ends with stopReason "waiting" —
+// deliberately NOT "end_turn": the work is unfinished and the ball is still the AGENT's, not the member's. The
+// intent left behind is what makes that promise keepable: it lives on the session record, so a matching platform
+// event (or the deadline) resumes THIS conversation, and an agent-service restart re-arms the watch instead of
+// silently dropping it. Cleared the moment the session is resumed.
+export const AgentWakeIntentSchema = z
+  .object({
+    // Event kinds that should resume the conversation. Membership in TRIGGERABLE_EVENT_KINDS is enforced at the
+    // tool boundary; stored loosely so an intent written by an older build still parses.
+    kinds: z.array(z.string().min(1)).min(1),
+    // Payload predicates (shared selector grammar) — "this scorecard", not "any scorecard".
+    filters: z.array(EventSelectorFilterSchema).default([]),
+    // What the agent is waiting for, in its own words. Replayed into the resumed turn and rendered in the UI, so a
+    // waiting conversation reads as a STATE ("watching scorecard sc_123") and never as a dead one.
+    note: z.string().min(1),
+    // Wake anyway at/after this instant even if nothing lands — the guard against silence. A batch that dies
+    // without emitting a terminal fact must not strand its watcher forever.
+    deadlineAt: z.string(),
+    createdAt: z.string(),
+  })
+  .strict();
+export type AgentWakeIntent = z.infer<typeof AgentWakeIntentSchema>;
 
 // How a conversation's mutating tool calls are approved — the member's standing choice for the session (a per-turn
 // body.mode still overrides). default = ask for every mutation (HITL) · auto = auto-allow routine mutations, ask only
@@ -58,6 +82,9 @@ export const AgentSessionRecordSchema = z.object({
   runId: z.string().optional(),
   // Headless-run lifecycle status (unset for plain conversations). See AgentRunStatusSchema.
   status: AgentRunStatusSchema.optional(),
+  // Set while this conversation is WAITING on the world (the agent called wait_for). Present = the agent still
+  // owes the member an answer; absent = nothing is being watched. See AgentWakeIntentSchema.
+  wakeIntent: AgentWakeIntentSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

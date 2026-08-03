@@ -5,6 +5,7 @@ import {
   type PermissionHook,
   type SubagentType,
   ToolRegistry,
+  type WaitRequest,
   buildSummarizer,
   runAgentLoop,
 } from "@everdict/agent-runtime";
@@ -14,6 +15,7 @@ import {
   type AgentReference,
   type AgentReferenceType,
   type AgentToolCall,
+  type AgentWakeIntent,
   type AnalysisArtifactRecord,
   NotFoundError,
 } from "@everdict/contracts";
@@ -271,6 +273,30 @@ function buildAttachmentPreamble(attachments: AgentAttachmentInput[]): string | 
   return `The user attached the following file(s). Use their content to answer.\n\n${blocks.join("\n\n")}`;
 }
 
+// An hour is long enough for a real batch and short enough that silence gets noticed; a day is the ceiling, because
+// an agent that parks a conversation past anyone's attention span has effectively dropped it.
+const DEFAULT_WAIT_SECONDS = 60 * 60;
+const MAX_WAIT_SECONDS = 24 * 60 * 60;
+
+// The kernel's wait REQUEST plus the host's clock = a durable intent. The kernel says what to wait for and never
+// reads a clock (that keeps it deterministic under test); the host decides when the wait expires. Every intent gets
+// a deadline — an unbounded wait is indistinguishable from a dropped promise.
+export function toWakeIntent(
+  request: WaitRequest,
+  deps: Pick<ChatDeps, "now" | "defaultWaitSeconds" | "maxWaitSeconds">,
+): AgentWakeIntent {
+  const requested = request.timeoutSeconds ?? deps.defaultWaitSeconds ?? DEFAULT_WAIT_SECONDS;
+  const seconds = Math.min(Math.max(Math.round(requested), 1), deps.maxWaitSeconds ?? MAX_WAIT_SECONDS);
+  const createdAt = deps.now();
+  return {
+    kinds: request.kinds,
+    filters: request.filters,
+    note: request.note,
+    deadlineAt: new Date(new Date(createdAt).getTime() + seconds * 1000).toISOString(),
+    createdAt,
+  };
+}
+
 export interface ChatDeps {
   sessions: AgentSessionStore;
   // Analysis-artifact persistence (docs/architecture/analysis-studio.md V2). Present → the agent gets the
@@ -306,6 +332,15 @@ export interface ChatDeps {
   // The workspace's registered (crafted) agents as spawnable sub-agent types (registrySubagentTypes) — merged
   // after the builtins (a name collision keeps the builtin). Absent → builtins only (dev / no registry).
   listSubagentTypes?: (principal: Principal) => Promise<SubagentType[]>;
+  // Waiting (LESSON 051): the event kinds THIS host can resume a conversation on. Present → the agent gets the
+  // `wait_for` tool and a turn may end parked ("waiting") with a durable wake intent instead of handing unfinished
+  // work back to the member. Absent → no tool: a host with no resume path must not let an agent promise a follow-up
+  // it will never deliver. Wired by the agent server, which owns both the event fan-out and the deadline sweep.
+  waitableEventKinds?: readonly string[];
+  // How long a wait may run when the agent names no timeout, and the ceiling for one it does. Ops knobs; absent →
+  // 1 hour / 24 hours. A wait always has a deadline — silence must never strand a watcher.
+  defaultWaitSeconds?: number;
+  maxWaitSeconds?: number;
   // Session running memory: once the bounded replay span exceeds this many characters, the oldest records are
   // folded into the session's digest at the turn boundary (see maintainSessionMemory). Ops/test tuning knob;
   // absent → MEMORY_TRIGGER_CHARS.
@@ -799,7 +834,7 @@ export async function runChat(
     let inputTokens = 0;
     let outputTokens = 0;
     try {
-      await runAgentLoop({
+      const loopResult = await runAgentLoop({
         transport: model.transport,
         model: model.model,
         systemPrompt: systemWithEnv,
@@ -830,9 +865,29 @@ export async function runChat(
         ...(hooks?.spawnTeammate ? { spawnTeammate: hooks.spawnTeammate } : {}),
         ...(hooks?.listTeammates ? { listTeammates: hooks.listTeammates } : {}),
         ...(deps.maxTurns !== undefined ? { maxTurns: deps.maxTurns } : {}),
+        ...(deps.waitableEventKinds && deps.waitableEventKinds.length > 0
+          ? { waitFor: { kinds: deps.waitableEventKinds } }
+          : {}),
         ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
         ...(signal ? { signal } : {}),
       });
+      // Arm (or disarm) the conversation's wake intent — the durable half of "waiting". The host owns the clock:
+      // the kernel says WHAT to wait for, we stamp WHEN it expires. Rearmed every turn, so an agent that waits
+      // again after a resume simply replaces its own intent, and a turn that ends normally clears it (the agent
+      // stopped watching). Best-effort by design: failing to park must not fail a turn the member already saw.
+      const parked = loopResult.waitRequest;
+      if (parked || session.wakeIntent) {
+        try {
+          await deps.sessions.setSessionWakeIntent(
+            workspace,
+            sessionId,
+            parked ? toWakeIntent(parked, deps) : null,
+            deps.now(),
+          );
+        } catch (err) {
+          console.error(`[agent] failed to park wake intent (${workspace}/${sessionId}): ${String(err)}`);
+        }
+      }
     } finally {
       // The ledger's copy of the same numbers (O2): the turn's model spend travels back to the caller, which
       // projects it into the sealed trajectory as an llm_call — so the run detail can state what the turn cost

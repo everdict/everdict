@@ -1,4 +1,10 @@
-import type { AgentMessageRecord, AgentPermissionMode, AgentRunStatus, AgentSessionRecord } from "@everdict/contracts";
+import type {
+  AgentMessageRecord,
+  AgentPermissionMode,
+  AgentRunStatus,
+  AgentSessionRecord,
+  AgentWakeIntent,
+} from "@everdict/contracts";
 
 // Persistence for Everdict's own agent conversations. Sessions are owner-scoped (a member's own chat history)
 // within a workspace; messages form an append-only, seq-ordered transcript per session. async — Postgres honors
@@ -34,6 +40,21 @@ export interface AgentSessionStore {
   // The fleet view (agent-automation A5): every session with an origin (= every agent RUN, newest first),
   // workspace-wide — unlike listSessions, which is a member's own chat history.
   listRuns(tenant: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]>;
+  // Arm or clear a conversation's wake intent (LESSON 051). Set when a turn ends with stopReason "waiting" — the
+  // agent parked itself on an event; cleared the moment the conversation is resumed. Persisting the intent (rather
+  // than holding a timer in memory) is what makes the promise survive an agent-service restart.
+  setSessionWakeIntent(tenant: string, id: string, intent: AgentWakeIntent | null, updatedAt: string): Promise<void>;
+  // Atomically CLAIM a parked conversation: clear its wake intent and report whether this caller is the one that
+  // cleared it. An arriving event and the deadline sweep (or two service replicas) can select the same session at
+  // the same instant; exactly one of them may resume it. The loser sees false and stands down — a wake intent is a
+  // one-shot claim, not a subscription.
+  claimWakeIntent(tenant: string, id: string, updatedAt: string): Promise<boolean>;
+  // Every conversation in this workspace currently waiting on the world, so an arriving event (or the deadline
+  // sweep) can find the ones it should resume. Workspace-wide and small by nature — one row per parked agent.
+  listWaitingSessions(tenant: string): Promise<AgentSessionRecord[]>;
+  // Every waiting conversation across ALL workspaces whose deadline has passed at `now` — the restart-proof sweep
+  // (W3): a job that dies without emitting a terminal fact must never strand its watcher.
+  listExpiredWakeIntents(now: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]>;
   // Durable activation dedup (agent-automation A3): has this crafted agent already run for this platform event?
   // At-least-once delivery (push + reconcile) collapses here, surviving agent-service restarts.
   hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean>;

@@ -11,6 +11,7 @@ export * from "./capability.js";
 export * from "./capability-diff.js";
 export * from "./capability-origin.js";
 export * from "./comment.js";
+export * from "./event-selector.js";
 export * from "./knowledge-entry.js";
 export * from "./notification.js";
 export * from "./oauth-state.js";

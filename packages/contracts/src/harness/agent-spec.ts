@@ -3,6 +3,7 @@ import { VersionSchema } from "../version.js";
 
 import { AgentPermissionModeSchema } from "../records/agent-session.js";
 import { CapabilityRefSchema } from "../records/capability.js";
+import { type EventSelectorFilter, EventSelectorFilterSchema } from "../records/event-selector.js";
 import type { PlatformEventKind } from "../records/platform-event.js";
 
 // A workspace-registered MCP tool server the Everdict agent connects to IN ADDITION to the built-in read-only
@@ -70,16 +71,11 @@ export const TRIGGERABLE_EVENT_KINDS = [
 const _triggerableAreKinds: readonly PlatformEventKind[] = TRIGGERABLE_EVENT_KINDS;
 void _triggerableAreKinds;
 
-// One declarative payload predicate — filters AND together against the event's pointer payload
-// (e.g. { field: "passRate", op: "lt", value: 1 } = "the batch had failing cases").
-export const AgentTriggerFilterSchema = z
-  .object({
-    field: z.string().min(1),
-    op: z.enum(["eq", "neq", "lt", "lte", "gt", "gte", "exists"]),
-    value: z.union([z.string(), z.number(), z.boolean()]).optional(), // required for every op except "exists"
-  })
-  .strict();
-export type AgentTriggerFilter = z.infer<typeof AgentTriggerFilterSchema>;
+// A trigger's payload predicate IS the shared event-selector filter (records/event-selector.ts) — subscriptions and
+// a waiting conversation's wake intent select events with the same grammar, matched by the same domain function.
+// Kept under the historical name so every existing consumer (and the web mirror) is untouched.
+export const AgentTriggerFilterSchema = EventSelectorFilterSchema;
+export type AgentTriggerFilter = EventSelectorFilter;
 
 // A trigger — the declarative subscription that lets a platform event activate this agent headlessly
 // (docs/architecture/agent-automation.md A3). Matching + activation live in the agent service.

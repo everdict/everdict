@@ -18,6 +18,7 @@ export * from "./tools/send-message-tool.js";
 export * from "./tools/spawn-teammate-tool.js";
 export * from "./tools/list-teammates-tool.js";
 export * from "./tools/plan-tool.js";
+export * from "./tools/wait-for-tool.js";
 export * from "./mcp/bridge.js";
 export * from "./context/token-budget.js";
 export * from "./context/compaction.js";

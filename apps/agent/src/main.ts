@@ -11,6 +11,7 @@ import {
   WEBSEARCH_SECRET_NAME,
   registryLatestVersionResolver,
 } from "@everdict/application-control";
+import { TRIGGERABLE_EVENT_KINDS } from "@everdict/contracts";
 import {
   InMemoryAgentSessionStore,
   InMemoryAnalysisArtifactStore,
@@ -75,6 +76,10 @@ function envModelFallback(config: AgentConfig): ModelResolver {
     ...(config.AGENT_LLM_BASE_URL !== undefined ? { baseURL: config.AGENT_LLM_BASE_URL } : {}),
   });
 }
+
+// How often the deadline sweep re-reads the durable wake intents. A minute is well under the granularity anyone
+// waits at (the shortest useful wait is minutes), and the query is a partial-index scan of parked rows only.
+const WAKE_SWEEP_INTERVAL_MS = 60_000;
 
 async function main(): Promise<void> {
   // Proxy-aware outbound: install a global dispatcher FIRST (before any client fetches) so every outbound call
@@ -246,6 +251,11 @@ async function main(): Promise<void> {
     ...(config.AGENT_FALLBACK_MODEL !== undefined ? { fallbackModelRef: config.AGENT_FALLBACK_MODEL } : {}),
     ...(config.AGENT_SUBAGENT_MODEL !== undefined ? { subagentModelRef: config.AGENT_SUBAGENT_MODEL } : {}),
     ...(config.AGENT_TOOL_TIMEOUT_MS !== undefined ? { toolTimeoutMs: config.AGENT_TOOL_TIMEOUT_MS } : {}),
+    // Waiting (LESSON 051): offer `wait_for` only where a conversation can actually be resumed — the resume path
+    // mints a per-turn agt_ token, so no key store means no resumption, and an agent must never promise a follow-up
+    // this deployment cannot deliver. The waitable vocabulary is the trigger-matchable one: the same facts the
+    // event door already fans out are exactly the ones a parked conversation can be woken by.
+    ...(keyStore ? { waitableEventKinds: TRIGGERABLE_EVENT_KINDS } : {}),
     ...(config.AGENT_THINKING_BUDGET !== undefined ? { thinkingBudgetTokens: config.AGENT_THINKING_BUDGET } : {}),
   });
 
@@ -262,6 +272,23 @@ async function main(): Promise<void> {
       });
       console.error("▶ everdict-agent: event reconcile loop on (registry-driven trigger activation)");
     }
+  }
+
+  // Deadline sweep (LESSON 051 W3): the backstop for silence. Events resume a parked conversation on the happy
+  // path, but a batch can die without ever emitting a terminal fact — and a wait armed before a restart would
+  // otherwise sit forever. The INTENT is durable (it lives on the session row); this timer is just the thing that
+  // re-reads it, so a restarted process picks up every wait the previous one was holding. The first pass runs
+  // immediately for exactly that reason.
+  const resumer = (app as unknown as { wakeResumer?: { sweep: (now: string) => Promise<number> } }).wakeResumer;
+  if (resumer) {
+    const sweep = (): void => {
+      void resumer.sweep(new Date().toISOString()).catch((err: unknown) => {
+        console.error(`[agent] wake sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    };
+    sweep();
+    setInterval(sweep, WAKE_SWEEP_INTERVAL_MS).unref();
+    console.error("▶ everdict-agent: wake-intent sweep on (parked conversations resume on their deadline)");
   }
 
   // Prometheus scrape endpoint — registered here (process-level operator surface, like the control plane's:
