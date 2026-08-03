@@ -3,7 +3,7 @@ import { RuntimeSpecSchema } from "@everdict/contracts";
 import { RuntimeControlCommandSchema } from "@everdict/contracts/wire";
 import { runtimeSpecWithCapabilities } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { runtimeDocs } from "./runtime.docs.js";
 
 // runtimes (workspace-owned SSOT, execution infra: local | nomad | k8s)
@@ -13,8 +13,11 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
       return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 "이 팀 것으로 만든다"이므로,
+    // 속하지 않은 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다.
+    const owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
     try {
-      gate(principal, "runtimes:write");
+      gate(principal, "runtimes:write", owner.gate);
     } catch (err) {
       return sendError(reply, err); // no permission 403 (execution infra = admin)
     }
@@ -23,7 +26,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     // Fill capabilities server-side (declared ∪ auto-derived) so the client never recomputes the hardened-runtime set.
     const spec = runtimeSpecWithCapabilities(parsed.data);
     try {
-      await deps.runtimeRegistry.register(principal.workspace, spec);
+      await deps.runtimeRegistry.register(principal.workspace, spec, principal.subject, owner.teamId);
       return reply.code(201).send({ workspace: principal.workspace, id: spec.id, version: spec.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409

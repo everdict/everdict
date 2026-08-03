@@ -27,16 +27,16 @@ import type {
   GithubIssueSync,
   InitiativeService,
   IssueService,
-  TeamService,
   ProjectService,
   SubscriptionService,
   TaskService,
+  TeamService,
   ViewService,
   ViewSnapshotService,
 } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
-import { type Action, type Principal, authorize } from "@everdict/auth";
+import { type Action, type Principal, type ResourceScope, authorize } from "@everdict/auth";
 import { AppError, type RuntimeSpec } from "@everdict/contracts";
 import type { InspectRuntimeResult, RuntimeControlCommand, RuntimeControlResult } from "@everdict/contracts/wire";
 import type { SecretStore, TenantKeyStore, WorkspaceSettingsStore } from "@everdict/db";
@@ -190,9 +190,12 @@ export async function run(
   principal: Principal,
   action: Action,
   fn: () => Promise<CallToolResult>,
+  resource?: ResourceScope,
 ): Promise<CallToolResult> {
   try {
-    authorize(principal, action);
+    // `resource` carries the owning team when the tool targets one — the MCP twin of the routes' gate(), so an
+    // agent cannot write another team's asset through a tool call that the HTTP route would have refused.
+    authorize(principal, action, resource);
     return await fn();
   } catch (err) {
     if (err instanceof AppError) return failFrom(err);

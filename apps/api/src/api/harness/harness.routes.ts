@@ -10,7 +10,15 @@ import {
   imageWarnings,
 } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import {
+  type ServerDeps,
+  gate,
+  resolvePrincipal,
+  sendError,
+  teamForNew,
+  teamOfEntity,
+  zodIssues,
+} from "../route-context.js";
 import { harnessDocs } from "./harness.docs.js";
 
 // Individual harnesses (instances) — /harnesses is the instance surface (category = /harness-templates). template reference + pins.
@@ -26,7 +34,10 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
     const parsed = HarnessInstanceSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      gate(principal, "harnesses:register");
+      // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 곧 "이 팀 것으로 만든다"이므로,
+      // 내가 속하지 않은 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다.
+      const owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
+      gate(principal, "harnesses:register", owner.gate);
       // Structural portability errors are hard-blocked inside the registry's register (the single chokepoint every path
       // — route/bundle/MCP — flows through). Host-literal warnings do NOT block; surface them so the author can migrate.
       // docs/architecture/topology-portability.md.
@@ -43,7 +54,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
             .filter((i) => i.severity === "warning")
             .map((i) => i.message);
       }
-      await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject);
+      await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject, owner.teamId);
       // Image-classification warnings (warn-not-block) — local/unqualified images have no pull guarantee (risky to run off the build machine).
       const warnings = await harnessImageWarnings(deps, principal.workspace, parsed.data.id, parsed.data.version);
       // Visibility tradeoff surfaced at write time: a user-scope secretRef makes the harness visible to you only.
@@ -112,7 +123,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
   });
 
-  app.get("/harnesses", { schema: harnessDocs.list }, async (req, reply) => {
+  app.get<{ Querystring: { team?: string } }>("/harnesses", { schema: harnessDocs.list }, async (req, reply) => {
     if (!deps.harnessInstances)
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -122,7 +133,11 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       const entries = await deps.harnessInstances.list(principal.workspace); // instances grouped by template id
       // A private harness (references a personal secret) is owner-only — the owner is the creator of the latest
       // version (the one that decides privacy), falling back to the id-level creator for older data.
-      return reply.send(entries.filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject));
+      const visible = entries.filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject);
+      // `team` narrows to one team's harnesses — this is what ownership does to a READ. It is a filter, never a
+      // 403: another team's work stays visible in the workspace, it just is not what you asked for.
+      const team = req.query.team;
+      return reply.send(team === undefined ? visible : visible.filter((e) => e.teamId === team));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -299,7 +314,12 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
     const parsed = RepinBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      gate(principal, "harnesses:register"); // same gate as instance register (ungated viewer+; the CI role has it too)
+      // 기존 엔티티의 소유 팀으로 게이트 — 재핀은 남의 팀 하네스를 바꾸는 쓰기다.
+      gate(
+        principal,
+        "harnesses:register",
+        await teamOfEntity(deps.harnessInstances, principal.workspace, req.params.id),
+      ); // same gate as instance register (ungated viewer+; the CI role has it too)
       const result = await repinHarnessImages(
         deps.harnessInstances,
         principal.workspace,

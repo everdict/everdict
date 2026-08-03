@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew } from "../route-context.js";
 import { SubmitBodySchema } from "./request/submit.js";
 import { runDocs } from "./run.docs.js";
 
@@ -15,12 +15,19 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     } catch (err) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
+    // 결과의 소유 팀 — 스코어카드와 같은 규칙.
+    const owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
     try {
-      gate(principal, "runs:submit");
+      gate(principal, "runs:submit", owner.gate);
       // submittedBy=subject → clone a private-repo seed with the submitter's personal connection ("clone with my connection").
-      return reply
-        .code(202)
-        .send(await deps.service.submit({ tenant: principal.workspace, submittedBy: principal.subject, ...body }));
+      return reply.code(202).send(
+        await deps.service.submit({
+          tenant: principal.workspace,
+          submittedBy: principal.subject,
+          ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
+          ...body,
+        }),
+      );
     } catch (err) {
       return sendError(reply, err);
     }

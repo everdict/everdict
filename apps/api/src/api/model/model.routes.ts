@@ -1,7 +1,7 @@
 import { deleteModelVersion, deleteModelVersions } from "@everdict/application-control";
 import { ModelSpecSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { modelDocs } from "./model.docs.js";
 import { DeleteModelVersionsBodySchema } from "./request/delete-model-versions.js";
 import { SaveModelBodySchema } from "./request/save-model.js";
@@ -14,15 +14,18 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
       return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 "이 팀 것으로 만든다"이므로,
+    // 속하지 않은 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다.
+    const owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
     try {
-      gate(principal, "models:write");
+      gate(principal, "models:write", owner.gate);
     } catch (err) {
       return sendError(reply, err); // no permission 403 (gate before validation)
     }
     const parsed = ModelSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      await deps.modelRegistry.register(principal.workspace, parsed.data, principal.subject); // creator = subject (delete rights)
+      await deps.modelRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId); // creator = subject (delete rights)
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409

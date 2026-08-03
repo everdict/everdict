@@ -36,10 +36,10 @@ import type {
   GithubIssueSync,
   InitiativeService,
   IssueService,
-  TeamService,
   ProjectService,
   SubscriptionService,
   TaskService,
+  TeamService,
   ViewService,
   ViewSnapshotService,
 } from "@everdict/application-control";
@@ -54,6 +54,7 @@ import {
   type Authenticator,
   EVERDICT_ROLES,
   type Principal,
+  type ResourceScope,
   authorize,
   can,
 } from "@everdict/auth";
@@ -328,6 +329,20 @@ export function workspaceHintOf(req: FastifyRequest): string | undefined {
   return typeof header === "string" && header.length > 0 ? header : undefined;
 }
 
+// The subject's TEAM MEMBERSHIPS in the resolved workspace — an authorization input, not decoration: a write
+// against a resource owned by a team the subject is not on is refused by can() in @everdict/domain. Loaded here,
+// beside the membership role, because both answer "what may this request do in THIS workspace" and both must come
+// from the control plane rather than the client.
+//
+// A failure loads NO teams rather than throwing: the request then behaves as a subject on no team — it can still
+// read everything and write unowned resources, and an owned write is refused. Failing closed on a lookup error is
+// the right side to err on, and it never takes the whole request down.
+async function withTeams(principal: Principal, deps: ServerDeps): Promise<Principal> {
+  if (!deps.teamService || !principal.workspace) return principal;
+  const teams = await deps.teamService.list(principal.workspace, { member: principal.subject }).catch(() => []);
+  return { ...principal, teams: teams.map((team) => team.id) };
+}
+
 export async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: ServerDeps): Promise<Principal> {
   // A runner token (via=runner) has a fixed workspace + minimal perms (roles:["runner"]) — exclude it from membership bootstrap / role promotion.
   // (Without the exclusion it would be promoted to the owner's membership role and the device credential would gain admin.)
@@ -359,11 +374,11 @@ export async function applyActiveWorkspace(base: Principal, req: FastifyRequest,
   const requested = workspaceHintOf(req) ?? base.workspace;
   if (requested && requested !== base.workspace) {
     const role = await store.roleFor(requested, subject);
-    if (role) return { ...base, workspace: requested, roles: [role] };
+    if (role) return withTeams({ ...base, workspace: requested, roles: [role] }, deps);
   }
 
   // Fall back to the default workspace (membership role if present). Otherwise keep workspace="" (onboarding target).
-  return base.workspace ? { ...base, roles: [baseRole as string] } : base;
+  return base.workspace ? withTeams({ ...base, roles: [baseRole as string] }, deps) : base;
 }
 
 // Final Principal with both authentication and active workspace resolved (used by every human/HTTP route).
@@ -430,9 +445,66 @@ export function mcpChallenge(req: FastifyRequest, reply: FastifyReply): FastifyR
     .send({ code: "UNAUTHENTICATED", message: "MCP requires OAuth authentication (see resource_metadata)." });
 }
 
+// ── Team ownership helpers (the authz kernel's team axis) ────────────────────────────────────────────────────
+// A versioned registry entry records its owning team beside created_by. These resolve it for gate(); a registry
+// that predates the column (or a `_shared`/seeded row) answers undefined, which the kernel reads as "unowned" and
+// lets through — never as "everyone's".
+type TeamAware = {
+  teamOfVersion?(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
+  ownVersions?(tenant: string, id: string): string[] | Promise<string[]>;
+};
+
+// The team that owns one VERSION.
+export async function teamOfVersion(
+  registry: TeamAware | undefined,
+  tenant: string,
+  id: string,
+  version: string,
+): Promise<ResourceScope> {
+  const teamId = await registry?.teamOfVersion?.(tenant, id, version);
+  return teamId === undefined ? {} : { teamId };
+}
+
+// The team that owns an ENTITY — read off its newest own version, because ownership belongs to the thing, not to
+// one release of it. Used by routes that mutate an id without naming a version (re-pin, tag edits).
+export async function teamOfEntity(
+  registry: TeamAware | undefined,
+  tenant: string,
+  id: string,
+): Promise<ResourceScope> {
+  const versions = (await registry?.ownVersions?.(tenant, id)) ?? [];
+  const newest = versions[versions.length - 1];
+  return newest === undefined ? {} : teamOfVersion(registry, tenant, id, newest);
+}
+
+// Who a NEWLY created asset will belong to, and what the gate should check.
+//
+// Two different questions, deliberately separated:
+//   · `teamId` — the owner it WILL get. A caller on no team still creates things; the asset lands in the
+//     workspace's default team, the same rule an issue follows when no team is named. Creating must not require
+//     already belonging somewhere, or a fresh member can do nothing.
+//   · `gate` — what to authorize. Only an EXPLICIT choice is authorized, because only that is a claim about
+//     another team; an implicit fallback is not the caller asserting anything. And an explicit choice the caller
+//     may not make is REFUSED, never quietly redirected to their own team — silently rewriting where something
+//     lands is how a mistyped id looks like it worked.
+export async function teamForNew(
+  principal: Principal,
+  deps: ServerDeps,
+  requested?: string,
+): Promise<{ teamId?: string; gate: ResourceScope }> {
+  if (requested !== undefined) return { teamId: requested, gate: { teamId: requested } };
+  const own = principal.teams?.[0];
+  if (own !== undefined) return { teamId: own, gate: {} };
+  const all = (await deps.teamService?.list(principal.workspace).catch(() => [])) ?? [];
+  const preferred = all.find((team) => team.isDefault) ?? all[0];
+  return preferred ? { teamId: preferred.id, gate: {} } : { gate: {} };
+}
+
 // authorize wrapper — throws ForbiddenError as-is so sendError maps it to 403.
-export function gate(principal: Principal, action: Action): void {
-  authorize(principal, action);
+// `resource` carries the OWNING TEAM when the target has one: a write against another team's harness/dataset/…
+// is refused even though the role allows the action in general. Omit it for workspace-level actions and reads.
+export function gate(principal: Principal, action: Action, resource?: ResourceScope): void {
+  authorize(principal, action, resource);
 }
 
 // AppError → flat error response; anything else → 500. Every route funnels failures through this.

@@ -1,7 +1,7 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
@@ -17,8 +17,11 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    // 이 배치를 소유할 팀 — 자산과 같은 축이라 "우리 팀이 무엇을 평가했나"가 답 가능해진다. 명시 지정만
+    // 인가 대상이고(남의 팀 앞으로 돌리는 것은 거절), 지정이 없으면 내 팀 → 워크스페이스 기본 팀 순이다.
+    const owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
     try {
-      gate(principal, "scorecards:run");
+      gate(principal, "scorecards:run", owner.gate);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -36,6 +39,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         await deps.scorecardService.submit({
           tenant: principal.workspace,
           submittedBy: principal.subject,
+          ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
           ...body,
           origin: { source: originSource(principal.via), ...(body.origin ?? {}) },
         }),
