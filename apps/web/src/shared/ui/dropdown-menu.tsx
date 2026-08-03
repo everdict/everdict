@@ -19,6 +19,40 @@ const Ctx = createContext<{ close: () => void } | null>(null)
 // 트리거와 팝오버 사이 간격(px). 예전의 mt-1.5/mb-1.5 를 fixed 좌표 계산으로 옮긴 값.
 const GAP = 6
 
+// The box a popover aligns to — the four viewport edges of `getBoundingClientRect()`, and nothing more, so
+// the geometry below is testable without a DOM.
+type Box = { top: number; right: number; bottom: number; left: number }
+type Measurable = { getBoundingClientRect: () => Box }
+
+// Align to the TRIGGER, not to the wrapper `div` that holds it. The wrapper is a block box, so it stretches
+// to whatever cell it sits in (a property row's value column, a table cell) — measuring that box parks an
+// `align="end"` menu at the CELL's right edge, far from the small button that opened it.
+export function triggerBoxOf(wrapper: Measurable & { firstElementChild: Measurable | null }): Box {
+  return (wrapper.firstElementChild ?? wrapper).getBoundingClientRect()
+}
+
+// Fixed-viewport coordinates for the portaled popover, pinned to the trigger box.
+export function popoverPosition(
+  box: Box,
+  {
+    side,
+    align,
+    viewport,
+  }: {
+    side: 'bottom' | 'top'
+    align: 'start' | 'end'
+    viewport: { width: number; height: number }
+  }
+): CSSProperties {
+  return {
+    position: 'fixed',
+    ...(side === 'bottom'
+      ? { top: box.bottom + GAP }
+      : { bottom: viewport.height - box.top + GAP }),
+    ...(align === 'end' ? { right: viewport.width - box.right } : { left: box.left }),
+  }
+}
+
 export function DropdownMenu({
   trigger,
   children,
@@ -37,14 +71,14 @@ export function DropdownMenu({
   const [open, setOpen] = useState(false)
   // 트리거의 뷰포트 좌표. 팝오버는 body 로 포털링해 fixed 로 여기에 정렬한다
   // (부모의 overflow-hidden 에 잘리지 않도록 — 예: 설정 카드 SettingsList).
-  const [rect, setRect] = useState<DOMRect | null>(null)
+  const [box, setBox] = useState<Box | null>(null)
   const triggerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
 
   // 트리거 좌표를 다시 잰다(열기·스크롤·리사이즈 시).
   function measure() {
     const el = triggerRef.current
-    if (el) setRect(el.getBoundingClientRect())
+    if (el) setBox(triggerBoxOf(el))
   }
 
   function toggle() {
@@ -80,14 +114,13 @@ export function DropdownMenu({
     }
   }, [open])
 
-  const style: CSSProperties | undefined = rect
-    ? {
-        position: 'fixed',
-        ...(side === 'bottom'
-          ? { top: rect.bottom + GAP }
-          : { bottom: window.innerHeight - rect.top + GAP }),
-        ...(align === 'end' ? { right: window.innerWidth - rect.right } : { left: rect.left }),
-      }
+  // `box` is only ever set from a client event, so `window` is read only then (SSR-safe).
+  const style: CSSProperties | undefined = box
+    ? popoverPosition(box, {
+        side,
+        align,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      })
     : undefined
 
   return (
