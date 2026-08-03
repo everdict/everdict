@@ -108,6 +108,18 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
 - **Detail views**: hide empty sections entirely (no "none" placeholder); entities show a meta strip, not a
   bare `dl` grid. **An entity detail is a ROUTED PAGE, never a dialog** — the right infra panel is half the
   workflow (edit/experiment on what the left half shows), and a modal makes that split impossible.
+  **A record whose title is CONTENT (the tracker's issue) takes the Linear issue-view shape instead of the meta
+  strip** (`app/[workspace]/issues/[id]` is the reference): ① a breadcrumb bar — list → team → identifier —
+  carrying the record-scoped actions (`CopyLinkButton`, the `⋯` menu) right after it and the prev/next SIBLING
+  navigation at the far right; ② the title alone at content size (a plain `h1`, not `PageHeader` — that atom is
+  for pages whose title is a NAME and truncates); ③ a container-queried two-column grid (`@3xl`) with the body
+  (description · evidence · discussion) left and ④ EVERY property gathered in one right column
+  (`shared/ui/property-list.tsx` — label-left/value-right, no card, empty rows omitted), placed by explicit
+  `col-start`/`row-start` so it collapses ABOVE the body when the container is narrow. Reading and changing live
+  in separate columns: the only control inside the property list is the one that IS a property (status). A
+  property block carrying its own form (issue links) declares its own `@container` so the form folds in the
+  narrow column. Siblings come from the list's own ordering, windowed (`SIBLING_WINDOW`), and the arrows stay
+  rendered-but-inert at the ends so their position never shifts.
   **Settings › Agent › Skills lists only what the workspace OWNS** — no "built-in"/"shared" tier: an Everdict or
   third-party skill in the store is an EXAMPLE, and taking it (`POST /skills/import`) copies it into the library as
   an ordinary workspace skill, editable and versionable from `settings/skills/[id]` like anything a member wrote
@@ -120,6 +132,23 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   (transport · the functions it puts in front of the model, under the bridged name · the description the model reads
   verbatim · the pinned source) and lets the member act on it (bind its secret via `SecretPicker`, connect-test or
   run it, edit it in chat). A tool key carries `:`/`/`, so encode it into the segment on both sides.
+- **A record's history/activity is ONE feed** (`shared/ui/activity-feed.tsx` — `ActivityFeed`/`ActivityRow`/
+  `ActivityActorName`), in Linear's grammar: the ACTOR'S FACE leads the row with a small event-icon badge on
+  its corner (a non-member subject — the regression watch, a GitHub sync — gets the icon as the node instead;
+  no connecting rail, the faces already form the column), then a short sentence ("**Dana** changed status"),
+  then what changed as CHIPS, then relative time (absolute on hover). **Values never go inside the sentence**: an inlined value drags the whole
+  clause through each locale's word order and Korean particles, so `{name}` leads and everything that changed
+  rides after it as a badge. The atom is hook-free (locale/timeZone are props) so a server page and a client
+  island render the same row. The tracker's three details (issue · project · initiative) render
+  `entities/tracker-history` `TrackerHistory` — one `TrackerHistoryEvent` → icon + tone + sentence, REUSING the
+  same status badges the lists use (`IssueStatusBadge`/`ProjectStatusBadge`/`InitiativeStatusBadge`) for
+  `from → to`, because a status that looks different in the history than in the list reads as a different
+  status. A row's `detail` bag is unvalidated wire data: read it ONLY through `lib/history-detail`
+  (`detailString`/`detailStrings`/`detailNumber`/`detailFlag`) and let a missing or mistyped field drop its
+  chip instead of breaking the row. Order is chronological (oldest first) with a "show earlier" head, like the
+  dataset's activity — which now renders through the same atom. Actor identity comes from ONE lookup
+  (`entities/member` `memberDirectoryOf` server-side / `useMemberDirectory` client-side), never a per-page
+  `members.find`. A new event = one enum value + one `case` + one message in BOTH locales (`tracker.history.*`).
 - **Domain-specific chat entries carry a MISSION**: a specialized entry like a skill detail's "대화로 편집하기"
   passes `mission` to `MentionInChatButton`/`AskAgentButton`/`AgentChatOpener` → `PendingMention.mission` →
   `AgentChatPanel`. The chat surface is UNCHANGED; only the empty-state icon/title/body/suggestions swap to that

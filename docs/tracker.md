@@ -111,7 +111,7 @@ Kinds are folded per subject rather than per verb:
 
 | kind | payload | triggerable |
 |---|---|---|
-| `issue.created` | `status`, `source: manual\|github`, `projectId?`, `repository?`/`number?` | ✅ |
+| `issue.created` | `status`, `source: manual\|github`, `teamId`, `identifier`, `projectId?`, and for a GitHub copy the addressable origin `repository`/`number`/`url` (+ `host?` on GHE) | ✅ |
 | `issue.status_changed` | `from`, `to`, `cause: manual\|github_sync\|regression`, `projectId?`, `scorecardId?` | ✅ |
 | `issue.linked` | `linkType`, `linkId`, `version?` | — |
 | `project.created` / `project.status_changed` | `from`, `to`, `openIssues`, `onTime?`, `forced?` | status only |
@@ -146,6 +146,15 @@ can predict.
 number already imported is skipped, never duplicated, so re-running after a partial failure is safe. An open
 issue lands as `todo`; a closed one lands as `done` with a note and **deliberately without a scorecard** —
 claiming evidence we do not have would poison every regression comparison that follows.
+
+**Provenance is recorded twice, on purpose.** `record.github` is the LIVE link — sync direction, remote state,
+the thread — and a member can detach it (`DELETE /issues/:id/github`). Where the issue *came from* is not that
+block: it is the durable first history entry (`github_imported`) plus the `issue.created` fact, and both carry
+the **addressable** origin — `repository`, `number`, `url`, and `host` when the copy came from a GitHub
+Enterprise server. `owner/name#42` alone is not an address on GHE, so a consumer that reconstructs a
+github.com URL from it sends people to the wrong server; carrying the url is what lets the web link the
+provenance (imported entry, detach entry, the "Imported from" property row) without reading the live block.
+Detaching therefore removes the sync, never the answer to "where did this issue come from".
 
 **Pull** (`POST /issues/:id/sync`, or `POST /issues/sync` for a whole repo) is one incremental `since=` list
 call watermarked by the oldest copy's last-seen remote timestamp, then per-issue apply. Two properties matter:

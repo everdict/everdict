@@ -4,14 +4,13 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 
 import { workspaceSlugFromPath } from '@/shared/auth/workspace-scope'
-import { fmtSubject } from '@/shared/lib/format'
 
 import { membersSchema } from '../model/schema'
+import type { MemberDirectory } from './member-profile'
 
 // subject → human identity. A record only ever stores the opaque Keycloak subject, so any client surface that
-// shows WHO did something needs this lookup; server components get the same thing from `listMembers` directly.
-export type MemberProfile = { name: string; avatarUrl?: string }
-export type MemberDirectory = Record<string, MemberProfile>
+// shows WHO did something needs this lookup; server components build the same thing from `listMembers` with
+// `memberDirectoryOf` (lib/member-profile — the pure half, callable from a server component).
 
 const EMPTY: MemberDirectory = {}
 
@@ -71,10 +70,4 @@ export function useMemberDirectory(): MemberDirectory {
   }, [workspace])
 
   return directory
-}
-
-// The name to show for a subject — the member's profile name, or the shortened subject when the directory hasn't
-// loaded or the member has since left the workspace (a past revision still names whoever published it).
-export function memberNameOf(directory: MemberDirectory, subject: string): string {
-  return directory[subject]?.name ?? fmtSubject(subject)
 }

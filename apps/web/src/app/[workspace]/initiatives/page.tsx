@@ -62,7 +62,9 @@ export default async function InitiativesPage({
       <PageHeader
         title={t('title')}
         description={t('description')}
-        actions={canWrite ? <CreateInitiativeButton workspace={workspace} /> : null}
+        actions={
+          canWrite ? <CreateInitiativeButton workspace={workspace} timeZone={timeZone} /> : null
+        }
       />
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -87,6 +89,10 @@ export default async function InitiativesPage({
           icon={<Rocket strokeWidth={1.75} />}
           title={t('emptyTitle')}
           hint={t('emptyHint')}
+          // 빈 목록은 시작하는 사람이 가장 오래 보는 화면이다 — 만드는 길을 여기서 바로 내준다(헤더 버튼과 같은 표면).
+          action={
+            canWrite ? <CreateInitiativeButton workspace={workspace} timeZone={timeZone} /> : null
+          }
         />
       ) : (
         <div className="space-y-2">

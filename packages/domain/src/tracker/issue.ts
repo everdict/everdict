@@ -86,6 +86,18 @@ function isTerminal(status: IssueStatus): boolean {
   return status === "done" || status === "cancelled";
 }
 
+// The addressable identity of the GitHub issue a copy came from, in the ONE shape every audit surface reads:
+// the creation history entry, the `issue.created` fact, and the detach entry. `host` appears only for a GitHub
+// Enterprise deployment (unset = github.com), the same convention WorkspaceCiLink uses.
+function githubOrigin(github: IssueGithub): { repository: string; number: number; url: string; host?: string } {
+  return {
+    repository: github.repository,
+    number: github.number,
+    url: github.url,
+    ...(github.host !== undefined ? { host: github.host } : {}),
+  };
+}
+
 export class Issue {
   private constructor(private readonly record: IssueRecord) {}
 
@@ -126,7 +138,11 @@ export class Issue {
           event: input.github !== undefined ? "github_imported" : "created",
           detail: {
             status,
-            ...(input.github !== undefined ? { repository: input.github.repository, number: input.github.number } : {}),
+            // The provenance entry is SELF-CONTAINED — host + url, not just `owner/name#42`. The `github` block
+            // above is live link state a member can detach; this entry is the immutable record of where the
+            // issue came from, and it has to stay resolvable afterwards. `owner/name#42` alone is not an
+            // address on a GitHub Enterprise host, so reconstructing the link downstream is guesswork.
+            ...(input.github !== undefined ? githubOrigin(input.github) : {}),
           },
         },
       ],
@@ -149,9 +165,9 @@ export class Issue {
           teamId: record.teamId,
           identifier: record.identifier,
           ...(record.projectId !== undefined ? { projectId: record.projectId } : {}),
-          ...(record.github !== undefined
-            ? { repository: record.github.repository, number: record.github.number }
-            : {}),
+          // Same origin shape as the history entry: a consumer woken by this fact (an agent, a webhook) can
+          // open the GitHub issue without a second read of the record — and without assuming github.com.
+          ...(record.github !== undefined ? githubOrigin(record.github) : {}),
         },
         message: `${record.identifier} filed — ${record.title}`,
       },
@@ -378,6 +394,8 @@ export class Issue {
     };
   }
 
+  // Detaching removes the LIVE link, never the provenance: the entry carries the same addressable origin the
+  // import entry did, so "where did this come from" still answers after someone unhooks the sync.
   detachGithub(by: string, now: string): IssueTransition {
     const github = this.requireGithub();
     return {
@@ -387,7 +405,11 @@ export class Issue {
           at: now,
           by,
           event: "updated",
-          detail: { changed: ["github"], detached: `${github.repository}#${github.number}` },
+          detail: {
+            changed: ["github"],
+            detached: `${github.repository}#${github.number}`,
+            ...githubOrigin(github),
+          },
         }),
         updatedAt: now,
       },
@@ -415,7 +437,9 @@ export class Issue {
     const changed: string[] = [];
     if (remote.title !== this.record.title) changed.push("title");
     if (remote.description !== this.record.description) changed.push("description");
-    if (remote.labels.join(" ") !== this.record.labels.join(" ")) changed.push("labels");
+    // \0 must stay ESCAPED: a literal NUL byte in the source makes this file binary to grep and to
+    // git diff, which quietly removes the tracker's core aggregate from every code search.
+    if (remote.labels.join("\0") !== this.record.labels.join("\0")) changed.push("labels");
     if (remote.state !== github.state) changed.push("state");
     // lastError is dropped by omission — a successful pull clears whatever failed before it.
     const { lastError: _cleared, ...rest } = github;

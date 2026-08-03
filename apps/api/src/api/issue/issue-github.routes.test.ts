@@ -77,7 +77,9 @@ function build(opts: { issues?: GithubIssue[]; tokenError?: Error } = {}) {
   const writers: GithubRepoWriterFactory = { for: () => writer };
   const store = new InMemoryIssueStore();
   const issueService = new IssueService({ teams: teamAllocator, store });
-  const issueSync = new GithubIssueSync({ teams: teamAllocator, store,
+  const issueSync = new GithubIssueSync({
+    teams: teamAllocator,
+    store,
     issues: issueService,
     tokens: {
       tokenForRepository: async () => {
@@ -156,6 +158,34 @@ describe("issue GitHub sync routes", () => {
     expect(detached.statusCode).toBe(200);
     expect(detached.json().github).toBeUndefined();
     expect(detached.json().title).toBe("remote issue 1"); // the local issue survives the detach
+  });
+
+  // An imported issue has to KNOW where it came from, addressably and for good: the `github` block is live sync
+  // state a member can unhook, so the durable history — not that block — is what answers the question later.
+  it("stamps the imported issue with the GitHub issue it came from, and keeps that after a detach", async () => {
+    const { app } = build();
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/issues/import",
+        headers: H,
+        payload: { repository: "acme/agent", numbers: [1] },
+      })
+    ).json().created[0];
+
+    const origin = {
+      repository: "acme/agent",
+      number: 1,
+      url: "https://github.com/acme/agent/issues/1",
+    };
+    expect(created.github).toMatchObject({ ...origin, state: "open" });
+    expect(created.history[0]).toMatchObject({ event: "github_imported", detail: origin });
+
+    const detached = await app.inject({ method: "DELETE", url: `/issues/${created.id}/github`, headers: H });
+    const history = detached.json().history;
+    expect(history[0]).toMatchObject({ event: "github_imported", detail: origin });
+    // The detach entry carries the address too, so the trail never depends on reading an older entry.
+    expect(history.at(-1)).toMatchObject({ event: "updated", detail: { changed: ["github"], ...origin } });
   });
 
   it("bulk pull reports a per-issue outcome and is a no-op when nothing changed", async () => {

@@ -7,31 +7,19 @@ import { Loader2, Plus, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import { ISSUE_LINK_TYPES, type IssueLink, type IssueLinkType } from '@/entities/issue'
+import {
+  ISSUE_LINK_REF_KIND,
+  ISSUE_LINK_TYPES,
+  issueLinkHref,
+  type IssueLink,
+  type IssueLinkType,
+} from '@/entities/issue'
 import { Button } from '@/shared/ui/button'
 import { EntityRef } from '@/shared/ui/chip'
 import { Combobox } from '@/shared/ui/combobox'
 import { Input, Label } from '@/shared/ui/input'
 
 import { addIssueLinkAction, removeIssueLinkAction } from '../api/links'
-
-// Where each pointer resolves in the app. A link is unvalidated, so the target may 404 — that is the
-// deliberate trade for letting an issue reference a capability before (or after) it exists.
-const ROUTE: Record<IssueLinkType, string> = {
-  harness: 'harnesses',
-  dataset: 'datasets',
-  judge: 'judges',
-  scorecard: 'scorecards',
-  run: 'runs',
-  view: 'views',
-}
-
-// EntityRef only tints the three versioned capability kinds; the rest render as a plain id@version ref.
-const REF_KIND: Partial<Record<IssueLinkType, 'dataset' | 'harness' | 'judge'>> = {
-  dataset: 'dataset',
-  harness: 'harness',
-  judge: 'judge',
-}
 
 export function IssueLinks({
   workspace,
@@ -102,11 +90,15 @@ export function IssueLinks({
               className="inline-flex max-w-full items-center gap-1 rounded bg-secondary py-0.5 pl-1.5 pr-1 text-[11px] text-secondary-foreground ring-1 ring-inset ring-border"
             >
               <Link
-                href={`/${workspace}/${ROUTE[link.type]}/${encodeURIComponent(link.id)}`}
+                href={issueLinkHref(workspace, link.type, link.id)}
                 className="min-w-0 transition-colors hover:text-foreground"
                 title={link.note ?? link.id}
               >
-                <EntityRef id={link.id} version={link.version} kind={REF_KIND[link.type]} />
+                <EntityRef
+                  id={link.id}
+                  version={link.version}
+                  kind={ISSUE_LINK_REF_KIND[link.type]}
+                />
               </Link>
               {canWrite && (
                 <button

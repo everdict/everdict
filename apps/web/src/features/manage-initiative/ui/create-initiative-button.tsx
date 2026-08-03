@@ -1,25 +1,40 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useId, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { isPastDue } from '@/entities/project'
 import { Button } from '@/shared/ui/button'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label, Textarea } from '@/shared/ui/input'
 
 import { createInitiativeAction } from '../api/initiatives'
 
-export function CreateInitiativeButton({ workspace }: { workspace: string }) {
+export function CreateInitiativeButton({
+  workspace,
+  timeZone,
+}: {
+  workspace: string
+  // 목표일이 이미 지났는지 판정할 기준. 목록의 "기한 초과" 배지와 같은 시간대를 써야 방금 만든 것이
+  // 왜 초과로 보이는지가 어긋나지 않는다.
+  timeZone: string
+}) {
   const t = useTranslations('initiativesPage')
   const router = useRouter()
+  // 이 버튼은 헤더와 빈 상태 두 곳에 놓인다 — 필드 id 를 인스턴스마다 갈라 두 개가 같은 id 를 쓰는 일이 없게 한다.
+  const formId = useId()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [targetDate, setTargetDate] = useState('')
   const [pending, startTransition] = useTransition()
+
+  // 지난 날짜도 받는다 — 이미 넘긴 마감을 그대로 기록하는 건 정당하다. 다만 만들자마자 "기한 초과"로
+  // 보일 거라는 사실은 저장 전에 알려준다.
+  const targetIsPast = isPastDue(targetDate === '' ? undefined : targetDate, timeZone)
 
   function submit() {
     const trimmed = name.trim()
@@ -48,7 +63,12 @@ export function CreateInitiativeButton({ workspace }: { workspace: string }) {
         <Plus className="size-3.5" />
         {t('create')}
       </Button>
-      <Dialog open={open} onClose={() => setOpen(false)} className="max-w-lg">
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        className="max-w-lg"
+        labelledBy={`${formId}-title`}
+      >
         <form
           className="@container space-y-4 p-5"
           onSubmit={(e) => {
@@ -56,11 +76,13 @@ export function CreateInitiativeButton({ workspace }: { workspace: string }) {
             submit()
           }}
         >
-          <h2 className="text-[15px] font-[560] text-foreground">{t('createTitle')}</h2>
+          <h2 id={`${formId}-title`} className="text-[15px] font-[560] text-foreground">
+            {t('createTitle')}
+          </h2>
           <div className="space-y-1.5">
-            <Label htmlFor="initiative-name">{t('fieldName')}</Label>
+            <Label htmlFor={`${formId}-name`}>{t('fieldName')}</Label>
             <Input
-              id="initiative-name"
+              id={`${formId}-name`}
               value={name}
               autoFocus
               onChange={(e) => setName(e.target.value)}
@@ -68,28 +90,37 @@ export function CreateInitiativeButton({ workspace }: { workspace: string }) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="initiative-description">{t('fieldDescription')}</Label>
+            <Label htmlFor={`${formId}-description`}>{t('fieldDescription')}</Label>
             <Textarea
-              id="initiative-description"
+              id={`${formId}-description`}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              placeholder={t('fieldDescriptionPlaceholder')}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="initiative-target">{t('fieldTargetDate')}</Label>
+            <Label htmlFor={`${formId}-target`}>{t('fieldTargetDate')}</Label>
             <Input
-              id="initiative-target"
+              id={`${formId}-target`}
               type="date"
               value={targetDate}
               onChange={(e) => setTargetDate(e.target.value)}
             />
+            {targetIsPast && (
+              <p className="text-[12px] leading-relaxed text-muted-foreground">
+                {t('fieldTargetDatePast')}
+              </p>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(false)}>
               {t('cancel')}
             </Button>
+            {/* 제출 라벨은 트리거("새 이니셔티브")와 달라야 한다 — 같은 글자면 무엇을 누르는지가 아니라
+                어디를 누르는지로만 구분된다. 진행 중에도 라벨을 유지해 버튼 폭이 튀지 않게 한다. */}
             <Button type="submit" size="sm" disabled={pending || name.trim().length === 0}>
-              {pending ? <Loader2 className="size-3.5 animate-spin" /> : t('create')}
+              {pending && <Loader2 className="size-3.5 animate-spin" />}
+              {t('createSubmit')}
             </Button>
           </div>
         </form>

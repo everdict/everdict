@@ -6,12 +6,13 @@ import { CommentsSection } from '@/features/discuss'
 import { InitiativeActions, InitiativeStatusControl } from '@/features/manage-initiative'
 import { initiativeDetailSchema, type InitiativeDetail } from '@/entities/initiative'
 import { issueHref, IssueStatusIcon } from '@/entities/issue'
-import { membersSchema } from '@/entities/member'
+import { memberDirectoryOf, membersSchema } from '@/entities/member'
 import { isPastDue, ProjectStatusBadge } from '@/entities/project'
+import { TrackerHistory } from '@/entities/tracker-history'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
+import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
@@ -75,12 +76,7 @@ export default async function InitiativeDetailPage({
     .catch(() => [])
   const canWrite = can(principal?.roles ?? [], 'issues:write')
   const overdue = current.status === 'active' && isPastDue(current.targetDate, timeZone)
-  const displayName = (subject: string): string => {
-    const m = members.find((x) => x.subject === subject)
-    return m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(subject)
-  }
-
-  const history = [...current.history].reverse()
+  const actors = memberDirectoryOf(members)
 
   return (
     <div className="@container space-y-7">
@@ -228,26 +224,16 @@ export default async function InitiativeDetailPage({
         </section>
       )}
 
-      {history.length > 0 && (
+      {current.history.length > 0 && (
         <section className="space-y-3">
           <SectionHeader title={t('historyTitle')} />
-          <ol className="space-y-1.5 border-l border-border pl-4">
-            {/* 점 중심을 세로선 한가운데에 올린다: pl-4(16px) + 선 두께 절반(0.5px) + 점 반지름(3px) */}
-            {history.map((entry, i) => (
-              <li
-                key={`${entry.at}-${i}`}
-                className="relative text-[12.5px] text-muted-foreground before:absolute before:-left-[19.5px] before:top-1.5 before:size-1.5 before:rounded-full before:bg-border"
-              >
-                <span className="text-foreground">{tracker(`historyEvent.${entry.event}`)}</span>
-                {' · '}
-                {displayName(entry.by)}
-                {' · '}
-                <time title={fmtDateTimeFull(entry.at, { timeZone })}>
-                  {fmtDateTime(entry.at, timeZone)}
-                </time>
-              </li>
-            ))}
-          </ol>
+          <TrackerHistory
+            kind="initiative"
+            subject={tracker('subject.initiative')}
+            entries={current.history}
+            actors={actors}
+            workspace={workspace}
+          />
         </section>
       )}
 

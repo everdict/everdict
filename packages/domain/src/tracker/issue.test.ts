@@ -53,6 +53,48 @@ describe("Issue — the tracker's unit of intent", () => {
     });
   });
 
+  // The provenance has to stay ADDRESSABLE on its own: the live `github` block is detachable state, so an
+  // origin recorded as `owner/name#42` would leave a GitHub Enterprise copy pointing nowhere afterwards.
+  it("records the imported issue's full address — host included — in the history, the fact and the detach entry", () => {
+    const github = {
+      host: "https://github.acme.internal",
+      repository: "acme/agent",
+      number: 42,
+      url: "https://github.acme.internal/acme/agent/issues/42",
+      state: "open" as const,
+      sync: { pull: true, push: false },
+      comments: [],
+    };
+    const record = newIssue({ status: "todo", github });
+    const origin = {
+      repository: "acme/agent",
+      number: 42,
+      url: "https://github.acme.internal/acme/agent/issues/42",
+      host: "https://github.acme.internal",
+    };
+    expect(record.history[0]?.detail).toMatchObject(origin);
+    expect(Issue.creationFacts(record)[0]?.payload).toMatchObject(origin);
+
+    const detached = Issue.from(record).detachGithub("dana", LATER);
+    expect(detached.patch.github).toBeUndefined();
+    expect(detached.patch.history?.at(-1)).toMatchObject({ event: "updated", detail: origin });
+  });
+
+  it("omits the host for a github.com copy — unset is the public host, not a missing value", () => {
+    const record = newIssue({
+      github: {
+        repository: "acme/agent",
+        number: 7,
+        url: "https://github.com/acme/agent/issues/7",
+        state: "open",
+        sync: { pull: false, push: false },
+        comments: [],
+      },
+    });
+    expect(record.history[0]?.detail).not.toHaveProperty("host");
+    expect(record.history[0]?.detail).toMatchObject({ url: "https://github.com/acme/agent/issues/7" });
+  });
+
   it("setStatus moves between open states and emits the folded status_changed fact", () => {
     const record = newIssue();
     const transition = Issue.from(record).setStatus("in_progress", "dana", LATER);
