@@ -154,3 +154,15 @@ export function placeTrajectory(segments: TrajectorySegment[]): PlacedTrajectory
 function laneRank(lane: Lane): number {
   return lane.kind === 'agent' ? 0 : lane.kind === 'placement' ? 1 : 2
 }
+
+// A caller holding ONE stream (a legacy run's row embed) reads it here as a single-segment trajectory.
+// Deliberately in this SERVER-SAFE module, not next to the view: the run detail is a server component, and a
+// function exported from a `'use client'` file cannot be CALLED from the server — only rendered as a component
+// or passed as a prop. That boundary is invisible to typecheck and to the unit tests; it fails at request time
+// with "Attempted to call asSingleSegment() from the server", which is exactly how it was found (live drill).
+export function asSingleSegment(
+  events: TraceEvent[],
+  source: TrajectorySegment['source']
+): TrajectorySegment[] {
+  return [{ emitter: source, source, eventCount: events.length, sealedAt: '', events }]
+}

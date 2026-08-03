@@ -161,14 +161,6 @@ function rollupOf(placed: PlacedEvent[]): Rollup {
   return out
 }
 
-// The run detail renders the same view over a single sealed stream — one segment, no service planes.
-export function asSingleSegment(
-  events: TraceEvent[],
-  source: TrajectorySegment['source']
-): TrajectorySegment[] {
-  return [{ emitter: source, source, eventCount: events.length, sealedAt: '', events }]
-}
-
 export function TrajectoryView({ segments }: { segments: TrajectorySegment[] }) {
   const t = useTranslations('trajectoryBrowser')
   const [lane, setLane] = useState<string>('all')
