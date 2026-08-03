@@ -1,7 +1,7 @@
 import { ConflictError } from "@everdict/contracts";
 import { RunRecordSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { Run } from "./run.js";
+import { Run, attachChannelsFor } from "./run.js";
 
 const CASE = {
   id: "c1",
@@ -232,5 +232,25 @@ describe("Run — agent activations on the ledger (P3)", () => {
       facts: [],
     });
     expect(() => Run.from({ ...agentRun(), status: "succeeded" }).settleAgent("failed", "late", "t2")).toThrow();
+  });
+});
+
+describe("attachChannelsFor — one rule for what an execution exposes", () => {
+  it("gives a cluster-placed case logs AND a shell — the control plane can reach its container", () => {
+    expect(attachChannelsFor({ kind: "eval", target: "nomad-seoul" })).toEqual(["logs", "terminal"]);
+    expect(attachChannelsFor({ kind: "eval" })).toEqual(["logs", "terminal"]);
+  });
+
+  it("gives a self-hosted case logs ONLY — the runner pushes lines, nothing can shell back in", () => {
+    expect(attachChannelsFor({ kind: "eval", target: "self:runner-1" })).toEqual(["logs"]);
+  });
+
+  it("gives an agent turn or an analysis nothing — there is no container to attach to", () => {
+    expect(attachChannelsFor({ kind: "agent" })).toEqual([]);
+    expect(attachChannelsFor({ kind: "analysis" })).toEqual([]);
+  });
+
+  it("treats an unstamped legacy run as an eval, which is what those rows were", () => {
+    expect(attachChannelsFor({})).toEqual(["logs", "terminal"]);
   });
 });

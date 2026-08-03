@@ -323,7 +323,7 @@ describe("RunService", () => {
     // CaseFailure with the throw-time evidence (placement identity + log tail) was a batch-only privilege, and
     // the run had no trajectory at all, so once the orchestrator job was GC'd the "why" was gone.
     const store = new InMemoryRunStore();
-    const sealed: Array<{ runId: string; source: string; events: unknown[] }> = [];
+    const sealed: Array<{ runId: string; source: string; emitter?: string; events: Array<{ kind: string }> }> = [];
     const evidenceFailDispatcher: Dispatcher = {
       async dispatch() {
         throw new UpstreamError(
@@ -343,7 +343,12 @@ describe("RunService", () => {
       newId: ids,
       trajectories: {
         async seal(input) {
-          sealed.push({ runId: input.runId, source: input.source, events: [...input.events] });
+          sealed.push({
+            runId: input.runId,
+            source: input.source,
+            ...(input.emitter !== undefined ? { emitter: input.emitter } : {}),
+            events: [...input.events],
+          });
           return {
             runId: input.runId,
             tenant: input.tenant,
@@ -391,10 +396,15 @@ describe("RunService", () => {
       { t: 1, kind: "log", stream: "stderr", text: "panic: boom" },
       { t: 2, kind: "error", message: "alloc failed — Driver Failure: Failed to pull image" },
     ]);
-    // Dual-write parity with the success path — the evidence trace sealed as the run's own trajectory.
-    expect(sealed).toHaveLength(1);
+    // Dual-write parity with the success path — the evidence seals as the run's own trajectory, split into the
+    // planes it actually holds: the agent's stream (what a judge reads) and the orchestrator's account of where
+    // it ran. The placement event never lands in the judged half.
+    expect(sealed).toHaveLength(2);
     expect(sealed[0]).toMatchObject({ runId: rec.id, source: "run" });
-    expect(sealed[0]?.events).toHaveLength(3);
+    expect(sealed[0]?.emitter).toBeUndefined();
+    expect(sealed[0]?.events.map((e) => e.kind)).toEqual(["log", "error"]);
+    expect(sealed[1]).toMatchObject({ runId: rec.id, emitter: "infra" });
+    expect(sealed[1]?.events.map((e) => e.kind)).toEqual(["infra"]);
   });
 
   it("submit throws when over budget (no run created, maps to 402)", async () => {

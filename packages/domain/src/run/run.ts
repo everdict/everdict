@@ -30,6 +30,20 @@ export interface NewQueuedRunInput {
   now: string;
 }
 
+// WHICH live channels an execution exposes — the ONE rule, so a surface never has to guess from the run's
+// kind what it can attach to. Guessing is what the web used to do (`kind is eval|command → assume a
+// container`), and it promised the same panels for an execution on a cluster and one on someone's laptop,
+// where only the second is true.
+//
+// A cluster-placed case is container-backed: the control plane can tail its logs and open a shell into it.
+// A `self:` case runs on a machine the control plane cannot reach — the runner PUSHES its lines, so logs
+// exist and exec does not. An agent turn or an analysis has no container at all.
+export function attachChannelsFor(input: { kind?: RunRecord["kind"]; target?: string }): RunAttachChannel[] {
+  const kind = input.kind ?? "eval";
+  if (kind !== "eval" && kind !== "command") return [];
+  return input.target?.startsWith("self:") ? ["logs"] : ["logs", "terminal"];
+}
+
 // The emission gate, domain law: scorecard children stay represented by the batch's own facts (flood
 // prevention). The initiator gate was WIDENED (E2 coverage decision, master-plan W6 backlog close-out):
 // a machine-fired completion is workspace news too — the Mattermost channel always posted it, and re-basing
@@ -79,6 +93,7 @@ export class Run {
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.envelope ? { envelope: input.envelope } : {}),
       ...(input.runtime ? { placement: { where: "runtime" as const, target: input.runtime } } : {}),
+      attach: attachChannelsFor({ kind: "eval", ...(input.runtime ? { target: input.runtime } : {}) }),
       createdAt: input.now,
       updatedAt: input.now,
     };

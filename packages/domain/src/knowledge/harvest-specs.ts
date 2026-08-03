@@ -11,6 +11,7 @@ import type {
   RubricSpec,
   RuntimeSpec,
 } from "@everdict/contracts";
+import { isPulledCommandTrace } from "@everdict/contracts";
 import { HarvestBuilder, type HarvestResult } from "./harvest.js";
 
 // Structured harvesters for the versioned REGISTRY specs (the eval subjects/config the scorecard/schedule harvesters'
@@ -76,7 +77,7 @@ export function harvestHarness(meta: SpecHarvestMeta, spec: HarnessSpec): Harves
     for (const [k, v] of Object.entries(spec.env)) {
       if (typeof v !== "string") b.ref("uses_secret", { type: "secret", key: v.secretRef }, `env.${k}.secretRef`);
     }
-    if (spec.trace.kind !== "none" && spec.trace.authSecret !== undefined) {
+    if (isPulledCommandTrace(spec.trace) && spec.trace.authSecret !== undefined) {
       b.ref("uses_secret", { type: "secret", key: spec.trace.authSecret }, "trace.authSecret");
     }
   }

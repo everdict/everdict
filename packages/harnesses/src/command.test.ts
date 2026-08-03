@@ -402,3 +402,113 @@ describe("CommandHarness — trace:none evidence fallback (stderr log events)", 
     expect(events.some((e) => e.kind === "log")).toBe(false);
   });
 });
+
+// The self-reported plane (trace:file) — the seam that lets a CLI agent describe its own run instead of
+// smuggling numbers out through stdout for a regex grader to recover.
+function computeWithTraceFile(body: string | (() => never), stdout = "the answer") {
+  const reads: string[] = [];
+  const compute: ComputeHandle = {
+    async exec() {
+      return { exitCode: 0, stdout, stderr: "" };
+    },
+    async writeFile() {},
+    async readFile(path): Promise<string> {
+      reads.push(path);
+      if (typeof body === "function") return body();
+      return body;
+    },
+    async dispose() {},
+  };
+  return { compute, reads };
+}
+
+async function collectSelfReported(harness: CommandHarness, compute: ComputeHandle): Promise<TraceEvent[]> {
+  const events: TraceEvent[] = [];
+  for await (const e of harness.run(compute, "do it", ctx)) events.push(e);
+  return events;
+}
+
+describe("CommandHarness — trace:file (the self-reported plane)", () => {
+  const fileSpec = (path?: string): CommandHarnessSpec =>
+    spec({ trace: path !== undefined ? { kind: "file", path } : { kind: "file", path: "everdict-trace.json" } });
+
+  it("reads the events the command wrote and yields them as the run's trace", async () => {
+    const events = [
+      { t: 1, kind: "tool_call", id: "c1", name: "skill_view", args: { name: "amber-band" } },
+      { t: 2, kind: "message", role: "assistant", text: "TMB-4412" },
+    ];
+    const { compute } = computeWithTraceFile(JSON.stringify(events));
+    const out = await collectSelfReported(new CommandHarness(fileSpec()), compute);
+    expect(out.filter((e) => e.kind === "tool_call")).toHaveLength(1);
+    expect(out.filter((e) => e.kind === "message")).toHaveLength(1);
+  });
+
+  it("makes the ordinary steps grader work — tool_call events are real, not a regex over stdout", async () => {
+    const events = [
+      { t: 1, kind: "tool_call", id: "c1", name: "a" },
+      { t: 2, kind: "tool_call", id: "c2", name: "b" },
+      { t: 3, kind: "message", role: "assistant", text: "done" },
+    ];
+    const { compute } = computeWithTraceFile(JSON.stringify(events));
+    const out = await collectSelfReported(new CommandHarness(fileSpec()), compute);
+    expect(out.filter((e) => e.kind === "tool_call")).toHaveLength(2);
+  });
+
+  it("accepts JSONL so an agent can append a line per step without buffering the run", async () => {
+    const body = [
+      '{"t":1,"kind":"tool_call","id":"c1","name":"a"}',
+      '{"t":2,"kind":"tool_call","id":"c2","name":"b"}',
+    ].join("\n");
+    const { compute } = computeWithTraceFile(body);
+    const out = await collectSelfReported(new CommandHarness(fileSpec()), compute);
+    expect(out.filter((e) => e.kind === "tool_call")).toHaveLength(2);
+  });
+
+  it("drops a malformed line instead of failing the case — a gap in evidence is not a lost result", async () => {
+    const body = [
+      '{"t":1,"kind":"tool_call","id":"c1","name":"a"}',
+      "{ not json",
+      '{"t":3,"kind":"tool_call","id":"c3","name":"c"}',
+    ].join("\n");
+    const { compute } = computeWithTraceFile(body);
+    const out = await collectSelfReported(new CommandHarness(fileSpec()), compute);
+    expect(out.filter((e) => e.kind === "tool_call")).toHaveLength(2);
+  });
+
+  it("falls back to stdout as the answer when the file carries no assistant message", async () => {
+    const { compute } = computeWithTraceFile('[{"t":1,"kind":"tool_call","id":"c1","name":"a"}]', "the printed answer");
+    const out = await collectSelfReported(new CommandHarness(fileSpec()), compute);
+    const message = out.find((e) => e.kind === "message");
+    expect(message).toMatchObject({ kind: "message", role: "assistant", text: "the printed answer" });
+  });
+
+  it("does not duplicate the answer when the agent reported one itself", async () => {
+    const body = JSON.stringify([{ t: 1, kind: "message", role: "assistant", text: "reported" }]);
+    const { compute } = computeWithTraceFile(body, "also printed");
+    const out = await collectSelfReported(new CommandHarness(fileSpec()), compute);
+    expect(out.filter((e) => e.kind === "message")).toHaveLength(1);
+    expect(out.find((e) => e.kind === "message")).toMatchObject({ text: "reported" });
+  });
+
+  it("survives a missing file — the agent simply chose not to report", async () => {
+    const { compute } = computeWithTraceFile(() => {
+      throw new Error("no such file");
+    }, "still answered");
+    const out = await collectSelfReported(new CommandHarness(fileSpec()), compute);
+    expect(out.find((e) => e.kind === "message")).toMatchObject({ text: "still answered" });
+  });
+
+  it("resolves a relative path under the harness workDir and leaves an absolute one alone", async () => {
+    const rel = computeWithTraceFile("[]");
+    await collectSelfReported(new CommandHarness(fileSpec("t.json")), rel.compute);
+    expect(rel.reads[0]).toBe("work/t.json");
+    const abs = computeWithTraceFile("[]");
+    await collectSelfReported(new CommandHarness(fileSpec("/tmp/t.json")), abs.compute);
+    expect(abs.reads[0]).toBe("/tmp/t.json");
+  });
+
+  it("never pulls from a platform — collectTrace stays empty because the sandbox is already gone", async () => {
+    expect(await new CommandHarness(fileSpec()).collectTrace("run-1")).toEqual([]);
+    expect(new CommandHarness(fileSpec()).traceSource()).toBeUndefined();
+  });
+});

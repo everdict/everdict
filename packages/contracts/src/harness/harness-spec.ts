@@ -511,6 +511,17 @@ const commandTraceAuth = {
 };
 export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }),
+  // The SELF-REPORTED plane: the command writes its own TraceEvent stream to a file in the sandbox and we read
+  // it back. Every other kind here says "go pull it from an observability platform", which leaves a CLI agent
+  // that CAN describe its own run but is not wired to one with only `none` — and that hole is why callers
+  // started smuggling numbers out through stdout markers for the `text-metric` grader to regex back. One file
+  // closes it: `ctx.trace` becomes real, so the ordinary trace-family graders (steps/cost/latency) and the
+  // judges read it with no per-agent grader code, and the settle-time seal files it as the run's own plane.
+  z.object({
+    kind: z.literal("file"),
+    // Relative to the harness workDir. Read AFTER the command exits — a live tail is the streaming rung, not this.
+    path: z.string().default("everdict-trace.json"),
+  }),
   z.object({
     kind: z.literal("otel"),
     endpoint: z.string(),
@@ -542,6 +553,15 @@ export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type CommandTraceSpec = z.infer<typeof CommandTraceSpecSchema>;
+
+// The PULLED kinds — the ones that name an external platform and therefore carry an endpoint + credential.
+// `none` (no trace) and `file` (the command reports its own) have neither. Callers that reach for
+// `endpoint`/`authSecret` narrow through this ONE guard instead of each re-deriving "which kinds have auth"
+// from the kind list — a new kind then lands in a single place rather than in every secret-resolution site.
+export type PulledCommandTraceSpec = Exclude<CommandTraceSpec, { kind: "none" } | { kind: "file" }>;
+export function isPulledCommandTrace(trace: CommandTraceSpec): trace is PulledCommandTraceSpec {
+  return trace.kind !== "none" && trace.kind !== "file";
+}
 
 // Live in-run screen capture declaration — an opt-in for command harnesses that drive a browser/GUI inside their own
 // container (e.g. browser-use's headless Chromium). When present, the self-hosted runner execs `captureCmd` in the case

@@ -6,6 +6,8 @@ import {
   InternalError,
   type RunContext,
   type TraceEvent,
+  TraceEventSchema,
+  isPulledCommandTrace,
   shq,
 } from "@everdict/contracts";
 import { flattenEnv } from "@everdict/domain";
@@ -71,7 +73,7 @@ export class CommandHarness implements EvaluableHarness {
   // authSecret exposes only the 'name' (the control plane re-resolves it at collect time) — the resolved value (trace.auth) never leaks via traceRef.
   traceSource(): HarnessTraceSource | undefined {
     const trace = this.spec.trace;
-    if (trace.kind === "none") return undefined;
+    if (!isPulledCommandTrace(trace)) return undefined;
     const correlatable = trace.kind === "mlflow" || trace.kind === "otel";
     return {
       kind: trace.kind,
@@ -86,6 +88,46 @@ export class CommandHarness implements EvaluableHarness {
     };
   }
 
+  // Read back the events the command wrote for itself. Accepts a JSON array or JSONL — an agent appending a
+  // line per step should not have to buffer the whole run to stay valid. Malformed events are DROPPED
+  // individually rather than failing the case: a broken line is a gap in evidence, never a lost result, and a
+  // missing file just means the agent chose not to report (the stdout answer still stands).
+  private async readSelfReportedTrace(compute: ComputeHandle, path: string): Promise<TraceEvent[]> {
+    let raw: string;
+    try {
+      raw = await compute.readFile(path.startsWith("/") ? path : `${this.cwd}/${path}`);
+    } catch {
+      return [];
+    }
+    const body = raw.trim();
+    if (!body) return [];
+    const candidates: unknown[] = [];
+    if (body.startsWith("[")) {
+      try {
+        const parsed: unknown = JSON.parse(body);
+        if (Array.isArray(parsed)) candidates.push(...parsed);
+      } catch {
+        return [];
+      }
+    } else {
+      for (const line of body.split("\n")) {
+        const text = line.trim();
+        if (!text) continue;
+        try {
+          candidates.push(JSON.parse(text));
+        } catch {
+          // one bad line, not a bad run
+        }
+      }
+    }
+    const events: TraceEvent[] = [];
+    for (const candidate of candidates) {
+      const parsed = TraceEventSchema.safeParse(candidate);
+      if (parsed.success) events.push(parsed.data);
+    }
+    return events;
+  }
+
   // Pull the exported trace by runId — runCase calls this after releasing compute (the sandbox isn't held during the flush delay).
   // run() yields only execution events; platform events come from here (previously pulled at the tail of run() — which held the sandbox).
   // Right after the process exits, the platform flush can lag, so retry briefly if 0 results (3 total). The source is the same
@@ -93,7 +135,9 @@ export class CommandHarness implements EvaluableHarness {
   // langsmith=x-api-key, etc.; the factory carries headers.authorization over to the newer 3 kinds' auth).
   async collectTrace(runId: string): Promise<TraceEvent[]> {
     const trace = this.spec.trace;
-    if (trace.kind === "none") return [];
+    // `none` has nothing to pull; `file` was already read inline during run() (it lives in the sandbox, which
+    // is gone by the time this runs — the deferred-pull path is for platforms that outlive the compute).
+    if (!isPulledCommandTrace(trace)) return [];
     const correlate =
       (trace.kind === "mlflow" || trace.kind === "otel") && trace.correlate === "tag" ? ("tag" as const) : undefined;
     // Search scope: the experiment for mlflow tag correlation | phoenix's project — both converge onto TraceSourceConfig.project.
@@ -169,7 +213,17 @@ export class CommandHarness implements EvaluableHarness {
       }
       // For a black-box CLI with no trace of its own (trace:none), the final answer = stdout — emit it as a normalized
       // assistant message so QA scoring (answer-match/judge) can read it (tail 32k — avoids record bloat). If a trace exists, that's the answer.
-      if (trace.kind === "none") {
+      // The self-reported plane: the command wrote its own events, so they ARE the trace — no regex, no
+      // markers. The stdout message is still emitted when the file carries no assistant message, so
+      // answer-match keeps working whether the agent reports its answer as an event or just prints it.
+      let selfReportedAnswer = false;
+      if (trace.kind === "file") {
+        for (const event of await this.readSelfReportedTrace(compute, trace.path)) {
+          if (event.kind === "message" && event.role === "assistant") selfReportedAnswer = true;
+          yield event;
+        }
+      }
+      if (trace.kind === "none" || (trace.kind === "file" && !selfReportedAnswer)) {
         const text = res.stdout.trim().slice(-32_000);
         if (text) yield { t: Date.now(), kind: "message", role: "assistant", text };
         // Evidence fallback: black-box CLIs log progress to stderr — without this, a successful run leaves no

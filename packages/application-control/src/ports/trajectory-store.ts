@@ -69,6 +69,45 @@ export function executionSegment(segments: TrajectorySegment[]): TrajectorySegme
   return segments[0];
 }
 
+// The orchestrator's account of WHERE the execution ran — a plane of its own, deliberately NOT in
+// EXECUTION_EMITTERS: a judge reads what the agent did, not where the scheduler put it.
+export const INFRA_EMITTER = "infra";
+
+// Split an execution's raw event stream into the planes it actually contains and seal each. Placement events
+// arrive interleaved with the agent's (the backend/runner appends them to the same CaseResult.trace), but they
+// are a different emitter on a different clock — `infra.at` is absolute while the agent's `t` counts from the
+// in-job start — so merging them into one segment costs both halves: the judged `events` carry scheduler
+// noise, and the two clocks share one anchor that fits neither.
+//
+// Best-effort by contract, like every seal call site it replaces: evidence, never lifecycle. Callers keep
+// their `void`/catch discipline.
+export async function sealExecutionPlanes(
+  store: Pick<TrajectoryStore, "seal">,
+  input: { runId: string; tenant: string; events: TraceEvent[] },
+): Promise<void> {
+  const agent: TraceEvent[] = [];
+  const infra: TraceEvent[] = [];
+  for (const event of input.events) (event.kind === "infra" ? infra : agent).push(event);
+  // The execution's plane seals first so `SealedTrajectory.events` resolves to it even if the second write loses.
+  if (agent.length > 0) await store.seal({ runId: input.runId, tenant: input.tenant, source: "run", events: agent });
+  if (infra.length > 0) {
+    // The plane's own anchor: the earliest absolute stamp its emitter reported. Without one the reader keeps
+    // this segment on its own axis rather than inventing an offset onto the agent's.
+    const t0 = infra
+      .map((e) => (e.kind === "infra" ? e.at : undefined))
+      .filter((at): at is string => at !== undefined)
+      .sort()[0];
+    await store.seal({
+      runId: input.runId,
+      tenant: input.tenant,
+      source: "run",
+      emitter: INFRA_EMITTER,
+      events: infra,
+      ...(t0 !== undefined ? { t0 } : {}),
+    });
+  }
+}
+
 // One emitter's contribution as it goes over the wire. The EXECUTION segment omits `events` — its stream
 // is the response's top-level `events` (the one a judge reads), so a system-level read never ships the same
 // trace twice. Every other segment carries its own events: that IS the point of the multi-plane rung.

@@ -239,15 +239,13 @@ export default async function RunDetailPage({
     run.kind === 'agent' ? 'agent' : run.kind === 'sandbox' ? 'environment' : 'harness'
   const objectLabel = run.kind === 'agent' ? 'cause' : run.kind === 'sandbox' ? 'image' : 'case'
 
-  // 라이브 패널은 run 이 선언한 채널만 연다. 선언이 없는 예전 eval/command run 은 기존 동작(로그+터미널)을
-  // 그대로 유지하고, 에이전트/분석 run 은 붙을 컨테이너 자체가 없으므로 아무것도 열지 않는다 — 예전에는
-  // 여기서 영원히 "대기 중"인 로그 카드와 "컨테이너 없음"만 답하는 터미널이 떴다.
-  const attach = run.attach
-  const containerBacked = run.kind === undefined || run.kind === 'eval' || run.kind === 'command'
-  const showLiveLogs = attach ? attach.includes('logs') : containerBacked
-  const showTerminal = attach
-    ? attach.includes('exec') || attach.includes('terminal')
-    : containerBacked
+  // 라이브 패널은 run 이 선언한 채널만 연다. 예전에는 여기서 kind 로 "컨테이너 기반이겠지"를 추측했는데,
+  // 그러면 클러스터에서 돈 실행과 남의 노트북(self-hosted)에서 돈 실행에 같은 약속을 하고 다른 걸 준다.
+  // 이제 판단은 컨트롤 플레인 한 곳(domain 의 attachChannelsFor)에 있고 — 선언이 없던 옛 run 도 읽을 때
+  // 같은 규칙으로 채워져 온다 — 여기서는 선언을 읽기만 한다.
+  const attach = run.attach ?? []
+  const showLiveLogs = attach.includes('logs')
+  const showTerminal = attach.includes('exec') || attach.includes('terminal')
 
   // 이 run 을 일으킨 run — 수요 그래프의 간선(에이전트가 제출한 실행이 대표적). 부모 그룹은 스코어카드면
   // 메타 카드가 이미 링크하므로, 여기서는 그 밖의 그룹(플레이그라운드 세션의 케이스)만 세운다.

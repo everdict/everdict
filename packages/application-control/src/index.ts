@@ -30,6 +30,8 @@ export {
   defaultEmitter,
   EXECUTION_EMITTERS,
   executionSegment,
+  INFRA_EMITTER,
+  sealExecutionPlanes,
   type SealedTrajectory,
   type TrajectoryListResult,
   type TrajectoryMeta,

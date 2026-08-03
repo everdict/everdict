@@ -1,4 +1,10 @@
-import { BadRequestError, type EnvValue, HARNESS_AUTH_ENV_VARS, type HarnessSpec } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type EnvValue,
+  HARNESS_AUTH_ENV_VARS,
+  type HarnessSpec,
+  isPulledCommandTrace,
+} from "@everdict/contracts";
 
 // Harness secret-resolution semantics — the {secretRef} env vocabulary is defined by the HarnessSpec
 // shape (@everdict/contracts); the resolution/visibility rules live here (single owner).
@@ -52,7 +58,7 @@ export function resolveHarnessSecrets(spec: HarnessSpec, secrets: HarnessSecretM
   // command's trace.authSecret (workspace secret name) → transient trace.auth value — in-job (collect=job) pull uses it
   // as the auth header (the agent can't reach SecretStore, so it's resolved just before dispatch like env).
   const resolveTrace = (trace: Extract<HarnessSpec, { kind: "command" }>["trace"]) => {
-    if (trace.kind === "none" || !trace.authSecret) return trace;
+    if (!isPulledCommandTrace(trace) || !trace.authSecret) return trace;
     const val = secrets.workspace[trace.authSecret];
     if (val === undefined) {
       missing.add(trace.authSecret);

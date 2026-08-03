@@ -13,6 +13,7 @@ import {
   type TraceEvent,
   type TraceSource,
   type TraceSourceConfig,
+  isPulledCommandTrace,
 } from "@everdict/contracts";
 // Type-only wire reuse (same package's DTO subpath): the placement/topology read models the backends produce.
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
@@ -22,6 +23,7 @@ import {
   Run,
   type RunTransition,
   type UsageMeter,
+  attachChannelsFor,
   billingCharges,
   priceUsd,
   resolveHarnessSecrets,
@@ -37,7 +39,12 @@ import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
 import type { RunStore } from "../ports/run-store.js";
-import { type TrajectorySegmentWire, type TrajectoryStore, trajectorySegmentsWire } from "../ports/trajectory-store.js";
+import {
+  type TrajectorySegmentWire,
+  type TrajectoryStore,
+  sealExecutionPlanes,
+  trajectorySegmentsWire,
+} from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { failedCaseResult } from "../run-suite.js";
@@ -288,7 +295,7 @@ export class RunService {
   async get(id: string): Promise<(RunRecord & { liveTrace?: LiveTraceRef }) | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
-    return this.withLiveTrace(await this.withTrajectoryUsage(record));
+    return this.withLiveTrace(withAttachChannels(await this.withTrajectoryUsage(record)));
   }
 
   // The read whose answer ends up on a SCREEN (the detail route + its MCP twin — keep the two in step). Identical to
@@ -301,6 +308,11 @@ export class RunService {
     const snapshot = await refreshSnapshotRefs(record.result.snapshot, this.deps.artifacts);
     return snapshot === record.result.snapshot ? record : { ...record, result: { ...record.result, snapshot } };
   }
+
+  // A run recorded before executions declared their channels: derive them from the same rule the domain
+  // stamps new ones with, so every reader sees a declaration and no surface keeps a heuristic of its own.
+  // Derived on read (the ProjectRollup treatment) rather than backfilled — the rule can change without a
+  // migration, and a stored copy would be a cache to invalidate.
 
   // Usage for the runs whose evidence is NOT a row embed. The store derives usage from `result.trace`, which
   // an eval run has and an agent turn never does (its transcript is sealed in the trajectory store, per O10 —
@@ -327,7 +339,7 @@ export class RunService {
       .resolveHarness(record.tenant, record.harness.id, record.harness.version)
       .catch(() => undefined);
     const source =
-      spec?.kind === "command" && spec.trace.kind !== "none"
+      spec?.kind === "command" && isPulledCommandTrace(spec.trace)
         ? { kind: spec.trace.kind, endpoint: spec.trace.endpoint }
         : spec?.kind === "service"
           ? { kind: spec.traceSource.kind, endpoint: spec.traceSource.endpoint }
@@ -619,10 +631,7 @@ export class RunService {
       }
       await this.finalize(id, (run) => run.succeed(result, this.now()));
       // P5 dual-write: seal the trajectory in the OWNED store (best-effort, idempotent — evidence, not lifecycle).
-      if (result.trace.length > 0)
-        void this.deps.trajectories
-          ?.seal({ runId: id, tenant: input.tenant, source: "run", events: result.trace })
-          .catch(() => {});
+      if (result.trace.length > 0) void this.sealPlanes(id, input.tenant, result.trace);
     } catch (err) {
       const error =
         err instanceof AppError
@@ -635,10 +644,7 @@ export class RunService {
       const failed = failedCaseResult(job, err);
       await this.finalize(id, (run) => run.fail(error, this.now(), failed));
       // Dual-write parity with the success path: the evidence trace seals as the run's own trajectory.
-      if (failed.trace.length > 0)
-        void this.deps.trajectories
-          ?.seal({ runId: id, tenant: input.tenant, source: "run", events: failed.trace })
-          .catch(() => {});
+      if (failed.trace.length > 0) void this.sealPlanes(id, input.tenant, failed.trace);
     }
     // Completion notification (Mattermost etc.) — with the latest record. Failure is independent of the run result (swallow). Independent of the webhook.
     if (this.deps.onComplete) {
@@ -712,10 +718,7 @@ export class RunService {
     // seal it as the run's OWN trajectory (source "run", first write wins). Offered BEFORE the terminal guard:
     // at-least-once reports re-offer harmlessly (idempotent seal) and a retry can heal a seal the first report
     // lost. Best-effort like every dual-write — the settle below is the durable half.
-    if (trace && trace.length > 0)
-      void this.deps.trajectories
-        ?.seal({ runId: id, tenant: current.tenant, source: "run", events: pricedTrace(trace) })
-        .catch(() => {});
+    if (trace && trace.length > 0) void this.sealPlanes(id, current.tenant, pricedTrace(trace));
     const run = Run.from(current);
     if (run.isTerminal()) return; // first terminal write wins (a retried terminal report)
     const { patch } = run.settleAgent(outcome, message, this.now());
@@ -766,6 +769,15 @@ export class RunService {
   }
 
   // Read-then-update is not atomic, but the tracker and boot recovery share one control-plane process.
+  // Evidence, never lifecycle: a seal failure must not touch the run's outcome. Splits the raw stream into the
+  // agent's plane and the orchestrator's (docs/architecture/native-observability.md) so the judged `events`
+  // carry no placement noise and each plane keeps its own clock anchor.
+  private async sealPlanes(runId: string, tenant: string, events: TraceEvent[]): Promise<void> {
+    const store = this.deps.trajectories;
+    if (!store) return;
+    await sealExecutionPlanes(store, { runId, tenant, events }).catch(() => {});
+  }
+
   private async finalize(id: string, outcome: (run: Run) => RunTransition): Promise<void> {
     const current = await this.deps.store.get(id);
     if (!current) return;
@@ -816,4 +828,15 @@ function standaloneRunOrigin(
     return { cause: "run", causedByRunId, ...(submittedBy ? { actor: submittedBy } : {}) };
   const cause = trigger === "web" || trigger === "mcp" ? "member" : trigger === "ci" ? "ci" : "api";
   return { cause, ...(submittedBy ? { actor: submittedBy } : {}) };
+}
+
+// The legacy-row half of the attach rule (see RunService.get): a record minted before executions declared
+// their channels still answers "what can I attach to" — from the domain's one rule, never a per-surface guess.
+function withAttachChannels(record: RunRecord): RunRecord {
+  if (record.attach !== undefined) return record;
+  const channels = attachChannelsFor({
+    ...(record.kind !== undefined ? { kind: record.kind } : {}),
+    ...(record.placement?.target !== undefined ? { target: record.placement.target } : {}),
+  });
+  return channels.length > 0 ? { ...record, attach: channels } : record;
 }

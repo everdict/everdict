@@ -1,4 +1,5 @@
 import type { EnvValue, HarnessSpec, ModelSpec, RuntimeSpec, WorkspaceSettings } from "@everdict/contracts";
+import { isPulledCommandTrace } from "@everdict/contracts";
 import type { SecretUsageRef } from "@everdict/contracts/wire";
 import { modelApiKeySecretName } from "../model/model-binding.js";
 import { mattermostConnections } from "../workspace/mattermost-connections.js";
@@ -52,7 +53,7 @@ export function collectSecretUsages(inputs: SecretUsageInputs): SecretUsage[] {
     const base: Omit<SecretUsageRef, "field" | "detail"> = { kind: "harness", label: id, resourceId: id, version };
     if (spec.kind === "command") {
       scanEnv(spec.env, base);
-      if (spec.trace.kind !== "none" && spec.trace.authSecret) {
+      if (isPulledCommandTrace(spec.trace) && spec.trace.authSecret) {
         workspaceRef(spec.trace.authSecret, { ...base, field: "trace-auth" });
       }
     } else if (spec.kind === "service") {
