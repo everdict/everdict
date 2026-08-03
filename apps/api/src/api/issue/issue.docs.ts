@@ -1,5 +1,8 @@
 import {
+  IssueGroupBySchema,
+  IssueGroupCountsSchema,
   IssueLinkTypeSchema,
+  IssueOrderSchema,
   IssuePageSchema,
   IssuePrioritySchema,
   IssueRecordSchema,
@@ -22,6 +25,7 @@ import { UpdateIssueBodySchema } from "./request/update-issue.js";
 export const issueDocs: Record<
   | "create"
   | "list"
+  | "counts"
   | "get"
   | "update"
   | "setStatus"
@@ -50,32 +54,71 @@ export const issueDocs: Record<
   list: {
     summary: "List the workspace's issues",
     description:
-      "One PAGE of the workspace's issues, newest activity first: `{ items, nextCursor? }` — pass nextCursor " +
-      "back as `cursor` for the next page (absent = last page). Rows are SUMMARIES: the description, the full " +
-      "link list and the move history are on GET /issues/:id, because a list row draws none of them. Filter by " +
-      "status, project, assignee, priority, team (or mine=true for every team you belong to), syncPull (the " +
-      "GitHub bulk sync's working set), parent (an issue id for its sub-issues, `none` for the top-level ones), " +
-      "or by the capability an issue links (linkType + linkId — 'which issues watch this harness'). " +
-      "Requires issues:read.",
+      "One PAGE of the workspace's issues: `{ items, nextCursor? }` — pass nextCursor back as `cursor` for the " +
+      "next page (absent = last page). Rows are SUMMARIES: the description, the full link list and the move " +
+      "history are on GET /issues/:id, because a list row draws none of them. `order` picks the sequence " +
+      "(updated [default] | created | priority | due); the cursor is minted UNDER that ordering, so reusing a " +
+      "token with a different `order` is a 400 rather than a meaningless window. status, priority, project, " +
+      "assignee, cycle and label are SETS — repeat the key to name several (`?status=todo&status=in_progress`), " +
+      "and they AND across facets; an empty value reaches the unset bucket (`?assignee=` = unassigned). Also " +
+      "filter by team (or mine=true for every team you belong to), syncPull (the GitHub bulk sync's working " +
+      "set), parent (an issue id for its sub-issues, `none` for the top-level ones), or by the capability an " +
+      "issue links (linkType + linkId — 'which issues watch this harness'). Requires issues:read.",
     tags: ["issue"],
     querystring: toJsonSchema(
       z.object({
-        status: IssueStatusSchema.optional(),
+        status: z.union([IssueStatusSchema, z.array(IssueStatusSchema)]).optional(),
         team: z.string().optional(),
         mine: z.enum(["true", "false"]).optional(),
-        project: z.string().optional(),
-        assignee: z.string().optional(),
-        priority: IssuePrioritySchema.optional(),
+        project: z.union([z.string(), z.array(z.string())]).optional(),
+        assignee: z.union([z.string(), z.array(z.string())]).optional(),
+        priority: z.union([IssuePrioritySchema, z.array(IssuePrioritySchema)]).optional(),
+        cycle: z.union([z.string(), z.array(z.string())]).optional(),
+        label: z.union([z.string(), z.array(z.string())]).optional(),
         parent: z.string().optional(),
+        triage: z.enum(["true", "false"]).optional(),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
         syncPull: z.enum(["true", "false"]).optional(),
+        order: IssueOrderSchema.optional(),
         limit: z.coerce.number().int().positive().max(200).optional(),
         cursor: z.string().optional(),
       }),
     ),
     response: {
-      200: { description: "One page of issue summaries, newest activity first", ...toJsonSchema(IssuePageSchema) },
+      200: { description: "One page of issue summaries", ...toJsonSchema(IssuePageSchema) },
+      ...errorResponses(400, 401, 403),
+    },
+  },
+  counts: {
+    summary: "Count the workspace's issues per group",
+    description:
+      "How many issues fall in each group under the SAME filter GET /issues takes — the headers of a grouped " +
+      "board. `groupBy` is status | assignee | priority | project | cycle, all scalar columns, so every issue " +
+      "counts exactly once. Groups come back largest-first with the UNSET bucket last and `key: null` " +
+      "(unassigned, no project, no cycle). A grouped screen holds one PAGE per group, so it cannot get these " +
+      "numbers from its own rows — counting what it received would only report the page size. Requires " +
+      "issues:read.",
+    tags: ["issue"],
+    querystring: toJsonSchema(
+      z.object({
+        groupBy: IssueGroupBySchema,
+        status: z.union([IssueStatusSchema, z.array(IssueStatusSchema)]).optional(),
+        team: z.string().optional(),
+        mine: z.enum(["true", "false"]).optional(),
+        project: z.union([z.string(), z.array(z.string())]).optional(),
+        assignee: z.union([z.string(), z.array(z.string())]).optional(),
+        priority: z.union([IssuePrioritySchema, z.array(IssuePrioritySchema)]).optional(),
+        cycle: z.union([z.string(), z.array(z.string())]).optional(),
+        label: z.union([z.string(), z.array(z.string())]).optional(),
+        parent: z.string().optional(),
+        triage: z.enum(["true", "false"]).optional(),
+        linkType: IssueLinkTypeSchema.optional(),
+        linkId: z.string().optional(),
+      }),
+    ),
+    response: {
+      200: { description: "Issue counts per group, largest first", ...toJsonSchema(IssueGroupCountsSchema) },
       ...errorResponses(400, 401, 403),
     },
   },
@@ -126,7 +169,9 @@ export const issueDocs: Record<
       "Hand the issue to another team. Its identifier is RE-MINTED from the destination team's counter (the " +
       "prefix says whose list an issue is on, so a moved issue keeping its old name would be a lie), and the " +
       "previous name keeps resolving — links already pasted elsewhere still land here, and reads redirect to " +
-      "the canonical one. Moving it to the team it is already on is a 409. Requires issues:write.",
+      "the canonical one. The move DROPS what the destination team does not own — the cycle, the board column, " +
+      "and the project unless the destination is on that project too — and the history entry names what it " +
+      "lost. Moving it to the team it is already on is a 409. Requires issues:write.",
     tags: ["issue"],
     body: toJsonSchema(MoveIssueBodySchema),
     response: {

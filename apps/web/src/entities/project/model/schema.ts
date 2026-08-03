@@ -1,15 +1,15 @@
 import type {
-  ProjectHealth as WireProjectHealth,
   ProjectMilestone as WireProjectMilestone,
   ProjectRecord as WireProjectRecord,
-  ProjectUpdateRecord as WireProjectUpdateRecord,
   ProjectRollup as WireProjectRollup,
   ProjectStatus as WireProjectStatus,
+  ProjectUpdateRecord as WireProjectUpdateRecord,
 } from '@everdict/contracts'
 import type { ProjectDetailResponse } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 import { trackerHistoryEntrySchema } from '@/entities/issue'
+import { trackerHealthSchema } from '@/entities/tracker-health'
 
 // The eval tracker's Project — issues under one target date (docs/tracker.md). Runtime boundary validation
 // stays here (zod v4); the EXPORTED types come from @everdict/contracts (`import type` only).
@@ -29,10 +29,6 @@ export const projectStatusSchema = z.enum(PROJECT_STATUSES)
 // Calendar dates, not instants — the literal YYYY-MM-DD round-trips with no timezone reinterpretation.
 const calendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 
-// 트래커가 기록하는 유일한 "판단" — 사람이 말한 것이라, 판정과 그 문장이 함께 간다.
-export const PROJECT_HEALTH = ['on_track', 'at_risk', 'off_track'] as const
-export const projectHealthSchema = z.enum(PROJECT_HEALTH)
-
 // 프로젝트 안의 체크포인트. 순서가 곧 의미다(날짜로 가는 단계들).
 export const projectMilestoneSchema = z.object({
   id: z.string(),
@@ -47,7 +43,7 @@ export const projectUpdateSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   projectId: z.string(),
-  health: projectHealthSchema,
+  health: trackerHealthSchema,
   body: z.string(),
   createdBy: z.string(),
   createdAt: z.string(),
@@ -61,13 +57,16 @@ export const projectSchema = z.object({
   description: z.string().optional(),
   status: projectStatusSchema,
   // 팀·이니셔티브 모두 N:M — 프로젝트는 여러 팀이 함께 하고, 여러 우산 아래 동시에 놓일 수 있다.
+  // 팀은 제어 평면에서 최소 하나가 보장된다(팀 없는 프로젝트는 만들 수 없다). 여기서까지 min(1) 로 막지는
+  // 않는다 — 읽는 쪽이고, 아직 마이그레이션되지 않은 배포의 옛 레코드 하나 때문에 화면을 통째로 못 그리는
+  // 것보다 그려 주는 편이 낫다.
   teamIds: z.array(z.string()).default([]),
   initiativeIds: z.array(z.string()).default([]),
   // 책임자와 참여자. 그리고 가장 최근 업데이트의 health — 목록 행이 타임라인을 읽지 않고도 색을 낼 수 있게
   // 프로젝트에 얹혀 있다(없음 = 아무도 업데이트를 안 올림, "정상"과는 다르다).
   lead: z.string().optional(),
   memberIds: z.array(z.string()).default([]),
-  health: projectHealthSchema.optional(),
+  health: trackerHealthSchema.optional(),
   milestones: z.array(projectMilestoneSchema).default([]),
   targetDate: calendarDateSchema.optional(),
   completedAt: z.string().optional(),
@@ -104,8 +103,6 @@ type _statusFwd = AssertAssignable<z.infer<typeof projectStatusSchema>, WireProj
 type _statusBack = AssertAssignable<WireProjectStatus, z.infer<typeof projectStatusSchema>>
 type _rollupFwd = AssertAssignable<z.infer<typeof projectRollupSchema>, WireProjectRollup>
 type _rollupBack = AssertAssignable<WireProjectRollup, z.infer<typeof projectRollupSchema>>
-type _healthFwd = AssertAssignable<z.infer<typeof projectHealthSchema>, WireProjectHealth>
-type _healthBack = AssertAssignable<WireProjectHealth, z.infer<typeof projectHealthSchema>>
 type _milestoneFwd = AssertAssignable<z.infer<typeof projectMilestoneSchema>, WireProjectMilestone>
 type _milestoneBack = AssertAssignable<WireProjectMilestone, z.infer<typeof projectMilestoneSchema>>
 type _updateFwd = AssertAssignable<z.infer<typeof projectUpdateSchema>, WireProjectUpdateRecord>
@@ -113,7 +110,6 @@ type _updateBack = AssertAssignable<WireProjectUpdateRecord, z.infer<typeof proj
 type _detailFwd = AssertAssignable<z.infer<typeof projectDetailSchema>, ProjectDetailResponse>
 type _detailBack = AssertAssignable<ProjectDetailResponse, z.infer<typeof projectDetailSchema>>
 
-export type ProjectHealth = WireProjectHealth
 export type ProjectMilestone = WireProjectMilestone
 export type ProjectUpdate = WireProjectUpdateRecord
 export type Project = WireProjectRecord
@@ -130,8 +126,6 @@ export type __projectDriftGuard = [
   _rollupBack,
   _detailFwd,
   _detailBack,
-  _healthFwd,
-  _healthBack,
   _milestoneFwd,
   _milestoneBack,
   _updateFwd,

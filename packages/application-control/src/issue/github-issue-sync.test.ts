@@ -1,5 +1,5 @@
-import type { IssuePage, IssueRecord } from "@everdict/contracts";
-import { issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
+import type { IssueGroupBy, IssueGroupCount, IssuePage, IssueRecord } from "@everdict/contracts";
+import { issueCountsByGroup, issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
   GithubIssue,
@@ -69,6 +69,9 @@ class FakeIssueStore implements IssueStore {
   }
   async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
     return issueCountsByTeam(await this.list(tenant));
+  }
+  async countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]> {
+    return issueCountsByGroup(await this.list(tenant, filter), groupBy);
   }
   async update(
     tenant: string,

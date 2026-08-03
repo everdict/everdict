@@ -1,15 +1,17 @@
 import Link from 'next/link'
-import { CalendarClock, Rocket } from 'lucide-react'
+import { CalendarClock, Target } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { CreateInitiativeButton } from '@/features/manage-initiative'
 import {
   INITIATIVE_STATUSES,
+  initiativeHref,
   initiativesSchema,
   InitiativeStatusBadge,
   type Initiative,
 } from '@/entities/initiative'
 import { isPastDue } from '@/entities/project'
+import { HealthBadge } from '@/entities/tracker-health'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -21,8 +23,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Initiatives — the deployment umbrella over projects. The readiness verdict is a fan-out, so it lives on the
-// detail; a row here is the umbrella and its deadline.
+// Initiatives — 여러 프로젝트가 함께 향하는 목표들. 진척은 프로젝트마다 이슈를 훑는 팬아웃이라 상세가 갖고,
+// 여기 한 줄은 그 목표가 무엇이고 언제까지이며 책임자가 뭐라고 말했는지(health)까지다.
 export default async function InitiativesPage({
   params,
   searchParams,
@@ -63,11 +65,13 @@ export default async function InitiativesPage({
         title={t('title')}
         description={t('description')}
         actions={
-          canWrite ? <CreateInitiativeButton
-                workspace={workspace}
-                timeZone={timeZone}
-                initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
-              /> : null
+          canWrite ? (
+            <CreateInitiativeButton
+              workspace={workspace}
+              timeZone={timeZone}
+              initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
+            />
+          ) : null
         }
       />
 
@@ -90,16 +94,18 @@ export default async function InitiativesPage({
         <Callout tone="danger">{t('loadError', { error })}</Callout>
       ) : initiatives.length === 0 ? (
         <EmptyState
-          icon={<Rocket strokeWidth={1.75} />}
+          icon={<Target strokeWidth={1.75} />}
           title={t('emptyTitle')}
           hint={t('emptyHint')}
           // 빈 목록은 시작하는 사람이 가장 오래 보는 화면이다 — 만드는 길을 여기서 바로 내준다(헤더 버튼과 같은 표면).
           action={
-            canWrite ? <CreateInitiativeButton
+            canWrite ? (
+              <CreateInitiativeButton
                 workspace={workspace}
                 timeZone={timeZone}
                 initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
-              /> : null
+              />
+            ) : null
           }
         />
       ) : (
@@ -109,7 +115,7 @@ export default async function InitiativesPage({
             return (
               <Link
                 key={i.id}
-                href={`/${workspace}/initiatives/${encodeURIComponent(i.id)}`}
+                href={initiativeHref(workspace, i.id)}
                 className="group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
                 <div className="min-w-0 flex-1">
@@ -132,6 +138,7 @@ export default async function InitiativesPage({
                   </span>
                 )}
                 {overdue && <Badge tone="danger">{t('overdue')}</Badge>}
+                {i.health !== undefined && <HealthBadge health={i.health} />}
                 <InitiativeStatusBadge status={i.status} />
               </Link>
             )

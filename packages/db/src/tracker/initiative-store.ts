@@ -1,5 +1,15 @@
-import type { InitiativeListFilter, InitiativeStore, OutboxEvent } from "@everdict/application-control";
-import { type InitiativeRecord, InitiativeRecordSchema } from "@everdict/contracts";
+import type {
+  InitiativeListFilter,
+  InitiativeStore,
+  InitiativeUpdateStore,
+  OutboxEvent,
+} from "@everdict/application-control";
+import {
+  type InitiativeRecord,
+  InitiativeRecordSchema,
+  type InitiativeUpdateRecord,
+  InitiativeUpdateRecordSchema,
+} from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory } from "./row.js";
@@ -54,13 +64,16 @@ interface InitiativeRow extends TrackerRow {
   description: string | null;
   status: string;
   parent_id: string | null;
+  lead: string | null;
+  health: string | null;
   target_date: string | null;
   completed_at: string | Date | null;
 }
 
 const INITIATIVE_COLUMNS =
-  "(id, tenant, name, description, status, parent_id, target_date, completed_at, history, created_by, created_at, updated_at)";
-const INITIATIVE_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::jsonb,$10,$11::timestamptz,$12::timestamptz)";
+  "(id, tenant, name, description, status, parent_id, lead, health, target_date, completed_at, history, created_by, created_at, updated_at)";
+const INITIATIVE_VALUES =
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,$11::jsonb,$12,$13::timestamptz,$14::timestamptz)";
 
 function insertParams(record: InitiativeRecord): unknown[] {
   return [
@@ -70,6 +83,8 @@ function insertParams(record: InitiativeRecord): unknown[] {
     record.description ?? null,
     record.status,
     record.parentId ?? null,
+    record.lead ?? null,
+    record.health ?? null,
     record.targetDate ?? null,
     record.completedAt ?? null,
     JSON.stringify(record.history),
@@ -87,6 +102,8 @@ function rowToRecord(row: InitiativeRow): InitiativeRecord {
     ...(row.description !== null ? { description: row.description } : {}),
     status: row.status,
     ...(row.parent_id !== null ? { parentId: row.parent_id } : {}),
+    ...(row.lead !== null ? { lead: row.lead } : {}),
+    ...(row.health !== null ? { health: row.health } : {}),
     ...(row.target_date !== null ? { targetDate: row.target_date } : {}),
     ...(row.completed_at !== null ? { completedAt: iso(row.completed_at) } : {}),
     history: trackerHistory(row.history),
@@ -149,8 +166,8 @@ export class PgInitiativeStore implements InitiativeStore {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
     const next: InitiativeRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
-    const sets = `name=$3, description=$4, status=$5, parent_id=$6, target_date=$7, completed_at=$8::timestamptz,
-       history=$9::jsonb, updated_at=$10::timestamptz`;
+    const sets = `name=$3, description=$4, status=$5, parent_id=$6, lead=$7, health=$8,
+       target_date=$9, completed_at=$10::timestamptz, history=$11::jsonb, updated_at=$12::timestamptz`;
     const params: unknown[] = [
       tenant,
       id,
@@ -158,6 +175,8 @@ export class PgInitiativeStore implements InitiativeStore {
       next.description ?? null,
       next.status,
       next.parentId ?? null,
+      next.lead ?? null,
+      next.health ?? null,
       next.targetDate ?? null,
       next.completedAt ?? null,
       JSON.stringify(next.history),
@@ -184,5 +203,68 @@ export class PgInitiativeStore implements InitiativeStore {
 
   async remove(tenant: string, id: string): Promise<void> {
     await this.client.query("DELETE FROM everdict_initiatives WHERE tenant=$1 AND id=$2", [tenant, id]);
+  }
+}
+
+// --- The posted updates -------------------------------------------------------------------------------------
+// Append-only, the same shape the project's timeline has: an update is what somebody said at a moment, so there
+// is no edit path and nothing to invalidate.
+
+export class InMemoryInitiativeUpdateStore implements InitiativeUpdateStore {
+  private readonly rows: InitiativeUpdateRecord[] = [];
+
+  async create(record: InitiativeUpdateRecord): Promise<void> {
+    this.rows.push(record);
+  }
+
+  async list(tenant: string, initiativeId: string, limit?: number): Promise<InitiativeUpdateRecord[]> {
+    const rows = this.rows
+      .filter((row) => row.tenant === tenant && row.initiativeId === initiativeId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return limit === undefined ? rows : rows.slice(0, limit);
+  }
+}
+
+interface InitiativeUpdateRow {
+  id: string;
+  tenant: string;
+  initiative_id: string;
+  health: string;
+  body: string;
+  created_by: string;
+  created_at: string | Date;
+}
+
+export class PgInitiativeUpdateStore implements InitiativeUpdateStore {
+  constructor(private readonly client: SqlClient) {}
+
+  async create(record: InitiativeUpdateRecord): Promise<void> {
+    await this.client.query(
+      `INSERT INTO everdict_initiative_updates (id, tenant, initiative_id, health, body, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::timestamptz)`,
+      [record.id, record.tenant, record.initiativeId, record.health, record.body, record.createdBy, record.createdAt],
+    );
+  }
+
+  async list(tenant: string, initiativeId: string, limit?: number): Promise<InitiativeUpdateRecord[]> {
+    const params: unknown[] = [tenant, initiativeId];
+    let sql = `SELECT * FROM everdict_initiative_updates
+       WHERE tenant=$1 AND initiative_id=$2 ORDER BY created_at DESC`;
+    if (limit !== undefined) {
+      sql += " LIMIT $3";
+      params.push(limit);
+    }
+    const { rows } = await this.client.query<InitiativeUpdateRow>(sql, params);
+    return rows.map((row) =>
+      InitiativeUpdateRecordSchema.parse({
+        id: row.id,
+        tenant: row.tenant,
+        initiativeId: row.initiative_id,
+        health: row.health,
+        body: row.body,
+        createdBy: row.created_by,
+        createdAt: iso(row.created_at),
+      }),
+    );
   }
 }

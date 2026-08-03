@@ -1,6 +1,6 @@
-import type { IssuePage, IssueRecord, ScorecardRecord } from "@everdict/contracts";
-import { BadRequestError, ConflictError, ForbiddenError } from "@everdict/contracts";
-import { issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
+import type { IssueGroupBy, IssueGroupCount, IssuePage, IssueRecord, ScorecardRecord } from "@everdict/contracts";
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "@everdict/contracts";
+import { issueCountsByGroup, issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
@@ -30,6 +30,21 @@ function movingAllocator() {
       const next = (counters.get(id) ?? 0) + 1;
       counters.set(id, next);
       return { team: { id }, grant: { number: next, identifier: `${keyOf(id)}-${next}` } };
+    },
+  };
+}
+
+// The project half of the team axis: a project NAMES the teams working it, and an issue may only join one its
+// own team is on. `ProjectStore` satisfies this shape structurally in production — the service asks the store,
+// never the peer service.
+function projectsWith(rows: readonly { id: string; teamIds: string[] }[]) {
+  return {
+    async get(
+      _tenant: string,
+      id: string,
+    ): Promise<{ teamIds: readonly string[]; milestones: readonly { id: string }[] } | undefined> {
+      const row = rows.find((project) => project.id === id);
+      return row === undefined ? undefined : { teamIds: row.teamIds, milestones: [] };
     },
   };
 }
@@ -75,6 +90,9 @@ class FakeIssueStore implements IssueStore {
   }
   async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
     return issueCountsByTeam(await this.list(tenant));
+  }
+  async countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]> {
+    return issueCountsByGroup(await this.list(tenant, filter), groupBy);
   }
   async update(
     tenant: string,
@@ -384,6 +402,78 @@ describe("IssueService.move — an issue changes teams, and its name changes wit
   it("refuses a move to the team the issue is already on", async () => {
     const { svc, issue } = await filed();
     await expect(svc.move("acme", issue.id, "team-eng", actor)).rejects.toThrow(ConflictError);
+  });
+
+  it("keeps the project when the destination team is on it, and drops it when it is not", async () => {
+    // Given two issues in projects the Engineering team works — one of them shared with Platform
+    const store = new FakeIssueStore();
+    let n = 0;
+    const svc = new IssueService({
+      teams: movingAllocator(),
+      store,
+      projects: projectsWith([
+        { id: "prj-eng", teamIds: ["team-eng"] },
+        { id: "prj-both", teamIds: ["team-eng", "team-plt"] },
+      ]),
+      newId: () => {
+        n += 1; // two issues in one test — a fixed id would make them the same record
+        return `id-${n}`;
+      },
+      now: () => NOW,
+    });
+    const alone = await svc.create({ tenant: "acme", createdBy: "dana", title: "a", projectId: "prj-eng" });
+    const shared = await svc.create({ tenant: "acme", createdBy: "dana", title: "b", projectId: "prj-both" });
+
+    // When both are handed to Platform
+    const movedAlone = await svc.move("acme", alone.id, "team-plt", actor);
+    const movedShared = await svc.move("acme", shared.id, "team-plt", actor);
+
+    // Then only the one whose project Platform does not work leaves it
+    expect(movedAlone.projectId).toBeUndefined();
+    expect(movedShared.projectId).toBe("prj-both");
+  });
+});
+
+describe("IssueService — an issue only joins a project its own team is on", () => {
+  const actor = { subject: "dana" };
+
+  function service() {
+    const store = new FakeIssueStore();
+    return {
+      store,
+      svc: new IssueService({
+        teams: teamAllocator, // files on team-eng
+        store,
+        projects: projectsWith([
+          { id: "prj-eng", teamIds: ["team-eng"] },
+          { id: "prj-plt", teamIds: ["team-plt"] },
+        ]),
+        newId: () => "ev",
+        now: () => NOW,
+      }),
+    };
+  }
+
+  it("files an issue into one of its team's projects", async () => {
+    const { svc } = service();
+    const issue = await svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retry", projectId: "prj-eng" });
+    expect(issue.projectId).toBe("prj-eng");
+  });
+
+  it("refuses to file it into another team's project", async () => {
+    const { svc } = service();
+    await expect(
+      svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retry", projectId: "prj-plt" }),
+    ).rejects.toThrow(BadRequestError);
+  });
+
+  it("refuses to move it into another team's project on an edit, and 404s an unknown one", async () => {
+    const { svc } = service();
+    const issue = await svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retry", projectId: "prj-eng" });
+    await expect(svc.update("acme", issue.id, { projectId: "prj-plt" }, actor)).rejects.toThrow(BadRequestError);
+    await expect(svc.update("acme", issue.id, { projectId: "ghost" }, actor)).rejects.toThrow(NotFoundError);
+    // Leaving a project is always allowed — the rule is about which one it may join.
+    expect((await svc.update("acme", issue.id, { projectId: null }, actor)).projectId).toBeUndefined();
   });
 });
 

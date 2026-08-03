@@ -1,50 +1,29 @@
 import Link from 'next/link'
-import { CalendarClock, CheckCircle2, ChevronLeft, Clock, ShieldAlert } from 'lucide-react'
-import { getTimeZone, getTranslations } from 'next-intl/server'
+import { getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
-import { InitiativeActions, InitiativeStatusControl } from '@/features/manage-initiative'
 import {
-  initiativeDetailSchema,
-  initiativesSchema,
-  type Initiative,
-  type InitiativeDetail,
+  initiativeHref,
+  InitiativeStatusBadge,
+  type InitiativeProjectSummary,
 } from '@/entities/initiative'
-import { issueHref, IssueStatusIcon } from '@/entities/issue'
-import { memberDirectoryOf, membersSchema } from '@/entities/member'
-import { isPastDue, ProjectStatusBadge } from '@/entities/project'
+import { ISSUE_STATUSES, issueHref, IssueStatusIcon } from '@/entities/issue'
+import { memberDirectoryOf } from '@/entities/member'
+import { PROJECT_STATUSES, type ProjectStatus } from '@/entities/project'
 import { TrackerHistory } from '@/entities/tracker-history'
-import { can } from '@/shared/auth/can'
-import { currentPrincipal } from '@/shared/auth/principal'
-import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
-import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
-import { Card } from '@/shared/ui/card'
-import { PageHeader } from '@/shared/ui/page-header'
+import { DistributionBar } from '@/shared/ui/distribution-bar'
 import { SectionHeader } from '@/shared/ui/section-header'
-import { StatCard } from '@/shared/ui/stat-card'
-import { InfoTip } from '@/shared/ui/tooltip'
+
+import { loadInitiative } from './load-initiative'
 
 export const dynamic = 'force-dynamic'
 
-function BackLink({ workspace, label }: { workspace: string; label: string }) {
-  return (
-    <Link
-      href={`/${workspace}/initiatives`}
-      className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
-    >
-      <ChevronLeft className="size-3.5" />
-      {label}
-    </Link>
-  )
-}
-
-// One initiative — "is everything resolved, can we ship". Readiness counts open issues across every
-// NON-CANCELLED project regardless of that project's own status: a project marked completed whose issue later
-// regressed still blocks the release. The project status is history; readiness is live truth.
-export default async function InitiativeDetailPage({
+// 개요 — 이 목표가 무엇이고, 지금 어디쯤인가. 리니어의 이니셔티브 개요와 같은 자리: 설명이 맨 위에 오고,
+// 그 아래에서 **프로젝트들이 어느 단계에 있는지**(상태 사이클)와 이슈 단위 진척이 한 줄씩 답한다. 무엇이
+// 남았는지는 그다음, 이력과 논의가 마지막이다.
+export default async function InitiativeOverviewPage({
   params,
 }: {
   params: Promise<{ workspace: string; id: string }>
@@ -52,143 +31,86 @@ export default async function InitiativeDetailPage({
   const { workspace, id } = await params
   const t = await getTranslations('initiativesPage')
   const tracker = await getTranslations('tracker')
-  const timeZone = await getTimeZone()
-  const { principal, ctx } = await currentPrincipal()
+  const { initiative, initiatives, members } = await loadInitiative(id)
+  // 레이아웃이 이미 실패를 그렸다 — 여기서 두 번 말하지 않는다.
+  if (!initiative) return null
 
-  let initiative: InitiativeDetail | undefined
-  let error: string | undefined
-  try {
-    initiative = initiativeDetailSchema.parse(await controlPlane.getInitiative(ctx, id))
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e)
-  }
-
-  if (!initiative) {
-    return (
-      <div className="space-y-5">
-        <BackLink workspace={workspace} label={t('backToList')} />
-        <PageHeader title={t('detailFallbackTitle')} />
-        <Callout tone="danger">{t('loadError', { error: error ?? '' })}</Callout>
-      </div>
-    )
-  }
   const current = initiative
   const { readiness } = current
-
-  const [members, initiatives] = await Promise.all([
-    controlPlane
-      .listMembers(ctx)
-      .then((r) => membersSchema.parse(r))
-      .catch(() => []),
-    controlPlane
-      .listInitiatives(ctx)
-      .then((r) => initiativesSchema.parse(r))
-      .catch((): Initiative[] => []),
-  ])
-  // 이 이니셔티브가 어디에 걸려 있고, 무엇을 품고 있는지. 준비도는 이미 하위까지 합산된 값이므로 여기서는
-  // 「어디를 눌러 들어가면 되는지」만 답한다.
-  const parent = current.parentId
-    ? initiatives.find((i) => i.id === current.parentId)
-    : undefined
   const children = initiatives.filter((i) => i.parentId === current.id)
-  const initiativeName = new Map(initiatives.map((i) => [i.id, i.name]))
-  const canWrite = can(principal?.roles ?? [], 'issues:write')
-  const overdue = current.status === 'active' && isPastDue(current.targetDate, timeZone)
   const actors = memberDirectoryOf(members)
 
+  // 프로젝트들이 어느 단계에 있는가 — 목표 아래 일의 "지금". 상태 순서는 어휘의 순서(백로그 → 취소)대로
+  // 두어, 막대를 왼쪽에서 오른쪽으로 읽으면 그대로 진행 순서가 된다.
+  const projectsByStatus = new Map<ProjectStatus, InitiativeProjectSummary[]>()
+  for (const project of readiness.projects) {
+    projectsByStatus.set(project.status, [...(projectsByStatus.get(project.status) ?? []), project])
+  }
+  const projectSegments = PROJECT_STATUSES.map((status) => ({
+    label: tracker(`projectStatus.${status}`),
+    count: projectsByStatus.get(status)?.length ?? 0,
+  })).filter((segment) => segment.count > 0)
+
+  // 이슈 단위 진척 — 각 프로젝트의 롤업을 합친 것. 서버가 모든 상태 키를 채워 보내므로 빈 값 분기가 없다.
+  const issueSegments = ISSUE_STATUSES.map((status) => ({
+    label: tracker(`issueStatus.${status}`),
+    count: readiness.projects.reduce((sum, p) => sum + (p.rollup.byStatus[status] ?? 0), 0),
+  })).filter((segment) => segment.count > 0)
+
   return (
-    <div className="@container space-y-7">
-      <div className="space-y-3">
-        <BackLink workspace={workspace} label={t('backToList')} />
-        <PageHeader
-          title={current.name}
-          description={current.description}
-          actions={
-            <div className="flex items-center gap-2">
-              <InitiativeStatusControl
-                id={current.id}
-                status={current.status}
-                canWrite={canWrite}
-              />
-              {canWrite && (
-                <InitiativeActions
-                  workspace={workspace}
-                  initiative={current}
-                  initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
-                />
-              )}
-            </div>
-          }
-        />
-      </div>
+    <div className="space-y-7">
+      {/* 설명은 이름 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 목표 그 자체다. */}
+      {current.description && (
+        <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+          {current.description}
+        </p>
+      )}
 
-      {/* The readiness card leads — it is the one number a release conversation asks for. */}
-      <Card
-        className={cn(
-          'space-y-4 p-4',
-          readiness.ready ? 'border-[var(--color-success)]/30' : 'border-destructive/30'
-        )}
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          {readiness.ready ? (
-            <CheckCircle2 className="size-5 text-[var(--color-success)]" strokeWidth={1.75} />
-          ) : (
-            <ShieldAlert className="size-5 text-destructive" strokeWidth={1.75} />
-          )}
-          <span className="text-[14px] font-[560] text-foreground">
-            {readiness.ready ? t('readinessReady') : t('readinessBlocked')}
-          </span>
-          <InfoTip content={t('readinessTip')} />
-        </div>
-        <div className="grid gap-3 @md:grid-cols-3">
-          <StatCard
-            label={t('readinessOpen')}
-            value={readiness.openIssues}
-            tone={readiness.openIssues > 0 ? 'danger' : 'success'}
+      {(projectSegments.length > 0 || issueSegments.length > 0) && (
+        <section className="space-y-4">
+          <SectionHeader
+            title={t('progressTitle')}
+            action={
+              readiness.projects.length > 0 ? (
+                <Link
+                  href={initiativeHref(workspace, current.id, 'projects')}
+                  className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {t('seeProjects')}
+                </Link>
+              ) : null
+            }
           />
-          <StatCard label={t('readinessTotal')} value={readiness.totalIssues} />
-          <StatCard label={t('readinessProjects')} value={readiness.projects.length} />
-        </div>
-      </Card>
-
-      <Card className="p-4">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px] text-muted-foreground">
-          {current.targetDate && (
-            <span
-              className={cn(
-                'inline-flex items-center gap-1.5',
-                overdue && 'font-[560] text-destructive'
-              )}
-            >
-              <CalendarClock className="size-3.5 text-faint" />
-              {t('metaTargetDate')} {current.targetDate}
-              {overdue ? ` · ${t('overdue')}` : ''}
-            </span>
+          {projectSegments.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+                {t('projectPhaseTitle')}
+              </p>
+              <DistributionBar segments={projectSegments} />
+            </div>
           )}
-          {current.completedAt && (
-            <span className="inline-flex items-center gap-1.5">
-              {t('metaCompleted')} {fmtDateTime(current.completedAt, timeZone)}
-            </span>
+          {issueSegments.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+                {t('issuePhaseTitle')}
+              </p>
+              <DistributionBar segments={issueSegments} />
+            </div>
           )}
-          <span
-            className="inline-flex items-center gap-1.5"
-            title={`${t('metaCreated')} ${fmtDateTimeFull(current.createdAt, { timeZone })}`}
-          >
-            <Clock className="size-3.5 text-faint" />
-            {t('metaCreated')} {fmtDateTime(current.createdAt, timeZone)}
-          </span>
-        </div>
-      </Card>
+        </section>
+      )}
 
-      {/* Blockers — regressions first (the API already sorts them), because a fallen resolution is the one
-          thing a release reviewer has to look at before anything else. */}
+      {/* 목표 아래 프로젝트가 하나도 없으면 진척은 셀 것이 없다 — 왜 비어 있는지는 여기서 말한다. */}
+      {readiness.projects.length === 0 && <Callout tone="info">{t('noProjectsHint')}</Callout>}
+
+      {/* 남은 일 — 회귀가 먼저다(서버가 그렇게 정렬해 보낸다). 무너진 해결은 새 일보다 먼저 봐야 한다. */}
       {readiness.blockers.length > 0 && (
         <section className="space-y-3">
           <SectionHeader
-            title={t('blockersTitle')}
+            title={t('remainingTitle')}
             action={
               <span className="text-[12px] tabular-nums text-faint">
-                {t('blockersCount', { count: readiness.blockers.length })}
+                {t('remainingCount', { count: readiness.openIssues })}
               </span>
             }
           />
@@ -215,74 +137,21 @@ export default async function InitiativeDetailPage({
         </section>
       )}
 
-      {(parent !== undefined || children.length > 0) && (
+      {/* 하위 목표 — 큰 목표는 쪼개진다. 상위는 속성 열이 이고 있으므로 여기서는 아래만 센다. */}
+      {children.length > 0 && (
         <section className="space-y-3">
-          <SectionHeader title={t('nestingTitle')} />
+          <SectionHeader title={t('subInitiativesTitle', { count: children.length })} />
           <div className="space-y-2">
-            {parent && (
-              <Link
-                href={`/${workspace}/initiatives/${encodeURIComponent(parent.id)}`}
-                className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
-              >
-                <Badge tone="outline">{t('nestingParent')}</Badge>
-                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
-                  {parent.name}
-                </span>
-              </Link>
-            )}
             {children.map((child) => (
               <Link
                 key={child.id}
-                href={`/${workspace}/initiatives/${encodeURIComponent(child.id)}`}
+                href={initiativeHref(workspace, child.id)}
                 className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
-                <Badge tone="neutral">{t('nestingChild')}</Badge>
                 <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
                   {child.name}
                 </span>
-                <span className="hidden shrink-0 text-[11px] text-muted-foreground @md:block">
-                  {tracker(`initiativeStatus.${child.status}`)}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {readiness.projects.length > 0 && (
-        <section className="space-y-3">
-          <SectionHeader title={t('projectsTitle', { count: readiness.projects.length })} />
-          <div className="space-y-2">
-            {readiness.projects.map((p) => (
-              <Link
-                key={p.id}
-                href={`/${workspace}/projects/${encodeURIComponent(p.id)}`}
-                className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
-              >
-                <span className="min-w-0 flex-1 truncate text-[13px] font-[510] text-foreground">
-                  {p.name}
-                  {/* 하위 이니셔티브를 거쳐 올라온 프로젝트는 어디에 걸려 있는지까지 말해야, 막힌 릴리스가
-                      우산이 아니라 실제 지점을 가리킨다. */}
-                  {p.viaInitiativeId !== undefined && (
-                    <span className="ml-2 text-[11.5px] font-normal text-muted-foreground">
-                      {initiativeName.get(p.viaInitiativeId) ?? p.viaInitiativeId}
-                    </span>
-                  )}
-                </span>
-                <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-                  {t('projectRollup', {
-                    open: p.rollup.open,
-                    done: p.rollup.done,
-                    total: p.rollup.total,
-                  })}
-                </span>
-                {p.rollup.open > 0 && <Badge tone="danger">{t('projectOpen')}</Badge>}
-                {p.targetDate && (
-                  <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground @md:block">
-                    {p.targetDate}
-                  </span>
-                )}
-                <ProjectStatusBadge status={p.status} />
+                <InitiativeStatusBadge status={child.status} />
               </Link>
             ))}
           </div>

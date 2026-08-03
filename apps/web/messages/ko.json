@@ -424,7 +424,8 @@
     "approve": "승인",
     "deny": "거부",
     "viewDetails": "상세 보기",
-    "agentFailed": "에이전트가 답변하지 못했어요. @everdict를 다시 언급해 재시도하세요."
+    "agentFailed": "에이전트가 답변하지 못했어요. @everdict를 다시 언급해 재시도하세요.",
+    "attachHint": "파일 붙여넣기·끌어놓기로 첨부"
   },
   "discussDataset": {
     "showPrevious": "이전 이력 {count}개 더 보기",
@@ -1612,7 +1613,6 @@
     "more": "더 보기",
     "members": "멤버",
     "teams": "팀",
-    "teamHome": "홈",
     "agent": "에이전트",
     "tools": "도구",
     "skills": "스킬",
@@ -1663,21 +1663,21 @@
   "overviewPage": {
     "viewAll": "전체 보기",
     "title": "개요",
-    "description": "내보내도 되는지 — 무엇이 막혀 있고, 무엇이 회귀했고, 무엇이 평가됐는지.",
+    "description": "지금 어디까지 왔는지 — 무엇이 남았고, 무엇이 회귀했고, 무엇이 평가됐는지.",
     "connectError": "서버에 연결하지 못했어요: {error}",
     "connectErrorHint": "`CONTROL_PLANE_URL` 과 `everdict-api` 가동 여부를 확인하세요.",
     "recentRuns": "최근 Runs",
     "harnesses": "하니스",
     "emptyHarnessesTitle": "아직 하니스가 없어요.",
     "emptyHarnessesHint": "하니스를 등록하면 여기에 표시돼요.",
-    "releaseReadiness": "배포 준비도",
     "regressions": "회귀",
-    "readinessReady": "준비됨",
-    "readinessBlocked": "{count}건 남음",
-    "readinessProgress": "프로젝트 {projects}개에서 이슈 {total}건 중 {resolved}건 해결",
-    "readinessMoreBlockers": "+{count}건 더 막고 있음",
     "emptyInitiativesTitle": "진행 중인 이니셔티브가 없어요.",
-    "emptyInitiativesHint": "이니셔티브는 하나의 배포가 기대는 프로젝트들을 묶습니다 — readiness 가 내보내도 되는지 답해 줍니다."
+    "emptyInitiativesHint": "이니셔티브는 한 목표를 향해 함께 가는 프로젝트들을 묶습니다 — 지금 어디까지 왔는지를 여기서 답합니다.",
+    "initiativeProgress": "목표 진척",
+    "progressComplete": "남은 일 없음",
+    "progressRemaining": "{count}건 남음",
+    "progressSummary": "프로젝트 {projects}개에서 이슈 {total}건 중 {resolved}건 완료",
+    "progressMoreRemaining": "+{count}건 더"
   },
   "palette": {
     "placeholder": "페이지로 이동하거나 작업 실행…",
@@ -3120,7 +3120,7 @@
     "mattermostCount": "연결 {count}개",
     "imageRegistryCount": "레지스트리 {count}개",
     "teamStatesTitle": "워크플로 상태",
-    "teamStatesTip": "팀이 자기 보드의 컬럼에 붙인 이름이에요. 각 컬럼은 정규 상태 하나를 가리키고, 이름을 바꿔도 릴리스 게이트·롤업·회귀 감시는 영향을 받지 않아요."
+    "teamStatesTip": "팀이 자기 보드의 컬럼에 붙인 이름이에요. 각 컬럼은 정규 상태 하나를 가리키고, 이름을 바꿔도 완료 게이트·롤업·회귀 감시는 영향을 받지 않아요."
   },
   "shell": {
     "searchPlaceholder": "검색·이동",
@@ -4380,7 +4380,7 @@
     },
     "initiatives": {
       "title": "이니셔티브",
-      "body": "배포 단위입니다. 내보내기 전에 readiness 가 아래 이슈들이 전부 해결됐는지 알려줍니다."
+      "body": "여러 프로젝트가 함께 향하는 목표입니다. 아래 일들이 어디까지 왔는지, 무엇이 남았는지를 한 자리에서 봅니다."
     }
   },
   "agentFleet": {
@@ -4543,6 +4543,7 @@
     "rollupErrors": "오류",
     "rollupPlanes": "평면",
     "timelineTitle": "타임라인",
+    "waterfallTitle": "워터폴",
     "unanchored": "절대 시각이 없는 이벤트 {count}개 — 축에는 없고 아래 목록에만 있습니다."
   },
   "subscriptions": {
@@ -4703,11 +4704,6 @@
       "active": "진행 중",
       "completed": "종료"
     },
-    "projectHealth": {
-      "on_track": "정상",
-      "at_risk": "위험",
-      "off_track": "이탈"
-    },
     "labelColor": {
       "gray": "회색",
       "purple": "보라",
@@ -4718,6 +4714,11 @@
       "orange": "주황",
       "red": "빨강",
       "pink": "분홍"
+    },
+    "health": {
+      "on_track": "정상",
+      "at_risk": "위험",
+      "off_track": "이탈"
     }
   },
   "issuesPage": {
@@ -4829,7 +4830,64 @@
     "triageTitle": "트리아지",
     "triageDescription": "이 팀의 워크플로에 들어오기를 기다리는 일 — 보드로 받아들이거나 돌려보냅니다.",
     "triageEmptyTitle": "인박스가 비어 있어요",
-    "triageEmptyHint": "이 팀으로 접수된 새 이슈가 먼저 여기 앉습니다."
+    "triageEmptyHint": "이 팀으로 접수된 새 이슈가 먼저 여기 앉습니다.",
+    "assigneeControlLabel": "담당자 바꾸기",
+    "assigneeSetTo": "담당자 지정",
+    "assigneeClear": "담당자 없음으로",
+    "assigneeError": "담당자를 바꾸지 못했습니다.",
+    "display": "표시",
+    "grouping": "묶는 기준",
+    "ordering": "정렬",
+    "showCompleted": "완료된 이슈 표시",
+    "topLevelOnly": "최상위 이슈만",
+    "totalCount": "{count}건",
+    "countsUnavailable": "그룹 개수를 불러오지 못해 목록을 묶어 보여줄 수 없습니다.",
+    "groupLoadMore": "{count}건 더 보기",
+    "groupsTruncated": "그룹 {count}개는 세우지 않았습니다. 필터로 좁히거나 「묶지 않음」으로 보세요.",
+    "boardMoveError": "이슈를 옮기지 못했습니다.",
+    "boardColumnEmpty": "비어 있음",
+    "boardColumnMore": "이 컬럼에 {count}건 더 있음",
+    "filter": "필터",
+    "filterBy": "필터 기준",
+    "filterBack": "기준 목록으로",
+    "filterSearchPlaceholder": "검색",
+    "filterNoMatch": "일치하는 값이 없습니다.",
+    "filterDone": "완료",
+    "filterRemove": "{name} 필터 제거",
+    "filterClear": "전체 해제",
+    "layout": {
+      "list": "목록",
+      "board": "보드"
+    },
+    "groupBy": {
+      "none": "묶지 않음",
+      "status": "상태",
+      "assignee": "담당자",
+      "priority": "우선순위",
+      "project": "프로젝트",
+      "cycle": "사이클"
+    },
+    "orderBy": {
+      "updated": "최근 수정순",
+      "created": "최근 생성순",
+      "priority": "우선순위순",
+      "due": "기한 임박순"
+    },
+    "facet": {
+      "status": "상태",
+      "priority": "우선순위",
+      "assignee": "담당자",
+      "label": "라벨",
+      "project": "프로젝트",
+      "cycle": "사이클"
+    },
+    "groupUnset": {
+      "status": "상태 없음",
+      "priority": "우선순위 없음",
+      "assignee": "담당자 없음",
+      "project": "프로젝트 없음",
+      "cycle": "사이클 없음"
+    }
   },
   "issueLinks": {
     "add": "링크 추가",
@@ -4898,7 +4956,7 @@
     "rollupOpen": "열림",
     "rollupDone": "완료",
     "rollupEvaluated": "검증 완료",
-    "rollupEvaluatedTip": "완료된 이슈 중 스코어카드까지 남긴 것. 「해결했다」와 「증거를 남기고 해결했다」는 다른 주장이고, 릴리스 판단에 필요한 쪽은 후자입니다.",
+    "rollupEvaluatedTip": "완료된 이슈 중 스코어카드까지 남긴 것. 「해결했다」와 「증거를 남기고 해결했다」는 다른 주장이고, 목표가 이뤄졌는지 판단할 때 필요한 쪽은 후자입니다.",
     "issuesTitle": "이슈 ({count})",
     "historyTitle": "이력",
     "discussTitle": "논의",
@@ -4914,7 +4972,7 @@
   },
   "initiativesPage": {
     "title": "이니셔티브",
-    "description": "프로젝트를 묶는 배포 단위 — 전부 해결됐는지, 내보내도 되는지 판단합니다.",
+    "description": "여러 프로젝트가 함께 향하는 목표 — 무엇을 이루려 하고, 지금 어디까지 왔는지.",
     "create": "새 이니셔티브",
     "createTitle": "새 이니셔티브",
     "createSubmit": "이니셔티브 만들기",
@@ -4930,44 +4988,65 @@
     "deleteError": "이니셔티브를 삭제하지 못했습니다.",
     "actions": "이니셔티브 작업",
     "fieldName": "이름",
-    "fieldNamePlaceholder": "예: 2026 3분기 릴리스",
+    "fieldNamePlaceholder": "예: 에이전트 신뢰도 90% 달성",
     "fieldDescription": "설명",
+    "fieldDescriptionPlaceholder": "무엇을 이루려는 목표인지, 무엇이 참이 되면 이룬 것인지 적어주세요.",
     "fieldParent": "상위 이니셔티브",
     "fieldParentNone": "없음(최상위)",
-    "nestingTitle": "상·하위 이니셔티브",
-    "nestingParent": "상위",
-    "nestingChild": "하위",
-    "fieldDescriptionPlaceholder": "무엇이 함께 나가야 하고, 릴리스했다는 건 무엇을 뜻하는지 적어주세요.",
+    "fieldLead": "책임자",
+    "fieldLeadNone": "없음",
+    "fieldStatus": "상태",
+    "fieldHealth": "상태 보고",
     "fieldTargetDate": "목표일",
     "fieldTargetDatePast": "이미 지난 날짜입니다 — 만드는 즉시 기한 초과로 보입니다.",
     "statusError": "이니셔티브 상태를 바꾸지 못했습니다.",
     "statusControlLabel": "상태 변경",
     "statusMoveTo": "이동",
-    "gateTitle": "아직 열린 이슈가 있습니다",
-    "gateBody": "이 이니셔티브 아래 아직 열려 있는 이슈가 {count}건 있습니다.",
+    "gateTitle": "아직 끝나지 않은 일이 있습니다",
+    "gateBody": "이 목표 아래 아직 진행 중인 이슈가 {count}건 있습니다.",
     "gateForce": "그래도 완료",
-    "gateForceHint": "지금 완료하면 강제 완료로 기록되어, 이력에는 알려진 미해결을 안고 내보냈다고 남습니다.",
+    "gateForceHint": "지금 완료하면 강제 완료로 기록되어, 이력에는 남은 일을 안고 닫았다고 남습니다.",
     "filterAll": "전체",
     "overdue": "기한 초과",
     "loadError": "이니셔티브를 불러오지 못했습니다: {error}",
     "emptyTitle": "아직 이니셔티브가 없습니다",
-    "emptyHint": "한 번의 릴리스에 함께 나가야 할 프로젝트들을 묶어보세요.",
+    "emptyHint": "한 목표를 향해 함께 가는 프로젝트들을 묶어보세요.",
     "backToList": "이니셔티브",
     "detailFallbackTitle": "이니셔티브",
+    "breadcrumbLabel": "이니셔티브 위치",
+    "copyLink": "링크 복사",
+    "linkCopied": "이니셔티브 링크를 복사했습니다.",
+    "tabsLabel": "이니셔티브 화면",
+    "tab": {
+      "overview": "개요",
+      "projects": "프로젝트",
+      "updates": "업데이트"
+    },
     "metaTargetDate": "목표일",
     "metaCompleted": "완료",
     "metaCreated": "생성",
-    "readinessReady": "내보낼 수 있습니다",
-    "readinessBlocked": "아직 막혀 있습니다",
-    "readinessTip": "준비 상태는 취소되지 않은 모든 프로젝트의 열린 이슈를 셉니다. 프로젝트가 완료로 표시돼 있어도 그 이슈가 나중에 회귀했다면 릴리스는 여전히 막힙니다.",
-    "readinessOpen": "열린 이슈",
-    "readinessTotal": "전체 이슈",
-    "readinessProjects": "프로젝트",
-    "blockersTitle": "막고 있는 이슈",
-    "blockersCount": "{count}건",
-    "projectsTitle": "프로젝트 ({count})",
-    "projectRollup": "열림 {open} / 완료 {done} / 전체 {total}",
-    "projectOpen": "블로커",
+    "nestingParent": "상위",
+    "progressTitle": "진척",
+    "progressTip": "진척은 취소되지 않은 모든 프로젝트의 이슈를 셉니다. 프로젝트가 완료로 표시돼 있어도 그 이슈가 나중에 회귀했다면, 목표 아래에는 아직 일이 남아 있습니다.",
+    "progressDone": "{total}건 중 {done}건 완료",
+    "progressOpen": "남은 일",
+    "progressTotal": "전체 이슈",
+    "progressProjects": "프로젝트",
+    "projectPhaseTitle": "프로젝트 단계",
+    "issuePhaseTitle": "이슈 진척",
+    "seeProjects": "프로젝트 전체 보기",
+    "noProjectsTitle": "아직 프로젝트가 없습니다",
+    "noProjectsHint": "프로젝트 상세에서 이 목표를 걸면, 그 프로젝트의 이슈가 여기 진척으로 셉니다.",
+    "remainingTitle": "남은 일",
+    "remainingCount": "{count}건",
+    "subInitiativesTitle": "하위 이니셔티브 ({count})",
+    "projectRollup": "남음 {open} / 완료 {done} / 전체 {total}",
+    "projectRemaining": "남음",
+    "updatesEmptyTitle": "아직 올라온 업데이트가 없습니다",
+    "updatesEmptyHint": "어디까지 왔는지는 산수가 말하지만, 그래서 괜찮은지는 사람이 말합니다.",
+    "updatePlaceholder": "이 목표는 지금 어디쯤이고, 왜 그렇게 읽히나요?",
+    "postUpdate": "업데이트 올리기",
+    "updateError": "업데이트를 올리지 못했어요",
     "historyTitle": "이력",
     "discussTitle": "논의"
   },
@@ -5110,17 +5189,6 @@
     "privateOff": "공개",
     "privateHint": "비공개면 이 팀의 이슈는 로스터에게만 보여요. 권한이 아니라 가시성이고, 워크스페이스 관리자는 계속 볼 수 있어요."
   },
-  "teamHome": {
-    "title": "팀",
-    "notFound": "이 팀은 더 이상 존재하지 않습니다.",
-    "openIssues": "열린 이슈 {count}개",
-    "totalIssues": "전체 이슈 {count}개",
-    "members": "멤버 {count}명",
-    "recentIssues": "최근 이슈",
-    "projects": "이 팀이 작업 중인 프로젝트",
-    "viewAll": "전체 보기",
-    "noIssues": "아직 이 팀에 이슈가 없습니다."
-  },
   "teamsDirectory": {
     "title": "팀",
     "description": "이 워크스페이스의 모든 팀입니다. 팀이 자기 이슈를 소유하고 식별자를 발번하므로, 일이 나뉘는 단위가 여기입니다.",
@@ -5237,5 +5305,23 @@
     "emptyHint": "{team} 팀의 첫 이터레이션을 계획해 보세요.",
     "loadError": "불러오지 못했어요: {error}",
     "detailFallbackTitle": "사이클"
+  },
+  "mediaLightbox": {
+    "title": "이미지 뷰어",
+    "counter": "{index} / {total}",
+    "previous": "이전 이미지",
+    "next": "다음 이미지",
+    "zoomIn": "확대",
+    "zoomOut": "축소",
+    "resetZoom": "원래 크기",
+    "download": "내려받기",
+    "downloadFallbackName": "image",
+    "close": "닫기"
+  },
+  "attachMedia": {
+    "dropHint": "놓으면 첨부됩니다",
+    "uploading": "{name} 올리는 중…",
+    "tooLarge": "첨부 한도 5MB 를 넘습니다 — {name}",
+    "failed": "첨부하지 못했습니다 — {reason}"
   }
 }

@@ -22,10 +22,11 @@ export function CreateProjectButton({
 }: {
   workspace: string
   initiatives: { id: string; name: string }[]
-  // 프로젝트는 여러 팀이 함께 한다. 아무 팀도 고르지 않으면 제어 평면이 워크스페이스 기본 팀에 올려 준다.
+  // 프로젝트는 여러 팀이 함께 하지만, 적어도 한 팀의 일이어야 한다 — 팀 없는 프로젝트는 어느 사이드바에도
+  // 나타나지 않고 어떤 이슈도 들어갈 수 없다(제어 평면이 거부한다).
   teams: { id: string; key: string; name: string }[]
-  // 팀 아래(`/teams/ENG/projects`)에서 열었으면 그 팀이 미리 골라져 있다 — 방금 보고 있던 목록에 나타나지
-  // 않을 곳에 프로젝트를 만드는 일이 없도록. 여전히 바꿀 수 있다(프로젝트는 여러 팀의 것일 수 있다).
+  // 미리 골라져 있는 팀 — 팀 아래(`/teams/ENG/projects`)에서 열었으면 그 팀, 워크스페이스 목록에서 열었으면
+  // 기본 팀. 여전히 바꿀 수 있다(프로젝트는 여러 팀의 것일 수 있다).
   defaultTeamIds?: string[]
 }) {
   const t = useTranslations('projectsPage')
@@ -103,6 +104,9 @@ export function CreateProjectButton({
                 id="project-teams"
                 selected={teamIds}
                 onChange={setTeamIds}
+                // 마지막 한 팀은 뺄 수 없다 — 팀 없는 프로젝트는 만들 수 없으므로, 만들고 나서 400 을
+                // 받는 대신 여기서 남겨 둔다.
+                minSelected={1}
                 placeholder={t('fieldTeamsPlaceholder')}
                 emptyLabel={t('fieldTeamsEmpty')}
                 removeLabel={(name) => t('fieldTeamRemove', { name })}

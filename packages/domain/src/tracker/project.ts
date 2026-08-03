@@ -1,10 +1,10 @@
 import type {
   PlatformFact,
-  ProjectHealth,
   ProjectMilestone,
   ProjectRecord,
   ProjectStatus,
   ProjectUpdateRecord,
+  TrackerHealth,
 } from "@everdict/contracts";
 import { BadRequestError, ConflictError } from "@everdict/contracts";
 import { appendHistory } from "./history.js";
@@ -24,6 +24,8 @@ export interface NewProjectInput {
   status?: ProjectStatus;
   // The contributing teams and the umbrellas this project rolls up into — both lists, because a project spans
   // teams and can serve more than one initiative (records/tracker.ts explains why neither may be a single id).
+  // The team list must not be EMPTY, though: the caller resolves "no teams named" to the workspace's default
+  // team before it gets here, so an empty one at this point is a project nobody would ever see.
   teamIds?: string[];
   initiativeIds?: string[];
   lead?: string;
@@ -36,8 +38,9 @@ export interface NewProjectInput {
 export interface ProjectEditInput {
   name?: string;
   description?: string | null;
-  // A list REPLACES what is there (an empty array detaches everything) — there is no add/remove verb, because a
-  // membership editor sends the resulting set and a patch that merged would make removal unexpressible.
+  // A list REPLACES what is there — there is no add/remove verb, because a membership editor sends the
+  // resulting set and a patch that merged would make removal unexpressible. `initiativeIds: []` detaches every
+  // umbrella (a project under none is still a project); `teamIds: []` is refused — see `assertTeamed`.
   teamIds?: string[];
   initiativeIds?: string[];
   // `null` clears the lead (nobody is answerable yet); the member list REPLACES, like the other lists.
@@ -50,6 +53,19 @@ export interface ProjectEditInput {
 // would double-count the same team in every rollup that walks it.
 function normalizeIds(ids: readonly string[]): string[] {
   return [...new Set(ids)];
+}
+
+// A project is always somebody's work. Enforced in the aggregate rather than only at the edges because both
+// ways in — creating one and editing its team list — end here, and an empty list is not a smaller project: it
+// is one that appears in no team's sidebar and that no issue may join (an issue can only be in a project its
+// own team is on), which is work made invisible rather than planned.
+function assertTeamed(teamIds: readonly string[], project: string): void {
+  if (teamIds.length === 0)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { project },
+      "A project is worked by at least one team — name the team it belongs to instead of detaching the last one.",
+    );
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
@@ -81,6 +97,7 @@ export class Project {
   static newProject(input: NewProjectInput): ProjectRecord {
     const status = input.status ?? "planned";
     const teamIds = normalizeIds(input.teamIds ?? []);
+    assertTeamed(teamIds, input.id);
     const initiativeIds = normalizeIds(input.initiativeIds ?? []);
     return {
       id: input.id,
@@ -145,6 +162,7 @@ export class Project {
     }
     if (fields.teamIds !== undefined) {
       const next = normalizeIds(fields.teamIds);
+      assertTeamed(next, this.record.id);
       if (!sameIds(next, this.record.teamIds)) {
         patch.teamIds = next;
         changed.push("teams");
@@ -190,7 +208,7 @@ export class Project {
   // latest health so a list row can show it without reading the timeline per row; the update itself is the
   // record, and the record is what a reader goes to when the colour changed.
   postUpdate(
-    update: { id: string; health: ProjectHealth; body: string },
+    update: { id: string; health: TrackerHealth; body: string },
     by: string,
     now: string,
   ): { transition: ProjectTransition; record: ProjectUpdateRecord } {

@@ -1,4 +1,4 @@
-import { IssueListView } from '@/widgets/issue-list'
+import { IssueListView, type IssueListFilters } from '@/widgets/issue-list'
 
 import { redirectLegacyTeamScope } from '../team-scope'
 
@@ -12,15 +12,8 @@ export default async function IssuesPage({
   searchParams,
 }: {
   params: Promise<{ workspace: string }>
-  searchParams: Promise<{
-    status?: string
-    project?: string
-    priority?: string
-    // 팀 스코프였던 예전 파라미터 — 이제는 리다이렉트의 입력일 뿐이다.
-    team?: string
-    triage?: string
-    cursor?: string
-  }>
+  // 팀 스코프였던 예전 파라미터(`team`/`triage`)는 리다이렉트의 입력일 뿐이라 보기 어휘에 없다.
+  searchParams: Promise<IssueListFilters & { team?: string; triage?: string }>
 }) {
   const { workspace } = await params
   const search = await searchParams

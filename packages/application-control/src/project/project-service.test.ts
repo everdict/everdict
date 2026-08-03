@@ -22,7 +22,7 @@ function project(id: string, over: Partial<ProjectRecord> = {}): ProjectRecord {
     tenant: TENANT,
     name: id,
     status: "in_progress",
-    teamIds: [],
+    teamIds: ["team-1"],
     initiativeIds: [],
     memberIds: [],
     milestones: [],
@@ -46,6 +46,28 @@ function team(id: string, isDefault = false): TeamRecord {
     cycleDurationWeeks: 2,
     triageEnabled: false,
     isPrivate: false,
+    history: [],
+    createdBy: "u",
+    createdAt: AT,
+    updatedAt: AT,
+  };
+}
+
+// Only what the stranded-issue gate reads: which team an issue is on, and which project it sits in.
+function issue(id: string, teamId: string): IssueRecord {
+  return {
+    id,
+    tenant: TENANT,
+    teamId,
+    number: 1,
+    identifier: `${teamId.toUpperCase().slice(0, 3)}-1`,
+    formerIdentifiers: [],
+    title: id,
+    status: "todo",
+    priority: "none",
+    inTriage: false,
+    labelIds: [],
+    links: [],
     history: [],
     createdBy: "u",
     createdAt: AT,
@@ -116,6 +138,9 @@ function stores(projects: ProjectRecord[], teams: TeamRecord[] = [], initiatives
       return { items: [] };
     },
     async countByTeam() {
+      return [];
+    },
+    async countByGroup() {
       return [];
     },
     async update() {
@@ -203,10 +228,51 @@ describe("ProjectService.create — the edges have to point at something real", 
     ).rejects.toThrow(/Unknown initiative/);
   });
 
-  it("leaves the teams empty in a workspace that has none — minting one is TeamService's job", async () => {
+  it("refuses to create a team-less project in a workspace that has no team — minting one is TeamService's job", async () => {
+    // Given: a workspace with no team at all (one that has never filed an issue), so the default-team fallback
+    // has nothing to fall back to
     const deps = stores([]);
-    const record = await new ProjectService(deps).create({ tenant: TENANT, createdBy: "dana", name: "alpha" });
-    expect(record.teamIds).toEqual([]);
+    // Then: the caller is told to name a team, rather than getting a project no team's list would ever show
+    await expect(new ProjectService(deps).create({ tenant: TENANT, createdBy: "dana", name: "alpha" })).rejects.toThrow(
+      BadRequestError,
+    );
+  });
+});
+
+describe("ProjectService.update — a project stays somebody's work", () => {
+  it("refuses to detach the last team, while an umbrella may be detached freely", async () => {
+    const deps = stores(
+      [project("alpha", { teamIds: ["web"], initiativeIds: ["ini-a"] })],
+      [team("web", true)],
+      [initiative("ini-a")],
+    );
+    const service = new ProjectService(deps);
+    const actor = { subject: "dana", isAdmin: true };
+
+    await expect(service.update(TENANT, "alpha", { teamIds: [] }, actor)).rejects.toThrow(BadRequestError);
+    expect((await service.update(TENANT, "alpha", { initiativeIds: [] }, actor)).initiativeIds).toEqual([]);
+  });
+
+  it("refuses to remove a team whose issues are still in the project, naming the count", async () => {
+    // Given: a project both teams work, holding one issue from each
+    const deps = stores([project("alpha", { teamIds: ["web", "mobile"] })], [team("web", true), team("mobile")]);
+    const held: IssueRecord[] = [
+      { ...issue("i-1", "web"), projectId: "alpha" },
+      { ...issue("i-2", "mobile"), projectId: "alpha" },
+    ];
+    deps.issues.list = async () => held;
+    const service = new ProjectService(deps);
+
+    // When: the mobile team is dropped from the project while its issue is still in it
+    // Then: refused — an issue may only sit in a project its own team is on, so those issues would be stranded
+    await expect(
+      service.update(TENANT, "alpha", { teamIds: ["web"] }, { subject: "dana", isAdmin: true }),
+    ).rejects.toThrow(ConflictError);
+
+    // And once that issue leaves the project, the team can go
+    held.pop();
+    const updated = await service.update(TENANT, "alpha", { teamIds: ["web"] }, { subject: "dana", isAdmin: true });
+    expect(updated.teamIds).toEqual(["web"]);
   });
 });
 

@@ -1,11 +1,19 @@
-import { IssueLinkTypeSchema, IssuePrioritySchema, IssueStatusSchema } from "@everdict/contracts";
-import type { FastifyInstance } from "fastify";
-import { z } from "zod";
+import type { IssueListFilter } from "@everdict/application-control";
+import type { Principal } from "@everdict/auth";
+import { IssueLinkTypeSchema } from "@everdict/contracts";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import type { z } from "zod";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, resolveTeamRef, sendError } from "../route-context.js";
 import { issueDocs } from "./issue.docs.js";
 import { CreateIssueBodySchema } from "./request/create-issue.js";
 import { IssueLinkInputSchema } from "./request/create-issue.js";
+import {
+  IssueCountsQuerySchema,
+  IssuePageQuerySchema,
+  type ListIssuesQuery,
+  issueFilterOf,
+} from "./request/list-issues.js";
 import { AcceptTriageBodySchema, DeclineTriageBodySchema, MoveIssueBodySchema } from "./request/move-issue.js";
 import { SetIssueStatusBodySchema } from "./request/set-issue-status.js";
 import { UpdateIssueBodySchema } from "./request/update-issue.js";
@@ -65,96 +73,49 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
     } catch (err) {
       return sendError(reply, err);
     }
-    const query = z
-      .object({
-        status: IssueStatusSchema.optional(),
-        // One team, or every team the caller belongs to. `mine` resolves through the roster rather than
-        // trusting a client-supplied id list.
-        team: z.string().min(1).optional(),
-        mine: z.enum(["true", "false"]).optional(),
-        project: z.string().min(1).optional(),
-        assignee: z.string().min(1).optional(),
-        priority: IssuePrioritySchema.optional(),
-        // One parent's sub-issues, or `none` for the TOP-LEVEL issues — what a board shows so a child never
-        // appears twice, once on its own and once under its parent.
-        parent: z.string().min(1).optional(),
-        // One iteration's board, and the team's triage inbox.
-        cycle: z.string().min(1).optional(),
-        triage: z.enum(["true", "false"]).optional(),
-        // "Which issues watch this harness" — the capability detail pages' reverse lookup.
-        linkType: IssueLinkTypeSchema.optional(),
-        linkId: z.string().min(1).optional(),
-        // The bulk GitHub sync's working set. Exposed because the alternative a caller is left with is reading
-        // the whole list and filtering client-side, which is what the issues page used to do.
-        syncPull: z.enum(["true", "false"]).optional(),
-        limit: z.coerce.number().int().positive().max(200).optional(),
-        cursor: z.string().min(1).optional(), // opaque token from a prior page's nextCursor
-      })
-      .safeParse(req.query);
+    const query = IssuePageQuerySchema.safeParse(req.query);
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
-    const {
-      status,
-      team,
-      mine,
-      project,
-      assignee,
-      priority,
-      parent,
-      cycle,
-      triage,
-      linkType,
-      linkId,
-      syncPull,
-      limit,
-      cursor,
-    } = query.data;
-    if ((linkType === undefined) !== (linkId === undefined))
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "linkType and linkId must be given together." });
-    // "My teams" is resolved here, not in the store: the roster lookup belongs to the team service, and the
-    // store stays a plain id filter. An empty roster narrows to nothing rather than silently widening to all.
-    const myTeamIds =
-      mine === "true" && deps.teamService
-        ? await deps.teamService.teamIdsFor(principal.workspace, principal.subject)
-        : undefined;
-    // A private team's issues are not the workspace's issues. The narrowing rides the SAME `teamIds` filter the
-    // "my teams" view uses, so there is one code path in the store and no second place to forget it. When the
-    // caller also asked for `mine`, the two intersect — you see your teams, minus the ones you may not.
-    const visibleTeamIds = deps.teamService
-      ? await deps.teamService.visibleTeamIds(principal.workspace, principal.subject, principal.roles.includes("admin"))
-      : undefined;
-    const teamScope =
-      visibleTeamIds === undefined
-        ? myTeamIds
-        : myTeamIds === undefined
-          ? visibleTeamIds
-          : myTeamIds.filter((id) => visibleTeamIds.includes(id));
-    // The filter names a team by id or by key (`?team=ENG`), because that is what the URL showing this list is
-    // scoped by. An unknown ref 404s here rather than filtering to nothing.
-    let teamId: string | undefined;
+    const scope = await resolveIssueScope(query.data, principal, deps, reply);
+    if (!("filter" in scope)) return scope.done;
+    // One PAGE of the list projection (`{ items, nextCursor? }`) — a row's description and audit trail never
+    // leave the database. `GET /issues/:id` is where the whole record lives.
     try {
-      teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
+      return reply.send(
+        await deps.issueService.listSummaries(principal.workspace, {
+          ...scope.filter,
+          ...(query.data.order !== undefined ? { order: query.data.order } : {}),
+          ...(query.data.limit !== undefined ? { limit: query.data.limit } : {}),
+          ...(query.data.cursor !== undefined ? { cursor: query.data.cursor } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // a cursor minted under another ordering is a 400, not a wrong page
+    }
+  });
+
+  // How many issues sit in each group, under the SAME filter the list is drawn with — the headers of a grouped
+  // screen. Its own endpoint rather than a field on the page, because a grouped list holds one page PER group:
+  // there is no single response the counts could ride on, and counting the rows it received would only report
+  // the page size back to itself.
+  app.get("/issues/counts", { schema: issueDocs.counts }, async (req, reply) => {
+    if (!deps.issueService) return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:read");
     } catch (err) {
       return sendError(reply, err);
     }
-    // One PAGE of the list projection (`{ items, nextCursor? }`) — a row's description and audit trail never
-    // leave the database. `GET /issues/:id` is where the whole record lives.
-    return reply.send(
-      await deps.issueService.listSummaries(principal.workspace, {
-        ...(status !== undefined ? { status } : {}),
-        ...(teamId !== undefined ? { teamId } : {}),
-        ...(teamScope !== undefined ? { teamIds: teamScope } : {}),
-        ...(project !== undefined ? { projectId: project } : {}),
-        ...(assignee !== undefined ? { assignee } : {}),
-        ...(priority !== undefined ? { priority } : {}),
-        ...(parent !== undefined ? { parentId: parent === "none" ? null : parent } : {}),
-        ...(cycle !== undefined ? { cycleId: cycle } : {}),
-        ...(triage !== undefined ? { inTriage: triage === "true" } : {}),
-        ...(linkType !== undefined && linkId !== undefined ? { link: { type: linkType, id: linkId } } : {}),
-        ...(syncPull === "true" ? { syncPull: true } : {}),
-        ...(limit !== undefined ? { limit } : {}),
-        ...(cursor !== undefined ? { cursor } : {}),
-      }),
-    );
+    const query = IssueCountsQuerySchema.safeParse(req.query);
+    if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
+    const scope = await resolveIssueScope(query.data, principal, deps, reply);
+    if (!("filter" in scope)) return scope.done;
+    const groups = await deps.issueService.countByGroup(principal.workspace, query.data.groupBy, scope.filter);
+    return reply.send({
+      groupBy: query.data.groupBy,
+      groups,
+      total: groups.reduce((sum, group) => sum + group.count, 0),
+    });
   });
 
   app.get<{ Params: { id: string } }>("/issues/:id", { schema: issueDocs.get }, async (req, reply) => {
@@ -427,4 +388,64 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
       return sendError(reply, err);
     }
   });
+}
+
+// Everything the two list endpoints must agree on before they can narrow anything: the link pair, the visible
+// teams, the team the URL is scoped to. Shared so the rows and the counts cannot be scoped differently — a
+// header saying 12 above a list that can only ever show 3 of them is worse than no header at all.
+//
+// Returns either the filter or the reply that already answered (400/404) — the caller stays the thin handler
+// shape and never re-decides an error the helper has sent.
+async function resolveIssueScope(
+  query: ListIssuesQuery,
+  principal: Principal,
+  deps: ServerDeps,
+  reply: FastifyReply,
+): Promise<{ filter: IssueListFilter } | { done: FastifyReply }> {
+  if ((query.linkType === undefined) !== (query.linkId === undefined))
+    return {
+      done: reply.code(400).send({ code: "BAD_REQUEST", message: "linkType and linkId must be given together." }),
+    };
+  // The three team reads below decide nothing about each other, so they go out TOGETHER. They used to be three
+  // sequential awaits in front of every list query, and this helper runs on both list endpoints — a grouped
+  // screen paid for it once per group. Their round trips now overlap instead of adding up.
+  //
+  // "My teams" is resolved here, not in the store: the roster lookup belongs to the team service, and the
+  // store stays a plain id filter. An empty roster narrows to nothing rather than silently widening to all.
+  //
+  // A private team's issues are not the workspace's issues. That narrowing rides the SAME `teamIds` filter the
+  // "my teams" view uses, so there is one code path in the store and no second place to forget it. When the
+  // caller also asked for `mine`, the two intersect — you see your teams, minus the ones you may not.
+  //
+  // The team ref names a team by id or by key (`?team=ENG`), because that is what the URL showing this list is
+  // scoped by. An unknown ref 404s rather than filtering to nothing — its rejection is carried out of the
+  // parallel block rather than thrown through it, so a rejected sibling can never mask it.
+  const [myTeamIds, visibleTeamIds, teamRef] = await Promise.all([
+    query.mine === "true" && deps.teamService
+      ? deps.teamService.teamIdsFor(principal.workspace, principal.subject)
+      : Promise.resolve(undefined),
+    deps.teamService
+      ? deps.teamService.visibleTeamIds(principal.workspace, principal.subject, principal.roles.includes("admin"))
+      : Promise.resolve(undefined),
+    query.team === undefined
+      ? Promise.resolve<{ id: string } | { err: unknown }>({ id: "" })
+      : resolveTeamRef(deps, principal.workspace, query.team).then(
+          (id) => ({ id }),
+          (err: unknown) => ({ err }),
+        ),
+  ]);
+  if ("err" in teamRef) return { done: sendError(reply, teamRef.err) };
+  const teamId = query.team === undefined ? undefined : teamRef.id;
+  const teamScope =
+    visibleTeamIds === undefined
+      ? myTeamIds
+      : myTeamIds === undefined
+        ? visibleTeamIds
+        : myTeamIds.filter((id) => visibleTeamIds.includes(id));
+  return {
+    filter: issueFilterOf(query, {
+      ...(teamId !== undefined ? { teamId } : {}),
+      ...(teamScope !== undefined ? { teamIds: teamScope } : {}),
+    }),
+  };
 }

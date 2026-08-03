@@ -4,12 +4,14 @@ import {
   IssueService,
   ProjectService,
   RunService,
+  TeamService,
 } from "@everdict/application-control";
 import type { GithubRepoWriter, GithubRepoWriterFactory, OutboxEvent } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import {
   InMemoryInitiativeStore,
+  InMemoryInitiativeUpdateStore,
   InMemoryIssueStore,
   InMemoryProjectStore,
   InMemoryRunStore,
@@ -20,17 +22,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { type McpDeps, buildMcpServer } from "../../mcp.js";
-
-// An issue is numbered by its owning team; these transport tests only need that to be deterministic.
-const teamAllocator = (() => {
-  let n = 0;
-  return {
-    async allocateForIssue() {
-      n += 1;
-      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
-    },
-  };
-})();
 
 // BFF↔MCP parity for the eval tracker — the surface an agent triages its own regressions through. The agent
 // attribution bound at initialize rides into the service, so an agent's transitions stamp causedBy (loop guard #1).
@@ -46,6 +37,7 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
   const issueStore = new InMemoryIssueStore();
   const projectStore = new InMemoryProjectStore();
   const initiativeStore = new InMemoryInitiativeStore();
+  const teamStore = new InMemoryTeamStore();
   const events = {
     emit: async () => undefined,
     pushPersisted: async (batch: Array<{ record: OutboxEvent }>) => {
@@ -60,10 +52,15 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
     },
   });
   const writers: GithubRepoWriterFactory = { for: () => idleWriter };
+  // The real team service, so an issue and a project land on the SAME default team — an issue may only join a
+  // project its own team is on, and a fake allocator naming a team the project store never heard of would make
+  // every tool that puts an issue in a project fail for a reason production does not have.
+  const teamService = new TeamService({ store: teamStore, issues: issueStore });
   const issueService = new IssueService({
-    teams: teamAllocator,
+    teams: teamService,
     store: issueStore,
     scorecards: new InMemoryScorecardStore(),
+    projects: projectStore,
     events,
   });
   return {
@@ -71,7 +68,7 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
       issueService,
       issueSync: new GithubIssueSync({
-        teams: teamAllocator,
+        teams: teamService,
         store: issueStore,
         issues: issueService,
         tokens: { tokenForRepository: async () => ({ token: "tok" }) },
@@ -80,7 +77,8 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
       projectService: new ProjectService({
         store: projectStore,
         issues: issueStore,
-        teams: new InMemoryTeamStore(),
+        teams: teamStore,
+        defaultTeam: teamService,
         // The SAME store the initiative service writes to — a project's initiative edge is validated against
         // the workspace, so a second (empty) store here would reject every real id.
         initiatives: initiativeStore,
@@ -90,6 +88,7 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
         store: initiativeStore,
         projects: projectStore,
         issues: issueStore,
+        updates: new InMemoryInitiativeUpdateStore(),
         events,
       }),
     },
@@ -131,12 +130,18 @@ describe("eval tracker MCP tools", () => {
       "get_project",
       "update_project",
       "set_project_status",
+      "post_project_update",
+      "list_project_updates",
       "delete_project",
       "create_initiative",
       "list_initiatives",
       "get_initiative",
       "update_initiative",
       "set_initiative_status",
+      // The goal's own judgment layer — a family wired into the service but forgotten in mcp.ts would be
+      // invisible except here.
+      "post_initiative_update",
+      "list_initiative_updates",
       "delete_initiative",
     ]) {
       expect(names).toContain(name);
@@ -191,10 +196,10 @@ describe("eval tracker MCP tools", () => {
     });
   });
 
-  it("reaches the same release gate the HTTP surface does — a 409 arrives as a tool error", async () => {
+  it("reaches the same completion gate the HTTP surface does — a 409 arrives as a tool error", async () => {
     const client = await connect(makeDeps().deps);
     const initiative = JSON.parse(
-      textOf(await client.callTool({ name: "create_initiative", arguments: { name: "v1 deploy" } })),
+      textOf(await client.callTool({ name: "create_initiative", arguments: { name: "agents people trust" } })),
     );
     const project = JSON.parse(
       textOf(
@@ -213,13 +218,35 @@ describe("eval tracker MCP tools", () => {
       arguments: { id: initiative.id, status: "completed" },
     });
     expect((refused as { isError?: boolean }).isError).toBe(true);
-    expect(textOf(refused)).toContain("still open under this initiative");
+    expect(textOf(refused)).toContain("under this initiative are still open");
 
-    // And the readiness read names the blocker rather than just refusing.
+    // And the progress read names what is left rather than just refusing.
     const detail = JSON.parse(
       textOf(await client.callTool({ name: "get_initiative", arguments: { id: initiative.id } })),
     );
     expect(detail.readiness).toMatchObject({ ready: false, openIssues: 1 });
+  });
+
+  it("reports on a goal through the same update timeline the HTTP surface serves", async () => {
+    const client = await connect(makeDeps().deps);
+    const initiative = JSON.parse(
+      textOf(await client.callTool({ name: "create_initiative", arguments: { name: "agents people trust" } })),
+    );
+    const posted = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "post_initiative_update",
+          arguments: { id: initiative.id, health: "off_track", body: "Two datasets are still unlabelled." },
+        }),
+      ),
+    );
+    expect(posted).toMatchObject({ initiativeId: initiative.id, health: "off_track" });
+    // The goal carries the latest health, and the sentence stays readable on the timeline.
+    const listed = JSON.parse(
+      textOf(await client.callTool({ name: "list_initiative_updates", arguments: { id: initiative.id } })),
+    );
+    expect(listed).toHaveLength(1);
+    expect(listed[0].body).toContain("unlabelled");
   });
 
   it("finds the issues watching a capability — the lookup before investigating a failing batch", async () => {

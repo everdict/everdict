@@ -1,10 +1,10 @@
-import { ProjectHealthSchema } from "@everdict/contracts";
+import { TrackerHealthSchema } from "@everdict/contracts";
 import { z } from "zod";
 
 // Posting a project update — the one JUDGMENT the tracker records, which is why the body is required: a health
 // flag with no sentence is a colour nobody can explain.
 export const PostProjectUpdateBodySchema = z.object({
-  health: ProjectHealthSchema,
+  health: TrackerHealthSchema,
   body: z.string().min(1).max(50_000),
 });
 

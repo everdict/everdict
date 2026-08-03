@@ -1,19 +1,19 @@
 import Link from 'next/link'
-import { CheckCircle2, Rocket, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, Target, TriangleAlert } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
-import type { InitiativeDetail } from '@/entities/initiative'
+import { initiativeHref, type InitiativeDetail } from '@/entities/initiative'
 import { issueHref, IssueStatusIcon } from '@/entities/issue'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
 
-// 배포 준비도 — 오버뷰가 가장 먼저 답해야 하는 질문("내보내도 되나"). 이니셔티브의 readiness 는 취소되지 않은 모든
-// 프로젝트의 열린 이슈를 세므로, completed 프로젝트 안의 regressed 이슈도 여기서 막힌 것으로 나타난다.
-// blocker 는 서버가 이미 회귀 먼저로 정렬해 보내준다.
+// 목표 진척 — 오버뷰가 가장 먼저 답해야 하는 질문("우리가 세운 목표들은 지금 어디쯤인가"). 진척은 취소되지 않은
+// 모든 프로젝트의 열린 이슈를 세므로, completed 프로젝트 안의 regressed 이슈도 여기서 남은 일로 나타난다.
+// 남은 일은 서버가 이미 회귀 먼저로 정렬해 보내준다.
 const BLOCKER_PREVIEW = 3
 
-function ReadinessBar({ done, total }: { done: number; total: number }) {
+function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total === 0 ? 100 : Math.round((done / total) * 100)
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
@@ -28,7 +28,7 @@ function ReadinessBar({ done, total }: { done: number; total: number }) {
   )
 }
 
-export async function ReleaseReadiness({
+export async function InitiativeProgress({
   workspace,
   initiatives,
 }: {
@@ -45,33 +45,33 @@ export async function ReleaseReadiness({
           <Card key={initiative.id} className="@container flex flex-col gap-3 p-4">
             <div className="flex items-start justify-between gap-3">
               <Link
-                href={`/${workspace}/initiatives/${initiative.id}`}
+                href={initiativeHref(workspace, initiative.id)}
                 className="group flex min-w-0 items-center gap-2"
               >
-                <Rocket className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                <Target className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
                 <span className="truncate text-[13.5px] font-[560] text-foreground group-hover:underline">
                   {initiative.name}
                 </span>
               </Link>
-              <Badge tone={readiness.ready ? 'success' : 'warning'}>
+              <Badge tone={readiness.ready ? 'success' : 'neutral'}>
                 {readiness.ready ? (
                   <>
                     <CheckCircle2 className="size-3" strokeWidth={2} />
-                    {t('readinessReady')}
+                    {t('progressComplete')}
                   </>
                 ) : (
                   <>
                     <TriangleAlert className="size-3" strokeWidth={2} />
-                    {t('readinessBlocked', { count: readiness.openIssues })}
+                    {t('progressRemaining', { count: readiness.openIssues })}
                   </>
                 )}
               </Badge>
             </div>
 
             <div className="space-y-1.5">
-              <ReadinessBar done={resolved} total={readiness.totalIssues} />
+              <ProgressBar done={resolved} total={readiness.totalIssues} />
               <p className="text-[11.5px] text-muted-foreground">
-                {t('readinessProgress', {
+                {t('progressSummary', {
                   resolved,
                   total: readiness.totalIssues,
                   projects: readiness.projects.length,
@@ -94,7 +94,7 @@ export async function ReleaseReadiness({
                 ))}
                 {readiness.blockers.length > BLOCKER_PREVIEW && (
                   <li className="pl-[22px] text-[11.5px] text-faint">
-                    {t('readinessMoreBlockers', {
+                    {t('progressMoreRemaining', {
                       count: readiness.blockers.length - BLOCKER_PREVIEW,
                     })}
                   </li>

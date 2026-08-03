@@ -24,6 +24,7 @@ export function MultiSelect({
   placeholder,
   emptyLabel,
   removeLabel,
+  minSelected = 0,
 }: {
   id?: string
   options: MultiSelectOption[]
@@ -34,6 +35,9 @@ export function MultiSelect({
   emptyLabel: string
   // 칩의 제거 버튼에 붙는 접근성 이름 — 이름을 받아 문장을 만든다.
   removeLabel: (name: string) => string
+  // 여기까지는 지운다 — 그 아래로 내려가는 제거 버튼은 아예 그리지 않는다(프로젝트의 팀처럼 "최소 하나"가
+  // 규칙인 자리). 기본값 0 = 다 뺄 수 있는 보통의 다중 선택.
+  minSelected?: number
 }) {
   const [query, setQuery] = useState('')
   const byValue = useMemo(() => Object.fromEntries(options.map((o) => [o.value, o])), [options])
@@ -43,7 +47,8 @@ export function MultiSelect({
 
   const needle = query.trim().toLocaleLowerCase()
   const choices = options.filter(
-    (o) => !selected.includes(o.value) && (needle === '' || o.label.toLocaleLowerCase().includes(needle))
+    (o) =>
+      !selected.includes(o.value) && (needle === '' || o.label.toLocaleLowerCase().includes(needle))
   )
 
   function toggle(value: string): void {
@@ -57,18 +62,23 @@ export function MultiSelect({
           {chips.map((chip) => (
             <span
               key={chip.value}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border py-0.5 pl-2 pr-1 text-[11.5px] text-muted-foreground"
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full border border-border py-0.5 pl-2 text-[11.5px] text-muted-foreground',
+                selected.length > minSelected ? 'pr-1' : 'pr-2'
+              )}
             >
               {chip.badge}
               <span className="truncate">{chip.label}</span>
-              <button
-                type="button"
-                onClick={() => toggle(chip.value)}
-                aria-label={removeLabel(chip.label)}
-                className="rounded-full p-0.5 transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <X className="size-3" />
-              </button>
+              {selected.length > minSelected && (
+                <button
+                  type="button"
+                  onClick={() => toggle(chip.value)}
+                  aria-label={removeLabel(chip.label)}
+                  className="rounded-full p-0.5 transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <X className="size-3" />
+                </button>
+              )}
             </span>
           ))}
         </div>

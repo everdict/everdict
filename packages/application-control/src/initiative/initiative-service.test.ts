@@ -1,6 +1,14 @@
-import type { InitiativeRecord, IssuePage, IssueRecord, ProjectRecord } from "@everdict/contracts";
+import type {
+  InitiativeRecord,
+  InitiativeUpdateRecord,
+  IssueGroupBy,
+  IssueGroupCount,
+  IssuePage,
+  IssueRecord,
+  ProjectRecord,
+} from "@everdict/contracts";
 import { ConflictError } from "@everdict/contracts";
-import { issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
+import { issueCountsByGroup, issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { InitiativeListFilter, InitiativeStore } from "../ports/initiative-store.js";
 import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
@@ -57,6 +65,9 @@ class FakeIssueStore extends FakeStore<IssueRecord> implements IssueStore {
   async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
     return issueCountsByTeam(await this.list(tenant));
   }
+  async countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]> {
+    return issueCountsByGroup(await this.list(tenant, filter), groupBy);
+  }
 }
 
 class FakeProjectStore extends FakeStore<ProjectRecord> implements ProjectStore {
@@ -107,7 +118,7 @@ function project(id: string, initiativeId: string, status: ProjectRecord["status
     tenant: "acme",
     name: `project ${id}`,
     status,
-    teamIds: [],
+    teamIds: ["team-1"],
     initiativeIds: [initiativeId],
     memberIds: [],
     milestones: [],
@@ -118,7 +129,7 @@ function project(id: string, initiativeId: string, status: ProjectRecord["status
   };
 }
 
-describe("InitiativeService — the release gate", () => {
+describe("InitiativeService — the completion gate", () => {
   let initiatives: FakeInitiativeStore;
   let projects: FakeProjectStore;
   let issues: FakeIssueStore;
@@ -159,7 +170,47 @@ describe("InitiativeService — the release gate", () => {
     expect(detail.readiness.projects.map((p) => p.id).sort()).toEqual(["p1", "p2"]);
   });
 
-  it("refuses completion while work is open under it — the check a team wants before shipping", async () => {
+  it("a posted update carries the health onto the goal, and the sentence stays the record", async () => {
+    // The update store is append-only; the fake keeps insertion order so "newest first" is the service's job.
+    const rows: InitiativeUpdateRecord[] = [];
+    const svc = new InitiativeService({
+      store: initiatives,
+      projects,
+      issues,
+      updates: {
+        async create(record) {
+          rows.push(record);
+        },
+        async list(_tenant, initiativeId) {
+          return rows
+            .filter((r) => r.initiativeId === initiativeId)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        },
+      },
+      newId: () => `id-${++ids}`,
+      now: () => NOW,
+    });
+    const initiative = await svc.create({ tenant: "acme", createdBy: "dana", name: "agents people trust" });
+    const update = await svc.postUpdate(
+      "acme",
+      initiative.id,
+      { health: "at_risk", body: "The judge rewrite slipped a week." },
+      actor,
+    );
+    expect(update.health).toBe("at_risk");
+    expect(rows).toHaveLength(1);
+    // The initiative keeps the LATEST health so a row shows it without reading the timeline.
+    expect((await svc.get("acme", initiative.id)).health).toBe("at_risk");
+    expect(await svc.listUpdates("acme", initiative.id)).toHaveLength(1);
+  });
+
+  it("serves an empty timeline when the deployment carries no update store", async () => {
+    const svc = service();
+    const initiative = await svc.create({ tenant: "acme", createdBy: "dana", name: "agents people trust" });
+    expect(await svc.listUpdates("acme", initiative.id)).toEqual([]);
+  });
+
+  it("refuses completion while work is open under it — a goal with unfinished work is not reached", async () => {
     const svc = service();
     const initiative = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });
     await projects.create(project("p1", initiative.id, "in_progress"));
@@ -200,7 +251,7 @@ describe("InitiativeService — the release gate", () => {
     await expect(svc.remove("acme", initiative.id, { subject: "dana", isAdmin: true })).rejects.toThrow(ConflictError);
   });
 
-  it("counts a sub-initiative's projects, so nesting cannot hide work from the release gate", async () => {
+  it("counts a sub-initiative's projects, so nesting cannot hide work from the goal", async () => {
     // Given: a parent whose own project is settled, and a child holding open work
     const svc = service();
     const parent = await svc.create({ tenant: "acme", createdBy: "dana", name: "v1 deploy" });

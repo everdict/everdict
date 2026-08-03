@@ -1,7 +1,14 @@
-import { InitiativeService, IssueService, ProjectService, RunService } from "@everdict/application-control";
+import {
+  InitiativeService,
+  IssueService,
+  ProjectService,
+  RunService,
+  TeamService,
+} from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import {
   InMemoryInitiativeStore,
+  InMemoryInitiativeUpdateStore,
   InMemoryIssueStore,
   InMemoryProjectStore,
   InMemoryRunStore,
@@ -10,17 +17,6 @@ import {
 } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
-
-// An issue is numbered by its owning team; these transport tests only need that to be deterministic.
-const teamAllocator = (() => {
-  let n = 0;
-  return {
-    async allocateForIssue() {
-      n += 1;
-      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
-    },
-  };
-})();
 
 const unusedDispatcher: Dispatcher = {
   async dispatch() {
@@ -36,19 +32,30 @@ function build() {
   const initiativeStore = new InMemoryInitiativeStore();
   const teamStore = new InMemoryTeamStore();
   const scorecardStore = new InMemoryScorecardStore();
+  // The real team service, not a stand-in: an issue and a project have to land on the SAME default team, since
+  // an issue may only join a project its own team is on. A fake allocator that answered with a team the project
+  // store never heard of made that invariant untestable here — the wiring is production's.
+  const teamService = new TeamService({ store: teamStore, issues: issueStore });
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-    issueService: new IssueService({ teams: teamAllocator, store: issueStore, scorecards: scorecardStore }),
+    issueService: new IssueService({
+      teams: teamService,
+      store: issueStore,
+      scorecards: scorecardStore,
+      projects: projectStore,
+    }),
     projectService: new ProjectService({
       store: projectStore,
       issues: issueStore,
       teams: teamStore,
+      defaultTeam: teamService,
       initiatives: initiativeStore,
     }),
     initiativeService: new InitiativeService({
       store: initiativeStore,
       projects: projectStore,
       issues: issueStore,
+      updates: new InMemoryInitiativeUpdateStore(),
     }),
   });
   return { app, issueStore, scorecardStore };
@@ -282,7 +289,7 @@ describe("issue routes", () => {
   });
 });
 
-describe("project + initiative routes — the release gate", () => {
+describe("project + initiative routes — the completion gate", () => {
   it("rolls issues up to a project and refuses completing an initiative while work is open", async () => {
     const { app } = build();
     const initiative = await app.inject({
@@ -348,6 +355,45 @@ describe("project + initiative routes — the release gate", () => {
     await app.close();
   });
 
+  it("posts an update on the goal — the health lands on the record and the sentence stays the timeline", async () => {
+    const { app } = build();
+    const initiativeId = (
+      await app.inject({
+        method: "POST",
+        url: "/initiatives",
+        headers: H,
+        payload: { name: "agents people trust", lead: "dana" },
+      })
+    ).json().id;
+
+    const posted = await app.inject({
+      method: "POST",
+      url: `/initiatives/${initiativeId}/updates`,
+      headers: H,
+      payload: { health: "at_risk", body: "The judge rewrite slipped a week." },
+    });
+    expect(posted.statusCode).toBe(201);
+    expect(posted.json()).toMatchObject({ initiativeId, health: "at_risk" });
+
+    // A health flag with no sentence is not an update — the body is required.
+    const empty = await app.inject({
+      method: "POST",
+      url: `/initiatives/${initiativeId}/updates`,
+      headers: H,
+      payload: { health: "off_track" },
+    });
+    expect(empty.statusCode).toBe(400);
+
+    // The record carries the LATEST health so a row draws it without reading the timeline; the lead rides along.
+    const detail = (await app.inject({ method: "GET", url: `/initiatives/${initiativeId}`, headers: H })).json();
+    expect(detail).toMatchObject({ health: "at_risk", lead: "dana" });
+
+    const timeline = await app.inject({ method: "GET", url: `/initiatives/${initiativeId}/updates`, headers: H });
+    expect(timeline.statusCode).toBe(200);
+    expect(timeline.json()).toHaveLength(1);
+    await app.close();
+  });
+
   it("a regressed issue inside a COMPLETED project still blocks the initiative", async () => {
     const { app } = build();
     const initiativeId = (
@@ -407,6 +453,127 @@ describe("project + initiative routes — the release gate", () => {
     ).json().id;
     await createIssue(app, { title: "t", projectId });
     expect((await app.inject({ method: "DELETE", url: `/projects/${projectId}`, headers: H })).statusCode).toBe(409);
+    await app.close();
+  });
+});
+
+describe("issue list — the grouped screen's query", () => {
+  it("takes a SET per facet, ANDs across facets, and reaches the unassigned bucket with an empty value", async () => {
+    const { app } = build();
+    await createIssue(app, { title: "one", status: "todo", assignee: "dana", labelIds: ["bug"] });
+    await createIssue(app, { title: "two", status: "in_progress", labelIds: ["bug", "flaky"] });
+    await createIssue(app, { title: "three", status: "cancelled", assignee: "sam", labelIds: ["flaky"] });
+
+    const titles = async (query: string) =>
+      (await app.inject({ method: "GET", url: `/issues?${query}`, headers: H }))
+        .json()
+        .items.map((i: { title: string }) => i.title)
+        .sort();
+
+    // Repeating the key is how a query string spells a set — "still in flight" is three statuses, not three calls.
+    expect(await titles("status=todo&status=in_progress")).toEqual(["one", "two"]);
+    // Labels intersect: carrying any one of them matches.
+    expect(await titles("label=flaky")).toEqual(["three", "two"]);
+    // An empty value is the unset bucket — a real group members filter to.
+    expect(await titles("assignee=")).toEqual(["two"]);
+    expect(await titles("assignee=dana&assignee=")).toEqual(["one", "two"]);
+    expect(await titles("status=todo&status=cancelled&label=flaky")).toEqual(["three"]);
+    await app.close();
+  });
+
+  it("orders by priority and refuses a cursor minted under a different ordering", async () => {
+    const { app } = build();
+    await createIssue(app, { title: "low", priority: "low" });
+    await createIssue(app, { title: "urgent", priority: "urgent" });
+    await createIssue(app, { title: "none" });
+
+    const byPriority = await app.inject({ method: "GET", url: "/issues?order=priority&limit=2", headers: H });
+    expect(byPriority.json().items.map((i: { title: string }) => i.title)).toEqual(["urgent", "low"]);
+    const cursor = byPriority.json().nextCursor;
+    expect(cursor).toBeTruthy();
+
+    // Same token, different ordering: a position in one sequence means nothing in another, so it is refused
+    // rather than served as a window that silently skips or repeats rows.
+    const crossed = await app.inject({
+      method: "GET",
+      url: `/issues?order=created&cursor=${encodeURIComponent(cursor)}`,
+      headers: H,
+    });
+    expect(crossed.statusCode).toBe(400);
+    expect(crossed.json().code).toBe("BAD_REQUEST");
+    await app.close();
+  });
+
+  it("counts each group under the same filter the rows are drawn with", async () => {
+    const { app } = build();
+    await createIssue(app, { title: "one", status: "todo", assignee: "dana" });
+    await createIssue(app, { title: "two", status: "todo", assignee: "dana" });
+    await createIssue(app, { title: "three", status: "todo" });
+    await createIssue(app, { title: "four", status: "cancelled", assignee: "sam" });
+
+    const all = await app.inject({ method: "GET", url: "/issues/counts?groupBy=status", headers: H });
+    expect(all.statusCode).toBe(200);
+    expect(all.json()).toEqual({
+      groupBy: "status",
+      groups: [
+        { key: "todo", count: 3 },
+        { key: "cancelled", count: 1 },
+      ],
+      total: 4,
+    });
+
+    // The unset bucket is a group with a null key, and it sorts last whatever its size.
+    const byAssignee = await app.inject({
+      method: "GET",
+      url: "/issues/counts?groupBy=assignee&status=todo",
+      headers: H,
+    });
+    expect(byAssignee.json().groups).toEqual([
+      { key: "dana", count: 2 },
+      { key: null, count: 1 },
+    ]);
+    expect(byAssignee.json().total).toBe(3);
+
+    // `counts` is a static segment — it must never be read as an issue id by the `/issues/:id` route.
+    expect((await app.inject({ method: "GET", url: "/issues/counts?groupBy=nonsense", headers: H })).statusCode).toBe(
+      400,
+    );
+    await app.close();
+  });
+
+  // The scope helper's three team reads (my teams · the teams I may see · the team the URL names) now go out
+  // TOGETHER instead of one after another — they decide nothing about each other, and this helper runs in front
+  // of EVERY list query, once per group on a grouped screen. Overlapping them puts an unknown team's rejection
+  // inside a `Promise.all`, where the naive spelling loses it: a sibling that settles first would let the whole
+  // block reject with something else, or the rejection would surface as a 500 rather than the 404 the URL earned.
+  // A team that does not exist must still read as ABSENT, on the rows and on the counts alike.
+  it("still 404s an unknown team ref on both list endpoints, now that the scope reads overlap", async () => {
+    // This one composes the team service on the SERVER (the shared fixture leaves it out, and without it
+    // `resolveTeamRef` keeps a ref verbatim by design — there is nothing to resolve against). The 404 being
+    // tested is the team service's answer, so it only exists in a deployment that has one.
+    const issueStore = new InMemoryIssueStore();
+    const teamStore = new InMemoryTeamStore();
+    const teamService = new TeamService({ store: teamStore, issues: issueStore });
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      issueService: new IssueService({ teams: teamService, store: issueStore }),
+      teamService,
+    });
+    await createIssue(app, { title: "one", status: "todo" });
+
+    for (const url of ["/issues?team=NOPE", "/issues/counts?groupBy=status&team=NOPE"]) {
+      const res = await app.inject({ method: "GET", url, headers: H });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().code).toBe("NOT_FOUND");
+    }
+
+    // And the happy path still narrows rather than 404-ing: the default team the issue was filed into is
+    // nameable by its KEY, which is what the team-scoped URL actually sends.
+    const teams = await app.inject({ method: "GET", url: "/teams", headers: H });
+    const key = teams.json()[0].key;
+    const scoped = await app.inject({ method: "GET", url: `/issues?team=${key}`, headers: H });
+    expect(scoped.statusCode).toBe(200);
+    expect(scoped.json().items.map((i: { title: string }) => i.title)).toEqual(["one"]);
     await app.close();
   });
 });

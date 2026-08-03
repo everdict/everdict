@@ -1,4 +1,11 @@
-import { IssueLinkTypeSchema, IssuePrioritySchema, IssueStatusSchema } from "@everdict/contracts";
+import type { IssueListFilter } from "@everdict/application-control";
+import {
+  IssueGroupBySchema,
+  IssueLinkTypeSchema,
+  IssueOrderSchema,
+  IssuePrioritySchema,
+  IssueStatusSchema,
+} from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
@@ -35,7 +42,10 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         estimate: z.number().int().nonnegative().max(1000).optional().describe("points on the team's scale"),
         dueDate: z.string().optional().describe("YYYY-MM-DD — when this issue is due"),
         parentId: z.string().optional().describe("file it as a sub-issue of this issue (id or identifier)"),
-        projectId: z.string().optional().describe("the project this issue belongs to"),
+        projectId: z
+          .string()
+          .optional()
+          .describe("the project this issue belongs to — one of the issue team's projects (list_projects?team=)"),
         assignee: z.string().optional(),
         labelIds: z.array(z.string()).max(50).optional(),
         links: z
@@ -79,21 +89,26 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
     "list_issues",
     {
       description:
-        "One PAGE of the workspace's issues, newest activity first: `{ items, nextCursor? }` — pass `nextCursor` " +
-        "back as `cursor` for the next page (absent = last page). Rows are SUMMARIES (identifier, title, status, " +
-        "labels, link count, assignee); the description, the full links and the move history live on get_issue. " +
-        "Filter by status (backlog | todo | in_progress | in_review | done | cancelled | regressed), project, " +
-        "assignee, or by the capability an issue links (linkType + linkId) — that last one answers 'which issues " +
-        "watch this harness/dataset', the lookup to run before investigating a failing batch. `parent` takes an " +
-        "issue id for its sub-issues, or the literal `none` for the top-level issues only.",
+        "One PAGE of the workspace's issues: `{ items, nextCursor? }` — pass `nextCursor` back as `cursor` for " +
+        "the next page (absent = last page). Rows are SUMMARIES (identifier, title, status, labels, link count, " +
+        "assignee); the description, the full links and the move history live on get_issue. `order` picks the " +
+        "sequence (updated [default] | created | priority | due) and the cursor belongs to it — reusing a token " +
+        "under a different order is refused rather than served as a meaningless window. status, priority, " +
+        "project, assignee, cycle and label take an ARRAY to mean 'any of these', and AND across facets; the " +
+        'empty string reaches the unset bucket (assignee: [""] = unassigned). `linkType` + `linkId` answers ' +
+        "'which issues watch this harness/dataset', the lookup to run before investigating a failing batch. " +
+        "`parent` takes an issue id for its sub-issues, or the literal `none` for the top-level issues only.",
       inputSchema: {
-        status: IssueStatusSchema.optional(),
-        project: z.string().optional(),
-        assignee: z.string().optional(),
-        priority: IssuePrioritySchema.optional(),
+        status: z.array(IssueStatusSchema).optional(),
+        project: z.array(z.string()).optional(),
+        assignee: z.array(z.string()).optional().describe('issue assignees; "" selects the unassigned ones'),
+        priority: z.array(IssuePrioritySchema).optional(),
+        cycle: z.array(z.string()).optional(),
+        label: z.array(z.string()).optional().describe("label ids; an issue matches when it carries ANY of them"),
         parent: z.string().optional().describe("an issue id for its sub-issues, or `none` for top-level only"),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
+        order: IssueOrderSchema.optional().describe("updated (default) | created | priority | due"),
         limit: z.number().int().positive().max(200).optional().describe("page size (default 50, max 200)"),
         cursor: z.string().optional().describe("page token from a prior page's nextCursor (next page)"),
       },
@@ -102,17 +117,42 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
       run(principal, "issues:read", async () =>
         ok(
           await issues.listSummaries(ws, {
-            ...(a.status !== undefined ? { status: a.status } : {}),
-            ...(a.project !== undefined ? { projectId: a.project } : {}),
-            ...(a.assignee !== undefined ? { assignee: a.assignee } : {}),
-            ...(a.priority !== undefined ? { priority: a.priority } : {}),
-            ...(a.parent !== undefined ? { parentId: a.parent === "none" ? null : a.parent } : {}),
-            ...(a.linkType !== undefined && a.linkId !== undefined ? { link: { type: a.linkType, id: a.linkId } } : {}),
+            ...issueFilterOfArgs(a),
+            ...(a.order !== undefined ? { order: a.order } : {}),
             ...(a.limit !== undefined ? { limit: a.limit } : {}),
             ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),
           }),
         ),
       ),
+  );
+
+  server.registerTool(
+    "count_issues",
+    {
+      description:
+        "How many issues fall in each group under the same filter list_issues takes — 'how much unstarted work " +
+        "does each member hold', 'how big is each status column'. `groupBy` is status | assignee | priority | " +
+        "project | cycle. Groups come back largest-first with the unset bucket last (`key: null`). Use this " +
+        "instead of paging the whole list to count it: the answer is one aggregate, and it stays correct past " +
+        "the page limit.",
+      inputSchema: {
+        groupBy: IssueGroupBySchema,
+        status: z.array(IssueStatusSchema).optional(),
+        project: z.array(z.string()).optional(),
+        assignee: z.array(z.string()).optional(),
+        priority: z.array(IssuePrioritySchema).optional(),
+        cycle: z.array(z.string()).optional(),
+        label: z.array(z.string()).optional(),
+        parent: z.string().optional(),
+        linkType: IssueLinkTypeSchema.optional(),
+        linkId: z.string().optional(),
+      },
+    },
+    (a) =>
+      run(principal, "issues:read", async () => {
+        const groups = await issues.countByGroup(ws, a.groupBy, issueFilterOfArgs(a));
+        return ok({ groupBy: a.groupBy, groups, total: groups.reduce((sum, group) => sum + group.count, 0) });
+      }),
   );
 
   server.registerTool(
@@ -162,7 +202,9 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         "Hand an issue to another team. Its identifier is RE-MINTED from the destination team's counter — the " +
         "prefix says whose list an issue is on — so the issue you moved comes back under a NEW name. Every " +
         "name it has answered to keeps resolving, so a reference you already handed someone still works; use " +
-        "the returned identifier from here on. Moving it to the team it is already on is refused.",
+        "the returned identifier from here on. Moving it to the team it is already on is refused. The move " +
+        "also DROPS what the destination team does not own: its cycle, its board column, and its project " +
+        "unless the destination team is on that project too (the history entry names what it lost).",
       inputSchema: {
         id: z.string().describe("issue id or identifier (ENG-12)"),
         teamId: z.string().describe("the destination team"),
@@ -268,4 +310,30 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         return ok({ deleted: a.id });
       }),
   );
+}
+
+// The narrowing `list_issues` and `count_issues` share, so the rows an agent reads and the totals it reports
+// can never come from two different filters. The HTTP twin has `request/list-issues.ts` doing the same job for
+// query strings; here the arguments are already typed, so only the mapping is left.
+function issueFilterOfArgs(a: {
+  status?: IssueListFilter["statuses"];
+  project?: string[];
+  assignee?: string[];
+  priority?: IssueListFilter["priorities"];
+  cycle?: string[];
+  label?: string[];
+  parent?: string;
+  linkType?: IssueListFilter["link"] extends infer L ? (L extends { type: infer T } ? T : never) : never;
+  linkId?: string;
+}): IssueListFilter {
+  return {
+    ...(a.status !== undefined ? { statuses: a.status } : {}),
+    ...(a.project !== undefined ? { projectIds: a.project } : {}),
+    ...(a.assignee !== undefined ? { assignees: a.assignee } : {}),
+    ...(a.priority !== undefined ? { priorities: a.priority } : {}),
+    ...(a.cycle !== undefined ? { cycleIds: a.cycle } : {}),
+    ...(a.label !== undefined ? { labelIds: a.label } : {}),
+    ...(a.parent !== undefined ? { parentId: a.parent === "none" ? null : a.parent } : {}),
+    ...(a.linkType !== undefined && a.linkId !== undefined ? { link: { type: a.linkType, id: a.linkId } } : {}),
+  };
 }

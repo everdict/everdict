@@ -64,6 +64,8 @@ export const TRIGGERABLE_EVENT_KINDS = [
   'project.status_changed',
   'project.update_posted',
   'initiative.status_changed',
+  // 목표가 흔들렸다 — 같은 payload 필터(health eq off_track)를, 이해관계자가 읽는 목표 쪽 업데이트에.
+  'initiative.update_posted',
   // 이터레이션이 닫혔다 — 회고 요약을 쓰라는 신호. 사이클은 한 번 닫히므로 한 번만 깨운다.
   'cycle.completed',
 ] as const

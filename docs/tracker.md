@@ -13,11 +13,16 @@ The tracker is the missing layer, and it is Linear-shaped.
 | **Team** | who owns a slice of the evaluation, and the prefix its issues are named with | whose list is this issue on |
 | **Issue** | the unit of intent: one problem under evaluation | what are we evaluating, how was it verified, why did it come back |
 | **Project** | issues under one target date, worked by one or more teams | did we finish the evaluation in time |
-| **Initiative** | the deployment umbrella over projects | is everything resolved — can we ship |
+| **Initiative** | a goal several projects work toward | how far along are we — is everything it asked for finished |
 
 Two axes cross here, exactly as they do in Linear: the **team axis** owns issues, and the **project/initiative
-axis** owns dates and releases. Neither contains the other — a project spans teams, and an initiative spans
-projects — which is what lets one release be planned across several teams without any of them owning it.
+axis** owns dates and goals. Neither contains the other — a project spans teams, and an initiative spans
+projects — which is what lets one goal be pursued across several teams without any of them owning it.
+
+An initiative is a GOAL, not a release train. Nothing about it is shipping-shaped: it holds the outcome a group
+is trying to reach ("agents people trust", "cost per case under a cent"), its progress is arithmetic over every
+issue underneath, and its health is what the person answerable for it says on top of that arithmetic. Completing
+one is a gate for exactly one reason — a goal with open work under it has not been reached yet.
 
 ## Team
 
@@ -27,8 +32,8 @@ billing and integration boundary, because every issue list becomes everyone's is
 
 A team is the smallest thing that fixes it, and deliberately no bigger:
 
-- **It owns issues, and only issues.** Projects and initiatives stay workspace-level, so a release several teams
-  contribute to is still ONE readiness gate. Scoping a project to a team would make the release question
+- **It owns issues, and only issues.** Projects and initiatives stay workspace-level, so a goal several teams
+  contribute to still has ONE progress read. Scoping a project to a team would make "how far along is this goal"
   unanswerable at exactly the moment it matters.
 - **It names them.** `key` (`ENG`) + a per-team counter → `ENG-12`, stored on the issue. The key is immutable
   after creation because it is baked into every identifier the team has already minted, and those get pasted
@@ -117,6 +122,15 @@ It is a transition, not an edit — `teamId` is deliberately absent from `PATCH 
 never carry a re-address as a side effect. It emits `issue.moved` (both team ids, both identifiers) and appends
 the durable `moved` history entry, and moving to the team the issue is already on is a `409`.
 
+**A move drops what the destination team does not own.** Everything the issue points at across the team axis was
+checked against the OLD team when it was set, so the move clears its **cycle** and its **board column**
+unconditionally, and its **project** (with the milestone inside it) unless the destination team is on that
+project too — a project spans teams, so moving *inside* the project's own set of teams is not a departure from
+it. Carrying them across would leave the issue in an iteration it can never appear in and a column that is not
+on its board: the invariant every other write path enforces, quietly false for exactly the issues that moved.
+What it lost is named in the `moved` history entry and on the fact (`dropped: ["cycle", "state", …]`), so an
+emptied field never reads as data going missing on its own.
+
 ### The identifier is the address
 
 `ENG-12` is not decoration — it is how an issue is **addressed** everywhere a human can see the reference:
@@ -175,12 +189,12 @@ holding is work IN FLIGHT, not an untouched backlog item and not a finished one.
 
 A team's board is `WorkflowState` rows (`/teams/:id/states`): name · colour · position · and the **canonical
 status the state is a view onto**. A team renames "Todo" to "Up next", recolours it, reorders the board, or adds
-"In QA" beside "In review" — and the release gate, the rollups, the regression watch and the GitHub sync keep
+"In QA" beside "In review" — and the completion gate, the rollups, the regression watch and the GitHub sync keep
 reading `status`, so none of it can be broken by a rename.
 
 This is the one place we deliberately stop short of Linear: **the canonical vocabulary stays closed**. Letting a
 team mint arbitrary statuses would mean either teaching every programmatic reader an open vocabulary, or adding
-a category field that duplicates the status enum we already have — and the readiness gate is the product's
+a category field that duplicates the status enum we already have — and the progress arithmetic is the product's
 central claim, so it does not get to depend on what somebody named a column. `regressed` is not offerable as a
 column at all: an issue reaches it by a resolution falling, never by somebody dragging a card.
 
@@ -231,11 +245,12 @@ Kinds are folded per subject rather than per verb:
 |---|---|---|
 | `issue.created` | `status`, `source: manual\|github`, `teamId`, `identifier`, `projectId?`, and for a GitHub copy the addressable origin `repository`/`number`/`url` (+ `host?` on GHE) | ✅ |
 | `issue.status_changed` | `from`, `to`, `cause: manual\|github_sync\|regression`, `projectId?`, `scorecardId?` | ✅ |
-| `issue.moved` | `fromTeamId`, `toTeamId`, `fromIdentifier`, `toIdentifier` | — |
+| `issue.moved` | `fromTeamId`, `toTeamId`, `fromIdentifier`, `toIdentifier`, `dropped?` (what the destination team does not own: `cycle`/`state`/`project`/`milestone`) | — |
 | `issue.linked` | `linkType`, `linkId`, `version?` | — |
 | `project.created` / `project.status_changed` | `from`, `to`, `openIssues`, `teamIds`, `initiativeIds`, `onTime?`, `forced?` | status only |
 | `project.update_posted` | `health`, `from?`, `teamIds`, `initiativeIds` | ✅ |
 | `initiative.created` / `initiative.status_changed` | `from`, `to`, `openIssues`, `onTime?`, `forced?` | status only |
+| `initiative.update_posted` | `health`, `from?` | ✅ |
 
 "Wake me when an issue regresses" is therefore a payload filter (`cause eq regression`), not another kind —
 the vocabulary stays small and the subscription stays precise. Facts, never judgments: `regression` states
@@ -273,24 +288,59 @@ by *listing that team's issues* — cost the same as `GET /issues` for a 1.6 KB 
 from two workspace aggregates (`IssueStore.countByTeam` + `TeamStore.countMembersByTeam`), the same rule the
 project list already followed: **the detail carries the rollup, the list stays lean.**
 
-**What the list is indexed for** (migration 0116, measured with `EXPLAIN ANALYZE` on a 5,000-issue workspace).
-Only the team-scoped newest-first read was covered before, and every other shape the screen offers fell off it:
-a label filter had no index at all and seq-scanned the table; the workspace-wide list had nothing leading with
-`(tenant, updated_at DESC)` and sorted the whole workspace to serve fifty rows; a status facet inside a team
-seeked on the team index and then discarded thousands of rows, because that index carries the ordering but not
-the predicate. All three are LINEAR in workspace size, which is why the list feels fine on a demo workspace and
-not on a real one. 0116 adds a GIN index on `label_ids` (the default `jsonb_ops` — `?|` is unsupported by
-`jsonb_path_ops`), `(tenant, updated_at DESC, id DESC)` and its `created_at` twin for the two column orderings
-and the cursors that ride them, and `(tenant, team_id, status, updated_at DESC)` with the status BETWEEN the
-team and the ordering, so an equality on it leaves `updated_at DESC` still sorted within the group. That last
-one is insurance the planner is meant to ignore for a broad facet — scanning the sorted twin and filtering
-really is cheaper — and to reach for on a selective one: "show me what regressed" names a rare status, and it
-used to walk the whole team to answer. Still uncovered on purpose: `countByTeam` reads every row of the
-workspace by definition, so it stays a seq scan; making that cheaper is a counter or a rollup, not an index.
-
 `syncPull=true` narrows to the GitHub bulk sync's working set. It is exposed for a reason worth stating: without
 it the only way to answer "which repositories can I refresh" was to read the entire issue list and filter it
 client-side, which is exactly what the issues page used to do — a second full-table read per page load.
+
+### The screen decides the ordering, the grouping and the sets it filters by
+
+A list screen is more than a page of rows, and the three things it needs beyond them cannot be applied on top of
+a page it already holds.
+
+**Ordering.** `?order=updated|created|priority|due` (default `updated`). `priority` sorts urgent-first with
+`none` LAST — the ordering lives in `issuePriorityRank`, never as a magic integer — and `due` sorts the nearest
+deadline first with undated issues at the end. The page CURSOR is minted under the ordering and carries it, so
+reusing a token with a different `order` is a **400**, not a window that silently skips or repeats rows: a
+position in one sequence means nothing in another. A two-field token from before orderings existed still
+resolves — it can only ever have meant `updated`.
+
+**Sets, not values.** `status`, `priority`, `project`, `assignee`, `cycle` and `label` are repeatable
+(`?status=todo&status=in_progress`): ANY within a facet, AND across facets — which is how a filter bar reads.
+"Everything still in flight" is one query, where before it was three that no cursor could merge correctly. An
+EMPTY value reaches the unset bucket (`?assignee=` = unassigned), because a query parameter has no null and
+"nobody" is a group members really do filter to. A facet named with no values selects **nothing** rather than
+widening back to everything.
+
+**Group counts.** `GET /issues/counts?groupBy=status|assignee|priority|project|cycle` (`count_issues` on MCP)
+answers how many issues each group holds *under the same filter*, largest-first, unset bucket last with
+`key: null`. It is its own endpoint because a grouped screen holds one PAGE PER GROUP: there is no single
+response the counts could ride on, and counting the rows it received would only report the page size back to
+itself. Every grouping column is a scalar on the issue, so an issue counts exactly once — labels are
+deliberately absent from `groupBy`, since an issue carries several and the group counts would add up to more
+than the list.
+
+The semantics live in the kernel (`issueGroupKey` / `issueOrderKey` / `compareIssuesForList` /
+`isIssueAfterCursor` / `orderIssueGroupCounts` in `@everdict/domain`) and the SQL under each store method is
+written to reproduce exactly what they return — the in-memory store and Postgres must agree about which row
+comes next, and about where a page boundary falls. `updated` keeps the row-value cursor predicate that lets the
+`(tenant, …, updated_at DESC)` indexes seek to the page; the other three sort on an expression and pay for a
+sort, deliberately: they are chosen from a display menu, and agreeing with the in-memory store is worth more
+there than an index.
+
+**What the list is indexed for** (migration 0116, measured with `EXPLAIN ANALYZE` on a 5,000-issue workspace).
+Only the team-scoped newest-first read was covered before, and every other shape the screen offers fell off it:
+a label filter had no index at all and seq-scanned; the workspace-wide list had nothing leading with
+`(tenant, updated_at DESC)` and sorted the whole workspace to serve fifty rows; a facet inside a team seeked on
+the team index and then discarded thousands of rows, because that index carries the ordering but not the
+predicate. All three are LINEAR in workspace size, which is why the list feels fine on a demo workspace and not
+on a real one. 0116 adds a GIN index on `label_ids` (default `jsonb_ops` — `?|` is unsupported by
+`jsonb_path_ops`), `(tenant, updated_at DESC, id DESC)` and its `created_at` twin for the two column orderings
+and their cursors, and `(tenant, team_id, status, updated_at DESC)` with the status BETWEEN the team and the
+ordering, so an equality on it leaves `updated_at DESC` still sorted. That last one is insurance the planner is
+meant to ignore for a broad facet (scanning the sorted twin and filtering really is cheaper) and to reach for on
+a selective one — "show me what regressed" is a rare status, and it used to walk the whole team to answer.
+Still uncovered on purpose: `countByTeam` reads every row of the workspace by definition, so it stays a seq
+scan; making it cheaper is a counter or a rollup, not an index.
 
 ### Evaluation history
 
@@ -448,38 +498,56 @@ something the browser can know, and a slower image beats a broken one.
   The teams are stored on the project rather than derived from its issues, because the derived answer was "no
   teams" for exactly as long as the project was still being planned — the window where the question is asked.
   Creating one without naming a team lands it on the workspace's default team, the same courtesy `teamId` gets
-  on an issue.
+  on an issue — through the same lazily-repairing `ensureDefault` seam, so a brand-new workspace's first act can
+  be creating a project.
+- **At least one team, always.** There is ONE kind of project. An empty `teamIds` used to be legal and mean
+  "workspace-wide", which quietly made a second kind: a project in no team's sidebar that — under the rule
+  below — no issue could ever join. Emptying the list is a `400`, and removing a team whose issues are still in
+  the project is a `409` naming the count (which of those issues leaves is the member's decision, not ours).
 - A project routinely serves two umbrellas (a migration that is both "Q3 reliability" and "cost down"), and a
   single `initiativeId` silently dropped whichever lost.
 
-Both lists are validated against the workspace on write (`400` naming the unknown ids) — unlike an issue LINK,
-which stays an unvalidated pointer. These edges decide which sidebar a project appears in and which release gate
-counts it, so a dangling id would hide real work rather than merely render a dead chip.
+**An issue only joins a project its own team is on** — the same rule a cycle has, one level up: a project the
+issue's team is not part of is a list the issue can never be seen in from the team that owns it. Enforced on
+`POST /issues` and `PATCH /issues/:id` (a `400` naming the project and the team; an unknown project is a `404`),
+so the picker a member is offered and the set the control plane accepts are the same set — which is what makes
+"this team's projects" a real answer rather than a hint. The web reads that picker's options with
+`GET /projects?team=<the issue's team>` for exactly that reason, and a team move re-decides it (above).
 
-**Initiatives nest** (`parentId`), and readiness rolls UP: a parent's verdict counts its own projects plus every
-descendant's, so decomposing a big bet can never hide work from the release gate. Each project in the readiness
-summary carries `viaInitiativeId` when it came up through a descendant, so a blocked release points at where
-the block actually sits. Cycles are refused (`409`) and an initiative with sub-initiatives cannot be deleted.
+Both lists are validated against the workspace on write (`400` naming the unknown ids) — unlike an issue LINK,
+which stays an unvalidated pointer. These edges decide which sidebar a project appears in and which goal counts
+it, so a dangling id would hide real work rather than merely render a dead chip.
+
+**Initiatives nest** (`parentId`), and progress rolls UP: a parent counts its own projects plus every
+descendant's, so decomposing a big goal can never hide work from it. Each project in the progress summary
+carries `viaInitiativeId` when it came up through a descendant, so remaining work points at where it actually
+sits. Cycles are refused (`409`) and an initiative with sub-initiatives cannot be deleted.
+
+**Both carry the human half too**: a `lead` (who is answerable) and a `health` — the flag on the LATEST posted
+update (`on_track | at_risk | off_track`), denormalized onto the record so a list row draws it without reading
+the timeline. Updates are their own append-only timelines (`POST/GET /projects/:id/updates`,
+`POST/GET /initiatives/:id/updates`, mig `0111` and `0117`), and the body is REQUIRED on both: a health flag with
+no sentence is a colour nobody can explain. One health vocabulary (`TrackerHealth`) serves both levels — the same
+three words mean the same three things, and two enums would have made "at risk" depend on which screen you read.
 
 Beyond that they are thin containers with one interesting operation: **completion is a gate.**
 
 - `POST /projects/:id/status {status: "completed"}` refuses with a `409` while the project has open issues,
   naming the count.
-- `POST /initiatives/:id/status {status: "completed"}` does the same across *every* project under the
-  umbrella.
-- `force: true` is the deliberate override — a release ships with known gaps — and it is recorded in the fact
+- `POST /initiatives/:id/status {status: "completed"}` does the same across *every* project under the goal.
+- `force: true` is the deliberate override — the goal is closed with known gaps — and it is recorded in the fact
   (`forced: true`) so the history says the deadline was overridden, not met.
 
 The rollups are **derived on detail reads, never stored** (the `ScorecardRecord.trialSummary` precedent):
 counting issues is cheap arithmetic, whereas a stored rollup is a cache to invalidate on every child write.
-`GET /projects/:id` carries `rollup`, `GET /initiatives/:id` carries `readiness` with its blocker list
-(regressions first). List endpoints stay lean. `GET /projects?team=` and `?initiative=` are containment tests on
+`GET /projects/:id` carries `rollup`, `GET /initiatives/:id` carries `readiness` — how far along the goal is,
+with what is left listed regressions-first, and each project summarized with its status, health and lead. List endpoints stay lean. `GET /projects?team=` and `?initiative=` are containment tests on
 the project's own lists (GIN-indexed), so they answer without touching the issue table.
 
-**The load-bearing invariant:** initiative readiness counts open issues across every non-cancelled project
-*regardless of that project's own status*. A project marked completed whose issue later regressed still blocks
-the release. The project status is history; readiness is live truth. A cancelled project's work is off the
-release entirely, so it is summarized but not counted.
+**The load-bearing invariant:** initiative progress counts open issues across every non-cancelled project
+*regardless of that project's own status*. A project marked completed whose issue later regressed is still
+unfinished work under the goal. The project status is history; this is live truth. A cancelled project's work is
+off the goal entirely, so it is summarized but not counted.
 
 `onTime` on a completion fact is `completedAt <= targetDate` — lexicographic comparison over `YYYY-MM-DD`,
 which is why target dates are stored as text and round-trip with no timezone reinterpretation.
@@ -500,7 +568,9 @@ Full BFF↔MCP parity. HTTP under `/teams`, `/issues`, `/projects`, `/initiative
 `list_teams`/`get_team`/`create_team`/`update_team`/`set_default_team`/`delete_team` plus
 `list_team_members`/`add_team_member`/`remove_team_member`; the issue MCP twins are `create_issue`,
 `list_issues`, `get_issue`, `update_issue`, `set_issue_status`, `add_issue_link`, `remove_issue_link`,
-`list_issue_scorecards`, `move_issue`, `delete_issue` plus the six-tool sets for projects and initiatives. Every `/issues/:id`
+`list_issue_scorecards`, `move_issue`, `delete_issue` plus the eight-tool sets for projects and initiatives —
+create/list/get/update/set-status/delete on both, each with its update pair (`post_project_update`/
+`list_project_updates`, `post_initiative_update`/`list_initiative_updates`). Every `/issues/:id`
 route and every issue tool takes the id OR the identifier (`ENG-12`), so an agent can act on the reference a
 member pasted at it. The MCP surface is how an agent triages its own regressions: find the issue watching a
 harness, read how it was closed last time, move it.
@@ -550,7 +620,8 @@ packages/db/src/tracker/                       InMemory + Pg stores (migrations 
                                                0109 = priority/estimate/due date/sub-issues, 0110 = cycles+triage,
                                                0111 = project lead/health/milestones + the update timeline,
                                                0112 = per-team workflow states + issue.state_id,
-                                               0113 = private teams)
+                                               0113 = private teams,
+                                               0117 = initiative lead/health + its own update timeline)
 packages/application-control/src/team/team-service.ts          team use-cases; ensureDefault is the invariant's repair point
 packages/application-control/src/cycle/cycle-service.ts        iteration use-cases (number, window, close+carry)
 apps/api/src/api/{team,cycle,issue,project,initiative}/   routes + MCP + OpenAPI docs

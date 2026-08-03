@@ -1,4 +1,4 @@
-import { IssueListView } from '@/widgets/issue-list'
+import { IssueListView, type IssueListFilters } from '@/widgets/issue-list'
 
 import { loadTeamScope } from '../../../team-scope'
 
@@ -11,7 +11,7 @@ export default async function TeamIssuesPage({
   searchParams,
 }: {
   params: Promise<{ workspace: string; key: string }>
-  searchParams: Promise<{ status?: string; project?: string; priority?: string; cursor?: string }>
+  searchParams: Promise<IssueListFilters>
 }) {
   const { workspace, key } = await params
   const search = await searchParams

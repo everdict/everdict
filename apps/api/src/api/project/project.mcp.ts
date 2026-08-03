@@ -1,4 +1,4 @@
-import { ProjectHealthSchema, ProjectStatusSchema } from "@everdict/contracts";
+import { ProjectStatusSchema, TrackerHealthSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, resolveTeam, run } from "../mcp-context.js";
@@ -28,7 +28,10 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
         teamIds: z
           .array(z.string())
           .optional()
-          .describe("the teams contributing — omit to land it on the workspace's default team"),
+          .describe(
+            "the teams contributing — omit to land it on the workspace's default team. A project always names " +
+              "at least one, and only those teams' issues may join it",
+          ),
         initiativeIds: z
           .array(z.string())
           .optional()
@@ -99,12 +102,13 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
       description:
         "Edit a project's content (name, description, teams, initiatives, target date). Status moves use " +
         "set_project_status instead. Pass null to clear description/targetDate; a LIST replaces what is there, " +
-        "so pass [] to detach every team or every initiative.",
+        "so pass [] to detach every initiative. Not the teams, though: a project is worked by at least one, " +
+        "and removing a team whose issues are still in the project is refused (move them out first).",
       inputSchema: {
         id: z.string(),
         name: z.string().min(1).max(300).optional(),
         description: z.string().max(50_000).nullable().optional(),
-        teamIds: z.array(z.string()).optional(),
+        teamIds: z.array(z.string()).min(1).optional(),
         initiativeIds: z.array(z.string()).optional(),
         targetDate: CalendarDate.nullable().optional(),
       },
@@ -126,7 +130,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
         "project goes off track' is a payload filter on it.",
       inputSchema: {
         id: z.string(),
-        health: ProjectHealthSchema,
+        health: TrackerHealthSchema,
         body: z.string().min(1).max(50_000).describe("what changed, and why it reads that way"),
       },
     },

@@ -89,11 +89,19 @@ export { Approval, type ApprovalTransition, type NewPendingApprovalInput } from 
 // tracker — the eval tracker's aggregates (Initiative ⊃ Project ⊃ Issue) + the readiness arithmetic that gates
 // a release (docs/tracker.md).
 export {
+  compareIssuesForList,
   Issue,
+  ISSUE_PRIORITIES_BY_RANK,
+  issueCountsByGroup,
   issueCountsByTeam,
+  issueGroupKey,
+  issueOrderKey,
   issueSummaryOf,
+  isIssueAfterCursor,
   isOpenIssueStatus,
+  orderIssueGroupCounts,
   type IssueEditInput,
+  type IssueOrderable,
   type IssueReopenInput,
   type IssueStatusChangeOptions,
   type IssueTransition,

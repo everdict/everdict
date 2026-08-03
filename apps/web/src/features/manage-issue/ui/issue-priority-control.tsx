@@ -17,10 +17,13 @@ export function IssuePriorityControl({
   id,
   priority,
   canWrite,
+  variant = 'default',
 }: {
   id: string
   priority: IssuePriority
   canWrite: boolean
+  // 상태 컨트롤과 같은 두 밀도 — 목록 행에서는 아이콘만 선다.
+  variant?: 'default' | 'icon'
 }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
@@ -45,7 +48,14 @@ export function IssuePriorityControl({
     </>
   )
 
-  if (!canWrite) return <span className="inline-flex items-center gap-1.5">{label}</span>
+  if (!canWrite)
+    return variant === 'icon' ? (
+      <span className="inline-flex shrink-0 items-center" title={tracker(`issuePriority.${priority}`)}>
+        <IssuePriorityIcon priority={priority} className="[&_svg]:size-3.5" />
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1.5">{label}</span>
+    )
 
   return (
     <DropdownMenu
@@ -56,11 +66,22 @@ export function IssuePriorityControl({
           onClick={toggle}
           aria-expanded={open}
           aria-label={t('priorityControlLabel')}
+          title={variant === 'icon' ? tracker(`issuePriority.${priority}`) : undefined}
           disabled={pending}
-          className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          className={
+            variant === 'icon'
+              ? 'inline-flex shrink-0 items-center rounded-md p-1 transition-colors hover:bg-accent disabled:opacity-50'
+              : 'inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50'
+          }
         >
-          {pending ? <Loader2 className="size-3.5 animate-spin" /> : label}
-          <ChevronDown className="size-3 shrink-0 text-faint" />
+          {pending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : variant === 'icon' ? (
+            <IssuePriorityIcon priority={priority} className="[&_svg]:size-3.5" />
+          ) : (
+            label
+          )}
+          {variant === 'default' && <ChevronDown className="size-3 shrink-0 text-faint" />}
         </button>
       )}
     >

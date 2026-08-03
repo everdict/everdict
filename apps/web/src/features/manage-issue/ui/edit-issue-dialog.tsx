@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { MediaDropZone, withBlockInsertion } from '@/features/attach-media'
 import type { Issue } from '@/entities/issue'
 import type { IssueLabel } from '@/entities/issue-label'
 import { Button } from '@/shared/ui/button'
@@ -31,6 +32,7 @@ export function EditIssueDialog({
   projects,
   labels,
   canWrite,
+  canAttach = false,
 }: {
   issue: Issue
   open: boolean
@@ -39,6 +41,7 @@ export function EditIssueDialog({
   // 워크스페이스 라벨 레지스트리 — 고를 대상이자 칩을 그리는 근거. 라벨은 이제 자유 문자열이 아니라 레코드다.
   labels: IssueLabel[]
   canWrite: boolean
+  canAttach?: boolean
 }) {
   const t = useTranslations('issuesPage')
   const router = useRouter()
@@ -47,9 +50,27 @@ export function EditIssueDialog({
   const [assignee, setAssignee] = useState(issue.assignee ?? '')
   const [projectId, setProjectId] = useState(issue.projectId ?? '')
   const [labelIds, setLabelIds] = useState(issue.labelIds)
-  const [estimate, setEstimate] = useState(issue.estimate === undefined ? '' : String(issue.estimate))
+  const [estimate, setEstimate] = useState(
+    issue.estimate === undefined ? '' : String(issue.estimate)
+  )
   const [dueDate, setDueDate] = useState(issue.dueDate ?? '')
   const [pending, startTransition] = useTransition()
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+
+  // 올라간 첨부는 커서 자리에 들어간다. 현재 값은 상태가 아니라 텍스트영역에서 읽는다 — 파일을 여러 개 놓으면
+  // 업로드가 하나씩 이어져, 그 사이 렌더에서 닫힌 상태 값은 이미 지난 값이기 때문이다.
+  function insertAttachment(snippet: string) {
+    const ta = descriptionRef.current
+    const current = ta?.value ?? description
+    const start = ta?.selectionStart ?? current.length
+    const end = ta?.selectionEnd ?? current.length
+    const next = withBlockInsertion(current, start, end, snippet)
+    setDescription(next.value)
+    queueMicrotask(() => {
+      descriptionRef.current?.focus()
+      descriptionRef.current?.setSelectionRange(next.caret, next.caret)
+    })
+  }
 
   function submit() {
     const patch = {
@@ -103,11 +124,15 @@ export function EditIssueDialog({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="edit-issue-description">{t('fieldDescription')}</Label>
-          <Textarea
-            id="edit-issue-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
+          {/* 재현 화면은 설명의 일부다 — 붙여넣거나 끌어다 놓으면 커서 자리에 첨부 문법이 들어간다. */}
+          <MediaDropZone onInsert={insertAttachment} disabled={!canAttach}>
+            <Textarea
+              id="edit-issue-description"
+              ref={descriptionRef}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </MediaDropZone>
         </div>
         <div className="grid gap-3 @md:grid-cols-2">
           <div className="space-y-1.5">

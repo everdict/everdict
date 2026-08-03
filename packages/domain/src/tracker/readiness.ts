@@ -35,14 +35,14 @@ export function projectRollup(issues: readonly IssueRecord[]): ProjectRollup {
   return { total: issues.length, open, done, cancelled, byStatus, evaluated, ready: open === 0 };
 }
 
-// The deployment verdict. Open issues are counted across every non-cancelled project REGARDLESS of that
-// project's own status: a project marked completed whose issue later regressed still blocks the release. The
-// project status is history; readiness is live truth.
+// How far along the GOAL is. Open issues are counted across every non-cancelled project REGARDLESS of that
+// project's own status: a project marked completed whose issue later regressed is still unfinished work under
+// the goal. The project status is history; this is live truth.
 //
 // `projects` is everything claimed by THIS initiative or any of its descendants — the service walks the tree
 // (it holds the store); the arithmetic here stays pure. A project that does not name the initiative directly
-// came up through a descendant, and the summary says which, so a blocked release can point at where the block
-// actually sits instead of just at the umbrella.
+// came up through a descendant, and the summary says which, so remaining work points at where it actually sits
+// instead of just at the goal.
 export function initiativeReadiness(
   initiativeId: string,
   projects: readonly ProjectRecord[],
@@ -65,6 +65,8 @@ export function initiativeReadiness(
       name: project.name,
       ...(via !== undefined ? { viaInitiativeId: via } : {}),
       status: project.status,
+      ...(project.health !== undefined ? { health: project.health } : {}),
+      ...(project.lead !== undefined ? { lead: project.lead } : {}),
       ...(project.targetDate !== undefined ? { targetDate: project.targetDate } : {}),
       ...(project.completedAt !== undefined ? { completedAt: project.completedAt } : {}),
       rollup,

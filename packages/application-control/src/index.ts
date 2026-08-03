@@ -84,7 +84,7 @@ export {
 export type { IssueLabelStore } from "./ports/issue-label-store.js";
 export type { IssueNumberGrant, TeamListFilter, TeamStore } from "./ports/team-store.js";
 export type { ProjectListFilter, ProjectStore, ProjectUpdateStore } from "./ports/project-store.js";
-export type { InitiativeListFilter, InitiativeStore } from "./ports/initiative-store.js";
+export type { InitiativeListFilter, InitiativeStore, InitiativeUpdateStore } from "./ports/initiative-store.js";
 export type { ViewStore } from "./ports/view-store.js";
 export type { OAuthStateStore } from "./ports/oauth-state-store.js";
 export type { RunnerStore } from "./ports/runner-store.js";
@@ -156,6 +156,7 @@ export {
 export {
   type CreateProjectInput,
   type ProjectActor,
+  type ProjectDefaultTeamResolver,
   ProjectService,
   type ProjectServiceDeps,
 } from "./project/project-service.js";

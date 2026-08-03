@@ -1,4 +1,13 @@
-import type { IssueLinkType, IssuePage, IssuePriority, IssueRecord, IssueStatus } from "@everdict/contracts";
+import type {
+  IssueGroupBy,
+  IssueGroupCount,
+  IssueLinkType,
+  IssueOrder,
+  IssuePage,
+  IssuePriority,
+  IssueRecord,
+  IssueStatus,
+} from "@everdict/contracts";
 import type { OutboxEvent } from "./run-store.js";
 
 export interface IssueListFilter {
@@ -26,6 +35,21 @@ export interface IssueListFilter {
   githubRepository?: string;
   syncPull?: boolean; // only issues whose GitHub copy has pull enabled (the manual bulk sync's working set)
   limit?: number;
+  // --- The SCREEN's filters: a set per facet, not a value ---
+  // "Everything still in flight" is `todo OR in_progress OR in_review`, and a caller that could only name one
+  // status at a time had to ask three times and merge the pages — which no cursor makes correct. Each of these
+  // selects rows matching ANY of the given values (an empty array selects nothing, because "filtered to
+  // nothing" is what the caller asked for); ACROSS facets they AND, which is how a filter bar reads. The
+  // singular fields above stay for the internal callers that narrow to exactly one value (the rollups, the
+  // regression watch) and AND with these.
+  statuses?: IssueStatus[];
+  priorities?: IssuePriority[];
+  assignees?: string[];
+  projectIds?: string[];
+  cycleIds?: string[];
+  // Labels are the one MANY-valued column: an issue carries a set, so a row matches when the two sets
+  // intersect. That is the only reading a label filter can have — "has any of these labels".
+  labelIds?: string[];
 }
 
 // The list projection's filter: the same narrowing plus the page cursor. Separate from `IssueListFilter` because
@@ -33,6 +57,10 @@ export interface IssueListFilter {
 // have to explain.
 export interface IssuePageFilter extends IssueListFilter {
   cursor?: string; // opaque token from a prior page's nextCursor; absent = the first page
+  // How the page is ordered — `updated` (newest touched first) when absent. The cursor is minted UNDER this
+  // ordering and carries it, so a page token read back with a different `order` is refused rather than
+  // silently resuming from a position that means nothing in the new sequence.
+  order?: IssueOrder;
 }
 
 // How many issues each team holds, and how many of those are still open — the counts a team list row shows.
@@ -66,6 +94,10 @@ export interface IssueStore {
   listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage>;
   // Issue counts per team in one aggregate. Absent teams simply have no entry (a team with no issues).
   countByTeam(tenant: string): Promise<IssueTeamCounts[]>;
+  // How many issues fall in each group under `filter` — what a GROUPED list's headers show. One aggregate, not
+  // a count per group: a screen grouped by assignee would otherwise fire a query per member to learn how many
+  // rows it is not showing. Groups come back largest-first; the unset bucket carries `key: null`.
+  countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]>;
   update(
     tenant: string,
     id: string,

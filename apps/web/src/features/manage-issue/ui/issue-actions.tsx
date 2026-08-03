@@ -23,6 +23,7 @@ export function IssueActions({
   projects,
   labels,
   canWrite,
+  canAttach = false,
 }: {
   workspace: string
   issue: Issue
@@ -30,6 +31,8 @@ export function IssueActions({
   // 편집 다이얼로그의 라벨 선택기가 고를 워크스페이스 레지스트리.
   labels: IssueLabel[]
   canWrite: boolean
+  // 설명에 파일을 붙일 수 있는지(files:write) — 이슈 쓰기와 같은 등급이지만 다른 판정이라 따로 받는다.
+  canAttach?: boolean
 }) {
   const t = useTranslations('issuesPage')
   const router = useRouter()
@@ -80,6 +83,7 @@ export function IssueActions({
       <EditIssueDialog
         labels={labels}
         canWrite={canWrite}
+        canAttach={canAttach}
         issue={issue}
         open={editing}
         onClose={() => setEditing(false)}

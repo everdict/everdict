@@ -1,4 +1,4 @@
-import type { InitiativeRecord, InitiativeStatus } from "@everdict/contracts";
+import type { InitiativeRecord, InitiativeStatus, InitiativeUpdateRecord } from "@everdict/contracts";
 import type { OutboxEvent } from "./run-store.js";
 
 export interface InitiativeListFilter {
@@ -17,4 +17,11 @@ export interface InitiativeStore {
     events?: OutboxEvent[],
   ): Promise<InitiativeRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;
+}
+
+// The posted-update timeline. Append-only: an update is what somebody said at a moment, so there is no edit
+// path and nothing to invalidate. Same port shape as `ProjectUpdateStore`, one level up.
+export interface InitiativeUpdateStore {
+  create(record: InitiativeUpdateRecord): Promise<void>;
+  list(tenant: string, initiativeId: string, limit?: number): Promise<InitiativeUpdateRecord[]>;
 }

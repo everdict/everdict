@@ -28,6 +28,36 @@ export {
   type IssueSummary,
   type TrackerHistoryEntry,
 } from './model/schema'
+export {
+  DEFAULT_ISSUE_VIEW,
+  ISSUE_FILTER_FACETS,
+  ISSUE_GROUP_BYS,
+  ISSUE_GROUPINGS,
+  ISSUE_LAYOUTS,
+  ISSUE_ORDERS,
+  issueFilterCount,
+  issueGroupBySchema,
+  issueGroupCountsSchema,
+  issueGroupsToRender,
+  issueLayoutSchema,
+  issueOrderSchema,
+  issueQueryFilters,
+  issueViewHref,
+  issueViewOf,
+  issueViewQuery,
+  orderIssueGroups,
+  toggleIssueFilter,
+  type IssueFilterFacet,
+  type IssueFilters,
+  type IssueGroupBy,
+  type IssueGroupCount,
+  type IssueGroupCounts,
+  type IssueGrouping,
+  type IssueLayout,
+  type IssueOrder,
+  type IssueView,
+  type IssueViewParams,
+} from './model/view'
 export { issueHref } from './lib/href'
 export { issueAttachmentProxy } from './lib/attachment-proxy'
 export { ISSUE_CAPABILITY_LINK_TYPES, ISSUE_LINK_REF_KIND, issueLinkHref } from './lib/link-target'

@@ -108,6 +108,53 @@ async function callVoid(auth: AuthContext, path: string, init?: RequestInit): Pr
   if (!res.ok) throw controlPlaneError(path, res.status, await res.text())
 }
 
+// 이슈 목록의 좁히기. 행(`listIssues`)과 그룹 개수(`countIssues`)가 같은 문자열을 만들도록 한곳에 둔다 —
+// 헤더가 12 라고 하는데 그 아래 목록이 3 줄만 그리는 일은, 두 곳에서 각자 쿼리를 조립할 때 생긴다.
+export interface IssueListQuery {
+  // 축마다 집합이다: `?status=todo&status=in_progress`. 축끼리는 AND, 축 안에서는 OR.
+  status?: string[]
+  priority?: string[]
+  // 빈 문자열은 「담당자 없음」 — 쿼리 파라미터에 null 이 없어서 그 버킷을 그렇게 부른다.
+  assignee?: string[]
+  project?: string[]
+  cycle?: string[]
+  label?: string[]
+  team?: string
+  mine?: boolean
+  // 한 부모의 하위 이슈들, 또는 `none` 으로 최상위만. 자식이 목록에 두 번(자기 줄 + 부모 아래) 나오지
+  // 않게 하려면 보드는 후자를 쓴다.
+  parent?: string
+  triage?: boolean
+  linkType?: string
+  linkId?: string
+  // GitHub 대량 동기화의 작업 집합. 전체 목록을 받아 클라이언트에서 거르는 대신 서버가 좁힌다.
+  syncPull?: boolean
+  // 아래 셋은 PAGE 만의 것 — 집계에는 장도 순서도 없다.
+  order?: string
+  limit?: number
+  cursor?: string
+}
+
+const ISSUE_FACETS = ['status', 'priority', 'assignee', 'project', 'cycle', 'label'] as const
+
+function issueListParams(filter?: IssueListQuery): URLSearchParams {
+  const q = new URLSearchParams()
+  for (const facet of ISSUE_FACETS) {
+    for (const value of filter?.[facet] ?? []) q.append(facet, value)
+  }
+  if (filter?.team) q.set('team', filter.team)
+  if (filter?.mine) q.set('mine', 'true')
+  if (filter?.parent) q.set('parent', filter.parent)
+  if (filter?.triage !== undefined) q.set('triage', filter.triage ? 'true' : 'false')
+  // The reverse lookup ("which issues watch this harness") needs both halves or the route 400s.
+  if (filter?.linkType && filter.linkId) {
+    q.set('linkType', filter.linkType)
+    q.set('linkId', filter.linkId)
+  }
+  if (filter?.syncPull) q.set('syncPull', 'true')
+  return q
+}
+
 export const controlPlane = {
   me: <T>(auth: AuthContext) => call<T>(auth, '/me'),
   // Notification feed (personally owned; bell inbox) — qs is a raw query string like '?unread=1&limit=30'.
@@ -138,6 +185,11 @@ export const controlPlane = {
     call<T>(auth, `/fs/entries?path=${encodeURIComponent(path)}`),
   readFsFile: <T>(auth: AuthContext, path: string) =>
     call<T>(auth, `/fs/file?path=${encodeURIComponent(path)}`),
+  // The same read, keeping the STATUS: the media route serves these bytes to an <img>/<video>, and a browser
+  // cannot tell 404 (the attachment was deleted) from 403 (this reader may not browse files) if both arrive as
+  // one generic failure — the network tab is where that question gets answered.
+  readFsFileChecked: (auth: AuthContext, path: string) =>
+    callWithEnvelope(auth, `/fs/file?path=${encodeURIComponent(path)}`),
   writeFsFile: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/fs/file', { method: 'PUT', body: JSON.stringify(body) }),
   // The same write, keeping a 409's BODY: losing a race to a teammate or an agent is a normal outcome of
@@ -539,11 +591,10 @@ export const controlPlane = {
       body: JSON.stringify(body),
     }),
   updateWorkflowState: <T>(auth: AuthContext, teamId: string, stateId: string, patch: unknown) =>
-    call<T>(
-      auth,
-      `/teams/${encodeURIComponent(teamId)}/states/${encodeURIComponent(stateId)}`,
-      { method: 'PATCH', body: JSON.stringify(patch) }
-    ),
+    call<T>(auth, `/teams/${encodeURIComponent(teamId)}/states/${encodeURIComponent(stateId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   deleteWorkflowState: (auth: AuthContext, teamId: string, stateId: string) =>
     call<unknown>(
       auth,
@@ -580,48 +631,20 @@ export const controlPlane = {
     call<T>(auth, `/issue-labels/${encodeURIComponent(id)}/usage`),
   // 한 PAGE 를 준다 — `{ items, nextCursor? }`. 행은 축약본(issueSummarySchema)이고, 본문·이력·링크 목록은
   // 상세(`getIssue`)에만 있다. 전체를 훑어야 하는 화면은 `nextCursor` 를 되돌려 넣어 다음 장을 잇는다.
-  listIssues: <T>(
-    auth: AuthContext,
-    filter?: {
-      status?: string
-      team?: string
-      mine?: boolean
-      project?: string
-      assignee?: string
-      priority?: string
-      // 한 부모의 하위 이슈들, 또는 `none` 으로 최상위만. 자식이 목록에 두 번(자기 줄 + 부모 아래) 나오지
-      // 않게 하려면 보드는 후자를 쓴다.
-      parent?: string
-      cycle?: string
-      triage?: boolean
-      linkType?: string
-      linkId?: string
-      // GitHub 대량 동기화의 작업 집합. 전체 목록을 받아 클라이언트에서 거르는 대신 서버가 좁힌다.
-      syncPull?: boolean
-      limit?: number
-      cursor?: string
-    }
-  ) => {
-    const q = new URLSearchParams()
-    if (filter?.status) q.set('status', filter.status)
-    if (filter?.team) q.set('team', filter.team)
-    if (filter?.mine) q.set('mine', 'true')
-    if (filter?.project) q.set('project', filter.project)
-    if (filter?.assignee) q.set('assignee', filter.assignee)
-    if (filter?.priority) q.set('priority', filter.priority)
-    if (filter?.parent) q.set('parent', filter.parent)
-    if (filter?.cycle) q.set('cycle', filter.cycle)
-    if (filter?.triage !== undefined) q.set('triage', filter.triage ? 'true' : 'false')
-    // The reverse lookup ("which issues watch this harness") needs both halves or the route 400s.
-    if (filter?.linkType && filter.linkId) {
-      q.set('linkType', filter.linkType)
-      q.set('linkId', filter.linkId)
-    }
-    if (filter?.syncPull) q.set('syncPull', 'true')
+  listIssues: <T>(auth: AuthContext, filter?: IssueListQuery) => {
+    const q = issueListParams(filter)
+    if (filter?.order) q.set('order', filter.order)
     if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
     if (filter?.cursor) q.set('cursor', filter.cursor)
     const qs = q.toString()
     return call<T>(auth, qs ? `/issues?${qs}` : '/issues')
+  },
+  // 그룹별 개수 — 묶인 화면의 헤더. 목록과 같은 필터를 받고 별도 엔드포인트인 이유는, 묶인 화면이 그룹마다
+  // 한 장씩 들고 있어서 자기 행을 세면 페이지 크기를 되풀이할 뿐이기 때문이다.
+  countIssues: <T>(auth: AuthContext, groupBy: string, filter?: IssueListQuery) => {
+    const q = issueListParams(filter)
+    q.set('groupBy', groupBy)
+    return call<T>(auth, `/issues/counts?${q.toString()}`)
   },
   getIssue: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}`),
@@ -661,7 +684,10 @@ export const controlPlane = {
       { method: 'DELETE' }
     ),
   // --- 사이클(팀 이터레이션) ---
-  listCycles: <T>(auth: AuthContext, filter?: { team?: string; open?: boolean; limit?: number }) => {
+  listCycles: <T>(
+    auth: AuthContext,
+    filter?: { team?: string; open?: boolean; limit?: number }
+  ) => {
     const q = new URLSearchParams()
     if (filter?.team) q.set('team', filter.team)
     if (filter?.open) q.set('open', 'true')
@@ -669,11 +695,15 @@ export const controlPlane = {
     const qs = q.toString()
     return call<T>(auth, `/cycles${qs ? `?${qs}` : ''}`)
   },
-  getCycle: <T>(auth: AuthContext, id: string) => call<T>(auth, `/cycles/${encodeURIComponent(id)}`),
+  getCycle: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/cycles/${encodeURIComponent(id)}`),
   createCycle: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/cycles', { method: 'POST', body: JSON.stringify(body) }),
   updateCycle: <T>(auth: AuthContext, id: string, patch: unknown) =>
-    call<T>(auth, `/cycles/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    call<T>(auth, `/cycles/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   // 종료는 게이트가 아니다 — 남은 일은 이월 대상 사이클로 함께 넘어간다.
   completeCycle: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/cycles/${encodeURIComponent(id)}/complete`, {
@@ -792,9 +822,18 @@ export const controlPlane = {
     const qs = q.toString()
     return call<T>(auth, qs ? `/initiatives?${qs}` : '/initiatives')
   },
-  // The detail carries the release verdict (readiness over every project's issues) — a fan-out the list omits.
+  // The detail carries how far along the goal is (progress over every project's issues) — a fan-out the list
+  // omits.
   getInitiative: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/initiatives/${encodeURIComponent(id)}`),
+  // 목표 자체에 올라온 판정 — 프로젝트 업데이트와 같은 계약, 한 층 위.
+  postInitiativeUpdate: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/initiatives/${encodeURIComponent(id)}/updates`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  listInitiativeUpdates: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/initiatives/${encodeURIComponent(id)}/updates`),
   createInitiative: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/initiatives', { method: 'POST', body: JSON.stringify(body) }),
   updateInitiative: <T>(auth: AuthContext, id: string, patch: unknown) =>
@@ -802,7 +841,7 @@ export const controlPlane = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
-  // The release gate — same 409-carrying-the-count contract as a project completion.
+  // The completion gate — same 409-carrying-the-count contract as a project completion.
   setInitiativeStatus: (auth: AuthContext, id: string, body: unknown) =>
     callWithEnvelope(auth, `/initiatives/${encodeURIComponent(id)}/status`, {
       method: 'POST',

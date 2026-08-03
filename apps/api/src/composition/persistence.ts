@@ -7,6 +7,7 @@ import type {
   EventConsumerStateStore,
   FsRevisionStore,
   InitiativeStore,
+  InitiativeUpdateStore,
   IssueLabelStore,
   IssueStore,
   ProjectStore,
@@ -35,6 +36,7 @@ import {
   InMemoryEventConsumerStateStore,
   InMemoryFsRevisionStore,
   InMemoryInitiativeStore,
+  InMemoryInitiativeUpdateStore,
   InMemoryIssueLabelStore,
   InMemoryIssueStore,
   InMemoryKnowledgeEntryStore,
@@ -81,6 +83,7 @@ import {
   PgEventConsumerStateStore,
   PgFsRevisionStore,
   PgInitiativeStore,
+  PgInitiativeUpdateStore,
   PgIssueLabelStore,
   PgIssueStore,
   PgKnowledgeEntryStore,
@@ -211,6 +214,7 @@ export interface Persistence {
   issueLabelStore: IssueLabelStore;
   projectStore: ProjectStore;
   initiativeStore: InitiativeStore;
+  initiativeUpdateStore: InitiativeUpdateStore; // the goal's own posted-update timeline (health + the sentence)
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
   skillStore: SkillStore; // workspace Skills (SKILL.md procedures the members own) — dual-scoped private|workspace
   skillVersionStore: SkillVersionStore; // a skill's stamped, immutable versions — the line its working copy moves along
@@ -315,6 +319,7 @@ export async function makePersistence(): Promise<Persistence> {
       issueLabelStore: inMemoryIssueLabels,
       projectStore: new InMemoryProjectStore(),
       initiativeStore: new InMemoryInitiativeStore(),
+      initiativeUpdateStore: new InMemoryInitiativeUpdateStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
       skillStore: new InMemorySkillStore(),
       skillVersionStore: new InMemorySkillVersionStore(),
@@ -374,6 +379,7 @@ export async function makePersistence(): Promise<Persistence> {
     issueLabelStore: new PgIssueLabelStore(client),
     projectStore: new PgProjectStore(client),
     initiativeStore: new PgInitiativeStore(client),
+    initiativeUpdateStore: new PgInitiativeUpdateStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),
     skillStore: new PgSkillStore(client),
     skillVersionStore: new PgSkillVersionStore(client),

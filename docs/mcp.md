@@ -71,8 +71,10 @@ last time, move it.
 | `delete_issue` | `issues:write` | hard delete; creator or admin |
 | `create/list/get/update/delete_project` | `issues:write` / `issues:read` | issues under one target date; `get` carries the rollup |
 | `set_project_status` | `issues:write` | completing REFUSES while issues are open (`CONFLICT`); `force:true` overrides and is recorded |
-| `create/list/get/update/delete_initiative` | `issues:write` / `issues:read` | the deployment umbrella; `get` carries the readiness verdict + blockers |
-| `set_initiative_status` | `issues:write` | the RELEASE GATE — refuses while any issue under any of its projects is open; `force:true` is a recorded override |
+| `post/list_project_update` | `issues:write` / `issues:read` | the project's health + the sentence that explains it (body required) |
+| `create/list/get/update/delete_initiative` | `issues:write` / `issues:read` | a GOAL several projects work toward; `get` carries how far along it is + what is left |
+| `post/list_initiative_update` | `issues:write` / `issues:read` | where the goal STANDS in the lead's words — health + the sentence that explains it (body required) |
+| `set_initiative_status` | `issues:write` | the COMPLETION GATE — refuses while any issue under any of its projects is open; `force:true` is a recorded override |
 | `list_github_import_candidates` | `issues:write` | a repo's issues minus PRs minus what this workspace already imported |
 | `import_github_issues` | `issues:write` | copy GitHub issues in; idempotent by remote identity. A closed issue lands `done` WITHOUT a scorecard — never invent evidence |
 | `pull_github_issues` / `sync_github_issue` | `issues:write` | MANUAL refresh (no webhook, no sweep). GitHub wins on title/description/labels/comments; a remote close/reopen reconciles through the normal transitions |

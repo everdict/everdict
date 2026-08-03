@@ -366,13 +366,13 @@ function HistoryRow({
         }
       }
       case 'update_posted': {
-        // 프로젝트가 어떤 상태라고 말했는지 — 판정은 배지로, 문장은 업데이트 타임라인이 갖는다.
+        // 프로젝트/이니셔티브가 어떤 상태라고 말했는지 — 판정은 배지로, 문장은 업데이트 타임라인이 갖는다.
         const health = detailString(detail, 'health')
         return {
           icon: Megaphone,
           tone: health === 'off_track' ? 'danger' : health === 'at_risk' ? 'warning' : 'success',
           text: t('history.updatePosted'),
-          values: health ? <Badge tone="outline">{t(`projectHealth.${health}`)}</Badge> : null,
+          values: health ? <Badge tone="outline">{t(`health.${health}`)}</Badge> : null,
         }
       }
       case 'moved': {

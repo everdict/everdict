@@ -1,84 +1,66 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
-import { CircleDot, MessageSquare } from 'lucide-react'
+import { CircleDot } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { TeamScopeBar, type TeamScope } from '@/widgets/team-scope-bar'
 import {
-  ImportGithubIssuesButton,
-  PullGithubIssuesButton,
-  type SyncedRepository,
-} from '@/features/import-github-issues'
-import { CreateIssueButton } from '@/features/manage-issue'
-import { githubAppViewSchema } from '@/entities/github-app'
+  IssueBoard,
+  IssueDisplayMenu,
+  IssueFilterMenu,
+  IssueGroup,
+  IssueRow,
+  type IssueBoardColumn,
+  type IssueDirectories,
+  type IssuePageQuery,
+} from '@/features/browse-issues'
+import { cycleLabel, cyclesSchema, type Cycle } from '@/entities/cycle'
 import {
-  isOpenIssueStatus,
-  ISSUE_PRIORITIES,
-  ISSUE_STATUSES,
-  issueHref,
+  issueGroupCountsSchema,
+  issueGroupsToRender,
   issuePageSchema,
-  IssuePriorityIcon,
-  IssueStatusIcon,
-  type IssueSummary,
+  issueQueryFilters,
+  issueViewOf,
+  orderIssueGroups,
+  type IssueGroupCount,
+  type IssuePage,
+  type IssueViewParams,
 } from '@/entities/issue'
-import {
-  IssueLabelChips,
-  issueLabelDirectoryOf,
-  issueLabelsSchema,
-  type IssueLabel,
-} from '@/entities/issue-label'
-import {
-  memberDirectoryOf,
-  memberNameOf,
-  membersSchema,
-  type Member,
-  type MemberDirectory,
-} from '@/entities/member'
-import { isPastDue, projectsSchema, type Project } from '@/entities/project'
+import { issueLabelDirectoryOf, issueLabelsSchema, type IssueLabel } from '@/entities/issue-label'
+import { memberDirectoryOf, membersSchema, type Member } from '@/entities/member'
+import { projectsSchema, type Project } from '@/entities/project'
 import { teamSectionHref, teamsWithSummarySchema, type TeamWithSummary } from '@/entities/team'
 import { can, canInTeam } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtDateTime } from '@/shared/lib/format'
-import { cn } from '@/shared/lib/utils'
-import { Avatar } from '@/shared/ui/avatar'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
-// 한 화면에 그릴 행 수. 전부 그리던 시절엔 2,000건 워크스페이스에서 HTML 이 6.5 MB 였고 SSR 만 수백 ms 였다 —
-// 목록은 훑는 화면이지 통째로 읽는 화면이 아니다. 다음 장은 커서로 잇는다.
-const PAGE_SIZE = 50
-// 동기화 저장소 목록을 만들기 위한 상한. 저장소 이름을 세는 게 목적이라 한 장이면 충분하다.
-const MAX_SYNCED_ROSTER = 200
+import { IssueListActions, IssueListActionsSkeleton } from './issue-list-actions'
 
-export interface IssueListFilters {
-  status?: string
-  project?: string
-  priority?: string
-  // 다음 장의 불투명 토큰. 필터가 바뀌면 커서는 의미를 잃으므로 filterHref 가 항상 떨군다.
-  cursor?: string
-}
+// 그룹 하나가 처음 그리는 행 수. 묶인 화면은 그룹마다 자기 장을 갖고, 「더 보기」가 그 그룹에만 이어 붙인다.
+const GROUP_PAGE = 25
+// 묶지 않은 목록의 한 장.
+const FLAT_PAGE = 50
+// 보드 컬럼 하나가 그리는 카드 수 — 훑는 화면이라 컬럼 안 페이지네이션 대신, 못 그린 수를 컬럼이 말한다.
+const BOARD_PAGE = 20
+// 한 화면에 세우는 그룹 수의 상한. 담당자로 묶은 200명짜리 워크스페이스가 200번의 조회가 되지 않도록 막되,
+// 잘랐다는 사실은 화면에 남긴다(조용한 상한은 "전부 봤다"로 읽힌다).
+const MAX_GROUPS = 20
 
-// 목록 행의 담당자. 이슈는 subject 만 들고 있으므로 워크스페이스 멤버 디렉터리와 한 번 이어 붙여야 사람이
-// 된다 — 이슈 상세와 같은 조인, 같은 얼굴. 이미 나간 멤버는 `memberNameOf` 가 축약한 subject 로 떨어진다.
-function AssigneeChip({ actors, subject }: { actors: MemberDirectory; subject: string }) {
-  const name = memberNameOf(actors, subject)
-  const avatarUrl = actors[subject]?.avatarUrl
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1">
-      <Avatar name={name} size="sm" {...(avatarUrl !== undefined ? { url: avatarUrl } : {})} />
-      <span className="truncate">{name}</span>
-    </span>
-  )
-}
+export type IssueListFilters = IssueViewParams
 
 // The eval tracker's issue list (docs/tracker.md) — "what are we evaluating, and what came back". A regressed
 // issue is not untouched work: it carries the resolution it fell from, so it reads as an alarm in every list.
 //
-// ONE component behind TWO addresses: `/{workspace}/issues` (every team's) and `/{workspace}/teams/ENG/issues`
-// (that team's, plus `/triage` for its inbox). The team is a PATH, not a query parameter — a list scoped to a
-// team is a different resource, not the same resource filtered, and each team holds different things. The
-// remaining query parameters (status·priority·project·cursor) really are filters over whichever list this is.
+// ONE component behind THREE addresses: `/{workspace}/issues` (every team's), `/{workspace}/teams/ENG` and its
+// `/issues` twin (that team's), plus `/triage` for a team's inbox. The team is a PATH, not a query parameter —
+// a list scoped to a team is a different resource, not the same resource filtered.
+//
+// 화면의 모양(묶기·정렬·레이아웃·필터)은 전부 URL 이 들고 있고(`issueViewOf`), 그룹의 개수는 서버 집계에서
+// 온다. 이 둘이 분리되어 있는 것이 요점이다: 목록은 그룹마다 한 장씩만 들고 있으므로, 받은 행을 세면
+// 페이지 크기를 되풀이할 뿐 "진행 중이 몇 건인가"에는 답하지 못한다.
 export async function IssueListView({
   workspace,
   team,
@@ -92,11 +74,10 @@ export async function IssueListView({
   triage?: boolean
   filters: IssueListFilters
 }) {
-  const { status, project, priority, cursor } = filters
   const t = await getTranslations('issuesPage')
-  const tracker = await getTranslations('tracker')
   const timeZone = await getTimeZone()
   const { principal, ctx } = await currentPrincipal()
+  const view = issueViewOf(filters)
 
   // 쓰기 버튼은 역할 + 팀 두 축을 모두 통과해야 뜬다 — 속하지 않은 팀의 목록에서 「이슈 만들기」를 내밀면
   // 제어 평면이 403 을 줄 게 확실한 버튼을 보여 주는 것이다(강제는 여전히 제어 평면 몫).
@@ -106,35 +87,43 @@ export async function IssueListView({
   // (bulk pull, per-issue sync, toggles): those ride issues:write and never touch the App configuration.
   const canReadIntegrations = can(principal?.roles ?? [], 'settings:read')
 
-  // 이 읽기들은 서로를 기다릴 이유가 없다 — 순차 await 이면 왕복 시간이 그대로 더해진다(측정: 페이지 660ms 중
-  // API 직렬 385ms). 목록만 실패를 표면에 올리고, 나머지는 자기 자리만 비운다.
-  const [page, teams, projects, labels, members, githubConnected, syncedRoster] = await Promise.all(
-    [
-      controlPlane
-        .listIssues(ctx, {
-          ...(status ? { status } : {}),
-          // 팀은 경로가 정한다. 슬러그가 아니라 해석된 id 를 보내는 이유는 하나 — 이 값이 목록의 주소이지
-          // 사용자가 고른 필터가 아니기 때문이다(제어 평면은 둘 다 받는다).
-          ...(team ? { team: team.id } : {}),
-          ...(triage ? { triage: true } : {}),
-          ...(project ? { project } : {}),
-          ...(priority ? { priority } : {}),
-          ...(cursor ? { cursor } : {}),
-          limit: PAGE_SIZE,
-        })
-        .then((r) => ({ page: issuePageSchema.parse(r) }))
-        .catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) })),
-      // 팀은 워크스페이스 전체 목록의 팀 칩에 쓰인다(칩은 필터가 아니라 그 팀의 목록으로 가는 링크다).
-      // 목록이 팀 조회 실패로 비어서는 안 되므로 실패는 빈 목록으로 흡수한다.
-      controlPlane
-        .listTeams(ctx)
-        .then((r) => teamsWithSummarySchema.parse(r))
-        .catch((): TeamWithSummary[] => []),
+  // 이 목록의 좁히기. 행과 그룹 개수가 **같은** 필터를 쓰도록 한 번만 만든다.
+  const scope: IssuePageQuery = {
+    ...issueQueryFilters(view),
+    ...(team ? { team: team.id } : {}),
+    ...(triage ? { triage: true } : {}),
+  }
+
+  // 팀 목록은 두 소비자가 있다 — 워크스페이스 전체 목록의 팀 칩(임계 경로)과 「이슈 만들기」의 팀 선택
+  // (스트리밍되는 툴바). 호출은 한 번, 기다리는 것은 칩이 실제로 그려지는 화면에서만.
+  const teamsPromise = controlPlane
+    .listTeams(ctx)
+    .then((r) => teamsWithSummarySchema.parse(r))
+    .catch((): TeamWithSummary[] => [])
+
+  // 이 읽기들은 서로를 기다릴 이유가 없다 — 순차 await 이면 왕복 시간이 그대로 더해진다. 목록만 실패를
+  // 표면에 올리고, 나머지는 자기 자리만 비운다.
+  const [counts, teams, projects, cycles, labels, members] = await Promise.all([
+      view.grouping === 'none'
+        ? Promise.resolve(undefined)
+        : controlPlane
+            .countIssues(ctx, view.grouping, scope)
+            .then((r) => issueGroupCountsSchema.parse(r))
+            .catch(() => undefined),
+      // 팀 칩은 워크스페이스 전체 목록에서만 그려진다 — 팀 스코프에서는 기다릴 이유가 없다.
+      team ? Promise.resolve<TeamWithSummary[]>([]) : teamsPromise,
       // Projects power both the filter and the per-row project name; a failure here must not blank the list.
       controlPlane
         .listProjects(ctx, team ? { team: team.id } : undefined)
         .then((r) => projectsSchema.parse(r))
         .catch((): Project[] => []),
+      // 사이클은 팀의 것이다 — 워크스페이스 전체 목록에서는 고를 대상이 없으므로 아예 읽지 않는다.
+      team
+        ? controlPlane
+            .listCycles(ctx, { team: team.id })
+            .then((r) => cyclesSchema.parse(r))
+            .catch((): Cycle[] => [])
+        : Promise.resolve<Cycle[]>([]),
       // 행의 라벨 칩은 id→정의 조인이 있어야 그려진다. 실패해도 목록은 뜬다(칩만 사라진다).
       controlPlane
         .listIssueLabels(ctx)
@@ -146,265 +135,161 @@ export async function IssueListView({
         .listMembers(ctx)
         .then((r) => membersSchema.parse(r))
         .catch((): Member[] => []),
-      canWrite && canReadIntegrations
-        ? controlPlane
-            .getGithubApp(ctx)
-            .then((r) => githubAppViewSchema.parse(r).installations.length > 0)
-            .catch(() => false)
-        : Promise.resolve(false),
-      // The bulk pull is per repository, so the button offers exactly the repos that have something to refresh.
-      // The SERVER narrows to the pull-enabled set (`syncPull`) — this used to re-read the entire unfiltered issue
-      // list to filter it here, which cost a second full-table read (4 MB) to name a handful of repositories.
-      canWrite
-        ? controlPlane
-            .listIssues(ctx, {
-              syncPull: true,
-              ...(team ? { team: team.id } : {}),
-              limit: MAX_SYNCED_ROSTER,
-            })
-            .then((r) => issuePageSchema.parse(r).items)
-            .catch((): IssueSummary[] => [])
-        : Promise.resolve<IssueSummary[]>([]),
-    ]
-  )
+    ])
 
-  const issues: IssueSummary[] = 'page' in page ? page.page.items : []
-  const nextCursor = 'page' in page ? page.page.nextCursor : undefined
-  const error = 'error' in page ? page.error : undefined
-  const projectName = new Map(projects.map((p) => [p.id, p.name]))
-  const labelDirectory = issueLabelDirectoryOf(labels)
   const actors = memberDirectoryOf(members)
-
-  const syncedRepositories: SyncedRepository[] = []
-  for (const issue of syncedRoster) {
-    const github = issue.github
-    if (!github || !github.pull) continue
-    const existing = syncedRepositories.find(
-      (r) => r.repository === github.repository && r.host === github.host
-    )
-    if (existing) existing.issues += 1
-    else
-      syncedRepositories.push({
-        repository: github.repository,
-        ...(github.host ? { host: github.host } : {}),
-        issues: 1,
-      })
+  const directories: IssueDirectories = {
+    projectName: Object.fromEntries(projects.map((p) => [p.id, p.name])),
+    cycleName: Object.fromEntries(cycles.map((c) => [c.id, cycleLabel(c)])),
+    labels: issueLabelDirectoryOf(labels),
+    actors,
+    members: members.map((m) => ({
+      subject: m.subject,
+      name: actors[m.subject]?.name ?? m.subject,
+      ...(m.avatarUrl !== undefined ? { avatarUrl: m.avatarUrl } : {}),
+    })),
   }
+
+  // 그룹별 첫 장. 서버가 그룹마다 자기 페이지를 가져오는 이유는 하나 — 한 장을 받아 화면에서 나누면
+  // 헤더의 개수와 그 아래 행이 다른 목록을 말하게 된다(50 건을 받아 7 갈래로 나눈 것은 어느 그룹도 아니다).
+  const perGroupLimit = view.layout === 'board' ? BOARD_PAGE : GROUP_PAGE
+  const rendered =
+    counts === undefined
+      ? []
+      : orderIssueGroups(issueGroupsToRender(counts.groups, counts.groupBy, view), counts.groupBy)
+  const shown = rendered.slice(0, MAX_GROUPS)
+  const dropped = rendered.length - shown.length
+
+  const [flat, groupPages] = await Promise.all([
+    view.grouping === 'none'
+      ? controlPlane
+          .listIssues(ctx, {
+            ...scope,
+            order: view.order,
+            limit: FLAT_PAGE,
+            ...(filters.cursor ? { cursor: filters.cursor } : {}),
+          })
+          .then((r) => ({ page: issuePageSchema.parse(r) }))
+          .catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
+      : Promise.resolve(undefined),
+    Promise.all(
+      shown.map((group) =>
+        // 빈 그룹은 조회하지 않는다 — 보드가 세워 둔 빈 컬럼(끌어다 놓을 자리)이 왕복을 만들면 안 된다.
+        group.count === 0
+          ? Promise.resolve<IssuePage | undefined>({ items: [] })
+          : controlPlane
+              .listIssues(ctx, groupQuery(scope, counts?.groupBy, group, view.order, perGroupLimit))
+              .then((r) => issuePageSchema.parse(r))
+              .catch((): IssuePage | undefined => undefined)
+      )
+    ),
+  ])
+
+  const flatPage = flat !== undefined && 'page' in flat ? flat.page : undefined
+  // 집계가 실패하면 묶인 화면은 그릴 근거가 없다 — 「이슈 없음」으로 떨어지면 있는 이슈를 없다고 말하게 된다.
+  const error =
+    flat !== undefined && 'error' in flat
+      ? flat.error
+      : view.grouping !== 'none' && counts === undefined
+        ? t('countsUnavailable')
+        : undefined
 
   // 이 목록의 주소. 팀 스코프면 팀 아래의 경로 자원이고, 아니면 워크스페이스 전체 목록이다.
   const basePath = team
     ? teamSectionHref(workspace, team.key, triage ? 'triage' : 'issues')
     : `/${workspace}/issues`
 
-  // 커서는 절대 물려주지 않는다 — 3장에서 필터를 바꾸면 그 커서는 다른 목록의 위치라서, 이어붙이면 엉뚱한
-  // 구간에서 시작한다. 필터가 바뀌면 언제나 1장부터다. 팀은 여기 없다: 경로가 이미 말하고 있다.
-  function filterHref(next: { status?: string; project?: string; priority?: string }): string {
-    const q = new URLSearchParams()
-    const nextStatus = 'status' in next ? next.status : status
-    const nextProject = 'project' in next ? next.project : project
-    const nextPriority = 'priority' in next ? next.priority : priority
-    if (nextStatus) q.set('status', nextStatus)
-    if (nextProject) q.set('project', nextProject)
-    if (nextPriority) q.set('priority', nextPriority)
-    const qs = q.toString()
-    return `${basePath}${qs ? `?${qs}` : ''}`
-  }
-
-  // 같은 필터의 다음 장. 커서 페이지네이션이라 "이전"은 없다 — 뒤로 가기가 그 역할을 한다.
-  function pageHref(token: string): string {
-    const base = filterHref({})
-    return `${base}${base.includes('?') ? '&' : '?'}cursor=${encodeURIComponent(token)}`
-  }
-
-  const chip = (active: boolean) =>
-    cn(
-      'rounded-full border px-2.5 py-0.5 text-[12px] transition-colors',
-      active
-        ? 'border-primary/40 bg-primary/10 text-foreground'
-        : 'border-border text-muted-foreground hover:text-foreground'
-    )
-
-  const scope: TeamScope | undefined = team
+  const teamScope: TeamScope | undefined = team
     ? { workspace, team, section: triage ? 'triage' : 'issues' }
     : undefined
 
+  const empty =
+    view.grouping === 'none'
+      ? (flatPage?.items.length ?? 0) === 0
+      : (counts?.total ?? 0) === 0
+
   return (
-    <div className="@container space-y-6">
-      {scope && <TeamScopeBar scope={scope} />}
+    <div className="@container space-y-4">
+      {teamScope && <TeamScopeBar scope={teamScope} />}
       <PageHeader
-        title={triage ? t('triageTitle') : t('title')}
-        description={triage ? t('triageDescription') : t('description')}
+        title={triage ? t('triageTitle') : team ? team.name : t('title')}
+        description={
+          triage ? t('triageDescription') : team ? (team.description ?? undefined) : t('description')
+        }
         actions={
           canWrite ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <PullGithubIssuesButton repositories={syncedRepositories} />
-              {githubConnected ? (
-                <ImportGithubIssuesButton
-                  workspace={workspace}
-                  projects={projects.map((p) => ({ id: p.id, name: p.name }))}
-                />
-              ) : (
-                // Never a dead import button: with no reachable installation the only useful move is connecting
-                // the App, so link there instead of opening a picker that has nothing to show.
-                canReadIntegrations && (
-                  <Link
-                    href={`/${workspace}/settings/integrations`}
-                    className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    {t('connectGithub')}
-                  </Link>
-                )
-              )}
-              <CreateIssueButton
+            // 버튼 세 개가 GitHub App 설치 상태와 동기화 저장소 목록을 기다린다 — 그 대기를 목록의 임계
+            // 경로에서 떼어 자기 경계 뒤로 보낸다.
+            <Suspense fallback={<IssueListActionsSkeleton />}>
+              <IssueListActions
                 workspace={workspace}
+                teams={teamsPromise}
                 projects={projects.map((p) => ({ id: p.id, name: p.name }))}
-                teams={teams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
-                {...(defaultTeamId(team, teams) !== undefined
-                  ? { defaultTeamId: defaultTeamId(team, teams) }
-                  : {})}
+                {...(team ? { defaultTeamId: team.id, team } : {})}
+                canReadIntegrations={canReadIntegrations}
               />
-            </div>
+            </Suspense>
           ) : null
         }
       />
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Link href={filterHref({ status: undefined })} className={chip(!status)}>
-          {t('filterAll')}
-        </Link>
-        {ISSUE_STATUSES.map((s) => (
-          <Link key={s} href={filterHref({ status: s })} className={chip(status === s)}>
-            {tracker(`issueStatus.${s}`)}
-          </Link>
-        ))}
-        {/* 팀 칩은 워크스페이스 전체 목록에서만, 그리고 팀이 둘 이상일 때만 — 필터가 아니라 그 팀의 목록으로
-            가는 링크다(팀마다 가진 것이 다르므로 주소가 달라야 한다). 팀 안에서는 이미 그 팀이라 뜨지 않는다. */}
-        {!team && teams.length > 1 && (
-          <>
-            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
-            {teams.map((x) => (
-              <Link
-                key={x.id}
-                href={teamSectionHref(workspace, x.key, 'issues')}
-                className={chip(false)}
-              >
-                <span className="font-mono">{x.key}</span>
-              </Link>
-            ))}
-          </>
-        )}
-        {/* 우선순위 — 상태와 같은 축의 칩이다. `none` 은 거르는 값으로 의미가 없어(대부분이 여기 있다)
-            긴급~낮음만 낸다. */}
-        <span className="ml-2 flex flex-wrap items-center gap-1.5 border-l border-border pl-3">
-          {ISSUE_PRIORITIES.filter((p) => p !== 'none').map((p) => (
+      {/* 툴바 — 무엇을 볼 것인가(필터)와 어떻게 볼 것인가(표시). 팀 칩은 워크스페이스 전체 목록에서만, 그리고
+          팀이 둘 이상일 때만: 필터가 아니라 그 팀의 목록으로 가는 링크다. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <IssueFilterMenu
+          basePath={basePath}
+          view={view}
+          directories={directories}
+          projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+          cycles={cycles.map((c) => ({ id: c.id, name: cycleLabel(c) }))}
+        />
+        <div className="ml-auto flex items-center gap-2">
+          {counts !== undefined && (
+            <span className="text-[12px] tabular-nums text-muted-foreground">
+              {t('totalCount', { count: counts.total })}
+            </span>
+          )}
+          <IssueDisplayMenu basePath={basePath} view={view} />
+        </div>
+      </div>
+      {!team && teams.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {teams.map((x) => (
             <Link
-              key={p}
-              href={filterHref({ priority: priority === p ? undefined : p })}
-              className={chip(priority === p)}
+              key={x.id}
+              href={teamSectionHref(workspace, x.key, 'issues')}
+              className="rounded-full border border-border px-2.5 py-0.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
             >
-              {tracker(`issuePriority.${p}`)}
+              <span className="font-mono">{x.key}</span>
             </Link>
           ))}
-        </span>
-        {projects.length > 0 && (
-          <span className="ml-2 flex flex-wrap items-center gap-1.5 border-l border-border pl-3">
-            <Link href={filterHref({ project: undefined })} className={chip(!project)}>
-              {t('filterAllProjects')}
-            </Link>
-            {projects.map((p) => (
-              <Link
-                key={p.id}
-                href={filterHref({ project: p.id })}
-                className={chip(project === p.id)}
-              >
-                {p.name}
-              </Link>
-            ))}
-          </span>
-        )}
-      </div>
+        </div>
+      )}
 
       {error ? (
         <Callout tone="danger">{t('loadError', { error })}</Callout>
-      ) : issues.length === 0 ? (
+      ) : empty ? (
         <EmptyState
           icon={<CircleDot strokeWidth={1.75} />}
           title={triage ? t('triageEmptyTitle') : t('emptyTitle')}
           hint={triage ? t('triageEmptyHint') : t('emptyHint')}
         />
-      ) : (
-        <div className="space-y-2">
-          {issues.map((issue) => (
-            <Link
+      ) : view.grouping === 'none' ? (
+        <div className="space-y-1.5">
+          {(flatPage?.items ?? []).map((issue) => (
+            <IssueRow
               key={issue.id}
-              href={issueHref(workspace, issue.identifier)}
-              className={cn(
-                'group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated',
-                // A regression is the one row that has to catch the eye across the whole list.
-                issue.status === 'regressed' && 'border-destructive/40 bg-destructive/5'
-              )}
-            >
-              <IssueStatusIcon status={issue.status} />
-              <IssuePriorityIcon priority={issue.priority} />
-              <div className="min-w-0 flex-1">
-                <p className="flex min-w-0 items-baseline gap-2">
-                  {/* 사람이 부르는 이름 — `ENG-12`. 팀이 찍어 이슈에 저장된 값이라 팀을 다시 읽지 않는다. */}
-                  <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">
-                    {issue.identifier}
-                  </span>
-                  <span className="truncate text-[13px] font-[510] text-foreground">
-                    {issue.title}
-                  </span>
-                </p>
-                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground">
-                  {issue.projectId && (
-                    <span className="truncate">
-                      {projectName.get(issue.projectId) ?? issue.projectId}
-                    </span>
-                  )}
-                  {/* 담당자는 사람이다 — subject 문자열이 아니라 상세 페이지와 같은 얼굴·같은 이름으로 그린다. */}
-                  {issue.assignee && <AssigneeChip actors={actors} subject={issue.assignee} />}
-                  <IssueLabelChips labelIds={issue.labelIds} directory={labelDirectory} />
-                  {issue.linkCount > 0 && (
-                    <span>{t('rowLinkCount', { count: issue.linkCount })}</span>
-                  )}
-                  {/* 대화가 있을 때만 — 「댓글 0」은 매일 보면 노이즈다(빈 섹션 숨김과 같은 규칙). */}
-                  {issue.commentCount !== undefined && issue.commentCount > 0 && (
-                    <span
-                      className="inline-flex items-center gap-0.5"
-                      title={t('rowCommentCount', { count: issue.commentCount })}
-                    >
-                      <MessageSquare className="size-3" strokeWidth={1.75} aria-hidden />
-                      <span className="tabular-nums">{issue.commentCount}</span>
-                    </span>
-                  )}
-                  {issue.estimate !== undefined && (
-                    <span className="font-mono tabular-nums">{issue.estimate}</span>
-                  )}
-                  {issue.dueDate !== undefined && (
-                    <time
-                      dateTime={issue.dueDate}
-                      className={cn(
-                        'font-mono',
-                        isOpenIssueStatus(issue.status) &&
-                          isPastDue(issue.dueDate, timeZone) &&
-                          'text-destructive'
-                      )}
-                    >
-                      {issue.dueDate}
-                    </time>
-                  )}
-                </p>
-              </div>
-              <time className="hidden shrink-0 font-mono text-[11px] text-muted-foreground @md:block">
-                {fmtDateTime(issue.updatedAt, timeZone)}
-              </time>
-            </Link>
+              workspace={workspace}
+              issue={issue}
+              directories={directories}
+              canWrite={canWrite}
+              timeZone={timeZone}
+            />
           ))}
-          {nextCursor && (
+          {flatPage?.nextCursor !== undefined && (
             <div className="pt-1">
               <Link
-                href={pageHref(nextCursor)}
+                href={pageHref(basePath, filters, flatPage.nextCursor)}
                 className="inline-flex items-center rounded-lg border border-border px-3 py-1.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
               >
                 {t('loadMore')}
@@ -412,16 +297,87 @@ export async function IssueListView({
             </div>
           )}
         </div>
+      ) : counts !== undefined && view.layout === 'board' ? (
+        <IssueBoard
+          workspace={workspace}
+          groupBy={counts.groupBy}
+          columns={shown.map((group, index): IssueBoardColumn => {
+            const items = groupPages[index]?.items ?? []
+            return {
+              key: group.key,
+              count: group.count,
+              items,
+              truncated: groupPages[index]?.nextCursor !== undefined,
+            }
+          })}
+          directories={directories}
+          canWrite={canWrite}
+        />
+      ) : counts !== undefined ? (
+        <div className="space-y-3">
+          {shown.map((group, index) => (
+            <IssueGroup
+              key={group.key ?? 'unset'}
+              workspace={workspace}
+              groupBy={counts.groupBy}
+              groupKey={group.key}
+              count={group.count}
+              initial={groupPages[index]?.items ?? []}
+              {...(groupPages[index]?.nextCursor !== undefined
+                ? { initialCursor: groupPages[index]?.nextCursor }
+                : {})}
+              query={{
+                ...groupQuery(scope, counts.groupBy, group, view.order, perGroupLimit),
+              }}
+              directories={directories}
+              canWrite={canWrite}
+              timeZone={timeZone}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {/* 조용한 상한은 "전부 봤다"로 읽힌다 — 몇 그룹을 안 세웠는지 말한다. */}
+      {dropped > 0 && (
+        <p className="text-[11.5px] text-muted-foreground">{t('groupsTruncated', { count: dropped })}</p>
       )}
     </div>
   )
 }
 
-// 새 이슈가 처음 앉을 팀: 팀 목록 안에서 열었으면 그 팀, 아니면 워크스페이스의 기본 팀. 지금 보고 있는 목록에
-// 나타나지 않을 곳에 이슈를 만드는 일이 없도록 한다.
-function defaultTeamId(
-  scoped: TeamWithSummary | undefined,
-  teams: TeamWithSummary[]
-): string | undefined {
-  return scoped?.id ?? teams.find((x) => x.isDefault)?.id
+// 한 그룹만 고르는 질의 — 목록 전체의 좁히기에 그 그룹의 값을 하나 더 얹는다. 미지정 버킷은 빈 문자열이다
+// (쿼리 파라미터에 null 이 없다). 이미 그 축에 필터가 걸려 있어도 여기서 덮어쓴다: 이 요청은 "이 그룹"이지
+// "이 그룹 ∩ 사용자가 고른 값들"이 아니고, 그룹 목록 자체가 이미 그 필터를 통과해 나온 것이다.
+function groupQuery(
+  scope: IssuePageQuery,
+  groupBy: string | undefined,
+  group: IssueGroupCount,
+  order: string,
+  limit: number
+): IssuePageQuery {
+  const value = group.key ?? ''
+  const facet =
+    groupBy === 'status'
+      ? { status: [value] }
+      : groupBy === 'priority'
+        ? { priority: [value] }
+        : groupBy === 'assignee'
+          ? { assignee: [value] }
+          : groupBy === 'project'
+            ? { project: [value] }
+            : groupBy === 'cycle'
+              ? { cycle: [value] }
+              : {}
+  return { ...scope, ...facet, order, limit }
+}
+
+// 묶지 않은 목록의 다음 장. 보기(필터·정렬)는 그대로 두고 커서만 얹는다.
+function pageHref(basePath: string, filters: IssueListFilters, cursor: string): string {
+  const q = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (key === 'cursor' || value === undefined) continue
+    for (const item of Array.isArray(value) ? value : [value]) q.append(key, item)
+  }
+  q.set('cursor', cursor)
+  return `${basePath}?${q.toString()}`
 }

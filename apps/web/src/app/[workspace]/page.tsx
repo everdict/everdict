@@ -4,7 +4,7 @@ import { getTranslations } from 'next-intl/server'
 
 import { EvalDashboard } from '@/widgets/eval-dashboard'
 import { RunsTable } from '@/widgets/runs-table'
-import { RegressedIssues, ReleaseReadiness } from '@/widgets/tracker-overview'
+import { InitiativeProgress, RegressedIssues } from '@/widgets/tracker-overview'
 import {
   initiativeDetailSchema,
   initiativesSchema,
@@ -54,7 +54,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
       controlPlane.listRuns(ctx),
       controlPlane.listScorecards(ctx),
       controlPlane.listInitiatives(ctx, { status: 'active', limit: READINESS_CARDS }),
-      controlPlane.listIssues(ctx, { status: 'regressed', limit: REGRESSION_ROWS }),
+      controlPlane.listIssues(ctx, { status: ['regressed'], limit: REGRESSION_ROWS }),
     ])
     runs = runsSchema.parse(r)
     scorecards = scorecardsSchema.parse(sc)
@@ -74,7 +74,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
-  // 막힌 배포가 먼저 — 준비된 것은 볼 일이 없다.
+  // 남은 일이 있는 목표가 먼저 — 다 이룬 것은 볼 일이 없다.
   const orderedReadiness = [...readiness].sort(
     (a, b) => Number(a.readiness.ready) - Number(b.readiness.ready)
   )
@@ -91,7 +91,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
         <>
           <section className="space-y-2.5">
             <SectionHeader
-              title={t('releaseReadiness')}
+              title={t('initiativeProgress')}
               action={<ViewAll href={`/${workspace}/initiatives`} label={t('viewAll')} />}
             />
             {orderedReadiness.length === 0 ? (
@@ -101,7 +101,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
                 hint={t('emptyInitiativesHint')}
               />
             ) : (
-              <ReleaseReadiness workspace={workspace} initiatives={orderedReadiness} />
+              <InitiativeProgress workspace={workspace} initiatives={orderedReadiness} />
             )}
           </section>
 

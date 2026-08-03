@@ -114,6 +114,10 @@ export const PLATFORM_EVENT_KINDS = [
   "project.update_posted",
   "initiative.created",
   "initiative.status_changed",
+  // The same judgment one level up: somebody reported on the GOAL. Separate from `project.update_posted`
+  // because the subject is what a listener filters on — "tell me when this goal slips" is not "tell me when any
+  // of its projects did", and the goal's own update is the one a stakeholder reads.
+  "initiative.update_posted",
   // Agent-run lifecycle facts (reported BY the agent service) — observable in the feed/fleet view, but NEVER
   // trigger-matchable in v1 (agents watching agents is a runaway vector; see the loop-prevention guardrails).
   "agent.run.started",

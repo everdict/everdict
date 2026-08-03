@@ -22,6 +22,13 @@ import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
+// 새 프로젝트가 기본으로 올라갈 팀 — 워크스페이스의 기본 팀 하나, 없으면 첫 팀. 팀이 아예 없는 워크스페이스
+// (아직 아무 이슈도 안 낸 곳)는 빈 배열이고, 그때는 제어 평면이 기본 팀을 만들어 얹는다.
+function defaultTeamIdsOf(teams: readonly TeamWithSummary[]): string[] {
+  const fallback = teams.find((team) => team.isDefault) ?? teams[0]
+  return fallback ? [fallback.id] : []
+}
+
 // Projects — issues under one target date. The list stays lean by contract (rollups are derived per detail
 // read), so a row shows the deadline and its status, not counts.
 //
@@ -105,7 +112,12 @@ export async function ProjectListView({
               workspace={workspace}
               initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
               teams={teams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
-              {...(team ? { defaultTeamIds: [team.id] } : {})}
+              // 팀 아래에서 열었으면 그 팀, 워크스페이스 목록에서 열었으면 기본 팀 — 어느 쪽이든 한 팀은
+              // 미리 골라져 있다. 프로젝트는 반드시 어느 팀의 일이고(제어 평면이 강제한다), 서버가 조용히
+              // 기본 팀에 얹어 주는 것보다 어디로 가는지 보이는 편이 낫다.
+              {...(team
+                ? { defaultTeamIds: [team.id] }
+                : { defaultTeamIds: defaultTeamIdsOf(teams) })}
             />
           ) : null
         }

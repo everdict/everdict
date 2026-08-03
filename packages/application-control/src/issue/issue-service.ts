@@ -3,6 +3,8 @@ import {
   ConflictError,
   ForbiddenError,
   type IssueGithubSync,
+  type IssueGroupBy,
+  type IssueGroupCount,
   type IssueLinkType,
   type IssuePage,
   type IssuePriority,
@@ -103,8 +105,14 @@ export interface IssueStateResolver {
   get(tenant: string, id: string): Promise<{ id: string; teamId: string; status: IssueStatus } | undefined>;
 }
 
-export interface IssueMilestoneResolver {
-  get(tenant: string, projectId: string): Promise<{ milestones: readonly { id: string }[] } | undefined>;
+// "Does this project exist, whose is it, and what checkpoints does it have" — composed like the cycle resolver;
+// absent = projects are not composed in this deployment and the field is simply not validated. `ProjectStore`
+// satisfies it structurally, so the two stay peers instead of one service reaching into the other.
+export interface IssueProjectResolver {
+  get(
+    tenant: string,
+    projectId: string,
+  ): Promise<{ teamIds: readonly string[]; milestones: readonly { id: string }[] } | undefined>;
 }
 
 export interface IssueServiceDeps {
@@ -122,7 +130,7 @@ export interface IssueServiceDeps {
   // "Does this cycle exist, and whose is it" — the one question an issue asks about an iteration. Absent =
   // cycles are not composed in this deployment, and the field is simply not validated.
   cycles?: IssueCycleResolver;
-  projects?: IssueMilestoneResolver;
+  projects?: IssueProjectResolver;
   // "Which column is this, and whose board is it on" — the only question an issue asks about a workflow state.
   states?: IssueStateResolver;
   events?: PlatformEventEmitter;
@@ -156,6 +164,7 @@ export class IssueService {
     if (input.parentId !== undefined) await this.get(input.tenant, input.parentId);
     const { team, grant } = await this.deps.teams.allocateForIssue(input.tenant, input.teamId, input.createdBy);
     if (input.cycleId !== undefined) await this.assertCycleOfTeam(input.tenant, input.cycleId, team.id);
+    if (input.projectId !== undefined) await this.assertProjectOfTeam(input.tenant, input.projectId, team.id);
     const record = Issue.newIssue({
       id: this.newId(),
       tenant: input.tenant,
@@ -193,6 +202,10 @@ export class IssueService {
   // Import shares create's persistence path so a GitHub copy is a first-class issue from birth (same facts,
   // same history shape) — only the record assembly differs, and that lives in the domain.
   async createImported(record: IssueRecord, agent?: IssueAgentAttribution): Promise<IssueRecord> {
+    // The record arrives assembled, so the project edge is checked HERE — an import that files a batch into a
+    // project the destination team is not on would otherwise be the one way into the state every other path
+    // refuses, and it is the path that files the most issues at once.
+    if (record.projectId !== undefined) await this.assertProjectOfTeam(record.tenant, record.projectId, record.teamId);
     return this.persistNew(record, agent);
   }
 
@@ -218,6 +231,13 @@ export class IssueService {
     // An issue absent from the aggregate has no comments — a real zero, not a missing value: the row WAS
     // counted, the count is nought.
     return { ...page, items: page.items.map((item) => ({ ...item, commentCount: byId.get(item.id) ?? 0 })) };
+  }
+
+  // How many issues each group holds under the SAME filter the list is drawn with — what a grouped screen's
+  // headers show. It stays a store aggregate rather than something counted off the page: a grouped list holds
+  // one page PER group, so counting what it received would only ever report the page size back to itself.
+  countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]> {
+    return this.deps.store.countByGroup(tenant, groupBy, filter);
   }
 
   // An issue is addressed by its id OR by the identifier its team minted (`ENG-12`) — the name that appears in
@@ -257,6 +277,11 @@ export class IssueService {
     // the issue sits on a board it can never appear on, which is work made invisible rather than planned.
     if (fields.cycleId !== undefined && fields.cycleId !== null)
       await this.assertCycleOfTeam(tenant, fields.cycleId, record.teamId);
+    // A project names its teams, so an issue can only join one its own team is on — the same rule as the cycle,
+    // one level up. (`teamId` is deliberately absent from an edit: a re-address is `move`, never a side effect
+    // of a rename, so the issue's team here is the one it already has.)
+    if (fields.projectId !== undefined && fields.projectId !== null)
+      await this.assertProjectOfTeam(tenant, fields.projectId, record.teamId);
     // A checkpoint belongs to a project, so an issue can only sit under one of ITS project's — the same reason
     // a cycle has to be its team's. `projectId` may be changing in the same edit, so the check reads whichever
     // project the issue will end up in.
@@ -304,6 +329,31 @@ export class IssueService {
         { milestone: milestoneId, project: projectId },
         "That milestone is not on this issue's project.",
       );
+  }
+
+  // A project names the teams working it, so an issue can only join one its OWN team is on — the same rule a
+  // cycle has, and for the same reason: a project the issue's team is not part of is a list the issue can never
+  // be seen in from the team that owns it. This is also what makes "this team's projects" a real answer rather
+  // than a hint: the picker a member is offered and the set the control plane accepts are the same set.
+  private async assertProjectOfTeam(tenant: string, projectId: string, teamId: string): Promise<void> {
+    if (!this.deps.projects) return; // projects not composed — nothing to validate against
+    const project = await this.deps.projects.get(tenant, projectId);
+    if (!project) throw new NotFoundError("NOT_FOUND", { project: projectId }, `project '${projectId}' not found.`);
+    if (!project.teamIds.includes(teamId))
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { project: projectId, team: teamId },
+        "That project is not one of this team's — add the team to the project first, or file the issue on a team that is on it.",
+      );
+  }
+
+  // The same edge read as a question instead of a guard — a move asks it, and an unanswerable one keeps the
+  // project: projects that are not composed (or a pointer that no longer resolves) are not a reason for a team
+  // move to quietly empty a field.
+  private async projectHoldsTeam(tenant: string, projectId: string, teamId: string): Promise<boolean> {
+    if (!this.deps.projects) return true;
+    const project = await this.deps.projects.get(tenant, projectId);
+    return project === undefined || project.teamIds.includes(teamId);
   }
 
   private async assertCycleOfTeam(tenant: string, cycleId: string, teamId: string): Promise<void> {
@@ -375,10 +425,22 @@ export class IssueService {
         "This issue already belongs to that team.",
       );
     const { team, grant } = await this.deps.teams.allocateForIssue(tenant, teamId, actor.subject);
+    // Whether the issue keeps its project is a store question (does the project name the destination team), so
+    // it is answered here and handed to the aggregate as a fact. A project spans teams, so moving INSIDE the
+    // project's own set of teams keeps it; moving out of that set drops it, because an issue in a project its
+    // team is not on is exactly the state every other path refuses. Asked with the RESOLVED id — the caller may
+    // have named the destination by key (`PLT`), and the project's list holds ids.
+    const projectHoldsTeam =
+      record.projectId === undefined ? undefined : await this.projectHoldsTeam(tenant, record.projectId, team.id);
     return this.applyTransition(
       record,
       Issue.from(record).moveToTeam(
-        { teamId: team.id, number: grant.number, identifier: grant.identifier },
+        {
+          teamId: team.id,
+          number: grant.number,
+          identifier: grant.identifier,
+          ...(projectHoldsTeam !== undefined ? { projectHoldsTeam } : {}),
+        },
         actor.subject,
         this.now(),
       ),

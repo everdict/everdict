@@ -63,6 +63,8 @@ export const TRIGGERABLE_EVENT_KINDS = [
   // "A project went off track" — a payload filter (health eq off_track) over the posted update.
   "project.update_posted",
   "initiative.status_changed",
+  // "The goal slipped" — the same payload filter (health eq off_track), on the update a stakeholder reads.
+  "initiative.update_posted",
   // "The iteration closed — write the summary, and say what carried over." A cycle ends once, so this wakes
   // once; `cycle.created` stays observable-only (planning the next fortnight is not a signal to act on).
   "cycle.completed",

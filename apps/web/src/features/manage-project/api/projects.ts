@@ -3,12 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
-import {
-  projectSchema,
-  type Project,
-  type ProjectHealth,
-  type ProjectStatus,
-} from '@/entities/project'
+import { projectSchema, type Project, type ProjectStatus } from '@/entities/project'
+import type { TrackerHealth } from '@/entities/tracker-health'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -107,7 +103,7 @@ export async function setProjectStatusAction(
 // 업데이트 올리기 — 판정과 그 이유를 함께. 본문 없는 판정은 서버가 400 으로 거절한다.
 export async function postProjectUpdateAction(
   id: string,
-  input: { health: ProjectHealth; body: string }
+  input: { health: TrackerHealth; body: string }
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await authContext()
   try {
@@ -140,7 +136,9 @@ export async function removeProjectMilestoneAction(
 ): Promise<ProjectActionResult> {
   const ctx = await authContext()
   try {
-    const project = projectSchema.parse(await controlPlane.removeProjectMilestone(ctx, id, milestoneId))
+    const project = projectSchema.parse(
+      await controlPlane.removeProjectMilestone(ctx, id, milestoneId)
+    )
     revalidateProjects()
     return { ok: true, project }
   } catch (e) {

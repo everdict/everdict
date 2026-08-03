@@ -214,6 +214,69 @@ describe("Issue — the tracker's unit of intent", () => {
   });
 });
 
+describe("Issue.moveToTeam — a move drops what the destination team does not own", () => {
+  // Everything below crossed the team axis when it was set: the cycle and the column were checked against the
+  // OLD team, and the project against the old team's membership of it.
+  const planned: IssueRecord = {
+    ...newIssue({ projectId: "prj-1", milestoneId: "ms-1", cycleId: "cyc-1" }),
+    stateId: "state-eng-todo",
+  };
+  const destination = { teamId: "team-plt", number: 3, identifier: "PLT-3" };
+
+  it("drops the cycle, the board column and the project when the destination is not on it", () => {
+    // Given an issue in the Engineering team's cycle, column and project
+    // When it is handed to Platform, which is NOT on that project
+    const { patch, facts } = Issue.from(planned).moveToTeam({ ...destination, projectHoldsTeam: false }, "dana", LATER);
+
+    // Then it arrives carrying nothing the destination cannot show it in
+    expect(patch.teamId).toBe("team-plt");
+    expect(patch.cycleId).toBeUndefined();
+    expect(patch.stateId).toBeUndefined();
+    expect(patch.projectId).toBeUndefined();
+    expect(patch.milestoneId).toBeUndefined();
+    // And the move says what it lost — an emptied field with no record reads as data quietly going missing.
+    expect(patch.history?.at(-1)).toMatchObject({
+      event: "moved",
+      detail: { dropped: ["cycle", "state", "project", "milestone"] },
+    });
+    expect(facts[0]?.payload).toMatchObject({ dropped: ["cycle", "state", "project", "milestone"] });
+  });
+
+  it("keeps the project when the destination team is on it too — a project spans teams", () => {
+    // Given the same issue, and a project both teams work
+    const { patch } = Issue.from(planned).moveToTeam({ ...destination, projectHoldsTeam: true }, "dana", LATER);
+
+    // Then the move stays inside the project: the patch does not touch it at all (a key present with an
+    // undefined value CLEARS, so "absent" is the assertion that matters), and only the team's own things go.
+    expect("projectId" in patch).toBe(false);
+    expect("milestoneId" in patch).toBe(false);
+    expect(patch.cycleId).toBeUndefined();
+    expect(patch.history?.at(-1)).toMatchObject({ detail: { dropped: ["cycle", "state"] } });
+  });
+
+  it("an ordinary project change takes the milestone with it — a checkpoint belongs to ITS project", () => {
+    // Given an issue at a checkpoint inside Apollo
+    const issue = Issue.from(newIssue({ projectId: "prj-1", milestoneId: "ms-1" }));
+
+    // When it is moved to another project without naming a checkpoint there
+    const { patch } = issue.update({ projectId: "prj-2" }, "dana", LATER);
+
+    // Then the old project's milestone does not come along (it is not one of the new project's)
+    expect(patch.projectId).toBe("prj-2");
+    expect(patch.milestoneId).toBeUndefined();
+    expect(patch.history?.at(-1)).toMatchObject({ detail: { changed: ["project", "milestone"] } });
+
+    // And an edit that names one in the same breath keeps it — the service checks that one against prj-2.
+    expect(issue.update({ projectId: "prj-2", milestoneId: "ms-9" }, "dana", LATER).patch.milestoneId).toBe("ms-9");
+  });
+
+  it("says nothing about dropped fields when the issue carried none", () => {
+    const { patch, facts } = Issue.from(newIssue()).moveToTeam(destination, "dana", LATER);
+    expect(patch.history?.at(-1)?.detail).not.toHaveProperty("dropped");
+    expect(facts[0]?.payload).not.toHaveProperty("dropped");
+  });
+});
+
 describe("Issue — the GitHub copy seams", () => {
   const github = {
     repository: "acme/agent",

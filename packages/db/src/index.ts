@@ -178,7 +178,12 @@ export {
   PgProjectStore,
   PgProjectUpdateStore,
 } from "./tracker/project-store.js";
-export { InMemoryInitiativeStore, PgInitiativeStore } from "./tracker/initiative-store.js";
+export {
+  InMemoryInitiativeStore,
+  InMemoryInitiativeUpdateStore,
+  PgInitiativeStore,
+  PgInitiativeUpdateStore,
+} from "./tracker/initiative-store.js";
 export { InMemoryAnalysisArtifactStore, PgAnalysisArtifactStore } from "./activity/analysis-artifact-store.js";
 export { InMemoryRunnerStore, PgRunnerStore, generateRunnerToken } from "./workspace/runner-store.js";
 export { InMemoryWorkspaceSettingsStore, PgWorkspaceSettingsStore } from "./workspace/workspace-settings.js";

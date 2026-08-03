@@ -148,6 +148,9 @@ export function ProjectActions({
                 id="edit-project-teams"
                 selected={teamIds}
                 onChange={setTeamIds}
+                // 마지막 한 팀은 뺄 수 없다 — 프로젝트는 언제나 누군가의 일이고, 팀을 다 빼면 어느
+                // 사이드바에도 없는 프로젝트가 된다(제어 평면도 400 으로 거부한다).
+                minSelected={1}
                 placeholder={t('fieldTeamsPlaceholder')}
                 emptyLabel={t('fieldTeamsEmpty')}
                 removeLabel={(teamName) => t('fieldTeamRemove', { name: teamName })}
@@ -166,7 +169,9 @@ export function ProjectActions({
                 onChange={setInitiativeIds}
                 placeholder={t('fieldInitiativePlaceholder')}
                 emptyLabel={t('fieldInitiativeEmpty')}
-                removeLabel={(initiativeName) => t('fieldInitiativeRemove', { name: initiativeName })}
+                removeLabel={(initiativeName) =>
+                  t('fieldInitiativeRemove', { name: initiativeName })
+                }
                 options={initiatives.map((i) => ({ value: i.id, label: i.name }))}
               />
             </div>

@@ -50,8 +50,9 @@ export function IssueProjectControl({
   workspace: string
   id: string
   project: IssueProjectOption | undefined
-  // 워크스페이스의 프로젝트 전부 — 팀으로 거르지 않는다(프로젝트는 여러 팀이 함께 하고, 제어 평면도 이슈의
-  // 팀을 따지지 않는다). 여기서 걸러 버리면 "고를 수 없는 프로젝트"가 다시 생긴다.
+  // 이 이슈의 팀이 올라 있는 프로젝트들(호출한 화면이 `?team=` 으로 걸러 온다). 프로젝트는 여러 팀이 함께
+  // 하지만 아무 팀이나 넣을 수 있는 건 아니다 — 이슈는 자기 팀이 올라 있는 프로젝트에만 들어가고, 그건
+  // 제어 평면이 강제한다. 그래서 여기 있는 것은 전부 실제로 고를 수 있는 것들이다.
   projects: IssueProjectOption[]
   canWrite: boolean
 }) {

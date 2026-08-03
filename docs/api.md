@@ -10,8 +10,8 @@ arrives by polling or webhook.
 |---|---|---|
 | `GET`  | `/me` | the caller's `Principal{subject,workspace,roles,via}` |
 | `POST` | `/runs` | `{ harness:{id,version}, case:EvalCase, runtime?, webhookUrl? }` → **202** `RunRecord` (`runs:submit`). `runtime` → `case.placement.target` (same runtime targeting as `/scorecards`). |
-| `GET`  | `/runs/:id` | `RunRecord` (200) or 404 (`runs:read`) |
-| `GET`  | `/runs` | `RunRecord[]` for the caller's workspace (`runs:read`) |
+| `GET`  | `/runs/:id` | `RunRecord` (200) or 404 (`runs:read`; another member's PERSONAL execution is 404 too — see below) |
+| `GET`  | `/runs` | `RunRecord[]` for the caller's workspace, minus other members' personal executions (`runs:read`) |
 | `GET`  | `/runs/:id/trajectory` | the run's **owned trajectory** (P5 rung 1): sealed `TraceEvent[]` from `everdict_trajectories`, embed fallback during dual-read — `meta.source` says which copy served (`runs:read`) |
 | `GET`  | `/trajectories` | browse the owned evidence ledger (N1 look-inward): sealed metas `{runId, source, eventCount, sealedAt}`, newest first, cursor-paginated — Settings › Traces' primary section reads this (`runs:read`; MCP `list_trajectories`) |
 | `GET`/`PUT` | `/workspace/trace-thresholds` | E4 perception config: bounds evaluated over every trajectory at seal — a crossing lands `trace.threshold_crossed` on the event log (read `runs:read`, write `settings:write`; MCP `get/set_workspace_trace_thresholds`) |
@@ -99,6 +99,24 @@ GET /runs/:id ◀── poll until status is terminal     (or receive the webhoo
 **`PgRunStore`** (real Postgres) — it runs migrations at boot (`migrate()` over `packages/db/migrations/`,
 idempotent) and persists `RunRecord`s (`result`/`error` as `jsonb`). Same interface, so the service +
 lifecycle are unchanged. Migration discipline: `docs/migration/`.
+
+### Run audience — personal executions are their owner's
+
+`runs:read` says a member may read this workspace's executions; it does not say they may read each OTHER's.
+An **agent run** is a conversation turn (the session store has always been owner-scoped) and a **sandbox
+session** is somebody's shell, so both are readable only by the member they belong to — `origin.actor`, else
+`createdBy`. Everything else (evals, the playground cases a session runs, analyses) stays workspace-visible,
+and a personal run with no member stamped on it stays workspace-visible too (hiding evidence from everyone is
+loss, not privacy). There is deliberately **no admin bypass**: listing/renaming/deleting a conversation is
+owner-only, and an admin who could open every member's transcript would make that ownership decorative — what
+an admin legitimately needs (who spent what) reads off the usage meter, which carries cost without content.
+
+The rule is `runAudience`/`canReadRun` in `@everdict/domain`, applied at three depths so no surface can forget
+it: `RunService.list/getForDisplay/trajectory` (both transports inherit it), the run observability routes via
+`runVisible` (route-context), and the ledger itself — every sealed trajectory carries an `owner` (mig 0116,
+backfilled from the run ledger), so `GET /trajectories` filters IN the query and `GET /trajectories/:id`
+answers 404 for someone else's. Refusals are **404, never 403** — the same answer as another workspace's run,
+so neither leaks that the row exists.
 
 The **trajectory store** (the owned trace ledger: eval runs · agent turns · OTLP-door arrivals · materialized
 imports) is the one store with a second engine: `EVERDICT_CLICKHOUSE_URL` swaps it to `ClickHouseTrajectoryStore`

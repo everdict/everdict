@@ -188,6 +188,7 @@ async function main(): Promise<void> {
     issueLabelStore,
     projectStore,
     initiativeStore,
+    initiativeUpdateStore,
     browserProfileStore,
     skillStore,
     skillVersionStore,
@@ -742,9 +743,12 @@ async function main(): Promise<void> {
   const projectService = new ProjectService({
     store: projectStore,
     issues: issueStore,
-    // A project's team/initiative edges are validated against these on write, and an unnamed team falls back to
-    // the workspace default — both are store reads, never peer-service calls.
+    // A project's team/initiative edges are validated against these on write — store reads, never peer-service
+    // calls. The one thing a store cannot answer is "which team does work land on when the caller names none":
+    // the workspace's default may still have to be minted, so that goes through the same TeamService seam
+    // filing an issue uses (a project always names at least one team).
     teams: teamStore,
+    defaultTeam: teamService,
     initiatives: initiativeStore,
     // The posted-update timeline — the project's health is what the latest one said.
     updates: projectUpdateStore,
@@ -754,6 +758,8 @@ async function main(): Promise<void> {
     store: initiativeStore,
     projects: projectStore,
     issues: issueStore,
+    // The goal's own posted-update timeline — its health is what the latest one said.
+    updates: initiativeUpdateStore,
     events: platformEventService,
   });
   const subscriptionService = buildSubscription({ subscriptionStore, agentRegistry });

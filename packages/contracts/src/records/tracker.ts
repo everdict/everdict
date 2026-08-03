@@ -4,7 +4,9 @@ import { z } from "zod";
 // judges, scorecards) answer "what ran"; the tracker answers "why we evaluate at all". An Issue is the unit of
 // intent — the problem under evaluation — and it gathers the capabilities that verify it, so a team discusses at
 // the issue level: how it was resolved, which scorecard closed it, and why it came back. Projects group issues
-// under a target date; an Initiative is the deployment umbrella whose readiness gates a release.
+// under a target date; an Initiative is a GOAL several projects work toward — Linear's meaning, not a release
+// train. Its progress is the live arithmetic over everything underneath, and completing it is a gate only
+// because a goal with open work under it has not been reached yet.
 // Teams (records/team.ts) group ISSUES inside a workspace and name them (`ENG-12`); projects and initiatives stay
 // workspace-level on purpose, so a release several teams contribute to is still one readiness gate.
 
@@ -374,19 +376,57 @@ export const IssuePageSchema = z.object({
 });
 export type IssuePage = z.infer<typeof IssuePageSchema>;
 
-// --- Project health (the "update" Linear posts) ---
+// --- How a list is ORDERED, and how it is GROUPED ---
+// Both belong to the LIST, not to the record: an issue has no ordering, a screen does. They live in the
+// contracts anyway because neither is something a caller can apply on top of a page it already holds — the
+// ordering decides what the page CURSOR means (a token minted under one ordering cannot be read under
+// another), and the grouping decides an aggregate only the store can compute.
+export const ISSUE_ORDERS = ["updated", "created", "priority", "due"] as const;
+export const IssueOrderSchema = z.enum(ISSUE_ORDERS);
+export type IssueOrder = z.infer<typeof IssueOrderSchema>;
+
+// The columns a list can be grouped by — each a SCALAR on the issue, so every row belongs to exactly one group
+// and the count is a plain GROUP BY. Labels are deliberately absent: an issue carries several, so grouping by
+// label would put one row in several groups and the group counts would add up to more than the list.
+export const ISSUE_GROUP_BYS = ["status", "assignee", "priority", "project", "cycle"] as const;
+export const IssueGroupBySchema = z.enum(ISSUE_GROUP_BYS);
+export type IssueGroupBy = z.infer<typeof IssueGroupBySchema>;
+
+// How many issues sit in each group, under the SAME filter the list is drawn with. A grouped list cannot get
+// this from its rows: it holds one page per group, so counting what it received would report the page size.
+// `key: null` is the UNSET bucket (no assignee, no project, no cycle) — a group a list has to draw, which is
+// why it is a null key rather than a missing entry.
+export const IssueGroupCountSchema = z.object({
+  key: z.string().nullable(),
+  count: z.number().int().nonnegative(),
+});
+export type IssueGroupCount = z.infer<typeof IssueGroupCountSchema>;
+
+export const IssueGroupCountsSchema = z.object({
+  groupBy: IssueGroupBySchema,
+  groups: z.array(IssueGroupCountSchema),
+  // Every issue the filter selects, groups included — the number a header shows next to the list's own name.
+  total: z.number().int().nonnegative(),
+});
+export type IssueGroupCounts = z.infer<typeof IssueGroupCountsSchema>;
+
+// --- Health (the "update" Linear posts) ---
 // A judgment a HUMAN makes, unlike everything else the tracker records — which is exactly why it lives on a
 // posted update with a body rather than being inferred from the rollup. "Behind on issue count" is arithmetic;
 // "at risk" is somebody saying so, and the sentence they said it in is the useful half.
-export const PROJECT_HEALTH = ["on_track", "at_risk", "off_track"] as const;
-export const ProjectHealthSchema = z.enum(PROJECT_HEALTH);
-export type ProjectHealth = z.infer<typeof ProjectHealthSchema>;
+//
+// ONE vocabulary for both levels a human reports on (a project and the goal it serves): the same three words
+// mean the same three things, and two enums would have made "at risk" a different value depending on which
+// screen you were reading.
+export const TRACKER_HEALTH = ["on_track", "at_risk", "off_track"] as const;
+export const TrackerHealthSchema = z.enum(TRACKER_HEALTH);
+export type TrackerHealth = z.infer<typeof TrackerHealthSchema>;
 
 export const ProjectUpdateRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   projectId: z.string(),
-  health: ProjectHealthSchema,
+  health: TrackerHealthSchema,
   body: z.string().max(50_000),
   createdBy: z.string(),
   createdAt: z.string(),
@@ -424,10 +464,13 @@ export const ProjectRecordSchema = z.object({
   // The teams contributing to this project, and the reason it is a LIST: a project is the unit a release is
   // planned in, and a release only one team may join is not a release — it is that team's backlog with a date
   // on it. Stored rather than derived from the project's issues, because the derived answer was "no teams" for
-  // exactly as long as the project was still being planned, which is when the question gets asked. Empty is
-  // legal and means workspace-wide; the service defaults a creation with no teams to the workspace's default
-  // team, the same courtesy `teamId` gets on an issue.
-  teamIds: z.array(z.string()).default([]),
+  // exactly as long as the project was still being planned, which is when the question gets asked.
+  //
+  // **At least one, always.** An empty list used to be legal and mean "workspace-wide", which quietly made a
+  // SECOND kind of project: one that appears in no team's sidebar and that no team's issues may join. There is
+  // one kind of project, and it is somebody's work — naming no team at creation lands it on the workspace's
+  // default team, the same courtesy `teamId` gets on an issue, so the requirement costs a caller nothing.
+  teamIds: z.array(z.string()).min(1),
   // Who is answerable for the project, and who is on it. The lead is a subject (the same identity every other
   // actor field carries), and membership is a plain list rather than a roster table: a project's members are a
   // statement about this project, not a second workspace directory.
@@ -435,12 +478,12 @@ export const ProjectRecordSchema = z.object({
   memberIds: z.array(z.string()).default([]),
   // The health of the LATEST update, kept on the project so a list row can show it without reading the update
   // timeline per row. Absent = nobody has posted an update, which is different from "on track".
-  health: ProjectHealthSchema.optional(),
+  health: TrackerHealthSchema.optional(),
   // The checkpoints inside the project, in order.
   milestones: z.array(ProjectMilestoneSchema).default([]),
-  // The initiatives this project rolls up into — also a list, because one project routinely serves two umbrellas
+  // The initiatives this project rolls up into — also a list, because one project routinely serves two goals
   // (a migration that is both "Q3 reliability" and "cost down"), and forcing a single choice silently drops
-  // whichever umbrella lost. Readiness counts the project under EVERY initiative that claims it.
+  // whichever goal lost. Progress counts the project under EVERY initiative that claims it.
   initiativeIds: z.array(z.string()).default([]),
   targetDate: CalendarDateSchema.optional(),
   completedAt: z.string().optional(),
@@ -451,7 +494,7 @@ export const ProjectRecordSchema = z.object({
 });
 export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 
-// --- Initiative: the deployment umbrella ---
+// --- Initiative: the goal several projects work toward ---
 export const INITIATIVE_STATUSES = ["active", "completed", "cancelled"] as const;
 export const InitiativeStatusSchema = z.enum(INITIATIVE_STATUSES);
 export type InitiativeStatus = z.infer<typeof InitiativeStatusSchema>;
@@ -463,10 +506,16 @@ export const InitiativeRecordSchema = z.object({
   description: z.string().optional(),
   status: InitiativeStatusSchema,
   // An initiative may sit under another one, so a big bet decomposes instead of flattening into a wall of
-  // projects. Readiness rolls UP: a parent counts its own projects plus every descendant's, which is the only
-  // reading that keeps "can we ship this" true for the umbrella a human actually points at. The service refuses
-  // a cycle (nothing may be its own ancestor) — a cycle would make that roll-up non-terminating.
+  // projects. Progress rolls UP: a parent counts its own projects plus every descendant's, which is the only
+  // reading that keeps "how far along is this" true for the goal a human actually points at. The service
+  // refuses a cycle (nothing may be its own ancestor) — a cycle would make that roll-up non-terminating.
   parentId: z.string().optional(),
+  // Who is answerable for the goal. Same shape as a project's lead and for the same reason: a goal nobody is
+  // named on is one nobody reports on, and the update timeline below is what they report through.
+  lead: z.string().optional(),
+  // The health of the LATEST posted update, denormalized so a list row shows it without reading the timeline
+  // per row. Absent = nobody has posted an update, which is NOT the same claim as "on track".
+  health: TrackerHealthSchema.optional(),
   targetDate: CalendarDateSchema.optional(),
   completedAt: z.string().optional(),
   history: z.array(TrackerHistoryEntrySchema).default([]),
@@ -475,6 +524,20 @@ export const InitiativeRecordSchema = z.object({
   updatedAt: z.string(),
 });
 export type InitiativeRecord = z.infer<typeof InitiativeRecordSchema>;
+
+// The initiative's posted updates — the same judgment a project reports, one level up. Its own record rather
+// than a project update with a nullable projectId: they are read as two separate timelines (a goal's update
+// summarizes across projects), and a nullable owner column is how one table becomes two half-used ones.
+export const InitiativeUpdateRecordSchema = z.object({
+  id: z.string(),
+  tenant: z.string(),
+  initiativeId: z.string(),
+  health: TrackerHealthSchema,
+  body: z.string().max(50_000),
+  createdBy: z.string(),
+  createdAt: z.string(),
+});
+export type InitiativeUpdateRecord = z.infer<typeof InitiativeUpdateRecordSchema>;
 
 // --- Derived read models (computed on detail reads, never stored) ---
 // Same treatment as ScorecardRecord.trialSummary: counting issues is cheap and always-fresh arithmetic, whereas
@@ -507,24 +570,28 @@ export const InitiativeProjectSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   // Which initiative actually claims this project: absent = this one directly, set = the descendant it came up
-  // through. Readiness is one flat verdict, but a blocked release still has to say WHERE the block sits.
+  // through. Progress is one flat number, but work that is still open has to say WHERE it sits.
   viaInitiativeId: z.string().optional(),
   status: ProjectStatusSchema,
+  // Carried so the goal's project list can draw the same row the project list draws — the reported health and
+  // who is answerable are the two things a reader scanning "where does this goal stand" asks per project.
+  health: TrackerHealthSchema.optional(),
+  lead: z.string().optional(),
   targetDate: CalendarDateSchema.optional(),
   completedAt: z.string().optional(),
   rollup: ProjectRollupSchema,
 });
 export type InitiativeProjectSummary = z.infer<typeof InitiativeProjectSummarySchema>;
 
-// The deployment verdict. `ready` counts open issues across every non-cancelled project REGARDLESS of that
-// project's own status — a project marked completed whose issue later regressed still blocks the release. The
-// project status is history; the initiative readiness is live truth.
+// How far along the goal is. `ready` counts open issues across every non-cancelled project REGARDLESS of that
+// project's own status — a project marked completed whose issue later regressed is still unfinished work under
+// the goal. The project status is history; this is live truth, and it is what the completion gate reads.
 export const InitiativeReadinessSchema = z.object({
   ready: z.boolean(),
   openIssues: z.number().int().nonnegative(),
   totalIssues: z.number().int().nonnegative(),
   projects: z.array(InitiativeProjectSummarySchema),
-  blockers: z.array(InitiativeBlockerSchema), // capped — a readiness card lists what to fix, not everything
+  blockers: z.array(InitiativeBlockerSchema), // capped — the card lists what is left to do, not everything
 });
 export type InitiativeReadiness = z.infer<typeof InitiativeReadinessSchema>;
 

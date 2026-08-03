@@ -114,7 +114,7 @@ describe("initiativeReadiness", () => {
   });
 
   it("counts a project claimed by a SUB-initiative, and says which one it came up through", () => {
-    // Given: the umbrella's own project is settled, but a sub-initiative's project still has open work.
+    // Given: the goal's own project is settled, but a sub-initiative's project still has open work.
     const readiness = initiativeReadiness(
       INITIATIVE,
       [project("p1", "in_progress"), project("p2", "in_progress", ["ini-sub"])],
@@ -123,7 +123,7 @@ describe("initiativeReadiness", () => {
         ["p2", [issue("b", "todo")]],
       ]),
     );
-    // Then: nesting cannot hide work from the release gate, and the summary points at the descendant.
+    // Then: nesting cannot hide work from the goal, and the summary points at the descendant.
     expect(readiness.ready).toBe(false);
     expect(readiness.openIssues).toBe(1);
     expect(readiness.projects.find((p) => p.id === "p1")?.viaInitiativeId).toBeUndefined();

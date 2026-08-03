@@ -1,10 +1,10 @@
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Flag, Rocket } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Flag, Target } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
 import { ProjectActions, ProjectStatusControl, ProjectUpdatePanel } from '@/features/manage-project'
-import { initiativesSchema, type Initiative } from '@/entities/initiative'
+import { initiativeHref, initiativesSchema, type Initiative } from '@/entities/initiative'
 import {
   ISSUE_STATUSES,
   issueHref,
@@ -26,6 +26,7 @@ import {
   teamsWithSummarySchema,
   type TeamWithSummary,
 } from '@/entities/team'
+import { HealthBadge } from '@/entities/tracker-health'
 import { TrackerHistory } from '@/entities/tracker-history'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -63,7 +64,7 @@ function BackLink({ workspace, label }: { workspace: string; label: string }) {
 // the counts are always live; `evaluated` is the stricter claim than `done`: closed WITH a scorecard.
 //
 // 레이아웃은 형제 화면인 이슈 상세(app/[workspace]/issues/[id])의 것을 그대로 쓴다 — Linear 프로젝트 뷰와 같은
-// 골격이다. ① 상단 브레드크럼(프로젝트 → 이니셔티브)이 "이 프로젝트가 어느 릴리스에 매달려 있는지"에 답하고
+// 골격이다. ① 상단 브레드크럼(프로젝트 → 이니셔티브)이 "이 프로젝트가 어느 목표에 매달려 있는지"에 답하고
 // 그 옆에 이 프로젝트에 대한 작업(링크 복사·⋯)이 붙는다. ② 이름은 크게 혼자 선다. ③ 본문(설명·이슈·이력·논의)은
 // 왼쪽 열, ④ 속성과 진행도는 전부 오른쪽 한 열. 종전 레이아웃이 낭비하던 자리가 여기서 사라진다: 메타 한 줄을
 // 담던 전폭 카드와, 한 자리 숫자 넷을 1100px 에 늘어놓던 StatCard 그리드가 모두 오른쪽 속성 열로 접힌다.
@@ -103,7 +104,7 @@ export default async function ProjectDetailPage({
     controlPlane
       // 프로젝트 상세의 상태별 보드 — 한 프로젝트의 이슈는 한 장에 들어가는 규모이고, 롤업 숫자는 서버가
       // 따로 파생한다(rollup). 여기서 필요한 건 그릴 행뿐이다.
-      .listIssues(ctx, { project: id, limit: PROJECT_ISSUE_ROWS })
+      .listIssues(ctx, { project: [id], limit: PROJECT_ISSUE_ROWS })
       .then((r) => issuePageSchema.parse(r).items)
       .catch((): IssueSummary[] => []),
     controlPlane
@@ -169,7 +170,7 @@ export default async function ProjectDetailPage({
             <>
               <ChevronRight className="size-3 shrink-0 text-faint" />
               <Link
-                href={`/${workspace}/initiatives/${encodeURIComponent(initiative.id)}`}
+                href={initiativeHref(workspace, initiative.id)}
                 className="truncate text-muted-foreground transition-colors hover:text-foreground"
               >
                 {initiative.name}
@@ -206,10 +207,10 @@ export default async function ProjectDetailPage({
                   {projectInitiatives.map((row) => (
                     <Link
                       key={row.id}
-                      href={`/${workspace}/initiatives/${encodeURIComponent(row.id)}`}
+                      href={initiativeHref(workspace, row.id)}
                       className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
                     >
-                      <Rocket className="size-3.5 shrink-0 text-faint" />
+                      <Target className="size-3.5 shrink-0 text-faint" />
                       <span className="truncate">{row.name}</span>
                     </Link>
                   ))}
@@ -218,17 +219,7 @@ export default async function ProjectDetailPage({
             )}
             {current.health !== undefined && (
               <PropertyRow label={t('fieldHealth')}>
-                <Badge
-                  tone={
-                    current.health === 'off_track'
-                      ? 'danger'
-                      : current.health === 'at_risk'
-                        ? 'warning'
-                        : 'success'
-                  }
-                >
-                  {tracker(`projectHealth.${current.health}`)}
-                </Badge>
+                <HealthBadge health={current.health} />
               </PropertyRow>
             )}
             {current.lead !== undefined && (
@@ -411,17 +402,7 @@ export default async function ProjectDetailPage({
                 {updates.map((update) => (
                   <article key={update.id} className="rounded-lg border bg-card p-3 shadow-raise">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge
-                        tone={
-                          update.health === 'off_track'
-                            ? 'danger'
-                            : update.health === 'at_risk'
-                              ? 'warning'
-                              : 'success'
-                        }
-                      >
-                        {tracker(`projectHealth.${update.health}`)}
-                      </Badge>
+                      <HealthBadge health={update.health} />
                       <span className="text-[12px] text-muted-foreground">
                         {memberNameOf(actors, update.createdBy)}
                       </span>

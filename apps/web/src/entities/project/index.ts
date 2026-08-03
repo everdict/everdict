@@ -1,12 +1,9 @@
 export {
   type ProjectUpdate,
   type ProjectMilestone,
-  type ProjectHealth,
   projectUpdatesSchema,
   projectUpdateSchema,
   projectMilestoneSchema,
-  projectHealthSchema,
-  PROJECT_HEALTH,
   PROJECT_STATUSES,
   projectDetailSchema,
   projectRollupSchema,

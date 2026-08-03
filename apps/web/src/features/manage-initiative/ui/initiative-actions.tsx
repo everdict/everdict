@@ -27,12 +27,16 @@ export function InitiativeActions({
   workspace,
   initiative,
   initiatives,
+  members,
 }: {
   workspace: string
   initiative: Initiative
   // 상위 후보 — 자기 자신은 뺀다. 자기 하위로 옮기는 시도는 제어 평면이 409 로 거절하므로, 여기서는
   // 명백히 불가능한 선택지(자기 자신)만 지운다.
   initiatives: { id: string; name: string }[]
+  // 책임자 후보 — 워크스페이스 멤버. 이름은 화면이 이미 갖고 있으므로(멤버 디렉터리) 여기서는 고를 목록만
+  // 받는다.
+  members: { subject: string; name: string }[]
 }) {
   const t = useTranslations('initiativesPage')
   const router = useRouter()
@@ -41,6 +45,7 @@ export function InitiativeActions({
   const [name, setName] = useState(initiative.name)
   const [description, setDescription] = useState(initiative.description ?? '')
   const [parentId, setParentId] = useState(initiative.parentId ?? '')
+  const [lead, setLead] = useState(initiative.lead ?? '')
   const [targetDate, setTargetDate] = useState(initiative.targetDate ?? '')
   const [pending, startTransition] = useTransition()
 
@@ -53,6 +58,7 @@ export function InitiativeActions({
       ...(parentId !== (initiative.parentId ?? '')
         ? { parentId: parentId === '' ? null : parentId }
         : {}),
+      ...(lead !== (initiative.lead ?? '') ? { lead: lead === '' ? null : lead } : {}),
       ...(targetDate !== (initiative.targetDate ?? '')
         ? { targetDate: targetDate === '' ? null : targetDate }
         : {}),
@@ -149,6 +155,19 @@ export function InitiativeActions({
                 ...initiatives
                   .filter((i) => i.id !== initiative.id)
                   .map((i) => ({ value: i.id, label: i.name })),
+              ]}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-initiative-lead">{t('fieldLead')}</Label>
+            <Combobox
+              id="edit-initiative-lead"
+              value={lead}
+              onChange={setLead}
+              placeholder={t('fieldLeadNone')}
+              options={[
+                { value: '', label: t('fieldLeadNone') },
+                ...members.map((m) => ({ value: m.subject, label: m.name })),
               ]}
             />
           </div>

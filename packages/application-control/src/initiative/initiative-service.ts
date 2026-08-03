@@ -4,20 +4,22 @@ import {
   type InitiativeReadiness,
   type InitiativeRecord,
   type InitiativeStatus,
+  type InitiativeUpdateRecord,
   type IssueRecord,
   NotFoundError,
+  type TrackerHealth,
 } from "@everdict/contracts";
 import type { InitiativeDetailResponse } from "@everdict/contracts/wire";
 import { Initiative, type InitiativeEditInput, type InitiativeTransition, initiativeReadiness } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
-import type { InitiativeListFilter, InitiativeStore } from "../ports/initiative-store.js";
+import type { InitiativeListFilter, InitiativeStore, InitiativeUpdateStore } from "../ports/initiative-store.js";
 import type { IssueStore } from "../ports/issue-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { ProjectStore } from "../ports/project-store.js";
 
-// The deployment umbrella. Its one interesting operation is completion, which is a GATE: it reads the live
-// readiness across every project's issues and refuses while anything is open. Stores are injected directly
-// (never peer services) so the readiness read is one fan-out, not a chain of service calls.
+// The goal several projects work toward. Its one interesting operation is completion, which is a GATE: it reads
+// the live progress across every project's issues and refuses while anything is open. Stores are injected
+// directly (never peer services) so that read is one fan-out, not a chain of service calls.
 
 export interface InitiativeActor {
   subject: string;
@@ -30,6 +32,7 @@ export interface CreateInitiativeInput {
   name: string;
   description?: string;
   parentId?: string;
+  lead?: string;
   targetDate?: string;
 }
 
@@ -37,6 +40,9 @@ export interface InitiativeServiceDeps {
   store: InitiativeStore;
   projects: ProjectStore;
   issues: IssueStore;
+  // The posted-update timeline. Absent = this deployment does not carry initiative updates, and the health
+  // routes report it as such rather than pretending the goal has never been reported on.
+  updates?: InitiativeUpdateStore;
   events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => string;
@@ -59,6 +65,7 @@ export class InitiativeService {
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      ...(input.lead !== undefined ? { lead: input.lead } : {}),
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
       createdBy: input.createdBy,
       now: this.now(),
@@ -87,10 +94,10 @@ export class InitiativeService {
     return { ...record, readiness: await this.readiness(tenant, id) };
   }
 
-  // The deployment verdict: every project under the umbrella — including the ones claimed by a DESCENDANT
-  // initiative — each project's issues, one answer. Nesting exists so a big bet can decompose, and a parent
-  // that reported "ready" while a sub-initiative was still blocked would make the decomposition a way to hide
-  // work from the release gate.
+  // How far along the goal is: every project under it — including the ones claimed by a DESCENDANT initiative —
+  // each project's issues, one answer. Nesting exists so a big bet can decompose, and a parent that reported
+  // "nothing left" while a sub-initiative was still working would make the decomposition a way to hide work
+  // from the goal it belongs to.
   async readiness(tenant: string, id: string): Promise<InitiativeReadiness> {
     const scope = await this.subtreeIds(tenant, id);
     const projects = await this.deps.projects.list(tenant, { initiativeIds: scope });
@@ -144,6 +151,35 @@ export class InitiativeService {
         );
     }
     return this.applyTransition(record, Initiative.from(record).update(fields, actor.subject, this.now()));
+  }
+
+  // Posting an update on the goal — the one judgment a human authors here. The initiative keeps the latest
+  // health (so a row shows it without reading the timeline) and the update itself is what a reader goes to.
+  async postUpdate(
+    tenant: string,
+    id: string,
+    input: { health: TrackerHealth; body: string },
+    actor: InitiativeActor,
+  ): Promise<InitiativeUpdateRecord> {
+    if (!this.deps.updates)
+      throw new NotFoundError("NOT_FOUND", { initiative: id }, "initiative updates are not configured.");
+    const record = await this.get(tenant, id);
+    const { transition, record: update } = Initiative.from(record).postUpdate(
+      { id: this.newId(), health: input.health, body: input.body },
+      actor.subject,
+      this.now(),
+    );
+    // The update is written first: a posted update with no health bump is recoverable (the next read shows the
+    // timeline), where a health bump with no update would be a colour nobody can explain.
+    await this.deps.updates.create(update);
+    await this.applyTransition(record, transition);
+    return update;
+  }
+
+  async listUpdates(tenant: string, id: string, limit?: number): Promise<InitiativeUpdateRecord[]> {
+    if (!this.deps.updates) return [];
+    await this.get(tenant, id); // 404 for another workspace's initiative before serving its timeline
+    return this.deps.updates.list(tenant, id, limit);
   }
 
   async setStatus(

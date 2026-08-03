@@ -7,9 +7,9 @@ export type InitiativeResponse = z.infer<typeof InitiativeResponseSchema>;
 export const InitiativeListResponseSchema = z.array(InitiativeRecordSchema);
 export type InitiativeListResponse = z.infer<typeof InitiativeListResponseSchema>;
 
-// GET /initiatives/:id — the record plus the deployment verdict (readiness over every project's issues).
-// Derived on read for the same reason as the project rollup, and it is the one number a release conversation
-// actually asks for: is anything still open under this umbrella.
+// GET /initiatives/:id — the record plus how far along the goal is (progress over every project's issues).
+// Derived on read for the same reason as the project rollup, and it is the number the goal's own screen is
+// built around: how much of the work under it is finished, and what is left.
 export const InitiativeDetailResponseSchema = InitiativeRecordSchema.extend({
   readiness: InitiativeReadinessSchema,
 });

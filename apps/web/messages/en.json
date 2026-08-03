@@ -424,7 +424,8 @@
     "approve": "Approve",
     "deny": "Deny",
     "viewDetails": "View details",
-    "agentFailed": "The agent couldn't answer. Mention @everdict again to retry."
+    "agentFailed": "The agent couldn't answer. Mention @everdict again to retry.",
+    "attachHint": "paste or drop a file to attach"
   },
   "discussDataset": {
     "showPrevious": "Show {count} earlier",
@@ -1612,7 +1613,6 @@
     "more": "More",
     "members": "Members",
     "teams": "Teams",
-    "teamHome": "Home",
     "agent": "Agent",
     "tools": "Tools",
     "skills": "Skills",
@@ -1663,21 +1663,21 @@
   "overviewPage": {
     "viewAll": "View all",
     "title": "Overview",
-    "description": "Can we ship — what is blocked, what regressed, and what has been evaluated.",
+    "description": "Where things stand — what is still open, what regressed, and what has been evaluated.",
     "connectError": "Couldn't reach the server: {error}",
     "connectErrorHint": "Check that `CONTROL_PLANE_URL` is set and `everdict-api` is running.",
     "recentRuns": "Recent runs",
     "harnesses": "Harnesses",
     "emptyHarnessesTitle": "No harnesses yet.",
     "emptyHarnessesHint": "Registered harnesses show up here.",
-    "releaseReadiness": "Release readiness",
     "regressions": "Regressions",
-    "readinessReady": "Ready",
-    "readinessBlocked": "{count} open",
-    "readinessProgress": "{resolved} of {total} issues resolved across {projects} project(s)",
-    "readinessMoreBlockers": "+{count} more blocking",
     "emptyInitiativesTitle": "No active initiatives.",
-    "emptyInitiativesHint": "An initiative groups the projects a release depends on — its readiness tells you whether you can ship."
+    "emptyInitiativesHint": "An initiative groups the projects working toward one goal — this is where you see how far along it is.",
+    "initiativeProgress": "Initiative progress",
+    "progressComplete": "Nothing left open",
+    "progressRemaining": "{count} left",
+    "progressSummary": "{resolved} of {total} issues done across {projects} project(s)",
+    "progressMoreRemaining": "+{count} more"
   },
   "palette": {
     "placeholder": "Go to a page or run an action…",
@@ -3120,7 +3120,7 @@
     "mattermostCount": "{count} connections",
     "imageRegistryCount": "{count} registries",
     "teamStatesTitle": "Workflow states",
-    "teamStatesTip": "A team's own names for its board columns. Each declares the canonical status it maps to, so renaming one never reaches the release gate, the rollups or the regression watch."
+    "teamStatesTip": "A team's own names for its board columns. Each declares the canonical status it maps to, so renaming one never reaches the completion gate, the rollups or the regression watch."
   },
   "shell": {
     "searchPlaceholder": "Search…",
@@ -4380,7 +4380,7 @@
     },
     "initiatives": {
       "title": "Initiatives",
-      "body": "The deployment umbrella. Before shipping, its readiness tells you whether every issue underneath is resolved."
+      "body": "A goal several projects work toward. One place to see how far along the work underneath is, and what is left."
     }
   },
   "agentFleet": {
@@ -4543,6 +4543,7 @@
     "rollupErrors": "Errors",
     "rollupPlanes": "Planes",
     "timelineTitle": "Timeline",
+    "waterfallTitle": "Waterfall",
     "unanchored": "{count} events carry no absolute time — listed below, not on the axis."
   },
   "subscriptions": {
@@ -4703,11 +4704,6 @@
       "active": "Active",
       "completed": "Completed"
     },
-    "projectHealth": {
-      "on_track": "On track",
-      "at_risk": "At risk",
-      "off_track": "Off track"
-    },
     "labelColor": {
       "gray": "Gray",
       "purple": "Purple",
@@ -4718,6 +4714,11 @@
       "orange": "Orange",
       "red": "Red",
       "pink": "Pink"
+    },
+    "health": {
+      "on_track": "On track",
+      "at_risk": "At risk",
+      "off_track": "Off track"
     }
   },
   "issuesPage": {
@@ -4829,7 +4830,64 @@
     "triageTitle": "Triage",
     "triageDescription": "Incoming work waiting to enter this team's workflow — accept it into the board, or decline it.",
     "triageEmptyTitle": "The inbox is empty",
-    "triageEmptyHint": "New issues filed into this team land here first."
+    "triageEmptyHint": "New issues filed into this team land here first.",
+    "assigneeControlLabel": "Change assignee",
+    "assigneeSetTo": "Assign to",
+    "assigneeClear": "Unassign",
+    "assigneeError": "Could not change the assignee.",
+    "display": "Display",
+    "grouping": "Grouping",
+    "ordering": "Ordering",
+    "showCompleted": "Show completed issues",
+    "topLevelOnly": "Top-level issues only",
+    "totalCount": "{count, plural, one {# issue} other {# issues}}",
+    "countsUnavailable": "Group counts could not be loaded, so this list cannot be grouped.",
+    "groupLoadMore": "Load {count} more",
+    "groupsTruncated": "{count, plural, one {# group is} other {# groups are}} not shown. Narrow the filter, or switch grouping off.",
+    "boardMoveError": "Could not move the issue.",
+    "boardColumnEmpty": "Empty",
+    "boardColumnMore": "{count} more in this column",
+    "filter": "Filter",
+    "filterBy": "Filter by",
+    "filterBack": "Back to filters",
+    "filterSearchPlaceholder": "Search",
+    "filterNoMatch": "No matching values.",
+    "filterDone": "Done",
+    "filterRemove": "Remove the {name} filter",
+    "filterClear": "Clear all",
+    "layout": {
+      "list": "List",
+      "board": "Board"
+    },
+    "groupBy": {
+      "none": "No grouping",
+      "status": "Status",
+      "assignee": "Assignee",
+      "priority": "Priority",
+      "project": "Project",
+      "cycle": "Cycle"
+    },
+    "orderBy": {
+      "updated": "Last updated",
+      "created": "Last created",
+      "priority": "Priority",
+      "due": "Due date"
+    },
+    "facet": {
+      "status": "Status",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "label": "Label",
+      "project": "Project",
+      "cycle": "Cycle"
+    },
+    "groupUnset": {
+      "status": "No status",
+      "priority": "No priority",
+      "assignee": "Unassigned",
+      "project": "No project",
+      "cycle": "No cycle"
+    }
   },
   "issueLinks": {
     "add": "Add link",
@@ -4898,7 +4956,7 @@
     "rollupOpen": "Open",
     "rollupDone": "Done",
     "rollupEvaluated": "Evaluated",
-    "rollupEvaluatedTip": "Done AND closed with a scorecard. “Resolved” and “resolved with evidence” are different claims, and a release conversation cares about the second one.",
+    "rollupEvaluatedTip": "Done AND closed with a scorecard. “Resolved” and “resolved with evidence” are different claims, and asking whether a goal was reached needs the second one.",
     "issuesTitle": "Issues ({count})",
     "historyTitle": "History",
     "discussTitle": "Discussion",
@@ -4914,7 +4972,7 @@
   },
   "initiativesPage": {
     "title": "Initiatives",
-    "description": "The deployment umbrella over projects — is everything resolved, can we ship?",
+    "description": "A goal several projects work toward — what you are trying to reach, and how far along it is.",
     "create": "New initiative",
     "createTitle": "New initiative",
     "createSubmit": "Create initiative",
@@ -4930,44 +4988,65 @@
     "deleteError": "Couldn't delete the initiative.",
     "actions": "Initiative actions",
     "fieldName": "Name",
-    "fieldNamePlaceholder": "e.g. 2026 Q3 release",
+    "fieldNamePlaceholder": "e.g. Agent reliability at 90%",
     "fieldDescription": "Description",
+    "fieldDescriptionPlaceholder": "What are you trying to reach, and what has to be true for it to count as reached?",
     "fieldParent": "Parent initiative",
     "fieldParentNone": "None (top level)",
-    "nestingTitle": "Nesting",
-    "nestingParent": "Parent",
-    "nestingChild": "Sub-initiative",
-    "fieldDescriptionPlaceholder": "What has to land together, and what does shipping it mean?",
+    "fieldLead": "Lead",
+    "fieldLeadNone": "Unassigned",
+    "fieldStatus": "Status",
+    "fieldHealth": "Health",
     "fieldTargetDate": "Target date",
     "fieldTargetDatePast": "That date has already passed — this initiative will read as overdue as soon as it exists.",
     "statusError": "Couldn't move the initiative.",
     "statusControlLabel": "Change status",
     "statusMoveTo": "Move to",
-    "gateTitle": "Issues are still open",
-    "gateBody": "{count} issue(s) under this initiative are still open.",
+    "gateTitle": "Work is still open",
+    "gateBody": "{count} issue(s) under this goal are still open.",
     "gateForce": "Complete anyway",
-    "gateForceHint": "Completing now is recorded as an override, so the history will show the release shipped with known gaps.",
+    "gateForceHint": "Completing now is recorded as an override, so the history will show the goal was closed with work still open.",
     "filterAll": "All",
     "overdue": "Overdue",
     "loadError": "Couldn't load initiatives: {error}",
     "emptyTitle": "No initiatives yet",
-    "emptyHint": "Group the projects that have to land together before a release.",
+    "emptyHint": "Group the projects that are working toward one goal.",
     "backToList": "Initiatives",
     "detailFallbackTitle": "Initiative",
+    "breadcrumbLabel": "Initiative location",
+    "copyLink": "Copy link",
+    "linkCopied": "Initiative link copied.",
+    "tabsLabel": "Initiative sections",
+    "tab": {
+      "overview": "Overview",
+      "projects": "Projects",
+      "updates": "Updates"
+    },
     "metaTargetDate": "Target",
     "metaCompleted": "Completed",
     "metaCreated": "Created",
-    "readinessReady": "Ready to ship",
-    "readinessBlocked": "Blocked",
-    "readinessTip": "Readiness counts open issues across every non-cancelled project, whatever that project's own status says. A project marked completed whose issue later regressed still blocks the release.",
-    "readinessOpen": "Open issues",
-    "readinessTotal": "Total issues",
-    "readinessProjects": "Projects",
-    "blockersTitle": "Blockers",
-    "blockersCount": "{count} issues",
-    "projectsTitle": "Projects ({count})",
+    "nestingParent": "Parent",
+    "progressTitle": "Progress",
+    "progressTip": "Progress counts the issues of every non-cancelled project. A project marked completed whose issue later regressed still leaves work open under the goal.",
+    "progressDone": "{done} of {total} done",
+    "progressOpen": "Still open",
+    "progressTotal": "Total issues",
+    "progressProjects": "Projects",
+    "projectPhaseTitle": "Projects by phase",
+    "issuePhaseTitle": "Issues by phase",
+    "seeProjects": "See all projects",
+    "noProjectsTitle": "No projects yet",
+    "noProjectsHint": "Attach a project to this goal from the project detail, and its issues start counting here.",
+    "remainingTitle": "Still to do",
+    "remainingCount": "{count} issues",
+    "subInitiativesTitle": "Sub-initiatives ({count})",
     "projectRollup": "{open} open / {done} done / {total}",
-    "projectOpen": "Blocking",
+    "projectRemaining": "Open",
+    "updatesEmptyTitle": "No updates posted yet",
+    "updatesEmptyHint": "The arithmetic says how far along it is; a person says whether that is fine.",
+    "updatePlaceholder": "Where does this goal stand, and why does it read that way?",
+    "postUpdate": "Post update",
+    "updateError": "Couldn't post the update",
     "historyTitle": "History",
     "discussTitle": "Discussion"
   },
@@ -5110,17 +5189,6 @@
     "privateOff": "Public",
     "privateHint": "A private team's issues are visible to its roster only. Visibility, not permission — workspace admins still see it."
   },
-  "teamHome": {
-    "title": "Team",
-    "notFound": "This team no longer exists.",
-    "openIssues": "{count, plural, one {# open issue} other {# open issues}}",
-    "totalIssues": "{count, plural, one {# issue total} other {# issues total}}",
-    "members": "{count, plural, one {# member} other {# members}}",
-    "recentIssues": "Recent issues",
-    "projects": "Projects this team is working on",
-    "viewAll": "View all",
-    "noIssues": "No issues in this team yet."
-  },
   "teamsDirectory": {
     "title": "Teams",
     "description": "Every team in this workspace. A team owns its issues and mints their identifiers, so this is where work is divided.",
@@ -5237,5 +5305,23 @@
     "emptyHint": "Plan the first iteration for {team}.",
     "loadError": "Could not load: {error}",
     "detailFallbackTitle": "Cycle"
+  },
+  "mediaLightbox": {
+    "title": "Image viewer",
+    "counter": "{index} / {total}",
+    "previous": "Previous image",
+    "next": "Next image",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetZoom": "Reset zoom",
+    "download": "Download",
+    "downloadFallbackName": "image",
+    "close": "Close"
+  },
+  "attachMedia": {
+    "dropHint": "Drop to attach",
+    "uploading": "Uploading {name}…",
+    "tooLarge": "Over the 5 MB attachment limit — {name}",
+    "failed": "Could not attach the file — {reason}"
   }
 }

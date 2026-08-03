@@ -4,10 +4,12 @@ import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { initiativeDocs } from "./initiative.docs.js";
 import { CreateInitiativeBodySchema } from "./request/create-initiative.js";
+import { PostInitiativeUpdateBodySchema } from "./request/post-initiative-update.js";
 import { SetInitiativeStatusBodySchema } from "./request/set-initiative-status.js";
 import { UpdateInitiativeBodySchema } from "./request/update-initiative.js";
 
-// The eval tracker's initiatives (docs/tracker.md) — the deployment umbrella whose readiness gates a release.
+// The eval tracker's initiatives (docs/tracker.md) — the GOAL several projects work toward, whose progress is
+// live arithmetic over everything underneath and whose completion is a gate on that arithmetic.
 // Authz reuses the ISSUE pair (issues:read / issues:write): Initiative ⊃ Project ⊃ Issue is one resource family.
 // Delete additionally requires creator-or-admin (decided in the service). An `InitiativeActor` is subject-only,
 // so no agent attribution rides along — the causedBy loop guard lives where agents write, on issues.
@@ -36,6 +38,7 @@ export function registerInitiativeRoutes(app: FastifyInstance, deps: ServerDeps)
           name: body.name,
           ...(body.description !== undefined ? { description: body.description } : {}),
           ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
+          ...(body.lead !== undefined ? { lead: body.lead } : {}),
           ...(body.targetDate !== undefined ? { targetDate: body.targetDate } : {}),
         }),
       );
@@ -70,8 +73,8 @@ export function registerInitiativeRoutes(app: FastifyInstance, deps: ServerDeps)
     );
   });
 
-  // Detail carries the readiness verdict — every project under the umbrella, each project's issues, one answer.
-  // It is a fan-out, which is why the list never serves it.
+  // Detail carries the progress read — every project under the goal, each project's issues, one answer. It is a
+  // fan-out, which is why the list never serves it.
   app.get<{ Params: { id: string } }>("/initiatives/:id", { schema: initiativeDocs.get }, async (req, reply) => {
     if (!deps.initiativeService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "initiative service not configured" });
@@ -114,6 +117,52 @@ export function registerInitiativeRoutes(app: FastifyInstance, deps: ServerDeps)
     }
   });
 
+  // The posted-update timeline — where the goal stands in the words of the person answerable for it, and the
+  // read a stakeholder goes to when the health colour changed.
+  app.post<{ Params: { id: string } }>(
+    "/initiatives/:id/updates",
+    { schema: initiativeDocs.postUpdate },
+    async (req, reply) => {
+      if (!deps.initiativeService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "initiative service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:write");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const body = PostInitiativeUpdateBodySchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        return reply.code(201).send(
+          await deps.initiativeService.postUpdate(principal.workspace, req.params.id, body.data, {
+            subject: principal.subject,
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/initiatives/:id/updates",
+    { schema: initiativeDocs.listUpdates },
+    async (req, reply) => {
+      if (!deps.initiativeService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "initiative service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:read");
+        return reply.send(await deps.initiativeService.listUpdates(principal.workspace, req.params.id, 50));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.post<{ Params: { id: string } }>(
     "/initiatives/:id/status",
     { schema: initiativeDocs.setStatus },
@@ -143,7 +192,7 @@ export function registerInitiativeRoutes(app: FastifyInstance, deps: ServerDeps)
           ),
         );
       } catch (err) {
-        return sendError(reply, err); // the release gate's refusal is the domain's 409, verbatim
+        return sendError(reply, err); // the completion gate's refusal is the domain's 409, verbatim
       }
     },
   );

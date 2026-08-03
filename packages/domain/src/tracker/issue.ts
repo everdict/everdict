@@ -2,8 +2,10 @@ import type {
   IssueGithub,
   IssueGithubComment,
   IssueGithubSync,
+  IssueGroupBy,
   IssueLink,
   IssueLinkType,
+  IssueOrder,
   IssuePriority,
   IssueRecord,
   IssueResolution,
@@ -17,6 +19,7 @@ import {
   BadRequestError,
   ConflictError,
   ISSUE_GITHUB_COMMENT_LIMIT,
+  ISSUE_PRIORITIES,
   ISSUE_STATUS_CATEGORY,
   NotFoundError,
 } from "@everdict/contracts";
@@ -96,6 +99,10 @@ export interface IssueMoveInput {
   teamId: string;
   number: number;
   identifier: string;
+  // Whether the destination team is on the issue's project. The SERVICE answers it (it holds the project
+  // store); the aggregate decides what a "no" means — see `moveToTeam`. Absent = the issue is in no project,
+  // or projects are not composed in this deployment, and there is nothing to decide.
+  projectHoldsTeam?: boolean;
 }
 
 export interface IssueStatusChangeOptions {
@@ -124,6 +131,13 @@ const PRIORITY_RANK: Record<IssuePriority, number> = { urgent: 0, high: 1, mediu
 export function issuePriorityRank(priority: IssuePriority): number {
   return PRIORITY_RANK[priority];
 }
+
+// The vocabulary IN rank order — most urgent first, unprioritised last. Derived from the ranking above rather
+// than typed out again, because a second list is a second place to forget where `none` belongs. Postgres sorts
+// a priority-ordered page by looking a value up in exactly this array.
+export const ISSUE_PRIORITIES_BY_RANK: readonly IssuePriority[] = [...ISSUE_PRIORITIES].sort(
+  (a, b) => PRIORITY_RANK[a] - PRIORITY_RANK[b],
+);
 
 // OPEN = not done and not cancelled. `regressed` is deliberately open: a resolution that stopped holding is
 // unfinished work, and the initiative readiness must treat it exactly like an unstarted issue.
@@ -184,6 +198,127 @@ export function issueSummaryOf(record: IssueRecord): IssueSummary {
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
+}
+
+// --- Grouping and ordering: the semantics both store implementations mirror ---
+// A grouped, sorted list is drawn from two sources that must agree — the aggregate that counts each group and
+// the page that fills it — and on Postgres those are SQL while in memory they are these functions. Keeping the
+// rules here (one group key, one sort key) is what stops the two readings from drifting: the SQL below each
+// store method is written to produce exactly what these return.
+
+// Which group a record falls in. `null` is the UNSET bucket — an issue with no assignee is not missing from
+// the list, it belongs to the group every board draws at the end.
+export function issueGroupKey(record: IssueRecord, groupBy: IssueGroupBy): string | null {
+  switch (groupBy) {
+    case "status":
+      return record.status;
+    case "priority":
+      return record.priority;
+    case "assignee":
+      return record.assignee ?? null;
+    case "project":
+      return record.projectId ?? null;
+    case "cycle":
+      return record.cycleId ?? null;
+  }
+}
+
+// Largest group first, ties by key so the sequence is stable across calls; the unset bucket sorts last
+// whatever its size, because "nobody" is not a peer of the named groups. Exported because Postgres counts with
+// a GROUP BY but orders through here — one ordering rule, so both implementations return the same sequence.
+export function orderIssueGroupCounts(
+  counts: readonly { key: string | null; count: number }[],
+): { key: string | null; count: number }[] {
+  return [...counts].sort((a, b) => {
+    if (a.key === null) return b.key === null ? 0 : 1;
+    if (b.key === null) return -1;
+    return b.count - a.count || a.key.localeCompare(b.key);
+  });
+}
+
+// Counts per group over records already in hand — the in-memory half of `IssueStore.countByGroup`.
+export function issueCountsByGroup(
+  records: readonly IssueRecord[],
+  groupBy: IssueGroupBy,
+): { key: string | null; count: number }[] {
+  const counts = new Map<string, { key: string | null; count: number }>();
+  for (const record of records) {
+    const key = issueGroupKey(record, groupBy);
+    // The map key spells the null bucket, because `Map` would happily keep `null` and the string "null" apart
+    // only until a project is literally named that.
+    const slot = key === null ? "unset:" : `key:${key}`;
+    const entry = counts.get(slot) ?? { key, count: 0 };
+    entry.count += 1;
+    counts.set(slot, entry);
+  }
+  return orderIssueGroupCounts([...counts.values()]);
+}
+
+// The PRIMARY sort key, rendered as a string that sorts DESCENDING into the order the reader asked for. One
+// comparable type for every ordering is what lets a single page cursor carry it: the token holds this value
+// plus (updatedAt, id), and both stores resume from the same row.
+//
+// The two ASCENDING orderings are inverted here rather than at the comparison, because a cursor predicate that
+// flips direction per ordering is a predicate somebody eventually gets backwards. `priority` inverts by
+// subtracting the rank from the vocabulary size (urgent = highest); `due` inverts by complementing each digit
+// of the date, so the earliest deadline compares greatest and an issue with NO deadline sorts last.
+// Everything an ordering reads, and nothing else — so the LIST PROJECTION satisfies it too. The Postgres store
+// mints its page token from the summary row it just selected; typing this as the whole record would have
+// forced it to re-read columns the projection exists to avoid.
+export type IssueOrderable = Pick<IssueRecord, "id" | "updatedAt" | "createdAt" | "priority" | "dueDate">;
+
+export function issueOrderKey(record: IssueOrderable, order: IssueOrder): string {
+  switch (order) {
+    case "updated":
+      return record.updatedAt;
+    case "created":
+      return record.createdAt;
+    case "priority":
+      // Zero-padded so the comparison stays a STRING comparison: unpadded, a tenth priority would rank "10"
+      // below "2" and the ordering would quietly invert for the tail of the vocabulary.
+      return String(ISSUE_PRIORITIES.length - issuePriorityRank(record.priority)).padStart(2, "0");
+    case "due":
+      return record.dueDate === undefined ? "0000-00-00" : complementDate(record.dueDate);
+  }
+}
+
+// `2026-08-03` → `7973-91-96`: each digit becomes 9 minus itself, so an earlier date yields a greater string
+// and a plain descending comparison puts the nearest deadline first. The dashes stay put, and every date is
+// the same length, so the mapping is order-reversing across the whole vocabulary.
+function complementDate(date: string): string {
+  let out = "";
+  for (const ch of date) out += ch >= "0" && ch <= "9" ? String(9 - Number(ch)) : ch;
+  return out;
+}
+
+// Plain codepoint comparison, never `localeCompare`: the page CURSOR resumes with `<`, so a sort that ordered
+// by collation instead would disagree with its own page boundary — locale collation is free to ignore the
+// dashes in a date, and then two rows on either side of the boundary swap and one of them is never served.
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// Newest/most-urgent first, ties broken by (updatedAt, id) descending so the sequence is total — without a
+// unique tail, two issues sharing a priority could swap places between pages and one of them would be lost.
+export function compareIssuesForList(a: IssueOrderable, b: IssueOrderable, order: IssueOrder): number {
+  return (
+    compareText(issueOrderKey(b, order), issueOrderKey(a, order)) ||
+    compareText(b.updatedAt, a.updatedAt) ||
+    compareText(b.id, a.id)
+  );
+}
+
+// Is `record` strictly AFTER the cursor position in the same sequence `compareIssuesForList` defines? The page
+// boundary and the sort are therefore one rule, not two that happen to line up today.
+export function isIssueAfterCursor(
+  record: IssueOrderable,
+  after: { key: string; updatedAt: string; id: string },
+  order: IssueOrder,
+): boolean {
+  const key = issueOrderKey(record, order);
+  if (key !== after.key) return key < after.key;
+  if (record.updatedAt !== after.updatedAt) return record.updatedAt < after.updatedAt;
+  return record.id < after.id;
 }
 
 // Counts per team over records already in hand — the in-memory half of `IssueStore.countByTeam`, shared so a
@@ -344,6 +479,13 @@ export class Issue {
       if (next !== this.record.projectId) {
         patch.projectId = next;
         changed.push("project");
+        // A milestone is a checkpoint INSIDE a project, so leaving the old one on an issue that just moved
+        // projects would be the dangling reference the service refuses to create in the first place. Cleared
+        // unless the same edit names a milestone — in which case that one is checked against the new project.
+        if (fields.milestoneId === undefined && this.record.milestoneId !== undefined) {
+          patch.milestoneId = undefined;
+          changed.push("milestone");
+        }
       }
     }
     if (fields.priority !== undefined && fields.priority !== this.record.priority) {
@@ -400,6 +542,13 @@ export class Issue {
   // would make the name a lie. The previous name is kept on the record (and stays resolvable) so every link
   // already pasted into a pull request still lands here, which is what makes re-minting affordable at all.
   // The service allocates the number from the destination team, exactly as filing does.
+  //
+  // A move also DROPS whatever the destination team does not own. Everything the issue points at across the
+  // team axis was checked against the OLD team when it was set — its cycle, its board column, and (unless the
+  // destination is on it too) its project with the milestone inside it. Carrying those across would leave the
+  // issue in an iteration it can never appear in and a column that is not on its board: the invariant every
+  // other path enforces, quietly false for exactly the issues that moved. What it loses is named in the
+  // history, so the move never reads as a rename that silently emptied three fields.
   moveToTeam(input: IssueMoveInput, by: string, now: string): IssueTransition {
     if (input.teamId === this.record.teamId)
       throw new ConflictError(
@@ -409,7 +558,22 @@ export class Issue {
       );
     const fromTeamId = this.record.teamId;
     const fromIdentifier = this.record.identifier;
-    const detail = { fromTeamId, toTeamId: input.teamId, fromIdentifier, toIdentifier: input.identifier };
+    // The project stays only when the destination team is on it — a project spans teams, so a move inside the
+    // project's own set of teams is not a departure from the project.
+    const keepsProject = this.record.projectId === undefined || input.projectHoldsTeam === true;
+    const dropped = [
+      ...(this.record.cycleId !== undefined ? ["cycle"] : []),
+      ...(this.record.stateId !== undefined ? ["state"] : []),
+      ...(keepsProject ? [] : ["project"]),
+      ...(keepsProject || this.record.milestoneId === undefined ? [] : ["milestone"]),
+    ];
+    const detail = {
+      fromTeamId,
+      toTeamId: input.teamId,
+      fromIdentifier,
+      toIdentifier: input.identifier,
+      ...(dropped.length > 0 ? { dropped } : {}),
+    };
     return {
       patch: {
         teamId: input.teamId,
@@ -418,6 +582,9 @@ export class Issue {
         // Counters only ever move forward, so a re-mint can never collide with a name this issue already had —
         // the Set is here for the shape's own sake, not to paper over a possible duplicate.
         formerIdentifiers: [...new Set([...this.record.formerIdentifiers, fromIdentifier])],
+        cycleId: undefined,
+        stateId: undefined,
+        ...(keepsProject ? {} : { projectId: undefined, milestoneId: undefined }),
         history: appendHistory(this.record.history, { at: now, by, event: "moved", detail }),
         updatedAt: now,
       },

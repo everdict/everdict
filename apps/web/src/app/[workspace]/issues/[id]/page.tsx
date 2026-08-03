@@ -62,6 +62,7 @@ import { Card } from '@/shared/ui/card'
 import { EntityRef } from '@/shared/ui/chip'
 import { CopyLinkButton } from '@/shared/ui/copy-link-button'
 import { Markdown } from '@/shared/ui/markdown'
+import { MediaLightbox } from '@/shared/ui/media-lightbox'
 import { PageHeader } from '@/shared/ui/page-header'
 import { PropertyList, PropertyRow } from '@/shared/ui/property-list'
 import { SectionHeader } from '@/shared/ui/section-header'
@@ -181,8 +182,11 @@ export default async function IssueDetailPage({
       .listIssueScorecards(ctx, current.id)
       .then((r) => issueScorecardsSchema.parse(r))
       .catch(() => ({ scorecards: [], linked: [] })),
+    // 이 이슈가 들어갈 수 있는 프로젝트 — 자기 팀의 것뿐이다. 프로젝트는 자기 팀들을 이름으로 들고 있고,
+    // 이슈는 자기 팀이 올라 있는 프로젝트에만 들어간다(제어 평면이 거부한다). 워크스페이스 전체를 그려 놓으면
+    // 고를 수는 있는데 저장은 실패하는 항목이 목록의 대부분이 된다.
     controlPlane
-      .listProjects(ctx)
+      .listProjects(ctx, { team: current.teamId })
       .then((r) => projectsSchema.parse(r))
       .catch((): Project[] => []),
     controlPlane
@@ -231,6 +235,9 @@ export default async function IssueDetailPage({
   ])
 
   const canWrite = can(principal?.roles ?? [], 'issues:write')
+  // 설명에 파일을 붙이는 것은 워크스페이스 파일시스템에 쓰는 일이다 — 이슈 쓰기와 같은 등급(member+)이지만
+  // 판정은 그 권한으로 한다.
+  const canAttach = can(principal?.roles ?? [], 'files:write')
   // 닫힌 이슈의 지난 기한은 경고가 아니다 — 이미 끝난 일에 붉은 배지를 다는 건 소음이다.
   const dueOverdue =
     current.status !== 'done' &&
@@ -328,6 +335,7 @@ export default async function IssueDetailPage({
               projects={projects.map((p) => ({ id: p.id, name: p.name }))}
               labels={labels}
               canWrite={canWrite}
+              canAttach={canAttach}
             />
           )}
         </div>
@@ -514,8 +522,10 @@ export default async function IssueDetailPage({
           )}
         </aside>
 
-        {/* ③ 이슈의 맥락과 증거, 그리고 논의. */}
-        <div className="min-w-0 space-y-7 @3xl:col-start-1 @3xl:row-start-1">
+        {/* ③ 이슈의 맥락과 증거, 그리고 논의.
+            본문 열 전체를 확대 뷰어로 감싼다 — 설명·GitHub 코멘트·논의에 실린 그림이 한 묶음의 좌우 이동이
+            되어야, 스크린샷을 비교하려고 이슈를 떠날 이유가 없어진다. */}
+        <MediaLightbox className="min-w-0 space-y-7 @3xl:col-start-1 @3xl:row-start-1">
           {/* 설명은 제목 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 이슈 그 자체다.
               An imported GitHub issue's body IS markdown — render it as such (GFM), never as flat text. */}
           {/* imageProxy: 본문의 GitHub 첨부 이미지는 브라우저가 직접 못 받아온다(GHE·비공개 리포는 리포와 같은
@@ -652,7 +662,7 @@ export default async function IssueDetailPage({
             resourceId={current.id}
             title={t('discussTitle')}
           />
-        </div>
+        </MediaLightbox>
       </div>
     </div>
   )

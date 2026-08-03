@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleSlash, Rocket, type LucideIcon } from 'lucide-react'
+import { CheckCircle2, CircleSlash, Target, type LucideIcon } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { Badge } from '@/shared/ui/badge'
@@ -12,7 +12,7 @@ const TONE: Record<InitiativeStatus, 'neutral' | 'success' | 'info'> = {
 }
 
 const ICON: Record<InitiativeStatus, LucideIcon> = {
-  active: Rocket,
+  active: Target,
   completed: CheckCircle2,
   cancelled: CircleSlash,
 }
