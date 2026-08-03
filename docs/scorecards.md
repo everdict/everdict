@@ -119,8 +119,12 @@ dashboard's engine (`@everdict/domain computeAnalysis`; the two stay in lockstep
 pivot/measure (`passRate|mean|count|latest`) over the lightweight list shape, `viz: table|bars` → grid rows,
 `viz: line` → time-bucketed series. Incomplete batches (queued/running/superseded/cancelled) are excluded
 unless `includeIncomplete`. `GET /scorecards/:id/analysis` returns the self-contained analysis artifact
-(`analysisRef`: summary + per-case verdicts/scores) as one JSON document — 404 when the record has no
-downloadable (http) artifact. Both power the analysis agent (`docs/architecture/analysis-studio.md`).
+(`analysisRef`: summary + per-case verdicts/scores) as one JSON document — 404 when the record has no artifact.
+It reads the object by KEY (`analyses/<id>.json`) through the `ArtifactStore`, falling back to fetching the ref
+only for an artifact this deployment's store doesn't hold: the stored ref is a PRESIGNED url on the
+server-internal endpoint, so it expires within the hour and no browser outside the cluster can resolve it. That
+is also why the web's "download analysis" link points at this route (through its BFF) instead of `analysisRef`.
+Both power the analysis agent (`docs/architecture/analysis-studio.md`).
 
 Optional `graders: GraderSpec[]` is the **run-time grading plan** — it replaces every case's default graders for
 this batch only (the dataset stays pure data), and is persisted in `orchestration.graders` so restart-resume /

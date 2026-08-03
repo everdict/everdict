@@ -20,7 +20,7 @@ import {
   scorecardModels,
   trendSeries,
 } from "@everdict/domain";
-import type { ScorecardServiceDeps } from "./scorecard-shared.js";
+import { type ScorecardServiceDeps, analysisArtifactKey } from "./scorecard-shared.js";
 
 // Analytics collaborator behind the ScorecardService facade (docs/architecture/api-route-modularization.md R2-b):
 // read-side derivations over the store + the pure @everdict/domain aggregations — diff / trend / leaderboard /
@@ -111,16 +111,22 @@ export class ScorecardAnalyticsService {
     return computeAnalysis(records, config);
   }
 
-  // The offloaded analysis bundle (ScorecardRecord.analysisRef) fetched server-side — the per-case verdicts/scores
-  // without re-reading every child run. Only an http(s) ref is fetchable (the same gate as the web download link);
-  // a record without one reads 404 like a missing resource. The artifact was written by our own offload path, so the
-  // URL is trusted; a fetch/parse failure is the upstream store's fault → UpstreamError.
+  // The offloaded analysis bundle (ScorecardRecord.analysisRef) read server-side — the per-case verdicts/scores
+  // without re-reading every child run. A record with no ref at all reads 404 like a missing resource.
+  //
+  // The stored ref is NOT how we read it back: `put` returns a PRESIGNED url (it expires — an hour later the record's
+  // ref answers 403) pointing at the SERVER-internal endpoint. So we read the artifact by its KEY through the store,
+  // which is stable forever, and keep the ref fetch only as the fallback for an artifact this deployment's store does
+  // not hold (a foreign bucket, or no store wired here). A fetch/parse failure is the upstream store's fault → UpstreamError.
   async analysisBundle(tenant: string, id: string): Promise<unknown> {
     const record = await this.getRecord(id);
     if (!record || record.tenant !== tenant)
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
     const ref = record.analysisRef;
-    if (!ref || !/^https?:\/\//i.test(ref))
+    if (!ref) throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' has no downloadable analysis artifact.`);
+    const fromStore = await this.readAnalysisArtifact(id);
+    if (fromStore !== undefined) return fromStore;
+    if (!/^https?:\/\//i.test(ref))
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' has no downloadable analysis artifact.`);
     try {
       const res = await fetch(ref);
@@ -138,6 +144,19 @@ export class ScorecardAnalyticsService {
         { id },
         `analysis artifact fetch failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  }
+
+  // The analysis artifact by KEY — the same key `offloadAnalysis` wrote (`analyses/<id>.json`). undefined = this
+  // deployment's store doesn't hold it (no store wired, another bucket, unparseable bytes) → the caller falls back
+  // to the ref. A store OUTAGE (as opposed to an absent object) propagates as the store's own UpstreamError.
+  private async readAnalysisArtifact(id: string): Promise<unknown | undefined> {
+    const bytes = await this.deps.artifacts?.get(analysisArtifactKey(id));
+    if (!bytes) return undefined;
+    try {
+      return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    } catch {
+      return undefined; // corrupt/partial object — let the ref path have its say rather than failing the read here
     }
   }
 

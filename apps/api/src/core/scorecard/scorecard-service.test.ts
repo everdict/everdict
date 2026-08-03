@@ -31,6 +31,7 @@ import {
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
 } from "@everdict/registry";
+import { InMemoryArtifactStore } from "@everdict/storage";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -387,6 +388,60 @@ describe("ScorecardService.analysis — flexible pivot", () => {
   });
 });
 
+describe("ScorecardService.getForDisplay — case snapshots the browser can open", () => {
+  const artifacts = {
+    async put(key: string): Promise<string> {
+      return `http://minio:9000/bucket/${key}`;
+    },
+    async get(): Promise<Uint8Array | undefined> {
+      return undefined;
+    },
+    async publicUrlFor(ref: string): Promise<string | undefined> {
+      return ref.startsWith("http://minio:9000/")
+        ? `${ref.replace("http://minio:9000", "https://cdn.example")}&fresh`
+        : undefined;
+    },
+  };
+  const withShot = (id: string): ScorecardRecord =>
+    record(id, {
+      status: "succeeded",
+      scorecard: {
+        suiteId: "d",
+        harness: "h@1",
+        results: [
+          {
+            caseId: "c1",
+            harness: "h@1",
+            trace: [],
+            snapshot: {
+              kind: "os-use",
+              screenshot: "",
+              screenshotRef: "http://minio:9000/bucket/scorecards/sc/c1.png?sig=old",
+              windows: [],
+            },
+            scores: [],
+          },
+        ],
+      },
+    });
+
+  it("re-mints each case's screenshotRef for the viewer, while get() keeps the in-cluster ref", async () => {
+    // Regression: the detail page rendered the stored ref, which is signed for http://minio:9000 and expired.
+    const store = new InMemoryScorecardStore();
+    await store.create(withShot("sc"));
+    const service = new ScorecardService({ dispatcher, store, datasets: new InMemoryDatasetRegistry(), artifacts });
+
+    const shown = (await service.getForDisplay("sc"))?.scorecard?.results[0]?.snapshot;
+    expect(shown?.kind === "os-use" && shown.screenshotRef).toBe(
+      "https://cdn.example/bucket/scorecards/sc/c1.png?sig=old&fresh",
+    );
+    const internal = (await service.get("sc"))?.scorecard?.results[0]?.snapshot;
+    expect(internal?.kind === "os-use" && internal.screenshotRef).toBe(
+      "http://minio:9000/bucket/scorecards/sc/c1.png?sig=old",
+    );
+  });
+});
+
 describe("ScorecardService.analysisBundle — offloaded analysis fetch", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -403,6 +458,41 @@ describe("ScorecardService.analysisBundle — offloaded analysis fetch", () => {
     const store = new InMemoryScorecardStore();
     await store.create(record("theirs", { tenant: "beta", analysisRef: "https://s3/analyses/theirs.json" }));
     await expect(svc(store).analysisBundle("acme", "theirs")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("reads the artifact by KEY from the store — never by replaying the stored (presigned, internal) ref", async () => {
+    // Regression: the ref `put` returned is a presigned URL on the SERVER-internal endpoint. An hour later it answers
+    // 403, so a scorecard from yesterday used to have an undownloadable analysis (and the browser could never resolve
+    // `minio:9000` anyway). The read side derives the key from the id instead.
+    const bundle = { scorecardId: "sc", dataset: "d@1", harness: "h@1", summary: [], cases: [] };
+    const artifacts = new InMemoryArtifactStore();
+    await artifacts.put("analyses/sc.json", Buffer.from(JSON.stringify(bundle)), "application/json");
+    const expired = vi.fn(async () => new Response("expired", { status: 403 }));
+    vi.stubGlobal("fetch", expired);
+    const store = new InMemoryScorecardStore();
+    await store.create(
+      record("sc", { analysisRef: "http://minio:9000/everdict-artifacts/analyses/sc.json?X-Amz-Signature=stale" }),
+    );
+    const service = new ScorecardService({ dispatcher, store, datasets: new InMemoryDatasetRegistry(), artifacts });
+    await expect(service.analysisBundle("acme", "sc")).resolves.toEqual(bundle);
+    expect(expired).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the ref when this deployment's store doesn't hold the artifact", async () => {
+    const bundle = { scorecardId: "sc", dataset: "d@1", harness: "h@1", summary: [], cases: [] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(bundle), { status: 200 })),
+    );
+    const store = new InMemoryScorecardStore();
+    await store.create(record("sc", { analysisRef: "https://elsewhere.example/analyses/sc.json" }));
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets: new InMemoryDatasetRegistry(),
+      artifacts: new InMemoryArtifactStore(), // wired, but empty
+    });
+    await expect(service.analysisBundle("acme", "sc")).resolves.toEqual(bundle);
   });
 
   it("fetches an http ref server-side and returns the parsed bundle", async () => {

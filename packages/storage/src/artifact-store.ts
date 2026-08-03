@@ -8,4 +8,13 @@ export class InMemoryArtifactStore implements ArtifactStore {
     this.objects.set(key, { data, contentType });
     return `${this.baseUrl}${key}`;
   }
+
+  async get(key: string): Promise<Uint8Array | undefined> {
+    return this.objects.get(key)?.data;
+  }
+
+  // memory:// refs don't expire and there is no second address to mint — a ref of ours is already the only one.
+  async publicUrlFor(ref: string): Promise<string | undefined> {
+    return ref.startsWith(this.baseUrl) ? ref : undefined;
+  }
 }

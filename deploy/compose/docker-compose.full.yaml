@@ -256,9 +256,10 @@ services:
       AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
       # ── Object storage (MinIO): the WORKSPACE FILESYSTEM — one bucket per tenant (everdict-fs-<tenant>-<hash8>,
       #    lazily created; skill/knowledge bodies + agent task outputs + the web /files tree live there) — plus
-      #    artifact offload (run screenshots/DOM → presigned URLs in EVERDICT_S3_BUCKET). MINIO_PUBLIC_URL rebases
-      #    presigned ARTIFACT links onto a browser-reachable base (set like API_PUBLIC_URL for off-host users);
-      #    the filesystem itself is served through the api, no public MinIO needed for it. ──
+      #    artifact offload (run screenshots/DOM → presigned URLs in EVERDICT_S3_BUCKET). MINIO_PUBLIC_URL is the
+      #    browser-reachable base those links are SIGNED FOR (SigV4 covers the host — an unset value leaves them on
+      #    http://minio:9000, which no off-host browser can resolve; set it like API_PUBLIC_URL). The filesystem and
+      #    the scorecard analysis download are served through the api, so neither needs a public MinIO. ──
       EVERDICT_S3_ENDPOINT: http://minio:9000
       EVERDICT_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-everdict}
       EVERDICT_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD (openssl rand -hex 16)}

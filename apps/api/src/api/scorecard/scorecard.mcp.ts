@@ -312,7 +312,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       },
       ({ id }) =>
         run(principal, "scorecards:read", async () => {
-          const record = await scorecards.get(id);
+          const record = await scorecards.getForDisplay(id); // BFF parity — the agent gets openable artifact refs too
           if (!record || record.tenant !== ws) return fail("NOT_FOUND: scorecard not found.");
           return ok(serveScorecard(record));
         }),

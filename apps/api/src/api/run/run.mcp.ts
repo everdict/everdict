@@ -61,7 +61,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     { description: "Fetch one run (another workspace's is NOT_FOUND)", inputSchema: { id: z.string() } },
     ({ id }) =>
       run(principal, "runs:read", async () => {
-        const record = await deps.service.get(id);
+        const record = await deps.service.getForDisplay(id); // BFF parity — the agent gets openable artifact refs too
         if (!record || record.tenant !== ws) return fail("NOT_FOUND: run not found.");
         return ok(record);
       }),

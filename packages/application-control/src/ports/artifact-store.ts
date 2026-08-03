@@ -6,6 +6,17 @@ import type { EnvSnapshot } from "@everdict/contracts";
 // the offload use-case belong to the application layer (I/O through the port, not a pure rule).
 export interface ArtifactStore {
   put(key: string, data: Uint8Array, contentType: string): Promise<string>;
+  // Read an artifact back by KEY. The ref `put` returns is not a durable handle — it is presigned (it expires) and it
+  // carries the SERVER-internal endpoint, so nothing may re-read an artifact by replaying that stored URL: server-side
+  // reads go through the key, and anything the browser must reach is served by us. Missing object → undefined
+  // (the caller decides whether that is a 404); a store failure throws (an outage is not an absence).
+  get(key: string): Promise<Uint8Array | undefined>;
+  // Mint a FRESH browser-facing url for a ref this store minted earlier. Two things are wrong with a stored ref by
+  // the time someone looks at it: it was signed for the SERVER-internal endpoint (no browser outside the cluster
+  // resolves `http://minio:9000`), and it has expired. So a display read re-mints — against the store's public base
+  // when the deployment declared one. Not this store's ref (a foreign bucket/deployment) → undefined, and the caller
+  // keeps what it had rather than inventing a link.
+  publicUrlFor(ref: string): Promise<string | undefined>;
 }
 
 // Offload a run's produced snapshot MEDIA to object storage so the persisted result stays small (the store's `put`
@@ -35,6 +46,27 @@ export async function offloadSnapshot(
   if (out.kind === "browser" && out.dom.length > DOM_INLINE_MAX) {
     const ref = await store.put(`${keyBase}.dom.html`, Buffer.from(out.dom, "utf8"), "text/html; charset=utf-8");
     out = { ...out, domRef: ref, dom: out.dom.slice(0, DOM_INLINE_MAX) };
+  }
+  return out;
+}
+
+// The display-side twin of offloadSnapshot: hand the browser links it can actually open. What the record holds is a
+// SERVER handle (internal endpoint + long expired), so every read that ends up on a screen re-mints it — never the
+// reads that feed our own code (a judge fetching evidence must keep using the in-cluster address). No store, nothing
+// offloaded, or a ref this store doesn't recognize → unchanged.
+export async function refreshSnapshotRefs(
+  snapshot: EnvSnapshot,
+  store: ArtifactStore | undefined,
+): Promise<EnvSnapshot> {
+  if (!store) return snapshot;
+  let out = snapshot;
+  if ((out.kind === "os-use" || out.kind === "browser") && out.screenshotRef) {
+    const fresh = await store.publicUrlFor(out.screenshotRef);
+    if (fresh) out = { ...out, screenshotRef: fresh };
+  }
+  if (out.kind === "browser" && out.domRef) {
+    const fresh = await store.publicUrlFor(out.domRef);
+    if (fresh) out = { ...out, domRef: fresh };
   }
   return out;
 }

@@ -103,6 +103,12 @@ describe("CaseRecorder", () => {
       async put(): Promise<string> {
         throw new Error("s3 down");
       },
+      async get(): Promise<Uint8Array | undefined> {
+        return undefined;
+      },
+      async publicUrlFor(): Promise<string | undefined> {
+        return undefined;
+      },
     };
     const recorder = new CaseRecorder(recordings, brokenArtifacts, fakeClock());
 

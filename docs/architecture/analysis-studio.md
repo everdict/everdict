@@ -116,9 +116,10 @@ verbs → no HITL. This slice is valuable standalone (big-workspace dashboard pe
   number): `{id, tenant, kind, title, sessionId, messageId?, viewId?, pinned, spec? (jsonb, size-capped),
   blobKey?, contentType?, createdBy, createdAt}`. Small declarative payloads (ChartSpec/table/markdown)
   live inline in `spec`; large payloads (CSV/JSON exports, images) go to `ArtifactStore` under
-  `agent-artifacts/<tenant>/<id>` with the **key** stored and the URL **minted at read time** (a new
-  `getUrl(key)` on the `ArtifactStore` port — presigned URLs expire, so persisting `put()`'s ref is only
-  correct for one-shot links like `analysisRef`).
+  `agent-artifacts/<tenant>/<id>` with the **key** stored and the URL **minted at read time** (a `getUrl(key)`
+  on the `ArtifactStore` port — presigned URLs expire, so a persisted `put()` ref is never a durable handle:
+  even `analysisRef` is only a marker that the artifact EXISTS, and the read side goes through
+  `ArtifactStore.get(key)`, never by replaying that URL).
 - **Emission tools** (first-party, in `first-party.ts` style but host-native — no network hop needed):
   `render_chart {spec}` (validated ChartSpec → chart artifact), `write_report {title, markdown}`,
   `export_table {title, rows}`. The agent host (`apps/agent`) persists the record, links it to the

@@ -871,8 +871,10 @@ storage with a presigned URL in `screenshotRef` — same field, swappable. Image
 
 ### Object-storage offload — screenshot to MinIO, presigned URL in a slim record ✅
 SLICE 81's base64-in-the-record is the dev posture; this is the production swap promised there. New **`@everdict/storage`**:
-an `ArtifactStore` interface (`put(key, bytes, contentType) → ref`), an **`S3ArtifactStore`** (MinIO/S3 via the AWS SDK —
-`PutObject` + a presigned `GetObject` URL, path-style, optional `publicBaseUrl` host rewrite + `ensureBucket`), an
+an `ArtifactStore` interface (`put(key, bytes, contentType) → ref` + `get(key) → bytes`, the durable read-back handle —
+the ref is presigned and expires), an **`S3ArtifactStore`** (MinIO/S3 via the AWS SDK — `PutObject` + a presigned
+`GetObject` URL, path-style, presigned FOR `publicBaseUrl` when set (SigV4 signs the host, so the URL can't be rewritten
+after signing) + `ensureBucket`), an
 `InMemoryArtifactStore` for tests, and `offloadSnapshot(snapshot, store, key)` — for an os-use snapshot it uploads the
 embedded base64, sets `screenshotRef` to the returned URL, and **clears `screenshot`** so the record stays small. The
 control plane wires it: `RunService`/`ScorecardService` take an optional `artifacts` store and offload each os-use

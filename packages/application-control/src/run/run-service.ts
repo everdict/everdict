@@ -30,7 +30,7 @@ import {
 import { admitCausedWork } from "../admission/admission.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
 import { type StampedFact, stampFacts } from "../platform-event/outbox.js";
-import { type ArtifactStore, offloadSnapshot } from "../ports/artifact-store.js";
+import { type ArtifactStore, offloadSnapshot, refreshSnapshotRefs } from "../ports/artifact-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
@@ -291,6 +291,17 @@ export class RunService {
     return this.withLiveTrace(await this.withTrajectoryUsage(record));
   }
 
+  // The read whose answer ends up on a SCREEN (the detail route + its MCP twin — keep the two in step). Identical to
+  // get(), except the snapshot's artifact refs are re-minted for the viewer's browser: the persisted ones are
+  // server-side handles (in-network host, hour-old signature). Our own callers keep using get() so their fetches stay
+  // in-cluster.
+  async getForDisplay(id: string): Promise<(RunRecord & { liveTrace?: LiveTraceRef }) | undefined> {
+    const record = await this.get(id);
+    if (!record?.result?.snapshot) return record;
+    const snapshot = await refreshSnapshotRefs(record.result.snapshot, this.deps.artifacts);
+    return snapshot === record.result.snapshot ? record : { ...record, result: { ...record.result, snapshot } };
+  }
+
   // Usage for the runs whose evidence is NOT a row embed. The store derives usage from `result.trace`, which
   // an eval run has and an agent turn never does (its transcript is sealed in the trajectory store, per O10 —
   // new runs write refs, not embeds). The result was that the executions which actually spend money reported
@@ -460,7 +471,17 @@ export class RunService {
     const recording = this.deps.recordingStore
       ? await this.deps.recordingStore.get(RunService.runIdFor(record))
       : undefined;
-    return { record, recording };
+    // The player draws every frame straight from its ref, so this read is display-only by nature — re-mint them
+    // (same reason as getForDisplay). Frames dedup by ref, so re-sign each distinct one once.
+    if (!recording?.tracks.frames?.length || !this.deps.artifacts) return { record, recording };
+    const minted = new Map<string, string>();
+    const frames = [];
+    for (const frame of recording.tracks.frames) {
+      if (!minted.has(frame.ref))
+        minted.set(frame.ref, (await this.deps.artifacts.publicUrlFor(frame.ref)) ?? frame.ref);
+      frames.push({ ...frame, ref: minted.get(frame.ref) ?? frame.ref });
+    }
+    return { record, recording: { ...recording, tracks: { ...recording.tracks, frames } } };
   }
 
   // CP-minted correlation id — the same derivation the dispatch stamps on CaseJob.runId (evd-run-<id> for a single

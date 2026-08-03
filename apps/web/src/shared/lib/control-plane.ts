@@ -704,6 +704,10 @@ export const controlPlane = {
   },
   getScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
+  // 오프로드된 분석 아티팩트(요약+케이스별 verdict/scores)를 컨트롤플레인이 오브젝트스토어에서 읽어 JSON 으로 준다.
+  // 브라우저가 오브젝트스토어를 직접 치지 않는 이유 = 저장된 ref 는 서버 내부 주소(minio:9000)이고 presigned 라 만료된다.
+  getScorecardAnalysis: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}/analysis`),
   runScorecard: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/scorecards', { method: 'POST', body: JSON.stringify(body) }),
   retryScorecard: <T>(auth: AuthContext, id: string) =>

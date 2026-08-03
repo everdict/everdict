@@ -498,6 +498,11 @@ export function analysisBundle(
   };
 }
 
+// Where a scorecard's analysis artifact lives in the store. The KEY is the durable handle (the returned ref is a
+// presigned URL that expires), so the read side derives it from the scorecard id through this same constant.
+export const ANALYSIS_KEY_PREFIX = "analyses/";
+export const analysisArtifactKey = (id: string): string => `${ANALYSIS_KEY_PREFIX}${id}.json`;
+
 // Offload the analysis bundle to object storage → a downloadable ref (ScorecardRecord.analysisRef). Best-effort: no
 // store or a failure returns undefined and never affects the scorecard (same discipline as offloadResults).
 export async function offloadAnalysis(
@@ -507,7 +512,7 @@ export async function offloadAnalysis(
 ): Promise<string | undefined> {
   if (!deps.artifacts) return undefined;
   try {
-    return await deps.artifacts.put(`analyses/${id}.json`, Buffer.from(JSON.stringify(bundle)), "application/json");
+    return await deps.artifacts.put(analysisArtifactKey(id), Buffer.from(JSON.stringify(bundle)), "application/json");
   } catch {
     return undefined;
   }

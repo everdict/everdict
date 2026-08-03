@@ -1084,3 +1084,76 @@ describe("RunService.get — usage for runs whose evidence is the sealed traject
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe("RunService — display reads re-mint artifact refs", () => {
+  // A store whose stored refs are in-network (what put() returns) and whose public refs are the browser's.
+  const artifacts = {
+    async put(key: string): Promise<string> {
+      return `http://minio:9000/bucket/${key}`;
+    },
+    async get(): Promise<Uint8Array | undefined> {
+      return undefined;
+    },
+    async publicUrlFor(ref: string): Promise<string | undefined> {
+      return ref.startsWith("http://minio:9000/bucket/")
+        ? `https://artifacts.example.com/bucket/${ref.slice("http://minio:9000/bucket/".length)}?fresh=1`
+        : undefined;
+    },
+  };
+
+  const shotRun = (id: string): RunRecord => ({
+    id,
+    tenant: "acme",
+    status: "succeeded",
+    harness: { id: "h", version: "1" },
+    caseId: "c1",
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    result: {
+      caseId: "c1",
+      harness: "h@1",
+      trace: [],
+      snapshot: { kind: "os-use", screenshot: "", screenshotRef: "http://minio:9000/bucket/runs/r1.png", windows: [] },
+      scores: [],
+    },
+  });
+
+  it("getForDisplay hands the browser a fresh public ref while get() keeps the in-cluster one", async () => {
+    // Regression: the detail page rendered `screenshotRef` verbatim, so an outside browser got http://minio:9000 —
+    // and an in-cluster consumer must NOT get the public host (the container may have no route to it).
+    const store = new InMemoryRunStore();
+    await store.create(shotRun("r1"));
+    const svc = new RunService({ dispatcher: okDispatcher, store, artifacts, newId: ids });
+
+    const displayed = await svc.getForDisplay("r1");
+    const snapshot = displayed?.result?.snapshot;
+    expect(snapshot?.kind === "os-use" && snapshot.screenshotRef).toBe(
+      "https://artifacts.example.com/bucket/runs/r1.png?fresh=1",
+    );
+    const internal = (await svc.get("r1"))?.result?.snapshot;
+    expect(internal?.kind === "os-use" && internal.screenshotRef).toBe("http://minio:9000/bucket/runs/r1.png");
+  });
+
+  it("recording frames are re-minted too (the player draws each frame from its ref), one mint per distinct ref", async () => {
+    const store = new InMemoryRunStore();
+    const recordings = new InMemoryRecordingStore();
+    await store.create(shotRun("r2"));
+    const frame = (t: number) => ({
+      track: "frames" as const,
+      entry: { t, ref: "http://minio:9000/bucket/recordings/a.png" },
+    });
+    await recordings.append("evd-run-r2", frame(1));
+    await recordings.append("evd-run-r2", frame(2));
+    await recordings.seal("evd-run-r2", { envKind: "browser" });
+    const mint = vi.spyOn(artifacts, "publicUrlFor");
+    const svc = new RunService({ dispatcher: okDispatcher, store, recordingStore: recordings, artifacts, newId: ids });
+
+    const out = await svc.recording("r2");
+    expect(out?.recording?.tracks.frames?.map((f) => f.ref)).toEqual([
+      "https://artifacts.example.com/bucket/recordings/a.png?fresh=1",
+      "https://artifacts.example.com/bucket/recordings/a.png?fresh=1",
+    ]);
+    expect(mint).toHaveBeenCalledTimes(1); // deduped by ref — a static screen is one object, not one per frame
+    mint.mockRestore();
+  });
+});

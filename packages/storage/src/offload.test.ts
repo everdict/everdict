@@ -1,4 +1,9 @@
-import { type ArtifactStore, DOM_INLINE_MAX, offloadSnapshot } from "@everdict/application-control";
+import {
+  type ArtifactStore,
+  DOM_INLINE_MAX,
+  offloadSnapshot,
+  refreshSnapshotRefs,
+} from "@everdict/application-control";
 import type { EnvSnapshot } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryArtifactStore } from "./artifact-store.js";
@@ -78,10 +83,59 @@ describe("offloadSnapshot (snapshot media → object storage: screenshot + DOM)"
         calls.push({ key, contentType, len: data.byteLength });
         return `s3://bucket/${key}`;
       },
+      async get() {
+        return undefined;
+      },
+      async publicUrlFor() {
+        return undefined;
+      },
     };
     const snap: EnvSnapshot = { kind: "os-use", screenshotRef: "x", screenshot: "QUJDRA==", windows: [] };
     const out = await offloadSnapshot(snap, store, "scorecards/sc1/case1");
     expect(out.kind === "os-use" && out.screenshotRef).toBe("s3://bucket/scorecards/sc1/case1.png");
     expect(calls[0]).toEqual({ key: "scorecards/sc1/case1.png", contentType: "image/png", len: 4 }); // "ABCD"=4 bytes
+  });
+});
+
+describe("refreshSnapshotRefs (display twin: the record's refs → links a browser can open)", () => {
+  // Stored refs are server handles on the in-network endpoint; the public twin is what a page may render.
+  const store: ArtifactStore = {
+    async put(key) {
+      return `http://minio:9000/bucket/${key}`;
+    },
+    async get() {
+      return undefined;
+    },
+    async publicUrlFor(ref) {
+      return ref.startsWith("http://minio:9000/") ? ref.replace("http://minio:9000", "https://cdn.example") : undefined;
+    },
+  };
+
+  it("re-mints screenshotRef and domRef, leaving the rest of the snapshot alone", async () => {
+    const snap: EnvSnapshot = {
+      kind: "browser",
+      url: "https://shop.example/cart",
+      dom: "<html>preview</html>",
+      domRef: "http://minio:9000/bucket/runs/b1.dom.html",
+      screenshotRef: "http://minio:9000/bucket/runs/b1.png",
+      console: [],
+    };
+    const out = await refreshSnapshotRefs(snap, store);
+    if (out.kind !== "browser") throw new Error("kind");
+    expect(out.screenshotRef).toBe("https://cdn.example/bucket/runs/b1.png");
+    expect(out.domRef).toBe("https://cdn.example/bucket/runs/b1.dom.html");
+    expect(out.dom).toBe("<html>preview</html>");
+    expect(out.url).toBe("https://shop.example/cart");
+  });
+
+  it("keeps a ref this store doesn't recognize, and is a no-op without a store", async () => {
+    const foreign: EnvSnapshot = {
+      kind: "os-use",
+      screenshot: "",
+      screenshotRef: "https://someone-else.example/x.png",
+      windows: [],
+    };
+    expect(await refreshSnapshotRefs(foreign, store)).toEqual(foreign);
+    expect(await refreshSnapshotRefs(foreign, undefined)).toEqual(foreign);
   });
 });

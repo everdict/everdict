@@ -24,6 +24,7 @@ import {
 import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
+import { refreshSnapshotRefs } from "../ports/artifact-store.js";
 import type { ScorecardListFilter } from "../ports/scorecard-store.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { ScorecardAnalyticsService } from "./scorecard-analytics-service.js";
@@ -623,6 +624,21 @@ export class ScorecardService {
     }
     // Trial roll-up is a pure record derivation — the domain model owns it (ETA stays here: it needs store IO).
     return ScorecardBatch.from(await this.withEta(hydrated)).withTrialSummary();
+  }
+
+  // The read whose answer ends up on a SCREEN (the detail route + its MCP twin — keep the two in step): get(), plus
+  // every case snapshot's artifact refs re-minted for the viewer's browser. The persisted refs are server-side
+  // handles (in-network host, hour-old signature), and our own callers keep using get() so their fetches stay
+  // in-cluster. See RunService.getForDisplay — same rule, same reason.
+  async getForDisplay(id: string): Promise<ScorecardRecord | undefined> {
+    const record = await this.get(id);
+    if (!record?.scorecard || !this.deps.artifacts) return record;
+    const results = await Promise.all(
+      record.scorecard.results.map(async (r) =>
+        r.snapshot ? { ...r, snapshot: await refreshSnapshotRefs(r.snapshot, this.deps.artifacts) } : r,
+      ),
+    );
+    return { ...record, scorecard: { ...record.scorecard, results } };
   }
 
   // Remaining wall-clock estimate for a RUNNING batch — median duration of its own finished children × remaining

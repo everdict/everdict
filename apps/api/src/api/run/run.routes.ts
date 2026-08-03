@@ -38,7 +38,9 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     if (!principal) return reply;
     try {
       gate(principal, "runs:read");
-      const record = await deps.service.get(req.params.id);
+      // getForDisplay, not get: this answer is rendered, so its artifact refs must be browser-openable (the stored
+      // ones point at the in-network object store and have expired). The MCP get_run twin does the same.
+      const record = await deps.service.getForDisplay(req.params.id);
       if (!record || record.tenant !== principal.workspace)
         return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
       return reply.send(record);

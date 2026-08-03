@@ -233,6 +233,12 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   appears for runnable extensions ONLY when `GET /me` reports `config.fileExecution` (the deployment composed an
   execution driver) AND the member may write — never a button whose only possible answer is 404; the result
   renders in `ui/execution-output.tsx` like a terminal (a non-zero exit is a result, not an error toast).
+- **A download link points at OUR route, never at an object-store ref**: a record's `analysisRef`/`screenshotRef` is a
+  PRESIGNED url minted on the SERVER-internal endpoint (`http://minio:9000`) — an outside browser can't resolve it and
+  it expires within the hour, so a page that links it ships a dead link to everyone but the operator. Add a BFF route
+  (`app/api/**/route.ts`) that asks the control plane and returns the bytes with a `content-disposition` filename;
+  the scorecard detail's `/api/scorecards/[id]/analysis` is the reference. Gate the button on the record SAYING it has
+  the artifact, not on the ref's scheme.
 - **Secret-name inputs** are never free text — use `SecretPicker` from `features/pick-secret`
   (combobox over preloaded names + "new" inline create; `defaultMultiline` for PEM/kubeconfig).
   Used by harness env, GHE App private key, Mattermost tokens.

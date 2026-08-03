@@ -408,15 +408,15 @@ export default async function ScorecardDetailPage({
                 reference={{ type: 'scorecard', id: record.id, label: record.id.slice(0, 8) }}
                 mission="scorecardAnalyze"
               />
-              {/* Download the self-contained analysis artifact (summary + per-case verdict/scores) — a presigned
-                  object-store URL. Shown only when the ref is a browser-fetchable http(s) URL (S3/MinIO); the dev
-                  in-memory store's memory:// ref is not fetchable, so the link is hidden (same gate as screenshots). */}
-              {record.analysisRef && /^https?:\/\//.test(record.analysisRef) && (
+              {/* Download the self-contained analysis artifact (summary + per-case verdict/scores) through OUR OWN
+                  route — never `record.analysisRef` itself: that ref is the object store's presigned URL, which
+                  carries the SERVER-internal endpoint (http://minio:9000 → an outside browser can't resolve it) and
+                  expires within the hour. The BFF asks the control plane, which reads the artifact by key. The link
+                  still appears only when the record HAS an offloaded artifact. */}
+              {record.analysisRef && (
                 <a
-                  href={record.analysisRef}
-                  target="_blank"
-                  rel="noreferrer"
-                  download
+                  href={`/api/scorecards/${encodeURIComponent(record.id)}/analysis`}
+                  download={`scorecard-${record.id}-analysis.json`}
                   className={buttonVariants({ variant: 'secondary', size: 'sm' })}
                 >
                   <Download />

@@ -62,6 +62,12 @@ describe("analysisBundle + offloadAnalysis (analysis result → object storage)"
       async put() {
         throw new Error("s3 down");
       },
+      async get() {
+        return undefined;
+      },
+      async publicUrlFor() {
+        return undefined;
+      },
     };
     const bundle = analysisBundle({ scorecardId: "sc1", dataset: "d@1", harness: "h@1" }, [], results);
     expect(await offloadAnalysis({ artifacts: failing }, "sc1", bundle)).toBeUndefined();

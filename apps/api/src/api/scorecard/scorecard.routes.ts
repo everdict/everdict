@@ -398,7 +398,9 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     if (!principal) return reply;
     try {
       gate(principal, "scorecards:read");
-      const record = await deps.scorecardService.get(req.params.id);
+      // getForDisplay, not get: the case snapshots on this answer are rendered, so their artifact refs must be
+      // browser-openable (the stored ones point at the in-network object store and have expired). Same in the MCP twin.
+      const record = await deps.scorecardService.getForDisplay(req.params.id);
       if (!record || record.tenant !== principal.workspace)
         return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
       return reply.send(serveScorecard(record));
