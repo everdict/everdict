@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { KeyRound, Search, Users } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
-import { TeamKeyBadge } from '@/entities/team'
+import { teamHref, TeamKeyBadge } from '@/entities/team'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
 import { cn } from '@/shared/lib/utils'
@@ -264,7 +264,7 @@ export function MemberList({
                       <>
                         {m.teams.slice(0, 3).map((tm) => (
                           <Tooltip key={tm.id} content={tm.name}>
-                            <Link href={`/${workspace}/teams/${encodeURIComponent(tm.id)}`}>
+                            <Link href={teamHref(workspace, tm.key)}>
                               <TeamKeyBadge teamKey={tm.key} />
                             </Link>
                           </Tooltip>

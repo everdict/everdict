@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { getFormatter } from 'next-intl/server'
 
-import { issueHref, type Issue } from '@/entities/issue'
+import { issueHref, type IssueSummary } from '@/entities/issue'
 import { Card } from '@/shared/ui/card'
 
 // 회귀 경보 — 닫아둔 이슈의 평가가 무너진 것들. 아무도 안 보고 있는 이슈라서 홈이 대신 들이민다.
@@ -11,7 +11,7 @@ export async function RegressedIssues({
   issues,
 }: {
   workspace: string
-  issues: Issue[]
+  issues: IssueSummary[]
 }) {
   const format = await getFormatter()
   return (

@@ -395,7 +395,8 @@ export class IssueService {
     const cause = input.cause ?? "manual";
     // Moving by column: the column names the canonical status, so it decides — and it has to be one of the
     // issue's OWN team's columns, for the same reason a cycle has to be its team's.
-    const state = input.stateId === undefined ? undefined : await this.resolveState(tenant, input.stateId, record.teamId);
+    const state =
+      input.stateId === undefined ? undefined : await this.resolveState(tenant, input.stateId, record.teamId);
     const to = state?.status ?? input.status;
     let transition: IssueTransition;
     if (to === "done") {

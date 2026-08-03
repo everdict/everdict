@@ -1,7 +1,15 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
+import {
+  type ServerDeps,
+  gate,
+  resolvePrincipal,
+  resolveTeamRef,
+  sendError,
+  teamForNew,
+  zodIssues,
+} from "../route-context.js";
 import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
@@ -19,8 +27,10 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     if (!principal) return reply;
     // 이 배치를 소유할 팀 — 자산과 같은 축이라 "우리 팀이 무엇을 평가했나"가 답 가능해진다. 명시 지정만
     // 인가 대상이고(남의 팀 앞으로 돌리는 것은 거절), 지정이 없으면 내 팀 → 워크스페이스 기본 팀 순이다.
-    const owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
+    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
+      // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
+      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
       gate(principal, "scorecards:run", owner.gate);
     } catch (err) {
       return sendError(reply, err);
@@ -226,7 +236,9 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
               : undefined;
         // ?team= COMBINES with the narrows above rather than replacing them — it answers "of these, which are
         // ours", which is the question the team sidebar asks. Reads stay workspace-wide; this is a filter.
-        const filter = team === undefined ? narrow : { ...(narrow ?? {}), teamId: team };
+        // Named by id or by key (`?team=ENG`), the same ref the team-scoped URL carries.
+        const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
+        const filter = teamId === undefined ? narrow : { ...(narrow ?? {}), teamId };
         return reply.send(await deps.scorecardService.list(principal.workspace, filter));
       } catch (err) {
         return sendError(reply, err);

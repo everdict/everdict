@@ -51,6 +51,25 @@ cookie-only path. `app/[workspace]/layout.tsx` is the authoritative validator (r
 prefixed at render; switching workspace = `router.push('/'+id)`. Slug-less entry points stay top-level
 (`RESERVED_TOP_LEVEL`: `onboarding`/`new-workspace`/`invite`/`api`).
 
+**A scope is a PATH; a filter is a query parameter.** The same rule one level down: what a TEAM owns lives under
+the team's slug — `/{workspace}/teams/ENG/{issues,triage,cycles,projects,scorecards}` — never `?team=<id>` on the
+workspace-wide list. Each team holds different things (its triage inbox exists only if it turned one on, its
+cycles are numbered in its own sequence), so "the same list, filtered" is the wrong description of it. Status,
+priority, project and the page cursor stay query parameters, because those really are filters over whichever list
+the path named. Slug = the team KEY (`ENG`), decided in `entities/team/lib/href.ts` (`teamHref` /
+`teamSectionHref` / `teamSettingsHref`) — every link goes through those, never a hand-built string.
+`app/[workspace]/team-scope.ts` is the one entry procedure: resolve the slug (`GET /teams/:ref` takes key or id),
+**redirect an id-spelled or lowercased URL to the canonical key** (same normalization the issue detail does for
+`ENG-12`), and `notFound()` on a team that is absent or invisible. Legacy `?team=` URLs redirect through
+`redirectLegacyTeamScope` in the same module.
+
+**A list that has two addresses is ONE component**, not two pages: the fetch-and-render body lives in a widget
+(`widgets/{issue,project,cycle,scorecard}-list` — `<Resource>ListView`, a server component taking an optional
+`team`), and both route files are thin adapters. Duplicating a list to scope it is how the two copies drift.
+Write gating on those screens is `canInTeam(principal, action, team?.id)` (`shared/auth/can.ts`, mirroring the
+domain's `canReachTeam`): a create button on a team you are not on is a guaranteed 403. Reads stay
+workspace-wide by design — ownership filters lists, it never 403s them.
+
 ## Styling
 Tailwind v4 tokens in `app/globals.css` `@theme inline` (Linear indigo `#5e6ad2`, tight `0.5rem` radius,
 near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-variant dark`) toggled by
@@ -60,6 +79,9 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
 ## Established UI conventions (enforced — reuse, don't reinvent)
 - **Format atoms**: score/model/version/time formatting goes through `shared/lib/format.ts` +
   `shared/ui/{score,chip}.tsx`, NEVER per-page inline.
+- **Image refs** render through `shared/lib/image-ref.ts` (`displayImageRef`, with the raw ref on `title`), never
+  raw: a digest is 71 characters, so a truncated line shows the digest head and eats the TAG — the only thing that
+  says which version is running. Same file owns `imageRepositoryOf` (tag/digest-blind repository matching).
 - **Charts** = `shared/ui/charts` (`LineChart` / `BarChart` [grouped+stacked] / `RankedBars`), never a
   new hand-rolled SVG. The family owns the axis, the nice-rounded ticks, the recessive hairline grid, the
   hover/focus tooltip and the legend, so a chart cannot invent its own chrome. **Colors come only from

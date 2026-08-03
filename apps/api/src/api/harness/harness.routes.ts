@@ -16,6 +16,7 @@ import {
   type ServerDeps,
   gate,
   resolvePrincipal,
+  resolveTeamRef,
   sendError,
   teamForNew,
   teamOfEntity,
@@ -145,9 +146,11 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       // version (the one that decides privacy), falling back to the id-level creator for older data.
       const visible = entries.filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject);
       // `team` narrows to one team's harnesses — this is what ownership does to a READ. It is a filter, never a
-      // 403: another team's work stays visible in the workspace, it just is not what you asked for.
+      // 403: another team's work stays visible in the workspace, it just is not what you asked for. Named by id
+      // or by key (`?team=ENG`), the same ref the team-scoped URL carries.
       const team = req.query.team;
-      return reply.send(team === undefined ? visible : visible.filter((e) => e.teamId === team));
+      const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
+      return reply.send(teamId === undefined ? visible : visible.filter((e) => e.teamId === teamId));
     } catch (err) {
       return sendError(reply, err);
     }

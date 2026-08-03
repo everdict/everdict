@@ -5,7 +5,15 @@ import { diffDatasets, harborToDataset, terminalBenchToDataset } from "@everdict
 import type { FastifyInstance } from "fastify";
 import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
+import {
+  type ServerDeps,
+  gate,
+  resolvePrincipal,
+  resolveTeamRef,
+  sendError,
+  teamForNew,
+  zodIssues,
+} from "../route-context.js";
 import { datasetDocs } from "./dataset.docs.js";
 import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
 import { ImportHarborBodySchema } from "./request/import-harbor.js";
@@ -20,8 +28,10 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!principal) return reply;
     // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 "이 팀 것으로 만든다"이므로, 속하지 않은
     // 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다. (게이트는 여전히 검증보다 앞선다.)
-    const owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
+    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
+      // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
+      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
       gate(principal, "datasets:write", owner.gate);
     } catch (err) {
       return sendError(reply, err); // no permission 403 (gate before validation — don't leak validation info to the unauthorized)
@@ -153,8 +163,10 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       const entries = await deps.datasetRegistry.list(principal.workspace);
       // `team` 은 한 팀의 것만 남긴다 — 소유권이 READ 에 하는 일은 필터이지 403 이 아니다.
       // 다른 팀 작업은 워크스페이스 안에서 계속 보이고, 다만 지금 물어본 대상이 아닐 뿐이다.
+      // id 로도 key(`?team=ENG`)로도 지목한다 — 팀 스코프 URL 이 들고 다니는 것과 같은 ref 다.
       const team = req.query.team;
-      return reply.send(team === undefined ? entries : entries.filter((e) => e.teamId === team));
+      const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
+      return reply.send(teamId === undefined ? entries : entries.filter((e) => e.teamId === teamId));
     } catch (err) {
       return sendError(reply, err);
     }

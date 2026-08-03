@@ -28,6 +28,9 @@ export interface WebPrincipal {
   subject: string
   workspace: string // current active workspace id
   roles: string[]
+  // 이 워크스페이스에서 내가 속한 팀들. 역할과 함께 제어 평면이 요청마다 채워 주는 인가 입력이다 —
+  // 남의 팀 자산을 쓰는 요청은 제어 평면이 403 으로 막고, 웹은 그 버튼을 미리 감추는 데만 쓴다(can.ts).
+  teams?: string[]
   via: 'oidc' | 'api-key'
   email?: string // OIDC email/preferred_username claim (display-only·read-only)
   workspaces?: WebWorkspace[] // list of workspaces I belong to (when a membership store exists)

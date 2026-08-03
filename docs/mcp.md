@@ -62,7 +62,7 @@ last time, move it.
 | tool | authZ | notes |
 |---|---|---|
 | `create_issue` | `issues:write` | file a problem under evaluation; `links` attach the capabilities that verify it |
-| `list_issues` | `issues:read` | newest activity first; `linkType`+`linkId` answers "which issues watch this harness" |
+| `list_issues` | `issues:read` | one PAGE of SUMMARIES (`{items, nextCursor?}` — pass `nextCursor` back as `cursor`), newest activity first; the description/links/history are on `get_issue`. `linkType`+`linkId` answers "which issues watch this harness" |
 | `get_issue` | `issues:read` | links, resolution (incl. the scorecard that proved it), GitHub copy, durable history |
 | `update_issue` | `issues:write` | content only (title/description/labels/assignee/project); `null` clears |
 | `set_issue_status` | `issues:write` | say where it should end up — the control plane picks move/resolve/reopen. `done` REQUIRES a resolution; reopening a done issue as `regressed` records a fallen resolution. Illegal move → `CONFLICT` |

@@ -184,7 +184,10 @@ panel/list guidance is not.
   the live probe (`POST /runtimes/probe`) to confirm the cluster actually responds before committing. The scorecard
   run form gains a runtime selector. See `docs/runtimes.md`.
 - **Sidebar teams section** (`widgets/app-shell` `TeamsNav`) — Linear's "Your teams": the teams the signed-in
-  member belongs to, each linking to that team's issues (`/issues?team=<id>`). Hidden entirely while the workspace has
+  member belongs to, each expanding to what that team owns under its own path (`/{workspace}/teams/ENG/issues`,
+  `…/triage` when the team turned one on, `…/cycles`, `…/projects`, `…/scorecards`). The active row is decided by the
+  PATH alone now — the group used to read `?team=` off the query string, which meant two different judgements for
+  "which team am I looking at". Hidden entirely while the workspace has
   fewer than two teams — a group with no choice in it is decoration, and the tracker's own "Issues" entry is already
   that destination. The list is fetched once in `[workspace]/layout.tsx` and threaded through `ShellSwitch` → `AppShell`
   → `Sidebar`; a failed read degrades to no section rather than breaking the shell. The issue list carries the matching
@@ -193,7 +196,7 @@ panel/list guidance is not.
 - **Workspace settings `/{workspace}/settings`** — admin-gated tabs: General · **Secrets** ·
   **Integrations**(GitHub App · Mattermost) · CI · Shared runners · Members · **Teams**.
   **Teams tab** (`features/manage-team`, `teams:read` to see / `teams:write` = admin to change): the settings-list of
-  teams — each row is a drill-in to `/settings/teams/{id}` (key badge · name · default chip on the left, roster size +
+  teams — each row is a drill-in to `/settings/teams/{key}` (the same slug the working screens use) (key badge · name · default chip on the left, roster size +
   open issues on the right). The detail is the team's General block (key READ-ONLY — it is baked into every identifier
   the team has minted — name/description, and "make default" which hands the flag over) plus its **roster**, which is
   separate from workspace membership: belonging to a team is what puts its issues in your list. Deletion is offered

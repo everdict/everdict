@@ -158,3 +158,24 @@ const PERMS: Record<string, WebAction[]> = {
 export function can(roles: string[] | undefined, action: WebAction): boolean {
   return (roles ?? []).some((role) => PERMS[role]?.includes(action))
 }
+
+// The TEAM axis of the same matrix (mirror of `canReachTeam` in @everdict/domain). An eval asset and an issue
+// belong to a team, and WRITING one you are not on is refused by the control plane — so a team-scoped page that
+// shows its create/edit buttons anyway is offering a guaranteed 403. Reads stay workspace-wide on purpose:
+// ownership filters lists, it never hides them, and a workspace whose teams cannot see each other's work stops
+// being one workspace.
+//
+// `teamId === undefined` means the thing declares no owner (a workspace-level action, an unowned row) — never
+// read that as "everyone's team", which would silently widen the gate. An ADMIN passes: admins govern the whole
+// workspace, and a team they are not on would otherwise be un-administrable.
+export function canInTeam(
+  principal: { roles?: string[]; teams?: string[] } | null | undefined,
+  action: WebAction,
+  teamId: string | undefined
+): boolean {
+  if (!can(principal?.roles, action)) return false
+  if (teamId === undefined) return true
+  if (action.endsWith(':read')) return true
+  if ((principal?.roles ?? []).includes('admin')) return true
+  return (principal?.teams ?? []).includes(teamId)
+}

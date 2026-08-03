@@ -47,7 +47,9 @@
     ".next-live/types/**/*.ts",
     ".next-live/dev/types/**/*.ts",
     ".next-dev-store/types/**/*.ts",
-    ".next-dev-store/dev/types/**/*.ts"
+    ".next-dev-store/dev/types/**/*.ts",
+    ".next-dev-verify/types/**/*.ts",
+    ".next-dev-verify/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
