@@ -127,36 +127,40 @@ function EntryDetailDialog({
     return `${g.ref.type}:${g.ref.key} ${asOf}${through} · ${t('detail.currentVersion', { version: g.latest })}`
   }
 
-  return (
-    <Dialog open onClose={onClose} className="max-w-2xl">
-      <div className="space-y-4 p-5">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <KindChip kind={entry.kind} />
-            <CoverageBadge coverage={entry.coverage} />
-            {entry.visibility === 'private' && <Lock className="size-3.5 text-muted-foreground" />}
-            {entry.status !== 'active' && (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                {t(`statuses.${entry.status}`)}
-              </span>
-            )}
-          </div>
-          <h2 className="text-base font-semibold">{entry.title}</h2>
-          <p className="text-xs text-muted-foreground">
-            {t('detail.meta', {
-              by: entry.createdBy,
-              updated: fmtDateTime(entry.updatedAt),
-            })}
-            {entry.verifiedAt &&
-              ` · ${t('detail.verifiedAt', { at: fmtDateTime(entry.verifiedAt) })}`}
-            {entry.extraction &&
-              ` · ${t('detail.extractedFrom', {
-                source: `${entry.extraction.sourceKind}:${entry.extraction.sourceId}`,
-                confidence: Math.round(entry.extraction.confidence * 100),
-              })}`}
-          </p>
-        </div>
+  const reviewable = entry.status === 'proposed' && canReview
 
+  // 패널 높이는 뷰포트에 묶고(85vh) 본문만 스크롤 — 긴 마크다운 엔트리가 화면 밖으로 자라 Dialog 의
+  // overflow-hidden 에 잘려나가던 것을 막는다. 제목/메타는 위, 액션은 아래에 고정.
+  return (
+    <Dialog open onClose={onClose} className="flex max-h-[85vh] max-w-2xl flex-col">
+      <div className="shrink-0 space-y-2 border-b border-border px-5 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <KindChip kind={entry.kind} />
+          <CoverageBadge coverage={entry.coverage} />
+          {entry.visibility === 'private' && <Lock className="size-3.5 text-muted-foreground" />}
+          {entry.status !== 'active' && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+              {t(`statuses.${entry.status}`)}
+            </span>
+          )}
+        </div>
+        <h2 className="text-base font-semibold">{entry.title}</h2>
+        <p className="text-xs text-muted-foreground">
+          {t('detail.meta', {
+            by: entry.createdBy,
+            updated: fmtDateTime(entry.updatedAt),
+          })}
+          {entry.verifiedAt &&
+            ` · ${t('detail.verifiedAt', { at: fmtDateTime(entry.verifiedAt) })}`}
+          {entry.extraction &&
+            ` · ${t('detail.extractedFrom', {
+              source: `${entry.extraction.sourceKind}:${entry.extraction.sourceId}`,
+              confidence: Math.round(entry.extraction.confidence * 100),
+            })}`}
+        </p>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
         {behind && entry.coverage && entry.coverage.gaps.length > 0 && (
           <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
             <p className="mb-1 font-medium text-amber-600 dark:text-amber-400">
@@ -189,74 +193,78 @@ function EntryDetailDialog({
 
         <RefChips label={t('detail.refs')} refs={entry.refs} />
         <RefChips label={t('detail.evidence')} refs={entry.evidence} />
+      </div>
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
+      {(error || reviewable || manageable) && (
+        <div className="shrink-0 space-y-3 border-t border-border px-5 py-3">
+          {error && <p className="text-xs text-destructive">{error}</p>}
 
-        {entry.status === 'proposed' && canReview && (
-          <div className="flex items-center justify-between gap-2 rounded-md border border-primary/25 bg-primary/5 p-3">
-            <p className="text-xs text-muted-foreground">{t('detail.proposedHint')}</p>
-            <div className="flex shrink-0 gap-2">
+          {reviewable && (
+            <div className="flex items-center justify-between gap-2 rounded-md border border-primary/25 bg-primary/5 p-3">
+              <p className="text-xs text-muted-foreground">{t('detail.proposedHint')}</p>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => act(() => approveKnowledgeEntryAction(entry.id))}
+                >
+                  {t('detail.approve')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={pending}
+                  onClick={() => act(() => rejectKnowledgeEntryAction(entry.id), true)}
+                >
+                  {t('detail.reject')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {manageable && (
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <Button
                 size="sm"
+                variant="secondary"
                 disabled={pending}
-                onClick={() => act(() => approveKnowledgeEntryAction(entry.id))}
+                onClick={() => act(() => verifyKnowledgeEntryAction(entry.id))}
               >
-                {t('detail.approve')}
+                <BadgeCheck className="size-4" /> {t('detail.verify')}
+              </Button>
+              <Button size="sm" variant="secondary" disabled={pending} onClick={onEdit}>
+                {t('detail.edit')}
               </Button>
               <Button
                 size="sm"
                 variant="secondary"
                 disabled={pending}
-                onClick={() => act(() => rejectKnowledgeEntryAction(entry.id), true)}
+                onClick={() =>
+                  act(() =>
+                    updateKnowledgeEntryAction(entry.id, {
+                      status: entry.status === 'active' ? 'deprecated' : 'active',
+                    })
+                  )
+                }
               >
-                {t('detail.reject')}
+                {entry.status === 'active' ? t('detail.deprecate') : t('detail.reactivate')}
+              </Button>
+              <Button
+                size="sm"
+                variant={confirmDelete ? 'primary' : 'ghost'}
+                disabled={pending}
+                onClick={() =>
+                  confirmDelete
+                    ? act(() => deleteKnowledgeEntryAction(entry.id), true)
+                    : setConfirmDelete(true)
+                }
+              >
+                {confirmDelete ? t('detail.deleteConfirm') : t('detail.delete')}
               </Button>
             </div>
-          </div>
-        )}
-
-        {manageable && (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={pending}
-              onClick={() => act(() => verifyKnowledgeEntryAction(entry.id))}
-            >
-              <BadgeCheck className="size-4" /> {t('detail.verify')}
-            </Button>
-            <Button size="sm" variant="secondary" disabled={pending} onClick={onEdit}>
-              {t('detail.edit')}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={pending}
-              onClick={() =>
-                act(() =>
-                  updateKnowledgeEntryAction(entry.id, {
-                    status: entry.status === 'active' ? 'deprecated' : 'active',
-                  })
-                )
-              }
-            >
-              {entry.status === 'active' ? t('detail.deprecate') : t('detail.reactivate')}
-            </Button>
-            <Button
-              size="sm"
-              variant={confirmDelete ? 'primary' : 'ghost'}
-              disabled={pending}
-              onClick={() =>
-                confirmDelete
-                  ? act(() => deleteKnowledgeEntryAction(entry.id), true)
-                  : setConfirmDelete(true)
-              }
-            >
-              {confirmDelete ? t('detail.deleteConfirm') : t('detail.delete')}
-            </Button>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </Dialog>
   )
 }

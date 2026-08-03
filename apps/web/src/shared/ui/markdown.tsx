@@ -1,8 +1,10 @@
+import type { ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
-import rehypeSanitize from 'rehype-sanitize'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 
+import { mediaKindForUrl, type MediaKind } from '@/shared/lib/media'
 import { cn } from '@/shared/lib/utils'
 import { MermaidDiagram } from '@/shared/ui/mermaid'
 
@@ -47,6 +49,33 @@ function proxiedSrc(src: string | undefined, proxy?: MarkdownImageProxy): string
   }
   if (!proxy.origins.includes(origin)) return src
   return `${proxy.path}?url=${encodeURIComponent(src)}`
+}
+
+// 새니타이즈 기본 스키마(= GitHub 규칙)에는 video·audio 가 없다 — 그대로 두면 이슈 본문에 붙은 화면 녹화가
+// 태그째 사라져 "첨부한 적 없는 이슈"처럼 보인다. 그래서 재생 태그만 딱 열어 준다.
+//
+// 여는 폭은 최소한이다. `autoPlay` 는 넣지 않았다(본문을 열자마자 소리가 나는 건 글쓴이가 정할 일이 아니다),
+// `style`·`on*` 은 기본 스키마가 이미 막고, src 는 기본 스키마의 프로토콜 제한(http/https)을 그대로 물려받는다.
+// 속성 이름이 hast 프로퍼티 표기(`playsInline`)인 것도 기본 스키마와 같은 규칙이다.
+const MEDIA_SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'video', 'audio', 'source'],
+  attributes: {
+    ...defaultSchema.attributes,
+    video: [
+      'src',
+      'poster',
+      'controls',
+      'loop',
+      'muted',
+      'playsInline',
+      'preload',
+      'width',
+      'height',
+    ],
+    audio: ['src', 'controls', 'loop', 'preload'],
+    source: ['src', 'type'],
+  },
 }
 
 // hast className 은 string | number | (string|number)[] 이라 문자열 목록으로 정규화해서 본다.
@@ -131,6 +160,51 @@ function rehypeMentions(re: RegExp) {
   }
 }
 
+// 본문 안의 재생기. 폭은 본문을 넘지 않고 높이는 화면을 삼키지 않게 잡는다 — 세로로 긴 화면 녹화 하나가
+// 나머지 본문을 다음 스크롤로 밀어내지 않도록. preload="metadata" 는 여러 개가 실린 본문에서 바이트를 아낀다.
+function MediaPlayer({
+  kind,
+  src,
+  poster,
+  title,
+  children,
+}: {
+  kind: Exclude<MediaKind, 'image'>
+  src: string | undefined
+  poster?: string | undefined
+  title?: string | undefined
+  children?: ReactNode
+}) {
+  if (kind === 'audio') {
+    return (
+      <audio controls preload="metadata" src={src} title={title} className="w-full max-w-md">
+        {children}
+      </audio>
+    )
+  }
+  return (
+    <video
+      controls
+      playsInline
+      preload="metadata"
+      src={src}
+      poster={poster}
+      title={title}
+      className="max-h-[70vh] w-full rounded-md border border-border bg-black"
+    >
+      {children}
+    </video>
+  )
+}
+
+// 자동링크(주소가 곧 문구인 링크)인지. 글쓴이가 따로 붙인 문구가 있으면 재생기로 바꾸지 않는다 — 그건 그 문구를
+// 지운다는 뜻이 되기 때문이다. GitHub 도 같은 규칙으로 첨부 주소만 재생기로 바꾼다.
+function isBareLink(children: ReactNode, href: string): boolean {
+  if (typeof children === 'string') return children === href
+  if (Array.isArray(children) && children.length === 1) return children[0] === href
+  return false
+}
+
 function heading(level: number): NonNullable<Components['h1']> {
   return ({ children }) => {
     const Tag = `h${level}` as 'h1'
@@ -200,29 +274,70 @@ export function Markdown({
     ),
     hr: () => <hr className="border-border" />,
 
-    a: ({ href, children }) => (
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className="text-link underline underline-offset-2"
-      >
-        {children}
-      </a>
-    ),
+    a: ({ href, children }) => {
+      // 첨부 주소가 그대로 적힌 줄은 링크가 아니라 매체다 — 가져온 이슈 본문의 화면 녹화가 이 모양으로 온다.
+      const kind = mediaKindForUrl(href)
+      if (
+        (kind === 'video' || kind === 'audio') &&
+        href !== undefined &&
+        isBareLink(children, href)
+      )
+        return <MediaPlayer kind={kind} src={proxiedSrc(href, imageProxy)} />
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="text-link underline underline-offset-2"
+        >
+          {children}
+        </a>
+      )
+    },
     img: ({ src, alt, title }) => {
+      const raw = typeof src === 'string' ? src : undefined
+      // `![](clip.mp4)` — 이미지 문법으로 붙은 영상. GitHub 이 그렇게 그리므로 여기서도 재생기로 그린다.
+      const kind = mediaKindForUrl(raw)
+      if (kind === 'video' || kind === 'audio')
+        return <MediaPlayer kind={kind} src={proxiedSrc(raw, imageProxy)} title={title} />
       // 본문의 이미지는 임의 원격 URL 이라 next/image 의 도메인 화이트리스트를 통과할 수 없다 — 원본 태그로 그린다.
       // imageProxy 가 지정한 오리진만 우리 라우트로 우회한다(인증이 필요한 첨부).
+      // data-media-preview 는 확대 뷰어(shared/ui/media-lightbox)가 잡을 표식이다 — 뷰어 안에 없으면 아무 일도
+      // 하지 않는 속성이라, 이 뷰어는 확대가 켜졌는지 알 필요가 없다.
       return (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={proxiedSrc(typeof src === 'string' ? src : undefined, imageProxy)}
+          data-media-preview=""
+          src={proxiedSrc(raw, imageProxy)}
           alt={alt ?? ''}
           title={title}
           className="max-w-full rounded-md border border-border"
         />
       )
     },
+    // 인라인 HTML 로 온 재생 태그(`<video src=… controls>`) — 새니타이즈 스키마에서 열어 준 만큼만 지나온다.
+    video: ({ src, poster, title, children }) => (
+      <MediaPlayer
+        kind="video"
+        src={proxiedSrc(typeof src === 'string' ? src : undefined, imageProxy)}
+        poster={proxiedSrc(typeof poster === 'string' ? poster : undefined, imageProxy)}
+        title={title}
+      >
+        {children}
+      </MediaPlayer>
+    ),
+    audio: ({ src, title, children }) => (
+      <MediaPlayer
+        kind="audio"
+        src={proxiedSrc(typeof src === 'string' ? src : undefined, imageProxy)}
+        title={title}
+      >
+        {children}
+      </MediaPlayer>
+    ),
+    source: ({ src, type }) => (
+      <source src={proxiedSrc(typeof src === 'string' ? src : undefined, imageProxy)} type={type} />
+    ),
 
     strong: ({ children }) => <strong className="font-[600] text-foreground">{children}</strong>,
     em: ({ children }) => <em>{children}</em>,
@@ -318,8 +433,8 @@ export function Markdown({
         // (mention highlighting comes last: it emits markup, so it must run on the already-sanitized tree.)
         rehypePlugins={
           mentionRe
-            ? [rehypeRaw, rehypeSanitize, rehypeMentions(mentionRe)]
-            : [rehypeRaw, rehypeSanitize]
+            ? [rehypeRaw, [rehypeSanitize, MEDIA_SANITIZE_SCHEMA], rehypeMentions(mentionRe)]
+            : [rehypeRaw, [rehypeSanitize, MEDIA_SANITIZE_SCHEMA]]
         }
         components={components}
       >

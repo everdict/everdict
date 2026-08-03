@@ -52,7 +52,9 @@ describe('markdown viewer (GFM)', () => {
     const out = html('## title\n\n![alt](https://example.com/a.png)')
 
     expect(out).toContain('<h2')
-    expect(out).toContain('<img src="https://example.com/a.png" alt="alt"')
+    expect(out).toContain('<img')
+    expect(out).toContain('src="https://example.com/a.png"')
+    expect(out).toContain('alt="alt"')
   })
 
   // An attachment on GitHub Enterprise (or any private repo) sits behind the same authentication the repo does,
@@ -144,5 +146,67 @@ describe('markdown viewer (mentions)', () => {
 
     expect(out).toContain('@nobody')
     expect(out).not.toContain(CHIP)
+  })
+})
+
+// 이슈 본문에는 화면 녹화가 붙는다 — 그런데 새니타이즈 기본 스키마(= GitHub 규칙)에는 video/audio 가 없어서,
+// 열어 주기 전까지 그 태그는 통째로 사라졌다("첨부한 적 없는 이슈"처럼 보인다).
+describe('markdown viewer (media)', () => {
+  it('renders an inline video tag instead of dropping it', () => {
+    const out = html('<video src="https://x.test/clip.mp4" controls></video>')
+
+    expect(out).toContain('<video')
+    expect(out).toContain('src="https://x.test/clip.mp4"')
+    expect(out).toContain('controls=""')
+  })
+
+  it('renders sources inside a video', () => {
+    const out = html(
+      '<video controls><source src="https://x.test/a.webm" type="video/webm"></video>'
+    )
+
+    expect(out).toContain('<source')
+    expect(out).toContain('type="video/webm"')
+  })
+
+  // 본문을 열자마자 소리가 나는 건 글쓴이가 정할 일이 아니다 — 스키마에서 뺐으므로 새니타이즈가 지운다.
+  it('strips autoplay from a body-supplied player', () => {
+    expect(html('<video src="https://x.test/a.mp4" controls autoplay></video>')).not.toContain(
+      'autoplay'
+    )
+  })
+
+  it('still strips a script and an event handler now that the schema is wider', () => {
+    const out = html(
+      '<video src="https://x.test/a.mp4" onerror="alert(1)"></video><script>x</script>'
+    )
+
+    expect(out).not.toContain('onerror')
+    expect(out).not.toContain('<script')
+  })
+
+  it('turns a bare recording address into a player, as GitHub does', () => {
+    expect(html('https://x.test/clip.mp4')).toContain('<video')
+  })
+
+  // 글쓴이가 붙인 문구가 있는 링크는 링크로 남는다 — 재생기로 바꾸면 그 문구를 지우는 셈이 된다.
+  it('leaves a titled link to a recording as a link', () => {
+    const out = html('[watch the repro](https://x.test/clip.mp4)')
+
+    expect(out).toContain('watch the repro')
+    expect(out).not.toContain('<video')
+  })
+
+  it('renders an image-syntax recording as a player, and audio as an audio player', () => {
+    expect(html('![repro](https://x.test/clip.webm)')).toContain('<video')
+    expect(html('![note](https://x.test/note.mp3)')).toContain('<audio')
+  })
+
+  // 확대 뷰어가 잡을 표식. 뷰어 밖에서는 아무 일도 하지 않는 속성이라 이 뷰어는 확대 여부를 알 필요가 없다.
+  it('marks an ordinary image for the lightbox', () => {
+    const out = html('![shot](https://x.test/a.png)')
+
+    expect(out).toContain('data-media-preview')
+    expect(out).toContain('<img')
   })
 })

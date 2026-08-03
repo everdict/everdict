@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { memo, useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   CornerDownRight,
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
+import { MediaDropZone, withBlockInsertion } from '@/features/attach-media'
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
@@ -49,6 +50,7 @@ export function CommentThread({
   comments,
   mentionables,
   canComment,
+  canAttach,
 }: {
   workspace: string
   resourceType: string
@@ -56,6 +58,8 @@ export function CommentThread({
   comments: ThreadComment[]
   mentionables: Mentionable[]
   canComment: boolean
+  // 첨부는 워크스페이스 파일시스템에 쓰는 일이라 코멘트 권한과 별개의 판정이다(files:write).
+  canAttach: boolean
 }) {
   const t = useTranslations('discuss')
   // Server props seed the thread; while an agent answer is in flight the client polls the rebuilt thread so every
@@ -117,6 +121,7 @@ export function CommentThread({
           resourceType={resourceType}
           resourceId={resourceId}
           canComment={canComment}
+          canAttach={canAttach}
         />
       ))}
       {canComment ? (
@@ -126,6 +131,7 @@ export function CommentThread({
             resourceId={resourceId}
             mentionables={mentionables}
             placeholder={t('composerPlaceholder')}
+            canAttach={canAttach}
           />
         </div>
       ) : (
@@ -143,6 +149,7 @@ function CommentNode({
   resourceType,
   resourceId,
   canComment,
+  canAttach,
 }: {
   comment: ThreadComment
   replies: ThreadComment[]
@@ -150,6 +157,7 @@ function CommentNode({
   resourceType: string
   resourceId: string
   canComment: boolean
+  canAttach: boolean
 }) {
   const t = useTranslations('discuss')
   const [replying, setReplying] = useState(false)
@@ -168,6 +176,7 @@ function CommentNode({
               parentId={comment.id}
               mentionables={mentionables}
               placeholder={t('replyPlaceholder')}
+              canAttach={canAttach}
               autoFocus
               onDone={() => setReplying(false)}
             />
@@ -197,7 +206,41 @@ function activityLabel(
   return t('activityThinking')
 }
 
-function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables: Mentionable[] }) {
+// 한 코멘트가 그리는 데 실제로 쓰는 것이 같은가. 폴링은 스레드를 통째로 다시 조립해 오므로(서버가 행에서 새로
+// 만든다) 객체 정체성으로는 "안 바뀐 코멘트"를 알아볼 수 없다 — 그래서 필드로 비교한다.
+function sameCard(
+  a: { item: ThreadComment; mentionables: Mentionable[] },
+  b: { item: ThreadComment; mentionables: Mentionable[] }
+): boolean {
+  if (a.mentionables !== b.mentionables) return false
+  const x = a.item
+  const y = b.item
+  return (
+    x.id === y.id &&
+    x.body === y.body &&
+    x.at === y.at &&
+    x.canDelete === y.canDelete &&
+    x.isAgent === y.isAgent &&
+    x.agentStatus === y.agentStatus &&
+    x.agentActivity === y.agentActivity &&
+    x.agentSessionId === y.agentSessionId &&
+    x.actor.name === y.actor.name &&
+    x.actor.avatarUrl === y.actor.avatarUrl &&
+    x.actor.known === y.actor.known
+  )
+}
+
+// 한 코멘트. 에이전트가 답하는 동안 스레드는 2.5초마다 스스로 갱신되는데, 이 카드는 마크다운을 unified 파이프라인
+// (remark-gfm → rehype-raw → sanitize) 전체로 다시 파싱한다 — 본문 하나에 약 5.6ms(node 기준, 브라우저 재조정
+// 전)라 코멘트 20개면 갱신 한 번이 약 112ms 다. 그동안 화면은 멈춘다. 메모가 그 일을 건너뛰게 하는 유일한 방법이다
+// (agent chat 이 같은 이유로 같은 처방을 받았다 — features/agent-chat/ui/transcript-render.test.tsx).
+export const CommentCard = memo(function CommentCard({
+  item,
+  mentionables,
+}: {
+  item: ThreadComment
+  mentionables: Mentionable[]
+}) {
   const t = useTranslations('discuss')
   const locale = useLocale()
   const timeZone = useTimeZone()
@@ -285,7 +328,7 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
       )}
     </div>
   )
-}
+}, sameCard)
 
 // An agent answer renders compactly by lifecycle: a live "doing now" line while it works, an inline approval
 // strip while parked, then ONLY the final markdown — the full reasoning/tool transcript lives behind "view
@@ -419,6 +462,7 @@ function Composer({
   parentId,
   mentionables,
   placeholder,
+  canAttach,
   autoFocus,
   onDone,
 }: {
@@ -427,6 +471,7 @@ function Composer({
   parentId?: string
   mentionables: Mentionable[]
   placeholder: string
+  canAttach: boolean
   autoFocus?: boolean
   onDone?: () => void
 }) {
@@ -470,6 +515,22 @@ function Composer({
       taRef.current?.setSelectionRange(pos, pos)
     })
   }
+  // 올라간 첨부는 커서 자리에 들어간다. 현재 값은 상태가 아니라 텍스트영역에서 읽는다 — 파일 여러 개를 놓으면
+  // 업로드가 하나씩 이어지는데, 그 사이 렌더에서 닫힌 상태 값은 이미 지난 값이기 때문이다.
+  function insertSnippet(snippet: string) {
+    const ta = taRef.current
+    const current = ta?.value ?? value
+    const start = ta?.selectionStart ?? current.length
+    const end = ta?.selectionEnd ?? current.length
+    const next = withBlockInsertion(current, start, end, snippet)
+    setValue(next.value)
+    setMenu(undefined)
+    queueMicrotask(() => {
+      taRef.current?.focus()
+      taRef.current?.setSelectionRange(next.caret, next.caret)
+    })
+  }
+
   function mentioned(text: string, name: string): boolean {
     return new RegExp(`(^|\\s)@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$|[.,!?])`).test(
       text
@@ -508,83 +569,88 @@ function Composer({
 
   return (
     <div className="space-y-2 rounded-lg border bg-card/40 p-3">
-      <div className="relative">
-        <Textarea
-          ref={taRef}
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value)
-            refreshMenu(e.target.value, e.target.selectionStart ?? e.target.value.length)
-          }}
-          onClick={(e) => refreshMenu(value, e.currentTarget.selectionStart ?? 0)}
-          placeholder={placeholder}
-          className="min-h-14 text-[13px]"
-          onKeyDown={(e) => {
-            if (menu && matches.length > 0) {
-              if (e.key === 'ArrowDown') {
-                e.preventDefault()
-                setActive((a) => (a + 1) % matches.length)
-                return
-              }
-              if (e.key === 'ArrowUp') {
-                e.preventDefault()
-                setActive((a) => (a - 1 + matches.length) % matches.length)
-                return
-              }
-              if (e.key === 'Enter' || e.key === 'Tab') {
-                const sel = matches[active]
-                if (sel) {
+      {/* 스크린샷은 논의의 절반이다 — 붙여넣거나 끌어다 놓으면 그 자리에서 첨부되고 본문에 문법이 들어간다. */}
+      <MediaDropZone onInsert={insertSnippet} disabled={!canAttach}>
+        <div className="relative">
+          <Textarea
+            ref={taRef}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value)
+              refreshMenu(e.target.value, e.target.selectionStart ?? e.target.value.length)
+            }}
+            onClick={(e) => refreshMenu(value, e.currentTarget.selectionStart ?? 0)}
+            placeholder={placeholder}
+            className="min-h-14 text-[13px]"
+            onKeyDown={(e) => {
+              if (menu && matches.length > 0) {
+                if (e.key === 'ArrowDown') {
                   e.preventDefault()
-                  pick(sel)
+                  setActive((a) => (a + 1) % matches.length)
+                  return
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setActive((a) => (a - 1 + matches.length) % matches.length)
+                  return
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  const sel = matches[active]
+                  if (sel) {
+                    e.preventDefault()
+                    pick(sel)
+                    return
+                  }
+                }
+                if (e.key === 'Escape') {
+                  setMenu(undefined)
                   return
                 }
               }
-              if (e.key === 'Escape') {
-                setMenu(undefined)
-                return
-              }
-            }
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSubmit()
-          }}
-        />
-        {menu && matches.length > 0 && (
-          <div className="absolute left-2 top-full z-20 mt-1 w-64 overflow-hidden rounded-lg border bg-popover shadow-pop">
-            {matches.map((mn, i) => (
-              <button
-                key={mn.subject}
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  pick(mn)
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[13px] transition-colors',
-                  i === active ? 'bg-accent text-foreground' : 'hover:bg-accent/60'
-                )}
-              >
-                {mn.isAgent ? (
-                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/12 text-primary">
-                    <Sparkles className="size-3" />
-                  </span>
-                ) : (
-                  <Avatar name={mn.name} url={mn.avatarUrl} size="sm" className="rounded-full" />
-                )}
-                <span className="truncate">{mn.name}</span>
-                {mn.isAgent && (
-                  <span className="ml-auto text-[11px] text-faint">{t('askAgentHint')}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSubmit()
+            }}
+          />
+          {menu && matches.length > 0 && (
+            <div className="absolute left-2 top-full z-20 mt-1 w-64 overflow-hidden rounded-lg border bg-popover shadow-pop">
+              {matches.map((mn, i) => (
+                <button
+                  key={mn.subject}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    pick(mn)
+                  }}
+                  className={cn(
+                    'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[13px] transition-colors',
+                    i === active ? 'bg-accent text-foreground' : 'hover:bg-accent/60'
+                  )}
+                >
+                  {mn.isAgent ? (
+                    <span className="flex size-5 items-center justify-center rounded-full bg-primary/12 text-primary">
+                      <Sparkles className="size-3" />
+                    </span>
+                  ) : (
+                    <Avatar name={mn.name} url={mn.avatarUrl} size="sm" className="rounded-full" />
+                  )}
+                  <span className="truncate">{mn.name}</span>
+                  {mn.isAgent && (
+                    <span className="ml-auto text-[11px] text-faint">{t('askAgentHint')}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </MediaDropZone>
       {error && (
         <Callout tone="danger" className="py-1.5">
           {error}
         </Callout>
       )}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-faint">{t('mentionHint')}</span>
+        <span className="text-[11px] text-faint">
+          {canAttach ? `${t('mentionHint')} · ${t('attachHint')}` : t('mentionHint')}
+        </span>
         <div className="flex items-center gap-2">
           {onDone && (
             <button
