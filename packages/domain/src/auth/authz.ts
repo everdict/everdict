@@ -274,23 +274,25 @@ const SCOPE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
 
 // The resource an action is aimed at, when the answer depends on it. Today that is TEAM OWNERSHIP: an eval asset
 // (harness · dataset · judge · rubric · runtime · scorecard · view · schedule) and an issue belong to a team, and
-// writing one you do not own is refused. Omit it for workspace-level actions (settings, members, secrets) and for
-// reads — those keep the flat role answer.
+// a team's work is ITS OWN — reading it as well as writing it. Omit the scope for workspace-level actions
+// (settings, members, secrets), which have no owner to check.
 export interface ResourceScope {
-  // The owning team. `undefined` = the resource declares no owner (legacy rows, workspace-level assets) and the
-  // team check does not apply — never treat "no owner" as "everyone's team", which would silently widen access.
+  // The owning team. `undefined` = the resource declares no owner (legacy rows, `_shared` seeds, workspace-level
+  // assets) and the team check does not apply — "no owner" means the workspace's, and it is a real state, not a
+  // gap: it is what every row was before the axis existed and what every seeded catalogue entry still is.
   teamId?: string;
 }
 
-// Is this a write? Only writes are gated on team membership. Reads stay workspace-wide on purpose: the role matrix
-// already says knowing what exists is benign at viewer+, and a workspace whose teams cannot see each other's work
-// stops being one workspace. Ownership shows up in reads as a FILTER (list by team), not as a 403.
-function isWrite(action: Action): boolean {
-  return !action.endsWith(":read");
+// A machine credential is not a person, and the team axis is a roster of people: a paired runner device and a
+// repo-linked CI token act for the WORKSPACE that trusts them, hold a deliberately tiny role, and can never be
+// added to a team — isolating them by one would just mean "sees nothing". An agent credential is the opposite
+// case and is NOT listed here: it acts AS its creator, so it carries that person's teams and is isolated with them.
+function actsForWorkspace(principal: Principal): boolean {
+  return principal.via === "runner" || principal.via === "github-actions";
 }
 
 // `can` answers three questions in order, and all three must pass:
-//   1. does the ROLE grant this action  2. does the api-key SCOPE still carry it  3. may this subject act on THIS
+//   1. does the ROLE grant this action  2. does the api-key SCOPE still carry it  3. may this subject reach THIS
 //      resource — i.e. is the owning team one of theirs.
 // (3) is the team axis. An ADMIN bypasses it: admins govern the whole workspace, and a team they are not on would
 // otherwise be un-administrable — the same reason workspace settings are admin-only in the first place.
@@ -301,21 +303,40 @@ export function can(principal: Principal, action: Action, resource?: ResourceSco
   if (principal.scopes && principal.scopes.length > 0) {
     if (!principal.scopes.some((s) => SCOPE_PERMISSIONS[s]?.has(action) ?? false)) return false;
   }
-  return canReachTeam(principal, action, resource);
+  return canReachTeam(principal, resource);
 }
 
-// The team half, split out so a service that already knows the role passed can ask just this.
-export function canReachTeam(principal: Principal, action: Action, resource?: ResourceScope): boolean {
+// The team half, split out so a service that already knows the role passed can ask just this. Ownership ISOLATES
+// rather than sorts: a team's assets are the team's to read as well as to write, so this is asked of reads too.
+// A read that fails it is answered 404 rather than 403 (`assertTeamVisible` in the API layer) — the same no-leak
+// answer another workspace's row gets, because "there is a thing here you may not see" is itself information.
+export function canReachTeam(principal: Principal, resource?: ResourceScope): boolean {
   if (resource?.teamId === undefined) return true; // unowned / workspace-level → nothing to check
-  if (!isWrite(action)) return true; // reads are workspace-wide; ownership filters lists, it does not 403 them
   if (principal.roles.includes("admin")) return true; // an admin governs every team in the workspace
+  if (actsForWorkspace(principal)) return true; // a runner/CI credential has no roster to be isolated by
   return principal.teams?.includes(resource.teamId) ?? false;
+}
+
+// The ceiling a LIST read stays under, for the stores that narrow in SQL (`visibleTeams`). `undefined` = no
+// ceiling (an admin, or a machine credential acting for the workspace); `[]` is the honest answer for a member on
+// no team — they see the workspace's unowned rows and nothing else, which is what being on no team means.
+export function visibleTeams(principal: Principal): string[] | undefined {
+  if (principal.roles.includes("admin") || actsForWorkspace(principal)) return undefined;
+  return principal.teams ?? [];
+}
+
+// The same ceiling applied to ONE already-loaded row, for the services that read by id or filter in memory. Keep
+// the two halves saying the same thing: no ceiling ⇒ everything, no owner ⇒ the workspace's, else membership.
+export function ownedByVisibleTeam(owner: { teamId?: string }, teams?: string[]): boolean {
+  if (teams === undefined) return true;
+  if (owner.teamId === undefined) return true;
+  return teams.includes(owner.teamId);
 }
 
 // 403 if not permitted. The caller (API route) invokes this at handler entry.
 export function authorize(principal: Principal, action: Action, resource?: ResourceScope): void {
   if (!can(principal, action, resource)) {
-    const teamDenied = resource?.teamId !== undefined && !canReachTeam(principal, action, resource);
+    const teamDenied = resource?.teamId !== undefined && !canReachTeam(principal, resource);
     throw new ForbiddenError(
       "FORBIDDEN",
       { workspace: principal.workspace, roles: principal.roles, action, ...(resource ?? {}) },

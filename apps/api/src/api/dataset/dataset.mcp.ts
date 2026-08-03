@@ -8,8 +8,10 @@ import {
   harborToDataset,
   terminalBenchToDataset,
 } from "@everdict/datasets";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   FROM_ISSUE_TOOL_DESCRIPTION,
   ORIGIN_NOTE_TOOL_DESCRIPTION,
@@ -31,7 +33,12 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
           "Datasets this workspace sees (owned + _shared benchmarks). The workspace is the 'active workspace' fixed by your credential — confirm with the user which workspace you are working in first (you cannot change it via a parameter; a different workspace requires reconnecting with that workspace's credential/session). Each entry groups multiple immutable versions under one id (id → versions[]). Before creating a new dataset, first use this list to check whether the same id already exists.",
         inputSchema: {},
       },
-      () => run(principal, "datasets:read", async () => ok(await datasets.list(ws))),
+      () =>
+        run(principal, "datasets:read", async () =>
+          // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
+          // person's teams and no more.
+          ok((await datasets.list(ws)).filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)))),
+        ),
     );
 
     server.registerTool(
@@ -45,7 +52,10 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
         },
       },
       ({ id, version }) =>
-        run(principal, "datasets:read", async () => ok(await datasets.get(ws, id, version ?? "latest"))),
+        run(principal, "datasets:read", async () => {
+          await assertEntityVisible(principal, datasets, ws, id, "dataset");
+          return ok(await datasets.get(ws, id, version ?? "latest"));
+        }),
     );
 
     server.registerTool(

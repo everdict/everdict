@@ -4,7 +4,7 @@ import { can, canInTeam } from './can'
 
 // The UI mirror of the control plane's authz matrix. It never grants anything — it only decides whether a
 // button is worth showing — so what matters is that it agrees with the server on the two axes the server uses:
-// the role, and (for writes) the owning team.
+// the role, and the owning team.
 describe('canInTeam — the team axis of the UI mirror', () => {
   const member = { roles: ['member'], teams: ['team-web'] }
 
@@ -16,8 +16,11 @@ describe('canInTeam — the team axis of the UI mirror', () => {
     expect(canInTeam(member, 'issues:write', 'team-mobile')).toBe(false)
   })
 
-  it('keeps reads workspace-wide — ownership filters lists, it does not hide them', () => {
-    expect(canInTeam(member, 'issues:read', 'team-mobile')).toBe(true)
+  it('refuses reads in a team they are not on — the control plane answers those 404, so the link is dead', () => {
+    expect(canInTeam(member, 'issues:read', 'team-mobile')).toBe(false)
+    expect(canInTeam(member, 'scorecards:read', 'team-mobile')).toBe(false)
+    expect(canInTeam(member, 'issues:read', 'team-web')).toBe(true)
+    expect(canInTeam(member, 'issues:read', undefined)).toBe(true) // unowned = the workspace's
   })
 
   it('lets an admin write across teams — a team they are not on must not be un-administrable', () => {

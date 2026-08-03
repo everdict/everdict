@@ -178,6 +178,12 @@ export class TeamService {
     return this.deps.store.list(tenant, filter);
   }
 
+  // The workspace's default team, or undefined while it has none. A pure read — unlike `ensureDefault`, which
+  // creates one, and which an authorization path must never call.
+  async defaultTeam(tenant: string): Promise<TeamRecord | undefined> {
+    return this.deps.store.getDefault(tenant);
+  }
+
   // Counts a list row wants — derived on read like ProjectRollup, never stored.
   //
   // Two AGGREGATES for the whole workspace, not a fetch per team. This used to list every issue of every team

@@ -2,7 +2,9 @@ import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-con
 import { deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
 import { diffDatasets, harborToDataset, terminalBenchToDataset } from "@everdict/datasets";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
 import {
@@ -161,12 +163,14 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     try {
       gate(principal, "datasets:read");
       const entries = await deps.datasetRegistry.list(principal.workspace);
-      // `team` 은 한 팀의 것만 남긴다 — 소유권이 READ 에 하는 일은 필터이지 403 이 아니다.
-      // 다른 팀 작업은 워크스페이스 안에서 계속 보이고, 다만 지금 물어본 대상이 아닐 뿐이다.
-      // id 로도 key(`?team=ENG`)로도 지목한다 — 팀 스코프 URL 이 들고 다니는 것과 같은 ref 다.
+      // Two different narrows, in order. The CEILING is ownership: another team's dataset is not the caller's to
+      // see, so it never appears (an unowned `_shared` entry is the workspace's and always does). `?team=` is the
+      // NARROW on top of it — "of the ones I can see, this team's" — named by id or by key (`?team=ENG`), the
+      // same ref the team-scoped URL carries.
+      const visible = entries.filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)));
       const team = req.query.team;
       const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
-      return reply.send(teamId === undefined ? entries : entries.filter((e) => e.teamId === teamId));
+      return reply.send(teamId === undefined ? visible : visible.filter((e) => e.teamId === teamId));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -183,6 +187,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       if (!principal) return reply;
       try {
         gate(principal, "datasets:read");
+        await assertEntityVisible(principal, deps.datasetRegistry, principal.workspace, req.params.id, "dataset");
         return reply.send(await deps.datasetRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404
@@ -279,6 +284,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
           .send({ code: "BAD_REQUEST", message: "base and candidate query parameters are required." });
       try {
         gate(principal, "datasets:read");
+        await assertEntityVisible(principal, deps.datasetRegistry, principal.workspace, req.params.id, "dataset");
         const [baseDs, candidateDs] = await Promise.all([
           deps.datasetRegistry.get(principal.workspace, req.params.id, base),
           deps.datasetRegistry.get(principal.workspace, req.params.id, candidate),

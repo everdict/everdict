@@ -2708,7 +2708,8 @@
     "sparklineLabel": "score trend",
     "metaWorkflow": "Workflow",
     "traceEvaluation": "Trace evaluation",
-    "sourceMeta": "source"
+    "sourceMeta": "source",
+    "runForTeam": "Run an evaluation as {team}."
   },
   "scorecardSummary": {
     "statTotal": "Total runs",

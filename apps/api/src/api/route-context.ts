@@ -344,13 +344,33 @@ export function workspaceHintOf(req: FastifyRequest): string | undefined {
 // beside the membership role, because both answer "what may this request do in THIS workspace" and both must come
 // from the control plane rather than the client.
 //
-// A failure loads NO teams rather than throwing: the request then behaves as a subject on no team — it can still
-// read everything and write unowned resources, and an owned write is refused. Failing closed on a lookup error is
-// the right side to err on, and it never takes the whole request down.
-async function withTeams(principal: Principal, deps: ServerDeps): Promise<Principal> {
-  if (!deps.teamService || !principal.workspace) return principal;
-  const teams = await deps.teamService.list(principal.workspace, { member: principal.subject }).catch(() => []);
-  return { ...principal, teams: teams.map((team) => team.id) };
+// A failure loads NO teams rather than throwing: the request then behaves as a subject on no team — it writes and
+// reads the workspace's unowned rows and nothing owned. That is the right side to err on (a lookup we could not
+// do must never widen access) and it never takes the whole request down, but since ownership now isolates READS
+// too, the same failure also empties this caller's lists — so it is logged rather than swallowed, because
+// "your team has nothing" and "we could not find out which teams are yours" look identical on screen.
+async function withTeams(principal: Principal, deps: ServerDeps, req: FastifyRequest): Promise<Principal> {
+  const service = deps.teamService;
+  if (!service || !principal.workspace) return principal;
+  const [teams, fallback] = await Promise.all([
+    service.list(principal.workspace, { member: principal.subject }).catch((err) => {
+      req.log.warn(
+        { subject: principal.subject, workspace: principal.workspace, err },
+        "auth: team roster lookup failed — the request proceeds as a subject on no team (owned resources are hidden)",
+      );
+      return [];
+    }),
+    // Every workspace MEMBER is on the default team whether or not anyone wrote them into its roster. The default
+    // team is not a team someone chose to be on: it is where an unnamed asset lands and where the ownership
+    // migration put everything that predates the axis, so isolating it would empty the screen of every member an
+    // admin has not got around to rostering. Teams people actually created stay isolated, which is the point.
+    service
+      .defaultTeam(principal.workspace)
+      .catch(() => undefined),
+  ]);
+  const ids = new Set(teams.map((team) => team.id));
+  if (fallback) ids.add(fallback.id);
+  return { ...principal, teams: [...ids] };
 }
 
 export async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: ServerDeps): Promise<Principal> {
@@ -384,11 +404,11 @@ export async function applyActiveWorkspace(base: Principal, req: FastifyRequest,
   const requested = workspaceHintOf(req) ?? base.workspace;
   if (requested && requested !== base.workspace) {
     const role = await store.roleFor(requested, subject);
-    if (role) return withTeams({ ...base, workspace: requested, roles: [role] }, deps);
+    if (role) return withTeams({ ...base, workspace: requested, roles: [role] }, deps, req);
   }
 
   // Fall back to the default workspace (membership role if present). Otherwise keep workspace="" (onboarding target).
-  return base.workspace ? withTeams({ ...base, roles: [baseRole as string] }, deps) : base;
+  return base.workspace ? withTeams({ ...base, roles: [baseRole as string] }, deps, req) : base;
 }
 
 // Final Principal with both authentication and active workspace resolved (used by every human/HTTP route).
@@ -455,83 +475,24 @@ export function mcpChallenge(req: FastifyRequest, reply: FastifyReply): FastifyR
     .send({ code: "UNAUTHENTICATED", message: "MCP requires OAuth authentication (see resource_metadata)." });
 }
 
-// ── Team ownership helpers (the authz kernel's team axis) ────────────────────────────────────────────────────
-// A versioned registry entry records its owning team beside created_by. These resolve it for gate(); a registry
-// that predates the column (or a `_shared`/seeded row) answers undefined, which the kernel reads as "unowned" and
-// lets through — never as "everyone's".
-type TeamAware = {
-  teamOfVersion?(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
-  ownVersions?(tenant: string, id: string): string[] | Promise<string[]>;
-};
+// Team OWNERSHIP resolution + the read guard live in `common/team-scope.ts` (both transports need them, and
+// an MCP tool file cannot import this module without closing a cycle): teamOfVersion / teamOfEntity /
+// assertEntityVisible / assertTeamVisible / visibleTeamsFor / teamCeiling.
 
-// The team that owns one VERSION.
-export async function teamOfVersion(
-  registry: TeamAware | undefined,
-  tenant: string,
-  id: string,
-  version: string,
-): Promise<ResourceScope> {
-  const teamId = await registry?.teamOfVersion?.(tenant, id, version);
-  return teamId === undefined ? {} : { teamId };
-}
-
-// The team that owns an ENTITY — read off its newest own version, because ownership belongs to the thing, not to
-// one release of it. Used by routes that mutate an id without naming a version (re-pin, tag edits).
-export async function teamOfEntity(
-  registry: TeamAware | undefined,
-  tenant: string,
-  id: string,
-): Promise<ResourceScope> {
-  const versions = (await registry?.ownVersions?.(tenant, id)) ?? [];
-  const newest = versions[versions.length - 1];
-  return newest === undefined ? {} : teamOfVersion(registry, tenant, id, newest);
-}
-
-// Who a NEWLY created asset will belong to, and what the gate should check.
-//
-// Two different questions, deliberately separated:
-//   · `teamId` — the owner it WILL get. A caller on no team still creates things; the asset lands in the
-//     workspace's default team, the same rule an issue follows when no team is named. Creating must not require
-//     already belonging somewhere, or a fresh member can do nothing.
-//   · `gate` — what to authorize. Only an EXPLICIT choice is authorized, because only that is a claim about
-//     another team; an implicit fallback is not the caller asserting anything. And an explicit choice the caller
-//     may not make is REFUSED, never quietly redirected to their own team — silently rewriting where something
-//     lands is how a mistyped id looks like it worked.
-export async function teamForNew(
-  principal: Principal,
-  deps: ServerDeps,
-  requested?: string,
-): Promise<{ teamId?: string; gate: ResourceScope }> {
-  if (requested !== undefined) {
-    // Resolved before it is gated: the caller may name the team by key (`ENG`), and comparing a key against the
-    // id list a principal carries would refuse a member of the very team they named.
-    const teamId = await resolveTeamRef(deps, principal.workspace, requested);
-    return { teamId, gate: { teamId } };
-  }
-  const own = principal.teams?.[0];
-  if (own !== undefined) return { teamId: own, gate: {} };
-  const all = (await deps.teamService?.list(principal.workspace).catch(() => [])) ?? [];
-  const preferred = all.find((team) => team.isDefault) ?? all[0];
-  return preferred ? { teamId: preferred.id, gate: {} } : { gate: {} };
-}
-
-// A team-shaped URL segment or query value → the team id a store/registry indexes by. A team is addressed by its
-// id OR by its key (`ENG`), the same way an issue is addressed by `ENG-12`: the resolution lives in TeamService
-// so every transport accepts both, and this is the one line a route needs to opt in. An unknown ref 404s rather
-// than passing through — a filter that keeps a bad ref answers with an empty list, which reads as "this team has
-// nothing" instead of "no such team". A deployment with no team service keeps the ref verbatim (nothing to
-// resolve against), so team-less compositions behave exactly as before.
-export async function resolveTeamRef(deps: ServerDeps, tenant: string, ref: string): Promise<string> {
-  if (!deps.teamService) return ref;
-  return deps.teamService.resolveId(tenant, ref);
-}
+// Re-exported so a ROUTE keeps one import surface (this module, beside gate/sendError) while an MCP tool file
+// imports the same functions straight from `common/team-scope.js` — it cannot import this one without a cycle.
+export { resolveTeamRef, teamForNew } from "../common/team-scope.js";
 
 // authorize wrapper — throws ForbiddenError as-is so sendError maps it to 403.
 // `resource` carries the OWNING TEAM when the target has one: a write against another team's harness/dataset/…
-// is refused even though the role allows the action in general. Omit it for workspace-level actions and reads.
+// is refused even though the role allows the action in general. Omit it for workspace-level actions; for READS
+// use `assertTeamVisible` below instead, which answers the same refusal as 404.
 export function gate(principal: Principal, action: Action, resource?: ResourceScope): void {
   authorize(principal, action, resource);
 }
+
+// The READ half of the team axis lives in `common/team-scope.ts` (both transports need it, and the MCP tool files
+// cannot import this module without closing a cycle): `assertTeamVisible` / `visibleTeamsFor` / `teamCeiling`.
 
 // AppError → flat error response; anything else → 500. Every route funnels failures through this.
 export function sendError(reply: FastifyReply, err: unknown): FastifyReply {

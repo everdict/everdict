@@ -59,6 +59,7 @@ import type { BudgetAdmin } from "../common/budget-tracker.js";
 import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
+import { teamForNew } from "../common/team-scope.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import type { AgentMemberToolingService } from "../core/agent/agent-member-tooling-service.js";
 import type { AgentService } from "../core/agent/agent-service.js";
@@ -203,6 +204,27 @@ export async function run(
     // agent cannot write another team's asset through a tool call that the HTTP route would have refused.
     authorize(principal, action, resource);
     return await fn();
+  } catch (err) {
+    if (err instanceof AppError) return failFrom(err);
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+}
+
+// Create-with-an-owner, gated: resolve the team the caller named (id or key), authorize the action AGAINST it,
+// then run. The MCP twin of a route's `teamForNew` + `gate(…, owner.gate)` pair, calling the same helper — an
+// agent naming a team its creator is not on is refused here exactly as the HTTP route refuses it. `fn` receives
+// the owner to stamp; undefined means "none named", which the service resolves by its own default rule.
+export async function runForTeam(
+  ctx: McpToolContext,
+  action: Action,
+  requested: string | undefined,
+  fn: (teamId: string | undefined) => Promise<CallToolResult>,
+): Promise<CallToolResult> {
+  try {
+    // Resolved before the gate: comparing a KEY against the id list a principal carries would refuse a member of
+    // the very team they named.
+    const owner = await teamForNew(ctx.principal, ctx.deps, requested);
+    return await run(ctx.principal, action, () => fn(owner.teamId), owner.gate);
   } catch (err) {
     if (err instanceof AppError) return failFrom(err);
     return fail(err instanceof Error ? err.message : String(err));

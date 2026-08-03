@@ -8,6 +8,7 @@ export {
   can,
   canReachTeam,
   type ResourceScope,
+  visibleTeams,
   EVERDICT_ROLES,
   type EverdictRole,
 } from "@everdict/domain";

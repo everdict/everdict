@@ -39,6 +39,7 @@ export function RunScorecardForm({
   runtimes = [],
   runners = [],
   hasWorkspaceRunners = false,
+  teamId,
 }: {
   datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
   // kind drives the submit-time capability-fit preview against each runtime (a service harness needs a container runtime).
@@ -52,6 +53,9 @@ export function RunScorecardForm({
   runtimes?: { id: string; capabilities?: string[] }[] // capabilities = latest version's declared caps (for fit preview)
   runners?: { id: string; label: string }[]
   hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
+  // The owning team, set when the form lives under a team's address. Absent = the control plane files the batch
+  // under the team that owns the harness chosen here.
+  teamId?: string
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -123,6 +127,7 @@ export function RunScorecardForm({
     }
     const res = await runScorecardAction({
       ...rest,
+      ...(teamId ? { teamId } : {}),
       ...(judgeRefs.length > 0 ? { judges: judgeRefs } : {}),
       ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}),
       ...(Number.isFinite(tn) && tn > 1 ? { trials: tn } : {}),

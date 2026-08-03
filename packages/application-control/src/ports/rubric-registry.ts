@@ -11,6 +11,9 @@ export interface RubricListEntry {
   description?: string; // rubric description (spec field)
   subtitle?: string; // content summary (text · N criteria · template) — list subtitle
   createdBy?: string; // subject of the first-registered version (absent for seed/_shared)
+  // The owning team (mig 0106) — absent = unowned (a `_shared`/seeded rubric, or one from before the axis), which
+  // is the workspace's. Both impls already carried it; the list read needs it to apply the ownership ceiling.
+  teamId?: string;
   createdAt?: string;
   updatedAt?: string;
   versionTags?: Record<string, string[]>; // version → free-form label (tagged versions only) — mutable registry metadata (outside the spec)

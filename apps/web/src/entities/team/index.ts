@@ -16,6 +16,7 @@ export {
   matchTeamPath,
   TEAM_SECTIONS,
   teamHref,
+  teamNewHref,
   teamSectionHref,
   teamSettingsHref,
   type TeamPathScope,

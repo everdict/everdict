@@ -1,6 +1,8 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
+import { teamCeiling, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   type ServerDeps,
   gate,
@@ -49,7 +51,11 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         await deps.scorecardService.submit({
           tenant: principal.workspace,
           submittedBy: principal.subject,
-          ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
+          // Only what the caller actually NAMED is an owner claim (owner.gate carries exactly that); the rest is
+          // the fallback the service reaches for after the harness's own team. Passing owner.teamId as `teamId`
+          // would make "whichever membership loaded first" outrank what was run.
+          ...(owner.gate.teamId !== undefined ? { teamId: owner.gate.teamId } : {}),
+          ...(owner.teamId !== undefined ? { submitterTeamId: owner.teamId } : {}),
           ...body,
           origin: { source: originSource(principal.via), ...(body.origin ?? {}) },
         }),
@@ -164,8 +170,11 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    // Same owner resolution a live run gets — an ingested batch is a result, and a result belongs to a team.
+    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
-      gate(principal, "scorecards:run");
+      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
+      gate(principal, "scorecards:run", owner.gate);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -176,6 +185,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         await deps.scorecardService.ingest({
           tenant: principal.workspace,
           submittedBy: principal.subject, // executor label/filter (createdBy)
+          ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
           ...parsed.data,
           origin: { source: originSource(principal.via) },
         }),
@@ -191,8 +201,11 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    // Same owner resolution a live run gets — an ingested batch is a result, and a result belongs to a team.
+    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
-      gate(principal, "scorecards:run");
+      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
+      gate(principal, "scorecards:run", owner.gate);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -203,6 +216,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         await deps.scorecardService.ingestPull({
           tenant: principal.workspace,
           submittedBy: principal.subject, // executor label/filter (createdBy)
+          ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
           ...parsed.data,
           origin: { source: originSource(principal.via) },
         }),
@@ -235,10 +249,15 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
               ? { ...(dataset !== undefined ? { dataset } : {}), ...(harness !== undefined ? { harness } : {}) }
               : undefined;
         // ?team= COMBINES with the narrows above rather than replacing them — it answers "of these, which are
-        // ours", which is the question the team sidebar asks. Reads stay workspace-wide; this is a filter.
-        // Named by id or by key (`?team=ENG`), the same ref the team-scoped URL carries.
+        // ours", which is the question the team sidebar asks. Named by id or by key (`?team=ENG`), the same ref
+        // the team-scoped URL carries. It is a NARROW, and `visibleTeams` below is the separate CEILING: naming a
+        // team you are not on returns nothing rather than that team's work.
         const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
-        const filter = teamId === undefined ? narrow : { ...(narrow ?? {}), teamId };
+        const filter = {
+          ...(narrow ?? {}),
+          ...(teamId !== undefined ? { teamId } : {}),
+          ...teamCeiling(principal),
+        };
         return reply.send(await deps.scorecardService.list(principal.workspace, filter));
       } catch (err) {
         return sendError(reply, err);
@@ -302,6 +321,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         return reply.send(
           await deps.scorecardService.diff(principal.workspace, baseline, candidate, {
             ...(zThreshold !== undefined ? { zThreshold } : {}),
+            ...teamCeiling(principal),
           }),
         );
       } catch (err) {
@@ -330,6 +350,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
           ...(from ? { from } : {}),
           ...(to ? { to } : {}),
           ...(baseline ? { baseline } : {}),
+          ...teamCeiling(principal),
         }),
       );
     } catch (err) {
@@ -364,6 +385,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
           ...(model ? { model } : {}),
           ...(judgeModel ? { judgeModel } : {}),
           window: window === "best" ? "best" : "latest", // anything else/unset = latest
+          ...teamCeiling(principal),
         }),
       );
     } catch (err) {
@@ -386,7 +408,9 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     const parsed = AnalysisQueryBodySchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error) });
     try {
-      return reply.send(await deps.scorecardService.analysis(principal.workspace, parsed.data));
+      return reply.send(
+        await deps.scorecardService.analysis(principal.workspace, parsed.data, visibleTeamsFor(principal)),
+      );
     } catch (err) {
       return sendError(reply, err);
     }
@@ -416,7 +440,8 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       // getForDisplay, not get: the case snapshots on this answer are rendered, so their artifact refs must be
       // browser-openable (the stored ones point at the in-network object store and have expired). Same in the MCP twin.
       const record = await deps.scorecardService.getForDisplay(req.params.id);
-      if (!record || record.tenant !== principal.workspace)
+      // Another team's batch is answered exactly like another workspace's, and like one that never existed.
+      if (!record || record.tenant !== principal.workspace || !ownedByVisibleTeam(record, visibleTeamsFor(principal)))
         return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
       return reply.send(serveScorecard(record));
     } catch (err) {
@@ -435,7 +460,9 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       if (!principal) return reply;
       try {
         gate(principal, "scorecards:read");
-        return reply.send(await deps.scorecardService.analysisBundle(principal.workspace, req.params.id));
+        return reply.send(
+          await deps.scorecardService.analysisBundle(principal.workspace, req.params.id, visibleTeamsFor(principal)),
+        );
       } catch (err) {
         return sendError(reply, err);
       }

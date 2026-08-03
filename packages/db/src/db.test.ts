@@ -63,6 +63,25 @@ describe("PgRunStore", () => {
     expect(calls[0]?.params?.[6]).toBeNull(); // no result
   });
 
+  it("create persists the owning team, and get maps it back (mig 0106 — the column existed, nothing wrote it)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgRunStore(client).create({
+      id: "r4",
+      tenant: "acme",
+      teamId: "team-eng",
+      harness: { id: "scripted", version: "0" },
+      caseId: "c1",
+      status: "queued",
+      createdAt: "2026-08-03T00:00:00.000Z",
+      updatedAt: "2026-08-03T00:00:00.000Z",
+    });
+    expect(calls[0]?.text).toMatch(/created_by, team_id/);
+    expect(calls[0]?.params?.[11]).toBe("team-eng");
+
+    const { client: reader } = fakeClient(() => ({ rows: [{ ...ROW, team_id: "team-eng" }] }));
+    expect((await new PgRunStore(reader).get("r4"))?.teamId).toBe("team-eng");
+  });
+
   it("round-trips caseSpec (mig 0051, single-run durability): INSERT stringifies it, get maps it back", async () => {
     const caseSpec: EvalCase = {
       id: "c1",
@@ -84,7 +103,7 @@ describe("PgRunStore", () => {
       createdAt: "2026-06-18T00:00:00.000Z",
       updatedAt: "2026-06-18T00:00:00.000Z",
     });
-    expect(calls[0]?.params?.[12]).toBe(JSON.stringify(caseSpec)); // case_spec column, jsonb
+    expect(calls[0]?.params?.[13]).toBe(JSON.stringify(caseSpec)); // case_spec column, jsonb
 
     const { client: reader } = fakeClient(() => ({ rows: [{ ...ROW, case_spec: caseSpec }] }));
     const rec = await new PgRunStore(reader).get("r2");
@@ -108,13 +127,14 @@ describe("PgRunStore", () => {
       createdAt: "2026-07-29T00:00:00.000Z",
       updatedAt: "2026-07-29T00:00:00.000Z",
     });
-    // Column order (mig 0092 tail): …case_spec($13), kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at
-    expect(calls[0]?.params?.[13]).toBe("eval");
-    expect(calls[0]?.params?.[14]).toBe("batch");
-    expect(calls[0]?.params?.[15]).toBe("task");
-    expect(calls[0]?.params?.[16]).toBe(JSON.stringify({ cause: "schedule", scheduleId: "sch-1" }));
-    expect(calls[0]?.params?.[18]).toBe(JSON.stringify({ where: "runtime", target: "nomad-x" }));
-    expect(calls[0]?.params?.[20]).toBe(JSON.stringify({ id: "sc-9", role: "case" }));
+    // Column order (mig 0092 tail, shifted one by team_id in mig 0106): …case_spec($14), kind, class, lifetime,
+    // origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at
+    expect(calls[0]?.params?.[14]).toBe("eval");
+    expect(calls[0]?.params?.[15]).toBe("batch");
+    expect(calls[0]?.params?.[16]).toBe("task");
+    expect(calls[0]?.params?.[17]).toBe(JSON.stringify({ cause: "schedule", scheduleId: "sch-1" }));
+    expect(calls[0]?.params?.[19]).toBe(JSON.stringify({ where: "runtime", target: "nomad-x" }));
+    expect(calls[0]?.params?.[21]).toBe(JSON.stringify({ id: "sc-9", role: "case" }));
 
     const { client: reader } = fakeClient(() => ({
       rows: [

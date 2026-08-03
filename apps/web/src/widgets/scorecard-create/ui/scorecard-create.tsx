@@ -25,6 +25,7 @@ export function ScorecardCreate({
   runners,
   hasWorkspaceRunners,
   traceSources,
+  teamId,
 }: {
   datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
   harnesses: {
@@ -38,6 +39,8 @@ export function ScorecardCreate({
   runners: { id: string; label: string }[]
   hasWorkspaceRunners: boolean
   traceSources: TraceSourceConfig[]
+  // Set when this form lives under a team's address — both modes file the result under that team.
+  teamId?: string
 }) {
   const t = useTranslations('scorecardCreate')
   const [mode, setMode] = useState<Mode>('run')
@@ -82,10 +85,15 @@ export function ScorecardCreate({
             runtimes={runtimes}
             runners={runners}
             hasWorkspaceRunners={hasWorkspaceRunners}
+            {...(teamId ? { teamId } : {})}
           />
         </Card>
       ) : (
-        <EvaluateTracesForm judges={judges} traceSources={traceSources} />
+        <EvaluateTracesForm
+          judges={judges}
+          traceSources={traceSources}
+          {...(teamId ? { teamId } : {})}
+        />
       )}
     </div>
   )

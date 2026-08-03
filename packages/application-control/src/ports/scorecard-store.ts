@@ -7,8 +7,14 @@ export interface ScorecardListFilter {
   dataset?: string; // dataset.id
   harness?: string; // harness.id
   status?: ScorecardStatus;
-  // 소유 팀 — 팀 사이드바의 스코어카드가 이 필터로 좁혀진다(다른 팀 것을 숨기지는 않는다: 읽기는 전역).
+  // The owning team — "what has THIS team evaluated", the read the team page is.
   teamId?: string;
+  // The teams the CALLER may see, which is a different question from the one above: `teamId` narrows to a team on
+  // purpose, `visibleTeams` is the ceiling every read stays under. A batch owned by a team outside this list is not
+  // returned at all (ownership isolates, it does not merely sort). Unowned batches (no `teamId` — `_shared` seeds,
+  // rows from before the axis existed) belong to the whole workspace and are always kept. Unset = no ceiling: an
+  // admin governs every team, and internal reads (recovery, cascade-cancel) are not acting for anyone.
+  visibleTeams?: string[];
   judge?: string; // applied Agent Judge id (orchestration.judges[].id, any version) — the judge detail's evaluation history
   scheduleId?: string; // the schedule that fired the run (origin.scheduleId) — the schedule detail's run history
   // Cascade-cancel walk (§5.5): the batches a given run caused (origin.causedByRunId) — the kill switch's read.

@@ -130,6 +130,9 @@ export type IngestScorecardBody = z.infer<typeof IngestScorecardBodySchema>;
 export type IngestScorecardInput = IngestScorecardBody & {
   tenant: string;
   submittedBy?: string; // submitter subject → record createdBy (runner attribution/filter)
+  // Owning team — decided by the transport (teamForNew), exactly as it is for a live run. An ingested batch is a
+  // result like any other; born unowned it would sit in every team's list forever.
+  teamId?: string;
   origin?: ScorecardOrigin;
 };
 
@@ -171,6 +174,7 @@ export type PullIngestBody = z.infer<typeof PullIngestBodySchema>;
 export type PullIngestInput = PullIngestBody & {
   tenant: string;
   submittedBy?: string; // submitter subject → record createdBy (runner attribution/filter)
+  teamId?: string; // owning team — decided by the transport, same as the push-ingest above
   origin?: ScorecardOrigin;
 };
 
@@ -234,9 +238,16 @@ export function applyGradingPlan(cases: EvalCase[], plan?: GraderSpec[]): EvalCa
 }
 
 export interface RunScorecardInput {
-  // 이 배치를 소유한 팀 — 평가 자산과 같은 축이라 "우리 팀이 무엇을 평가했나"를
-  // 하네스를 전부 훑지 않고 답할 수 있다. 라우트가 결정해 넘긴다.
+  // Who this batch belongs to, in precedence order. The eval assets carry the same axis, which is what makes
+  // "what has our team evaluated" answerable without walking every harness.
+  //   · teamId          — the owner the CALLER named. The transport authorized it, so it wins outright.
+  //   · (the harness's own team, resolved here) — what a batch inherits when nobody said: evaluating a team's
+  //     harness produces that team's result, and it is the only answer the headless callers have.
+  //   · submitterTeamId — the transport's fallback (the caller's team, else the workspace default), used only
+  //     when the harness is unowned too. Separate from `teamId` because it is NOT a claim the caller made, and
+  //     collapsing the two would let an arbitrary "first membership" outrank what actually ran.
   teamId?: string;
+  submitterTeamId?: string;
   tenant: string;
   // INTERNAL (experiment façade only — routes never expose these two): group kind stamped on the record, and a
   // pre-resolved dataset that BYPASSES the registry lookup (the ad-hoc task path / the graders-stripped copy).

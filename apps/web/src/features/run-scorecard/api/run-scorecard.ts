@@ -6,6 +6,9 @@ import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
 export interface RunScorecardInput {
+  // The team this batch belongs to. Set when the form was opened under a team's own address; absent at the
+  // workspace address, where the control plane files the batch under the team that owns the harness.
+  teamId?: string
   datasetId: string
   datasetVersion: string
   harnessId: string
@@ -32,6 +35,7 @@ export interface RunScorecardResult {
 export async function runScorecardAction(input: RunScorecardInput): Promise<RunScorecardResult> {
   const ctx = await authContext()
   const body = {
+    ...(input.teamId ? { teamId: input.teamId } : {}),
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     // When runtime is selected the control plane injects it as each case's placement.target → RuntimeDispatcher routing.

@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 
 import {
   teamHref,
+  teamNewHref,
   teamSectionHref,
   teamWithSummarySchema,
   type TeamSection,
@@ -24,10 +25,13 @@ export async function loadTeamScope(input: {
   slug: string
   // 팀 홈이면 생략. 섹션이면 정규화 리다이렉트가 그 섹션으로 돌아간다.
   section?: TeamSection
+  // The section's "new" screen (`…/scorecards/new`). Without it a normalizing redirect would land on the LIST and
+  // silently throw away the form the person opened — the slug is fixed, but so is what they were doing.
+  create?: boolean
   // 정규화 리다이렉트가 살려 둘 쿼리(상태·우선순위 필터). 팀은 여기 없다 — 경로가 말한다.
   search?: Record<string, string | string[] | undefined>
 }): Promise<TeamWithSummary> {
-  const { workspace, slug, section, search } = input
+  const { workspace, slug, section, create, search } = input
   const ctx = await authContext()
 
   let team: TeamWithSummary
@@ -42,7 +46,9 @@ export async function loadTeamScope(input: {
     const base =
       section === undefined
         ? teamHref(workspace, team.key)
-        : teamSectionHref(workspace, team.key, section)
+        : create
+          ? teamNewHref(workspace, team.key, section)
+          : teamSectionHref(workspace, team.key, section)
     const qs = queryString(search)
     redirect(`${base}${qs ? `?${qs}` : ''}`)
   }

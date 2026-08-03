@@ -2708,7 +2708,8 @@
     "sparklineLabel": "score 추이",
     "metaWorkflow": "워크플로",
     "traceEvaluation": "트레이스 평가",
-    "sourceMeta": "소스"
+    "sourceMeta": "소스",
+    "runForTeam": "{team} 팀의 이름으로 평가를 실행합니다."
   },
   "scorecardSummary": {
     "statTotal": "전체 실행",

@@ -54,6 +54,35 @@ async function main() {
   await res.json();
   console.log("✓ GET /harnesses ok (dev-fallback tenant)");
 
+  // 3) Every route is feature-gated on its service being present on ServerDeps ("… not configured" → 404). A service
+  //    the composition root BUILDS but forgets to hand to buildServer is therefore invisible everywhere EXCEPT here:
+  //    it typechecks, and the route tests inject their own deps, so only a booted process can tell. Reaching each
+  //    surface once is what makes that miss a CI failure instead of a bug report. `/teams/…/states` names a team that
+  //    does not exist on purpose — an unwired service answers "not configured" before it ever looks the team up.
+  const WIRED = [
+    "/cycles",
+    "/teams",
+    "/teams/__no_such_team__/states",
+    "/issues",
+    "/projects",
+    "/initiatives",
+    "/datasets",
+    "/judges",
+    "/scorecards",
+    "/schedules",
+    "/views",
+    "/runtimes",
+    "/tasks",
+    "/subscriptions",
+  ];
+  for (const path of WIRED) {
+    const r = await fetch(`${BASE}${path}`, { headers: { "x-everdict-tenant": "default" } });
+    const body = await r.json().catch(() => ({}));
+    if (typeof body.message === "string" && body.message.includes("not configured"))
+      throw new Error(`GET ${path} → "${body.message}" — the service is built in main.ts but missing from ServerDeps`);
+  }
+  console.log(`✓ ${WIRED.length} route families reachable (no service missing from ServerDeps)`);
+
   console.log("PASS: empty-env boot contract holds");
 }
 

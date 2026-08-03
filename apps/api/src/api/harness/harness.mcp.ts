@@ -2,9 +2,10 @@ import { setVersionTags } from "@everdict/application-control";
 import { repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { HarnessInstanceSpecSchema } from "@everdict/contracts";
-import { diffHarnessSpecs } from "@everdict/domain";
+import { diffHarnessSpecs, ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   FROM_ISSUE_TOOL_DESCRIPTION,
   ORIGIN_NOTE_TOOL_DESCRIPTION,
@@ -27,7 +28,11 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "harnesses:read", async () => {
           // A private harness (references a personal secret) is createdBy-only — hidden from other users (same as the HTTP list).
           const entries = await instances.list(ws);
-          return ok(entries.filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject));
+          return ok(
+            entries
+              .filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject)
+              .filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal))),
+          );
         }),
     );
 
@@ -39,7 +44,10 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         inputSchema: { id: z.string(), version: z.string().describe('instance version tag or "latest"') },
       },
       ({ id, version }) =>
-        run(principal, "harnesses:read", async () => ok(await instances.getInstance(ws, id, version))),
+        run(principal, "harnesses:read", async () => {
+          await assertEntityVisible(principal, instances, ws, id, "harness");
+          return ok(await instances.getInstance(ws, id, version));
+        }),
     );
 
     server.registerTool(
@@ -57,6 +65,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "harnesses:read", async () => {
           // A private harness (references a personal secret) is owner-only — its existence is hidden from others (same as the HTTP route).
           if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: harness not found.");
+          await assertEntityVisible(principal, instances, ws, id, "harness");
           const [baseSpec, candidateSpec] = await Promise.all([
             instances.get(ws, id, base),
             instances.get(ws, id, candidate),

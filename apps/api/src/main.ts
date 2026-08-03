@@ -958,9 +958,11 @@ async function main(): Promise<void> {
     viewService,
     taskService,
     teamService,
+    workflowStateService, // the team's board — /teams/:id/states, edited from Settings › Teams
     issueService,
     issueLabelService,
     issueSync: githubIssueSync,
+    cycleService, // the team's iterations — /cycles
     projectService,
     initiativeService,
     subscriptionService,

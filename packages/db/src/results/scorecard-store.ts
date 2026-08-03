@@ -52,6 +52,8 @@ export class InMemoryScorecardStore implements ScorecardStore {
       .filter((c) => !filter?.harness || c.harness.id === filter.harness)
       .filter((c) => !filter?.status || c.status === filter.status)
       .filter((c) => !filter?.teamId || c.teamId === filter.teamId)
+      // Ownership ceiling — another team's batch is not visible at all; an unowned one is the workspace's.
+      .filter((c) => !filter?.visibleTeams || c.teamId === undefined || filter.visibleTeams.includes(c.teamId))
       .filter((c) => !filter?.judge || (c.orchestration?.judges ?? []).some((j) => j.id === filter.judge))
       .filter((c) => !filter?.scheduleId || c.origin?.scheduleId === filter.scheduleId)
       .filter((c) => !filter?.causedByRunId || c.origin?.causedByRunId === filter.causedByRunId)

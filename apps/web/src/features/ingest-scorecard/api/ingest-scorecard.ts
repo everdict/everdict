@@ -93,6 +93,8 @@ export async function pullScorecardAction(
 }
 
 export interface EvaluateTracesInput {
+  // The owning team, when the form was opened under one — a judged trace set is a team's result like any run.
+  teamId?: string
   sourceName: string // a REGISTERED workspace trace source (Settings › Observability) — pull by name (credential from the pool)
   traceIds: string[] // the selected trace ids to evaluate; each becomes one case (caseId = trace id)
   judges: { id: string; version: string }[] // Agent Judges (id + version) to score each pulled trace (empty = control-plane default scoring)
@@ -112,6 +114,7 @@ export async function evaluateTracesAction(
     // dataset + harness deliberately omitted → the control plane treats this as a direct trace evaluation.
     // correlate:"id" — the ids ARE the platform's real trace ids (from listTraces), so fetch by id even if the source
     // is registered for "tag" (everdict.run_id) correlation.
+    ...(input.teamId ? { teamId: input.teamId } : {}),
     source: { name: input.sourceName, correlate: 'id' as const },
     runs: input.traceIds.map((id) => ({ caseId: id, runId: id })),
     ...(input.judges.length > 0 ? { judges: input.judges } : {}),

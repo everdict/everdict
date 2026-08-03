@@ -1,7 +1,9 @@
 import { setVersionTags } from "@everdict/application-control";
 import { RubricSpecSchema } from "@everdict/contracts";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Rubric MCP tools — the MCP twin of rubric.routes.ts.
@@ -15,7 +17,10 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "list_rubrics",
       { description: "Rubrics visible to this workspace (owned + _shared default rubrics)", inputSchema: {} },
-      () => run(principal, "judges:read", async () => ok(await rubrics.list(ws))),
+      () =>
+        run(principal, "judges:read", async () =>
+          ok((await rubrics.list(ws)).filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)))),
+        ),
     );
 
     server.registerTool(
@@ -26,7 +31,10 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
       ({ id, version }) =>
-        run(principal, "judges:read", async () => ok(await rubrics.get(ws, id, version ?? "latest"))),
+        run(principal, "judges:read", async () => {
+          await assertEntityVisible(principal, rubrics, ws, id, "rubric");
+          return ok(await rubrics.get(ws, id, version ?? "latest"));
+        }),
     );
 
     server.registerTool(

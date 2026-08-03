@@ -16,6 +16,7 @@ interface RunRow {
   parent_scorecard_id: string | null;
   trigger: string | null;
   created_by: string | null;
+  team_id: string | null; // owning team (mig 0106) — beside created_by, because ownership is metadata, not content
   runtime: string | null;
   case_spec: unknown | null;
   // The universal-run shape (mig 0092) — nullable; absent = legacy eval run.
@@ -49,6 +50,7 @@ function rowToRecord(row: RunRow): RunRecord {
     parentScorecardId: row.parent_scorecard_id ?? undefined,
     trigger: row.trigger ?? undefined,
     createdBy: row.created_by ?? undefined,
+    teamId: row.team_id ?? undefined,
     runtime: row.runtime ?? undefined,
     ...(row.case_spec ? { caseSpec: row.case_spec } : {}),
     ...(row.kind ? { kind: row.kind } : {}),
@@ -69,8 +71,9 @@ function rowToRecord(row: RunRow): RunRecord {
 }
 
 const RUN_COLUMNS =
-  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, session, created_at, updated_at)";
-const RUN_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)";
+  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, team_id, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, session, created_at, updated_at)";
+const RUN_VALUES =
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)";
 
 function runInsertParams(r: RunRecord): unknown[] {
   return [
@@ -85,6 +88,7 @@ function runInsertParams(r: RunRecord): unknown[] {
     r.parentScorecardId ?? null,
     r.trigger ?? null,
     r.createdBy ?? null,
+    r.teamId ?? null,
     r.runtime ?? null,
     r.caseSpec ? JSON.stringify(r.caseSpec) : null,
     r.kind ?? null,

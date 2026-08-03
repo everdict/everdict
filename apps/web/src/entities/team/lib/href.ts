@@ -20,6 +20,13 @@ export function teamSectionHref(workspace: string, key: string, section: TeamSec
   return `${teamHref(workspace, key)}/${section}`
 }
 
+// A team's "create one of these" screen — `/{workspace}/teams/ENG/scorecards/new`. Creating under the team's own
+// address is what carries the owner: the same form at the workspace address has to infer whose it is, and the
+// inference is exactly what put every batch in one team.
+export function teamNewHref(workspace: string, key: string, section: TeamSection): string {
+  return `${teamSectionHref(workspace, key, section)}/new`
+}
+
 // 팀 설정(이름·키·로스터·보드) — 일하는 화면이 아니라 구성 화면이라 Settings 아래에 있지만, 주소는 같은 슬러그다.
 export function teamSettingsHref(workspace: string, key: string): string {
   return `/${workspace}/settings/teams/${encodeURIComponent(key)}`

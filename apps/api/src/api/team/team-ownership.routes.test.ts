@@ -83,19 +83,47 @@ describe("team ownership — an eval asset belongs to a team, and writes respect
     await app.close();
   });
 
-  it("lets ANY team read another team's asset — ownership filters lists, it does not hide the workspace", async () => {
+  it("keeps another team's asset OUT of the list — ownership isolates the read, it does not merely sort it", async () => {
     const ctx = await build();
     const owner = serverFor(ctx, ["member"], [ctx.web.id]);
     expect(
-      (await owner.inject({ method: "POST", url: "/judges", headers: bearer, payload: judge("shared") })).statusCode,
+      (await owner.inject({ method: "POST", url: "/judges", headers: bearer, payload: judge("theirs") })).statusCode,
     ).toBe(201);
+    const mine = await owner.inject({ method: "GET", url: "/judges", headers: bearer });
+    expect(mine.json().map((j: { id: string }) => j.id)).toContain("theirs"); // ...their own team still sees it
     await owner.close();
 
     const other = serverFor(ctx, ["member"], [ctx.mobile.id], "other");
     const res = await other.inject({ method: "GET", url: "/judges", headers: bearer });
     expect(res.statusCode).toBe(200);
-    expect(res.json().map((j: { id: string }) => j.id)).toContain("shared");
+    expect(res.json().map((j: { id: string }) => j.id)).not.toContain("theirs");
     await other.close();
+  });
+
+  it("answers a read of another team's asset 404, not 403 — refusing must not confirm that it exists", async () => {
+    const ctx = await build();
+    const owner = serverFor(ctx, ["member"], [ctx.web.id]);
+    await owner.inject({ method: "POST", url: "/judges", headers: bearer, payload: judge("secret") });
+    await owner.close();
+
+    const other = serverFor(ctx, ["member"], [ctx.mobile.id], "other");
+    const res = await other.inject({ method: "GET", url: "/judges/secret/versions/1.0.0", headers: bearer });
+    expect(res.statusCode).toBe(404);
+    await other.close();
+  });
+
+  it("still shows an ADMIN every team's assets — an unreachable team would be un-administrable", async () => {
+    const ctx = await build();
+    const owner = serverFor(ctx, ["member"], [ctx.web.id]);
+    await owner.inject({ method: "POST", url: "/judges", headers: bearer, payload: judge("theirs") });
+    await owner.close();
+
+    const admin = serverFor(ctx, ["admin"], [], "boss");
+    const res = await admin.inject({ method: "GET", url: "/judges", headers: bearer });
+    expect(res.json().map((j: { id: string }) => j.id)).toContain("theirs");
+    expect((await admin.inject({ method: "GET", url: "/judges/theirs/versions/1.0.0", headers: bearer })).statusCode) //
+      .toBe(200);
+    await admin.close();
   });
 
   it("names the owning team by KEY too — the same ref the URL carries", async () => {

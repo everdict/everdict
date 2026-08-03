@@ -22,9 +22,11 @@ import { InfoTip } from '@/shared/ui/tooltip'
 export function EvaluateTracesForm({
   judges,
   traceSources,
+  teamId,
 }: {
   judges: JudgePickerChoice[]
   traceSources: TraceSourceConfig[]
+  teamId?: string
 }) {
   const t = useTranslations('evaluateTraces')
   const router = useRouter()
@@ -57,6 +59,7 @@ export function EvaluateTracesForm({
       sourceName: sel.sourceName,
       traceIds: [...sel.ids],
       judges: judgeRefs,
+      ...(teamId ? { teamId } : {}),
     })
     setBusy(false)
     if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)

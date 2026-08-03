@@ -1,8 +1,10 @@
 import { deleteJudgeVersion, setVersionTags } from "@everdict/application-control";
 import { JudgeSpecSchema, TraceEventSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   FROM_ISSUE_TOOL_DESCRIPTION,
   ORIGIN_NOTE_TOOL_DESCRIPTION,
@@ -20,7 +22,10 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "list_judges",
       { description: "Agent Judges visible to this workspace (owned + _shared default judges)", inputSchema: {} },
-      () => run(principal, "judges:read", async () => ok(await judges.list(ws))),
+      () =>
+        run(principal, "judges:read", async () =>
+          ok((await judges.list(ws)).filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)))),
+        ),
     );
 
     server.registerTool(
@@ -29,7 +34,11 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
         description: "A full JudgeSpec (model | harness). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
-      ({ id, version }) => run(principal, "judges:read", async () => ok(await judges.get(ws, id, version ?? "latest"))),
+      ({ id, version }) =>
+        run(principal, "judges:read", async () => {
+          await assertEntityVisible(principal, judges, ws, id, "judge");
+          return ok(await judges.get(ws, id, version ?? "latest"));
+        }),
     );
 
     server.registerTool(

@@ -54,6 +54,18 @@ describe("InMemoryScorecardStore", () => {
     expect(list[0]?.scorecard).toBeUndefined(); // list has no heavy scorecard
   });
 
+  it("list(visibleTeams) hides another team's batch and keeps the unowned ones", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(rec({ id: "own", teamId: "team-eng" }));
+    await store.create(rec({ id: "theirs", teamId: "team-web" }));
+    await store.create(rec({ id: "unowned" })); // `_shared` seeds / pre-team rows belong to the whole workspace
+    const mine = await store.list("acme", { visibleTeams: ["team-eng"] });
+    expect(mine.map((c) => c.id).sort()).toEqual(["own", "unowned"]);
+    // Naming a team is a different question from being allowed to see it — both narrow, and both apply.
+    expect((await store.list("acme", { teamId: "team-web", visibleTeams: ["team-eng"] })).map((c) => c.id)).toEqual([]);
+    expect((await store.list("acme")).map((c) => c.id).sort()).toEqual(["own", "theirs", "unowned"]);
+  });
+
   it("appends outbox events to the paired platform-event store right after the write (E0 in-memory pair)", async () => {
     const events = new InMemoryPlatformEventStore();
     const store = new InMemoryScorecardStore(events);
@@ -219,7 +231,38 @@ describe("PgScorecardStore", () => {
     expect(calls[0]?.params?.[9]).toBeNull(); // no models (rec default)
     expect(calls[0]?.params?.[10]).toBeNull(); // no judge_models
     expect(calls[0]?.params?.[12]).toBe("user-alice"); // created_by (runner)
-    expect(calls[0]?.params?.[13]).toBeNull(); // no runtime
+    expect(calls[0]?.params?.[13]).toBeNull(); // no team_id (unowned)
+    expect(calls[0]?.params?.[14]).toBeNull(); // no runtime
+  });
+
+  it("create persists the owning team, and list SELECTs it back (mig 0106 — the column existed, nothing wrote it)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(client).create(rec({ teamId: "team-eng" }));
+    expect(calls[0]?.text).toMatch(/created_by, team_id/);
+    expect(calls[0]?.params?.[13]).toBe("team-eng");
+
+    const { client: c2, calls: calls2 } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(c2).list("acme");
+    expect(calls2[0]?.text).toMatch(/SELECT[\s\S]*team_id/); // a list row without the owner cannot be attributed to a team
+  });
+
+  it("list(filter.teamId) narrows in SQL — the team page asks the store, not the caller", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(client).list("acme", { teamId: "team-eng" });
+    expect(calls[0]?.text).toMatch(/team_id = \$/);
+    expect(calls[0]?.params).toContain("team-eng");
+  });
+
+  it("list(filter.visibleTeams) keeps unowned rows and refuses the rest — including for a caller on NO team", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(client).list("acme", { visibleTeams: ["team-eng"] });
+    expect(calls[0]?.text).toMatch(/\(team_id IS NULL OR team_id = ANY\(\$\d+::text\[\]\)\)/);
+    expect(calls[0]?.params).toContainEqual(["team-eng"]);
+
+    // [] is an answer ("on no team"), not an absence — dropping the condition would show the whole workspace.
+    const { client: c2, calls: calls2 } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(c2).list("acme", { visibleTeams: [] });
+    expect(calls2[0]?.text).toMatch(/team_id IS NULL OR team_id = ANY/);
   });
 
   it("list(filter.causedByRunId) narrows in SQL on the persisted origin (cascade-cancel walk)", async () => {
@@ -337,7 +380,7 @@ describe("PgScorecardStore", () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     await new PgScorecardStore(client).create(rec({ analysisRef: ref }));
     expect(calls[0]?.text).toMatch(/analysis_ref/); // column present in the INSERT list (absent pre-fix)
-    expect(calls[0]?.params?.[17]).toBe(ref); // positioned after scorecard ($17), before sink_export
+    expect(calls[0]?.params?.[18]).toBe(ref); // positioned after scorecard ($18), before sink_export
   });
 
   it("list(filter) → dataset_id/status clauses in the SQL WHERE + parameterization (avoids a full scan)", async () => {

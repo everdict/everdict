@@ -1,6 +1,8 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { RubricSpecSchema } from "@everdict/contracts";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { rubricDocs } from "./rubric.docs.js";
 
@@ -64,7 +66,9 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
     if (!principal) return reply;
     try {
       gate(principal, "judges:read");
-      return reply.send(await deps.rubricRegistry.list(principal.workspace));
+      // A rubric is owned like every other eval asset — another team's does not appear, an unowned one does.
+      const entries = await deps.rubricRegistry.list(principal.workspace);
+      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal))));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -81,6 +85,7 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
       if (!principal) return reply;
       try {
         gate(principal, "judges:read");
+        await assertEntityVisible(principal, deps.rubricRegistry, principal.workspace, req.params.id, "rubric");
         return reply.send(await deps.rubricRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404

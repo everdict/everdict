@@ -69,6 +69,35 @@ A flat role → action matrix; `can(principal, action)` / `authorize(principal, 
 
 Roles are cumulative (`member` ⊃ `viewer`, `admin` ⊃ `member`).
 
+### The team axis (ownership isolates)
+The role says what you may DO; the owning team says what you may do it TO. Every eval asset (harness · dataset ·
+judge · rubric · runtime · model · agent) and every result (scorecard · run) records a `teamId` beside its
+`createdBy` (migration `0106`) — a column, never a field inside a versioned spec, because transferring a team must
+not mint a new version of something whose content did not change.
+
+`can(principal, action, { teamId })` adds a third question after the role and the api-key scope:
+`canReachTeam(principal, resource)`.
+
+- **A team's work is its own — to read as well as to write.** An asset owned by a team the subject is not on is
+  refused in both directions. A refused READ is answered **404**, never 403: "you may not see this" still confirms
+  that a harness by that name, a batch with that id, exists. List endpoints narrow to `visibleTeams(principal)`
+  (the stores take it as a `visibleTeams` filter; a service holding one row asks `ownedByVisibleTeam`).
+- **`teamId: undefined` means unowned, which means the workspace's** — `_shared` catalogue entries, operator seeds,
+  and every row that predates the axis. Never read "no owner" as "everyone's team" in the other direction.
+- **Every workspace member is on the DEFAULT team**, rostered or not (`withTeams` adds it). That team is not one
+  somebody chose to join: it is where an unnamed asset lands and where the `0106` backfill put everything that
+  predates the axis, so isolating it would show a member nobody has rostered yet an empty workspace. Teams people
+  actually created stay isolated, which is the point.
+- **An ADMIN reaches every team** (a team they are not on would otherwise be un-administrable), and so does a
+  MACHINE credential acting for the workspace (`via ∈ {runner, github-actions}`) — a paired device and a
+  repo-linked CI token have no roster to be isolated by and already hold a deliberately tiny role. An `agent`
+  credential is NOT exempt: it acts as its creator, so it carries that person's teams and is isolated with them.
+- **What a new asset gets**: `teamForNew` (`apps/api` `common/team-scope.ts`) separates the owner it WILL get from
+  what the gate checks — only an EXPLICIT choice is authorized (naming another team is refused, never quietly
+  redirected), and an implicit fallback is the caller's team, else the workspace's default. A scorecard resolves
+  one step earlier still: an explicit choice → **the team that owns the harness it runs** → the submitter's team.
+  That middle step is what gives a schedule, a CI token or a chat command an owner at all.
+
 ## How `apps/api` enforces it
 `resolvePrincipal(req)` is called by **every** route:
 1. `Authorization: Bearer <token|ak_…>` → `authenticator.authenticate(...)`; on `undefined` → **401**.

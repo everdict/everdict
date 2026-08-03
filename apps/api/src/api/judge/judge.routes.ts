@@ -1,7 +1,9 @@
 import { VersionTagsBodySchema, deleteJudgeVersion, setVersionTags } from "@everdict/application-control";
 import { JudgeSpecSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
 import {
@@ -142,12 +144,12 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
     try {
       gate(principal, "judges:read");
       const entries = await deps.judgeRegistry.list(principal.workspace);
-      // `team` 은 한 팀의 것만 남긴다 — 소유권이 READ 에 하는 일은 필터이지 403 이 아니다.
-      // 다른 팀 작업은 워크스페이스 안에서 계속 보이고, 다만 지금 물어본 대상이 아닐 뿐이다.
-      // id 로도 key(`?team=ENG`)로도 지목한다 — 팀 스코프 URL 이 들고 다니는 것과 같은 ref 다.
+      // Ceiling first (another team's judge is not the caller's to see; an unowned `_shared` one is everyone's),
+      // then the `?team=` narrow on top — named by id or by key (`?team=ENG`), the ref the team URL carries.
+      const visible = entries.filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)));
       const team = req.query.team;
       const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
-      return reply.send(teamId === undefined ? entries : entries.filter((e) => e.teamId === teamId));
+      return reply.send(teamId === undefined ? visible : visible.filter((e) => e.teamId === teamId));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -164,6 +166,7 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
       if (!principal) return reply;
       try {
         gate(principal, "judges:read");
+        await assertEntityVisible(principal, deps.judgeRegistry, principal.workspace, req.params.id, "judge");
         return reply.send(await deps.judgeRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404
@@ -188,6 +191,7 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
           .send({ code: "BAD_REQUEST", message: "base and candidate query parameters are required." });
       try {
         gate(principal, "judges:read");
+        await assertEntityVisible(principal, deps.judgeRegistry, principal.workspace, req.params.id, "judge");
         const [baseSpec, candidateSpec] = await Promise.all([
           deps.judgeRegistry.get(principal.workspace, req.params.id, base),
           deps.judgeRegistry.get(principal.workspace, req.params.id, candidate),

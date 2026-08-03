@@ -17,6 +17,7 @@ import {
   diffScorecards,
   diffTrials,
   leaderboard,
+  ownedByVisibleTeam,
   scorecardModels,
   trendSeries,
 } from "@everdict/domain";
@@ -45,10 +46,10 @@ export class ScorecardAnalyticsService {
     tenant: string,
     baselineId: string,
     candidateId: string,
-    opts: { zThreshold?: number } = {},
+    opts: { zThreshold?: number; visibleTeams?: string[] } = {},
   ): Promise<ScorecardDiff & { trials?: TrialDiff }> {
-    const baseline = await this.requireSucceeded(tenant, baselineId);
-    const candidate = await this.requireSucceeded(tenant, candidateId);
+    const baseline = await this.requireSucceeded(tenant, baselineId, opts.visibleTeams);
+    const candidate = await this.requireSucceeded(tenant, candidateId, opts.visibleTeams);
     const diff = diffScorecards(baseline, candidate);
     const hasTrials =
       baseline.results.some((r) => r.trial !== undefined) || candidate.results.some((r) => r.trial !== undefined);
@@ -59,7 +60,17 @@ export class ScorecardAnalyticsService {
   // Computed from the list (lightweight summary) alone — no heavy traces needed. ScorecardRecord structurally satisfies TrendCard.
   async trend(
     tenant: string,
-    opts: { datasetId: string; metric: string; harnessId?: string; from?: string; to?: string; baseline?: string },
+    opts: {
+      datasetId: string;
+      metric: string;
+      harnessId?: string;
+      from?: string;
+      to?: string;
+      baseline?: string;
+      // The caller's ownership ceiling (undefined = none). A trend is a shape derived from batches, so a batch the
+      // caller cannot see must not bend the line either.
+      visibleTeams?: string[];
+    },
   ): Promise<ScorecardTrend> {
     // Narrow at the SQL level by dataset (+optional harness)·succeeded — avoid a full workspace scan (suite defensively re-filters).
     const records = await this.deps.store.list(tenant, {
@@ -67,6 +78,7 @@ export class ScorecardAnalyticsService {
       status: "succeeded",
       kind: "scorecard", // experiments are ungraded (P1) — they never belong on a trend
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
+      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
     });
     return trendSeries(records, opts);
   }
@@ -82,6 +94,9 @@ export class ScorecardAnalyticsService {
       model?: string;
       judgeModel?: string;
       window?: "latest" | "best";
+      // The caller's ownership ceiling (undefined = none) — a ranking that counts rows the caller cannot open is
+      // a leak dressed as an average.
+      visibleTeams?: string[];
     },
   ): Promise<Leaderboard> {
     // Narrow at the SQL level by dataset (+optional harness)·succeeded — summary-derived axes like model/judgeModel/window are filtered by suite.
@@ -90,6 +105,7 @@ export class ScorecardAnalyticsService {
       status: "succeeded",
       kind: "scorecard", // experiments are ungraded (P1) — they never rank
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
+      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
     });
     return leaderboard(records, opts);
   }
@@ -99,7 +115,9 @@ export class ScorecardAnalyticsService {
   // Computed from the list (lightweight summary/models/origin) alone — ScorecardRecord structurally satisfies
   // AnalysisCard. Narrows dataset/harness at the SQL level when the filter pins exactly one (domain re-filters
   // defensively). docs/architecture/analysis-studio.md (V1).
-  async analysis(tenant: string, config: AnalysisConfig): Promise<AnalysisResult> {
+  // `visibleTeams` is a separate parameter rather than a field on the config on purpose: the config is parsed from
+  // the request body, and an ownership ceiling that a caller could type is not a ceiling.
+  async analysis(tenant: string, config: AnalysisConfig, visibleTeams?: string[]): Promise<AnalysisResult> {
     const f = config.filters;
     const dataset = f.dataset?.length === 1 ? f.dataset[0] : undefined;
     const harness = f.harness?.length === 1 ? f.harness[0] : undefined;
@@ -107,6 +125,7 @@ export class ScorecardAnalyticsService {
       kind: "scorecard", // experiments are ungraded (P1) — score-less rows would only add noise to the pivot
       ...(dataset !== undefined ? { dataset } : {}),
       ...(harness !== undefined ? { harness } : {}),
+      ...(visibleTeams ? { visibleTeams } : {}),
     });
     return computeAnalysis(records, config);
   }
@@ -118,9 +137,9 @@ export class ScorecardAnalyticsService {
   // ref answers 403) pointing at the SERVER-internal endpoint. So we read the artifact by its KEY through the store,
   // which is stable forever, and keep the ref fetch only as the fallback for an artifact this deployment's store does
   // not hold (a foreign bucket, or no store wired here). A fetch/parse failure is the upstream store's fault → UpstreamError.
-  async analysisBundle(tenant: string, id: string): Promise<unknown> {
+  async analysisBundle(tenant: string, id: string, visibleTeams?: string[]): Promise<unknown> {
     const record = await this.getRecord(id);
-    if (!record || record.tenant !== tenant)
+    if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
     const ref = record.analysisRef;
     if (!ref) throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' has no downloadable analysis artifact.`);
@@ -175,10 +194,11 @@ export class ScorecardAnalyticsService {
     return { scanned: records.length, updated };
   }
 
-  // Ensure workspace scope + completion (scorecard exists). 404 if missing (no existence leak), 400 if incomplete.
-  private async requireSucceeded(tenant: string, id: string): Promise<Scorecard> {
+  // Ensure workspace scope + team scope + completion (scorecard exists). 404 if missing OR owned by a team the
+  // caller cannot see (no existence leak — the same answer another workspace's id gets), 400 if incomplete.
+  private async requireSucceeded(tenant: string, id: string, visibleTeams?: string[]): Promise<Scorecard> {
     const record = await this.getRecord(id); // get hydrates dedup storage from child runs — diff works regardless of embed/reference
-    if (!record || record.tenant !== tenant)
+    if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
     if (!record.scorecard)
       throw new BadRequestError(

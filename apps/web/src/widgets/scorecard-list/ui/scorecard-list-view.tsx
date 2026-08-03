@@ -5,8 +5,8 @@ import { TeamScopeBar, type TeamScope } from '@/widgets/team-scope-bar'
 import { membersSchema } from '@/entities/member'
 import { runnersResponseSchema } from '@/entities/runner'
 import { scorecardsSchema } from '@/entities/scorecard'
-import { type TeamWithSummary } from '@/entities/team'
-import { can } from '@/shared/auth/can'
+import { teamNewHref, type TeamWithSummary } from '@/entities/team'
+import { canInTeam } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { buttonVariants } from '@/shared/ui/button'
@@ -69,11 +69,11 @@ export async function ScorecardListView({
     }
   }
 
-  const canRun = can(principal?.roles, 'scorecards:run')
+  const canRun = canInTeam(principal, 'scorecards:run', team?.id)
   // Row-trash gating info for the list: an admin deletes any terminal batch, a member only their own.
   const viewer = {
     ...(principal?.subject !== undefined ? { subject: principal.subject } : {}),
-    admin: can(principal?.roles, 'scorecards:delete'),
+    admin: canInTeam(principal, 'scorecards:delete', team?.id),
   }
   const scope: TeamScope | undefined = team ? { workspace, team, section: 'scorecards' } : undefined
 
@@ -85,7 +85,16 @@ export async function ScorecardListView({
         description={t('description')}
         actions={
           canRun ? (
-            <Link href={`/${workspace}/scorecards/new`} className={buttonVariants({ size: 'sm' })}>
+            <Link
+              // Under a team, running starts at the TEAM's address so the batch is filed as that team's — the
+              // workspace form would have to guess, and guessing is what put every batch in one team.
+              href={
+                team
+                  ? teamNewHref(workspace, team.key, 'scorecards')
+                  : `/${workspace}/scorecards/new`
+              }
+              className={buttonVariants({ size: 'sm' })}
+            >
               {t('run')}
             </Link>
           ) : null
