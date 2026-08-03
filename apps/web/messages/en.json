@@ -4968,7 +4968,12 @@
     "updatesTitle": "Updates",
     "postUpdate": "Post update",
     "updatePlaceholder": "What changed, and why does it read that way?",
-    "updateError": "Could not post the update"
+    "updateError": "Could not post the update",
+    "initiativeControlLabel": "Change goals",
+    "initiativeAdd": "Add to a goal",
+    "initiativeSearchPlaceholder": "Search goals…",
+    "initiativeNone": "No goals yet",
+    "initiativeError": "Could not change the goals."
   },
   "initiativesPage": {
     "title": "Initiatives",
@@ -5048,7 +5053,18 @@
     "postUpdate": "Post update",
     "updateError": "Couldn't post the update",
     "historyTitle": "History",
-    "discussTitle": "Discussion"
+    "discussTitle": "Discussion",
+    "addProjects": "Add projects",
+    "addProjectsTitle": "Add projects to this goal",
+    "addProjectsLabel": "Projects",
+    "addProjectsPlaceholder": "Choose projects…",
+    "addProjectsNone": "Every project is already here",
+    "addProjectsRemove": "Remove {name}",
+    "addProjectsSubmit": "Add",
+    "addProjectsDone": "{count, plural, one {# project added} other {# projects added}}",
+    "addProjectsError": "Could not add the projects.",
+    "removeProject": "Remove {name} from this goal",
+    "removeProjectError": "Could not remove the project."
   },
   "importGithubIssues": {
     "open": "Import from GitHub",

@@ -18,6 +18,7 @@ export {
   type InitiativeUpdate,
 } from './model/schema'
 export { INITIATIVE_SECTIONS, initiativeHref, type InitiativeSection } from './lib/href'
+export { projectCandidatesFor } from './lib/project-candidates'
 export {
   InitiativeStatusBadge,
   initiativeStatusIcon,

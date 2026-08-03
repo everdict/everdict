@@ -4968,7 +4968,12 @@
     "updatesTitle": "업데이트",
     "postUpdate": "업데이트 올리기",
     "updatePlaceholder": "무엇이 바뀌었고, 왜 그렇게 읽히나요?",
-    "updateError": "업데이트를 올리지 못했어요"
+    "updateError": "업데이트를 올리지 못했어요",
+    "initiativeControlLabel": "목표 바꾸기",
+    "initiativeAdd": "목표에 넣기",
+    "initiativeSearchPlaceholder": "목표 검색…",
+    "initiativeNone": "아직 목표가 없습니다",
+    "initiativeError": "목표를 바꾸지 못했습니다."
   },
   "initiativesPage": {
     "title": "이니셔티브",
@@ -5048,7 +5053,18 @@
     "postUpdate": "업데이트 올리기",
     "updateError": "업데이트를 올리지 못했어요",
     "historyTitle": "이력",
-    "discussTitle": "논의"
+    "discussTitle": "논의",
+    "addProjects": "프로젝트 추가",
+    "addProjectsTitle": "이 목표에 프로젝트 추가",
+    "addProjectsLabel": "프로젝트",
+    "addProjectsPlaceholder": "프로젝트 고르기…",
+    "addProjectsNone": "모든 프로젝트가 이미 들어 있습니다",
+    "addProjectsRemove": "{name} 빼기",
+    "addProjectsSubmit": "추가",
+    "addProjectsDone": "프로젝트 {count}개를 추가했습니다",
+    "addProjectsError": "프로젝트를 추가하지 못했습니다.",
+    "removeProject": "{name} 을(를) 이 목표에서 빼기",
+    "removeProjectError": "프로젝트를 빼지 못했습니다."
   },
   "importGithubIssues": {
     "open": "GitHub에서 가져오기",

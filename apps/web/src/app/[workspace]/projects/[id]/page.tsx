@@ -1,9 +1,14 @@
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, Flag, Target } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Flag } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
-import { ProjectActions, ProjectStatusControl, ProjectUpdatePanel } from '@/features/manage-project'
+import {
+  ProjectActions,
+  ProjectInitiativeControl,
+  ProjectStatusControl,
+  ProjectUpdatePanel,
+} from '@/features/manage-project'
 import { initiativeHref, initiativesSchema, type Initiative } from '@/entities/initiative'
 import {
   ISSUE_STATUSES,
@@ -201,20 +206,17 @@ export default async function ProjectDetailPage({
             <PropertyRow label={t('fieldStatus')}>
               <ProjectStatusControl id={current.id} status={current.status} canWrite={canWrite} />
             </PropertyRow>
-            {projectInitiatives.length > 0 && (
+            {/* 목표는 비어 있어도 줄을 남긴다 — 쓸 수 있는 사람에게는 이 줄이 배정하는 유일한 자리다.
+                읽기만 하는 사람에게는 컨트롤이 null 을 돌려주므로 빈 줄 숨김 관습이 그대로 지켜진다. */}
+            {(canWrite || projectInitiatives.length > 0) && (
               <PropertyRow label={t('fieldInitiative')}>
-                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                  {projectInitiatives.map((row) => (
-                    <Link
-                      key={row.id}
-                      href={initiativeHref(workspace, row.id)}
-                      className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
-                    >
-                      <Target className="size-3.5 shrink-0 text-faint" />
-                      <span className="truncate">{row.name}</span>
-                    </Link>
-                  ))}
-                </span>
+                <ProjectInitiativeControl
+                  workspace={workspace}
+                  id={current.id}
+                  initiativeIds={current.initiativeIds}
+                  initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
+                  canWrite={canWrite}
+                />
               </PropertyRow>
             )}
             {current.health !== undefined && (

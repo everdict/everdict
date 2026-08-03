@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
 import { initiativeSchema, type Initiative, type InitiativeStatus } from '@/entities/initiative'
+import { projectSchema } from '@/entities/project'
 import type { TrackerHealth } from '@/entities/tracker-health'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -50,7 +51,59 @@ export async function createInitiativeAction(input: {
   }
 }
 
-// Projects join an initiative from the PROJECT side (PATCH /projects/:id), so membership is not editable here.
+// Adding work to a goal, from the GOAL's side. The link itself still lives on the project (`initiativeIds`) —
+// one project serves several goals, so the list belongs where the project is — but "which projects count toward
+// this" is a question asked while looking at the goal, and answering it anywhere else means leaving the screen
+// that asked. So this reads each chosen project and rewrites its list; there is no second way to be in an
+// initiative, and therefore nothing new to keep consistent.
+//
+// The current list comes from the SERVER rather than from the picker's props: the patch replaces the array
+// wholesale, so merging against a page that has been open for a while would silently drop a goal somebody else
+// added in the meantime.
+async function relinkProjects(
+  projectIds: readonly string[],
+  next: (current: string[]) => string[]
+): Promise<{ ok: boolean; error?: string; changed: number }> {
+  const ctx = await authContext()
+  let changed = 0
+  for (const projectId of projectIds) {
+    try {
+      const project = projectSchema.parse(await controlPlane.getProject(ctx, projectId))
+      const initiativeIds = next(project.initiativeIds)
+      // Same set (a double click, a stale tab) — nothing to write, and nothing to report as a failure.
+      if (initiativeIds.length === project.initiativeIds.length) continue
+      await controlPlane.updateProject(ctx, projectId, { initiativeIds })
+      changed += 1
+    } catch (e) {
+      // Stop at the first refusal and say which project it was: a partial link is confusing enough without
+      // also being silent about where it stopped.
+      return { ok: false, error: e instanceof Error ? e.message : String(e), changed }
+    }
+  }
+  revalidateInitiatives()
+  revalidatePath('/[workspace]/projects', 'page')
+  revalidatePath('/[workspace]/projects/[id]', 'page')
+  return { ok: true, changed }
+}
+
+export async function addProjectsToInitiativeAction(
+  initiativeId: string,
+  projectIds: string[]
+): Promise<{ ok: boolean; error?: string; changed: number }> {
+  return relinkProjects(projectIds, (current) =>
+    current.includes(initiativeId) ? current : [...current, initiativeId]
+  )
+}
+
+export async function removeProjectFromInitiativeAction(
+  initiativeId: string,
+  projectId: string
+): Promise<{ ok: boolean; error?: string; changed: number }> {
+  // Removing a project from a goal does not touch the project itself — it goes on being somebody's work, it just
+  // stops counting toward this goal.
+  return relinkProjects([projectId], (current) => current.filter((id) => id !== initiativeId))
+}
+
 export async function updateInitiativeAction(
   id: string,
   patch: {

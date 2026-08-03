@@ -2,10 +2,23 @@ import Link from 'next/link'
 import { Target } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
-import type { InitiativeProjectSummary } from '@/entities/initiative'
+import {
+  AddInitiativeProjectsButton,
+  RemoveInitiativeProjectButton,
+} from '@/features/manage-initiative'
+import { projectCandidatesFor, type InitiativeProjectSummary } from '@/entities/initiative'
 import { memberDirectoryOf, memberNameOf } from '@/entities/member'
-import { PROJECT_STATUSES, ProjectStatusBadge, type ProjectStatus } from '@/entities/project'
+import {
+  PROJECT_STATUSES,
+  projectsSchema,
+  ProjectStatusBadge,
+  type Project,
+  type ProjectStatus,
+} from '@/entities/project'
 import { HealthBadge } from '@/entities/tracker-health'
+import { canInTeam } from '@/shared/auth/can'
+import { authContext } from '@/shared/auth/principal'
+import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { EmptyState } from '@/shared/ui/empty-state'
 
@@ -24,8 +37,19 @@ export default async function InitiativeProjectsPage({
   const { workspace, id } = await params
   const t = await getTranslations('initiativesPage')
   const tracker = await getTranslations('tracker')
-  const { initiative, initiatives, members } = await loadInitiative(id)
+  const { initiative, initiatives, members, roles } = await loadInitiative(id)
   if (!initiative) return null // 레이아웃이 이미 실패를 그렸다
+
+  // 목표에 넣을 수 있는 후보 — 이 목표를 아직 이름에 담지 않은 워크스페이스 프로젝트들. 링크는 프로젝트 쪽
+  // 필드라 실패해도 목록은 그대로 그린다(추가 버튼만 비활성으로 선다).
+  const ctx = await authContext()
+  const allProjects: Project[] = await controlPlane
+    .listProjects(ctx)
+    .then((r) => projectsSchema.parse(r))
+    .catch((): Project[] => [])
+  const candidates = projectCandidatesFor(id, allProjects)
+  // 프로젝트를 목표에 넣고 빼는 것은 프로젝트를 고치는 일이다 — 트래커 쓰기 권한과 같은 판정.
+  const canEdit = canInTeam({ roles }, 'issues:write', undefined)
 
   const { readiness } = initiative
   const actors = memberDirectoryOf(members)
@@ -39,16 +63,28 @@ export default async function InitiativeProjectsPage({
 
   if (grouped.length === 0) {
     return (
-      <EmptyState
-        icon={<Target strokeWidth={1.75} />}
-        title={t('noProjectsTitle')}
-        hint={t('noProjectsHint')}
-      />
+      <div className="space-y-4">
+        <EmptyState
+          icon={<Target strokeWidth={1.75} />}
+          title={t('noProjectsTitle')}
+          hint={t('noProjectsHint')}
+        />
+        {canEdit && (
+          <div className="flex justify-center">
+            <AddInitiativeProjectsButton initiativeId={id} candidates={candidates} />
+          </div>
+        )}
+      </div>
     )
   }
 
   return (
     <div className="space-y-6">
+      {canEdit && (
+        <div className="flex justify-end">
+          <AddInitiativeProjectsButton initiativeId={id} candidates={candidates} />
+        </div>
+      )}
       {grouped.map((group) => (
         <section key={group.status} className="space-y-2">
           <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -56,42 +92,55 @@ export default async function InitiativeProjectsPage({
           </p>
           <div className="space-y-2">
             {group.items.map((project) => (
-              <Link
+              <div
                 key={project.id}
-                href={`/${workspace}/projects/${encodeURIComponent(project.id)}`}
-                className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+                className="flex items-center gap-1 rounded-lg border bg-card pr-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
-                <span className="min-w-0 flex-1 truncate text-[13px] font-[510] text-foreground">
-                  {project.name}
-                  {/* 하위 목표를 거쳐 올라온 프로젝트는 어디에 걸려 있는지까지 말해야, 남은 일이 우산이
+                <Link
+                  href={`/${workspace}/projects/${encodeURIComponent(project.id)}`}
+                  className="flex min-w-0 flex-1 flex-wrap items-center gap-3 px-3.5 py-2.5"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-[510] text-foreground">
+                    {project.name}
+                    {/* 하위 목표를 거쳐 올라온 프로젝트는 어디에 걸려 있는지까지 말해야, 남은 일이 우산이
                       아니라 실제 지점을 가리킨다. */}
-                  {project.viaInitiativeId !== undefined && (
-                    <span className="ml-2 text-[11.5px] font-normal text-muted-foreground">
-                      {initiativeName.get(project.viaInitiativeId) ?? project.viaInitiativeId}
+                    {project.viaInitiativeId !== undefined && (
+                      <span className="ml-2 text-[11.5px] font-normal text-muted-foreground">
+                        {initiativeName.get(project.viaInitiativeId) ?? project.viaInitiativeId}
+                      </span>
+                    )}
+                  </span>
+                  {project.lead !== undefined && (
+                    <span className="hidden shrink-0 truncate text-[11.5px] text-muted-foreground @md:block">
+                      {memberNameOf(actors, project.lead)}
                     </span>
                   )}
-                </span>
-                {project.lead !== undefined && (
-                  <span className="hidden shrink-0 truncate text-[11.5px] text-muted-foreground @md:block">
-                    {memberNameOf(actors, project.lead)}
+                  <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                    {t('projectRollup', {
+                      open: project.rollup.open,
+                      done: project.rollup.done,
+                      total: project.rollup.total,
+                    })}
                   </span>
+                  {project.rollup.open > 0 && <Badge tone="outline">{t('projectRemaining')}</Badge>}
+                  {project.targetDate && (
+                    <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground @md:block">
+                      {project.targetDate}
+                    </span>
+                  )}
+                  {project.health !== undefined && <HealthBadge health={project.health} />}
+                  <ProjectStatusBadge status={project.status} />
+                </Link>
+                {/* 하위 목표를 거쳐 올라온 프로젝트는 여기 걸린 게 아니라 그 목표에 걸려 있다 — 여기서 뺄 수
+                  있는 척하지 않는다. */}
+                {canEdit && project.viaInitiativeId === undefined && (
+                  <RemoveInitiativeProjectButton
+                    initiativeId={id}
+                    projectId={project.id}
+                    projectName={project.name}
+                  />
                 )}
-                <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-                  {t('projectRollup', {
-                    open: project.rollup.open,
-                    done: project.rollup.done,
-                    total: project.rollup.total,
-                  })}
-                </span>
-                {project.rollup.open > 0 && <Badge tone="outline">{t('projectRemaining')}</Badge>}
-                {project.targetDate && (
-                  <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground @md:block">
-                    {project.targetDate}
-                  </span>
-                )}
-                {project.health !== undefined && <HealthBadge health={project.health} />}
-                <ProjectStatusBadge status={project.status} />
-              </Link>
+              </div>
             ))}
           </div>
         </section>
