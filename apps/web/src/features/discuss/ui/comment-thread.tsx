@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   CornerDownRight,
@@ -187,34 +187,6 @@ function CommentNode({
   )
 }
 
-// Highlight @name mentions in the body (longer names first).
-function renderBody(body: string, mentionables: Mentionable[]): ReactNode {
-  const names = [...new Set(mentionables.map((m) => m.name).filter(Boolean))].sort(
-    (a, b) => b.length - a.length
-  )
-  if (names.length === 0) return body
-  const re = new RegExp(
-    `@(${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
-    'g'
-  )
-  const out: ReactNode[] = []
-  let last = 0
-  let m: RegExpExecArray | null
-  let k = 0
-  // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-iteration pattern
-  while ((m = re.exec(body)) !== null) {
-    if (m.index > last) out.push(body.slice(last, m.index))
-    out.push(
-      <span key={k++} className="rounded bg-primary/12 px-1 font-[560] text-primary">
-        {m[0]}
-      </span>
-    )
-    last = m.index + m[0].length
-  }
-  if (last < body.length) out.push(body.slice(last))
-  return out
-}
-
 // The agent's live "doing now" line — the server stores a machine token; copy is localized here.
 function activityLabel(
   t: (key: string, values?: Record<string, string>) => string,
@@ -296,11 +268,15 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
         )}
       </div>
       {item.isAgent ? (
-        <AgentCommentBody item={item} />
+        <AgentCommentBody item={item} mentionables={mentionables} />
       ) : (
-        <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">
-          {renderBody(item.body, mentionables)}
-        </p>
+        // A comment is written the way an issue body is — markdown. The viewer keeps single newlines, so a plain
+        // note still reads as typed, and it highlights the @names the composer offered.
+        <Markdown
+          content={item.body}
+          mentions={mentionables.map((m) => m.name)}
+          className="text-[13px] leading-relaxed"
+        />
       )}
       {error && (
         <Callout tone="danger" className="mt-2 py-1.5">
@@ -314,10 +290,22 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
 // An agent answer renders compactly by lifecycle: a live "doing now" line while it works, an inline approval
 // strip while parked, then ONLY the final markdown — the full reasoning/tool transcript lives behind "view
 // details" (the right panel opens the backing discussion session).
-function AgentCommentBody({ item }: { item: ThreadComment }) {
+function AgentCommentBody({
+  item,
+  mentionables,
+}: {
+  item: ThreadComment
+  mentionables: Mentionable[]
+}) {
   const t = useTranslations('discuss')
   if (item.agentStatus === 'complete')
-    return <Markdown content={item.body} className="text-[13px] leading-relaxed" />
+    return (
+      <Markdown
+        content={item.body}
+        mentions={mentionables.map((m) => m.name)}
+        className="text-[13px] leading-relaxed"
+      />
+    )
   if (item.agentStatus === 'failed')
     return (
       <Callout tone="danger" className="py-1.5">

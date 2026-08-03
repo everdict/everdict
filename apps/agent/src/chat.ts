@@ -833,23 +833,6 @@ export async function runChat(
         ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
         ...(signal ? { signal } : {}),
       });
-    } catch (err) {
-      // Failure is a conversation CITIZEN, not just an exception (Claude Code parity): persist why the turn died
-      // as an assistant record before rethrowing, so the transcript shows the failure and the conversation stays
-      // continuable — the next turn replays a balanced history (normalizeHistory pairs any dangling tool_calls).
-      // A user abort is not a failure. Best-effort: a store write must not mask the original error.
-      // A thrown turn never reached the loop's done event — count it under its own outcome.
-      deps.metrics?.counter("everdict_agent_turn_total", "Agent chat turns by stop reason", { outcome: "error" });
-      if (signal?.aborted !== true) {
-        const detail = err instanceof Error ? err.message : String(err);
-        try {
-          await persist({
-            role: "assistant",
-            content: `[The turn failed: ${detail}] The conversation is intact — send a message to continue.`,
-          });
-        } catch {}
-      }
-      throw err;
     } finally {
       // The ledger's copy of the same numbers (O2): the turn's model spend travels back to the caller, which
       // projects it into the sealed trajectory as an llm_call — so the run detail can state what the turn cost
@@ -888,6 +871,30 @@ export async function runChat(
         ...(deps.memoryTriggerChars !== undefined ? { triggerChars: deps.memoryTriggerChars } : {}),
       });
     } catch {}
+  } catch (err) {
+    // Failure is a conversation CITIZEN, not just an exception (Claude Code parity): persist why the turn died
+    // as an assistant record before rethrowing, so the transcript shows the failure and the conversation stays
+    // continuable — the next turn replays a balanced history (normalizeHistory pairs any dangling tool_calls).
+    // A user abort is not a failure. Best-effort: a store write must not mask the original error.
+    // A thrown turn never reached the loop's done event — count it under its own outcome.
+    // This catch wraps the WHOLE turn, not just the loop: a turn that dies BEFORE the first model call (no model
+    // configured, an unreachable model registry, a dead tool session) used to leave the member's message sitting
+    // there with no answer and no reason — a silent death reads as "the agent ignored me".
+    deps.metrics?.counter("everdict_agent_turn_total", "Agent chat turns by stop reason", { outcome: "error" });
+    if (signal?.aborted !== true) {
+      const detail = err instanceof Error ? err.message : String(err);
+      // The operator's copy of the same failure. The transcript record below is the MEMBER's copy; without this
+      // line a turn that dies on the provider leaves no trace at all in the service log, so "the model provider
+      // call failed" is all anyone — member or operator — ever gets.
+      console.error(`[agent] chat turn failed (${workspace}/${sessionId}): ${detail}`);
+      try {
+        await persist({
+          role: "assistant",
+          content: `[The turn failed: ${detail}] The conversation is intact — send a message to continue.`,
+        });
+      } catch {}
+    }
+    throw err;
   } finally {
     await tools.close();
   }

@@ -133,18 +133,29 @@ i18n `agentChat` namespace in `messages/{en,ko}.json`.
   actually enforced (time-to-headers; it was declared and unused), a **90s stream-idle watchdog** cancels a
   silently-dead SSE body (a dropped connection must not pin the turn forever), a stream that ends with no
   content/tool_calls/stop_reason fails as a retryable error instead of posing as a completed empty turn, and a
-  rate-limited response surfaces `Retry-After`/`anthropic-ratelimit-unified-reset` as `extra.retryAfterMs`.
+  rate-limited response surfaces `Retry-After`/`anthropic-ratelimit-unified-reset` as `extra.retryAfterMs`. The
+  **OpenAI-compatible transport remaps too** (it used to let the raw SDK `APIError` through): status +
+  `retryAfterMs` in `extra` for the retry policy to classify on, the parsed response BODY in the message — a 429
+  that says `usage_limit_reached … resets_in_seconds` is the member's whole diagnosis.
   (2) **Retry policy** (kernel `runAgentLoop`): exponential backoff + jitter (500ms base → 32s cap, default 6
   retries — was 2 fixed), the server's own pacing honored over the computed backoff, retryability decided by the
   TRUE upstream status (`extra.status` — a provider 400 is no longer retried just because UpstreamError maps to
   502), `retry` events surfaced per wait, and **`persistentRetry`** for unattended turns (teammate / discussion /
   report set it via a deps spread): capacity errors (429/529/overloaded) are waited out indefinitely (5min-cap
-  backoff) instead of failing the reaction. (3) **Transcript repair** (`normalizeHistory` — Claude Code's
+  backoff) instead of failing the reaction. An ATTENDED turn does the opposite past
+  `INTERACTIVE_RETRY_AFTER_MAX_MS` (30s): a server pacing longer than a person can wait ends the turn
+  immediately — a plan quota that resets in hours/days is not something backoff fixes, and parking the chat behind
+  a retry banner for it is the failure, not the recovery. The thrown `UpstreamError` carries the provider's own
+  reason in its MESSAGE (not only in `extra.detail`): "the model provider call failed" alone cannot be told apart
+  from a dead key, an exhausted quota or a network blip, and it is the string the member reads. (3) **Transcript repair** (`normalizeHistory` — Claude Code's
   `ensureToolResultPairing` reinterpreted): a crash-dangling assistant `tool_calls` is answered with a synthetic
   tool result on replay and orphan tool results are dropped, so a mid-turn host death no longer bricks the
   conversation with provider 400s forever. (4) **Failure is a conversation citizen** (`runChat`): a failed turn
   persists WHY as an assistant record before rethrowing (the transcript shows it; the next message just
-  continues), usage metering moved to a `finally` (a failed/aborted turn's consumed tokens still bill), and the
+  continues) — for the WHOLE turn, not just the loop, so one that dies before the first model call (no model
+  configured, an unreachable model registry, a dead tool session) can no longer read as the agent ignoring the
+  member — and the same cause is `console.error`-logged for the operator (a turn that died on the provider used to
+  leave no trace at all in the service log). Usage metering moved to a `finally` (a failed/aborted turn's consumed tokens still bill), and the
   chat MCP invoke now **reconnects a dead session** (`makeInvoke` over a client box; shared in-flight reconnect —
   reads auto-retry once on the fresh session, mutations return an explicit outcome-unknown error instead of
   risking a silent double-fire). Also in this pass: a turn's write tools run **serially in call order** while

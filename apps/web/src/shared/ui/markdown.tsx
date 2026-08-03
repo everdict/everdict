@@ -25,11 +25,110 @@ const HEADING: Record<number, string> = {
   6: 'text-[13px] font-[560]',
 }
 
+// 본문 이미지 중 "브라우저가 직접 받아올 수 없는 것"을 우리 라우트로 우회시키는 명세. 비공개 리포나 GitHub
+// Enterprise 의 첨부는 리포와 똑같은 인증 뒤에 있는데 이 화면을 보는 브라우저에는 그쪽 세션이 없다 — 그래서
+// 서버가 대신 받아온다. 콜백이 아니라 값인 이유: 서버 컴포넌트(이슈 설명)와 클라이언트 섬(GitHub 코멘트 패널)이
+// 같은 규칙을 각자 만들어 넘기는데, 직렬화되는 값이면 어느 쪽에서 만들었는지 이 뷰어가 알 필요가 없다.
+export interface MarkdownImageProxy {
+  // 프록시를 태울 오리진 목록. `new URL(...).origin` 과 같은 표기여야 한다(소문자 호스트, 기본 포트 생략).
+  origins: string[]
+  // 최종 src = `${path}?url=<encodeURIComponent(원본)>`
+  path: string
+}
+
+// 목록에 없는 오리진·상대경로·data: 는 원본 그대로 둔다 — 공개 이미지까지 서버를 거치게 만들 이유가 없다.
+function proxiedSrc(src: string | undefined, proxy?: MarkdownImageProxy): string | undefined {
+  if (src === undefined || proxy === undefined) return src
+  let origin: string
+  try {
+    origin = new URL(src).origin
+  } catch {
+    return src
+  }
+  if (!proxy.origins.includes(origin)) return src
+  return `${proxy.path}?url=${encodeURIComponent(src)}`
+}
+
 // hast className 은 string | number | (string|number)[] 이라 문자열 목록으로 정규화해서 본다.
 function classNames(value: unknown): string[] {
   if (typeof value === 'string') return value.split(/\s+/)
   if (Array.isArray(value)) return value.filter((c): c is string => typeof c === 'string')
   return []
+}
+
+// Opt-in `mentions`: the names a body may address (a comment thread passes the workspace's members + the agent).
+// The pass runs AFTER sanitize on purpose — it ADDS markup, so it must never hand rehype-sanitize something to
+// interpret, and sanitize has already dropped the class a body would need to forge a mention chip by writing the
+// span itself. It only ever rewrites text nodes, and never inside a link, code or a fenced block.
+const MENTION_CLASS = 'everdict-mention'
+const MENTION_SKIP = new Set(['a', 'code', 'pre'])
+
+// The hast tree as this pass needs it. Kept structural (not imported from `hast`) so the viewer stays free of a
+// type-only dependency it does not otherwise carry; `children` is optional so a plugin transformer still accepts
+// the bare unist node unified types it with.
+type MentionText = { type: 'text'; value: string }
+type MentionElement = {
+  type: 'element'
+  tagName: string
+  properties?: Record<string, unknown>
+  children?: MentionNode[]
+}
+type MentionNode = MentionText | MentionElement | { type: string }
+
+function isMentionElement(node: MentionNode): node is MentionElement {
+  return node.type === 'element'
+}
+function isMentionText(node: MentionNode): node is MentionText {
+  return node.type === 'text'
+}
+
+// Longest name first, so `@Ada Lovelace` never matches as `@Ada` with a trailing surname.
+function mentionPattern(names: string[]): RegExp | undefined {
+  const unique = [...new Set(names.filter((n) => n.trim() !== ''))].sort(
+    (a, b) => b.length - a.length
+  )
+  if (unique.length === 0) return undefined
+  return new RegExp(
+    `@(?:${unique.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+    'g'
+  )
+}
+
+function splitMentions(nodes: MentionNode[], re: RegExp): void {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]
+    if (node === undefined) continue
+    if (isMentionElement(node)) {
+      if (!MENTION_SKIP.has(node.tagName) && node.children) splitMentions(node.children, re)
+      continue
+    }
+    if (!isMentionText(node)) continue
+    const parts: MentionNode[] = []
+    let last = 0
+    re.lastIndex = 0
+    let m: RegExpExecArray | null
+    // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-iteration pattern
+    while ((m = re.exec(node.value)) !== null) {
+      if (m.index > last) parts.push({ type: 'text', value: node.value.slice(last, m.index) })
+      parts.push({
+        type: 'element',
+        tagName: 'span',
+        properties: { className: [MENTION_CLASS] },
+        children: [{ type: 'text', value: m[0] }],
+      })
+      last = m.index + m[0].length
+    }
+    if (parts.length === 0) continue
+    if (last < node.value.length) parts.push({ type: 'text', value: node.value.slice(last) })
+    nodes.splice(i, 1, ...parts)
+    i += parts.length - 1
+  }
+}
+
+function rehypeMentions(re: RegExp) {
+  return () => (tree: { children?: MentionNode[] }) => {
+    if (tree.children) splitMentions(tree.children, re)
+  }
 }
 
 function heading(level: number): NonNullable<Components['h1']> {
@@ -43,11 +142,16 @@ export function Markdown({
   content,
   className,
   mermaid = false,
+  imageProxy,
+  mentions,
 }: {
   content: string
   className?: string
   mermaid?: boolean
+  imageProxy?: MarkdownImageProxy
+  mentions?: string[]
 }) {
+  const mentionRe = mentions ? mentionPattern(mentions) : undefined
   const components: Components = {
     h1: heading(1),
     h2: heading(2),
@@ -108,10 +212,11 @@ export function Markdown({
     ),
     img: ({ src, alt, title }) => {
       // 본문의 이미지는 임의 원격 URL 이라 next/image 의 도메인 화이트리스트를 통과할 수 없다 — 원본 태그로 그린다.
+      // imageProxy 가 지정한 오리진만 우리 라우트로 우회한다(인증이 필요한 첨부).
       return (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={typeof src === 'string' ? src : undefined}
+          src={proxiedSrc(typeof src === 'string' ? src : undefined, imageProxy)}
           alt={alt ?? ''}
           title={title}
           className="max-w-full rounded-md border border-border"
@@ -196,6 +301,13 @@ export function Markdown({
         {children}
       </kbd>
     ),
+    // Only the mention pass produces a classed span — sanitize strips a body's own class, so this cannot be forged.
+    span: ({ children, className: spanClass }) =>
+      classNames(spanClass).includes(MENTION_CLASS) ? (
+        <span className="rounded bg-primary/12 px-1 font-[560] text-primary">{children}</span>
+      ) : (
+        <span>{children}</span>
+      ),
   }
 
   return (
@@ -203,7 +315,12 @@ export function Markdown({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         // 순서가 곧 안전장치다 — raw 가 원문 HTML 을 트리로 만들고, sanitize 가 그 뒤에서 걸러낸다.
-        rehypePlugins={[rehypeRaw, rehypeSanitize]}
+        // (mention highlighting comes last: it emits markup, so it must run on the already-sanitized tree.)
+        rehypePlugins={
+          mentionRe
+            ? [rehypeRaw, rehypeSanitize, rehypeMentions(mentionRe)]
+            : [rehypeRaw, rehypeSanitize]
+        }
         components={components}
       >
         {content}

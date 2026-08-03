@@ -140,7 +140,9 @@ export function MentionPicker({
     : items
 
   return (
-    <div className="absolute bottom-full left-0 right-0 z-10 mb-1 max-h-72 overflow-hidden rounded-lg border border-border bg-popover shadow-pop">
+    // Anchored to the composer's left edge at a fixed menu width (like the session/team menus) — the panel is a
+    // resizable split, so stretching to `right-0` would spread a list of short labels across the whole panel.
+    <div className="absolute bottom-full left-0 z-10 mb-1 max-h-72 w-[min(20rem,100%)] overflow-hidden rounded-lg border border-border bg-popover shadow-pop">
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
         <span className="text-[12px] font-[560] text-foreground">
           {type ? t(`refType.${type}`) : t('mentionPick')}

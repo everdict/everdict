@@ -485,6 +485,17 @@ export function AgentChatPanel({
               : [...prev, { requestId, name, input: d.input }]
           )
       }
+    } else if (event === 'error') {
+      // 턴이 실패했다. 보통은 실패 사유가 어시스턴트 레코드로도 남지만(그건 트랜스크립트의 몫), 루프에 닿기
+      // 전에 죽은 턴(모델 해석 실패·툴 세션 실패)은 레코드가 없다 — 그때 이 토스트가 유일한 신호다.
+      const detail =
+        data !== null && typeof data === 'object' && 'message' in data
+          ? (data as { message?: unknown }).message
+          : undefined
+      setStreamNotice(null)
+      toast.error(
+        typeof detail === 'string' && detail.length > 0 ? detail : t('errorTurn')
+      )
     } else if (event === 'permission_resolved') {
       // The server decided it (a timeout/disconnect default, not a click) — drop the first prompt for that tool.
       const name =
@@ -497,7 +508,7 @@ export function AgentChatPanel({
           return i < 0 ? prev : prev.filter((_, j) => j !== i)
         })
     }
-  }, [])
+  }, [t])
 
   // 스트림 소유권 토큰: 전송/재접속 리더가 시작될 때마다 증가. 끝난(또는 끊긴) 리더의 뒷정리는 자신이 아직
   // 최신 소유자일 때만 상태를 건드린다 — 낡은 finally 가 새 스트림의 sending 표시를 지우는 사고 방지.

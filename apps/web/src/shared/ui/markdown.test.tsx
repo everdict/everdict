@@ -55,6 +55,28 @@ describe('markdown viewer (GFM)', () => {
     expect(out).toContain('<img src="https://example.com/a.png" alt="alt"')
   })
 
+  // An attachment on GitHub Enterprise (or any private repo) sits behind the same authentication the repo does,
+  // and this browser holds no session for that host — so those images, and only those, go through our own route.
+  it('routes images from the proxied origins through our path and leaves every other image alone', () => {
+    const proxy = { origins: ['https://ghe.example.net'], path: '/api/issues/iss-1/attachment' }
+    const out = renderToStaticMarkup(
+      <Markdown
+        imageProxy={proxy}
+        content={
+          '![shot](https://ghe.example.net/user-attachments/assets/a-1)\n\n' +
+          '![public](https://example.com/a.png)\n\n' +
+          '![relative](/uploads/a.png)'
+        }
+      />
+    )
+
+    expect(out).toContain(
+      'src="/api/issues/iss-1/attachment?url=https%3A%2F%2Fghe.example.net%2Fuser-attachments%2Fassets%2Fa-1"'
+    )
+    expect(out).toContain('src="https://example.com/a.png"')
+    expect(out).toContain('src="/uploads/a.png"')
+  })
+
   it('renders the HTML subset a GitHub body actually uses', () => {
     const out = html('one<br>two\n\n<details><summary>logs</summary>\n\nbody\n\n</details>')
 
@@ -82,5 +104,45 @@ describe('markdown viewer (GFM)', () => {
   it('neutralises a javascript: link target', () => {
     expect(html('[click](javascript:alert(1))')).not.toContain('href="javascript:')
     expect(html('<a href="javascript:alert(1)">click</a>')).not.toContain('href="javascript:')
+  })
+})
+
+// A comment body is markdown too, and the thread it lives in addresses people — so the same viewer has to keep
+// the @mention chip the plain-text renderer used to draw, without letting a body forge one.
+const mentioned = (content: string, names: string[]) =>
+  renderToStaticMarkup(<Markdown content={content} mentions={names} />)
+
+const CHIP = 'bg-primary/12'
+
+describe('markdown viewer (mentions)', () => {
+  it('highlights a known name, even next to other inline markdown', () => {
+    const out = mentioned('hey @Dana **look**', ['Dana'])
+
+    expect(out).toContain(CHIP)
+    expect(out).toContain('@Dana')
+    expect(out).toContain('<strong')
+  })
+
+  it('prefers the longest matching name, so a surname is not left dangling', () => {
+    const out = mentioned('@Ada Lovelace shipped it', ['Ada', 'Ada Lovelace'])
+
+    expect(out).toContain('@Ada Lovelace</span>')
+  })
+
+  it('leaves an unknown name alone', () => {
+    expect(mentioned('@nobody', ['Dana'])).not.toContain(CHIP)
+  })
+
+  it('does not rewrite a mention inside code or a link', () => {
+    expect(mentioned('`@Dana`', ['Dana'])).not.toContain(CHIP)
+    expect(mentioned('```\n@Dana\n```', ['Dana'])).not.toContain(CHIP)
+    expect(mentioned('[@Dana](https://example.com)', ['Dana'])).not.toContain(CHIP)
+  })
+
+  it('cannot be forged by a body that writes the mention markup itself', () => {
+    const out = mentioned('<span class="everdict-mention">@nobody</span>', ['Dana'])
+
+    expect(out).toContain('@nobody')
+    expect(out).not.toContain(CHIP)
   })
 })

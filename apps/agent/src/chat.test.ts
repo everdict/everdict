@@ -342,6 +342,30 @@ describe("runChat failure handling", () => {
     expect(last?.content).toContain("send a message to continue");
   });
 
+  it("records a turn that died BEFORE the first model call (no silent death)", async () => {
+    // Given a turn that cannot even resolve its model (an unconfigured / unreachable model registry)
+    const never: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        throw new Error("the model should never have been called");
+      },
+    };
+    const { deps, sessions } = await seededDeps(never);
+    const failing: ChatDeps = {
+      ...deps,
+      resolveModel: async () => {
+        throw new Error("no model configured for this workspace");
+      },
+    };
+    await expect(runChat(failing, PRINCIPAL, {}, "s-1", "hello")).rejects.toThrow();
+    // Then the transcript still says why — otherwise the member's message sits there answerless and the failure
+    // reads as the agent ignoring them.
+    const messages = await sessions.listMessages("acme", "s-1");
+    const last = messages[messages.length - 1];
+    expect(last?.role).toBe("assistant");
+    expect(last?.content).toContain("no model configured for this workspace");
+  });
+
   it("replays a crash-dangling transcript with synthetic tool results (the conversation is not bricked)", async () => {
     // Given a prior turn that persisted its tool_calls but died before any tool result (host crash mid-turn)
     const requests: StreamRequest[] = [];
