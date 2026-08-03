@@ -119,7 +119,12 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   in separate columns: the only control inside the property list is the one that IS a property (status). A
   property block carrying its own form (issue links) declares its own `@container` so the form folds in the
   narrow column. Siblings come from the list's own ordering, windowed (`SIBLING_WINDOW`), and the arrows stay
-  rendered-but-inert at the ends so their position never shifts.
+  rendered-but-inert at the ends so their position never shifts. **The linked-assets block lists only what
+  VERIFIES the record** — `ISSUE_CAPABILITY_LINK_TYPES` (harness · dataset · judge), not the full six-type link
+  vocabulary the control plane accepts: a scorecard is EVIDENCE and the evaluation-history section already owns
+  it (pinned + baseline badges), so repeating it as a chip puts one thing on the screen twice with no answer to
+  which is authoritative. Display and the add-form read the SAME allowlist — never offer a type that then renders
+  nowhere — and the empty-section test counts the allowlisted links, not `links.length`.
   **Settings › Agent › Skills lists only what the workspace OWNS** — no "built-in"/"shared" tier: an Everdict or
   third-party skill in the store is an EXAMPLE, and taking it (`POST /skills/import`) copies it into the library as
   an ordinary workspace skill, editable and versionable from `settings/skills/[id]` like anything a member wrote

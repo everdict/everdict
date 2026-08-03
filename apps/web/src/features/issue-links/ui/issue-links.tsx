@@ -8,8 +8,8 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import {
+  ISSUE_CAPABILITY_LINK_TYPES,
   ISSUE_LINK_REF_KIND,
-  ISSUE_LINK_TYPES,
   issueLinkHref,
   type IssueLink,
   type IssueLinkType,
@@ -36,12 +36,14 @@ export function IssueLinks({
   const tracker = useTranslations('tracker')
   const router = useRouter()
   const [adding, setAdding] = useState(false)
-  const [type, setType] = useState<IssueLinkType>('scorecard')
+  const [type, setType] = useState<IssueLinkType>('harness')
   const [id, setId] = useState('')
   const [version, setVersion] = useState('')
   const [pending, startTransition] = useTransition()
 
-  const grouped = ISSUE_LINK_TYPES.map((kind) => ({
+  // 이슈를 검증하는 능력만 — 스코어카드는 증거라서 "평가 이력" 섹션이 소유한다(ISSUE_CAPABILITY_LINK_TYPES).
+  // 그래서 여기서 거는 것과 보이는 것이 같은 집합이다: 걸 수는 있는데 보이지 않는 종류를 만들지 않는다.
+  const grouped = ISSUE_CAPABILITY_LINK_TYPES.map((kind) => ({
     kind,
     items: links.filter((l) => l.type === kind),
   })).filter((g) => g.items.length > 0)
@@ -131,7 +133,7 @@ export function IssueLinks({
                 id="link-type"
                 value={type}
                 onChange={(v) => setType(v as IssueLinkType)}
-                options={ISSUE_LINK_TYPES.map((k) => ({
+                options={ISSUE_CAPABILITY_LINK_TYPES.map((k) => ({
                   value: k,
                   label: tracker(`linkType.${k}`),
                 }))}

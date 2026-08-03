@@ -17,6 +17,7 @@ import { IssueEvaluationHistory, type IssueEvaluationEntry } from '@/features/is
 import { IssueLinks } from '@/features/issue-links'
 import { IssueActions, IssueStatusControl } from '@/features/manage-issue'
 import {
+  ISSUE_CAPABILITY_LINK_TYPES,
   issueHref,
   issueSchema,
   issueScorecardsSchema,
@@ -197,6 +198,11 @@ export default async function IssueDetailPage({
 
   const assignee = current.assignee
   const assigneeAvatar = assignee ? actors[assignee]?.avatarUrl : undefined
+  // 속성 열이 보여주는 링크 = 이슈를 검증하는 능력(하니스·데이터셋·평가자)뿐. 스코어카드 링크는 증거이고
+  // 아래 "평가 이력"이 이미 고정 배지로 보여주므로, 여기 세면 빈 섹션 판정이 틀어진다.
+  const capabilityLinks = current.links.filter((link) =>
+    ISSUE_CAPABILITY_LINK_TYPES.some((kind) => kind === link.type)
+  )
 
   return (
     <div className="@container">
@@ -353,8 +359,9 @@ export default async function IssueDetailPage({
           </PropertyList>
 
           {/* 이 이슈를 검증하는 자산들 — 속성 중 유일하게 편집 폼을 달고 있어 구분선 아래로 내린다.
-              @container 는 그 폼이 좁은 사이드바에서 세로로 접히도록 자기 너비를 재게 하려는 것이다. */}
-          {(current.links.length > 0 || canWrite) && (
+              @container 는 그 폼이 좁은 사이드바에서 세로로 접히도록 자기 너비를 재게 하려는 것이다.
+              세는 것도 능력 링크만: 스코어카드만 걸려 있는 이슈에 빈 섹션이 서면 안 된다(빈 섹션 숨김). */}
+          {(capabilityLinks.length > 0 || canWrite) && (
             <div className="@container space-y-2 border-t border-border pt-3.5">
               <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
                 {t('linksTitle')}
