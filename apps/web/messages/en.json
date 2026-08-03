@@ -4706,6 +4706,17 @@
       "on_track": "On track",
       "at_risk": "At risk",
       "off_track": "Off track"
+    },
+    "labelColor": {
+      "gray": "Gray",
+      "purple": "Purple",
+      "blue": "Blue",
+      "teal": "Teal",
+      "green": "Green",
+      "yellow": "Yellow",
+      "orange": "Orange",
+      "red": "Red",
+      "pink": "Pink"
     }
   },
   "issuesPage": {
@@ -4784,6 +4795,7 @@
     "labelAdd": "Add label",
     "labelsControlLabel": "This issue's labels",
     "labelsError": "Couldn't change the labels.",
+    "labelColorLabel": "Label color",
     "projectControlLabel": "This issue's project",
     "projectAdd": "Add to project",
     "projectClear": "Remove from project",

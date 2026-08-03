@@ -4706,6 +4706,17 @@
       "on_track": "정상",
       "at_risk": "위험",
       "off_track": "이탈"
+    },
+    "labelColor": {
+      "gray": "회색",
+      "purple": "보라",
+      "blue": "파랑",
+      "teal": "청록",
+      "green": "초록",
+      "yellow": "노랑",
+      "orange": "주황",
+      "red": "빨강",
+      "pink": "분홍"
     }
   },
   "issuesPage": {
@@ -4784,6 +4795,7 @@
     "labelAdd": "라벨 추가",
     "labelsControlLabel": "이 이슈의 라벨",
     "labelsError": "라벨을 바꾸지 못했습니다.",
+    "labelColorLabel": "라벨 색",
     "projectControlLabel": "이 이슈의 프로젝트",
     "projectAdd": "프로젝트에 넣기",
     "projectClear": "프로젝트에서 빼기",

@@ -6,7 +6,13 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { createIssueLabelAction } from '@/features/manage-issue-labels'
-import { LabelDot, type IssueLabel } from '@/entities/issue-label'
+import {
+  LabelColorPicker,
+  LabelDot,
+  suggestLabelColor,
+  type IssueLabel,
+  type IssueLabelColor,
+} from '@/entities/issue-label'
 import { cn } from '@/shared/lib/utils'
 import { Input } from '@/shared/ui/input'
 
@@ -68,6 +74,9 @@ export function IssueLabelOptions({
 }) {
   const t = useTranslations('issuesPage')
   const [query, setQuery] = useState('')
+  // 고른 색이 없으면 이름에서 제안한 색을 쓴다 — 고르지 않은 것과 회색을 고른 것은 다르다(전자는 이름을
+  // 고쳐 쓰는 동안 색도 따라 바뀌고, 후자는 그대로 있어야 한다).
+  const [picked, setPicked] = useState<IssueLabelColor | undefined>()
   const [pending, startTransition] = useTransition()
 
   const needle = query.trim().toLocaleLowerCase()
@@ -78,18 +87,20 @@ export function IssueLabelOptions({
   // 정확히 같은 이름이 이미 있으면 만들기 줄을 내지 않는다 — 서버가 409 로 거절할 것을 권하지 않는다.
   const exact = labels.some((l) => l.name.trim().toLocaleLowerCase() === needle)
   const offerCreate = canCreate && needle.length > 0 && !exact
+  const color = picked ?? suggestLabelColor(query)
 
   function create(): void {
     const name = query.trim()
     if (name.length === 0) return
     startTransition(async () => {
-      const r = await createIssueLabelAction({ name, color: 'gray' })
+      const r = await createIssueLabelAction({ name, color })
       if (!r.ok || !r.label) {
         toast.error(r.error ?? t('labelCreateError'))
         return
       }
       onCreated(r.label)
       setQuery('')
+      setPicked(undefined)
     })
   }
 
@@ -122,18 +133,29 @@ export function IssueLabelOptions({
           </button>
         ))}
         {offerCreate && (
-          <button
-            type="button"
-            onClick={create}
-            disabled={pending}
-            className={cn(
-              'flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[12.5px] text-link transition-colors hover:bg-accent hover:text-foreground',
-              pending && 'opacity-60'
-            )}
-          >
-            <Plus className="size-3.5" />
-            <span className="truncate">{t('labelCreate', { name: query.trim() })}</span>
-          </button>
+          // 만들기 줄은 색까지 정하는 자리다 — 색을 나중에 설정 화면에서 고치게 하면 새 라벨은 전부 한 색으로
+          // 태어난다. 점은 지금 만들어질 색을 그대로 보여 준다.
+          <div className="space-y-1.5 rounded-md border border-border/70 p-1.5">
+            <button
+              type="button"
+              onClick={create}
+              disabled={pending}
+              className={cn(
+                'flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-[12.5px] text-link transition-colors hover:bg-accent hover:text-foreground',
+                pending && 'opacity-60'
+              )}
+            >
+              <Plus className="size-3.5" />
+              <span className="truncate">{t('labelCreate', { name: query.trim() })}</span>
+              <LabelDot color={color} />
+            </button>
+            <LabelColorPicker
+              size="sm"
+              value={color}
+              onChange={setPicked}
+              ariaLabel={t('labelColorLabel')}
+            />
+          </div>
         )}
         {choices.length === 0 && !offerCreate && (
           <p className="px-1.5 py-1 text-[12px] text-faint">{t('labelNoMatch')}</p>

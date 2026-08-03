@@ -7,12 +7,11 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import {
-  ISSUE_LABEL_COLORS,
+  LabelColorPicker,
   LabelDot,
   type IssueLabel,
   type IssueLabelColor,
 } from '@/entities/issue-label'
-import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
@@ -30,40 +29,7 @@ import {
 // Settings › Labels — 워크스페이스의 분류 어휘. 이슈는 이 목록의 id 를 가리키므로 여기서의 이름/색 변경은
 // 그 라벨을 단 모든 이슈에 한 번에 반영된다(문자열 시절에는 불가능했던 성질).
 //
-// 색은 닫힌 팔레트에서만 고른다 — hex 입력을 주면 다크에서 안 보이는 라벨을 만들 수 있다.
-function ColorPicker({
-  value,
-  onChange,
-  labelledBy,
-}: {
-  value: IssueLabelColor
-  onChange: (next: IssueLabelColor) => void
-  labelledBy: string
-}) {
-  return (
-    <div role="radiogroup" aria-labelledby={labelledBy} className="flex flex-wrap gap-1.5">
-      {ISSUE_LABEL_COLORS.map((color) => (
-        <button
-          key={color}
-          type="button"
-          role="radio"
-          aria-checked={color === value}
-          aria-label={color}
-          onClick={() => onChange(color)}
-          className={cn(
-            'grid size-7 place-items-center rounded-md border transition-colors',
-            color === value
-              ? 'border-primary bg-primary/10'
-              : 'border-border hover:border-border-strong'
-          )}
-        >
-          <LabelDot color={color} className="size-3" />
-        </button>
-      ))}
-    </div>
-  )
-}
-
+// 색 고르개는 `entities/issue-label` 의 것을 쓴다 — 이슈 화면의 선택기도 같은 물건으로 고른다.
 export function IssueLabelsManager({
   labels,
   canWrite,
@@ -177,7 +143,9 @@ export function IssueLabelsManager({
             >
               <div className="flex min-w-0 items-center gap-2">
                 <LabelDot color={label.color} />
-                <span className="truncate text-[13px] font-[510] text-foreground">{label.name}</span>
+                <span className="truncate text-[13px] font-[510] text-foreground">
+                  {label.name}
+                </span>
                 {label.description && (
                   <span className="truncate text-[12px] text-muted-foreground">
                     {label.description}
@@ -247,7 +215,7 @@ export function IssueLabelsManager({
             <span id={`${formId}-color`} className="block text-[13px] font-[510] text-foreground">
               {t('fieldColor')}
             </span>
-            <ColorPicker value={color} onChange={setColor} labelledBy={`${formId}-color`} />
+            <LabelColorPicker value={color} onChange={setColor} labelledBy={`${formId}-color`} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={`${formId}-description`}>{t('fieldDescription')}</Label>
