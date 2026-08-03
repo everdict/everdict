@@ -523,6 +523,56 @@ describe("runAgentLoop", () => {
     expect(calls).toBe(1); // one attempt, no retries burned on a permanent error
   });
 
+  it("reports WHY the provider call failed instead of a bare 'the model provider call failed'", async () => {
+    const quotaGone: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        throw Object.assign(
+          new Error('model 429: {"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}'),
+          { extra: { status: 429 } },
+        );
+      },
+    };
+    const err = await runAgentLoop({
+      transport: quotaGone,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      maxRetries: 0,
+    })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    // The host persists this message into the transcript — it is the member's ONLY account of the failure, so the
+    // provider's own reason (and the upstream status) must survive the remap.
+    expect((err as Error).message).toContain("usage_limit_reached");
+    expect((err as { extra?: unknown }).extra).toMatchObject({ status: 429 });
+  });
+
+  it("fails an attended turn fast when the server's retry pacing is longer than a person can wait", async () => {
+    let calls = 0;
+    const quotaResetsInAnHour: LlmTransport = {
+      provider: "fake",
+      stream: async () => {
+        calls += 1;
+        // A plan quota answers with its own reset — retrying (or parking on it) is not recovery, it is a hang.
+        throw Object.assign(new Error("model 429: usage limit reached"), {
+          extra: { status: 429, retryAfterMs: 60 * 60_000 },
+        });
+      },
+    };
+    await expect(
+      runAgentLoop({
+        transport: quotaResetsInAnHour,
+        model: "test-model",
+        systemPrompt: "sys",
+        history,
+        registry: new ToolRegistry([]),
+      }),
+    ).rejects.toThrow(/usage limit reached/i);
+    expect(calls).toBe(1); // no retry slept for an hour, and no budget burned pretending it might clear
+  });
+
   it("waits out capacity errors indefinitely under persistentRetry instead of exhausting the budget", async () => {
     let calls = 0;
     const overloadedTwiceThenOk: LlmTransport = {

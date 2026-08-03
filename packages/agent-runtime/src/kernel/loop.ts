@@ -188,6 +188,11 @@ const RETRY_MAX_DELAY_MS = 32_000;
 const PERSISTENT_RETRY_MAX_DELAY_MS = 5 * 60_000;
 // A pathological server Retry-After must not park the loop unbounded — cap honoring it at 1 hour.
 const RETRY_AFTER_CAP_MS = 60 * 60_000;
+// An ATTENDED run has a person watching the panel: honoring a server's pacing is right up to a short wait, but past
+// this the waiting IS the failure. A quota that resets in hours (or days — a plan limit) must fail fast and SAY so
+// rather than park the chat behind a retry banner nobody can distinguish from a hang. Unattended runs
+// (persistentRetry) keep the full patience.
+const INTERACTIVE_RETRY_AFTER_MAX_MS = 30_000;
 
 // The retry delay for the attempt: the server's own pacing (Retry-After / rate-limit reset, surfaced by the
 // transport) wins when present; else exponential backoff + up-to-25% jitter (herd-splitting), capped. Exported for
@@ -680,7 +685,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             attempt -= 1; // a capacity wait doesn't consume the transient budget
             continue;
           }
-          if (isTransient(err) && attempt < maxRetries) {
+          // The server named a comeback time an attended turn cannot wait out (a plan quota resetting in hours/days
+          // arrives as exactly this) — retrying is not recovery, so skip straight to the fallback ladder / the
+          // failure, which carries the provider's own reason.
+          const waitsTooLong =
+            opts.persistentRetry !== true && retryAfter !== undefined && retryAfter > INTERACTIVE_RETRY_AFTER_MAX_MS;
+          if (isTransient(err) && attempt < maxRetries && !waitsTooLong) {
             const delayMs = retryDelayMs(attempt, retryAfter);
             emit({ type: "retry", attempt: attempt + 1, delayMs });
             await sleep(delayMs, opts.signal);
@@ -696,10 +706,21 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             attempt = -1; // reset the retry budget for the fallback model (the ++ makes this attempt 0)
             continue;
           }
+          // The cause travels in the MESSAGE, not only in `extra`: this string is what the host persists into the
+          // transcript and shows the member, and a bare "the model provider call failed" is indistinguishable
+          // between a dead key, an exhausted plan quota and a network blip — none of which the member can act on
+          // without being told which one it was.
+          const detail = err instanceof Error ? err.message : String(err);
+          const status = upstreamStatusOf(err);
           throw new UpstreamError(
             "UPSTREAM_ERROR",
-            { detail: err instanceof Error ? err.message : String(err), attempts: attempt + 1 },
-            "The model provider call failed.",
+            {
+              detail,
+              attempts: attempt + 1,
+              ...(status !== undefined ? { status } : {}),
+              ...(retryAfter !== undefined ? { retryAfterMs: retryAfter } : {}),
+            },
+            `The model provider call failed after ${attempt + 1} attempt(s): ${detail}`,
           );
         }
       }
