@@ -11,6 +11,7 @@ export {
 export { CreateIssueButton } from './ui/create-issue-button'
 export { EditIssueDialog } from './ui/edit-issue-dialog'
 export { IssueActions } from './ui/issue-actions'
+export { IssueLabelControl } from './ui/issue-label-control'
 export { IssuePriorityControl } from './ui/issue-priority-control'
 export { IssueStatusControl } from './ui/issue-status-control'
 export { IssueTriageActions } from './ui/issue-triage-actions'

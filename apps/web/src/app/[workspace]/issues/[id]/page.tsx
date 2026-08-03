@@ -19,6 +19,7 @@ import { IssueLinks } from '@/features/issue-links'
 import {
   CreateIssueButton,
   IssueActions,
+  IssueLabelControl,
   IssuePriorityControl,
   IssueStatusControl,
   IssueTeamControl,
@@ -38,12 +39,7 @@ import {
   type Issue,
   type IssueSummary,
 } from '@/entities/issue'
-import {
-  IssueLabelChips,
-  issueLabelDirectoryOf,
-  issueLabelsSchema,
-  type IssueLabel,
-} from '@/entities/issue-label'
+import { issueLabelsSchema, type IssueLabel } from '@/entities/issue-label'
 import { memberDirectoryOf, memberNameOf, membersSchema, type Member } from '@/entities/member'
 import { isPastDue, projectsSchema, type Project } from '@/entities/project'
 import {
@@ -243,8 +239,6 @@ export default async function IssueDetailPage({
   const project = current.projectId ? projects.find((p) => p.id === current.projectId) : undefined
   // 이력·담당자·해결 기록이 같은 이름·같은 얼굴을 쓰도록 subject → 프로필을 한 번만 만든다.
   const actors = memberDirectoryOf(members)
-  // 이슈는 라벨 id 만 들고 있다 — 칩을 그리려면 레지스트리와 한 번 이어 붙인다(멤버/프로젝트와 같은 조인).
-  const labelDirectory = issueLabelDirectoryOf(labels)
   const displayName = (subject: string): string => memberNameOf(actors, subject)
 
   const at = siblings.findIndex((s) => s.id === current.id)
@@ -444,9 +438,16 @@ export default async function IssueDetailPage({
                 </span>
               </PropertyRow>
             )}
-            {current.labelIds.length > 0 && (
+            {/* 라벨은 이 열에서 바로 붙였다 뗀다 — 쓸 수 있는 사람에게는 비어 있어도 행을 낸다(붙일 자리가
+                화면 어디에도 없으면 "편집할 수 없는 속성"이 된다). 읽기 전용일 때만 빈 행을 숨긴다. */}
+            {(canWrite || current.labelIds.length > 0) && (
               <PropertyRow label={t('fieldLabels')}>
-                <IssueLabelChips labelIds={current.labelIds} directory={labelDirectory} />
+                <IssueLabelControl
+                  id={current.id}
+                  labelIds={current.labelIds}
+                  labels={labels}
+                  canWrite={canWrite}
+                />
               </PropertyRow>
             )}
             <PropertyRow label={t('metaCreated')}>
