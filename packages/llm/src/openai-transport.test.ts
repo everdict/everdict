@@ -1,3 +1,4 @@
+import { UpstreamError } from "@everdict/contracts";
 import type OpenAI from "openai";
 import { describe, expect, it } from "vitest";
 import { OpenAiTransport } from "./openai-transport.js";
@@ -126,5 +127,53 @@ describe("OpenAiTransport", () => {
     expect(result.content).toBe("verdict");
     expect(result.finishReason).toBe("stop");
     expect(result.usage).toEqual({ inputTokens: 20, outputTokens: 3, totalTokens: 23 });
+  });
+
+  it("remaps a provider failure to an UpstreamError that keeps the status, the retry pacing and the body", async () => {
+    // What LiteLLM/OpenAI answer when the tenant's plan quota is gone: a 429 whose BODY is the whole diagnosis.
+    const apiError = Object.assign(new Error("429 The usage limit has been reached"), {
+      status: 429,
+      headers: { "retry-after": "120" },
+      // The SDK's message keeps only `error.message`; the parsed body says WHICH limit and when it clears.
+      error: { error: { type: "usage_limit_reached", plan_type: "free", resets_in_seconds: 1_250_141 } },
+    });
+    const client = {
+      chat: {
+        completions: {
+          create: () => Promise.reject(apiError),
+        },
+      },
+    } as unknown as OpenAI;
+    const err = await new OpenAiTransport(client)
+      .stream(baseReq)
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UpstreamError);
+    const upstream = err as UpstreamError;
+    // The reason survives (a bare "the model provider call failed" is unactionable), as do the fields the caller's
+    // retry policy classifies on — the raw SDK error must never reach it (repo rule: remap external failures).
+    expect(upstream.message).toContain("usage_limit_reached");
+    expect(upstream.message).toContain("resets_in_seconds");
+    expect(upstream.extra).toMatchObject({ status: 429, retryAfterMs: 120_000 });
+  });
+
+  it("remaps a failure raised MID-stream, not only on the initial call", async () => {
+    const client = {
+      chat: {
+        completions: {
+          create: () =>
+            (async function* () {
+              yield { choices: [{ index: 0, delta: { content: "par" }, finish_reason: null }] };
+              throw Object.assign(new Error("500 upstream connection error"), { status: 500 });
+            })(),
+        },
+      },
+    } as unknown as OpenAI;
+    const err = await new OpenAiTransport(client)
+      .stream(baseReq)
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UpstreamError);
+    expect((err as UpstreamError).extra).toMatchObject({ status: 500 });
   });
 });
