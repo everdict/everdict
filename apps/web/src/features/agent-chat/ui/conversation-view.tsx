@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ChartSpline,
@@ -138,6 +138,17 @@ function PermissionModePicker({
   )
 }
 
+// An emitted artifact in the transcript. Memoized like every other item, and it owns its own `action` element:
+// building `<PinControl>` at the call site would hand the card a new prop identity on every render and defeat the
+// memo — the very thing a chart (SVG marks, a table, a sandboxed frame) can least afford to redraw per keystroke.
+const ArtifactRow = memo(function ArtifactRow({ artifact }: { artifact: AnalysisArtifact }) {
+  return (
+    <div className="px-3 py-1.5">
+      <ArtifactCard artifact={artifact} action={<PinControl artifact={artifact} />} />
+    </div>
+  )
+})
+
 export function ConversationView({
   title,
   user,
@@ -250,7 +261,10 @@ export function ConversationView({
     scrollToBottom('auto')
   }, [scrollToBottom])
 
-  const items = buildTranscript(messages, artifacts)
+  // The draft the member is typing lives in this component's props, so EVERY keystroke re-renders this view. The
+  // transcript below must not be rebuilt by it: buildTranscript mints fresh todo/sub-agent objects each call, and a
+  // new object identity would push a re-render straight through the memoized rows into their markdown parsers.
+  const items = useMemo(() => buildTranscript(messages, artifacts), [messages, artifacts])
 
   const isEmpty = messages.length === 0 && !pendingUser && !sending
   // 임무로 진입했으면 그 임무의 카탈로그 블록(agentChat.missions.<kind>)이 빈 화면의 제목·설명·제안을 대신한다 —
@@ -337,14 +351,7 @@ export function ConversationView({
                 if (item.kind === 'agents')
                   return <SubagentList key={item.id} agents={item.agents} />
                 if (item.kind === 'artifact')
-                  return (
-                    <div key={item.id} className="px-3 py-1.5">
-                      <ArtifactCard
-                        artifact={item.artifact}
-                        action={<PinControl artifact={item.artifact} />}
-                      />
-                    </div>
-                  )
+                  return <ArtifactRow key={item.id} artifact={item.artifact} />
                 return <MessageRow key={item.message.id} message={item.message} user={user} />
               })}
               {pendingUser && (

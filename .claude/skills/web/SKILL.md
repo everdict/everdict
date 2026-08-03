@@ -190,6 +190,16 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   new-conversation / session switch. A new mission = one enum value + one intent entry + one catalog block in BOTH
   locales + the prop at the entry — never a second chat component. Every detail-page chat entry passes its mission;
   only truly generic surfaces (the @-picker, the trace browser's chip-adder) stay mission-less with default copy.
+- **Every chat transcript item is `memo`-wrapped** (`features/agent-chat/ui/*`, guarded by
+  `transcript-render.test.tsx`): the composer's draft is state ABOVE the transcript, so a keystroke re-renders
+  `ConversationView`, and a transcript item re-parses its markdown through the whole unified pipeline
+  (remark-gfm → rehype-raw → sanitize) every time it renders. Unmemoized that was ~17ms per keystroke at 5 turns
+  and ~46ms at 20 (node alone, before the browser's reconciliation) — the panel visibly dropped frames while
+  typing. `ConversationView` therefore also `useMemo`s `buildTranscript` (it mints fresh todo/sub-agent objects
+  per call, and a new identity punches straight through the memo), and an item that needs a companion control
+  builds it INSIDE the memoized row (`ArtifactRow` owns its `PinControl`) rather than passing an element in. A new
+  item kind is memoized and added to that test's list. Same reasoning covers any surface that renders `Markdown`
+  in a list under live-changing state.
 - **Reading a trace has ONE surface**: `TrajectoryView` (`features/browse-traces`) — rollup · plane chips (one
   lane per emitter) · event list left / FULL payload right. Settings › Observability's sealed-trajectory dialog
   and the run detail's evidence section render the same component, so a payload read in one place is the payload

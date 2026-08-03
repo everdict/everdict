@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { ChevronRight, Inbox, UsersRound } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -10,7 +10,8 @@ import { Markdown } from '@/shared/ui/markdown'
 // Context the mailbox injected into the conversation — a teammate agent's message or a platform event the running
 // turn absorbed. It is input FOR the agent, not something the member said or needs to read, so it renders like
 // reasoning: a quiet foldable block, collapsed by default, markdown when expanded (for the curious).
-export function ContextBlock({
+// Memoized like every transcript item — the composer's draft lives above it, and a keystroke must not reach here.
+export const ContextBlock = memo(function ContextBlock({
   source,
   sender,
   text,
@@ -52,4 +53,4 @@ export function ContextBlock({
       )}
     </div>
   )
-}
+})

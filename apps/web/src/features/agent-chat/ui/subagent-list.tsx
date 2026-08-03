@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { Bot, ChevronRight, CircleCheck, LoaderCircle, TriangleAlert } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -13,7 +13,9 @@ import type { SubagentView } from '../lib/transcript'
 // sub-task / spawned teammate is a row with a spinner while it runs and a check/alert when it settles, so parallel
 // and background delegation is visible in the conversation instead of happening silently. A row expands to the full
 // task and, once finished, the sub-agent's returned summary.
-export function SubagentList({ agents }: { agents: SubagentView[] }) {
+// Memoized like every transcript item: a settled row's summary is markdown, and re-parsing it on each keystroke in
+// the composer is exactly the cost this panel could not afford.
+export const SubagentList = memo(function SubagentList({ agents }: { agents: SubagentView[] }) {
   const t = useTranslations('agentChat')
   const [open, setOpen] = useState<Record<string, boolean>>({})
   if (agents.length === 0) return null
@@ -106,4 +108,4 @@ export function SubagentList({ agents }: { agents: SubagentView[] }) {
       </div>
     </div>
   )
-}
+})

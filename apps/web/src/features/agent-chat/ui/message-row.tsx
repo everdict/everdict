@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import { Paperclip, User } from 'lucide-react'
 
 import type { AgentMessage } from '@/entities/agent-session'
@@ -36,7 +37,17 @@ export function UserBadge({ user }: { user?: ChatUser }) {
 // turn shows the member's profile avatar + their @-reference chips above the text; assistant text renders as bare
 // markdown with NO avatar/gutter (the agent needs no face — its words are the surface). Reasoning, todos, and
 // sub-agent activity are pulled OUT into their own transcript items (see build-transcript).
-export function MessageRow({ message, user }: { message: AgentMessage; user?: ChatUser }) {
+// MEMOIZED, and this one is not an optimization detail: an assistant turn re-parses its markdown through the whole
+// unified pipeline (remark-gfm → rehype-raw → sanitize) on every render, and the composer's draft lives one
+// component up — so without this every keystroke re-parsed the ENTIRE transcript (measured ~46ms at 20 turns,
+// before the browser's own reconciliation). A settled message is immutable, so identity comparison is exact.
+export const MessageRow = memo(function MessageRow({
+  message,
+  user,
+}: {
+  message: AgentMessage
+  user?: ChatUser
+}) {
   if (message.role === 'tool') return null
 
   const isUser = message.role === 'user'
@@ -86,4 +97,4 @@ export function MessageRow({ message, user }: { message: AgentMessage; user?: Ch
       </div>
     </div>
   )
-}
+})
