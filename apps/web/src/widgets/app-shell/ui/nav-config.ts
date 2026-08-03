@@ -18,6 +18,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { matchTeamPath } from '@/entities/team'
+
 export interface NavItem {
   // Workspace-relative path suffix (e.g. '' = overview, '/scorecards'). Prefixed with the active workspace at render → /{workspace}{suffix}.
   // nav-config has no request context (workspace·locale unknown at module load), so it holds only the suffix + message key.
@@ -76,8 +78,9 @@ export const NAV_SECTIONS: NavSection[] = [
       },
     ],
   },
-  // Workspace — what spans every team. Initiatives group projects; projects span teams (a project record carries
-  // an initiative, never a team); Views are the saved analysis lenses. `More` holds the workspace rosters, which
+  // Workspace — what spans every team. Initiatives group projects; a project spans teams (it NAMES them, at
+  // least one, so this list and a team's are two addresses onto one collection); Views are the saved analysis
+  // lenses. `More` holds the workspace rosters, which
   // are configuration screens you visit rarely — they live under /settings and are LINKED here rather than moved,
   // so there is exactly one Members page in the product.
   {
@@ -212,3 +215,27 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   ...NAV_SECTIONS.flatMap((s) => s.items.flatMap((item) => item.children ?? [item])),
   WORKSPACE_ISSUES_ITEM,
 ]
+
+// Every row rendered in the app nav, flattened — the sidebar's `More` children included. The active-state
+// invariant ("at most one row") is stated over this list, so a new section can never quietly escape it.
+export const ALL_SIDEBAR_ROWS: NavItem[] = [...NAV_SECTIONS, RESOURCES_SECTION].flatMap((section) =>
+  section.items.flatMap((item) => item.children ?? [item])
+)
+
+// Which row owns the current path — the ONE place the app nav answers that, so no two rows can both claim it.
+//
+// A row owns its href and everything under it, EXCEPT what a more specific owner already claims: a team-scoped
+// path (`/{workspace}/teams/ENG/...`) belongs to that team's group in the sidebar, so no workspace-level row
+// matches there. Without that carve-out `/teams` prefix-matched every page a team owns, lighting the workspace
+// `Teams` row alongside the team's own row (and force-expanding the `More` group that holds it).
+export function isNavItemActive(
+  item: Pick<NavItem, 'href' | 'exact'>,
+  pathname: string,
+  workspace: string
+): boolean {
+  if (matchTeamPath(pathname, workspace) !== null) return false
+  const full = `/${workspace}${item.href}`
+  return item.exact === true
+    ? pathname === full
+    : pathname === full || pathname.startsWith(`${full}/`)
+}

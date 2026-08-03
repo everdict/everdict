@@ -7,7 +7,7 @@ import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Search, Settings, X } fro
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
-import { teamHref, teamSectionHref } from '@/entities/team'
+import { matchTeamPath, teamHref, teamSectionHref, type TeamPathScope } from '@/entities/team'
 import type { Workspace } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { cn } from '@/shared/lib/utils'
@@ -15,7 +15,7 @@ import { Avatar } from '@/shared/ui/avatar'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Kbd } from '@/shared/ui/kbd'
 
-import { NAV_SECTIONS, RESOURCES_SECTION } from './nav-config'
+import { isNavItemActive, NAV_SECTIONS, RESOURCES_SECTION } from './nav-config'
 import { navGroupOpen } from './nav-group-open'
 import { SETTINGS_NAV_GROUPS } from './settings-nav-config'
 
@@ -107,10 +107,12 @@ function NavLinks({
     window.localStorage.setItem(`${NAV_GROUP_STORAGE_PREFIX}${key}`, next ? 'open' : 'closed')
   }
 
-  const isActiveItem = (href: string, exact?: boolean) => {
-    const full = `/${workspace}${href}`
-    return exact ? pathname === full : pathname === full || pathname.startsWith(`${full}/`)
-  }
+  // 지금 경로가 어느 팀의 것인가 — 한 번만 판정하고 양쪽(워크스페이스 나브 · 팀 그룹)이 같은 답을 쓴다.
+  // 각자 답하던 시절에는 `/teams` 행이 팀 하위 페이지까지 자기 것이라 주장해 두 행이 동시에 켜졌다.
+  const teamScope = matchTeamPath(pathname, workspace)
+
+  const isActiveItem = (href: string, exact?: boolean) =>
+    isNavItemActive({ href, exact }, pathname, workspace)
 
   return (
     <nav className="flex flex-col gap-4">
@@ -231,7 +233,12 @@ function NavLinks({
                 })}
             </div>
             {i === teamsAfterIndex && (
-              <TeamsNav workspace={workspace} teams={teams} onNavigate={onNavigate} />
+              <TeamsNav
+                workspace={workspace}
+                teams={teams}
+                scope={teamScope}
+                onNavigate={onNavigate}
+              />
             )}
           </Fragment>
         )
@@ -245,29 +252,26 @@ function NavLinks({
 //
 // 팀은 링크가 아니라 펼쳐지는 그룹이다: 이슈는 `teamId` 가 필수이고 식별자도 `<KEY>-123` 으로 팀이 발번하므로,
 // 팀은 이슈를 거르는 필터가 아니라 이슈가 사는 곳이다. 그래서 최상단의 평평한 "Issues" 항목을 없애고 각 팀이
-// 자기 이슈 목록을 소유하게 했다. 프로젝트는 팀에 속하지 않고(레코드에 teamId 가 없다) 이니셔티브로 묶이므로
-// 워크스페이스 레벨에 그대로 두되, 팀 안에는 "그 팀이 이슈를 갖고 있는 프로젝트" 뷰를 둔다 — 서버가 이슈에서
-// 파생해 답한다.
+// 자기 이슈 목록을 소유하게 했다. 프로젝트는 종류가 하나뿐이다 — 워크스페이스의 것이면서 자기 팀들을 이름으로
+// 들고 있고(`teamIds`, 최소 하나), 그래서 워크스페이스 목록과 팀 아래 목록은 같은 한 컬렉션의 두 주소다.
 //
 // 팀이 하나뿐이어도 감추지 않는다. 예전에는 감췄지만, 그러면 이슈가 팀에 속한다는 사실 자체가 화면에서 사라져
 // 워크스페이스 전역 목록처럼 보인다 — 팀 키(`ENG`)는 이슈 번호에 이미 박혀 있으니 하나뿐인 팀도 보여줄 값이 있다.
 function TeamsNav({
   workspace,
   teams,
+  scope,
   onNavigate,
 }: {
   workspace: string
   teams: SidebarTeam[]
+  // 어느 팀의 화면을 보고 있나 — 전부 경로가 말한다(`/{workspace}/teams/ENG/…`). 판정은 위에서 한 번만 하고
+  // 내려받는다: 이 그룹과 워크스페이스 나브가 각자 경로를 읽으면 둘 다 자기 것이라 주장할 수 있다.
+  scope: TeamPathScope | null
   onNavigate?: () => void
 }) {
-  const pathname = usePathname()
   const t = useTranslations('nav')
   const [openTeams, setOpenTeams] = useState<Record<string, boolean>>({})
-  // 어느 팀의 화면을 보고 있나 — 이제 전부 경로가 말한다(`/{workspace}/teams/ENG/…`). 쿼리 파라미터를
-  // 읽던 시절에는 팀 홈만 경로였고 목록들은 `?team=` 이라 판정이 두 갈래였다.
-  const scoped = pathname.match(new RegExp(`^/${workspace}/teams/([^/]+)(?:/([^/]+))?$`))
-  const scopedTeamKey = scoped?.[1] !== undefined ? decodeURIComponent(scoped[1]) : null
-  const scopedSection = scoped?.[2] ?? (scopedTeamKey === null ? null : 'home')
   if (teams.length === 0) return null
   return (
     <div className="flex flex-col gap-0.5">
@@ -275,7 +279,7 @@ function TeamsNav({
       {teams.map((team) => {
         // 활성 스코프인 팀은 기본으로 펼치되, 사용자가 접었으면 접힌 채로 둔다. 팀이 하나뿐이면 접을 이유도
         // 없으니 그때의 기본은 펼침이다.
-        const holdsActive = scopedTeamKey === team.key
+        const holdsActive = scope?.key === team.key
         const open = navGroupOpen({
           recorded: openTeams[team.id],
           holdsActive,
@@ -343,7 +347,7 @@ function TeamsNav({
               <div className="ml-[13px] flex flex-col gap-0.5 border-l border-border/60 pl-2">
                 {children.map((child) => {
                   // 경로 하나로 판정된다 — 어느 팀인지도, 그 팀의 어느 자원인지도 URL 이 들고 있다.
-                  const active = holdsActive && scopedSection === child.page
+                  const active = holdsActive && scope?.section === child.page
                   return (
                     <Link
                       key={child.page}
