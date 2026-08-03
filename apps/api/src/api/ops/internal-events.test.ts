@@ -439,14 +439,14 @@ describe("RunService.trajectory — the owned copy with the embed fallback (P5)"
       updatedAt: "t",
     });
     // No sealed copy yet → the embed answers, marked as such.
-    const viaEmbed = await service.trajectory("acme", "r-embed");
+    const viaEmbed = await service.trajectory("acme", "r-embed", "member-1");
     expect(viaEmbed?.meta.source).toBe("embed");
     expect(viaEmbed?.events).toHaveLength(1);
     // Sealed copy present → it serves (the owned record outranks the row embed).
     await trajectories.seal({ runId: "r-embed", tenant: "acme", source: "run", events: trace });
-    expect((await service.trajectory("acme", "r-embed"))?.meta.source).toBe("run");
+    expect((await service.trajectory("acme", "r-embed", "member-1"))?.meta.source).toBe("run");
     // Workspace scoping — a foreign tenant reads nothing.
-    expect(await service.trajectory("rival", "r-embed")).toBeUndefined();
+    expect(await service.trajectory("rival", "r-embed", "member-1")).toBeUndefined();
   });
 });
 

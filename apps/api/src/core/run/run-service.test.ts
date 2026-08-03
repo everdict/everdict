@@ -1135,7 +1135,7 @@ describe("RunService — display reads re-mint artifact refs", () => {
     await store.create(shotRun("r1"));
     const svc = new RunService({ dispatcher: okDispatcher, store, artifacts, newId: ids });
 
-    const displayed = await svc.getForDisplay("r1");
+    const displayed = await svc.getForDisplay("r1", "member-1");
     const snapshot = displayed?.result?.snapshot;
     expect(snapshot?.kind === "os-use" && snapshot.screenshotRef).toBe(
       "https://artifacts.example.com/bucket/runs/r1.png?fresh=1",

@@ -41,7 +41,13 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
   // One entry per run: the header (how it first arrived) plus one segment per emitter, insertion-ordered.
   private readonly rows = new Map<
     string,
-    { tenant: string; source: TrajectoryMeta["source"]; sealedAt: string; segments: TrajectorySegment[] }
+    {
+      tenant: string;
+      source: TrajectoryMeta["source"];
+      sealedAt: string;
+      owner?: string;
+      segments: TrajectorySegment[];
+    }
   >();
 
   async seal(input: {
@@ -51,6 +57,7 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     events: TraceEvent[];
     emitter?: string;
     t0?: string;
+    owner?: string;
   }): Promise<TrajectoryMeta & { created: boolean }> {
     const emitter = input.emitter ?? defaultEmitter(input.source);
     const sealedAt = new Date().toISOString();
@@ -68,6 +75,7 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
         tenant: input.tenant,
         source: input.source,
         sealedAt,
+        ...(input.owner !== undefined ? { owner: input.owner } : {}),
         segments: [segment],
       });
       return { ...this.metaOf(input.runId), created: true };
@@ -102,11 +110,20 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     };
   }
 
-  async list(tenant: string, opts?: { limit?: number; cursor?: string }): Promise<TrajectoryListResult> {
+  async list(
+    tenant: string,
+    opts?: { limit?: number; cursor?: string; viewer?: string },
+  ): Promise<TrajectoryListResult> {
     const limit = clampLimit(opts?.limit);
     const after = opts?.cursor !== undefined ? decodeCursor(opts.cursor) : undefined;
+    const viewer = opts?.viewer;
     const sorted = [...this.rows.keys()]
-      .filter((runId) => this.rows.get(runId)?.tenant === tenant)
+      .filter((runId) => {
+        const row = this.rows.get(runId);
+        if (row?.tenant !== tenant) return false;
+        // Owned evidence is the owner's alone (the Pg twin's `owner IS NULL OR owner = $viewer`).
+        return viewer === undefined || row.owner === undefined || row.owner === viewer;
+      })
       .map((runId) => this.metaOf(runId))
       .sort((a, b) => b.sealedAt.localeCompare(a.sealedAt) || b.runId.localeCompare(a.runId))
       .filter(
@@ -155,6 +172,7 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       source: row.source,
       eventCount: row.segments.reduce((sum, s) => sum + s.eventCount, 0),
       sealedAt: row.sealedAt,
+      ...(row.owner !== undefined ? { owner: row.owner } : {}),
     };
   }
 }
@@ -168,6 +186,7 @@ interface PrimaryRow {
   segment_event_count: number;
   t0: string | Date | null;
   sealed_at: string | Date;
+  owner: string | null; // mig 0116 — whose evidence this is; NULL = the workspace's
 }
 
 // Postgres-backed trajectory store (mig 0098 + 0104) — the header row carries the FIRST emitter's body;
@@ -183,13 +202,14 @@ export class PgTrajectoryStore implements TrajectoryStore {
     events: TraceEvent[];
     emitter?: string;
     t0?: string;
+    owner?: string;
   }): Promise<TrajectoryMeta & { created: boolean }> {
     const emitter = input.emitter ?? defaultEmitter(input.source);
     const sealedAt = new Date().toISOString();
     // RETURNING under ON CONFLICT DO NOTHING yields a row ONLY when this call inserted — `created` for free.
     const inserted = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, t0, sealed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8)
+      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, t0, sealed_at, owner)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9)
        ON CONFLICT (run_id) DO NOTHING
        RETURNING run_id`,
       [
@@ -201,6 +221,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         JSON.stringify(input.events),
         input.t0 ?? null,
         sealedAt,
+        input.owner ?? null,
       ],
     );
     if (inserted.rows.length > 0) {
@@ -210,6 +231,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         source: input.source,
         eventCount: input.events.length,
         sealedAt,
+        ...(input.owner !== undefined ? { owner: input.owner } : {}),
         created: true,
       };
     }
@@ -256,7 +278,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
 
   async get(tenant: string, runId: string): Promise<SealedTrajectory | undefined> {
     const res = await this.client.query<PrimaryRow & { body: unknown }>(
-      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, body, t0, sealed_at
+      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, body, t0, sealed_at, owner
        FROM everdict_trajectories WHERE run_id = $1`,
       [runId],
     );
@@ -301,17 +323,25 @@ export class PgTrajectoryStore implements TrajectoryStore {
     };
   }
 
-  async list(tenant: string, opts?: { limit?: number; cursor?: string }): Promise<TrajectoryListResult> {
+  async list(
+    tenant: string,
+    opts?: { limit?: number; cursor?: string; viewer?: string },
+  ): Promise<TrajectoryListResult> {
     const limit = clampLimit(opts?.limit);
     const after = opts?.cursor !== undefined ? decodeCursor(opts.cursor) : undefined;
     const conds = ["tenant = $1"];
     const vals: unknown[] = [tenant];
     if (after !== undefined) {
-      conds.push("(sealed_at, run_id) < ($2::timestamptz, $3)");
+      conds.push(`(sealed_at, run_id) < ($${vals.length + 1}::timestamptz, $${vals.length + 2})`);
       vals.push(after.sealedAt, after.runId);
     }
+    // Owned evidence is the owner's alone — in the WHERE, so the page stays full for everyone else.
+    if (opts?.viewer !== undefined) {
+      conds.push(`(owner IS NULL OR owner = $${vals.length + 1})`);
+      vals.push(opts.viewer);
+    }
     const res = await this.client.query<PrimaryRow>(
-      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, t0, sealed_at FROM everdict_trajectories
+      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, t0, sealed_at, owner FROM everdict_trajectories
        WHERE ${conds.join(" AND ")}
        ORDER BY sealed_at DESC, run_id DESC
        LIMIT ${limit + 1}`,
@@ -347,7 +377,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
 
   private async primary(runId: string): Promise<PrimaryRow | undefined> {
     const res = await this.client.query<PrimaryRow>(
-      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, t0, sealed_at
+      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, t0, sealed_at, owner
        FROM everdict_trajectories WHERE run_id = $1`,
       [runId],
     );
@@ -362,5 +392,6 @@ function metaOf(row: PrimaryRow): TrajectoryMeta {
     source: row.source as TrajectoryMeta["source"],
     eventCount: Number(row.event_count) + Number(row.segment_event_count ?? 0),
     sealedAt: isoOf(row.sealed_at),
+    ...(row.owner ? { owner: row.owner } : {}),
   };
 }

@@ -25,8 +25,10 @@ import {
   type UsageMeter,
   attachChannelsFor,
   billingCharges,
+  canReadRun,
   priceUsd,
   resolveHarnessSecrets,
+  runAudience,
   usageFromTrace,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
@@ -305,8 +307,13 @@ export class RunService {
   // get(), except the snapshot's artifact refs are re-minted for the viewer's browser: the persisted ones are
   // server-side handles (in-network host, hour-old signature). Our own callers keep using get() so their fetches stay
   // in-cluster.
-  async getForDisplay(id: string): Promise<(RunRecord & { liveTrace?: LiveTraceRef }) | undefined> {
+  //
+  // `viewer` is the member asking. A run another member's agent turn or shell produced reads as undefined — the same
+  // answer as a foreign workspace's run, so a transport maps both to 404 and neither leaks that the row exists
+  // (`runAudience`, @everdict/domain). Serving a PERSON goes through here; our own reads keep get().
+  async getForDisplay(id: string, viewer: string): Promise<(RunRecord & { liveTrace?: LiveTraceRef }) | undefined> {
     const record = await this.get(id);
+    if (record && !canReadRun(record, viewer)) return undefined;
     if (!record?.result?.snapshot) return record;
     const snapshot = await refreshSnapshotRefs(record.result.snapshot, this.deps.artifacts);
     return snapshot === record.result.snapshot ? record : { ...record, result: { ...record.result, snapshot } };
@@ -547,6 +554,8 @@ export class RunService {
   // Default is standalone runs (activity list); scorecardId → only that batch's child runs (scorecard-detail case
   // drilldown); includeChildren → all runs (standalone + children) for the activity console's "all executions" view;
   // runnerId → runs a self-hosted runner executed (runner-detail activity feed), offset-paginated by limit (newest first).
+  // `viewer` (the member asking) drops another member's personal executions in the QUERY — a transport always
+  // passes it; an internal sweep leaves it unset.
   list(
     tenant?: string,
     opts?: {
@@ -555,6 +564,7 @@ export class RunService {
       runnerId?: string;
       limit?: number;
       offset?: number;
+      viewer?: string;
     },
   ): Promise<RunRecord[]> {
     return this.deps.store.list(tenant, opts);
@@ -736,7 +746,11 @@ export class RunService {
     // seal it as the run's OWN trajectory (source "run", first write wins). Offered BEFORE the terminal guard:
     // at-least-once reports re-offer harmlessly (idempotent seal) and a retry can heal a seal the first report
     // lost. Best-effort like every dual-write — the settle below is the durable half.
-    if (trace && trace.length > 0) void this.sealPlanes(id, current.tenant, pricedTrace(trace));
+    // The turn's evidence inherits the turn's audience (a member's transcript stays that member's), and its
+    // relative clock is anchored at the run's own start — the turn opened when the record was created, so the
+    // trajectory can be laid on a wall-clock axis without the agent service having to ship one.
+    if (trace && trace.length > 0)
+      void this.sealPlanes(id, current.tenant, pricedTrace(trace), { record: current, t0: current.createdAt });
     const run = Run.from(current);
     if (run.isTerminal()) return; // first terminal write wins (a retried terminal report)
     const { patch } = run.settleAgent(outcome, message, this.now());
@@ -748,9 +762,12 @@ export class RunService {
 
   // The OWNED trajectory (P5): workspace-scoped read — a foreign/missing run reads undefined (the route
   // maps it to 404, no existence leak). The run row's embed stays the fallback during the dual-read window.
+  // `viewer` applies the audience rule over the same record: evidence is exactly as private as the execution
+  // that produced it, so another member's chat transcript is not readable through the trajectory door.
   async trajectory(
     tenant: string,
     runId: string,
+    viewer: string,
   ): Promise<
     | {
         meta: { source: string; eventCount: number; sealedAt: string };
@@ -760,7 +777,7 @@ export class RunService {
     | undefined
   > {
     const record = await this.deps.store.get(runId);
-    if (!record || record.tenant !== tenant) return undefined;
+    if (!record || record.tenant !== tenant || !canReadRun(record, viewer)) return undefined;
     const sealed = await this.deps.trajectories?.get(tenant, runId);
     if (sealed) {
       const { runId: _r, tenant: _t, ...meta } = sealed.meta;
@@ -790,10 +807,26 @@ export class RunService {
   // Evidence, never lifecycle: a seal failure must not touch the run's outcome. Splits the raw stream into the
   // agent's plane and the orchestrator's (docs/architecture/native-observability.md) so the judged `events`
   // carry no placement noise and each plane keeps its own clock anchor.
-  private async sealPlanes(runId: string, tenant: string, events: TraceEvent[]): Promise<void> {
+  // `owned` is the run whose audience the evidence inherits (`runAudience`): a chat turn's transcript is as
+  // private as the turn. Passing the RECORD rather than a subject keeps the rule in one place — a caller
+  // cannot seal personal evidence as the workspace's by forgetting a field. `t0` anchors the plane in
+  // absolute time when the caller knows where its relative clock starts.
+  private async sealPlanes(
+    runId: string,
+    tenant: string,
+    events: TraceEvent[],
+    owned?: { record: RunRecord; t0?: string },
+  ): Promise<void> {
     const store = this.deps.trajectories;
     if (!store) return;
-    await sealExecutionPlanes(store, { runId, tenant, events }).catch(() => {});
+    const audience = owned !== undefined ? runAudience(owned.record) : undefined;
+    await sealExecutionPlanes(store, {
+      runId,
+      tenant,
+      events,
+      ...(audience?.scope === "member" ? { owner: audience.subject } : {}),
+      ...(owned?.t0 !== undefined ? { t0: owned.t0 } : {}),
+    }).catch(() => {});
   }
 
   private async finalize(id: string, outcome: (run: Run) => RunTransition): Promise<void> {

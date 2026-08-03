@@ -71,6 +71,7 @@ import {
   JudgeRunConfigSchema,
   JudgeSpecSchema,
   ModelSpecSchema,
+  type RunRecord,
   type RuntimeSpec,
   RuntimeSpecSchema,
   resolveHarnessInstance,
@@ -91,7 +92,7 @@ import {
   type WorkspaceStore,
   issueKey,
 } from "@everdict/db";
-import { collectHarnessImages, imageWarnings } from "@everdict/domain";
+import { canReadRun, collectHarnessImages, imageWarnings } from "@everdict/domain";
 import type { UsageMeter } from "@everdict/domain";
 import type { ImageTokenService } from "@everdict/images";
 import type {
@@ -489,6 +490,18 @@ export { resolveTeamRef, teamForNew } from "../common/team-scope.js";
 // use `assertTeamVisible` below instead, which answers the same refusal as 404.
 export function gate(principal: Principal, action: Action, resource?: ResourceScope): void {
   authorize(principal, action, resource);
+}
+
+// Is this run THIS caller's to read? Workspace scoping and the audience rule in one question, because the two
+// have the same answer (404, no existence leak): a foreign workspace's run and another member's personal
+// execution — an agent turn, a sandbox shell (`runAudience`, @everdict/domain) — are equally none of the
+// caller's business. Used by the run observability routes, which hold the record already; the data reads
+// (get/list/trajectory) apply the same rule inside RunService so both transports inherit it.
+export function runVisible(
+  record: Pick<RunRecord, "tenant" | "kind" | "createdBy" | "origin">,
+  principal: Principal,
+): boolean {
+  return record.tenant === principal.workspace && canReadRun(record, principal.subject);
 }
 
 // The READ half of the team axis lives in `common/team-scope.ts` (both transports need it, and the MCP tool files

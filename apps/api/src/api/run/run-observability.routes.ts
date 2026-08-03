@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, runVisible, sendError } from "../route-context.js";
 import { runObservabilityDocs } from "./run-observability.docs.js";
 
 // run observability — live progress into a run's sandbox: logs snapshot/stream, one-shot exec,
@@ -26,7 +26,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
         if (stream === undefined && req.query.stream !== undefined)
           return reply.code(400).send({ code: "BAD_REQUEST", message: "stream must be stdout or stderr." });
         const out = await deps.service.logs(req.params.id, stream);
-        if (!out || out.record.tenant !== principal.workspace)
+        if (!out || !runVisible(out.record, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
         return reply.send({ status: out.record.status, found: out.text !== undefined, text: out.text ?? "" });
       } catch (err) {
@@ -47,7 +47,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
       try {
         gate(principal, "runs:read");
         const out = await deps.service.placement(req.params.id);
-        if (!out || out.record.tenant !== principal.workspace)
+        if (!out || !runVisible(out.record, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
         return reply.send({
           status: out.record.status,
@@ -72,7 +72,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
       try {
         gate(principal, "runs:read");
         const out = await deps.service.topology(req.params.id);
-        if (!out || out.record.tenant !== principal.workspace)
+        if (!out || !runVisible(out.record, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
         return reply.send({
           status: out.record.status,
@@ -96,7 +96,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
       try {
         gate(principal, "runs:read");
         const out = await deps.service.topologyServiceLogs(req.params.id, req.params.service);
-        if (!out || out.record.tenant !== principal.workspace)
+        if (!out || !runVisible(out.record, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
         return reply.send({ found: out.text !== undefined, text: out.text ?? "" });
       } catch (err) {
@@ -120,7 +120,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
         if (typeof command !== "string" || command.trim() === "")
           return reply.code(400).send({ code: "BAD_REQUEST", message: "command is required." });
         const out = await deps.service.exec(req.params.id, command);
-        if (!out || out.record.tenant !== principal.workspace)
+        if (!out || !runVisible(out.record, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
         // Creator-or-admin — exec runs arbitrary commands in the sandbox (mutating), stricter than a read.
         if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
@@ -147,7 +147,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
         if (!deps.terminalTickets)
           return reply.code(404).send({ code: "NOT_FOUND", message: "terminal not configured" });
         const rec = await deps.service.get(req.params.id);
-        if (!rec || rec.tenant !== principal.workspace)
+        if (!rec || !runVisible(rec, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
         if (rec.createdBy && rec.createdBy !== principal.subject && !principal.roles.includes("admin"))
           return reply
@@ -176,7 +176,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
         if (!deps.screenTickets)
           return reply.code(404).send({ code: "NOT_FOUND", message: "interactive screen not configured" });
         const out = await deps.service.screenEndpoint(req.params.id);
-        if (!out || out.record.tenant !== principal.workspace)
+        if (!out || !runVisible(out.record, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
         if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
           return reply
@@ -202,7 +202,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
       try {
         gate(principal, "runs:read");
         const out = await deps.service.screen(req.params.id);
-        if (!out || out.record.tenant !== principal.workspace)
+        if (!out || !runVisible(out.record, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
         if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
           return reply
@@ -232,7 +232,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
       try {
         gate(principal, "runs:read");
         const out = await deps.service.recording(req.params.id);
-        if (!out || out.record.tenant !== principal.workspace)
+        if (!out || !runVisible(out.record, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
         if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
           return reply
@@ -266,7 +266,7 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
       if (stream === undefined && req.query.stream !== undefined)
         return reply.code(400).send({ code: "BAD_REQUEST", message: "stream must be stdout or stderr." });
       let out = await deps.service.logs(req.params.id, stream);
-      if (!out || out.record.tenant !== principal.workspace)
+      if (!out || !runVisible(out.record, principal))
         return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
       reply.hijack();
       reply.raw.writeHead(200, {

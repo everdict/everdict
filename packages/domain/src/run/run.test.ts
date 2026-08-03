@@ -1,7 +1,7 @@
 import { ConflictError } from "@everdict/contracts";
 import { RunRecordSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { Run, attachChannelsFor } from "./run.js";
+import { Run, attachChannelsFor, canReadRun, runAudience } from "./run.js";
 
 const CASE = {
   id: "c1",
@@ -252,5 +252,63 @@ describe("attachChannelsFor — one rule for what an execution exposes", () => {
 
   it("treats an unstamped legacy run as an eval, which is what those rows were", () => {
     expect(attachChannelsFor({})).toEqual(["logs", "terminal"]);
+  });
+});
+
+describe("runAudience — one rule for who may read an execution", () => {
+  it("keeps a chat turn for the member who typed it", () => {
+    const record = Run.newChatTurn({
+      id: "r1",
+      tenant: "acme",
+      agentId: "default",
+      sessionId: "s1",
+      actor: "alice",
+      now: "2026-08-03T00:00:00.000Z",
+    });
+    expect(runAudience(record)).toEqual({ scope: "member", subject: "alice" });
+    expect(canReadRun(record, "alice")).toBe(true);
+    expect(canReadRun(record, "bob")).toBe(false);
+  });
+
+  it("keeps an activation for the member it acts as — the agent's work is that member's usage", () => {
+    const record = Run.newAgentRun({
+      id: "r2",
+      tenant: "acme",
+      agentId: "watcher",
+      sessionId: "s2",
+      eventKind: "issue.created",
+      createdBy: "alice",
+      now: "2026-08-03T00:00:00.000Z",
+    });
+    expect(runAudience(record)).toEqual({ scope: "member", subject: "alice" });
+    expect(canReadRun(record, "bob")).toBe(false);
+  });
+
+  it("keeps a sandbox session for whoever is at the shell", () => {
+    const record = Run.newSandboxSession({
+      id: "r3",
+      tenant: "acme",
+      harness: { id: "ubuntu", version: "adhoc" },
+      image: "ubuntu:24.04",
+      ttlSec: 600,
+      createdBy: "alice",
+      now: "2026-08-03T00:00:00.000Z",
+    });
+    expect(runAudience(record)).toEqual({ scope: "member", subject: "alice" });
+    expect(canReadRun(record, "bob")).toBe(false);
+  });
+
+  it("leaves eval work to the workspace — an eval is what the team is here to read", () => {
+    expect(runAudience(queued({ submittedBy: "alice" }))).toEqual({ scope: "workspace" });
+    expect(canReadRun(queued({ submittedBy: "alice" }), "bob")).toBe(true);
+  });
+
+  it("leaves an OWNERLESS personal run to the workspace — hiding it from everyone is loss, not privacy", () => {
+    expect(runAudience({ kind: "agent" })).toEqual({ scope: "workspace" });
+    expect(canReadRun({ kind: "agent" }, "bob")).toBe(true);
+  });
+
+  it("treats an unstamped legacy row as an eval, which is what those rows were", () => {
+    expect(runAudience({ createdBy: "alice" })).toEqual({ scope: "workspace" });
   });
 });

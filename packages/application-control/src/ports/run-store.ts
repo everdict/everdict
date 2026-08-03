@@ -16,6 +16,12 @@ export interface RunListOptions {
   // Skip the first N rows (newest first) before applying limit — offset pagination for the runner-detail activity
   // feed (each page fetches exactly `limit` rows at `offset = page * limit`). Unset/0 = start from the newest.
   offset?: number;
+  // WHO is reading (a member subject). Personal executions — agent turns, sandbox shells — belong to the member
+  // who did them (`runAudience` in @everdict/domain), so the store drops another member's from the page. Applied
+  // in the QUERY, not after it: filtering a limited page would let one member's chat history push everyone else's
+  // runs off the reader's screen. Unset = an internal read (recovery, reapers, the usage meter) that is not
+  // serving a person — never pass it through from a transport.
+  viewer?: string;
 }
 
 // A platform event stamped with identity but not yet sequenced — what the same-tx outbox persists alongside

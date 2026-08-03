@@ -562,7 +562,9 @@ export class SandboxSessionService {
       live.trace.push({ t: live.t++, kind: "env_action", action: "session.close", detail: { reason } });
       // Seal the session's trajectory (P5 discipline: evidence before anything reads it; first write wins).
       await this.deps.trajectories
-        ?.seal({ runId, tenant: live.tenant, source: "run", events: live.trace })
+        // A shell session is personal work (`runAudience`), so its record is the member's — the browse ledger
+        // must not hand one member's terminal history to the workspace.
+        ?.seal({ runId, tenant: live.tenant, source: "run", events: live.trace, owner: live.createdBy })
         .catch(() => undefined);
       const settled = await this.settle(runId, live.tenant, reason);
       // Prompt reaper completion (best-effort) — a missed signal just lets the timer fire a no-op later.

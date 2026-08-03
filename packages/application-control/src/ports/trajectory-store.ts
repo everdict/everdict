@@ -17,6 +17,12 @@ export interface TrajectoryMeta {
   // metering bills.
   eventCount: number;
   sealedAt: string;
+  // WHOSE evidence this is (a member subject), when it belongs to one person rather than the workspace: an
+  // agent turn's transcript, a sandbox shell's record. Stamped at seal from the run's audience
+  // (`runAudience`, @everdict/domain) so the ledger can answer "may this reader see it" from the row alone —
+  // a browse page must not have to join the run ledger to stay private, and a page filtered after the fact
+  // would be short. Absent = the workspace's evidence (evals, OTLP arrivals, imports).
+  owner?: string;
 }
 
 // One EMITTER's contribution to a run's trajectory (the multi-plane rung): the agent's own record, the
@@ -83,13 +89,24 @@ export const INFRA_EMITTER = "infra";
 // their `void`/catch discipline.
 export async function sealExecutionPlanes(
   store: Pick<TrajectoryStore, "seal">,
-  input: { runId: string; tenant: string; events: TraceEvent[] },
+  input: { runId: string; tenant: string; events: TraceEvent[]; owner?: string; t0?: string },
 ): Promise<void> {
   const agent: TraceEvent[] = [];
   const infra: TraceEvent[] = [];
   for (const event of input.events) (event.kind === "infra" ? infra : agent).push(event);
+  const owner = input.owner !== undefined ? { owner: input.owner } : {};
   // The execution's plane seals first so `SealedTrajectory.events` resolves to it even if the second write loses.
-  if (agent.length > 0) await store.seal({ runId: input.runId, tenant: input.tenant, source: "run", events: agent });
+  if (agent.length > 0)
+    await store.seal({
+      runId: input.runId,
+      tenant: input.tenant,
+      source: "run",
+      events: agent,
+      // The execution's own anchor when the caller knows it (an agent turn: the run's start). Without one a
+      // relative `t` cannot be laid on a shared axis and the reader keeps this plane on its own.
+      ...(input.t0 !== undefined ? { t0: input.t0 } : {}),
+      ...owner,
+    });
   if (infra.length > 0) {
     // The plane's own anchor: the earliest absolute stamp its emitter reported. Without one the reader keeps
     // this segment on its own axis rather than inventing an offset onto the agent's.
@@ -104,6 +121,7 @@ export async function sealExecutionPlanes(
       emitter: INFRA_EMITTER,
       events: infra,
       ...(t0 !== undefined ? { t0 } : {}),
+      ...owner,
     });
   }
 }
@@ -133,6 +151,13 @@ export function trajectorySegmentsWire(sealed: SealedTrajectory): TrajectorySegm
   }));
 }
 
+// May this reader open this evidence? The read-side half of `TrajectoryMeta.owner`, kept beside the port so
+// every surface that serves a sealed trajectory (the ledger's own detail read and its MCP twin) asks the same
+// question — the list side asks it in the query instead, for pagination. Unowned evidence is the workspace's.
+export function trajectoryReadableBy(meta: TrajectoryMeta, viewer: string): boolean {
+  return meta.owner === undefined || meta.owner === viewer;
+}
+
 // One page of the store's ledger (metas only — bodies stay behind get()). Cursor = opaque base64 of the
 // last row's (sealedAt, runId), newest first — the house pagination shape.
 export interface TrajectoryListResult {
@@ -154,11 +179,16 @@ export interface TrajectoryStore {
     events: TraceEvent[];
     emitter?: string;
     t0?: string;
+    // The member this evidence belongs to (see TrajectoryMeta.owner). Set by the FIRST seal — later planes
+    // join evidence that already has an owner, so they never need to restate it.
+    owner?: string;
   }): Promise<TrajectoryMeta & { created: boolean }>;
   get(tenant: string, runId: string): Promise<SealedTrajectory | undefined>;
   // Browse the workspace's sealed evidence, newest first (N1 "look inward" — Settings › Traces reads OUR
-  // store). Metas only: a page never hauls bodies.
-  list(tenant: string, opts?: { limit?: number; cursor?: string }): Promise<TrajectoryListResult>;
+  // store). Metas only: a page never hauls bodies. `viewer` (the member asking) drops evidence owned by
+  // someone else IN THE QUERY — filtering afterwards would hand the reader a short page and let one member's
+  // chat history crowd out everyone else's traces. Unset = an internal read (retention, metering).
+  list(tenant: string, opts?: { limit?: number; cursor?: string; viewer?: string }): Promise<TrajectoryListResult>;
   // Ingestion accounting (N3's admission lane): what this workspace sealed since `sinceIso`. The STORE is
   // the meter — no separate counter to drift or lose on restart; the door's quota check reads this.
   ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }>;

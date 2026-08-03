@@ -258,21 +258,22 @@ describe("PgRunStore", () => {
   it("list scope: default hides children ($3 false); includeChildren = all ($3 true); scorecardId = one batch ($2); runner filter ($4) + limit ($5) + offset ($6)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
     const store = new PgRunStore(client);
-    // params: [tenant, scorecardId, includeChildren, runnerId, limit, offset]
+    // params: [tenant, scorecardId, includeChildren, runnerId, limit, offset, viewer, personalKinds]
+    const PERSONAL = ["agent", "sandbox"]; // the audience filter's kind list ($8) — unset viewer ($7) disables it
     await store.list("acme");
-    expect(calls[0]?.params).toEqual(["acme", null, false, null, null, 0]);
+    expect(calls[0]?.params).toEqual(["acme", null, false, null, null, 0, null, PERSONAL]);
     await store.list("acme", { includeChildren: true });
-    expect(calls[1]?.params).toEqual(["acme", null, true, null, null, 0]);
+    expect(calls[1]?.params).toEqual(["acme", null, true, null, null, 0, null, PERSONAL]);
     await store.list("acme", { scorecardId: "sc1" });
-    expect(calls[2]?.params).toEqual(["acme", "sc1", false, null, null, 0]);
+    expect(calls[2]?.params).toEqual(["acme", "sc1", false, null, null, 0, null, PERSONAL]);
     // runner activity feed — jsonb provenance filter + capped
     await store.list("acme", { runnerId: "r1", limit: 20 });
-    expect(calls[3]?.params).toEqual(["acme", null, false, "r1", 20, 0]);
+    expect(calls[3]?.params).toEqual(["acme", null, false, "r1", 20, 0, null, PERSONAL]);
     expect(calls[3]?.text).toMatch(/result->'provenance'->>'runner' = \$4/);
     expect(calls[3]?.text).toMatch(/LIMIT \$5 OFFSET \$6/);
     // offset pagination — the runner feed's next page skips the first N ($6)
     await store.list("acme", { runnerId: "r1", limit: 20, offset: 40 });
-    expect(calls[4]?.params).toEqual(["acme", null, false, "r1", 20, 40]);
+    expect(calls[4]?.params).toEqual(["acme", null, false, "r1", 20, 40, null, PERSONAL]);
   });
 
   it("deleteByScorecard → parameterized DELETE on parent_scorecard_id; RETURNING rows = removed count", async () => {
@@ -410,6 +411,57 @@ describe("InMemoryRunStore — scorecard child-run filter", () => {
     const all = await store.list("acme", { includeChildren: true });
     expect(all.map((r) => r.id).sort()).toEqual(["run-child-c", "run-solo"]);
     await expect(store.deleteByScorecard("sc1")).resolves.toBe(0); // idempotent — nothing left
+  });
+});
+
+describe("RunStore — the audience filter (personal executions are their owner's)", () => {
+  const mk = (id: string, extra: Partial<RunRecord>): RunRecord => ({
+    id,
+    tenant: "acme",
+    harness: { id: "s", version: "0" },
+    caseId: "c1",
+    status: "succeeded",
+    createdAt: "t",
+    updatedAt: "t",
+    ...extra,
+  });
+
+  it("drops another member's agent turns and shell sessions, keeps the workspace's evals", async () => {
+    const store = new InMemoryRunStore();
+    await store.create(mk("eval-1", { createdBy: "alice" }));
+    await store.create(
+      mk("turn-alice", { kind: "agent", createdBy: "alice", origin: { cause: "member", actor: "alice" } }),
+    );
+    await store.create(mk("shell-alice", { kind: "sandbox", createdBy: "alice" }));
+    await store.create(mk("turn-bob", { kind: "agent", createdBy: "bob", origin: { cause: "member", actor: "bob" } }));
+    // A personal run nobody is stamped on stays the workspace's — hiding it from everyone would be loss.
+    await store.create(mk("turn-orphan", { kind: "agent" }));
+
+    expect((await store.list("acme", { viewer: "bob" })).map((r) => r.id).sort()).toEqual([
+      "eval-1",
+      "turn-bob",
+      "turn-orphan",
+    ]);
+    expect((await store.list("acme", { viewer: "alice" })).map((r) => r.id).sort()).toEqual([
+      "eval-1",
+      "shell-alice",
+      "turn-alice",
+      "turn-orphan",
+    ]);
+    // No viewer = an internal read (recovery, reapers) — unfiltered, as before.
+    expect(await store.list("acme")).toHaveLength(5);
+  });
+
+  it("Pg impl asks the same question IN the query, so a limited page stays full for the reader", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgRunStore(client).list("acme", { viewer: "alice", limit: 20 });
+    const sql = calls[0]?.text ?? "";
+    expect(sql).toMatch(/NOT \(kind = ANY\(\$8::text\[\]\)\)/);
+    expect(sql).toMatch(/COALESCE\(origin->>'actor', created_by\) = \$7/);
+    // The filter sits in the WHERE, above the LIMIT — never applied to an already-limited page.
+    expect(sql.indexOf("COALESCE(origin->>'actor', created_by) = $7")).toBeLessThan(sql.indexOf("LIMIT $5"));
+    expect(calls[0]?.params?.[6]).toBe("alice");
+    expect(calls[0]?.params?.[7]).toEqual(["agent", "sandbox"]);
   });
 });
 

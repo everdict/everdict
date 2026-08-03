@@ -44,6 +44,48 @@ export function attachChannelsFor(input: { kind?: RunRecord["kind"]; target?: st
   return input.target?.startsWith("self:") ? ["logs"] : ["logs", "terminal"];
 }
 
+// WHO may read an execution and the evidence it sealed — the ONE rule, for the same reason
+// `attachChannelsFor` is one rule: every surface (the runs list, a run detail, the trajectory ledger, the
+// MCP twins) would otherwise re-derive it from `kind`, and the first surface to forget re-publishes
+// workspace-wide what another surface keeps private.
+//
+// PERSONAL work belongs to the member who did it. An agent run is a conversation turn — the session store
+// has always been owner-scoped (`getVisibleSession`), so the run ledger and the trajectory ledger must not
+// hand the same transcript to the whole workspace through a different door. A sandbox session is someone's
+// shell. Everything else — evals, the playground cases a session runs, analyses — is the workspace's work
+// and stays workspace-visible.
+//
+// There is deliberately NO admin bypass: listing, renaming and deleting a conversation are owner-only
+// today, and an admin who could open every member's agent evidence would make that ownership decorative.
+// What an admin legitimately needs — who spent what — stays visible through the usage meter, which carries
+// cost without content.
+export type RunAudience = { scope: "workspace" } | { scope: "member"; subject: string };
+
+// The kinds that are somebody's own work rather than the workspace's. Exported because a store that
+// paginates has to express the same rule in its query language — filtering AFTER a LIMIT would hand a
+// member a short page (a workspace full of someone else's chat turns would read as "no runs"). `runAudience`
+// stays the SSOT for the rule; a SQL impl restates only this list plus the owner fallback, and the store
+// tests assert the two impls agree.
+export const PERSONAL_RUN_KINDS: readonly RunRecord["kind"][] = ["agent", "sandbox"];
+
+export function runAudience(record: Pick<RunRecord, "kind" | "createdBy" | "origin">): RunAudience {
+  if (!PERSONAL_RUN_KINDS.includes(record.kind ?? "eval")) return { scope: "workspace" };
+  // `origin.actor` is the member the run acted FOR (an activation acts as its agent's creator); `createdBy`
+  // is the same subject on every factory that stamps both, and the fallback for older rows.
+  const owner = record.origin?.actor ?? record.createdBy;
+  // A personal run with nobody on it (a pre-P0 row, an activation reported without a creator) has no owner
+  // to keep it for. It stays the workspace's rather than becoming readable by no one — hiding evidence from
+  // everybody is not privacy, it is loss.
+  return owner === undefined ? { scope: "workspace" } : { scope: "member", subject: owner };
+}
+
+// May `viewer` (a member subject) read this run and its trajectory? Tenancy is checked separately and
+// first — this answers only the within-workspace question.
+export function canReadRun(record: Pick<RunRecord, "kind" | "createdBy" | "origin">, viewer: string): boolean {
+  const audience = runAudience(record);
+  return audience.scope === "workspace" || audience.subject === viewer;
+}
+
 // The emission gate, domain law: scorecard children stay represented by the batch's own facts (flood
 // prevention). The initiator gate was WIDENED (E2 coverage decision, master-plan W6 backlog close-out):
 // a machine-fired completion is workspace news too — the Mattermost channel always posted it, and re-basing

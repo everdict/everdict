@@ -911,6 +911,43 @@ describe("materialize-on-import — imported traces seal as OUR copy and are jud
     expect(failed.error?.message).toContain("ghost");
   });
 
+  it("refuses to pull ANOTHER member's owned trajectory into a scorecard — the audience rule's third door", async () => {
+    // The browse surfaces keep a member's agent-turn transcript private; this path names run ids directly, so
+    // without the same check the evidence would simply walk out through a scorecard's results.
+    const trajectories = new InMemoryTrajectoryStore();
+    await trajectories.seal({ runId: "turn-alice", tenant: "acme", source: "run", owner: "alice", events: pulled });
+    const { store, datasets, service } = build(trajectories, {
+      fetch: async () => {
+        throw new Error("the owned store never builds an external TraceSource");
+      },
+    });
+    await datasets.register("acme", datasetWithCase());
+
+    const asBob = await service.ingestPull({
+      tenant: "acme",
+      submittedBy: "bob",
+      dataset: { id: "d", version: "latest" },
+      source: { name: "everdict" },
+      runs: [{ caseId: "c1", runId: "turn-alice" }],
+      judges: [],
+    });
+    const refused = await waitTerminal(store, asBob.id);
+    expect(refused.status).toBe("failed");
+    // Same wording as an id that does not exist — a refusal must not confirm that it does.
+    expect(refused.error?.message).toContain("turn-alice");
+
+    // The owner evaluates her own turn exactly as before.
+    const asAlice = await service.ingestPull({
+      tenant: "acme",
+      submittedBy: "alice",
+      dataset: { id: "d", version: "latest" },
+      source: { name: "everdict" },
+      runs: [{ caseId: "c1", runId: "turn-alice" }],
+      judges: [],
+    });
+    expect((await waitTerminal(store, asAlice.id)).status).toBe("succeeded");
+  });
+
   it("push ingest materializes through the same door (both ingest paths converge on finishIngest)", async () => {
     const trajectories = new InMemoryTrajectoryStore();
     const { store, datasets, service } = build(trajectories, {

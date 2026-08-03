@@ -1,4 +1,4 @@
-import { trajectorySegmentsWire } from "@everdict/application-control";
+import { trajectoryReadableBy, trajectorySegmentsWire } from "@everdict/application-control";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
@@ -35,6 +35,9 @@ export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps)
           await deps.trajectoryStore.list(principal.workspace, {
             ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
             ...(req.query.cursor !== undefined && req.query.cursor !== "" ? { cursor: req.query.cursor } : {}),
+            // Personal evidence (an agent turn, a shell session) is its owner's — the store drops everyone
+            // else's IN the query, so this page stays full for the reader.
+            viewer: principal.subject,
           }),
         );
       } catch (err) {
@@ -56,7 +59,9 @@ export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps)
     try {
       gate(principal, "runs:read");
       const sealed = await deps.trajectoryStore.get(principal.workspace, req.params.id);
-      if (!sealed) return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
+      // Another member's personal evidence answers exactly like a foreign workspace's — 404, no existence leak.
+      if (!sealed || !trajectoryReadableBy(sealed.meta, principal.subject))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
       const { tenant: _tenant, ...meta } = sealed.meta; // the tenant is the caller's own — never echoed
       return reply.send({ meta, events: sealed.events, segments: trajectorySegmentsWire(sealed) });
     } catch (err) {

@@ -476,6 +476,40 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(sealed?.meta.eventCount).toBe(2);
   });
 
+  it("keeps OWNED evidence for its owner — the browse page drops another member's, in the query", async () => {
+    // An agent turn's transcript and a shell session's record are the member's own (`runAudience`). The ledger
+    // is read by id, with no run row beside it, so the owner rides the row.
+    const store = new InMemoryTrajectoryStore();
+    await store.seal({ runId: "turn-a", tenant: "acme", source: "run", owner: "alice", events: events as never });
+    await store.seal({ runId: "eval-1", tenant: "acme", source: "run", events: events as never });
+
+    expect((await store.list("acme", { viewer: "alice" })).items.map((m) => m.runId).sort()).toEqual([
+      "eval-1",
+      "turn-a",
+    ]);
+    // Bob sees the workspace's evidence and none of Alice's.
+    expect((await store.list("acme", { viewer: "bob" })).items.map((m) => m.runId)).toEqual(["eval-1"]);
+    // An internal read (retention, metering) passes no viewer and still sees everything.
+    expect((await store.list("acme")).items).toHaveLength(2);
+    expect((await store.get("acme", "turn-a"))?.meta.owner).toBe("alice");
+  });
+
+  it("Pg impl filters the owner IN the WHERE (a page filtered after LIMIT would be short)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgTrajectoryStore(client).list("acme", { viewer: "alice", limit: 10 });
+    expect(calls[0]?.text).toMatch(/\(owner IS NULL OR owner = \$2\)/);
+    expect(calls[0]?.params).toEqual(["acme", "alice"]);
+    // The cursor keeps its own placeholders when both are present.
+    const paged = fakeClient(() => ({ rows: [] }));
+    await new PgTrajectoryStore(paged.client).list("acme", {
+      viewer: "alice",
+      cursor: Buffer.from("2026-08-03T00:00:00.000Z|r1", "utf8").toString("base64url"),
+    });
+    expect(paged.calls[0]?.text).toMatch(/\(sealed_at, run_id\) < \(\$2::timestamptz, \$3\)/);
+    expect(paged.calls[0]?.text).toMatch(/\(owner IS NULL OR owner = \$4\)/);
+    expect(paged.calls[0]?.params).toEqual(["acme", "2026-08-03T00:00:00.000Z", "r1", "alice"]);
+  });
+
   it("meters ingestion from the store itself and sweeps retention by cutoff (N3)", async () => {
     const store = new InMemoryTrajectoryStore();
     await store.seal({ runId: "old", tenant: "acme", source: "otlp", events: events as never });

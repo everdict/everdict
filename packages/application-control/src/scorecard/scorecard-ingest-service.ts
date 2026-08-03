@@ -16,6 +16,7 @@ import {
 } from "@everdict/contracts";
 import { ScorecardBatch, type ScorecardTransition, scorecardModels, summarizeScorecard } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
+import { trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 import {
   type IngestScorecardBody,
@@ -167,7 +168,11 @@ export class ScorecardIngestService {
         const perCase: IngestScorecardBody["traces"] = [];
         for (const r of runs) {
           const sealed = await this.deps.trajectories.get(tenant, r.runId);
-          if (!sealed)
+          // The audience rule reaches here too, and it has to: this path names run ids DIRECTLY, so without
+          // the check a member could pull another member's agent-turn transcript into a scorecard and read it
+          // there — the browse surfaces would be private and the evidence would walk out a third door. Same
+          // answer as an id that does not exist, so nothing leaks either way.
+          if (!sealed || (record.createdBy !== undefined && !trajectoryReadableBy(sealed.meta, record.createdBy)))
             throw new BadRequestError(
               "BAD_REQUEST",
               { runId: r.runId },

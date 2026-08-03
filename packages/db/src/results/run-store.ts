@@ -1,5 +1,5 @@
 import type { RunRecord } from "@everdict/contracts";
-import { caseVerdict, usageFromTrace } from "@everdict/domain";
+import { canReadRun, caseVerdict, usageFromTrace } from "@everdict/domain";
 
 // On read, fills the DERIVED fields from the run's result — usage from the trace, the case verdict from the
 // scores (no stored columns → they always match the result, and neither needs a migration). The verdict is
@@ -57,7 +57,11 @@ export class InMemoryRunStore implements RunStore {
 
   async list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]> {
     const all = [...this.runs.values()];
-    const scoped = tenant ? all.filter((r) => r.tenant === tenant) : all;
+    const inTenant = tenant ? all.filter((r) => r.tenant === tenant) : all;
+    // The audience rule straight from the domain (the Pg twin restates it in SQL — the store tests pin the two
+    // together). Applied BEFORE paging, like the query does.
+    const viewer = opts?.viewer;
+    const scoped = viewer === undefined ? inTenant : inTenant.filter((r) => canReadRun(r, viewer));
     // runnerId → runs this self-hosted runner executed (provenance), newest first, capped. Implies children included
     // (a runner mostly runs scorecard cases). Mirrors the Pg jsonb filter.
     if (opts?.runnerId) {

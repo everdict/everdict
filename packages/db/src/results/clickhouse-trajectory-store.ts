@@ -36,12 +36,16 @@ const SCHEMA_SQL = `CREATE TABLE IF NOT EXISTS everdict_trajectories (
   body String,
   t0 String DEFAULT '',
   sealed_at String,
+  owner String DEFAULT '',
   INDEX idx_run run_id TYPE bloom_filter GRANULARITY 4
 ) ENGINE = MergeTree ORDER BY (tenant, sealed_at, run_id)`;
 
 // Additive DDL for installs created before the multi-plane rung (idempotent, like the CREATE above).
 const ADD_EMITTER_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS emitter String DEFAULT ''";
 const ADD_T0_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS t0 String DEFAULT ''";
+// Whose evidence a trajectory is (mig 0116's rung-2 twin). '' = the workspace's. No backfill here: unlike
+// Postgres this store has no run ledger beside it to read an owner from, and it is opt-in + new.
+const ADD_OWNER_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS owner String DEFAULT ''";
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
@@ -52,6 +56,7 @@ interface RunRow {
   source_run: string;
   event_count_run: number | string;
   sealed_at_run: string;
+  owner_run: string;
 }
 
 function rowToMeta(row: RunRow): TrajectoryMeta {
@@ -61,6 +66,7 @@ function rowToMeta(row: RunRow): TrajectoryMeta {
     source: row.source_run as TrajectoryMeta["source"],
     eventCount: Number(row.event_count_run),
     sealedAt: row.sealed_at_run,
+    ...(row.owner_run ? { owner: row.owner_run } : {}),
   };
 }
 
@@ -91,6 +97,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     await this.command(SCHEMA_SQL, {});
     await this.command(ADD_EMITTER_SQL, {});
     await this.command(ADD_T0_SQL, {});
+    await this.command(ADD_OWNER_SQL, {});
   }
 
   async seal(input: {
@@ -100,6 +107,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     events: TraceEvent[];
     emitter?: string;
     t0?: string;
+    owner?: string;
   }): Promise<TrajectoryMeta & { created: boolean }> {
     const emitter = input.emitter ?? defaultEmitter(input.source);
     const sealedAt = new Date().toISOString();
@@ -110,6 +118,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       source: input.source,
       eventCount: input.events.length,
       sealedAt,
+      ...(input.owner !== undefined ? { owner: input.owner } : {}),
     };
     if (existing) {
       // First seal per emitter wins — evidence is never rewritten; a new emitter is a new plane.
@@ -132,6 +141,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       body: JSON.stringify(input.events),
       t0: input.t0 ?? "",
       sealed_at: sealedAt,
+      owner: input.owner ?? "",
     };
     await this.command(`INSERT INTO ${this.table()} FORMAT JSONEachRow`, {}, JSON.stringify(row));
     if (!existing) return { ...fallback, created: true };
@@ -152,6 +162,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       body_first: string;
       t0_first: string;
       sealed_at_first: string;
+      owner_first: string;
     }>(
       `SELECT emitter,
               argMin(tenant, sealed_at) AS tenant_first,
@@ -159,6 +170,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(event_count, sealed_at) AS event_count_first,
               argMin(body, sealed_at) AS body_first,
               argMin(t0, sealed_at) AS t0_first,
+              argMin(owner, sealed_at) AS owner_first,
               min(sealed_at) AS sealed_at_first
        FROM ${this.table()}
        WHERE run_id = {runId:String}
@@ -185,6 +197,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
         source: header.source_first as TrajectoryMeta["source"],
         eventCount: segments.reduce((sum, s) => sum + s.eventCount, 0),
         sealedAt: header.sealed_at_first,
+        ...(header.owner_first ? { owner: header.owner_first } : {}),
       },
       events: execution?.events ?? [],
       ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
@@ -192,7 +205,10 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     };
   }
 
-  async list(tenant: string, opts?: { limit?: number; cursor?: string }): Promise<TrajectoryListResult> {
+  async list(
+    tenant: string,
+    opts?: { limit?: number; cursor?: string; viewer?: string },
+  ): Promise<TrajectoryListResult> {
     const limit = clampLimit(opts?.limit);
     const after = opts?.cursor !== undefined ? decodeCursor(opts.cursor) : undefined;
     // ClickHouse quirk (caught live): an alias is visible EVERYWHERE in its SELECT, so aliasing
@@ -203,8 +219,14 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(tenant_first, sealed_at_first) AS tenant_run,
               argMin(source_first, sealed_at_first) AS source_run,
               sum(event_count_first) AS event_count_run,
-              min(sealed_at_first) AS sealed_at_run
-       FROM (${this.perEmitterSql("tenant = {tenant:String}")})
+              min(sealed_at_first) AS sealed_at_run,
+              argMin(owner_first, sealed_at_first) AS owner_run
+       FROM (${this.perEmitterSql(
+         // Owned evidence is the owner's alone — inside the WHERE so the page stays full for everyone else.
+         opts?.viewer !== undefined
+           ? "tenant = {tenant:String} AND (owner = '' OR owner = {viewer:String})"
+           : "tenant = {tenant:String}",
+       )})
        GROUP BY run_id
        ${after !== undefined ? "HAVING (sealed_at_run, run_id) < ({afterSealedAt:String}, {afterRunId:String})" : ""}
        ORDER BY sealed_at_run DESC, run_id DESC
@@ -212,6 +234,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       {
         tenant,
         limitPlusOne: String(limit + 1),
+        ...(opts?.viewer !== undefined ? { viewer: opts.viewer } : {}),
         ...(after !== undefined ? { afterSealedAt: after.sealedAt, afterRunId: after.runId } : {}),
       },
     );
@@ -258,6 +281,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(tenant, sealed_at) AS tenant_first,
               argMin(source, sealed_at) AS source_first,
               argMin(event_count, sealed_at) AS event_count_first,
+              argMin(owner, sealed_at) AS owner_first,
               min(sealed_at) AS sealed_at_first
        FROM ${this.table()} WHERE ${where} GROUP BY run_id, emitter`;
   }

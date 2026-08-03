@@ -74,7 +74,16 @@ export {
 } from "./scorecard/scorecard-batch.js";
 
 // run — the Run aggregate (from apps/api core/run)
-export { attachChannelsFor, type NewQueuedRunInput, Run, type RunTransition } from "./run/run.js";
+export {
+  attachChannelsFor,
+  canReadRun,
+  type NewQueuedRunInput,
+  PERSONAL_RUN_KINDS,
+  Run,
+  type RunAudience,
+  runAudience,
+  type RunTransition,
+} from "./run/run.js";
 export { Approval, type ApprovalTransition, type NewPendingApprovalInput } from "./approval/approval.js";
 
 // tracker — the eval tracker's aggregates (Initiative ⊃ Project ⊃ Issue) + the readiness arithmetic that gates

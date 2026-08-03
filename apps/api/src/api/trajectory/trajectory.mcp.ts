@@ -1,4 +1,4 @@
-import { trajectorySegmentsWire } from "@everdict/application-control";
+import { trajectoryReadableBy, trajectorySegmentsWire } from "@everdict/application-control";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
@@ -28,6 +28,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
           await store.list(ws, {
             ...(limit !== undefined ? { limit } : {}),
             ...(cursor !== undefined ? { cursor } : {}),
+            viewer: principal.subject, // personal evidence stays its owner's (BFF parity)
           }),
         ),
       ),
@@ -51,7 +52,8 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
     ({ runId }: { runId: string }) =>
       run(principal, "runs:read", async () => {
         const sealed = await store.get(ws, runId);
-        if (!sealed) return fail("NOT_FOUND: trajectory not found.");
+        if (!sealed || !trajectoryReadableBy(sealed.meta, principal.subject))
+          return fail("NOT_FOUND: trajectory not found.");
         const { tenant: _tenant, ...meta } = sealed.meta;
         return ok({ meta, events: sealed.events, segments: trajectorySegmentsWire(sealed) });
       }),

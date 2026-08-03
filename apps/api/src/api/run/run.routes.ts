@@ -42,7 +42,9 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       gate(principal, "runs:read");
       // getForDisplay, not get: this answer is rendered, so its artifact refs must be browser-openable (the stored
       // ones point at the in-network object store and have expired). The MCP get_run twin does the same.
-      const record = await deps.service.getForDisplay(req.params.id);
+      // The viewer decides what is readable: another member's agent turn / shell session answers 404, the
+      // same as another workspace's run (`runAudience` — no existence leak either way).
+      const record = await deps.service.getForDisplay(req.params.id, principal.subject);
       if (!record || record.tenant !== principal.workspace)
         return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
       return reply.send(record);
@@ -58,7 +60,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     if (!principal) return reply;
     try {
       gate(principal, "runs:read");
-      const trajectory = await deps.service.trajectory(principal.workspace, req.params.id);
+      const trajectory = await deps.service.trajectory(principal.workspace, req.params.id, principal.subject);
       if (!trajectory) return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
       return reply.send(trajectory);
     } catch (err) {
@@ -90,7 +92,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
           : scope === "all"
             ? { includeChildren: true }
             : undefined;
-      return reply.send(await deps.service.list(principal.workspace, opts));
+      return reply.send(await deps.service.list(principal.workspace, { ...opts, viewer: principal.subject }));
     } catch (err) {
       return sendError(reply, err);
     }

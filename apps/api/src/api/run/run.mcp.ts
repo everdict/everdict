@@ -1,4 +1,5 @@
-import { EvalCaseSchema } from "@everdict/contracts";
+import { EvalCaseSchema, type RunRecord } from "@everdict/contracts";
+import { canReadRun } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
@@ -6,6 +7,12 @@ import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 // Run resource MCP tools — the MCP twin of run.routes.ts (same RunService core, second transport).
 export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws, agent } = ctx;
+
+  // Workspace scope + the audience rule in one question — the MCP twin of route-context's `runVisible` (a tool
+  // file cannot import that module without closing a cycle, so both call the same domain rule). Another
+  // workspace's run and another member's agent turn / shell session answer the same NOT_FOUND.
+  const visible = (record: Pick<RunRecord, "tenant" | "kind" | "createdBy" | "origin">): boolean =>
+    record.tenant === ws && canReadRun(record, principal.subject);
 
   server.registerTool(
     "get_run_trajectory",
@@ -18,7 +25,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     },
     ({ id }: { id: string }) =>
       run(principal, "runs:read", async () => {
-        const trajectory = await deps.service.trajectory(ws, id);
+        const trajectory = await deps.service.trajectory(ws, id, principal.subject);
         if (!trajectory) return fail("NOT_FOUND: trajectory not found.");
         return ok(trajectory);
       }),
@@ -42,16 +49,17 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     ({ scorecard_id, scope, runner, limit, offset }) =>
       run(principal, "runs:read", async () =>
         ok(
-          await deps.service.list(
-            ws,
-            scorecard_id
+          await deps.service.list(ws, {
+            // The viewer keeps another member's agent turns and shell sessions off this page (BFF parity).
+            viewer: principal.subject,
+            ...(scorecard_id
               ? { scorecardId: scorecard_id }
               : runner
                 ? { runnerId: runner, ...(limit ? { limit } : {}), ...(offset ? { offset } : {}) }
                 : scope === "all"
                   ? { includeChildren: true }
-                  : undefined,
-          ),
+                  : {}),
+          }),
         ),
       ),
   );
@@ -61,8 +69,8 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     { description: "Fetch one run (another workspace's is NOT_FOUND)", inputSchema: { id: z.string() } },
     ({ id }) =>
       run(principal, "runs:read", async () => {
-        const record = await deps.service.getForDisplay(id); // BFF parity — the agent gets openable artifact refs too
-        if (!record || record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        const record = await deps.service.getForDisplay(id, principal.subject); // BFF parity — openable refs + the same audience rule
+        if (!record || !visible(record)) return fail("NOT_FOUND: run not found.");
         return ok(record);
       }),
   );
@@ -77,7 +85,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     ({ id, command }) =>
       run(principal, "runs:read", async () => {
         const out = await deps.service.exec(id, command);
-        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
         if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
           return fail("FORBIDDEN: only the run's creator or an admin can exec.");
         if (!out.result) return ok({ found: false, stdout: "", stderr: "", exitCode: null });
@@ -95,7 +103,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     ({ id, stream }) =>
       run(principal, "runs:read", async () => {
         const out = await deps.service.logs(id, stream);
-        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
         return ok({ status: out.record.status, found: out.text !== undefined, text: out.text ?? "" });
       }),
   );
@@ -113,7 +121,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     ({ id }: { id: string }) =>
       run(principal, "runs:read", async () => {
         const out = await deps.service.screen(id);
-        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
         if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
           return fail("FORBIDDEN: only the run's creator or an admin can view the screen.");
         return ok({
@@ -139,7 +147,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     ({ id }: { id: string }) =>
       run(principal, "runs:read", async () => {
         const out = await deps.service.placement(id);
-        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
         return ok({ status: out.record.status, found: out.placement !== undefined, placement: out.placement ?? null });
       }),
   );
@@ -157,7 +165,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     ({ id }: { id: string }) =>
       run(principal, "runs:read", async () => {
         const out = await deps.service.topology(id);
-        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
         return ok({ status: out.record.status, found: out.topology !== undefined, topology: out.topology ?? null });
       }),
   );
@@ -177,7 +185,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     ({ id, service }: { id: string; service: string }) =>
       run(principal, "runs:read", async () => {
         const out = await deps.service.topologyServiceLogs(id, service);
-        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
         return ok({ found: out.text !== undefined, text: out.text ?? "" });
       }),
   );
@@ -192,7 +200,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     ({ id }) =>
       run(principal, "runs:read", async () => {
         const out = await deps.service.recording(id);
-        if (!out || out.record.tenant !== ws) return fail("NOT_FOUND: run not found.");
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
         if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
           return fail("FORBIDDEN: only the run's creator or an admin can view the recording.");
         return ok({ status: out.record.status, found: out.recording !== undefined, recording: out.recording ?? null });

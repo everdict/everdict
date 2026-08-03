@@ -35,6 +35,7 @@ export {
   type SealedTrajectory,
   type TrajectoryListResult,
   type TrajectoryMeta,
+  trajectoryReadableBy,
   type TrajectorySegment,
   trajectorySegmentsWire,
   type TrajectorySegmentWire,

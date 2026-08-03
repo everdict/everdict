@@ -1,5 +1,6 @@
 import type { OutboxEvent, RunListOptions, RunStore } from "@everdict/application-control";
 import { type RunRecord, RunRecordSchema } from "@everdict/contracts";
+import { PERSONAL_RUN_KINDS } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
 import { withRunUsage } from "./run-store.js";
@@ -202,6 +203,12 @@ export class PgRunStore implements RunStore {
     // runnerId ($4) → runs this self-hosted runner executed (jsonb result.provenance.runner); implies children
     // included. limit ($5, NULL = all) caps the activity feed. LIMIT NULL is valid Postgres (unlimited). offset ($6,
     // default 0) skips the first N rows for the runner-detail activity feed's offset pagination.
+    // viewer ($7, NULL = an internal read) applies the run-audience rule IN the query: a personal kind
+    // (PERSONAL_RUN_KINDS — agent turns, sandbox shells) is readable only by the member it belongs to, which is
+    // `origin.actor` falling back to `created_by`, and an ownerless one stays the workspace's. This restates
+    // `runAudience` (@everdict/domain, the SSOT) because the filter must run BEFORE LIMIT — filtering the page
+    // afterwards would let one member's chat history push everyone else's runs off the reader's screen. The
+    // store tests assert this clause and the in-memory `canReadRun` path agree.
     const res = await this.client.query<RunRow>(
       `SELECT * FROM everdict_runs
        WHERE ($1::text IS NULL OR tenant = $1)
@@ -209,6 +216,12 @@ export class PgRunStore implements RunStore {
          AND (
            ($2::text IS NOT NULL AND parent_scorecard_id = $2)
            OR ($2::text IS NULL AND ($3::bool OR $4::text IS NOT NULL OR parent_scorecard_id IS NULL))
+         )
+         AND (
+           $7::text IS NULL
+           OR NOT (kind = ANY($8::text[]))
+           OR COALESCE(origin->>'actor', created_by) IS NULL
+           OR COALESCE(origin->>'actor', created_by) = $7
          )
        ORDER BY created_at DESC, id DESC
        LIMIT $5 OFFSET $6`,
@@ -219,6 +232,8 @@ export class PgRunStore implements RunStore {
         opts?.runnerId ?? null,
         opts?.limit ?? null,
         opts?.offset ?? 0,
+        opts?.viewer ?? null,
+        [...PERSONAL_RUN_KINDS],
       ],
     );
     return res.rows.map(rowToRecord);
