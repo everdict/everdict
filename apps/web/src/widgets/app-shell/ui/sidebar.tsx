@@ -7,7 +7,7 @@ import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Search, Settings, X } fro
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
-import { matchTeamPath, teamHref, teamSectionHref, type TeamPathScope } from '@/entities/team'
+import { matchTeamPath, teamSectionHref, type TeamPathScope } from '@/entities/team'
 import type { Workspace } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { cn } from '@/shared/lib/utils'
@@ -290,7 +290,8 @@ function TeamsNav({
         // 하네스·데이터셋·저지도 팀 소유지만 사이드바 행은 주지 않는다: 이름을 대고 찾아가는 것은
         // 스코어카드이고, 나머지는 그 스코어카드나 팀에서 도달한다. 행이 늘어날수록 팀 그룹이 벽이 된다.
         const children = [
-          { href: teamHref(workspace, team.key), labelKey: 'teamHome', page: 'home' },
+          // 팀의 짧은 주소가 곧 이슈 화면이라 「홈」 행은 없다 — 같은 목적지를 두 줄로 내밀면 둘 중 무엇이
+          // 다른지 사람이 찾게 된다. 팀 이름을 누르는 것은 접기/펴기이고, 목적지는 아래 줄들이다.
           {
             href: teamSectionHref(workspace, team.key, 'issues'),
             labelKey: 'issues',

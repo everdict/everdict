@@ -55,7 +55,8 @@ app/        Next App Router — landing(/), [workspace]/{layout(shell+membership
             onboarding·new-workspace·invite ; api/auth/[...nextauth] ; middleware(first URL segment → injects x-everdict-active-workspace header)
 widgets/    page-level composition: app-shell (sidebar+topbar), workspace-switcher (Linear-style sidebar dropdown:
             current workspace + switch (= navigate to /{workspace}) + "new workspace"), scorecard-summary, runs-table
-            (trace reading is NOT a widget — the one surface is features/browse-traces TrajectoryView, see Run detail)
+            (trace reading is NOT a widget — the one surface is features/browse-traces TrajectoryView, whose
+             SpanWaterfall is shared with the external platform's trace dialog; see Run detail)
 features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard, create-workspace, manage-workspace-secrets, manage-github-app + manage-mattermost (workspace-owned integrations: GitHub App org install→selected repos, Mattermost notifications/slash commands) (client form/action → control plane; workspace switching is a URL navigation, so there is no separate action)
 entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime, workspace, secret, github-app, mattermost)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state/callout/section-header/theme-toggle), lib (utils, control-plane),
@@ -185,7 +186,9 @@ panel/list guidance is not.
   run form gains a runtime selector. See `docs/runtimes.md`.
 - **Sidebar teams section** (`widgets/app-shell` `TeamsNav`) — Linear's "Your teams": the teams the signed-in
   member belongs to, each expanding to what that team owns under its own path (`/{workspace}/teams/ENG/issues`,
-  `…/triage` when the team turned one on, `…/cycles`, `…/projects`, `…/scorecards`). The active row is decided by the
+  `…/triage` when the team turned one on, `…/cycles`, `…/projects`, `…/scorecards`). There is no "Home" row: the
+  team's short address (`/{workspace}/teams/ENG`) IS its issue list — same component, canonical `…/issues` twin —
+  so `matchTeamPath` reads the bare path as `issues` and one destination never gets two nav rows. The active row is decided by the
   PATH alone now — the group used to read `?team=` off the query string, which meant two different judgements for
   "which team am I looking at". Hidden entirely while the workspace has
   fewer than two teams — a group with no choice in it is decoration, and the tracker's own "Issues" entry is already

@@ -32,11 +32,12 @@ export function teamSettingsHref(workspace: string, key: string): string {
   return `/${workspace}/settings/teams/${encodeURIComponent(key)}`
 }
 
-// 경로가 가리키는 팀 스코프. `section` 은 팀 홈이면 'home', 팀 아래이긴 하지만 우리가 이름을 붙인 자원이
+// 경로가 가리키는 팀 스코프. 팀의 짧은 주소(`/teams/ENG`)는 그 팀의 이슈 화면이라 'issues' 로 읽는다 —
+// 예전에는 별도의 요약 홈이 있어 'home' 이었지만, 지금은 같은 화면의 두 주소다. 팀 아래이긴 하지만 이름을 붙인 자원이
 // 아니면 null 이다 — 그래도 그 팀의 화면이라는 사실은 변하지 않는다.
 export interface TeamPathScope {
   key: string
-  section: TeamSection | 'home' | null
+  section: TeamSection | null
 }
 
 // href 빌더의 역방향 — 주소를 다시 팀 스코프로 읽는다. 이것이 "이 경로는 누구의 것인가"에 답하는 **유일한**
@@ -52,7 +53,7 @@ export function matchTeamPath(pathname: string, workspace: string): TeamPathScop
   const key = decodeSegment(segments[0])
   if (key === '') return null
   const rawSection = segments.length > 1 ? segments[1] : ''
-  if (rawSection === '') return { key, section: 'home' }
+  if (rawSection === '') return { key, section: 'issues' }
   // 자원 아래로 더 깊이 들어간 주소(상세 화면)도 여전히 그 자원의 것이다.
   return { key, section: TEAM_SECTIONS.find((section) => section === rawSection) ?? null }
 }

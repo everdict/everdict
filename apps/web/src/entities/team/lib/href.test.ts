@@ -27,12 +27,19 @@ describe('team hrefs — the team is a path segment, not a filter', () => {
 // 주소를 다시 스코프로 읽는 쪽 — 사이드바가 "이 경로는 누구의 것인가"에 한 번만 답하게 하는 판정.
 describe('matchTeamPath — one answer to who owns a path', () => {
   it('reads back what the href builders wrote', () => {
-    expect(matchTeamPath(teamHref('acme', 'ENG'), 'acme')).toEqual({ key: 'ENG', section: 'home' })
+    // The team's short address IS its issue list — one screen, two spellings.
+    expect(matchTeamPath(teamHref('acme', 'ENG'), 'acme')).toEqual({
+      key: 'ENG',
+      section: 'issues',
+    })
     expect(matchTeamPath(teamSectionHref('acme', 'ENG', 'issues'), 'acme')).toEqual({
       key: 'ENG',
       section: 'issues',
     })
-    expect(matchTeamPath(teamHref('acme', 'A/B'), 'acme')).toEqual({ key: 'A/B', section: 'home' })
+    expect(matchTeamPath(teamHref('acme', 'A/B'), 'acme')).toEqual({
+      key: 'A/B',
+      section: 'issues',
+    })
   })
 
   it('leaves the team directory to the workspace nav — it is no team of its own', () => {

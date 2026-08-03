@@ -97,6 +97,13 @@ Gate **before** validate (don't leak validation info to the unauthorized). Read 
 workspace's resource is 404 (no existence leak). "Admin or creator" checks live in the service
 (`deleteDatasetVersion` pattern), never in the route.
 
+**A role gate is not an audience.** `runs:read` says a member may read this workspace's executions, not that
+they may read each other's: an agent turn is a conversation and a sandbox session is somebody's shell, so
+`runAudience`/`canReadRun` (`@everdict/domain`) keeps those for their owner — enforced in `RunService`
+(both transports inherit it), in `runVisible` (route-context, for the routes that already hold the record) and
+in the ledgers themselves (`RunListOptions.viewer`, `TrajectoryMeta.owner`), always as **404**. When a new
+surface serves runs or their evidence, ask the audience question there too; see docs/api.md §Run audience.
+
 ## Recipe: adding a resource
 1. `core/<domain>/<resource>-service.ts` — logic + store access + response shaping. Inputs are command objects.
 2. `api/<domain>/request/<dto>.ts` — `CreateXBodySchema`/`UpdateXBodySchema` (Zod), one file per DTO.

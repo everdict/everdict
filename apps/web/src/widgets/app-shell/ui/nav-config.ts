@@ -9,8 +9,8 @@ import {
   MonitorDown,
   Network,
   Puzzle,
-  Rocket,
   Store,
+  Target,
   Terminal,
   Users,
   UsersRound,
@@ -89,7 +89,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         href: '/initiatives',
         labelKey: 'initiatives',
-        icon: Rocket,
+        icon: Target,
         keywords: 'initiative release readiness ship 이니셔티브 릴리스 준비',
       },
       {

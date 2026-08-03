@@ -75,7 +75,7 @@ export default async function CycleDetailPage({
 
   const [issues, siblings, members, team] = await Promise.all([
     controlPlane
-      .listIssues(ctx, { cycle: id, limit: 200 })
+      .listIssues(ctx, { cycle: [id], limit: 200 })
       .then((r) => issuePageSchema.parse(r).items)
       .catch((): IssueSummary[] => []),
     // 이월 대상 후보 — 같은 팀의 열린 사이클, 자기 자신은 제외.

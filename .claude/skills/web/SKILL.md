@@ -58,6 +58,9 @@ cycles are numbered in its own sequence), so "the same list, filtered" is the wr
 priority, project and the page cursor stay query parameters, because those really are filters over whichever list
 the path named. Slug = the team KEY (`ENG`), decided in `entities/team/lib/href.ts` (`teamHref` /
 `teamSectionHref` / `teamSettingsHref`) — every link goes through those, never a hand-built string.
+The team's SHORT address is the issue list itself (`/{workspace}/teams/ENG` renders `IssueListView`, with
+`…/issues` as the canonical twin) — Linear's landing, and the reason `matchTeamPath` reads a bare team path as
+`issues` and the sidebar has no separate "Home" row.
 `app/[workspace]/team-scope.ts` is the one entry procedure: resolve the slug (`GET /teams/:ref` takes key or id),
 **redirect an id-spelled or lowercased URL to the canonical key** (same normalization the issue detail does for
 `ENG-12`), and `notFound()` on a team that is absent or invisible. Legacy `?team=` URLs redirect through
@@ -79,6 +82,13 @@ under the team that owns the harness chosen. Both are the same server component 
 optional `team`), and `teamNewHref` builds the link. A normalizing redirect on a create screen must pass
 `create: true` to `loadTeamScope`, or fixing the slug silently drops the form.
 
+**A picker offers exactly what the control plane accepts.** Where the team axis constrains a relation, the
+options are FETCHED narrowed rather than drawn wide and filtered client-side: an issue's project picker reads
+`listProjects(ctx, { team: issue.teamId })`, because an issue may only join a project its own team is on
+(`docs/tracker.md`) and a wider list is a menu of guaranteed 400s. The narrowing lives in the server component
+that fetches; the client island renders what it was handed and never re-filters, so there is one answer to
+"what may I choose", not two that drift.
+
 ## Styling
 Tailwind v4 tokens in `app/globals.css` `@theme inline` (Linear indigo `#5e6ad2`, tight `0.5rem` radius,
 near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-variant dark`) toggled by
@@ -90,14 +100,14 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   `force-dynamic`, so without a `loading.tsx` a navigation BLOCKS: the old screen stays frozen until the whole
   server render lands, and — the quieter half — `<Link>` prefetch does nothing at all, because Next.js prefetches
   a dynamic route only as far as its nearest loading boundary. `app/[workspace]/loading.tsx` is the default;
-  a segment whose shape is distinctive overrides it (the issue list's `IssueListSkeleton`, and the team's short
-  address renders that list, so its boundary carries the list shape too). Placeholders come from
-  `shared/ui/skeleton.tsx` (`Skeleton`/`SkeletonLines`/`ListPageSkeleton`) and are sized by the CALLER, never
-  self-sized, or the screen jumps when the real thing arrives. Inside a page, anything the primary content does
-  not need — a toolbar's data, a side panel — goes in its OWN async component behind `<Suspense>` and streams;
-  it must never join the `Promise.all` the rows are waiting on. A read with two consumers (the team list: the
-  filter chips and the create dialog) is started ONCE as a promise and awaited only on the path that renders it,
-  so the screen that does not draw it does not wait for it.
+  a segment whose shape is distinctive overrides it (the issue list's `IssueListSkeleton`). Placeholders are
+  built from `shared/ui/skeleton.tsx` (`Skeleton`/`SkeletonLines`) — sized by the CALLER, never self-sized, or
+  the screen jumps when the real thing arrives. Inside a page, anything the primary content does not need
+  (a toolbar's data, a side panel) goes in its OWN async component behind `<Suspense>` and streams: it must
+  never join the `Promise.all` the rows are waiting on. `widgets/issue-list` is the reference — the list waits
+  for its page + directories, while `IssueListActions` streams the GitHub-App state and the synced-repo roster
+  in behind it. A read with two consumers (the team list: filter chips + the create dialog) is started ONCE as a
+  promise and awaited only on the path that renders it, so the screen that does not draw it does not wait for it.
 - **Format atoms**: score/model/version/time formatting goes through `shared/lib/format.ts` +
   `shared/ui/{score,chip}.tsx`, NEVER per-page inline.
 - **Image refs** render through `shared/lib/image-ref.ts` (`displayImageRef`, with the raw ref on `title`), never
@@ -168,6 +178,15 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   it (pinned + baseline badges), so repeating it as a chip puts one thing on the screen twice with no answer to
   which is authoritative. Display and the add-form read the SAME allowlist — never offer a type that then renders
   nowhere — and the empty-section test counts the allowlisted links, not `links.length`.
+  **A detail with more than one QUESTION is a tabbed route, not a longer page** (`app/[workspace]/initiatives/[id]`
+  is the reference — Linear's initiative view): the `layout.tsx` owns everything that must not disappear while you
+  move around (breadcrumb + record actions, the `h1`, the tab bar, the whole right property/progress column) and each
+  tab is its own `page.tsx` under it, so a soft nav re-renders only the body. Two rules make it cheap and honest:
+  the shared read is a module-level `cache()`d loader (`load-initiative.ts`) the layout AND each tab call — a
+  fan-out detail read must not run twice per screen — and the tab addresses come from ONE href builder
+  (`entities/<x>/lib/href.ts`, same rule the team slug follows), with the active tab decided by
+  `useSelectedLayoutSegment()` rather than by comparing path strings. A tab renders `null` when the record failed to
+  load: the layout already drew that failure, and saying it twice is worse than saying it once.
   **Settings › Agent › Skills lists only what the workspace OWNS** — no "built-in"/"shared" tier: an Everdict or
   third-party skill in the store is an EXAMPLE, and taking it (`POST /skills/import`) copies it into the library as
   an ordinary workspace skill, editable and versionable from `settings/skills/[id]` like anything a member wrote
@@ -221,10 +240,14 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   builds it INSIDE the memoized row (`ArtifactRow` owns its `PinControl`) rather than passing an element in. A new
   item kind is memoized and added to that test's list. Same reasoning covers any surface that renders `Markdown`
   in a list under live-changing state.
-- **Reading a trace has ONE surface**: `TrajectoryView` (`features/browse-traces`) — rollup · plane chips (one
-  lane per emitter) · event list left / FULL payload right. Settings › Observability's sealed-trajectory dialog
-  and the run detail's evidence section render the same component, so a payload read in one place is the payload
-  read in the other. It is its own `@container` (2-pane by ITS width, not the viewport's) and needs a definite
+- **Reading a trace has ONE surface**: `TrajectoryView` (`features/browse-traces`) — rollup · swimlanes (one
+  lane per emitter) · **`SpanWaterfall`** left / FULL payload right. Settings › Observability's sealed-trajectory
+  dialog and the run detail's evidence section render the same component, so a payload read in one place is the
+  payload read in the other. `SpanWaterfall` is shared with the EXTERNAL `TraceDetailDialog` (a platform's own
+  trace), which is the point: the two surfaces used to look like different products because our evidence had no
+  span tree to draw, not because the renderer differed. `lib/trajectory-spans.ts` projects `TraceEvent[]` →
+  waterfall nodes off the contracts STRUCTURE fields; if a new emitter's events render flat, it is dropping
+  `spanId`/`parentId`/`durationMs`, not hitting a view limit. It is its own `@container` (2-pane by ITS width, not the viewport's) and needs a definite
   height from the host. Never write a page-local timeline again — the run detail's was deleted for this.
   `entities/run/lib/trace.ts` (`summarizeTraceEvent`/`traceKindColor`) stays for the LIVE/compact lanes only
   (replay player, playground stream), never for settled evidence. A caller holding one stream (a legacy row
@@ -238,6 +261,20 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   derived by the control plane with `caseVerdict` on the same read as `usage`) — never recompute the authority
   ranking in the web (those mirrors were deleted in re-architecture P1g; one authority, one answer). Live attach
   panels (logs/exec/terminal/screen) render only for channels the run declares in `attach`.
+- **A work LIST is a view, and the view lives in the URL** (`widgets/issue-list` + `features/browse-issues` +
+  `entities/issue/model/view.ts` — the tracker's issue list is the reference). Grouping · ordering · layout ·
+  "show completed" · sub-issues · every filter facet serialize into the query string (`issueViewOf` /
+  `issueViewHref`, defaults deliberately OMITTED so a pasted link is readable and a changed default is not
+  frozen into old links), so back is undo and two people opening one link see one screen. Filters are a SET per
+  facet (`?status=todo&status=in_progress`); toggling the last value off DELETES the facet rather than leaving
+  `[]`, which the control plane reads as "chosen, and nothing matches". **Group headers show the SERVER's
+  count** (`GET /issues/counts`), never the rows received: a grouped screen fetches one page PER GROUP, so
+  counting what it holds reports the page size back to itself. Empty columns of a CLOSED vocabulary (status,
+  priority) are still stood up — a board needs somewhere to drop a card — while open vocabularies (assignee,
+  project, cycle) show only groups that hold issues, so a 200-member workspace does not get 200 empty columns.
+  Rows carry the mutations inline (status · priority · assignee dropdowns), which is why a row is NOT a
+  `<Link>`: the title zone is the link and the controls are its siblings. Beyond a group cap the screen SAYS how
+  many groups it did not stand up (`groupsTruncated`) — silent truncation reads as "that's all of them".
 - **State toggles** = a status icon + click dropdown (`shared/ui/dropdown-menu.tsx`; e.g.
   `widgets/notification-bell/`), not text links.
 - **Infra split view** (`widgets/infra-panel`): infra concerns (schedules · runtimes · runs · work queue · a

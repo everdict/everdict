@@ -59,7 +59,11 @@ no default-to-first**. Discriminated unions carry the shape variants:
   throwing `BadRequestError` on a missing/mismatched slot.
 - `EvalCase` (`eval-case.ts`) — case bundle (env, task, graders, image?); also `CaseResult`/`Scorecard`.
 - `CaseJob` (`case-job.ts`) — one dispatched unit; `tenant`/`submittedBy` key the SaaS machinery.
-- `TraceEvent` (`trace.ts`) — union on `kind` (message/llm_call/tool_call/…); cost comes from here.
+- `TraceEvent` (`trace.ts`) — union on `kind` (message/llm_call/tool_call/…); cost comes from here. Every
+  non-trivial kind also carries the optional **STRUCTURE** block — `spanId`/`parentId`/`durationMs`/`at` — so a
+  normalized stream keeps the span TREE and real time of whatever produced it (a normalizer that drops them
+  turns a waterfall into a list; that is exactly what the internal trace viewer used to render). All four are
+  optional and additive: a source reporting none produces the same stream it always did.
 - `RuntimeSpec` (`runtime-spec.ts`) — `local | nomad | k8s` execution infra; **never store secrets**
   (only SecretStore key *names* like `authSecret`).
 - `CaseRecording` (`recording.ts`) — replay capture: track lanes on one `t0` wall-clock (`TrackEntry` union

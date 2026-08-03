@@ -18,8 +18,8 @@ import { cn } from '@/shared/lib/utils'
 export interface TeamScope {
   workspace: string
   team: TeamWithSummary
-  // 지금 보고 있는 자리. 팀 홈은 'home'.
-  section: TeamSection | 'home'
+  // 지금 보고 있는 자리. 팀의 짧은 주소는 이슈 화면이므로 'issues' 다.
+  section: TeamSection
 }
 
 export async function TeamScopeBar({ scope }: { scope: TeamScope }) {
@@ -47,7 +47,7 @@ export async function TeamScopeBar({ scope }: { scope: TeamScope }) {
           href={teamHref(workspace, team.key)}
           className={cn(
             'inline-flex items-center gap-1.5 transition-colors hover:text-foreground',
-            section === 'home' && 'text-foreground'
+            section === 'issues' && 'text-foreground'
           )}
         >
           <TeamKeyBadge teamKey={team.key} />
