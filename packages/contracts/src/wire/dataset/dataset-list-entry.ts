@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DatasetProvenanceSchema } from "../../execution/dataset.js";
+import { CapabilityOriginSchema } from "../../records/capability-origin.js";
 
 // GET /datasets 200 — one entry per dataset id: registration history + display fields from the latest version.
 // Mirrors DatasetListEntry (@everdict/registry dataset-registry.ts).
@@ -21,6 +22,10 @@ export const DatasetListEntrySchema = z.object({
   createdAt: z.string().optional().describe("First registration time (ISO)"),
   updatedAt: z.string().optional().describe("Most recent registration time (ISO)"),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
+  versionOrigins: z
+    .record(CapabilityOriginSchema)
+    .optional()
+    .describe("version → where that version came from (stamped versions only)"),
 });
 export type DatasetListEntry = z.infer<typeof DatasetListEntrySchema>;
 

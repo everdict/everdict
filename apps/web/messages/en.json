@@ -5066,5 +5066,23 @@
     "deleteError": "Couldn't delete the label.",
     "emptyTitle": "No labels yet",
     "emptyHint": "Define the vocabulary your team classifies issues with."
+  },
+  "capabilityLineage": {
+    "title": "Where this came from",
+    "bornFrom": "Created from",
+    "createdBy": "Created by",
+    "onBehalfOf": "for {name}",
+    "refType": {
+      "issue": "Issue",
+      "project": "Project",
+      "initiative": "Initiative",
+      "scorecard": "Scorecard",
+      "run": "Run",
+      "trace": "Trace",
+      "harness": "Harness",
+      "dataset": "Dataset",
+      "judge": "Judge",
+      "benchmark": "Benchmark"
+    }
   }
 }

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CapabilityOriginSchema } from "../../records/capability-origin.js";
 
 // GET /judges 200 — one entry per judge id: version meta + display fields derived from the latest spec.
 // Mirrors JudgeListEntry (@everdict/registry judge-registry.ts).
@@ -17,6 +18,10 @@ export const JudgeListEntrySchema = z.object({
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
+  versionOrigins: z
+    .record(CapabilityOriginSchema)
+    .optional()
+    .describe("version → where that version came from (stamped versions only)"),
 });
 export type JudgeListEntry = z.infer<typeof JudgeListEntrySchema>;
 

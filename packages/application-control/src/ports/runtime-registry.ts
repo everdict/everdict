@@ -1,4 +1,4 @@
-import type { CapabilityName, RuntimeSpec } from "@everdict/contracts";
+import type { CapabilityName, CapabilityOrigin, RuntimeSpec } from "@everdict/contracts";
 
 // Runtime (execution infra) version SSOT — (tenant, id, version) → RuntimeSpec. Versions are immutable. "latest" = newest by semver/registration order.
 // Same ownership model as harness/dataset/judge: tenant-owned first, else SHARED_TENANT (first-party shared runtime) fallback.
@@ -9,13 +9,21 @@ export interface RuntimeListEntry {
   versions: string[];
   owner: string;
   versionTags?: Record<string, string[]>; // version → free-form label — mutable registry metadata (outside the spec)
+  // version → where that version came from (only stamped versions; omitted entirely when none was).
+  versionOrigins?: Record<string, CapabilityOrigin>;
   // The latest version's declared capabilities — surfaced so a submit-time picker can preview runtime↔harness fit
   // (a service harness needs `docker`, etc.) before dispatch. Absent = the runtime declares none (treated unchecked).
   capabilities?: CapabilityName[];
 }
 
 export interface RuntimeRegistry {
-  register(tenant: string, spec: RuntimeSpec, createdBy?: string, teamId?: string): Promise<void>;
+  register(
+    tenant: string,
+    spec: RuntimeSpec,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void>;
   // 소유 팀 — 인가 커널의 팀 축이 읽는 값(undefined = 소유자 없음).
   teamOfVersion?(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
   has(tenant: string, id: string, version: string): Promise<boolean>;

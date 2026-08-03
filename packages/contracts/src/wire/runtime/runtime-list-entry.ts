@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CapabilityOriginSchema } from "../../records/capability-origin.js";
 
 // GET /runtimes 200 — one entry per runtime id. Mirrors RuntimeListEntry (@everdict/registry runtime-registry.ts).
 export const RuntimeListEntrySchema = z.object({
@@ -6,6 +7,10 @@ export const RuntimeListEntrySchema = z.object({
   versions: z.array(z.string()).describe("Versions (semver ascending)"),
   owner: z.string().describe("Owning tenant, or _shared for first-party runtimes"),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
+  versionOrigins: z
+    .record(CapabilityOriginSchema)
+    .optional()
+    .describe("version → where that version came from (stamped versions only)"),
   capabilities: z
     .array(z.string())
     .optional()

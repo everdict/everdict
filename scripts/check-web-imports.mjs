@@ -106,8 +106,7 @@ for (const [file, src] of sources) {
       if (!new RegExp(`\\b${local ?? imported}\\s*\\(`).test(src)) continue;
       const line = src.slice(0, m.index).split("\n").length;
       violations.push(
-        `${path.relative(root, file)}:${line} -> calls \`${imported}()\` exported by the client module ${owner} ` +
-          `(a server component cannot invoke a 'use client' export — move the helper to a server-safe module)`,
+        `${path.relative(root, file)}:${line} -> calls \`${imported}()\` exported by the client module ${owner} (a server component cannot invoke a 'use client' export — move the helper to a server-safe module)`,
       );
     }
   }

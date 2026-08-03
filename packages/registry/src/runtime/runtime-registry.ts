@@ -1,4 +1,4 @@
-import type { RuntimeSpec } from "@everdict/contracts";
+import type { CapabilityOrigin, RuntimeSpec } from "@everdict/contracts";
 import { VersionedStore } from "../versioned-store.js";
 
 // The registry port + its list-entry type live in @everdict/application-control; this InMemory impl `implements`
@@ -12,8 +12,16 @@ import type { RuntimeListEntry, RuntimeRegistry } from "@everdict/application-co
 export class InMemoryRuntimeRegistry implements RuntimeRegistry {
   private readonly store = new VersionedStore<RuntimeSpec>("runtime");
 
-  async register(tenant: string, spec: RuntimeSpec): Promise<void> {
-    this.store.register(tenant, spec);
+  // createdBy/teamId stay unthreaded (everdict_runtimes carries neither column) — the parameters exist only to keep
+  // the port's positional shape, so `origin` lands in the same 5th slot every other registry uses.
+  async register(
+    tenant: string,
+    spec: RuntimeSpec,
+    _createdBy?: string,
+    _teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
+    this.store.register(tenant, spec, undefined, undefined, origin);
   }
   // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
   teamOfVersion(tenant: string, id: string, version: string): string | undefined {

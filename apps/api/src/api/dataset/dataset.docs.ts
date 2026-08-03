@@ -10,6 +10,7 @@ import { RegisterDatasetResultSchema } from "@everdict/contracts/wire";
 import { SetVersionTagsResultSchema } from "@everdict/contracts/wire";
 import { ValidateDatasetResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
+import { withOriginDoc } from "../capability-origin.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
 import { ImportHarborBodySchema } from "./request/import-harbor.js";
@@ -36,10 +37,11 @@ const idVersionParams = {
 const docs = {
   register: {
     summary: "Register a dataset version",
-    description:
+    description: withOriginDoc(
       "Registers a workspace-owned dataset (harness-agnostic eval-case bundle). Requires datasets:write " +
-      "(member+). Versions are immutable — re-registering the same (id, version) with different content is 409. " +
-      "Reads resolve workspace-owned first with a _shared (first-party benchmark) fallback.",
+        "(member+). Versions are immutable — re-registering the same (id, version) with different content is 409. " +
+        "Reads resolve workspace-owned first with a _shared (first-party benchmark) fallback.",
+    ),
     tags: ["dataset"],
     body: toJsonSchema(DatasetSchema),
     response: {

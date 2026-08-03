@@ -10,6 +10,8 @@ import {
   imageWarnings,
 } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
+import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
+import { agentAttributionFrom } from "../fs/fs-actor.js";
 import {
   type ServerDeps,
   gate,
@@ -54,7 +56,15 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
             .filter((i) => i.severity === "warning")
             .map((i) => i.message);
       }
-      await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject, owner.teamId);
+      // Birth stamp beside the spec (the spec schema strips it, so provenance never becomes content).
+      const origin = await capabilityOriginFor(
+        deps,
+        principal.workspace,
+        "web",
+        agentAttributionFrom(req.headers),
+        declaredOriginFrom(req.body),
+      );
+      await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject, owner.teamId, origin);
       // Image-classification warnings (warn-not-block) — local/unqualified images have no pull guarantee (risky to run off the build machine).
       const warnings = await harnessImageWarnings(deps, principal.workspace, parsed.data.id, parsed.data.version);
       // Visibility tradeoff surfaced at write time: a user-scope secretRef makes the harness visible to you only.

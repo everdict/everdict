@@ -2,6 +2,8 @@ import { VersionTagsBodySchema, deleteJudgeVersion, setVersionTags } from "@ever
 import { JudgeSpecSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
+import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
+import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { judgeDocs } from "./judge.docs.js";
 import { PreviewJudgeBodySchema, TryJudgeBodySchema } from "./request/judge-evidence.js";
@@ -23,8 +25,17 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
     }
     const parsed = JudgeSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    // The birth stamp rides beside the spec (the spec schema strips it, so it never becomes content): channel +
+    // the agent that acted + whatever the caller declared it was built from.
+    const origin = await capabilityOriginFor(
+      deps,
+      principal.workspace,
+      "web",
+      agentAttributionFrom(req.headers),
+      declaredOriginFrom(req.body),
+    );
     try {
-      await deps.judgeRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId);
+      await deps.judgeRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId, origin);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409

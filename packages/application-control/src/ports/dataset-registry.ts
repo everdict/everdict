@@ -1,4 +1,4 @@
-import type { Dataset, DatasetProvenance } from "@everdict/contracts";
+import type { CapabilityOrigin, Dataset, DatasetProvenance } from "@everdict/contracts";
 
 // One list() entry — summarizes a single id (with several immutable versions) into list-view metadata. Content
 // (case count / description / tags / provenance) comes from the latest semver version; creator and timestamps come
@@ -21,6 +21,8 @@ export interface DatasetListEntry {
   // Version tags — version → free-form label (only versions that have tags). Unlike content tags (entity classification),
   // these are registry metadata editable after registration (attached when versions are hard to tell apart by number alone).
   versionTags?: Record<string, string[]>;
+  // version → where that version came from (only stamped versions; omitted entirely when none was).
+  versionOrigins?: Record<string, CapabilityOrigin>;
 }
 
 // Dataset version SSOT — (tenant, id, version) → Dataset. Versions are immutable. "latest" = newest by semver/registration order.
@@ -28,7 +30,13 @@ export interface DatasetListEntry {
 // Harness-agnostic — the same dataset runs against several harness@version for baseline comparison. async — Postgres shares the contract.
 export interface DatasetRegistry {
   // createdBy: subject that registered this version (for soft-delete authz — the creator themselves). No system seed / file loader (undefined).
-  register(tenant: string, dataset: Dataset, createdBy?: string, teamId?: string): Promise<void>;
+  register(
+    tenant: string,
+    dataset: Dataset,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<Dataset>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback, deleted versions excluded

@@ -9,6 +9,7 @@ export * from "./browser-profile.js";
 export * from "./budget.js";
 export * from "./capability.js";
 export * from "./capability-diff.js";
+export * from "./capability-origin.js";
 export * from "./comment.js";
 export * from "./knowledge-entry.js";
 export * from "./notification.js";

@@ -1,4 +1,4 @@
-import type { AgentSpec } from "@everdict/contracts";
+import type { AgentSpec, CapabilityOrigin } from "@everdict/contracts";
 
 // Agent version SSOT — (tenant, id, version) → AgentSpec. Versions are immutable. "latest" is the semver/registration-order
 // latest. Same ownership model as models/judges: tenant-owned first, else SHARED_TENANT (first-party default agent)
@@ -6,7 +6,13 @@ import type { AgentSpec } from "@everdict/contracts";
 // async — Postgres honors the same contract.
 export interface AgentRegistry {
   // createdBy: subject that registered this version (for soft-delete authz — the creator themselves). No seed/file/bundle (undefined).
-  register(tenant: string, spec: AgentSpec, createdBy?: string, teamId?: string): Promise<void>;
+  register(
+    tenant: string,
+    spec: AgentSpec,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<AgentSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback, deleted versions excluded

@@ -7,6 +7,7 @@ import { DeleteJudgeVersionResultSchema } from "@everdict/contracts/wire";
 import { RegisterJudgeResultSchema } from "@everdict/contracts/wire";
 import { ValidateJudgeResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
+import { withOriginDoc } from "../capability-origin.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { PreviewJudgeBodySchema, TryJudgeBodySchema } from "./request/judge-evidence.js";
 import { JudgePreviewResultSchema, JudgeTryResultSchema } from "./response/preview-judge-result.js";
@@ -27,10 +28,11 @@ const idVersionParams = {
 const docs = {
   register: {
     summary: "Register an Agent Judge version",
-    description:
+    description: withOriginDoc(
       "Registers a workspace-owned Agent Judge (kind model = LLM/VLM call, kind harness = delegate to a " +
-      "harness). Requires judges:write (member+). Versions are immutable — re-registering the same (id, version) " +
-      "with different content is 409. Reads resolve workspace-owned first with a _shared (first-party) fallback.",
+        "harness). Requires judges:write (member+). Versions are immutable — re-registering the same (id, version) " +
+        "with different content is 409. Reads resolve workspace-owned first with a _shared (first-party) fallback.",
+    ),
     tags: ["judge"],
     body: toJsonSchema(JudgeSpecSchema),
     response: {

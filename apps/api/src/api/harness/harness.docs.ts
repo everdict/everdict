@@ -11,6 +11,7 @@ import { RepinResultSchema } from "@everdict/contracts/wire";
 import { ResolvedHarnessResponseSchema } from "@everdict/contracts/wire";
 import { ValidateHarnessResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
+import { withOriginDoc } from "../capability-origin.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
 
@@ -35,13 +36,14 @@ const idVersionParams = {
 const docs = {
   register: {
     summary: "Register a harness instance version",
-    description:
+    description: withOriginDoc(
       "Registers a workspace-owned harness instance (template reference + pins). Requires harnesses:register " +
-      "(viewer+ — collaborative eval content). The spec is confirmed via resolve: a missing template is 404, a " +
-      "missing/unknown pin is 400. Versions are immutable — re-registering the same (id, version) with different " +
-      "content is 409. The response surfaces write-time advisories: image-classification warnings " +
-      "(local/unqualified images, warn-not-block) and private:true when the spec references a personal secret " +
-      "(the harness becomes visible to the creator only).",
+        "(viewer+ — collaborative eval content). The spec is confirmed via resolve: a missing template is 404, a " +
+        "missing/unknown pin is 400. Versions are immutable — re-registering the same (id, version) with different " +
+        "content is 409. The response surfaces write-time advisories: image-classification warnings " +
+        "(local/unqualified images, warn-not-block) and private:true when the spec references a personal secret " +
+        "(the harness becomes visible to the creator only).",
+    ),
     tags: ["harness"],
     body: toJsonSchema(HarnessInstanceSpecSchema),
     response: {

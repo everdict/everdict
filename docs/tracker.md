@@ -130,6 +130,31 @@ closed issue actually surfaces: nobody re-links a scorecard that has not happene
 the linked dataset runs anyway. The derived half uses the scorecard store's existing `dataset`/`harness`
 filters — the SQL narrows, nothing scans the workspace.
 
+### A capability born from an issue links itself back
+
+Linking used to be a separate act nobody owed anyone: whoever built the judge had to remember `add_issue_link`
+after registering it. That is exactly the bookkeeping that gets skipped, and skipping it is not cosmetic — the
+regression watch below only reopens a closed issue when the batch's dataset **and** harness are both linked to
+it, so an agent that built and ran the evaluation but forgot the link left the issue unable to notice its own
+regression.
+
+So the link is made where the birth is recorded. A registration that declares `origin.from = {type:"issue", id}`
+(`docs/registry.md`) also adds the issue→capability link, through `withOriginBacklink` — a composition-root
+decorator beside `withRegisteredFact`, so routes, MCP tools and headless callers cannot fork the behaviour. Three
+properties are deliberate:
+
+- **The link carries no version.** An issue means "this judge", not "this judge at 1.2.0" (`IssueLink.version`),
+  and the regression watch matches at id level for the same reason.
+- **The actor is the agent, when one acted.** The resulting `issue.linked` fact is stamped
+  `causedBy: agent:<id>:<conversation>`, so an agent never wakes on the link its own registration produced.
+- **Best-effort, both directions.** Already-linked (the state we wanted) and any other failure are swallowed: the
+  member's registration already succeeded, and failing it afterwards over a backlink is a worse answer than a
+  missing chip. The origin stamp survives regardless, so the capability still says where it came from.
+
+The reverse read (`GET /issues?linkType=judge&linkId=…`) is what a capability's detail view asks to draw "the
+issues watching this" — and it is how a capability registered *before* the origin stamp existed can still show
+its issue, with no backfill.
+
 ## GitHub import + manual sync
 
 Everdict stays the **client**: there is no inbound webhook (`docs/architecture/workspace-scoped-integrations.md`)

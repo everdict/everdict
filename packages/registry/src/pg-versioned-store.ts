@@ -1,7 +1,14 @@
 import type { VersionMeta } from "@everdict/application-control";
-import { BadRequestError, ConflictError, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, type CapabilityOrigin, ConflictError, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
-import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
+import {
+  SHARED_TENANT,
+  parseCapabilityOrigin,
+  parseVersionTags,
+  resolveRef,
+  sortVersions,
+  specsEqual,
+} from "./registry.js";
 
 // Per-entity persistence config. Column names and optional-column capabilities diverge across the versioned
 // tables (everdict_datasets stores the jsonb in a `dataset` column with created_by/deleted_at/tags; everdict_models
@@ -19,6 +26,9 @@ export interface PgVersionedStoreConfig<T> {
   // metadata beside created_by, never inside the versioned spec: transferring it must not mint a new version.
   teamId?: boolean;
   tags?: boolean; // table has a tags jsonb column (migration 0047/0054) → setVersionTags/versionTags + list versionTags
+  // table has an origin jsonb column (migration 0111) → INSERT stamps it and listMeta/versionOrigins read it.
+  // Provenance beside created_by/team_id, never inside the spec (see records/capability-origin.ts).
+  origin?: boolean;
 }
 
 // The spec-column value is read back under the table's own column name (dataset/judge/spec/…), keyed dynamically.
@@ -36,6 +46,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   private readonly hasCreatedBy: boolean;
   private readonly hasTeamId: boolean;
   private readonly hasTags: boolean;
+  private readonly hasOrigin: boolean;
 
   constructor(
     private readonly client: SqlClient,
@@ -49,6 +60,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     this.hasCreatedBy = config.createdBy ?? false;
     this.hasTeamId = config.teamId ?? false;
     this.hasTags = config.tags ?? false;
+    this.hasOrigin = config.origin ?? false;
   }
 
   // " AND deleted_at IS NULL" only where the table has the column — otherwise the clause would reference a missing column.
@@ -76,7 +88,13 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     return sortVersions(r.rows.map((x) => x.version));
   }
 
-  async register(tenant: string, item: T, createdBy?: string, teamId?: string): Promise<void> {
+  async register(
+    tenant: string,
+    item: T,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
     // Non-empty version invariant (parity with VersionedStore) — a blank version sorts to the tail as non-semver and
     // silently becomes `latest`. Reject it before the write.
     if (item.version.trim().length === 0) {
@@ -115,6 +133,14 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
           `UPDATE ${this.table} SET team_id = $4 WHERE tenant = $1 AND id = $2 AND version = $3 AND team_id IS NULL`,
           [tenant, item.id, item.version, teamId],
         );
+      // Provenance fills an unstamped version and never rewrites a stamped one (`origin IS NULL` is the guard):
+      // re-registering identical content is not a second birth, so the first answer to "where did this come
+      // from" is the one that stands.
+      if (this.hasOrigin && origin !== undefined)
+        await this.client.query(
+          `UPDATE ${this.table} SET origin = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND origin IS NULL`,
+          [tenant, item.id, item.version, JSON.stringify(origin)],
+        );
       return;
     }
     const columns = ["tenant", "id", "version", this.column, "created_at"];
@@ -129,6 +155,11 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       columns.push("team_id");
       values.push(teamId ?? null);
       placeholders.push(`$${values.length}`);
+    }
+    if (this.hasOrigin) {
+      columns.push("origin");
+      values.push(origin === undefined ? null : JSON.stringify(origin));
+      placeholders.push(`$${values.length}::jsonb`);
     }
     await this.client.query(
       `INSERT INTO ${this.table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")})`,
@@ -196,6 +227,23 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     return out;
   }
 
+  // version → origin (only stamped live versions). Owner resolution matches versions() (incl. the _shared fallback).
+  async versionOrigins(tenant: string, id: string): Promise<Record<string, CapabilityOrigin>> {
+    if (!this.hasOrigin) return {};
+    const owner = await this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const r = await this.client.query<{ version: string; origin: unknown }>(
+      `SELECT version, origin FROM ${this.table} WHERE tenant = $1 AND id = $2${this.live}`,
+      [owner, id],
+    );
+    const out: Record<string, CapabilityOrigin> = {};
+    for (const row of r.rows) {
+      const origin = parseCapabilityOrigin(row.origin);
+      if (origin) out[row.version] = origin;
+    }
+    return out;
+  }
+
   async softDelete(tenant: string, id: string, version: string): Promise<void> {
     const r = await this.client.query<{ version: string }>(
       `UPDATE ${this.table} SET deleted_at = now() WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version`,
@@ -252,8 +300,9 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
         created_by: string | null;
         team_id: string | null;
         tags: unknown;
+        origin: unknown;
       }>(
-        `SELECT version, created_at${this.hasCreatedBy ? ", created_by" : ""}${this.hasTeamId ? ", team_id" : ""}${this.hasTags ? ", tags" : ""} FROM ${this.table} WHERE tenant = $1 AND id = $2${this.live}`,
+        `SELECT version, created_at${this.hasCreatedBy ? ", created_by" : ""}${this.hasTeamId ? ", team_id" : ""}${this.hasTags ? ", tags" : ""}${this.hasOrigin ? ", origin" : ""} FROM ${this.table} WHERE tenant = $1 AND id = $2${this.live}`,
         [owner, id],
       );
       const versions = sortVersions(r.rows.map((x) => x.version));
@@ -264,9 +313,12 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       const latest = byTime.at(-1);
       const latestVersionRow = r.rows.find((x) => x.version === latestVersion); // creator of the semver-latest version (≠ last-registered)
       const versionTags: Record<string, string[]> = {};
+      const versionOrigins: Record<string, CapabilityOrigin> = {};
       for (const row of r.rows) {
         const tags = parseVersionTags(row.tags);
         if (tags.length > 0) versionTags[row.version] = tags;
+        const origin = parseCapabilityOrigin(row.origin);
+        if (origin) versionOrigins[row.version] = origin;
       }
       out.push({
         id,
@@ -280,6 +332,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
         ...(earliest ? { createdAt: new Date(earliest.created_at).toISOString() } : {}),
         ...(latest ? { updatedAt: new Date(latest.created_at).toISOString() } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
+        ...(Object.keys(versionOrigins).length > 0 ? { versionOrigins } : {}),
       });
     }
     return out;

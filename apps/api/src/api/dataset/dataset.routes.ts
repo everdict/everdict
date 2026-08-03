@@ -3,6 +3,8 @@ import { deleteDatasetVersion, deleteDatasetVersions } from "@everdict/applicati
 import { DatasetSchema } from "@everdict/contracts";
 import { diffDatasets, harborToDataset, terminalBenchToDataset } from "@everdict/datasets";
 import type { FastifyInstance } from "fastify";
+import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
+import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { datasetDocs } from "./dataset.docs.js";
 import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
@@ -26,8 +28,16 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
     const parsed = DatasetSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    // Birth stamp beside the spec (the spec schema strips it, so provenance never becomes content).
+    const origin = await capabilityOriginFor(
+      deps,
+      principal.workspace,
+      "web",
+      agentAttributionFrom(req.headers),
+      declaredOriginFrom(req.body),
+    );
     try {
-      await deps.datasetRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId); // creator = subject (delete rights)
+      await deps.datasetRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId, origin); // creator = subject (delete rights)
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409

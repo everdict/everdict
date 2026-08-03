@@ -1,4 +1,4 @@
-import { type RuntimeSpec, RuntimeSpecSchema } from "@everdict/contracts";
+import { type CapabilityOrigin, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import type { RuntimeListEntry, RuntimeRegistry } from "./runtime-registry.js";
@@ -16,11 +16,20 @@ export class PgRuntimeRegistry implements RuntimeRegistry {
       parse: (v) => RuntimeSpecSchema.parse(v),
       teamId: true,
       tags: true,
+      origin: true,
     });
   }
 
-  register(tenant: string, spec: RuntimeSpec): Promise<void> {
-    return this.store.register(tenant, spec);
+  // createdBy/teamId stay unthreaded (the table carries neither column) — the parameters keep the port's positional
+  // shape so `origin` lands in the same 5th slot every other registry uses.
+  register(
+    tenant: string,
+    spec: RuntimeSpec,
+    _createdBy?: string,
+    _teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
+    return this.store.register(tenant, spec, undefined, undefined, origin);
   }
   // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
   teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {

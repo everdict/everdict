@@ -1,4 +1,4 @@
-import { type Dataset, DatasetSchema, NotFoundError } from "@everdict/contracts";
+import { type CapabilityOrigin, type Dataset, DatasetSchema, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import { SHARED_TENANT, parseVersionTags, sortVersions } from "../registry.js";
@@ -22,11 +22,18 @@ export class PgDatasetRegistry implements DatasetRegistry {
       createdBy: true,
       teamId: true,
       tags: true,
+      origin: true,
     });
   }
 
-  register(tenant: string, dataset: Dataset, createdBy?: string, teamId?: string): Promise<void> {
-    return this.store.register(tenant, dataset, createdBy, teamId);
+  register(
+    tenant: string,
+    dataset: Dataset,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
+    return this.store.register(tenant, dataset, createdBy, teamId, origin);
   }
   // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
   teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {

@@ -21,13 +21,15 @@ import {
 import { useTranslations } from 'next-intl'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
-import { MentionInChatButton } from '@/widgets/infra-panel'
+import { MentionInChatButton, OpenConversationButton } from '@/widgets/infra-panel'
+import { CapabilityLineage, loadLinkedIssues } from '@/features/capability-lineage'
 import { VersionSwitcher } from '@/features/dataset-versions'
 import { DeleteDatasetButton } from '@/features/delete-dataset'
 import { CommentsSection } from '@/features/discuss'
 import { ActivityTimeline, type ActivityItem, type Actor } from '@/features/discuss-dataset'
 import { CaseList } from '@/features/inspect-dataset'
 import { VersionTagsEditor } from '@/features/version-tags'
+import { pickOrigin } from '@/entities/capability-origin'
 import {
   datasetSchema,
   datasetsSchema,
@@ -109,6 +111,8 @@ export default async function DatasetDetailPage({
     .listHarnesses(ctx)
     .then((r) => new Set(harnessesSchema.parse(r).map((h) => h.id)))
     .catch(() => undefined)
+  // 이 데이터셋을 지켜보는 이슈들 + 태어난 자리 — 보조 정보라 실패해도 상세는 그대로 그린다.
+  const linkedIssues = await loadLinkedIssues(ctx, 'dataset', id)
   const relation = buildDatasetRelations(scorecards, liveHarnessIds)[id]
   const currentWorkspace = principal?.workspace ?? workspace
   // Creator — profile name+avatar (if any). Seed/_shared are shown as first-party (no avatar).
@@ -155,6 +159,12 @@ export default async function DatasetDetailPage({
 
   // This version's tags (free-form labels) — mutable meta for distinguishing versions, separate from content tags (classification). Unrelated to version immutability.
   const versionTags = summary?.versionTags?.[dataset.version] ?? []
+  // 이 버전이 어디서 왔는가 — 이 버전에 스탬프가 없으면 가장 오래된 스탬프(태어난 자리)로 물러난다.
+  const datasetOrigin = pickOrigin(
+    summary?.versionOrigins,
+    dataset.version,
+    summary?.versions ?? []
+  )
 
   // Case composition summary — distribution of environment (env.kind)·grading (grader.id) (by frequency). The benchmark's character at a glance.
   const envSummary = [
@@ -356,6 +366,24 @@ export default async function DatasetDetailPage({
           </div>
         )}
       </Card>
+
+      {/* 만들어진 배경 — 이 데이터셋이 어느 이슈에서 태어났고 어떤 이슈들이 그것을 지켜보는지. 아래의
+          "출처 · 리니지"가 데이터가 어디서 왔는지(행의 출처)라면, 이쪽은 왜 존재하는지(의도의 출처)다. */}
+      <CapabilityLineage
+        workspace={workspace}
+        {...(datasetOrigin ? { origin: datasetOrigin } : {})}
+        issues={linkedIssues}
+        {...(author.known ? { createdByLabel: author.name } : {})}
+        {...(summary?.createdAt ? { createdAt: summary.createdAt } : {})}
+        timeZone={timeZone}
+        {...(datasetOrigin?.conversationId
+          ? {
+              conversationAction: (
+                <OpenConversationButton sessionId={datasetOrigin.conversationId} />
+              ),
+            }
+          : {})}
+      />
 
       {/* Lineage/provenance — where this data came from. Original source (HF link) · official provenance · production path. */}
       {dataset.producedBy && (

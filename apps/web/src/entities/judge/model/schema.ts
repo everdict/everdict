@@ -1,6 +1,8 @@
 import type { JudgeListEntry, JudgeSpecDiffResponse } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
+import { versionOriginsSchema } from '@/entities/capability-origin'
+
 // Runtime boundary validation stays here (zod v4); the EXPORTED list type is anchored to @everdict/contracts
 // (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
 // GET /judges response: the judge list a tenant sees (owned + _shared defaults).
@@ -8,8 +10,16 @@ export const judgeSummarySchema = z.object({
   id: z.string(),
   owner: z.string(),
   versions: z.array(z.string()),
+  // 첫 등록의 주체/시각, 그리고 가장 최근 등록 시각. 저지 상세가 "누가 언제 만들었나"를 말할 근거이며,
+  // 아래 versionOrigins 와 함께 리니지 한 줄을 이룬다(시드/_shared 는 등록 주체가 없다).
+  createdBy: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
   // version → free-form labels (only versions that have tags) — mutable meta outside the spec.
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
+  // version → 그 버전이 어디서 왔는가(찍힌 버전만). 이슈에서 태어났는지, 어떤 에이전트가 어느 대화에서
+  // 만들었는지 — 상세가 리니지를 그리는 근거.
+  versionOrigins: versionOriginsSchema.optional(),
 })
 export const judgesSchema = z.array(judgeSummarySchema)
 

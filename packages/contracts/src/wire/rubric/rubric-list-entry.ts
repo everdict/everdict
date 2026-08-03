@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CapabilityOriginSchema } from "../../records/capability-origin.js";
 
 // GET /rubrics 200 — one entry per rubric id: version meta + display fields derived from the latest spec.
 // Mirrors RubricListEntry (@everdict/registry rubric-registry.ts).
@@ -14,6 +15,10 @@ export const RubricListEntrySchema = z.object({
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
+  versionOrigins: z
+    .record(CapabilityOriginSchema)
+    .optional()
+    .describe("version → where that version came from (stamped versions only)"),
 });
 export type RubricListEntry = z.infer<typeof RubricListEntrySchema>;
 

@@ -1,4 +1,4 @@
-import type { RubricSpec } from "@everdict/contracts";
+import type { CapabilityOrigin, RubricSpec } from "@everdict/contracts";
 import { VersionedStore } from "../versioned-store.js";
 
 // The registry port + its list-entry type live in @everdict/application-control; this InMemory impl `implements`
@@ -24,8 +24,14 @@ export function rubricDerived(spec: RubricSpec): Pick<RubricListEntry, "descript
 export class InMemoryRubricRegistry implements RubricRegistry {
   private readonly store = new VersionedStore<RubricSpec>("rubric");
 
-  async register(tenant: string, spec: RubricSpec, createdBy?: string, teamId?: string): Promise<void> {
-    this.store.register(tenant, spec, createdBy, teamId);
+  async register(
+    tenant: string,
+    spec: RubricSpec,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
+    this.store.register(tenant, spec, createdBy, teamId, origin);
   }
   // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
   teamOfVersion(tenant: string, id: string, version: string): string | undefined {
@@ -67,6 +73,7 @@ export class InMemoryRubricRegistry implements RubricRegistry {
         ...(meta.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
         ...(meta.updatedAt !== undefined ? { updatedAt: meta.updatedAt } : {}),
         ...(meta.versionTags !== undefined ? { versionTags: meta.versionTags } : {}),
+        ...(meta.versionOrigins !== undefined ? { versionOrigins: meta.versionOrigins } : {}),
       });
     }
     return out;

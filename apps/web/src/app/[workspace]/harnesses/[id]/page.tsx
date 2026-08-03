@@ -3,7 +3,12 @@ import Link from 'next/link'
 import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
-import { MentionInChatButton, OpenPlaygroundButton } from '@/widgets/infra-panel'
+import {
+  MentionInChatButton,
+  OpenConversationButton,
+  OpenPlaygroundButton,
+} from '@/widgets/infra-panel'
+import { CapabilityLineage, loadLinkedIssues } from '@/features/capability-lineage'
 import { DeleteHarnessButton } from '@/features/delete-harness'
 import { CommentsSection } from '@/features/discuss'
 import { HarnessVersionSwitcher } from '@/features/harness-versions'
@@ -11,6 +16,7 @@ import { HarnessDetail, RawConfigDisclosure } from '@/features/inspect-harness'
 import { CiLinkPanel } from '@/features/manage-ci-links'
 import { HarnessSinkSelect, HarnessSourceSelect } from '@/features/manage-trace-source'
 import { VersionTagsEditor } from '@/features/version-tags'
+import { pickOrigin } from '@/entities/capability-origin'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { datasetsSchema } from '@/entities/dataset'
 import {
@@ -137,6 +143,11 @@ export default async function HarnessDetailPage({
       known: true as const,
     }
   })()
+
+  // 이 하네스를 지켜보는 이슈들 + (보고 있는 버전이 스탬프되지 않았으면 가장 오래된 스탬프 = 태어난 자리).
+  // 보조 정보라 실패해도 상세는 그대로 그린다.
+  const linkedIssues = await loadLinkedIssues(ctx, 'harness', id)
+  const harnessOrigin = pickOrigin(entry?.versionOrigins, active ?? '', entry?.versions ?? [])
 
   // Original config (template reference + pins) + this version's changelog (description). The starting point for editing a new version.
   // Separate from resolve, so the detail keeps rendering even if it fails. description lives only on the instance (independent of template fetch success), so it's pulled out separately.
@@ -385,6 +396,23 @@ export default async function HarnessDetailPage({
           </MetaItem>
         )}
       </Card>
+
+      {/* 만들어진 배경 — 이 하네스가 어느 이슈에서 태어났고 어떤 이슈들이 그것을 지켜보는지. */}
+      <CapabilityLineage
+        workspace={workspace}
+        {...(harnessOrigin ? { origin: harnessOrigin } : {})}
+        issues={linkedIssues}
+        {...(author.known ? { createdByLabel: author.name } : {})}
+        {...(entry?.createdAt ? { createdAt: entry.createdAt } : {})}
+        timeZone={timeZone}
+        {...(harnessOrigin?.conversationId
+          ? {
+              conversationAction: (
+                <OpenConversationButton sessionId={harnessOrigin.conversationId} />
+              ),
+            }
+          : {})}
+      />
 
       {/* Config — the final settings this harness actually runs with, in a clean value view. The raw (pins/overrides)·JSON is collapsible. */}
       <section className="space-y-4">

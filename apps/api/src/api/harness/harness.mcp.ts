@@ -5,6 +5,12 @@ import { HarnessInstanceSpecSchema } from "@everdict/contracts";
 import { diffHarnessSpecs } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {
+  FROM_ISSUE_TOOL_DESCRIPTION,
+  ORIGIN_NOTE_TOOL_DESCRIPTION,
+  capabilityOriginFor,
+  declaredOriginFromIssue,
+} from "../capability-origin.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Harness-instance MCP tools — the MCP twin of harness.routes.ts.
@@ -104,9 +110,11 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             .describe(
               "HarnessInstanceSpec JSON: { template:{id,version}, id, version, pins, description? } (description = this version's changelog, optional)",
             ),
+          fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
+          originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
         },
       },
-      ({ spec }) =>
+      ({ spec, fromIssue, originNote }) =>
         run(principal, "harnesses:register", async () => {
           let parsed: unknown;
           try {
@@ -116,8 +124,15 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
           }
           const result = HarnessInstanceSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          const origin = await capabilityOriginFor(
+            deps,
+            ws,
+            "mcp",
+            ctx.agent,
+            declaredOriginFromIssue(fromIssue, originNote),
+          );
           // creator stamp = HTTP parity — without it a user-secret (private) instance becomes invisible even to its registrant
-          await instances.register(ws, result.data, principal.subject); // resolve validation (missing template / absent pins → error)
+          await instances.register(ws, result.data, principal.subject, undefined, origin); // resolve validation (missing template / absent pins → error)
           // Visibility tradeoff surfaced at write time (HTTP parity): user-scope secretRef → visible to you only.
           const isPrivate = await harnessIsPrivate(instances, ws, result.data.id, result.data.version);
           return ok({

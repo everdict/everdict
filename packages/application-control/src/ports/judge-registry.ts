@@ -1,4 +1,4 @@
-import type { JudgeSpec } from "@everdict/contracts";
+import type { CapabilityOrigin, JudgeSpec } from "@everdict/contracts";
 
 // One list entry — version metadata (registration history) + display fields derived from the latest judge spec (kind/provider/model/description).
 // GET /judges and MCP list_judges emit this shape. Same feel as the dataset/harness ListEntry.
@@ -19,13 +19,21 @@ export interface JudgeListEntry {
   createdAt?: string;
   updatedAt?: string;
   versionTags?: Record<string, string[]>; // version → free-form label (tagged versions only) — mutable registry metadata (outside the spec)
+  // version → where that version came from (only stamped versions; omitted entirely when none was).
+  versionOrigins?: Record<string, CapabilityOrigin>;
 }
 
 // Agent Judge version SSOT — (tenant, id, version) → JudgeSpec. Versions are immutable. "latest" is the semver/registration-order latest.
 // Same ownership model as harnesses/datasets: tenant-owned first, else SHARED_TENANT (first-party default judge) fallback.
 // A user registers and version-manages their own judge (model/harness) directly. async — Postgres honors the same contract.
 export interface JudgeRegistry {
-  register(tenant: string, spec: JudgeSpec, createdBy?: string, teamId?: string): Promise<void>;
+  register(
+    tenant: string,
+    spec: JudgeSpec,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<JudgeSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback

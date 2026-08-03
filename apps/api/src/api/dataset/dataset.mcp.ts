@@ -10,6 +10,12 @@ import {
 } from "@everdict/datasets";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {
+  FROM_ISSUE_TOOL_DESCRIPTION,
+  ORIGIN_NOTE_TOOL_DESCRIPTION,
+  capabilityOriginFor,
+  declaredOriginFromIssue,
+} from "../capability-origin.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Dataset MCP tools — the MCP twin of dataset.routes.ts.
@@ -101,9 +107,13 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       {
         description:
           "Register a Dataset (JSON string) as owned by the active workspace (versions immutable; re-registering the same id@version with different content is CONFLICT). Before registering, always confirm in order: (1) workspace — confirm with the user which workspace (fixed by credential, not changeable via a parameter). (2) id — one id groups multiple versions. If you are adding/editing cases in the same dataset, reuse the existing id and bump to a new 'version' (e.g. 1.0.0 → 1.1.0). Do not flatten into a new id each time. (3) version — a new semver that doesn't collide with an existing one. First check existing ids/versions via list_datasets/validate_dataset.",
-        inputSchema: { dataset: z.string().describe("Dataset JSON (id·version·cases)") },
+        inputSchema: {
+          dataset: z.string().describe("Dataset JSON (id·version·cases)"),
+          fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
+          originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
+        },
       },
-      ({ dataset }) =>
+      ({ dataset, fromIssue, originNote }) =>
         run(principal, "datasets:write", async () => {
           let parsed: unknown;
           try {
@@ -113,7 +123,14 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
           }
           const result = DatasetSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await datasets.register(ws, result.data, principal.subject); // creator = subject (delete permission)
+          const origin = await capabilityOriginFor(
+            deps,
+            ws,
+            "mcp",
+            ctx.agent,
+            declaredOriginFromIssue(fromIssue, originNote),
+          );
+          await datasets.register(ws, result.data, principal.subject, undefined, origin); // creator = subject (delete permission)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );

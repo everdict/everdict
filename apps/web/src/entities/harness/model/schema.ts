@@ -6,6 +6,8 @@ import type {
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
+import { versionOriginsSchema } from '@/entities/capability-origin'
+
 // Runtime boundary validation stays here (zod v4); the EXPORTED list/versions types are anchored to
 // @everdict/contracts (re-architecture P4). `import type` only — the zod v3 wire schemas never run in the web.
 // The full resolved/template/instance HarnessSpec mirrors below stay LOCAL (loose display views — see the note
@@ -29,6 +31,9 @@ export const harnessSchema = z.object({
   updatedAt: z.string().optional(),
   // version → free-form labels (only versions that have tags) — mutable meta outside the spec. Attached when versions are hard to tell apart by number alone.
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
+  // version → 그 버전이 어디서 왔는가(찍힌 버전만). 이슈에서 태어났는지, 어떤 에이전트가 어느 대화에서
+  // 만들었는지 — 상세가 리니지를 그리는 근거.
+  versionOrigins: versionOriginsSchema.optional(),
 })
 
 export const harnessesSchema = z.array(harnessSchema)

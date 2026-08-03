@@ -25,6 +25,7 @@ import {
   FsService,
   RevisionedWorkspaceFs,
   SkillService,
+  withOriginBacklink,
   withRegisteredFact,
   withTracePerception,
 } from "@everdict/application-control";
@@ -55,7 +56,7 @@ import {
 import { buildFileExecutionService } from "./composition/file-execution.js";
 import { buildManagedImages } from "./composition/images.js";
 import { buildIntegrations } from "./composition/integrations.js";
-import { lateBoundEmitter } from "./composition/late-events.js";
+import { lateBoundEmitter, lateBoundIssueLinker } from "./composition/late-events.js";
 import { makePersistence } from "./composition/persistence.js";
 import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
@@ -198,14 +199,28 @@ async function main(): Promise<void> {
   // through the same decorated instance; _shared seeds never emit. The platform-event service is built later
   // (buildIntegrations), so the decorators emit through a late-bound forwarder connected below.
   const lateEvents = lateBoundEmitter();
+  // A capability that declares it was born from an issue links itself back to that issue — same choke point,
+  // because the regression watch needs BOTH the dataset and the harness link to notice a closed issue degrading,
+  // and a link nobody remembers to make is a watch that never fires. Only the three kinds an issue can link.
+  const lateIssueLinks = lateBoundIssueLinker();
   const harnessInstanceRegistry = withRegisteredFact(
-    rawHarnessInstanceRegistry,
+    withOriginBacklink(rawHarnessInstanceRegistry, "harness", lateIssueLinks),
     "harness.registered",
     "harness",
     lateEvents,
   );
-  const datasetRegistry = withRegisteredFact(rawDatasetRegistry, "dataset.registered", "dataset", lateEvents);
-  const judgeRegistry = withRegisteredFact(rawJudgeRegistry, "judge.registered", "judge", lateEvents);
+  const datasetRegistry = withRegisteredFact(
+    withOriginBacklink(rawDatasetRegistry, "dataset", lateIssueLinks),
+    "dataset.registered",
+    "dataset",
+    lateEvents,
+  );
+  const judgeRegistry = withRegisteredFact(
+    withOriginBacklink(rawJudgeRegistry, "judge", lateIssueLinks),
+    "judge.registered",
+    "judge",
+    lateEvents,
+  );
   // E4 perception (event-plumbing wave 4): every trajectory passes through seal, so the tenant's trace
   // thresholds are evaluated THERE — a crossing lands trace.threshold_crossed on the log and wakes whatever
   // subscribed (the continuous-operations loop's sensory half). Announce-once rides seal's `created`.
@@ -675,6 +690,9 @@ async function main(): Promise<void> {
     events: platformEventService,
     github: { pushStatus: async (record, actor) => githubSyncRef.current?.pushStatus(record, actor) },
   });
+  // Connect the registries' origin backlink now that the tracker exists (construction-order forwarder, like
+  // lateEvents): from here on, registering a capability stamped `from: {type:"issue"}` also links it there.
+  lateIssueLinks.bind(issueService);
   // Absent GitHub App config just means the sync routes answer 404 — the local tracker is unaffected.
   const githubIssueSync = new GithubIssueSync({
     store: issueStore,

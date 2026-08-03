@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CapabilityOriginSchema } from "../../records/capability-origin.js";
 
 // GET /harnesses 200 — one entry per harness id: version meta (registration history) + display fields derived
 // from the latest instance. Mirrors HarnessListEntry (@everdict/registry harness-instance-registry.ts).
@@ -16,6 +17,10 @@ export const HarnessListEntrySchema = z.object({
   createdAt: z.string().optional().describe("First registration time (ISO)"),
   updatedAt: z.string().optional().describe("Most recent registration time (ISO)"),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
+  versionOrigins: z
+    .record(CapabilityOriginSchema)
+    .optional()
+    .describe("version → where that version came from (stamped versions only)"),
   category: z.string().optional().describe("Template category of the latest instance"),
   kind: z.string().optional().describe("command | service | process (resolved)"),
   subtitle: z.string().optional().describe("Model/command/service summary for list display"),

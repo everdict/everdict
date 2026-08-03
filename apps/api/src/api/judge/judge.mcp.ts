@@ -3,6 +3,12 @@ import { JudgeSpecSchema, TraceEventSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {
+  FROM_ISSUE_TOOL_DESCRIPTION,
+  ORIGIN_NOTE_TOOL_DESCRIPTION,
+  capabilityOriginFor,
+  declaredOriginFromIssue,
+} from "../capability-origin.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Judge MCP tools — the MCP twin of judge.routes.ts.
@@ -113,9 +119,13 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
       {
         description:
           "Register a JudgeSpec (JSON string) as owned by this workspace (model/harness; immutable; CONFLICT on collision)",
-        inputSchema: { judge: z.string().describe("JudgeSpec JSON") },
+        inputSchema: {
+          judge: z.string().describe("JudgeSpec JSON"),
+          fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
+          originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
+        },
       },
-      ({ judge }) =>
+      ({ judge, fromIssue, originNote }) =>
         run(principal, "judges:write", async () => {
           let parsed: unknown;
           try {
@@ -125,7 +135,14 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
           }
           const result = JudgeSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await judges.register(ws, result.data, principal.subject); // creator stamp — HTTP parity
+          const origin = await capabilityOriginFor(
+            deps,
+            ws,
+            "mcp",
+            ctx.agent,
+            declaredOriginFromIssue(fromIssue, originNote),
+          );
+          await judges.register(ws, result.data, principal.subject, undefined, origin); // creator stamp — HTTP parity
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );

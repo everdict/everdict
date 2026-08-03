@@ -119,6 +119,8 @@ export {
   type IssueTeamAllocator,
   type SetIssueStatusInput,
 } from "./issue/issue-service.js";
+// A capability born from an issue links itself back to it — one act, both directions (composition-root decorator).
+export { type IssueBacklinkPort, withOriginBacklink } from "./issue/origin-backlink.js";
 export {
   type CreateTeamInput,
   DEFAULT_TEAM_KEY,

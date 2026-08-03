@@ -1,3 +1,4 @@
+import type { CapabilityOrigin } from "@everdict/contracts";
 import {
   type HarnessInstanceSpec,
   HarnessInstanceSpecSchema,
@@ -34,15 +35,22 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
       createdBy: true,
       teamId: true,
       tags: true,
+      origin: true,
     });
   }
 
-  async register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string, teamId?: string): Promise<void> {
+  async register(
+    tenant: string,
+    instance: HarnessInstanceSpec,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
     // Resolve validates pins; assertPortable then hard-blocks a non-portable service spec (structural errors only —
     // host-literal warnings are surfaced by the caller). docs/architecture/topology-portability.md.
     assertPortable(resolveHarnessInstance(template, instance));
-    await this.store.register(tenant, instance, createdBy, teamId);
+    await this.store.register(tenant, instance, createdBy, teamId, origin);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);

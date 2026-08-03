@@ -1,4 +1,4 @@
-import { type Dataset, NotFoundError } from "@everdict/contracts";
+import { type CapabilityOrigin, type Dataset, NotFoundError } from "@everdict/contracts";
 import { VersionedStore } from "../versioned-store.js";
 
 // The registry port + its list-entry type live in @everdict/application-control; this InMemory impl `implements`
@@ -13,8 +13,14 @@ import type { DatasetListEntry, DatasetRegistry } from "@everdict/application-co
 export class InMemoryDatasetRegistry implements DatasetRegistry {
   private readonly store = new VersionedStore<Dataset>("Dataset");
 
-  async register(tenant: string, dataset: Dataset, createdBy?: string, teamId?: string): Promise<void> {
-    this.store.register(tenant, dataset, createdBy, teamId);
+  async register(
+    tenant: string,
+    dataset: Dataset,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
+    this.store.register(tenant, dataset, createdBy, teamId, origin);
   }
   // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
   teamOfVersion(tenant: string, id: string, version: string): string | undefined {
@@ -67,6 +73,7 @@ export class InMemoryDatasetRegistry implements DatasetRegistry {
         ...(meta.createdBy !== undefined ? { createdBy: meta.createdBy } : {}),
         ...(meta.teamId !== undefined ? { teamId: meta.teamId } : {}),
         ...(meta.versionTags !== undefined ? { versionTags: meta.versionTags } : {}),
+        ...(meta.versionOrigins !== undefined ? { versionOrigins: meta.versionOrigins } : {}),
       });
     }
     return out;

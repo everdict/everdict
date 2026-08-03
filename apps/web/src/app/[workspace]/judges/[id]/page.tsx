@@ -3,9 +3,11 @@ import { redirect } from 'next/navigation'
 import { ChevronLeft, GitCompare } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
-import { MentionInChatButton } from '@/widgets/infra-panel'
+import { MentionInChatButton, OpenConversationButton } from '@/widgets/infra-panel'
+import { CapabilityLineage, loadLinkedIssues } from '@/features/capability-lineage'
 import { DeleteJudgeButton } from '@/features/delete-judge'
 import { JudgeHistory, type JudgeHistoryEntry } from '@/features/judge-history'
+import { pickOrigin } from '@/entities/capability-origin'
 import {
   isRubricRef,
   judgeModelLabel,
@@ -87,8 +89,12 @@ export default async function JudgeDetailPage({
     .then((r) => scorecardsSchema.parse(r))
     .then((list) => [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
     .catch(() => [])
+  // 이 저지를 지켜보는 이슈들 + 태어난 자리 — 상세가 "왜 이게 있나"를 답하는 근거. 보조 정보라
+  // 실패해도 상세는 그대로 그린다.
+  const linkedIssues = await loadLinkedIssues(ctx, 'judge', id)
+  const origin = pickOrigin(summary.versionOrigins, latest, summary.versions)
   const members =
-    history.length > 0
+    history.length > 0 || summary.createdBy !== undefined
       ? await controlPlane
           .listMembers(ctx)
           .then((r) => membersSchema.parse(r))
@@ -218,6 +224,19 @@ export default async function JudgeDetailPage({
           {judge.kind === 'harness' && judge.runtime && <RuntimeChip label={judge.runtime} />}
         </div>
       </div>
+
+      {/* 리니지 — 이 저지가 어디서 태어났고 어떤 이슈들이 그것을 지켜보는지. 그릴 게 없으면 섹션이 없다. */}
+      <CapabilityLineage
+        workspace={workspace}
+        {...(origin ? { origin } : {})}
+        issues={linkedIssues}
+        {...(summary.createdBy ? { createdByLabel: resolveRunner(summary.createdBy)?.name } : {})}
+        {...(summary.createdAt ? { createdAt: summary.createdAt } : {})}
+        timeZone={timeZone}
+        {...(origin?.conversationId
+          ? { conversationAction: <OpenConversationButton sessionId={origin.conversationId} /> }
+          : {})}
+      />
 
       {/* Code judge — the code IS the judging logic; show it in the same highlighted editor the wizard uses,
           read-only (entrypoint-in-image judges have no code to show, so they keep the plain path line). */}

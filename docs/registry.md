@@ -86,3 +86,51 @@ content-mutation action (`harnesses:register` / `datasets:write` / `judges:write
 reuse `judges:write` like the rest of their surface; no new authz action); MCP
 parity via `set_*_version_tags`. Input is normalized in `apps/api` `version-tag-service.ts` (trim, drop empties,
 order-preserving dedupe; ≤20 tags × ≤60 chars).
+
+## Where a version came from (`origin`)
+
+`created_by` answers WHO registered a version; **`origin`** answers why it exists at all — the issue whose
+problem it was built to evaluate, the agent and conversation that shaped it, the channel the registration came
+through. Without it a judge an agent authored from an issue arrives anonymous: the detail view can name its
+creator and its content and nothing else, and "why does this exist" has no answer once the conversation scrolls
+away.
+
+`CapabilityOrigin` (`@everdict/contracts`, `records/capability-origin.ts`):
+
+```ts
+{ via: "web" | "mcp" | "ci" | "import",
+  from?: { type: "issue" | "scorecard" | "run" | …, id, version?, label? },
+  agentId?, agentName?, conversationId?, runId?, note? }
+```
+
+Three rules make it work:
+
+- **Metadata beside the spec, never inside it** — the same layer `created_by`, `team_id` and version tags live
+  on. Versions are immutable, so a spec-resident origin would mean two versions born from the same issue stop
+  being comparable, and re-stating where something came from would mint a version of unchanged content. It is
+  excluded from `specsEqual`, so a differing origin is never a 409.
+- **First answer wins.** `register` fills an UNSTAMPED version and never rewrites a stamped one (`origin IS NULL`
+  is the guard, exactly like the team-adoption rule beside it): re-registering identical content is not a second
+  birth.
+- **Record-embedded, not derived from the event log.** The `*.registered` facts are swept
+  (`deleteOlderThan`), and "why does this judge exist" is asked long after — the same reasoning behind the
+  tracker's durable per-record history.
+
+Assembly is one helper (`apps/api` `api/capability-origin.ts`), so both transports produce the same stamp: the
+route/tool decides `via`, the agent identity comes from the attribution the caller already carries
+(`x-everdict-agent-id` / `-name` / `-conversation-id`, the same headers `RevisionedWorkspaceFs` records), and
+`from` is DECLARED — an `origin` sibling on the register body (the spec schema strips it) or the `fromIssue` /
+`originNote` arguments on `create_judge` / `create_dataset` / `create_harness`. A declared **issue** reference is
+resolved to the issue's stable record id with its identifier+title snapshotted as `label`, because `ENG-12` is
+re-minted when an issue moves team.
+
+Storage: an `origin jsonb` column on every versioned table (migration `0111_capability_origin`), read back
+defensively (`parseCapabilityOrigin` — a malformed stamp degrades to "unknown origin" and never breaks the list
+that carries it). List entries expose `versionOrigins: Record<version, CapabilityOrigin>` (only stamped
+versions), the same grain as `versionTags`, so the detail views read it without a new endpoint. Rows registered
+before the migration stay NULL and stay that way: an origin invented after the fact is a guess wearing the
+clothes of a record. Their tie to an issue surfaces through the reverse read instead
+(`GET /issues?linkType=judge&linkId=…`).
+
+**A capability born from an issue links itself back to it** — `withOriginBacklink` (`@everdict/application-control`),
+a composition-root decorator paired with `withRegisteredFact`. See `docs/tracker.md`.

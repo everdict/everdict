@@ -1,4 +1,4 @@
-import type { EmitPlatformEventInput, PlatformEventEmitter } from "@everdict/application-control";
+import type { EmitPlatformEventInput, IssueBacklinkPort, PlatformEventEmitter } from "@everdict/application-control";
 
 // Construction-order forwarder (E2): fact producers built BEFORE the platform-event service exists — the
 // registries, the RevisionedWorkspaceFs decorator, the knowledge service — emit through this; bind() connects
@@ -20,6 +20,26 @@ export function lateBoundEmitter(): LateBoundEmitter {
     },
     async pushPersisted(events) {
       return target?.pushPersisted?.(events);
+    },
+  };
+}
+
+// The same construction-order idiom for the issue backlink: the registries are decorated long before
+// IssueService exists, so `withOriginBacklink` links through this forwarder and bind() connects it once the
+// tracker services are built. Unbound = no link, which only covers boot-time registrations (seeds, whose
+// `_shared` tenant the decorator skips anyway).
+export interface LateBoundIssueLinker extends IssueBacklinkPort {
+  bind(target: IssueBacklinkPort): void;
+}
+
+export function lateBoundIssueLinker(): LateBoundIssueLinker {
+  let target: IssueBacklinkPort | undefined;
+  return {
+    bind(t: IssueBacklinkPort): void {
+      target = t;
+    },
+    async link(tenant, id, input, actor): Promise<unknown> {
+      return target?.link(tenant, id, input, actor);
     },
   };
 }

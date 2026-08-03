@@ -5066,5 +5066,23 @@
     "deleteError": "라벨을 삭제하지 못했습니다.",
     "emptyTitle": "아직 라벨이 없습니다",
     "emptyHint": "팀이 이슈를 분류할 어휘를 정의해보세요."
+  },
+  "capabilityLineage": {
+    "title": "만들어진 배경",
+    "bornFrom": "다음에서 만들어짐",
+    "createdBy": "만든 주체",
+    "onBehalfOf": "{name} 대신",
+    "refType": {
+      "issue": "이슈",
+      "project": "프로젝트",
+      "initiative": "이니셔티브",
+      "scorecard": "스코어카드",
+      "run": "실행",
+      "trace": "트레이스",
+      "harness": "하네스",
+      "dataset": "데이터셋",
+      "judge": "저지",
+      "benchmark": "벤치마크"
+    }
   }
 }

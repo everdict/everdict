@@ -1,4 +1,4 @@
-import type { HarnessInstanceSpec, HarnessSpec, ServiceHarnessSpec } from "@everdict/contracts";
+import type { CapabilityOrigin, HarnessInstanceSpec, HarnessSpec, ServiceHarnessSpec } from "@everdict/contracts";
 import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
 
 // List metadata — live-version summary for one id (from registration history). Spec derivations like category/kind are filled in by the upstream registry.
@@ -16,6 +16,10 @@ export interface VersionMeta {
   createdAt?: string; // first registration time (ISO)
   updatedAt?: string; // most recent registration time (ISO)
   versionTags?: Record<string, string[]>; // version → tags (empty versions omitted; if no tags at all, the field itself is omitted)
+  // version → where that version came from (only versions that were stamped; if none was, the field is omitted).
+  // Per-VERSION, not per-id: v1 born from an issue and v2 shaped in a later conversation are different answers to
+  // "why does this exist", and collapsing them to the first would make the newest version the least explained one.
+  versionOrigins?: Record<string, CapabilityOrigin>;
 }
 
 // One list entry — version meta (registration history) + display fields derived from the latest instance (category/kind/subtitle).
@@ -33,7 +37,13 @@ export interface HarnessListEntry extends VersionMeta {
 // get()/getService() pin the template and return a resolved HarnessSpec (drop-in compatible with the existing HarnessRegistry.get).
 // Instances stack as versions under the same id (= template.id) → list groups them by category (template).
 export interface HarnessInstanceRegistry {
-  register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string, teamId?: string): Promise<void>;
+  register(
+    tenant: string,
+    instance: HarnessInstanceSpec,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec>;
   get(tenant: string, id: string, ref?: string): Promise<HarnessSpec>; // resolved (template + pins)

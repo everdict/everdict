@@ -34,6 +34,16 @@ infra (no secrets in the spec; `local` = dev/control-plane-host, superseded for 
   affect conflict/idempotency checks. Surface: `PUT /:id/versions/:version/tags` + MCP `set_*_version_tags`,
   gated by each entity's existing content-mutation action (no new authz action); normalization (trim/dedupe/caps)
   lives in `apps/api` `version-tag-service.ts` — one core, two transports.
+- **`origin` is provenance metadata, NOT spec content** — where a version came from (`CapabilityOrigin`: the
+  issue it was built for, the agent + conversation that shaped it, the channel). It sits beside `createdBy`/tags
+  for the same reason: versions are immutable, so a spec-resident origin would mint a version for unchanged
+  content and stop two versions born from the same issue from being comparable. It is excluded from `specsEqual`
+  (a differing origin is never a 409), `register` FILLS an unstamped version but never rewrites a stamped one
+  (first answer wins — re-registering identical content is not a second birth), and reads parse it defensively
+  (a malformed stamp degrades to "unknown", never breaks the list). Assembled at ONE helper
+  (`apps/api` `api/capability-origin.ts`) so both transports stamp identically; `origin jsonb` column, migration
+  `0111`. A declared `from: {type:"issue"}` also links the capability back to that issue via `withOriginBacklink`
+  (composition-root decorator, best-effort). See `docs/registry.md` + `docs/tracker.md`.
 - Validate file/external specs with `HarnessSpecSchema` (`@everdict/contracts`) at the boundary; unknown id/version →
   `NotFoundError`; `getService` narrows to `ServiceHarnessSpec` (throws on process).
 - Keep registry impls interchangeable (in-memory / file loader / Postgres) behind the one **async** interface.

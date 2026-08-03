@@ -1,4 +1,4 @@
-import { type JudgeSpec, JudgeSpecSchema } from "@everdict/contracts";
+import { type CapabilityOrigin, type JudgeSpec, JudgeSpecSchema } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import { type JudgeListEntry, type JudgeRegistry, judgeDerived } from "./judge-registry.js";
@@ -17,12 +17,19 @@ export class PgJudgeRegistry implements JudgeRegistry {
       createdBy: true,
       teamId: true,
       tags: true,
+      origin: true,
       softDelete: true,
     });
   }
 
-  register(tenant: string, spec: JudgeSpec, createdBy?: string, teamId?: string): Promise<void> {
-    return this.store.register(tenant, spec, createdBy, teamId);
+  register(
+    tenant: string,
+    spec: JudgeSpec,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
+    return this.store.register(tenant, spec, createdBy, teamId, origin);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
@@ -71,6 +78,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
         ...(meta.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
         ...(meta.updatedAt !== undefined ? { updatedAt: meta.updatedAt } : {}),
         ...(meta.versionTags !== undefined ? { versionTags: meta.versionTags } : {}),
+        ...(meta.versionOrigins !== undefined ? { versionOrigins: meta.versionOrigins } : {}),
       });
     }
     return out;

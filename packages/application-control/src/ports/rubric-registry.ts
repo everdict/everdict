@@ -1,4 +1,4 @@
-import type { RubricSpec } from "@everdict/contracts";
+import type { CapabilityOrigin, RubricSpec } from "@everdict/contracts";
 
 // One list entry — version metadata (registration history) + display fields derived from the latest rubric spec (description/subtitle).
 // GET /rubrics and MCP list_rubrics emit this shape. Same feel as the judge/dataset ListEntry.
@@ -14,13 +14,21 @@ export interface RubricListEntry {
   createdAt?: string;
   updatedAt?: string;
   versionTags?: Record<string, string[]>; // version → free-form label (tagged versions only) — mutable registry metadata (outside the spec)
+  // version → where that version came from (only stamped versions; omitted entirely when none was).
+  versionOrigins?: Record<string, CapabilityOrigin>;
 }
 
 // Rubric version SSOT — (tenant, id, version) → RubricSpec. Versions are immutable. "latest" is the semver/registration-order latest.
 // Same ownership model as judges/datasets: tenant-owned first, else SHARED_TENANT (first-party default rubric) fallback.
 // One rubric serves many judges (JudgeSpec.rubric may reference it as {id, version}). async — Postgres honors the same contract.
 export interface RubricRegistry {
-  register(tenant: string, spec: RubricSpec, createdBy?: string, teamId?: string): Promise<void>;
+  register(
+    tenant: string,
+    spec: RubricSpec,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<RubricSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback

@@ -1,4 +1,4 @@
-import type { JudgeSpec } from "@everdict/contracts";
+import type { CapabilityOrigin, JudgeSpec } from "@everdict/contracts";
 import { modelBindingLabel } from "@everdict/domain";
 import { VersionedStore } from "../versioned-store.js";
 
@@ -42,8 +42,14 @@ export function judgeDerived(
 export class InMemoryJudgeRegistry implements JudgeRegistry {
   private readonly store = new VersionedStore<JudgeSpec>("judge");
 
-  async register(tenant: string, spec: JudgeSpec, createdBy?: string, teamId?: string): Promise<void> {
-    this.store.register(tenant, spec, createdBy, teamId);
+  async register(
+    tenant: string,
+    spec: JudgeSpec,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
+    this.store.register(tenant, spec, createdBy, teamId, origin);
   }
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
@@ -91,6 +97,7 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
         ...(meta.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
         ...(meta.updatedAt !== undefined ? { updatedAt: meta.updatedAt } : {}),
         ...(meta.versionTags !== undefined ? { versionTags: meta.versionTags } : {}),
+        ...(meta.versionOrigins !== undefined ? { versionOrigins: meta.versionOrigins } : {}),
       });
     }
     return out;

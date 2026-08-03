@@ -2,6 +2,7 @@ import { BadRequestError, ConflictError, NotFoundError } from "@everdict/contrac
 import { LATEST, SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
 import type { VersionMeta } from "@everdict/application-control";
+import type { CapabilityOrigin } from "@everdict/contracts";
 
 // Shared in-memory storage/resolution for (tenant, id, version) → T: _shared fallback, latest/semver, immutable versions.
 // Shared by the harness taxonomy registries (template/instance) — a generalization of the former HarnessRegistry machinery.
@@ -16,6 +17,9 @@ interface Entry<T> {
   teamId?: string;
   deletedAt?: number; // soft-delete tombstone — once set, excluded from every read (content preserved, same pattern as datasets)
   tags?: string[]; // version tags — free-form labels attached because a version is hard to tell apart by number alone. Mutable metadata (outside content immutability, on par with createdBy)
+  // WHERE this version came from (the issue it was built for, the agent + conversation that shaped it). Metadata
+  // beside createdBy for the same reason ownership is: provenance must not mint a version of unchanged content.
+  origin?: CapabilityOrigin;
 }
 
 export class VersionedStore<T extends { id: string; version: string }> {
@@ -37,7 +41,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return undefined;
   }
 
-  register(tenant: string, item: T, createdBy?: string, teamId?: string): void {
+  register(tenant: string, item: T, createdBy?: string, teamId?: string, origin?: CapabilityOrigin): void {
     // Non-empty version is a registry invariant (defense-in-depth for seed/file paths that bypass the contract
     // VersionSchema): an empty/blank version is non-semver, so compareVersions sorts it to the tail → it silently
     // becomes `latest` and corrupts resolution + the detail view. Reject it here too.
@@ -72,6 +76,10 @@ export class VersionedStore<T extends { id: string; version: string }> {
       // team: transferring ownership is its own act, and doing it as a side effect of re-registering identical
       // content would move a resource out from under whoever could write it.
       if (existing.teamId === undefined && teamId !== undefined) existing.teamId = teamId;
+      // Same rule for provenance: a revive may FILL an unstamped version, but never rewrites one that already
+      // says where it came from — the first answer is the true one, and re-registering identical content is not
+      // a new birth.
+      if (existing.origin === undefined && origin !== undefined) existing.origin = origin;
       return;
     }
     versions.set(item.version, {
@@ -80,6 +88,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
       createdAt: new Date().toISOString(),
       ...(createdBy !== undefined ? { createdBy } : {}),
       ...(teamId !== undefined ? { teamId } : {}),
+      ...(origin !== undefined ? { origin } : {}),
     });
   }
 
@@ -120,6 +129,18 @@ export class VersionedStore<T extends { id: string; version: string }> {
     const out: Record<string, string[]> = {};
     for (const e of this.byOwner.get(owner)?.get(id)?.values() ?? []) {
       if (e.deletedAt === undefined && e.tags !== undefined && e.tags.length > 0) out[e.item.version] = e.tags;
+    }
+    return out;
+  }
+
+  // version → origin (only stamped live versions). Reads resolve the owner like versions() does, so a `_shared`
+  // fallback answers with its own provenance rather than an empty map.
+  versionOrigins(tenant: string, id: string): Record<string, CapabilityOrigin> {
+    const owner = this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const out: Record<string, CapabilityOrigin> = {};
+    for (const e of this.byOwner.get(owner)?.get(id)?.values() ?? []) {
+      if (e.deletedAt === undefined && e.origin !== undefined) out[e.item.version] = e.origin;
     }
     return out;
   }
@@ -165,6 +186,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
       const latest = entries.at(-1);
       const latestVersionEntry = this.byOwner.get(owner)?.get(id)?.get(latestVersion); // creator of the semver-latest version (≠ last-registered)
       const versionTags = this.versionTags(owner, id);
+      const versionOrigins = this.versionOrigins(owner, id);
       out.push({
         id,
         owner,
@@ -177,6 +199,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
         ...(earliest ? { createdAt: earliest.createdAt } : {}),
         ...(latest ? { updatedAt: latest.createdAt } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
+        ...(Object.keys(versionOrigins).length > 0 ? { versionOrigins } : {}),
       });
     }
     return out;
