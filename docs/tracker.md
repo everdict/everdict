@@ -273,6 +273,21 @@ by *listing that team's issues* — cost the same as `GET /issues` for a 1.6 KB 
 from two workspace aggregates (`IssueStore.countByTeam` + `TeamStore.countMembersByTeam`), the same rule the
 project list already followed: **the detail carries the rollup, the list stays lean.**
 
+**What the list is indexed for** (migration 0116, measured with `EXPLAIN ANALYZE` on a 5,000-issue workspace).
+Only the team-scoped newest-first read was covered before, and every other shape the screen offers fell off it:
+a label filter had no index at all and seq-scanned the table; the workspace-wide list had nothing leading with
+`(tenant, updated_at DESC)` and sorted the whole workspace to serve fifty rows; a status facet inside a team
+seeked on the team index and then discarded thousands of rows, because that index carries the ordering but not
+the predicate. All three are LINEAR in workspace size, which is why the list feels fine on a demo workspace and
+not on a real one. 0116 adds a GIN index on `label_ids` (the default `jsonb_ops` — `?|` is unsupported by
+`jsonb_path_ops`), `(tenant, updated_at DESC, id DESC)` and its `created_at` twin for the two column orderings
+and the cursors that ride them, and `(tenant, team_id, status, updated_at DESC)` with the status BETWEEN the
+team and the ordering, so an equality on it leaves `updated_at DESC` still sorted within the group. That last
+one is insurance the planner is meant to ignore for a broad facet — scanning the sorted twin and filtering
+really is cheaper — and to reach for on a selective one: "show me what regressed" names a rare status, and it
+used to walk the whole team to answer. Still uncovered on purpose: `countByTeam` reads every row of the
+workspace by definition, so it stays a seq scan; making that cheaper is a counter or a rollup, not an index.
+
 `syncPull=true` narrows to the GitHub bulk sync's working set. It is exposed for a reason worth stating: without
 it the only way to answer "which repositories can I refresh" was to read the entire issue list and filter it
 client-side, which is exactly what the issues page used to do — a second full-table read per page load.
