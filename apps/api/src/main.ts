@@ -2,11 +2,11 @@ import {
   GithubIssueSync,
   InitiativeService,
   IssueService,
-  TeamService,
   KnowledgeEntryService,
   KnowledgeService,
   ProjectService,
   TaskService,
+  TeamService,
   registryLatestVersionResolver,
   seedFirstPartyAgents,
 } from "@everdict/application-control";

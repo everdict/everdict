@@ -81,9 +81,10 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
       return reply.code(400).send({ code: "BAD_REQUEST", message: "linkType and linkId must be given together." });
     // "My teams" is resolved here, not in the store: the roster lookup belongs to the team service, and the
     // store stays a plain id filter. An empty roster narrows to nothing rather than silently widening to all.
-    const myTeamIds = mine === "true" && deps.teamService
-      ? await deps.teamService.teamIdsFor(principal.workspace, principal.subject)
-      : undefined;
+    const myTeamIds =
+      mine === "true" && deps.teamService
+        ? await deps.teamService.teamIdsFor(principal.workspace, principal.subject)
+        : undefined;
     return reply.send(
       await deps.issueService.list(principal.workspace, {
         ...(status !== undefined ? { status } : {}),

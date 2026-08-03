@@ -58,12 +58,19 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
     },
   });
   const writers: GithubRepoWriterFactory = { for: () => idleWriter };
-  const issueService = new IssueService({ teams: teamAllocator, store: issueStore, scorecards: new InMemoryScorecardStore(), events });
+  const issueService = new IssueService({
+    teams: teamAllocator,
+    store: issueStore,
+    scorecards: new InMemoryScorecardStore(),
+    events,
+  });
   return {
     deps: {
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
       issueService,
-      issueSync: new GithubIssueSync({ teams: teamAllocator, store: issueStore,
+      issueSync: new GithubIssueSync({
+        teams: teamAllocator,
+        store: issueStore,
         issues: issueService,
         tokens: { tokenForRepository: async () => ({ token: "tok" }) },
         writers,
