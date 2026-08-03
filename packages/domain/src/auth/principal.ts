@@ -13,6 +13,12 @@ export interface Principal {
   email?: string; // OIDC email/preferred_username claim — for the member list display (display only, unrelated to authz/identity). Absent for api-key.
   scopes?: string[]; // per-api-key permission scope (read|write|admin). If present, narrowed by intersection with role permissions. If absent (OIDC/legacy key), unlimited. See authz.ts can().
   runnerId?: string; // only for a runner token (via=runner) — which device. The lease/result tools use (workspace, subject, runnerId).
+  // The teams this subject belongs to IN `workspace` — resolved per request alongside the membership role, because
+  // team membership is its own roster (a workspace member is not automatically in every team). It is an
+  // AUTHORIZATION input, not just display: a write against a resource owned by a team the subject is not on is
+  // refused (see can() in authz.ts). Absent/empty = on no team, which can still act on unowned resources and,
+  // for an admin, on everything. Never trusted from the client — the control plane loads it.
+  teams?: string[];
 }
 
 // Authentication request context — hints from outside the bearer. workspaceHint = x-everdict-workspace header (the workspace the request targets).

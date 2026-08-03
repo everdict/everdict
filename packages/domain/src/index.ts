@@ -289,6 +289,8 @@ export {
   API_KEY_SCOPES,
   type ApiKeyScope,
   authorize,
+  canReachTeam,
+  type ResourceScope,
   can,
   EVERDICT_ROLES,
   type EverdictRole,

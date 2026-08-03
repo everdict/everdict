@@ -6,6 +6,8 @@ export {
   type ApiKeyScope,
   authorize,
   can,
+  canReachTeam,
+  type ResourceScope,
   EVERDICT_ROLES,
   type EverdictRole,
 } from "@everdict/domain";

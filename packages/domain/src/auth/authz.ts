@@ -272,21 +272,56 @@ const SCOPE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
   admin: ALL_ACTIONS,
 };
 
-export function can(principal: Principal, action: Action): boolean {
+// The resource an action is aimed at, when the answer depends on it. Today that is TEAM OWNERSHIP: an eval asset
+// (harness · dataset · judge · rubric · runtime · scorecard · view · schedule) and an issue belong to a team, and
+// writing one you do not own is refused. Omit it for workspace-level actions (settings, members, secrets) and for
+// reads — those keep the flat role answer.
+export interface ResourceScope {
+  // The owning team. `undefined` = the resource declares no owner (legacy rows, workspace-level assets) and the
+  // team check does not apply — never treat "no owner" as "everyone's team", which would silently widen access.
+  teamId?: string;
+}
+
+// Is this a write? Only writes are gated on team membership. Reads stay workspace-wide on purpose: the role matrix
+// already says knowing what exists is benign at viewer+, and a workspace whose teams cannot see each other's work
+// stops being one workspace. Ownership shows up in reads as a FILTER (list by team), not as a 403.
+function isWrite(action: Action): boolean {
+  return !action.endsWith(":read");
+}
+
+// `can` answers three questions in order, and all three must pass:
+//   1. does the ROLE grant this action  2. does the api-key SCOPE still carry it  3. may this subject act on THIS
+//      resource — i.e. is the owning team one of theirs.
+// (3) is the team axis. An ADMIN bypasses it: admins govern the whole workspace, and a team they are not on would
+// otherwise be un-administrable — the same reason workspace settings are admin-only in the first place.
+export function can(principal: Principal, action: Action, resource?: ResourceScope): boolean {
   const roleOk = principal.roles.some((r) => ROLE_PERMISSIONS[r]?.has(action) ?? false);
   if (!roleOk) return false;
   // A subject with no scope (OIDC user / legacy key) keeps the role permissions as-is (unlimited). If scoped, narrowed by intersection.
-  if (!principal.scopes || principal.scopes.length === 0) return true;
-  return principal.scopes.some((s) => SCOPE_PERMISSIONS[s]?.has(action) ?? false);
+  if (principal.scopes && principal.scopes.length > 0) {
+    if (!principal.scopes.some((s) => SCOPE_PERMISSIONS[s]?.has(action) ?? false)) return false;
+  }
+  return canReachTeam(principal, action, resource);
+}
+
+// The team half, split out so a service that already knows the role passed can ask just this.
+export function canReachTeam(principal: Principal, action: Action, resource?: ResourceScope): boolean {
+  if (resource?.teamId === undefined) return true; // unowned / workspace-level → nothing to check
+  if (!isWrite(action)) return true; // reads are workspace-wide; ownership filters lists, it does not 403 them
+  if (principal.roles.includes("admin")) return true; // an admin governs every team in the workspace
+  return principal.teams?.includes(resource.teamId) ?? false;
 }
 
 // 403 if not permitted. The caller (API route) invokes this at handler entry.
-export function authorize(principal: Principal, action: Action): void {
-  if (!can(principal, action)) {
+export function authorize(principal: Principal, action: Action, resource?: ResourceScope): void {
+  if (!can(principal, action, resource)) {
+    const teamDenied = resource?.teamId !== undefined && !canReachTeam(principal, action, resource);
     throw new ForbiddenError(
       "FORBIDDEN",
-      { workspace: principal.workspace, roles: principal.roles, action },
-      `You do not have permission for this action (${action}).`,
+      { workspace: principal.workspace, roles: principal.roles, action, ...(resource ?? {}) },
+      teamDenied
+        ? `This belongs to a team you are not on, so you cannot ${action}. Ask an admin to add you to the team.`
+        : `You do not have permission for this action (${action}).`,
     );
   }
 }

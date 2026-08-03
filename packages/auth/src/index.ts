@@ -7,6 +7,8 @@ export {
   API_KEY_SCOPES,
   can,
   authorize,
+  canReachTeam,
+  type ResourceScope,
 } from "./authz.js";
 export { type OidcAuthOptions, type OidcVerifyErrorInfo, oidcAuthenticator } from "./oidc.js";
 export { type ApiKeyAuthOptions, apiKeyAuthenticator } from "./api-key.js";
