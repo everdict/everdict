@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  FolderKanban,
   Github,
   Link2,
 } from 'lucide-react'
@@ -21,6 +20,7 @@ import {
   IssueActions,
   IssueLabelControl,
   IssuePriorityControl,
+  IssueProjectControl,
   IssueStatusControl,
   IssueTeamControl,
   IssueTriageActions,
@@ -397,15 +397,22 @@ export default async function IssueDetailPage({
                 canWrite={canWrite}
               />
             </PropertyRow>
-            {project && (
+            {/* 프로젝트도 이 열에서 바로 넣고 뺀다 — 붙어 있을 때만 보이던 링크 한 줄로는 "이 이슈를 어느
+                프로젝트에 넣을까"에 답할 자리가 화면 어디에도 없었다(편집 다이얼로그 안에만 있었다).
+                고를 프로젝트가 하나도 없는 워크스페이스에서는 빈 행을 내지 않는다(빈 섹션 숨김). */}
+            {(project !== undefined || (canWrite && projects.length > 0)) && (
               <PropertyRow label={t('fieldProject')}>
-                <Link
-                  href={`/${workspace}/projects/${encodeURIComponent(project.id)}`}
-                  className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
-                >
-                  <FolderKanban className="size-3.5 shrink-0 text-faint" />
-                  <span className="truncate">{project.name}</span>
-                </Link>
+                <IssueProjectControl
+                  workspace={workspace}
+                  id={current.id}
+                  project={
+                    project
+                      ? { id: project.id, name: project.name, status: project.status }
+                      : undefined
+                  }
+                  projects={projects.map((p) => ({ id: p.id, name: p.name, status: p.status }))}
+                  canWrite={canWrite}
+                />
               </PropertyRow>
             )}
             {cycle && (
