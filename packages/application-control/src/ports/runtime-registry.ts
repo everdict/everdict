@@ -15,7 +15,9 @@ export interface RuntimeListEntry {
 }
 
 export interface RuntimeRegistry {
-  register(tenant: string, spec: RuntimeSpec): Promise<void>;
+  register(tenant: string, spec: RuntimeSpec, createdBy?: string, teamId?: string): Promise<void>;
+  // 소유 팀 — 인가 커널의 팀 축이 읽는 값(undefined = 소유자 없음).
+  teamOfVersion?(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<RuntimeSpec>;
   versions(tenant: string, id: string): Promise<string[]>;

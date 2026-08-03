@@ -14,11 +14,17 @@ export class PgBenchmarkRegistry implements BenchmarkRegistry {
       column: "spec",
       label: "Benchmark",
       parse: (v) => BenchmarkAdapterSpecSchema.parse(v),
+      teamId: true,
     });
   }
 
-  register(tenant: string, spec: BenchmarkAdapterSpec): Promise<void> {
-    return this.store.register(tenant, spec);
+  register(tenant: string, spec: BenchmarkAdapterSpec, teamId?: string): Promise<void> {
+    return this.store.register(tenant, spec, undefined, teamId);
+  }
+
+  // 소유 팀 — 인가 커널의 팀 축이 읽는 값(undefined = 소유자 없음).
+  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    return this.store.teamOfVersion(tenant, id, version);
   }
   versions(tenant: string, id: string): Promise<string[]> {
     return this.store.versions(tenant, id);

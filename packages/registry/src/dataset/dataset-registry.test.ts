@@ -211,7 +211,7 @@ describe("loadDatasetDir", () => {
   });
 });
 
-// Fake SqlClient — mimics a tenant-aware everdict_datasets (including created_by + deleted_at tombstone + tags [version tags]).
+// Fake SqlClient — mimics a tenant-aware everdict_datasets (created_by + team_id owner + deleted_at tombstone + tags).
 interface FakeRow {
   tenant: string;
   id: string;
@@ -219,6 +219,7 @@ interface FakeRow {
   dataset: unknown;
   created_at: string;
   created_by: string | null;
+  team_id?: string | null;
   deleted_at: number | null;
   tags: unknown;
 }
@@ -273,10 +274,10 @@ function fakePg(): SqlClient {
         const r = rows.some((x) => x.tenant === p[0] && x.id === p[1] && live(x));
         return { rows: (r ? [{}] : []) as R[] };
       }
-      // summarize — version/dataset/created_at/created_by/tags of live versions (for list metadata summary).
+      // summarize — version/dataset/created_at/created_by/team_id/tags of live versions (list metadata).
       if (
         t.startsWith(
-          "SELECT version, dataset, created_at, created_by, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+          "SELECT version, dataset, created_at, created_by, team_id, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
         )
       ) {
         return {
@@ -287,6 +288,7 @@ function fakePg(): SqlClient {
               dataset: x.dataset,
               created_at: x.created_at,
               created_by: x.created_by,
+              team_id: x.team_id ?? null,
               tags: x.tags,
             })) as R[],
         };

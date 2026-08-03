@@ -105,6 +105,10 @@ export type RunSession = z.infer<typeof RunSessionSchema>;
 export const RunRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
+  // 이 결과를 만든 팀. 자산과 같은 축이라 "우리 팀이 무엇을 평가했나"를 하네스를 전부 훑지 않고
+  // 답할 수 있다. 선택적인 이유는 팀 도입 이전 행과 소유자 없는 실행이 실재하기 때문 — 없음은
+  // "모두의 것"이 아니라 "소유자 없음"이다.
+  teamId: z.string().optional(),
   harness: z.object({ id: z.string(), version: z.string() }),
   caseId: z.string(),
   status: RunStatusSchema,

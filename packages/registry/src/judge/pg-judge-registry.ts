@@ -15,13 +15,14 @@ export class PgJudgeRegistry implements JudgeRegistry {
       label: "judge",
       parse: (v) => JudgeSpecSchema.parse(v),
       createdBy: true,
+      teamId: true,
       tags: true,
       softDelete: true,
     });
   }
 
-  register(tenant: string, spec: JudgeSpec, createdBy?: string): Promise<void> {
-    return this.store.register(tenant, spec, createdBy);
+  register(tenant: string, spec: JudgeSpec, createdBy?: string, teamId?: string): Promise<void> {
+    return this.store.register(tenant, spec, createdBy, teamId);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
@@ -35,6 +36,11 @@ export class PgJudgeRegistry implements JudgeRegistry {
   get(tenant: string, id: string, ref?: string): Promise<JudgeSpec> {
     return this.store.get(tenant, id, ref);
   }
+  // 소유 팀 위임 — 인가 커널의 팀 축이 읽는 값.
+  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    return this.store.teamOfVersion(tenant, id, version);
+  }
+
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
     return this.store.creatorOfVersion(tenant, id, version);
   }
@@ -61,6 +67,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
         versionCount: meta.versionCount,
         ...judgeDerived(latestSpec),
         ...(meta.createdBy !== undefined ? { createdBy: meta.createdBy } : {}),
+        ...(meta.teamId !== undefined ? { teamId: meta.teamId } : {}),
         ...(meta.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
         ...(meta.updatedAt !== undefined ? { updatedAt: meta.updatedAt } : {}),
         ...(meta.versionTags !== undefined ? { versionTags: meta.versionTags } : {}),

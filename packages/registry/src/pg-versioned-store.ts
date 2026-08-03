@@ -15,6 +15,9 @@ export interface PgVersionedStoreConfig<T> {
   parse: (v: unknown) => T;
   softDelete?: boolean; // table has a deleted_at column → reads filter it out, register revives, softDelete exposed
   createdBy?: boolean; // table has a created_by column → INSERT stamps it, creatorOfVersion + list createdBy derive from it
+  // table has a team_id column (migration 0106) → INSERT stamps it and teamOfVersion reads it. Ownership is
+  // metadata beside created_by, never inside the versioned spec: transferring it must not mint a new version.
+  teamId?: boolean;
   tags?: boolean; // table has a tags jsonb column (migration 0047/0054) → setVersionTags/versionTags + list versionTags
 }
 
@@ -31,6 +34,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   private readonly parse: (v: unknown) => T;
   private readonly hasSoftDelete: boolean;
   private readonly hasCreatedBy: boolean;
+  private readonly hasTeamId: boolean;
   private readonly hasTags: boolean;
 
   constructor(
@@ -43,6 +47,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     this.parse = config.parse;
     this.hasSoftDelete = config.softDelete ?? false;
     this.hasCreatedBy = config.createdBy ?? false;
+    this.hasTeamId = config.teamId ?? false;
     this.hasTags = config.tags ?? false;
   }
 
@@ -71,7 +76,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     return sortVersions(r.rows.map((x) => x.version));
   }
 
-  async register(tenant: string, item: T, createdBy?: string): Promise<void> {
+  async register(tenant: string, item: T, createdBy?: string, teamId?: string): Promise<void> {
     // Non-empty version invariant (parity with VersionedStore) — a blank version sorts to the tail as non-semver and
     // silently becomes `latest`. Reject it before the write.
     if (item.version.trim().length === 0) {
@@ -102,19 +107,44 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
           `UPDATE ${this.table} SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3`,
           [tenant, item.id, item.version],
         );
+      // A revive may ADOPT an unowned version, but never moves an owned one to another team — transferring
+      // ownership is its own act, and doing it as a side effect of re-registering identical content would move a
+      // resource out from under whoever could write it (`team_id IS NULL` is the guard, not an UPDATE).
+      if (this.hasTeamId && teamId !== undefined)
+        await this.client.query(
+          `UPDATE ${this.table} SET team_id = $4 WHERE tenant = $1 AND id = $2 AND version = $3 AND team_id IS NULL`,
+          [tenant, item.id, item.version, teamId],
+        );
       return;
     }
+    const columns = ["tenant", "id", "version", this.column, "created_at"];
+    const values: unknown[] = [tenant, item.id, item.version, JSON.stringify(item)];
+    const placeholders = ["$1", "$2", "$3", "$4", "now()"];
     if (this.hasCreatedBy) {
-      await this.client.query(
-        `INSERT INTO ${this.table} (tenant, id, version, ${this.column}, created_at, created_by) VALUES ($1, $2, $3, $4, now(), $5)`,
-        [tenant, item.id, item.version, JSON.stringify(item), createdBy ?? null],
-      );
-    } else {
-      await this.client.query(
-        `INSERT INTO ${this.table} (tenant, id, version, ${this.column}, created_at) VALUES ($1, $2, $3, $4, now())`,
-        [tenant, item.id, item.version, JSON.stringify(item)],
-      );
+      columns.push("created_by");
+      values.push(createdBy ?? null);
+      placeholders.push(`$${values.length}`);
     }
+    if (this.hasTeamId) {
+      columns.push("team_id");
+      values.push(teamId ?? null);
+      placeholders.push(`$${values.length}`);
+    }
+    await this.client.query(
+      `INSERT INTO ${this.table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")})`,
+      values,
+    );
+  }
+
+  // Which team owns this version — the input the authz kernel's team axis needs. Undefined for an unowned
+  // (seed/_shared/legacy) version, which is NOT the same as "everyone's".
+  async teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    if (!this.hasTeamId) return undefined;
+    const r = await this.client.query<{ team_id: string | null }>(
+      `SELECT team_id FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3${this.live}`,
+      [tenant, id, version],
+    );
+    return r.rows[0]?.team_id ?? undefined;
   }
 
   async has(tenant: string, id: string, version: string): Promise<boolean> {

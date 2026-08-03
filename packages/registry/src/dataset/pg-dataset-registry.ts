@@ -20,13 +20,19 @@ export class PgDatasetRegistry implements DatasetRegistry {
       parse: (v) => DatasetSchema.parse(v),
       softDelete: true,
       createdBy: true,
+      teamId: true,
       tags: true,
     });
   }
 
-  register(tenant: string, dataset: Dataset, createdBy?: string): Promise<void> {
-    return this.store.register(tenant, dataset, createdBy);
+  register(tenant: string, dataset: Dataset, createdBy?: string, teamId?: string): Promise<void> {
+    return this.store.register(tenant, dataset, createdBy, teamId);
   }
+  // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
+  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    return this.store.teamOfVersion(tenant, id, version);
+  }
+
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
   }
@@ -87,9 +93,10 @@ export class PgDatasetRegistry implements DatasetRegistry {
       dataset: unknown;
       created_at: string | Date;
       created_by: string | null;
+      team_id: string | null;
       tags: unknown;
     }>(
-      "SELECT version, dataset, created_at, created_by, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+      "SELECT version, dataset, created_at, created_by, team_id, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
       [owner, id],
     );
     const rows = r.rows;
@@ -124,6 +131,8 @@ export class PgDatasetRegistry implements DatasetRegistry {
       tags: latest.tags,
       createdAt: new Date(earliest.created_at).toISOString(),
       updatedAt: new Date(newest.created_at).toISOString(),
+      // 소유 팀은 최신 버전 기준 — 소유권은 릴리스가 아니라 대상 자체에 붙는다.
+      ...(latestRow.team_id != null ? { teamId: latestRow.team_id } : {}),
       ...(latest.description !== undefined ? { description: latest.description } : {}),
       ...(latest.producedBy !== undefined ? { producedBy: latest.producedBy } : {}),
       ...(earliest.created_by !== null ? { createdBy: earliest.created_by } : {}),

@@ -8,6 +8,9 @@ export interface VersionMeta {
   versions: string[];
   latestVersion: string;
   versionCount: number;
+  // 소유 팀 — 목록이 팀으로 걸리려면 행에 실려야 한다. 최신 버전 기준(소유권은 릴리스가 아니라 대상
+  // 자체에 붙는다). 없음 = 소유자 없음(_shared/시드).
+  teamId?: string;
   createdBy?: string; // subject of the first registered version
   latestCreatedBy?: string; // subject of the latest (semver) version — the privacy owner for a user-secret harness (visibility follows the version that decides privacy)
   createdAt?: string; // first registration time (ISO)
@@ -30,7 +33,7 @@ export interface HarnessListEntry extends VersionMeta {
 // get()/getService() pin the template and return a resolved HarnessSpec (drop-in compatible with the existing HarnessRegistry.get).
 // Instances stack as versions under the same id (= template.id) → list groups them by category (template).
 export interface HarnessInstanceRegistry {
-  register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string): Promise<void>;
+  register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string, teamId?: string): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec>;
   get(tenant: string, id: string, ref?: string): Promise<HarnessSpec>; // resolved (template + pins)
@@ -47,6 +50,10 @@ export interface HarnessInstanceRegistry {
   // The first-registrant subject of this harness id (no seed/shared) — for verifying the owner of a private (references a personal secret) harness.
   creatorOf(tenant: string, id: string): Promise<string | undefined>;
   // The registrant subject of this "version" — for delete authz (creator-or-admin). Non-owned/deleted/absent → NotFound (same as datasets).
+  // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned
+  // (`_shared`/seeded), which the gate lets through; it is NOT "everyone's".
+  teamOfVersion?(tenant: string, id: string, version: string): Promise<string | undefined>;
+
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
   // Version soft-delete (tombstone) — data is preserved (past scorecard reproducibility), excluded from every read, re-registering identical content revives it.
   softDelete(tenant: string, id: string, version: string): Promise<void>;

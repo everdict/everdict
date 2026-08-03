@@ -234,6 +234,9 @@ export function applyGradingPlan(cases: EvalCase[], plan?: GraderSpec[]): EvalCa
 }
 
 export interface RunScorecardInput {
+  // 이 배치를 소유한 팀 — 평가 자산과 같은 축이라 "우리 팀이 무엇을 평가했나"를
+  // 하네스를 전부 훑지 않고 답할 수 있다. 라우트가 결정해 넘긴다.
+  teamId?: string;
   tenant: string;
   // INTERNAL (experiment façade only — routes never expose these two): group kind stamped on the record, and a
   // pre-resolved dataset that BYPASSES the registry lookup (the ad-hoc task path / the graders-stripped copy).

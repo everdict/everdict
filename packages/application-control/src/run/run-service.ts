@@ -54,6 +54,8 @@ export interface SubmitInput {
   // submitter (principal.subject) — the owner used to resolve a personally-owned connection for a private-repo seed ("clone with my connection").
   // HTTP/MCP routes always carry principal.subject; if unset, resolveRepoToken falls back to tenant (test compatibility).
   submittedBy?: string;
+  // 이 실행을 소유한 팀 — 자산과 같은 축(라우트가 결정해 넘긴다).
+  teamId?: string;
   harness: { id: string; version: string };
   case: EvalCase;
   runtime?: string; // the tenant Runtime id to run on (placement.target). If absent, the default backend (same symmetry as scorecard).
@@ -264,6 +266,7 @@ export class RunService {
       ...(placedRuntime ? { runtime: placedRuntime } : {}),
       ...(effective.trigger ? { trigger: effective.trigger } : {}),
       ...(effective.submittedBy ? { submittedBy: effective.submittedBy } : {}),
+      ...(effective.teamId ? { teamId: effective.teamId } : {}),
       origin: standaloneRunOrigin(effective.trigger, effective.submittedBy, effective.causedByRunId),
       // Caused work is background by default (§5.4 — autonomous fan-out never starves a human's click).
       ...(effective.causedByRunId ? { class: "background" as const } : {}),

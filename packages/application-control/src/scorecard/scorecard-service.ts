@@ -226,6 +226,7 @@ export class ScorecardService {
       harness: { id: input.harness.id, version: harnessVersion }, // resolved concrete version (never "latest")
       ...(origin ? { origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
+      ...(input.teamId ? { teamId: input.teamId } : {}),
       ...(input.runtime ? { runtime: input.runtime } : {}),
       ...(subset ? { subset } : {}),
       orchestration: {

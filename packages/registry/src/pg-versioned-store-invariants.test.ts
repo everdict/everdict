@@ -125,7 +125,7 @@ function fakePg(): FakePg {
       }
       if (
         t.startsWith(
-          "SELECT version, dataset, created_at, created_by, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+          "SELECT version, dataset, created_at, created_by, team_id, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
         )
       ) {
         return {
@@ -136,6 +136,7 @@ function fakePg(): FakePg {
               dataset: x.dataset,
               created_at: x.created_at,
               created_by: x.created_by,
+              team_id: null,
               tags: x.tags,
             })) as R[],
         };

@@ -15,6 +15,11 @@ export class InMemoryRuntimeRegistry implements RuntimeRegistry {
   async register(tenant: string, spec: RuntimeSpec): Promise<void> {
     this.store.register(tenant, spec);
   }
+  // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
+  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
+    return this.store.teamOfVersion(tenant, id, version);
+  }
+
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
   }

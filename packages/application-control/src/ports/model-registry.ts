@@ -5,7 +5,7 @@ import type { ModelSpec } from "@everdict/contracts";
 // A user registers and version-manages their own model (provider+model+baseUrl) directly. async — Postgres honors the same contract.
 export interface ModelRegistry {
   // createdBy: subject that registered this version (for soft-delete authz — the creator themselves). No system seed / file loader / bundle apply (undefined).
-  register(tenant: string, spec: ModelSpec, createdBy?: string): Promise<void>;
+  register(tenant: string, spec: ModelSpec, createdBy?: string, teamId?: string): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<ModelSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback, deleted versions excluded

@@ -87,16 +87,21 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
   constructor(private readonly templates: HarnessTemplateRegistry) {}
 
   // On register, validate template existence + pin validity via resolve (reject on failure — fail fast).
-  async register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string): Promise<void> {
+  async register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string, teamId?: string): Promise<void> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
     // Resolve validates pins; assertPortable then hard-blocks a service spec that would resolve to different addresses
     // per runtime (structural errors only — host-literal warnings are surfaced by the caller). docs/architecture/topology-portability.md.
     assertPortable(resolveHarnessInstance(template, instance));
-    this.store.register(tenant, instance, createdBy);
+    this.store.register(tenant, instance, createdBy, teamId);
   }
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
   }
+  // 소유 팀 위임 — 인가 커널의 팀 축이 읽는 값.
+  async teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    return await this.store.teamOfVersion(tenant, id, version);
+  }
+
   async creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
     return this.store.creatorOfVersion(tenant, id, version);
   }

@@ -5,6 +5,8 @@ import type { Dataset, DatasetProvenance } from "@everdict/contracts";
 // from the registration history (createdAt=first registration, updatedAt=latest registration).
 // _shared and file-seeded versions have no createdBy (undefined). GET /datasets and MCP list_datasets emit this shape verbatim.
 export interface DatasetListEntry {
+  // 소유 팀 — 목록이 팀으로 걸리려면 행에 실려야 한다(최신 버전 기준). 없음 = 소유자 없음.
+  teamId?: string;
   id: string;
   owner: string;
   versions: string[]; // live versions (semver ascending)
@@ -26,7 +28,7 @@ export interface DatasetListEntry {
 // Harness-agnostic — the same dataset runs against several harness@version for baseline comparison. async — Postgres shares the contract.
 export interface DatasetRegistry {
   // createdBy: subject that registered this version (for soft-delete authz — the creator themselves). No system seed / file loader (undefined).
-  register(tenant: string, dataset: Dataset, createdBy?: string): Promise<void>;
+  register(tenant: string, dataset: Dataset, createdBy?: string, teamId?: string): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<Dataset>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback, deleted versions excluded

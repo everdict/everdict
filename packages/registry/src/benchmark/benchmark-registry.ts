@@ -5,7 +5,9 @@ import { VersionedStore } from "../versioned-store.js";
 // Same ownership model as dataset/harness/judge: tenant-owned first, else _shared (first-party) fallback.
 // This is the core of the "per-user/per-tenant benchmark" generalization — turning the catalog (code) into data a tenant registers.
 export interface BenchmarkRegistry {
-  register(tenant: string, spec: BenchmarkAdapterSpec): Promise<void>;
+  register(tenant: string, spec: BenchmarkAdapterSpec, teamId?: string): Promise<void>;
+  // 소유 팀 — 인가 커널의 팀 축이 읽는 값(undefined = 소유자 없음).
+  teamOfVersion?(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
   get(tenant: string, id: string, ref?: string): Promise<BenchmarkAdapterSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // owner-first / _shared fallback
   ownVersions(tenant: string, id: string): Promise<string[]>; // this tenant's owned only (conflict check)
@@ -19,8 +21,12 @@ export interface BenchmarkRegistry {
 export class InMemoryBenchmarkRegistry implements BenchmarkRegistry {
   private readonly store = new VersionedStore<BenchmarkAdapterSpec>("Benchmark");
 
-  async register(tenant: string, spec: BenchmarkAdapterSpec): Promise<void> {
-    this.store.register(tenant, spec);
+  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
+    return this.store.teamOfVersion(tenant, id, version);
+  }
+
+  async register(tenant: string, spec: BenchmarkAdapterSpec, teamId?: string): Promise<void> {
+    this.store.register(tenant, spec, undefined, teamId);
   }
   async versions(tenant: string, id: string): Promise<string[]> {
     return this.store.versions(tenant, id);

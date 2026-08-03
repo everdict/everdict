@@ -10,6 +10,10 @@ interface Entry<T> {
   seq: number;
   createdAt: string; // registration time (ISO)
   createdBy?: string; // registering subject (absent for seed/file)
+  // The OWNING TEAM. Metadata like createdBy, deliberately outside the versioned content: ownership can be
+  // transferred, and rewriting a spec to do it would mint a new version of something that did not change.
+  // Absent = unowned (seed/_shared/legacy) → the team gate does not apply. See can() in @everdict/domain.
+  teamId?: string;
   deletedAt?: number; // soft-delete tombstone — once set, excluded from every read (content preserved, same pattern as datasets)
   tags?: string[]; // version tags — free-form labels attached because a version is hard to tell apart by number alone. Mutable metadata (outside content immutability, on par with createdBy)
 }
@@ -33,7 +37,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return undefined;
   }
 
-  register(tenant: string, item: T, createdBy?: string): void {
+  register(tenant: string, item: T, createdBy?: string, teamId?: string): void {
     // Non-empty version is a registry invariant (defense-in-depth for seed/file paths that bypass the contract
     // VersionSchema): an empty/blank version is non-semver, so compareVersions sorts it to the tail → it silently
     // becomes `latest` and corrupts resolution + the detail view. Reject it here too.
@@ -64,6 +68,10 @@ export class VersionedStore<T extends { id: string; version: string }> {
         );
       }
       existing.deletedAt = undefined; // re-registering identical content = revive — content immutability is preserved
+      // Ownership is metadata, so a revive may set it — but it never SILENTLY moves an owned version to another
+      // team: transferring ownership is its own act, and doing it as a side effect of re-registering identical
+      // content would move a resource out from under whoever could write it.
+      if (existing.teamId === undefined && teamId !== undefined) existing.teamId = teamId;
       return;
     }
     versions.set(item.version, {
@@ -71,6 +79,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
       seq: this.seq++,
       createdAt: new Date().toISOString(),
       ...(createdBy !== undefined ? { createdBy } : {}),
+      ...(teamId !== undefined ? { teamId } : {}),
     });
   }
 
@@ -85,6 +94,12 @@ export class VersionedStore<T extends { id: string; version: string }> {
     if (!entry || entry.deletedAt !== undefined)
       throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} not found.`);
     return entry;
+  }
+
+  // Which team owns this version — the input the authz kernel's team axis needs. Undefined for an unowned
+  // (seed/_shared/legacy) version, which is NOT the same as "everyone's".
+  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
+    return this.byOwner.get(tenant)?.get(id)?.get(version)?.teamId;
   }
 
   creatorOfVersion(tenant: string, id: string, version: string): string | undefined {
@@ -158,6 +173,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
         versionCount: versions.length,
         ...(earliest?.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
         ...(latestVersionEntry?.createdBy !== undefined ? { latestCreatedBy: latestVersionEntry.createdBy } : {}),
+        ...(latestVersionEntry?.teamId !== undefined ? { teamId: latestVersionEntry.teamId } : {}),
         ...(earliest ? { createdAt: earliest.createdAt } : {}),
         ...(latest ? { updatedAt: latest.createdAt } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),

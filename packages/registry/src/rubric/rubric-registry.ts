@@ -24,9 +24,14 @@ export function rubricDerived(spec: RubricSpec): Pick<RubricListEntry, "descript
 export class InMemoryRubricRegistry implements RubricRegistry {
   private readonly store = new VersionedStore<RubricSpec>("rubric");
 
-  async register(tenant: string, spec: RubricSpec, createdBy?: string): Promise<void> {
-    this.store.register(tenant, spec, createdBy);
+  async register(tenant: string, spec: RubricSpec, createdBy?: string, teamId?: string): Promise<void> {
+    this.store.register(tenant, spec, createdBy, teamId);
   }
+  // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
+  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
+    return this.store.teamOfVersion(tenant, id, version);
+  }
+
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
   }
@@ -58,6 +63,7 @@ export class InMemoryRubricRegistry implements RubricRegistry {
         versionCount: meta.versionCount,
         ...rubricDerived(latestSpec),
         ...(meta.createdBy !== undefined ? { createdBy: meta.createdBy } : {}),
+        ...(meta.teamId !== undefined ? { teamId: meta.teamId } : {}),
         ...(meta.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
         ...(meta.updatedAt !== undefined ? { updatedAt: meta.updatedAt } : {}),
         ...(meta.versionTags !== undefined ? { versionTags: meta.versionTags } : {}),

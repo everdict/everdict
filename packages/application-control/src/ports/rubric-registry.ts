@@ -20,7 +20,7 @@ export interface RubricListEntry {
 // Same ownership model as judges/datasets: tenant-owned first, else SHARED_TENANT (first-party default rubric) fallback.
 // One rubric serves many judges (JudgeSpec.rubric may reference it as {id, version}). async — Postgres honors the same contract.
 export interface RubricRegistry {
-  register(tenant: string, spec: RubricSpec, createdBy?: string): Promise<void>;
+  register(tenant: string, spec: RubricSpec, createdBy?: string, teamId?: string): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<RubricSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback

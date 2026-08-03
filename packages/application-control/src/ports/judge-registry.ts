@@ -3,6 +3,8 @@ import type { JudgeSpec } from "@everdict/contracts";
 // One list entry — version metadata (registration history) + display fields derived from the latest judge spec (kind/provider/model/description).
 // GET /judges and MCP list_judges emit this shape. Same feel as the dataset/harness ListEntry.
 export interface JudgeListEntry {
+  // 소유 팀 — 목록이 팀으로 걸리려면 행에 실려야 한다(최신 버전 기준). 없음 = 소유자 없음.
+  teamId?: string;
   id: string;
   owner: string;
   versions: string[];
@@ -23,13 +25,17 @@ export interface JudgeListEntry {
 // Same ownership model as harnesses/datasets: tenant-owned first, else SHARED_TENANT (first-party default judge) fallback.
 // A user registers and version-manages their own judge (model/harness) directly. async — Postgres honors the same contract.
 export interface JudgeRegistry {
-  register(tenant: string, spec: JudgeSpec, createdBy?: string): Promise<void>;
+  register(tenant: string, spec: JudgeSpec, createdBy?: string, teamId?: string): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<JudgeSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback
   ownVersions(tenant: string, id: string): Promise<string[]>; // only versions this tenant registered directly (no fallback — for conflict checks)
   list(tenant: string): Promise<JudgeListEntry[]>;
   // The registrant subject of this "version" — for delete authz (creator-or-admin). Non-owned/deleted/absent → NotFound (same as harnesses/datasets).
+  // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned
+  // (`_shared`/seeded), which the gate lets through; it is NOT "everyone's".
+  teamOfVersion?(tenant: string, id: string, version: string): Promise<string | undefined>;
+
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
   // Version soft-delete (tombstone) — data is preserved (past scorecard reproducibility), excluded from every read, re-registering identical content revives it.
   softDelete(tenant: string, id: string, version: string): Promise<void>;
