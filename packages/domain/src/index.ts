@@ -332,8 +332,8 @@ export {
   canReachTeam,
   type ResourceScope,
   can,
-  visibleTeams,
   ownedByVisibleTeam,
+  ownedByAnyVisibleTeam,
   EVERDICT_ROLES,
   type EverdictRole,
 } from "./auth/authz.js";

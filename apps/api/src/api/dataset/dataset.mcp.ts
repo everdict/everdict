@@ -21,6 +21,12 @@ import {
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Dataset MCP tools — the MCP twin of dataset.routes.ts.
+// A private team's work is not the workspace's — the same ceiling the HTTP list stays under.
+async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
+  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
+  return rows.filter((row) => ownedByVisibleTeam(row, seen));
+}
+
 export function registerDatasetTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
 
@@ -37,7 +43,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "datasets:read", async () =>
           // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
           // person's teams and no more.
-          ok((await datasets.list(ws)).filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)))),
+          ok(await keepVisible(ctx, await datasets.list(ws))),
         ),
     );
 
@@ -53,7 +59,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, version }) =>
         run(principal, "datasets:read", async () => {
-          await assertEntityVisible(principal, datasets, ws, id, "dataset");
+          await assertEntityVisible(ctx.deps, principal, datasets, ws, id, "dataset");
           return ok(await datasets.get(ws, id, version ?? "latest"));
         }),
     );

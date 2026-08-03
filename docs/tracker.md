@@ -66,6 +66,13 @@ trigger-matchable: there is no automation whose wake signal is "a team was renam
 axis: the trust zone stays `workspace = tenant`, `can()` still reads exactly the roles it always did, and the
 filter sits ON TOP of `issues:read`.
 
+It is also the ONLY thing that hides a team's work — and not only the tracker's. The eval assets (harness ·
+dataset · judge · rubric) and the results (scorecard · run) follow the same rule, and so do projects, which are
+workspace records naming the teams that work on them (visible when ANY of those teams is). For a while they did
+not: reads were gated on the roster itself, so a member of Web could not reuse the judge Mobile wrote, and an
+initiative listed a project's progress while the evaluations proving it answered "not found" on the same screen.
+One workspace, one rule — public by default, private by choice. See `docs/auth.md`.
+
 - The narrowing rides the **same `teamIds` filter** the "my teams" view already uses (`visibleTeamIds` is the
   one place that decides it), so there is one code path in the store and no second place to forget it. Asking
   for `mine` intersects with it — your teams, minus the ones you may not see.

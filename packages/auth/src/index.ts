@@ -8,7 +8,6 @@ export {
   can,
   authorize,
   canReachTeam,
-  visibleTeams,
   type ResourceScope,
 } from "./authz.js";
 export { type OidcAuthOptions, type OidcVerifyErrorInfo, oidcAuthenticator } from "./oidc.js";

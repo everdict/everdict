@@ -1,6 +1,8 @@
 import { ProjectStatusSchema } from "@everdict/contracts";
+import { ownedByAnyVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, resolveTeamRef, sendError } from "../route-context.js";
 import { projectDocs } from "./project.docs.js";
 import { CreateProjectBodySchema } from "./request/create-project.js";
@@ -75,14 +77,17 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ServerDeps): v
     try {
       // Named by id or by key (`?team=ENG`) — the same ref the team-scoped URL carries.
       const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
-      return reply.send(
-        await deps.projectService.list(principal.workspace, {
-          ...(status !== undefined ? { status } : {}),
-          ...(initiative !== undefined ? { initiativeId: initiative } : {}),
-          ...(teamId !== undefined ? { teamId } : {}),
-          ...(limit !== undefined ? { limit } : {}),
-        }),
-      );
+      const rows = await deps.projectService.list(principal.workspace, {
+        ...(status !== undefined ? { status } : {}),
+        ...(initiative !== undefined ? { initiativeId: initiative } : {}),
+        ...(teamId !== undefined ? { teamId } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      });
+      // A PRIVATE team's work is not the workspace's. A project names several teams and is visible when any one
+      // of them is — being on one of the teams doing the work is reason enough to see it. Public teams are
+      // unaffected, which is the point: this narrows what somebody opted to hide, nothing else.
+      const seen = await visibleTeamsFor(deps, principal);
+      return reply.send(rows.filter((project) => ownedByAnyVisibleTeam(project, seen)));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -101,7 +106,11 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ServerDeps): v
       return sendError(reply, err);
     }
     try {
-      return reply.send(await deps.projectService.detail(principal.workspace, req.params.id));
+      const detail = await deps.projectService.detail(principal.workspace, req.params.id);
+      // Same answer a private team's issue gets: absent, not forbidden.
+      if (!ownedByAnyVisibleTeam(detail, await visibleTeamsFor(deps, principal)))
+        return reply.code(404).send({ code: "NOT_FOUND", message: `project '${req.params.id}' not found.` });
+      return reply.send(detail);
     } catch (err) {
       return sendError(reply, err); // another workspace's id → 404 (tenant-scoped store, no existence leak)
     }

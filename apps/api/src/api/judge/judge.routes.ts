@@ -146,7 +146,8 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
       const entries = await deps.judgeRegistry.list(principal.workspace);
       // Ceiling first (another team's judge is not the caller's to see; an unowned `_shared` one is everyone's),
       // then the `?team=` narrow on top — named by id or by key (`?team=ENG`), the ref the team URL carries.
-      const visible = entries.filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)));
+      const seen = await visibleTeamsFor(deps, principal);
+      const visible = entries.filter((e) => ownedByVisibleTeam(e, seen));
       const team = req.query.team;
       const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
       return reply.send(teamId === undefined ? visible : visible.filter((e) => e.teamId === teamId));
@@ -166,7 +167,7 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
       if (!principal) return reply;
       try {
         gate(principal, "judges:read");
-        await assertEntityVisible(principal, deps.judgeRegistry, principal.workspace, req.params.id, "judge");
+        await assertEntityVisible(deps, principal, deps.judgeRegistry, principal.workspace, req.params.id, "judge");
         return reply.send(await deps.judgeRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404
@@ -191,7 +192,7 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
           .send({ code: "BAD_REQUEST", message: "base and candidate query parameters are required." });
       try {
         gate(principal, "judges:read");
-        await assertEntityVisible(principal, deps.judgeRegistry, principal.workspace, req.params.id, "judge");
+        await assertEntityVisible(deps, principal, deps.judgeRegistry, principal.workspace, req.params.id, "judge");
         const [baseSpec, candidateSpec] = await Promise.all([
           deps.judgeRegistry.get(principal.workspace, req.params.id, base),
           deps.judgeRegistry.get(principal.workspace, req.params.id, candidate),

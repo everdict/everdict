@@ -49,17 +49,18 @@ token courier, never an auth authority. See `docs/auth.md`.
 - **AuthZ is a flat matrix** (`authz.ts`): `can`/`authorize(principal, action)`; `authorize` throws
   `ForbiddenError` → **403**. Roles are cumulative (`admin ⊃ member ⊃ viewer`). Gate every mutating route;
   reads of another workspace's resource return **404** (no existence leak), not 403.
-- **The team axis ISOLATES, in both directions.** An eval asset/result carries a `teamId` (mig `0106`), and
-  `canReachTeam(principal, resource)` refuses a subject who is not on that team — for READS as well as writes. A
-  refused read answers **404** (`assertTeamVisible` / `assertEntityVisible` in `apps/api` `common/team-scope.ts`),
-  and every list narrows to `visibleTeams(principal)` (stores take it as a `visibleTeams` filter). `teamId:
-  undefined` = unowned = the whole workspace's (`_shared`, seeds, pre-axis rows) — never "everyone's team" in the
-  other direction, EXCEPT the workspace's default team — every member is on it whether or not anyone rostered
-  them, because it is the fallback owner and the backfill target. An admin and a MACHINE credential (`via ∈ {runner, github-actions}`) reach every team; an
-  `agent` credential does not (it acts as its creator, so it carries that person's teams). A new asset gets its
-  owner from `teamForNew`: an explicit choice is gated (naming another team is refused, never redirected), a
-  fallback is not — and a scorecard prefers the team that owns the HARNESS it runs, which is the only owner a
-  schedule/CI/chat fire has.
+- **The team axis: WRITE = the roster, READ = team privacy.** An eval asset/result carries a `teamId` (mig
+  `0106`), a project names several (`teamIds`). Writing one you are not on is refused (`canReachTeam`, 403).
+  Reading is NOT membership's business — a workspace whose teams cannot see each other's work stops being one
+  workspace — so what a team owns is visible by default and the only narrowing is that team being **private**
+  (`isPrivate`, mig `0113`), which is Linear's model. Privacy is decided in ONE place
+  (`TeamService.visibleTeamIds` / `canSeeTeam`) and never re-derived in a route; `undefined` = nothing is hidden,
+  never "no teams". The API wraps it as `visibleTeamsFor`/`teamCeiling`/`assertTeamVisible`/`assertEntityVisible`
+  (`common/team-scope.ts`) over the pure `ownedByVisibleTeam`/`ownedByAnyVisibleTeam` (`@everdict/domain`). A
+  refused read is **404**, never 403. `teamId: undefined` = unowned = the workspace's. Admins and machine
+  credentials (`via ∈ {runner, github-actions}`) reach every team; an `agent` does not. **Counts are computed
+  over everything, listings are narrowed** — an initiative's progress is one number for everybody, but it names
+  only the projects/blockers the reader may see.
 - **Resource-ownership override (use sparingly).** A few actions are "admin **or** the resource's creator". Keep
   the **admin** half in the flat matrix (e.g. `datasets:delete` = admin-only) and put the **creator** half in the
   service layer that knows who created the row (`dataset-service.ts` `deleteDatasetVersion`: `creatorOf` vs

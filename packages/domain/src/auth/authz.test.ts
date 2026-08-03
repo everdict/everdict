@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authorize, can, visibleTeams } from "./authz.js";
+import { authorize, can, ownedByAnyVisibleTeam, ownedByVisibleTeam } from "./authz.js";
 import type { Principal } from "./principal.js";
 
 describe("can — the team axis (team-owned resources)", () => {
@@ -15,30 +15,36 @@ describe("can — the team axis (team-owned resources)", () => {
     expect(can(member, "harnesses:register", { teamId: "mobile" })).toBe(false);
   });
 
-  it("refuses READING another team's resource too — a team's work is its own, not the workspace's noticeboard", () => {
-    expect(can(member, "harnesses:read", { teamId: "mobile" })).toBe(false);
-    expect(can(member, "scorecards:read", { teamId: "mobile" })).toBe(false);
-    expect(can(member, "harnesses:read", { teamId: "web" })).toBe(true); // ...their own still reads
-    expect(can(member, "harnesses:read", {})).toBe(true); // ...and so does an unowned one
+  it("READS another team's resource — the roster says who may CHANGE a team's work, not who may see it", () => {
+    // A workspace whose teams cannot see each other's work has stopped being one workspace. What hides a team's
+    // work is that team choosing to be PRIVATE, which is a property of the team and therefore not this kernel's
+    // to answer (TeamService.visibleTeamIds decides it, and a refusal is answered 404).
+    expect(can(member, "harnesses:read", { teamId: "mobile" })).toBe(true);
+    expect(can(member, "scorecards:read", { teamId: "mobile" })).toBe(true);
+    expect(can(member, "harnesses:register", { teamId: "mobile" })).toBe(false); // ...writing still is
   });
 
   it("keeps a machine credential outside the team axis — a runner/CI token has no roster to be isolated by", () => {
     const ci: Principal = { subject: "repo:acme/api", workspace: "acme", roles: ["ci"], via: "github-actions" };
-    const runner: Principal = { subject: "rnr", workspace: "acme", roles: ["runner"], via: "runner" };
-    expect(can(ci, "scorecards:read", { teamId: "mobile" })).toBe(true);
     expect(can(ci, "scorecards:run", { teamId: "mobile" })).toBe(true);
-    expect(visibleTeams(ci)).toBeUndefined();
-    expect(visibleTeams(runner)).toBeUndefined();
-    // An agent credential is NOT exempt: it acts as its creator, so it is isolated with that person's teams.
+    // An agent credential is NOT exempt: it acts as its creator, so it writes with that person's teams.
     const agent: Principal = { subject: "u", workspace: "acme", roles: ["member"], via: "agent", teams: ["web"] };
-    expect(can(agent, "scorecards:read", { teamId: "mobile" })).toBe(false);
-    expect(visibleTeams(agent)).toEqual(["web"]);
+    expect(can(agent, "scorecards:run", { teamId: "mobile" })).toBe(false);
+    expect(can(agent, "scorecards:run", { teamId: "web" })).toBe(true);
   });
 
-  it("gives a list read its ceiling: none for an admin, and [] — not 'everything' — for a member on no team", () => {
-    expect(visibleTeams(admin)).toBeUndefined();
-    expect(visibleTeams(member)).toEqual(["web"]);
-    expect(visibleTeams(teamless)).toEqual([]);
+  it("narrows a list row by the VISIBLE-team ceiling — undefined means nothing is hidden, never 'nothing'", () => {
+    expect(ownedByVisibleTeam({ teamId: "mobile" }, undefined)).toBe(true); // no private team anywhere
+    expect(ownedByVisibleTeam({ teamId: "mobile" }, ["web"])).toBe(false); // mobile is private, not mine
+    expect(ownedByVisibleTeam({ teamId: "web" }, ["web"])).toBe(true);
+    expect(ownedByVisibleTeam({}, ["web"])).toBe(true); // unowned = the workspace's
+  });
+
+  it("shows a row that names SEVERAL teams when ANY of them is visible — a project is worked on by all of them", () => {
+    expect(ownedByAnyVisibleTeam({ teamIds: ["mobile", "web"] }, ["web"])).toBe(true);
+    expect(ownedByAnyVisibleTeam({ teamIds: ["mobile"] }, ["web"])).toBe(false);
+    expect(ownedByAnyVisibleTeam({ teamIds: [] }, ["web"])).toBe(true); // names none = the workspace's
+    expect(ownedByAnyVisibleTeam({ teamIds: ["mobile"] }, undefined)).toBe(true);
   });
 
   it("lets an admin write any team's resource — an unreachable team would be un-administrable", () => {

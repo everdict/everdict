@@ -9,6 +9,12 @@ import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 // Rubric MCP tools — the MCP twin of rubric.routes.ts.
 // AuthZ reuses the judge actions (rubrics are the judging domain — no new action, mirroring how views reuse
 // scorecards:*): read = judges:read, write = judges:write.
+// A private team's work is not the workspace's — the same ceiling the HTTP list stays under.
+async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
+  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
+  return rows.filter((row) => ownedByVisibleTeam(row, seen));
+}
+
 export function registerRubricTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
 
@@ -17,10 +23,7 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "list_rubrics",
       { description: "Rubrics visible to this workspace (owned + _shared default rubrics)", inputSchema: {} },
-      () =>
-        run(principal, "judges:read", async () =>
-          ok((await rubrics.list(ws)).filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)))),
-        ),
+      () => run(principal, "judges:read", async () => ok(await keepVisible(ctx, await rubrics.list(ws)))),
     );
 
     server.registerTool(
@@ -32,7 +35,7 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
       },
       ({ id, version }) =>
         run(principal, "judges:read", async () => {
-          await assertEntityVisible(principal, rubrics, ws, id, "rubric");
+          await assertEntityVisible(ctx.deps, principal, rubrics, ws, id, "rubric");
           return ok(await rubrics.get(ws, id, version ?? "latest"));
         }),
     );

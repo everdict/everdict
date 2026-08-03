@@ -14,6 +14,12 @@ import {
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Judge MCP tools — the MCP twin of judge.routes.ts.
+// A private team's work is not the workspace's — the same ceiling the HTTP list stays under.
+async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
+  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
+  return rows.filter((row) => ownedByVisibleTeam(row, seen));
+}
+
 export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
 
@@ -22,10 +28,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "list_judges",
       { description: "Agent Judges visible to this workspace (owned + _shared default judges)", inputSchema: {} },
-      () =>
-        run(principal, "judges:read", async () =>
-          ok((await judges.list(ws)).filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)))),
-        ),
+      () => run(principal, "judges:read", async () => ok(await keepVisible(ctx, await judges.list(ws)))),
     );
 
     server.registerTool(
@@ -36,7 +39,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
       },
       ({ id, version }) =>
         run(principal, "judges:read", async () => {
-          await assertEntityVisible(principal, judges, ws, id, "judge");
+          await assertEntityVisible(ctx.deps, principal, judges, ws, id, "judge");
           return ok(await judges.get(ws, id, version ?? "latest"));
         }),
     );

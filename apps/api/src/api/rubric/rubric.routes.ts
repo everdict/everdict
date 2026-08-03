@@ -68,7 +68,8 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
       gate(principal, "judges:read");
       // A rubric is owned like every other eval asset — another team's does not appear, an unowned one does.
       const entries = await deps.rubricRegistry.list(principal.workspace);
-      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal))));
+      const seen = await visibleTeamsFor(deps, principal);
+      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, seen)));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -85,7 +86,7 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
       if (!principal) return reply;
       try {
         gate(principal, "judges:read");
-        await assertEntityVisible(principal, deps.rubricRegistry, principal.workspace, req.params.id, "rubric");
+        await assertEntityVisible(deps, principal, deps.rubricRegistry, principal.workspace, req.params.id, "rubric");
         return reply.send(await deps.rubricRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404

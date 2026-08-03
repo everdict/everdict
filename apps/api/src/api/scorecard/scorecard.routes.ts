@@ -256,7 +256,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         const filter = {
           ...(narrow ?? {}),
           ...(teamId !== undefined ? { teamId } : {}),
-          ...teamCeiling(principal),
+          ...(await teamCeiling(deps, principal)),
         };
         return reply.send(await deps.scorecardService.list(principal.workspace, filter));
       } catch (err) {
@@ -321,7 +321,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         return reply.send(
           await deps.scorecardService.diff(principal.workspace, baseline, candidate, {
             ...(zThreshold !== undefined ? { zThreshold } : {}),
-            ...teamCeiling(principal),
+            ...(await teamCeiling(deps, principal)),
           }),
         );
       } catch (err) {
@@ -350,7 +350,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
           ...(from ? { from } : {}),
           ...(to ? { to } : {}),
           ...(baseline ? { baseline } : {}),
-          ...teamCeiling(principal),
+          ...(await teamCeiling(deps, principal)),
         }),
       );
     } catch (err) {
@@ -385,7 +385,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
           ...(model ? { model } : {}),
           ...(judgeModel ? { judgeModel } : {}),
           window: window === "best" ? "best" : "latest", // anything else/unset = latest
-          ...teamCeiling(principal),
+          ...(await teamCeiling(deps, principal)),
         }),
       );
     } catch (err) {
@@ -409,7 +409,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error) });
     try {
       return reply.send(
-        await deps.scorecardService.analysis(principal.workspace, parsed.data, visibleTeamsFor(principal)),
+        await deps.scorecardService.analysis(principal.workspace, parsed.data, await visibleTeamsFor(deps, principal)),
       );
     } catch (err) {
       return sendError(reply, err);
@@ -441,7 +441,11 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       // browser-openable (the stored ones point at the in-network object store and have expired). Same in the MCP twin.
       const record = await deps.scorecardService.getForDisplay(req.params.id);
       // Another team's batch is answered exactly like another workspace's, and like one that never existed.
-      if (!record || record.tenant !== principal.workspace || !ownedByVisibleTeam(record, visibleTeamsFor(principal)))
+      if (
+        !record ||
+        record.tenant !== principal.workspace ||
+        !ownedByVisibleTeam(record, await visibleTeamsFor(deps, principal))
+      )
         return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
       return reply.send(serveScorecard(record));
     } catch (err) {
@@ -461,7 +465,11 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       try {
         gate(principal, "scorecards:read");
         return reply.send(
-          await deps.scorecardService.analysisBundle(principal.workspace, req.params.id, visibleTeamsFor(principal)),
+          await deps.scorecardService.analysisBundle(
+            principal.workspace,
+            req.params.id,
+            await visibleTeamsFor(deps, principal),
+          ),
         );
       } catch (err) {
         return sendError(reply, err);

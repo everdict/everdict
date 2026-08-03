@@ -71,10 +71,11 @@ The team's SHORT address is the issue list itself (`/{workspace}/teams/ENG` rend
 `team`), and both route files are thin adapters. Duplicating a list to scope it is how the two copies drift.
 Gating on those screens is `canInTeam(principal, action, team?.id)` (`shared/auth/can.ts`, mirroring the domain's
 `canReachTeam`): a create button on a team you are not on is a guaranteed 403, and a link into its assets is a
-guaranteed 404. **Ownership ISOLATES reads, it does not merely sort them** — a team's harnesses, datasets,
-judges, rubrics and scorecards do not appear in another team's lists at all, and the control plane answers a
-refused read as NOT FOUND (never 403 — "you may not see this" still confirms it exists). Unowned rows (`_shared`
-seeds, anything from before the axis) are the whole workspace's, and an ADMIN sees every team.
+guaranteed 403. **Reads are NOT gated on the roster** — a workspace whose teams cannot see each other's work has
+stopped being one workspace, so a team's harnesses, datasets, judges, rubrics and scorecards are the workspace's
+to read. The one narrowing is a team choosing to be PRIVATE (`isPrivate`), decided server-side: a hidden row
+simply never arrives, and asking for it by id answers NOT FOUND (never 403 — "you may not see this" still
+confirms it exists). That is why `canInTeam` passes every `:read` action.
 
 **Creating happens at the OWNER's address.** `…/teams/ENG/scorecards/new` files the batch as that team's because
 the URL says so; the workspace-level `…/scorecards/new` pins nothing and the control plane files the result

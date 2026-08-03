@@ -28,10 +28,11 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "harnesses:read", async () => {
           // A private harness (references a personal secret) is createdBy-only — hidden from other users (same as the HTTP list).
           const entries = await instances.list(ws);
+          const seen = await visibleTeamsFor(ctx.deps, principal);
           return ok(
             entries
               .filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject)
-              .filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal))),
+              .filter((e) => ownedByVisibleTeam(e, seen)),
           );
         }),
     );
@@ -45,7 +46,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, version }) =>
         run(principal, "harnesses:read", async () => {
-          await assertEntityVisible(principal, instances, ws, id, "harness");
+          await assertEntityVisible(ctx.deps, principal, instances, ws, id, "harness");
           return ok(await instances.getInstance(ws, id, version));
         }),
     );
@@ -65,7 +66,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "harnesses:read", async () => {
           // A private harness (references a personal secret) is owner-only — its existence is hidden from others (same as the HTTP route).
           if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: harness not found.");
-          await assertEntityVisible(principal, instances, ws, id, "harness");
+          await assertEntityVisible(ctx.deps, principal, instances, ws, id, "harness");
           const [baseSpec, candidateSpec] = await Promise.all([
             instances.get(ws, id, base),
             instances.get(ws, id, candidate),

@@ -145,10 +145,12 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       const entries = await deps.harnessInstances.list(principal.workspace); // instances grouped by template id
       // A private harness (references a personal secret) is owner-only — the owner is the creator of the latest
       // version (the one that decides privacy), falling back to the id-level creator for older data.
-      // Two separate ceilings, both "not yours to see": privacy (a personal secret) and team ownership.
+      // Two separate ceilings, both "not yours to see": a personal secret makes a harness its owner's, and a
+      // PRIVATE team makes its work its members'. Neither is about the roster of an ordinary team.
+      const seen = await visibleTeamsFor(deps, principal);
       const visible = entries
         .filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject)
-        .filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)));
+        .filter((e) => ownedByVisibleTeam(e, seen));
       // `?team=` is the NARROW on top of them — "of the ones I can see, this team's". Named by id or by key
       // (`?team=ENG`), the same ref the team-scoped URL carries.
       const team = req.query.team;
@@ -170,7 +172,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       if (versions.length === 0) return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
       if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
         return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-      await assertEntityVisible(principal, deps.harnessInstances, principal.workspace, req.params.id, "harness");
+      await assertEntityVisible(deps, principal, deps.harnessInstances, principal.workspace, req.params.id, "harness");
       // versionTags: version → free label (only versions that have tags) — a display aid to tell versions apart in the switcher/list.
       const versionTags = await deps.harnessInstances.versionTags(principal.workspace, req.params.id);
       return reply.send({
@@ -203,7 +205,14 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         // A private harness (references a personal secret) is owner-only — existence hidden from others (404, same as the reads).
         if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
           return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-        await assertEntityVisible(principal, deps.harnessInstances, principal.workspace, req.params.id, "harness");
+        await assertEntityVisible(
+          deps,
+          principal,
+          deps.harnessInstances,
+          principal.workspace,
+          req.params.id,
+          "harness",
+        );
         const [baseSpec, candidateSpec] = await Promise.all([
           deps.harnessInstances.get(principal.workspace, req.params.id, base),
           deps.harnessInstances.get(principal.workspace, req.params.id, candidate),
@@ -231,7 +240,14 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         // hidden). Owner semantics live in the one shared helper (latest-version creator) — no inline fork.
         if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
           return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-        await assertEntityVisible(principal, deps.harnessInstances, principal.workspace, req.params.id, "harness");
+        await assertEntityVisible(
+          deps,
+          principal,
+          deps.harnessInstances,
+          principal.workspace,
+          req.params.id,
+          "harness",
+        );
         // Served image classification (re-architecture P1g) — per-image workspace/external/local/unqualified,
         // computed against ALL workspace registries at serve time so the web badge doesn't re-implement the rule.
         const coords = await deps.imageRegistryService?.coordinates(principal.workspace);
@@ -261,7 +277,14 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         // visible to other members either.
         if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
           return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-        await assertEntityVisible(principal, deps.harnessInstances, principal.workspace, req.params.id, "harness");
+        await assertEntityVisible(
+          deps,
+          principal,
+          deps.harnessInstances,
+          principal.workspace,
+          req.params.id,
+          "harness",
+        );
         return reply.send(
           await deps.harnessInstances.getInstance(principal.workspace, req.params.id, req.params.version),
         );

@@ -16,11 +16,10 @@ describe('canInTeam — the team axis of the UI mirror', () => {
     expect(canInTeam(member, 'issues:write', 'team-mobile')).toBe(false)
   })
 
-  it('refuses reads in a team they are not on — the control plane answers those 404, so the link is dead', () => {
-    expect(canInTeam(member, 'issues:read', 'team-mobile')).toBe(false)
-    expect(canInTeam(member, 'scorecards:read', 'team-mobile')).toBe(false)
-    expect(canInTeam(member, 'issues:read', 'team-web')).toBe(true)
-    expect(canInTeam(member, 'issues:read', undefined)).toBe(true) // unowned = the workspace's
+  it('leaves reads alone — a public team\'s work is the workspace\'s, and a private one is hidden server-side', () => {
+    expect(canInTeam(member, 'issues:read', 'team-mobile')).toBe(true)
+    expect(canInTeam(member, 'scorecards:read', 'team-mobile')).toBe(true)
+    expect(canInTeam(member, 'issues:write', 'team-mobile')).toBe(false) // ...writing is still the roster's
   })
 
   it('lets an admin write across teams — a team they are not on must not be un-administrable', () => {

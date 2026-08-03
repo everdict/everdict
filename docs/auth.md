@@ -69,34 +69,42 @@ A flat role → action matrix; `can(principal, action)` / `authorize(principal, 
 
 Roles are cumulative (`member` ⊃ `viewer`, `admin` ⊃ `member`).
 
-### The team axis (ownership isolates)
+### The team axis (write = the roster, read = team privacy)
 The role says what you may DO; the owning team says what you may do it TO. Every eval asset (harness · dataset ·
 judge · rubric · runtime · model · agent) and every result (scorecard · run) records a `teamId` beside its
-`createdBy` (migration `0106`) — a column, never a field inside a versioned spec, because transferring a team must
-not mint a new version of something whose content did not change.
+`createdBy` (migration `0106`); a project names several (`teamIds`). It is a column, never a field inside a
+versioned spec, because transferring a team must not mint a new version of something whose content did not change.
 
-`can(principal, action, { teamId })` adds a third question after the role and the api-key scope:
-`canReachTeam(principal, resource)`.
+The axis answers two different questions, and conflating them was a bug worth naming:
 
-- **A team's work is its own — to read as well as to write.** An asset owned by a team the subject is not on is
-  refused in both directions. A refused READ is answered **404**, never 403: "you may not see this" still confirms
-  that a harness by that name, a batch with that id, exists. List endpoints narrow to `visibleTeams(principal)`
-  (the stores take it as a `visibleTeams` filter; a service holding one row asks `ownedByVisibleTeam`).
-- **`teamId: undefined` means unowned, which means the workspace's** — `_shared` catalogue entries, operator seeds,
-  and every row that predates the axis. Never read "no owner" as "everyone's team" in the other direction.
-- **Every workspace member is on the DEFAULT team**, rostered or not (`withTeams` adds it). That team is not one
-  somebody chose to join: it is where an unnamed asset lands and where the `0106` backfill put everything that
-  predates the axis, so isolating it would show a member nobody has rostered yet an empty workspace. Teams people
-  actually created stay isolated, which is the point.
-- **An ADMIN reaches every team** (a team they are not on would otherwise be un-administrable), and so does a
-  MACHINE credential acting for the workspace (`via ∈ {runner, github-actions}`) — a paired device and a
-  repo-linked CI token have no roster to be isolated by and already hold a deliberately tiny role. An `agent`
-  credential is NOT exempt: it acts as its creator, so it carries that person's teams and is isolated with them.
-- **What a new asset gets**: `teamForNew` (`apps/api` `common/team-scope.ts`) separates the owner it WILL get from
-  what the gate checks — only an EXPLICIT choice is authorized (naming another team is refused, never quietly
-  redirected), and an implicit fallback is the caller's team, else the workspace's default. A scorecard resolves
-  one step earlier still: an explicit choice → **the team that owns the harness it runs** → the submitter's team.
-  That middle step is what gives a schedule, a CI token or a chat command an owner at all.
+- **WRITING another team's asset is refused** — `can(principal, action, { teamId })` → `canReachTeam`, 403. A
+  team's work is theirs to change, and the roster is what says who "they" are. An explicit claim about another
+  team (`teamId` in the body) is refused rather than quietly redirected.
+- **READING is not membership's business.** A workspace whose teams cannot see each other's work has stopped
+  being one workspace: a member of Web could not reuse the judge Mobile wrote, and a goal's projects were
+  readable while the evaluations proving them answered "not found" on the same screen. So everything a team owns
+  is visible by default, and the narrowing is the team choosing to be **private** (`isPrivate`, migration `0113`)
+  — an explicit, per-team opt-in, exactly Linear's model.
+
+Privacy is decided in ONE place, `TeamService.visibleTeamIds(tenant, subject, isAdmin)` / `canSeeTeam(...)`, and
+never re-derived in a route. `undefined` from it means "nothing is hidden" — never "no teams", which is the
+failure mode a `[]` would silently produce. The API layer wraps it as `visibleTeamsFor` / `teamCeiling` /
+`assertTeamVisible` / `assertEntityVisible` (`apps/api` `common/team-scope.ts`), and the pure predicates
+`ownedByVisibleTeam` / `ownedByAnyVisibleTeam` (`@everdict/domain`) apply it to a loaded row.
+
+- A refused read answers **404**, never 403 — a private team must not be discoverable by the shape of the error.
+- `teamId: undefined` means unowned, which means the workspace's (`_shared` seeds, operator rows, anything from
+  before the axis). Never read "no owner" as "everyone's team" in the other direction.
+- An ADMIN reaches every team (one they are not on would otherwise be un-administrable), and so does a MACHINE
+  credential acting for the workspace (`via ∈ {runner, github-actions}`) — a paired device and a repo-linked CI
+  token have no roster to be isolated by. An `agent` credential is NOT exempt: it acts as its creator.
+- **Aggregates are counted over everything, listings are narrowed.** An initiative's progress is one number for
+  everybody — "how far along is this goal" stops meaning anything if it depends on who asks — but the projects
+  and blockers it NAMES are only the ones the reader may see. A total identifies nothing; a name does.
+- **What a new asset gets**: `teamForNew` separates the owner it WILL get from what the gate checks — only an
+  EXPLICIT choice is authorized, an implicit fallback is the caller's team, else the workspace's default. A
+  scorecard resolves one step earlier: an explicit choice → **the team that owns the harness it runs** → the
+  submitter's team. That middle step is what gives a schedule, a CI token or a chat command an owner at all.
 
 ## How `apps/api` enforces it
 `resolvePrincipal(req)` is called by **every** route:

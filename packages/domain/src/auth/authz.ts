@@ -291,6 +291,19 @@ function actsForWorkspace(principal: Principal): boolean {
   return principal.via === "runner" || principal.via === "github-actions";
 }
 
+// Is this a write? The two halves of the team axis ask different questions, and conflating them was a bug:
+//
+//   · WRITING another team's asset is refused — a team's work is theirs to change, and membership is the roster
+//     that says who "they" are. That is what this kernel can answer, because the principal carries its teams.
+//   · READING is not membership's business. A workspace whose teams cannot see each other's work has stopped
+//     being one workspace, so the default is visible and the narrowing is TEAM PRIVACY (`isPrivate`) — an
+//     explicit, per-team opt-in. Privacy is a property of the TEAM, which a pure kernel cannot look up, so it is
+//     enforced where the roster is (`TeamService.visibleTeamIds` / `canSeeTeam` — the one place that decides it)
+//     and answered 404, never 403.
+function isWrite(action: Action): boolean {
+  return !action.endsWith(":read");
+}
+
 // `can` answers three questions in order, and all three must pass:
 //   1. does the ROLE grant this action  2. does the api-key SCOPE still carry it  3. may this subject reach THIS
 //      resource — i.e. is the owning team one of theirs.
@@ -303,40 +316,41 @@ export function can(principal: Principal, action: Action, resource?: ResourceSco
   if (principal.scopes && principal.scopes.length > 0) {
     if (!principal.scopes.some((s) => SCOPE_PERMISSIONS[s]?.has(action) ?? false)) return false;
   }
-  return canReachTeam(principal, resource);
+  return canReachTeam(principal, action, resource);
 }
 
-// The team half, split out so a service that already knows the role passed can ask just this. Ownership ISOLATES
-// rather than sorts: a team's assets are the team's to read as well as to write, so this is asked of reads too.
-// A read that fails it is answered 404 rather than 403 (`assertTeamVisible` in the API layer) — the same no-leak
-// answer another workspace's row gets, because "there is a thing here you may not see" is itself information.
-export function canReachTeam(principal: Principal, resource?: ResourceScope): boolean {
+// The team half, split out so a service that already knows the role passed can ask just this. See `isWrite`:
+// this is the WRITE half — reads pass here and are narrowed by team privacy at the transport instead.
+export function canReachTeam(principal: Principal, action: Action, resource?: ResourceScope): boolean {
   if (resource?.teamId === undefined) return true; // unowned / workspace-level → nothing to check
+  if (!isWrite(action)) return true; // reads are decided by team PRIVACY, not by the roster
   if (principal.roles.includes("admin")) return true; // an admin governs every team in the workspace
   if (actsForWorkspace(principal)) return true; // a runner/CI credential has no roster to be isolated by
   return principal.teams?.includes(resource.teamId) ?? false;
 }
 
-// The ceiling a LIST read stays under, for the stores that narrow in SQL (`visibleTeams`). `undefined` = no
-// ceiling (an admin, or a machine credential acting for the workspace); `[]` is the honest answer for a member on
-// no team — they see the workspace's unowned rows and nothing else, which is what being on no team means.
-export function visibleTeams(principal: Principal): string[] | undefined {
-  if (principal.roles.includes("admin") || actsForWorkspace(principal)) return undefined;
-  return principal.teams ?? [];
-}
-
-// The same ceiling applied to ONE already-loaded row, for the services that read by id or filter in memory. Keep
-// the two halves saying the same thing: no ceiling ⇒ everything, no owner ⇒ the workspace's, else membership.
+// The ceiling a LIST read stays under, applied to ONE already-loaded row. `teams` comes from
+// `TeamService.visibleTeamIds` — the one place team privacy is decided — where `undefined` means "nothing is
+// hidden" rather than "no teams". An unowned row is the workspace's and always passes.
 export function ownedByVisibleTeam(owner: { teamId?: string }, teams?: string[]): boolean {
   if (teams === undefined) return true;
   if (owner.teamId === undefined) return true;
   return teams.includes(owner.teamId);
 }
 
+// The same question for a row that names SEVERAL teams (a project is worked on by all of them): it is visible
+// when any one of them is, because being on one of the teams doing the work is reason enough to see it.
+export function ownedByAnyVisibleTeam(owner: { teamIds?: string[] }, teams?: string[]): boolean {
+  if (teams === undefined) return true;
+  const owners = owner.teamIds ?? [];
+  if (owners.length === 0) return true;
+  return owners.some((teamId) => teams.includes(teamId));
+}
+
 // 403 if not permitted. The caller (API route) invokes this at handler entry.
 export function authorize(principal: Principal, action: Action, resource?: ResourceScope): void {
   if (!can(principal, action, resource)) {
-    const teamDenied = resource?.teamId !== undefined && !canReachTeam(principal, resource);
+    const teamDenied = resource?.teamId !== undefined && !canReachTeam(principal, action, resource);
     throw new ForbiddenError(
       "FORBIDDEN",
       { workspace: principal.workspace, roles: principal.roles, action, ...(resource ?? {}) },

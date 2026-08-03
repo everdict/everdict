@@ -167,7 +167,8 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       // see, so it never appears (an unowned `_shared` entry is the workspace's and always does). `?team=` is the
       // NARROW on top of it — "of the ones I can see, this team's" — named by id or by key (`?team=ENG`), the
       // same ref the team-scoped URL carries.
-      const visible = entries.filter((e) => ownedByVisibleTeam(e, visibleTeamsFor(principal)));
+      const seen = await visibleTeamsFor(deps, principal);
+      const visible = entries.filter((e) => ownedByVisibleTeam(e, seen));
       const team = req.query.team;
       const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
       return reply.send(teamId === undefined ? visible : visible.filter((e) => e.teamId === teamId));
@@ -187,7 +188,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       if (!principal) return reply;
       try {
         gate(principal, "datasets:read");
-        await assertEntityVisible(principal, deps.datasetRegistry, principal.workspace, req.params.id, "dataset");
+        await assertEntityVisible(deps, principal, deps.datasetRegistry, principal.workspace, req.params.id, "dataset");
         return reply.send(await deps.datasetRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404
@@ -284,7 +285,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
           .send({ code: "BAD_REQUEST", message: "base and candidate query parameters are required." });
       try {
         gate(principal, "datasets:read");
-        await assertEntityVisible(principal, deps.datasetRegistry, principal.workspace, req.params.id, "dataset");
+        await assertEntityVisible(deps, principal, deps.datasetRegistry, principal.workspace, req.params.id, "dataset");
         const [baseDs, candidateDs] = await Promise.all([
           deps.datasetRegistry.get(principal.workspace, req.params.id, base),
           deps.datasetRegistry.get(principal.workspace, req.params.id, candidate),

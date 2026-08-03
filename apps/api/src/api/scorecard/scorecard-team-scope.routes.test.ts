@@ -118,17 +118,45 @@ describe("a scorecard belongs to a team", () => {
     await app.close();
   });
 
-  it("keeps another team's batch out of the list and answers its detail 404", async () => {
+  it("stays readable across teams — a workspace's evaluations are the workspace's to learn from", async () => {
     const ctx = await build();
     const owner = serverFor(ctx, [ctx.web.id]);
     const created = (await owner.inject({ method: "POST", url: "/scorecards", headers: bearer, payload: body })).json();
-    expect((await owner.inject({ method: "GET", url: "/scorecards", headers: bearer })).json()).toHaveLength(1);
     await owner.close();
+
+    const other = serverFor(ctx, [ctx.mobile.id], "other");
+    expect((await other.inject({ method: "GET", url: "/scorecards", headers: bearer })).json()).toHaveLength(1);
+    expect((await other.inject({ method: "GET", url: `/scorecards/${created.id}`, headers: bearer })).statusCode) //
+      .toBe(200);
+    await other.close();
+  });
+
+  it("hides a PRIVATE team's batch — the one narrowing, answered 404 so it is not discoverable", async () => {
+    const ctx = await build();
+    const secret = await ctx.teamService.create({
+      tenant: "acme",
+      key: "SEC",
+      name: "Secret",
+      createdBy: "system",
+      isPrivate: true,
+    });
+    await ctx.teamService.addMember("acme", secret.id, "u", { subject: "system" });
+    const insider = serverFor(ctx, [secret.id, ctx.web.id]);
+    const created = (
+      await insider.inject({
+        method: "POST",
+        url: "/scorecards",
+        headers: bearer,
+        payload: { ...body, teamId: secret.id },
+      })
+    ).json();
+    expect((await insider.inject({ method: "GET", url: "/scorecards", headers: bearer })).json()).toHaveLength(1);
+    await insider.close();
 
     const outsider = serverFor(ctx, [ctx.mobile.id], "other");
     expect((await outsider.inject({ method: "GET", url: "/scorecards", headers: bearer })).json()).toEqual([]);
-    const detail = await outsider.inject({ method: "GET", url: `/scorecards/${created.id}`, headers: bearer });
-    expect(detail.statusCode).toBe(404); // not 403 — refusing must not confirm the batch exists
+    expect((await outsider.inject({ method: "GET", url: `/scorecards/${created.id}`, headers: bearer })).statusCode) //
+      .toBe(404);
     await outsider.close();
   });
 
@@ -137,7 +165,8 @@ describe("a scorecard belongs to a team", () => {
     const app = serverFor(ctx, [ctx.web.id]);
     await app.inject({ method: "POST", url: "/scorecards", headers: bearer, payload: body });
     expect((await app.inject({ method: "GET", url: "/scorecards?team=WEB", headers: bearer })).json()).toHaveLength(1);
-    // A team the caller is not on returns nothing rather than that team's work — the narrow cannot widen.
+    // Another team's page is a different question, not a refused one — it lists that team's batches, of which
+    // there are none here.
     expect((await app.inject({ method: "GET", url: "/scorecards?team=MOB", headers: bearer })).json()).toEqual([]);
     await app.close();
   });

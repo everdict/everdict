@@ -319,7 +319,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
                   : { ...(dataset !== undefined ? { dataset } : {}), ...(harness !== undefined ? { harness } : {}) }),
               // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
               // person's teams and no more.
-              ...teamCeiling(principal),
+              ...(await teamCeiling(ctx.deps, principal)),
             }),
           ),
         ),
@@ -334,7 +334,11 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       ({ id }) =>
         run(principal, "scorecards:read", async () => {
           const record = await scorecards.getForDisplay(id); // BFF parity — the agent gets openable artifact refs too
-          if (!record || record.tenant !== ws || !ownedByVisibleTeam(record, visibleTeamsFor(principal)))
+          if (
+            !record ||
+            record.tenant !== ws ||
+            !ownedByVisibleTeam(record, await visibleTeamsFor(ctx.deps, principal))
+          )
             return fail("NOT_FOUND: scorecard not found.");
           return ok(serveScorecard(record));
         }),
@@ -360,7 +364,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
           ok(
             await scorecards.diff(ws, baseline, candidate, {
               ...(zThreshold !== undefined ? { zThreshold } : {}),
-              ...teamCeiling(principal),
+              ...(await teamCeiling(ctx.deps, principal)),
             }),
           ),
         ),
@@ -426,7 +430,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               ...(model ? { model } : {}),
               ...(judge_model ? { judgeModel: judge_model } : {}),
               window: window ?? "latest",
-              ...teamCeiling(principal),
+              ...(await teamCeiling(ctx.deps, principal)),
             }),
           ),
         ),
@@ -485,7 +489,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
                 viz: viz ?? "table",
                 ...(include_incomplete !== undefined ? { includeIncomplete: include_incomplete } : {}),
               },
-              visibleTeamsFor(principal),
+              await visibleTeamsFor(ctx.deps, principal),
             ),
           ),
         ),
@@ -502,7 +506,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       },
       ({ id }) =>
         run(principal, "scorecards:read", async () =>
-          ok(await scorecards.analysisBundle(ws, id, visibleTeamsFor(principal))),
+          ok(await scorecards.analysisBundle(ws, id, await visibleTeamsFor(ctx.deps, principal))),
         ),
     );
 

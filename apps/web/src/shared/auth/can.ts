@@ -159,10 +159,13 @@ export function can(roles: string[] | undefined, action: WebAction): boolean {
   return (roles ?? []).some((role) => PERMS[role]?.includes(action))
 }
 
-// The TEAM axis of the same matrix (mirror of `canReachTeam` in @everdict/domain). An eval asset and an issue
-// belong to a team, and one you are not on is not yours to read or to write — so a team-scoped page that shows
-// its create/edit buttons anyway is offering a guaranteed 403, and a link into another team's asset is offering a
-// guaranteed 404 (the control plane answers a read it refuses as "not found", never as "not allowed").
+// The TEAM axis of the same matrix (mirror of `canReachTeam` in @everdict/domain). It answers the WRITE half:
+// an eval asset and an issue belong to a team, and changing one you are not on is refused — so a team-scoped
+// page that shows its create/edit buttons anyway is offering a guaranteed 403.
+//
+// READS are not this axis's business. A workspace whose teams cannot see each other's work has stopped being one
+// workspace, so what a team owns is visible by default and the narrowing is that team choosing to be PRIVATE —
+// decided server-side (a hidden row simply never arrives), which is why passing a read action here returns true.
 //
 // `teamId === undefined` means the thing declares no owner (a workspace-level action, an unowned row) — never
 // read that as "everyone's team", which would silently widen the gate. An ADMIN passes: admins govern the whole
@@ -174,6 +177,7 @@ export function canInTeam(
 ): boolean {
   if (!can(principal?.roles, action)) return false
   if (teamId === undefined) return true
+  if (action.endsWith(':read')) return true
   if ((principal?.roles ?? []).includes('admin')) return true
   return (principal?.teams ?? []).includes(teamId)
 }

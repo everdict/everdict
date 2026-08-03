@@ -1,35 +1,55 @@
 import type { TeamService } from "@everdict/application-control";
-import { type Principal, type ResourceScope, canReachTeam, visibleTeams } from "@everdict/auth";
+import type { Principal, ResourceScope } from "@everdict/auth";
 import { NotFoundError } from "@everdict/contracts";
 
 // The READ half of the team axis, shared by both transports (routes + MCP tools). It lives in `common/` rather
-// than in route-context because it needs nothing but the principal — and because the MCP tool files cannot import
-// route-context without closing a cycle (route-context builds the MCP server).
+// than in route-context because the MCP tool files cannot import route-context without closing a cycle
+// (route-context builds the MCP server).
 //
-// Ownership ISOLATES: an asset owned by a team the caller is not on is not theirs to read, and the refusal is
-// answered exactly like another workspace's row — 404, never 403. "You may not see this" would still confirm that
-// a harness by that name, a batch with that id, exists at all.
+// **Reads are decided by team PRIVACY, not by membership.** A workspace whose teams cannot see each other's work
+// has stopped being one workspace, so what a team owns is visible by default and `isPrivate` is the explicit,
+// per-team opt-in that hides it — the rule the tracker already followed, now the only rule. Membership still
+// decides WRITING (`canReachTeam`, the kernel): a team's work is theirs to change.
+//
+// `TeamService.visibleTeamIds` is the ONE place privacy is decided, and `undefined` from it means "nothing is
+// hidden" — never "no teams", which is the failure mode a `[]` would silently produce.
 
-// One already-identified resource. Reads gate the ROLE first (`gate(principal, "x:read")`, no resource) and the
-// OWNER with this, in that order: someone with no read permission at all should hear 403 about the permission,
-// not 404 about a row.
-export function assertTeamVisible(principal: Principal, resource: ResourceScope | undefined, what: string): void {
-  if (canReachTeam(principal, resource)) return;
-  throw new NotFoundError("NOT_FOUND", { team: resource?.teamId }, `${what} not found.`);
+// Everything here needs the team roster and nothing more of the deps bag — both ServerDeps and McpDeps satisfy
+// this structurally, which is what lets the two transports share one answer.
+interface TeamResolvingDeps {
+  teamService?: TeamService;
 }
 
-// The ceiling a LIST read stays under — `undefined` for an admin or a machine credential (no narrowing), else the
-// caller's teams (`[]` for someone on no team, which honestly returns only the workspace's unowned rows).
-// Stores take it as `visibleTeams`; a service holding one row asks `ownedByVisibleTeam` with the same value.
-export function visibleTeamsFor(principal: Principal): string[] | undefined {
-  return visibleTeams(principal);
+// The teams whose work this caller may READ — `undefined` when nothing is hidden (no private team exists, the
+// caller is an admin, or this deployment composes no team service at all).
+export async function visibleTeamsFor(deps: TeamResolvingDeps, principal: Principal): Promise<string[] | undefined> {
+  if (!deps.teamService) return undefined;
+  return deps.teamService.visibleTeamIds(principal.workspace, principal.subject, principal.roles.includes("admin"));
 }
 
 // The same ceiling in spread form, for the filter/options objects that carry it as an optional field — `{}` when
 // there is no ceiling, so an absent key never reads as "narrow to nothing".
-export function teamCeiling(principal: Principal): { visibleTeams?: string[] } {
-  const teams = visibleTeams(principal);
+export async function teamCeiling(deps: TeamResolvingDeps, principal: Principal): Promise<{ visibleTeams?: string[] }> {
+  const teams = await visibleTeamsFor(deps, principal);
   return teams === undefined ? {} : { visibleTeams: teams };
+}
+
+// One already-identified resource. A refusal is answered 404, never 403: a private team must not be discoverable
+// by the shape of the error, which is the same no-existence-leak rule a cross-workspace read follows.
+export async function assertTeamVisible(
+  deps: TeamResolvingDeps,
+  principal: Principal,
+  teamId: string | undefined,
+  what: string,
+): Promise<void> {
+  if (teamId === undefined || !deps.teamService) return; // unowned = the workspace's
+  const visible = await deps.teamService.canSeeTeam(
+    principal.workspace,
+    teamId,
+    principal.subject,
+    principal.roles.includes("admin"),
+  );
+  if (!visible) throw new NotFoundError("NOT_FOUND", { team: teamId }, `${what} not found.`);
 }
 
 // ── Ownership resolution for the versioned registries ────────────────────────────────────────────────────────
@@ -52,17 +72,19 @@ export async function teamOfVersion(
   return teamId === undefined ? {} : { teamId };
 }
 
-// The READ guard for a registry-backed entity: another team's harness/dataset/judge/rubric is answered 404, the
-// same as one that does not exist. Asked of the ENTITY rather than the version, so a caller cannot see version 3
-// of something whose ownership they cannot reach just because version 3 predates the axis.
+// The READ guard for a registry-backed entity: a PRIVATE team's harness/dataset/judge/rubric is answered 404, the
+// same as one that does not exist. Asked of the ENTITY rather than the version, so ownership is one answer per
+// thing rather than one per release.
 export async function assertEntityVisible(
+  deps: TeamResolvingDeps,
   principal: Principal,
   registry: TeamAware | undefined,
   tenant: string,
   id: string,
   what: string,
 ): Promise<void> {
-  assertTeamVisible(principal, await teamOfEntity(registry, tenant, id), what);
+  const owner = await teamOfEntity(registry, tenant, id);
+  await assertTeamVisible(deps, principal, owner.teamId, what);
 }
 
 // The team that owns an ENTITY — read off its newest own version, because ownership belongs to the thing, not to
@@ -75,12 +97,6 @@ export async function teamOfEntity(
   const versions = (await registry?.ownVersions?.(tenant, id)) ?? [];
   const newest = versions[versions.length - 1];
   return newest === undefined ? {} : teamOfVersion(registry, tenant, id, newest);
-}
-
-// Everything below needs the team roster, and nothing more of the deps bag — both ServerDeps and McpDeps
-// satisfy this structurally, which is what lets the two transports share one answer.
-interface TeamResolvingDeps {
-  teamService?: TeamService;
 }
 
 // Who a NEWLY created asset will belong to, and what the gate should check.

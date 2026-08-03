@@ -1,6 +1,7 @@
 import { InitiativeStatusSchema } from "@everdict/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { initiativeDocs } from "./initiative.docs.js";
 import { CreateInitiativeBodySchema } from "./request/create-initiative.js";
@@ -86,7 +87,15 @@ export function registerInitiativeRoutes(app: FastifyInstance, deps: ServerDeps)
       return sendError(reply, err);
     }
     try {
-      return reply.send(await deps.initiativeService.detail(principal.workspace, req.params.id));
+      return reply.send(
+        await deps.initiativeService.detail(
+          principal.workspace,
+          req.params.id,
+          // The goal itself is workspace-level, so it is always readable; what narrows is which projects and
+          // blockers under it are NAMED (a private team's are not).
+          await visibleTeamsFor(deps, principal),
+        ),
+      );
     } catch (err) {
       return sendError(reply, err); // another workspace's id → 404 (tenant-scoped store, no existence leak)
     }
