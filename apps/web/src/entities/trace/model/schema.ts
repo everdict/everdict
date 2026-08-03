@@ -17,12 +17,21 @@ export const traceCostSchema = z.object({
   outputTokens: z.number(),
   usd: z.number(),
 })
+// STRUCTURE (contracts) — optional on every kind: the span identity + parentage + duration + absolute instant
+// that let a normalized event stream be read as the TREE it came from. Absent on a source that reports none.
+const structure = {
+  spanId: z.string().optional(),
+  parentId: z.string().optional(),
+  durationMs: z.number().optional(),
+  at: z.string().optional(),
+}
 export const traceEventSchema = z.discriminatedUnion('kind', [
   z.object({
     t: z.number(),
     kind: z.literal('message'),
     role: z.enum(['user', 'assistant']),
     text: z.string(),
+    ...structure,
   }),
   z.object({
     t: z.number(),
@@ -30,6 +39,7 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
     model: z.string(),
     cost: traceCostSchema.optional(),
     latencyMs: z.number().optional(),
+    ...structure,
   }),
   z.object({
     t: z.number(),
@@ -42,6 +52,7 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
     // is REQUIRED, so mirroring it verbatim rejected real evidence while the drift guard stayed green
     // (both infer `unknown`, which already admits undefined). Keep the runtime as loose as the wire.
     args: z.unknown().optional(),
+    ...structure,
   }),
   z.object({
     t: z.number(),
@@ -49,19 +60,22 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
     id: z.string(),
     ok: z.boolean(),
     output: z.string(),
+    ...structure,
   }),
   z.object({
     t: z.number(),
     kind: z.literal('env_action'),
     action: z.string(),
     detail: z.unknown().optional(),
+    ...structure,
   }),
-  z.object({ t: z.number(), kind: z.literal('error'), message: z.string() }),
+  z.object({ t: z.number(), kind: z.literal('error'), message: z.string(), ...structure }),
   z.object({
     t: z.number(),
     kind: z.literal('log'),
     stream: z.enum(['stdout', 'stderr']),
     text: z.string(),
+    ...structure,
   }),
   z.object({
     t: z.number(),
@@ -70,14 +84,15 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
     ref: z.string(),
     mediaType: z.string().optional(),
     role: z.string().optional(),
+    ...structure,
   }),
   z.object({
     t: z.number(),
     kind: z.literal('span'),
     name: z.string(),
-    // 스팬 자체의 길이(OTLP end−start). 없으면 순간으로 도착해 크로스-플레인 타임라인이 시작점만 그린다.
-    durationMs: z.number().optional(),
     attributes: z.record(z.string(), z.unknown()).optional(),
+    // durationMs lives in `structure` now — it was this kind's field first, and every kind needs it.
+    ...structure,
   }),
   // 인프라 플레인 기록(배치/서비스) — 백엔드가 오케스트레이터의 계정을 트레이스에 봉인한 것
   z.object({
@@ -89,6 +104,8 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
     unit: z.string().optional(),
     node: z.string().optional(),
     service: z.string().optional(),
+    // `at` (the cross-plane alignment anchor) rides in `structure` — it was this kind's field first.
+    ...structure,
   }),
 ])
 

@@ -9,13 +9,20 @@ import { cn } from '@/shared/lib/utils'
 
 import type { TrajectorySegment } from '../api/browse-trajectories'
 import { placeTrajectory, type Lane, type PlacedEvent } from '../lib/trajectory-planes'
+import { trajectorySpans } from '../lib/trajectory-spans'
 import { AttributesView, IoPanel } from './data-view'
+import { SpanLegend, SpanWaterfall } from './span-waterfall'
 
 // The owned trajectory's SYSTEM view — every plane the sealed evidence carries, read as one run: the
 // agent's own steps, the orchestrator's account of where it ran, and one lane per service that pushed its
-// own OTel spans into this run. The platform TraceDetailDialog's grammar — timeline on top, list left,
-// selected item's full payload right — over OUR vocabulary: a normalized TraceEvent stream per emitter,
-// not one span tree.
+// own OTel spans into this run.
+//
+// It renders through the SAME `SpanWaterfall` an external platform's trace does. It used to render a flat
+// list beside a bar chart, and the reason was the data, not the view: our normalized events carried a bare
+// scalar `t` and no parentage, so there was no tree to draw and (for an agent turn, whose `t` was a step
+// index with no anchor) not even a time axis. Events now carry the contracts STRUCTURE — span id, parent,
+// duration, absolute instant — so one renderer serves both, and what stays ours is the extra axis a
+// single-process platform trace has no equivalent for: the PLANES.
 //
 // The one rule this view inherits verbatim from data-view: payloads render IN FULL. A trajectory is
 // evidence, and evidence elided at 200 characters is not evidence.
@@ -176,12 +183,22 @@ export function TrajectoryView({ segments }: { segments: TrajectorySegment[] }) 
     anchored.sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0))
     return [...anchored, ...rest]
   }, [placed])
+  // The waterfall's nodes — the projection that makes this evidence readable by the shared renderer.
+  const { nodes, eventOf } = useMemo(() => trajectorySpans(ordered, axis?.startMs), [ordered, axis])
   const rows = useMemo(
-    () => (lane === 'all' ? ordered : ordered.filter((p) => p.laneId === lane)),
-    [ordered, lane]
+    () => (lane === 'all' ? nodes : nodes.filter((n) => eventOf.get(n.id)?.laneId === lane)),
+    [nodes, eventOf, lane]
   )
 
-  const current = placed.find((p) => p.key === selectedKey) ?? ordered[0]
+  const currentId = selectedKey !== undefined && eventOf.has(selectedKey) ? selectedKey : rows[0]?.id
+  const current = currentId !== undefined ? eventOf.get(currentId) : undefined
+  // The swimlanes place PLACED events; selection speaks in waterfall node ids. One map keeps the two axes
+  // pointing at the same step, so clicking a bar highlights its row and vice versa.
+  const nodeIdByKey = useMemo(() => {
+    const byKey = new Map<string, string>()
+    for (const [id, placedEvent] of eventOf) byKey.set(placedEvent.key, id)
+    return byKey
+  }, [eventOf])
 
   if (placed.length === 0)
     return <p className="px-1 py-2 text-[12px] text-faint">{t('noEvents')}</p>
@@ -235,8 +252,9 @@ export function TrajectoryView({ segments }: { segments: TrajectorySegment[] }) 
               label={laneLabel(laneRow, t)}
               axis={axis}
               events={placed.filter((p) => p.laneId === laneRow.id && p.startMs !== undefined)}
-              selectedKey={current?.key}
+              {...(currentId !== undefined ? { selectedNodeId: currentId } : {})}
               onSelect={setSelectedKey}
+              nodeIdOf={(key) => nodeIdByKey.get(key) ?? key}
             />
           ))}
           {unanchored > 0 && (
@@ -274,41 +292,25 @@ export function TrajectoryView({ segments }: { segments: TrajectorySegment[] }) 
         </div>
       )}
 
-      {/* List left, the selected event's full payload right — each pane scrolls on its own once the
+      {/* Waterfall left, the selected event's full payload right — each pane scrolls on its own once the
           CONTAINER (not the viewport) is wide enough to hold both. */}
       <div className="mt-3 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto @3xl:flex-row @3xl:overflow-hidden">
-        <ul className="min-w-0 flex-1 divide-y divide-border/50 overflow-hidden rounded-md border border-border bg-card/50 @3xl:overflow-y-auto">
-          {rows.map((row) => (
-            <li key={row.key}>
-              <button
-                type="button"
-                onClick={() => setSelectedKey(row.key)}
-                className={cn(
-                  'flex w-full gap-3 px-3 py-1.5 text-left hover:bg-elevated/50',
-                  row.key === current?.key && 'bg-primary/10'
-                )}
-              >
-                <span className="w-8 shrink-0 pt-0.5 text-right font-mono text-[10px] tabular-nums text-faint">
-                  {row.index}
-                </span>
-                <span
-                  className="w-20 shrink-0 pt-0.5 font-mono text-[10px] uppercase tracking-wide"
-                  style={{ color: KIND_COLOR[row.event.kind] }}
-                >
-                  {row.event.kind}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/90">
-                  {summarize(row.event)}
-                </span>
-                {lanes.length > 1 && (
-                  <span className="hidden shrink-0 self-center rounded-[3px] bg-elevated px-1 text-[9.5px] text-faint @lg:inline">
-                    {laneLabel(laneOfId(lanes, row.laneId), t)}
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <section className="min-w-0 flex-1 @3xl:overflow-y-auto">
+          <div className="flex items-center justify-between pb-1">
+            <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+              {t('waterfallTitle')}
+            </span>
+            <SpanLegend />
+          </div>
+          <SpanWaterfall
+            spans={rows}
+            {...(currentId !== undefined ? { selectedId: currentId } : {})}
+            onSelect={setSelectedKey}
+            laneLabelOf={(id) =>
+              lanes.length > 1 ? laneLabel(laneOfId(lanes, eventOf.get(id)?.laneId ?? ''), t) : undefined
+            }
+          />
+        </section>
 
         <aside className="shrink-0 @3xl:w-[44%] @3xl:min-w-[360px] @3xl:max-w-[600px] @3xl:overflow-y-auto">
           {current ? (
@@ -330,15 +332,18 @@ function LaneRow({
   label,
   axis,
   events,
-  selectedKey,
+  selectedNodeId,
   onSelect,
+  nodeIdOf,
 }: {
   lane: Lane
   label: string
   axis: { startMs: number; endMs: number }
   events: PlacedEvent[]
-  selectedKey?: string
-  onSelect: (key: string) => void
+  selectedNodeId?: string
+  onSelect: (nodeId: string) => void
+  // A placed event's waterfall node — the bars and the rows are two views of one step.
+  nodeIdOf: (key: string) => string
 }) {
   const span = Math.max(1, axis.endMs - axis.startMs)
   return (
@@ -350,16 +355,17 @@ function LaneRow({
         {events.map((placed) => {
           const left = (((placed.startMs ?? axis.startMs) - axis.startMs) / span) * 100
           const width = (placed.durationMs / span) * 100
+          const nodeId = nodeIdOf(placed.key)
           return (
             <button
               key={placed.key}
               type="button"
-              onClick={() => onSelect(placed.key)}
+              onClick={() => onSelect(nodeId)}
               title={`${placed.event.kind} · ${summarize(placed.event).slice(0, 120)}`}
               aria-label={`${lane.label} ${placed.event.kind}`}
               className={cn(
                 'absolute top-1/2 h-3 -translate-y-1/2 rounded-[2px] transition-opacity hover:opacity-100',
-                placed.key === selectedKey ? 'opacity-100 ring-1 ring-primary' : 'opacity-75'
+                nodeId === selectedNodeId ? 'opacity-100 ring-1 ring-primary' : 'opacity-75'
               )}
               style={{
                 left: `${Math.min(left, 99.4)}%`,

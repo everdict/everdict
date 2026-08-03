@@ -220,6 +220,17 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
     if (!s) continue;
     const t = s.startMs - base;
     const a = s.attrs;
+    // STRUCTURE (contracts): the span's own identity travels with the events it becomes, so our ledger keeps
+    // the TREE the platform sent instead of flattening it — the reason a trace read from the platform's UI used
+    // to be a waterfall while the same trace read from our store was a list. One event per span may claim the
+    // id (the span's primary classification); companions point at it as their parent.
+    const spanId = s.spanId ?? `${s.name}-${i}`;
+    const structure = {
+      spanId,
+      ...(s.parentId !== undefined ? { parentId: s.parentId } : {}),
+      durationMs: Math.max(0, s.endMs - s.startMs),
+      ...(Number.isFinite(s.startMs) ? { at: new Date(s.startMs).toISOString() } : {}),
+    };
     // MLflow 3.x native token/cost live in nested objects (mlflow.chat.tokenUsage/mlflow.llm.cost) — kept as a fallback
     // after the mapping+GenAI keys, since real MLflow 3.11 autolog traces carry them there even without gen_ai.* (live-verified).
     const tu = (a["mlflow.chat.tokenUsage"] ?? {}) as Record<string, unknown>;
@@ -242,6 +253,9 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
         ref: artifactRef,
         ...(mediaType ? { mediaType } : {}),
         ...(role ? { role } : {}),
+        // A product OF the span — it hangs under it rather than claiming its id (one node per span).
+        parentId: spanId,
+        ...(structure.at !== undefined ? { at: structure.at } : {}),
       });
     }
 
@@ -256,12 +270,21 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
           usd: pickNum(a, keys.costUsd) ?? num(llmCost.total_cost) ?? 0,
         },
         latencyMs: s.endMs - s.startMs,
+        ...structure,
       });
     } else if (toolName !== undefined) {
       const id = pickStr(a, keys.toolCallId) ?? `${s.name}-${i}`;
-      out.push({ t, kind: "tool_call", id, name: toolName, args: firstDefined(a, keys.toolArgs) });
+      out.push({ t, kind: "tool_call", id, name: toolName, args: firstDefined(a, keys.toolArgs), ...structure });
       const ok = a["tool.error"] === undefined && a.error === undefined;
-      out.push({ t: s.endMs - base, kind: "tool_result", id, ok, output: pickStr(a, keys.toolResult) ?? "" });
+      // The result is the call's own outcome — nested under it, with no id of its own (the call IS the span).
+      out.push({
+        t: s.endMs - base,
+        kind: "tool_result",
+        id,
+        ok,
+        output: pickStr(a, keys.toolResult) ?? "",
+        parentId: spanId,
+      });
     } else if (declaredKindIsTool(a)) {
       // TOOL-kind spans WITHOUT gen_ai/tool.* attrs (mlflow.spanType=TOOL, openinference TOOL/FUNCTION, …): the
       // platform DECLARES the span a tool step even when no attribute carries a tool name. These used to demote to
@@ -269,7 +292,14 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
       // "span", so the judge saw NO tool actions at all for such harnesses. Name = the span itself; args/result
       // fall back to the platform's generic I/O channels.
       const id = pickStr(a, keys.toolCallId) ?? `${s.name}-${i}`;
-      out.push({ t, kind: "tool_call", id, name: s.name, args: firstDefined(a, [...keys.toolArgs, ...IO_INPUT_KEYS]) });
+      out.push({
+        t,
+        kind: "tool_call",
+        id,
+        name: s.name,
+        args: firstDefined(a, [...keys.toolArgs, ...IO_INPUT_KEYS]),
+        ...structure,
+      });
       const ok = a["tool.error"] === undefined && a.error === undefined;
       out.push({
         t: s.endMs - base,
@@ -277,22 +307,22 @@ export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): Tr
         id,
         ok,
         output: pickStr(a, keys.toolResult) ?? pickIo(a, IO_OUTPUT_KEYS) ?? "",
+        parentId: spanId,
       });
     } else {
       const text = pickStr(a, keys.messageText);
-      if (text !== undefined) out.push({ t, kind: "message", role: "assistant", text });
+      if (text !== undefined) out.push({ t, kind: "message", role: "assistant", text, ...structure });
       // Structural span (chain/agent/retriever etc.) — preserved instead of dropped, so a `span` judge requirement is
       // satisfiable and non-LLM steps aren't silently lost. Skip a bare artifact-only span (already emitted above).
       else if (artifactRef === undefined) {
         // Carry the span's own length through: a service under test emits mostly structural spans, and a
         // cross-plane timeline needs their duration, not just their start.
-        const durationMs = s.endMs - s.startMs;
         out.push({
           t,
           kind: "span",
           name: s.name,
-          ...(Number.isFinite(durationMs) && durationMs > 0 ? { durationMs } : {}),
           attributes: a,
+          ...structure,
         });
       }
     }

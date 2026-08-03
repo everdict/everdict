@@ -4,15 +4,29 @@ import type { AgentMessageRecord, TraceEvent } from "@everdict/contracts";
 // normalized TraceEvent stream — the same projection idiom as tryMessagesToTrace (agent-automation B5), but
 // over the PERSISTED AgentMessageRecord rows a real run produced. The transcript is already tool-call shaped,
 // so this is a projection, not an inference: user/assistant text → message, assistant toolCalls → tool_call
-// (real call ids), tool rows → tool_result paired by toolCallId. `t` is a monotonic step index (graders that
-// need wall-clock read llm_call latency, which a transcript doesn't carry). Reasoning text stays display-only
-// on the session record — it is not part of the evidence stream.
+// (real call ids), tool rows → tool_result paired by toolCallId. Reasoning text stays display-only on the
+// session record — it is not part of the evidence stream.
+//
+// TIME is real here (it used to be a step counter, 0,1,2…). A transcript row carries `createdAt`, so `t` is
+// milliseconds from the turn's first row and `at` is the absolute instant — which is what lets a reader lay
+// this plane on a shared axis at all. Before this, an agent turn sealed with no anchor and no durations, so
+// the trace viewer could only draw a list: no timeline, no bars. A tool call's `durationMs` is its own
+// result's arrival, which the transcript knows exactly.
+//
+// STRUCTURE is real too: a tool result hangs under the call it answers (`parentId`), so the stream reads as
+// the tree it always was instead of a flat sequence.
+
 // What one turn spent on the model. The meter (billing) and the ledger (evidence) take the SAME numbers from
 // the loop's counters, so there is one type rather than two shapes drifting apart.
 export interface AgentTurnUsage {
   model: string;
   inputTokens: number;
   outputTokens: number;
+}
+
+function msOf(iso: string): number | undefined {
+  const parsed = Date.parse(iso);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 export function transcriptToTrace(
@@ -25,12 +39,32 @@ export function transcriptToTrace(
   usage?: AgentTurnUsage,
 ): TraceEvent[] {
   const trace: TraceEvent[] = [];
-  let t = 0;
-  for (const m of messages) {
+  // The turn's own t0 — every `t` counts from the first row we can date. A transcript with no datable row
+  // keeps a step index, which is what this projection always produced (never worse than before).
+  const stamps = messages.map((m) => msOf(m.createdAt));
+  const base = stamps.find((ms): ms is number => ms !== undefined);
+  let step = 0; // the pre-timestamp fallback: used only when NO row in the turn can be dated
+  let lastT = 0;
+  const at = (index: number): { t: number; at?: string } => {
+    const ms = stamps[index];
+    if (base === undefined) return { t: step++ };
+    if (ms === undefined) return { t: lastT }; // an undatable row sits where the last datable one did
+    lastT = ms - base;
+    return { t: lastT, at: new Date(ms).toISOString() };
+  };
+  // When a tool result arrived, by the call id it answers — a tool_call's own length.
+  const resultAt = new Map<string, number>();
+  messages.forEach((m, index) => {
+    const ms = stamps[index];
+    if (m.role !== "assistant" && m.toolCallId !== undefined && ms !== undefined) resultAt.set(m.toolCallId, ms);
+  });
+
+  messages.forEach((m, index) => {
+    const stamp = at(index);
     if (m.role === "user") {
-      if (m.content.length > 0) trace.push({ t: t++, kind: "message", role: "user", text: m.content });
+      if (m.content.length > 0) trace.push({ ...stamp, kind: "message", role: "user", text: m.content });
     } else if (m.role === "assistant") {
-      if (m.content.length > 0) trace.push({ t: t++, kind: "message", role: "assistant", text: m.content });
+      if (m.content.length > 0) trace.push({ ...stamp, kind: "message", role: "assistant", text: m.content });
       for (const call of m.toolCalls ?? []) {
         let args: unknown = call.arguments;
         try {
@@ -38,24 +72,41 @@ export function transcriptToTrace(
         } catch {
           // Keep the raw string — the model produced non-JSON arguments.
         }
-        trace.push({ t: t++, kind: "tool_call", id: call.id, name: call.name, args });
+        const end = resultAt.get(call.id);
+        const started = stamps[index];
+        trace.push({
+          ...stamp,
+          kind: "tool_call",
+          id: call.id,
+          name: call.name,
+          args,
+          spanId: call.id, // the call IS the span; its result nests under it
+          ...(end !== undefined && started !== undefined && end > started ? { durationMs: end - started } : {}),
+        });
       }
     } else {
+      const id = m.toolCallId ?? `call-${index}`;
       trace.push({
-        t: t++,
+        ...stamp,
         kind: "tool_result",
-        id: m.toolCallId ?? `call-${t}`,
+        id,
         ok: !m.content.startsWith("Error"),
         output: m.content,
+        parentId: id,
       });
     }
-  }
-  if (usage)
+  });
+  if (usage) {
+    // The turn's model spend, closing the stream — it spans the whole turn rather than sitting at an instant.
+    const last = [...stamps].reverse().find((ms): ms is number => ms !== undefined);
     trace.push({
-      t: t++,
+      t: base !== undefined && last !== undefined ? last - base : step++,
+      ...(last !== undefined ? { at: new Date(last).toISOString() } : {}),
       kind: "llm_call",
       model: usage.model,
       cost: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, usd: 0 },
+      ...(base !== undefined && last !== undefined && last > base ? { durationMs: last - base } : {}),
     });
+  }
   return trace;
 }

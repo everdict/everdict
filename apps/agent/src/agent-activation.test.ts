@@ -299,16 +299,19 @@ describe("AgentActivator", () => {
 
     const terminal = reports.find((r) => r.kind === "agent.run.completed");
     expect(terminal?.runId).toBe("s-2"); // the activation minted session s-1, run s-2
+    // This fixture's rows carry no datable createdAt, so the projection keeps its step-index fallback (`t` is
+    // an order, not a clock). A row's own tool calls share its step — they happened at the same instant — and
+    // the call carries the span id its result hangs under.
     expect(terminal?.trace).toEqual([
       { t: 0, kind: "message", role: "user", text: "[scorecard.completed] Scorecard sc-1 succeeded" },
       { t: 1, kind: "message", role: "assistant", text: "Checked the regression." },
-      { t: 2, kind: "tool_call", id: "call-1", name: "get_scorecard", args: { id: "sc-1" } },
-      { t: 3, kind: "tool_result", id: "call-1", ok: true, output: "ok" },
+      { t: 1, kind: "tool_call", id: "call-1", name: "get_scorecard", args: { id: "sc-1" }, spanId: "call-1" },
+      { t: 2, kind: "tool_result", id: "call-1", ok: true, output: "ok", parentId: "call-1" },
       // The turn's model call closes the evidence. Without it the trajectory claims the agent typed and used
       // tools but never called a model, and usage (derived from llm_call costs) reads zero for a run that
       // spent money. `usd` is 0 on the wire on purpose — the control plane prices it at seal.
       {
-        t: 4,
+        t: 3,
         kind: "llm_call",
         model: "claude-sonnet-5",
         cost: { inputTokens: 120, outputTokens: 40, usd: 0 },

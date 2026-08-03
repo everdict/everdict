@@ -118,10 +118,12 @@ describe("spansToTraceEvents", () => {
 });
 
 describe("parseOtlpSpans", () => {
-  it("normalizes the OTLP attribute array + ns times", () => {
+  it("normalizes the OTLP attribute array + ns times, keeping the span tree the exporter sent", () => {
     const spans = parseOtlpSpans([
       {
         name: "chat",
+        spanId: "0a1b",
+        parentSpanId: "root",
         startTimeUnixNano: "1000000000", // 1000ms
         endTimeUnixNano: 1200000000,
         attributes: [
@@ -133,8 +135,44 @@ describe("parseOtlpSpans", () => {
     expect(spans[0]?.startMs).toBe(1000);
     expect(spans[0]?.attrs["gen_ai.request.model"]).toBe("m1");
     expect(spans[0]?.attrs["gen_ai.usage.input_tokens"]).toBe(42);
+    expect(spans[0]).toMatchObject({ spanId: "0a1b", parentId: "root" });
     // end-to-end: OTLP → TraceEvent
     expect(spansToTraceEvents(spans)[0]?.kind).toBe("llm_call");
+  });
+});
+
+describe("spansToTraceEvents — the span TREE survives normalization", () => {
+  // Regression: normalization used to drop span identity and parentage, so the SAME trace was a waterfall in
+  // the platform's own UI and a flat list once it reached our ledger. The renderer was never the problem.
+  it("carries spanId/parentId/durationMs/at onto the events a span becomes", () => {
+    const spans: Span[] = [
+      { name: "agent", spanId: "a", startMs: 1_000, endMs: 3_000, attrs: {} },
+      {
+        name: "bash",
+        spanId: "b",
+        parentId: "a",
+        startMs: 1_500,
+        endMs: 2_000,
+        attrs: { "gen_ai.tool.name": "bash", "tool.arguments": "ls" },
+      },
+    ];
+    const events = spansToTraceEvents(spans);
+    // The structural span keeps its own identity + length.
+    expect(events[0]).toMatchObject({
+      kind: "span",
+      name: "agent",
+      spanId: "a",
+      durationMs: 2_000,
+      at: new Date(1_000).toISOString(),
+    });
+    // The tool call hangs under it, and its RESULT hangs under the call — the tree, not a sequence.
+    expect(events[1]).toMatchObject({ kind: "tool_call", spanId: "b", parentId: "a", durationMs: 500 });
+    expect(events[2]).toMatchObject({ kind: "tool_result", parentId: "b" });
+  });
+
+  it("a span with no platform id still gets a stable node id (name-index), so a partial tree draws", () => {
+    const events = spansToTraceEvents([{ name: "chain", startMs: 0, endMs: 10, attrs: {} }]);
+    expect(events[0]).toMatchObject({ kind: "span", spanId: "chain-0" });
   });
 });
 

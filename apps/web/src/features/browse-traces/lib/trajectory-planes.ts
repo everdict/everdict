@@ -26,6 +26,10 @@ export interface PlacedEvent {
   event: TraceEvent
   laneId: string
   emitter: string
+  // The span tree the evidence carries (contracts STRUCTURE): the node this event IS, and the node it hangs
+  // under. Scoped by EMITTER, because two planes may legitimately mint the same platform span id.
+  nodeId: string
+  parentNodeId?: string
   // Position within its own segment — the number a reader can point at ("event #12 of the checkout plane").
   index: number
   // Absolute wall-clock, present only when the segment could be anchored. Without it an event still shows
@@ -74,10 +78,12 @@ export function anchorOf(segment: TrajectorySegment): number | undefined {
 }
 
 // How long an event occupied its lane. An instant (0) is drawn as a tick, not a zero-width bar.
-// A tool call's length is its own result's arrival — the pair shares an id inside one segment.
+// The emitter's own `durationMs` wins (contracts STRUCTURE — a normalized OTel span reports its real length);
+// the per-kind fallbacks stay for streams that predate it. A tool call's length is its own result's arrival —
+// the pair shares an id inside one segment.
 function durationOf(event: TraceEvent, resultAt: Map<string, number>): number {
+  if (event.durationMs !== undefined) return event.durationMs
   if (event.kind === 'llm_call') return event.latencyMs ?? 0
-  if (event.kind === 'span') return event.durationMs ?? 0
   if (event.kind === 'tool_call') {
     const end = resultAt.get(event.id)
     return end !== undefined && end > event.t ? end - event.t : 0
@@ -125,11 +131,15 @@ export function placeTrajectory(segments: TrajectorySegment[]): PlacedTrajectory
         startMs = startMs === undefined ? absolute : Math.min(startMs, absolute)
         endMs = endMs === undefined ? absolute + durationMs : Math.max(endMs, absolute + durationMs)
       }
+      const key = `${segment.emitter}#${index}`
       placed.push({
-        key: `${segment.emitter}#${index}`,
+        key,
         event,
         laneId,
         emitter: segment.emitter,
+        // A span id from the emitter is the node's identity; without one the event is its own leaf node.
+        nodeId: event.spanId !== undefined ? `${segment.emitter}:${event.spanId}` : key,
+        ...(event.parentId !== undefined ? { parentNodeId: `${segment.emitter}:${event.parentId}` } : {}),
         index,
         ...(absolute !== undefined ? { startMs: absolute } : {}),
         durationMs,

@@ -8,24 +8,73 @@ export const CostSchema = z.object({
 });
 export type Cost = z.infer<typeof CostSchema>;
 
+// STRUCTURE — the optional shape every non-infra event may carry, so the stream can be read as the tree it
+// came from instead of a flat list. All four are additive and optional: a harness that reports none produces
+// exactly the stream it always did, and no judge/grader changes.
+//
+// Why they exist: our own ledger normalizes every source into this vocabulary, and until now that
+// normalization DROPPED a span's identity and parentage — so an OTel trace read from the platform's own UI
+// was a waterfall, while the same trace read from our store was a list. The renderer was never the problem;
+// the model was. (`spanId`/`parentId` = the span tree; `durationMs` = how long the step took, not just when it
+// started; `at` = the absolute instant, since `t` is relative to the EMITTER's clock.)
+const STRUCTURE = {
+  spanId: z.string().optional(), // this step's own id — the node a child points at
+  parentId: z.string().optional(), // the enclosing step's spanId; absent = a root
+  durationMs: z.number().optional(), // how long this step took (an instant when absent)
+  at: z.string().optional(), // absolute wall-clock (ISO), when the emitter knows it
+};
+
 // Normalized trace — every harness adapter converts its native output into "this".
 // Every metric (task success/trajectory/cost/latency) derives from this single stream.
 export const TraceEventSchema = z.discriminatedUnion("kind", [
-  z.object({ t: z.number(), kind: z.literal("message"), role: z.enum(["user", "assistant"]), text: z.string() }),
+  z.object({
+    t: z.number(),
+    kind: z.literal("message"),
+    role: z.enum(["user", "assistant"]),
+    text: z.string(),
+    ...STRUCTURE,
+  }),
   z.object({
     t: z.number(),
     kind: z.literal("llm_call"),
     model: z.string(),
     cost: CostSchema.optional(),
     latencyMs: z.number().optional(),
+    ...STRUCTURE,
   }),
-  z.object({ t: z.number(), kind: z.literal("tool_call"), id: z.string(), name: z.string(), args: z.unknown() }),
-  z.object({ t: z.number(), kind: z.literal("tool_result"), id: z.string(), ok: z.boolean(), output: z.string() }),
-  z.object({ t: z.number(), kind: z.literal("env_action"), action: z.string(), detail: z.unknown().optional() }),
-  z.object({ t: z.number(), kind: z.literal("error"), message: z.string() }),
+  z.object({
+    t: z.number(),
+    kind: z.literal("tool_call"),
+    id: z.string(),
+    name: z.string(),
+    args: z.unknown(),
+    ...STRUCTURE,
+  }),
+  z.object({
+    t: z.number(),
+    kind: z.literal("tool_result"),
+    id: z.string(),
+    ok: z.boolean(),
+    output: z.string(),
+    ...STRUCTURE,
+  }),
+  z.object({
+    t: z.number(),
+    kind: z.literal("env_action"),
+    action: z.string(),
+    detail: z.unknown().optional(),
+    ...STRUCTURE,
+  }),
+  z.object({ t: z.number(), kind: z.literal("error"), message: z.string(), ...STRUCTURE }),
   // Raw process output (evidence fallback for black-box harnesses) — stderr progress logs and oversized stdout
   // that don't fit the message/tool vocabulary. Tail-capped by the emitter; judges/sinks may ignore it.
-  z.object({ t: z.number(), kind: z.literal("log"), stream: z.enum(["stdout", "stderr"]), text: z.string() }),
+  z.object({
+    t: z.number(),
+    kind: z.literal("log"),
+    stream: z.enum(["stdout", "stderr"]),
+    text: z.string(),
+    ...STRUCTURE,
+  }),
   // A produced artifact (file/attachment the agent emitted) — `ref` is a fetchable pointer (URL/path), not the bytes.
   // The ingest-generalization channel: platforms that carry attachments surface them here so an `artifact` judge
   // requirement is satisfiable. Judges/sinks that don't need it may ignore it. `role` = the artifact's purpose (e.g. "report").
@@ -36,6 +85,7 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     ref: z.string(),
     mediaType: z.string().optional(),
     role: z.string().optional(),
+    ...STRUCTURE,
   }),
   // A structural (non-LLM/non-tool) span preserved through ingest — chain/agent/retriever steps a harness emits that
   // the GenAI-convention normalizer would otherwise drop. `attributes` carries the raw span attributes verbatim.
@@ -45,8 +95,8 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     t: z.number(),
     kind: z.literal("span"),
     name: z.string(),
-    durationMs: z.number().optional(),
     attributes: z.record(z.string(), z.unknown()).optional(),
+    ...STRUCTURE, // `durationMs` lives here now — it was this kind's field first, and every kind needs it
   }),
   // The INFRA-plane record of the run's execution — the orchestrator's own account (job submission, blocked
   // placement verdicts, task/pod lifecycle events, restarts, OOM kills; a service topology's per-unit state).
@@ -62,9 +112,10 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     unit: z.string().optional(), // alloc id / pod name
     node: z.string().optional(),
     service: z.string().optional(), // the topology unit's name (scope "service")
-    // Absolute wall-clock (ISO) when the emitter knows it — the cross-plane alignment anchor: `t` is relative
-    // to the EMITTER's clock (dispatch t0 for infra vs in-job t0 for agent events), `at` is absolute.
-    at: z.string().optional(),
+    // STRUCTURE carries this plane's `at` — the absolute wall-clock the cross-plane axis aligns on (`t` is
+    // relative to the EMITTER's clock: dispatch t0 for infra vs in-job t0 for agent events). It was declared
+    // here first; every kind has it now.
+    ...STRUCTURE,
   }),
 ]);
 export type TraceEvent = z.infer<typeof TraceEventSchema>;

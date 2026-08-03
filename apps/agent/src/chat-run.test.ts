@@ -82,9 +82,17 @@ describe("withChatTurnRun — a chat turn is a run (O1)", () => {
       creator: "u-1",
       cause: "chat",
     });
+    // The transcript's own clock: both rows share a timestamp in this fixture, so both sit at t=0 with the
+    // absolute instant beside them (the projection stopped inventing a step index — see run-trace.ts).
     expect(reports[1]?.trace).toEqual([
-      { t: 0, kind: "message", role: "user", text: "what changed?" },
-      { t: 1, kind: "message", role: "assistant", text: "two runs regressed." },
+      { t: 0, at: "2026-07-31T00:00:00.000Z", kind: "message", role: "user", text: "what changed?" },
+      {
+        t: 0,
+        at: "2026-07-31T00:00:00.000Z",
+        kind: "message",
+        role: "assistant",
+        text: "two runs regressed.",
+      },
     ]);
   });
 

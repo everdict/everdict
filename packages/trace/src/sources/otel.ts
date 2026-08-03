@@ -30,6 +30,11 @@ interface OtlpSpan {
   startTimeUnixNano?: string | number;
   endTimeUnixNano?: string | number;
   attributes?: OtlpAttr[];
+  // The span TREE, as OTLP/JSON sends it (hex ids). Carried through to the normalized events so evidence
+  // arriving at our door keeps the nesting the exporter reported — a trace read from our own store must be
+  // the same picture the sender's platform shows.
+  spanId?: string;
+  parentSpanId?: string;
 }
 
 function attrValue(v: OtlpAttr["value"]): unknown {
@@ -116,7 +121,15 @@ export function parseOtlpSpans(spans: OtlpSpan[]): Span[] {
   return spans.map((s) => {
     const attrs: Record<string, unknown> = {};
     for (const at of s.attributes ?? []) attrs[at.key] = attrValue(at.value);
-    return { name: s.name ?? "", startMs: nanoToMs(s.startTimeUnixNano), endMs: nanoToMs(s.endTimeUnixNano), attrs };
+    return {
+      name: s.name ?? "",
+      startMs: nanoToMs(s.startTimeUnixNano),
+      endMs: nanoToMs(s.endTimeUnixNano),
+      attrs,
+      // An empty parentSpanId is OTLP's way of saying "root" — kept as absent rather than as an id nothing has.
+      ...(s.spanId ? { spanId: s.spanId } : {}),
+      ...(s.parentSpanId ? { parentId: s.parentSpanId } : {}),
+    };
   });
 }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
@@ -11,19 +11,13 @@ import {
   ClipboardCheck,
   Database,
   FileText,
-  Hash,
   Play,
   Sparkles,
   X,
 } from 'lucide-react'
 import { useTimeZone, useTranslations } from 'next-intl'
 
-import type {
-  TraceInspectResult,
-  TraceProvenance,
-  TraceSpanNode,
-  TraceSummary,
-} from '@/entities/trace'
+import type { TraceInspectResult, TraceProvenance, TraceSummary } from '@/entities/trace'
 import { fmtDateTime, fmtDurationMs, fmtTokens, fmtUsd } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
@@ -33,37 +27,8 @@ import { Dialog } from '@/shared/ui/dialog'
 
 import { inspectTraceAction } from '../api/browse-traces'
 import { AttributesView, IoPanel } from './data-view'
+import { SpanLegend, SpanTypeTag, SpanWaterfall, spanMetricLine } from './span-waterfall'
 import { TraceDetail } from './trace-detail'
-
-// Span-type accent (fixed hexes — like the existing EventRow kind colors — so they read on both themes).
-const SPAN_COLOR: Record<TraceSpanNode['type'], string> = {
-  agent: '#5e6ad2',
-  llm: '#9d7be6',
-  tool: '#3fb6b2',
-  retriever: '#e0a04c',
-  chain: '#8a8f98',
-  span: '#8a8f98',
-}
-
-// depth of each span by walking parentId (missing/cyclic parent → treat as a root, capped).
-function computeDepths(spans: TraceSpanNode[]): Map<string, number> {
-  const byId = new Map(spans.map((s) => [s.id, s]))
-  const depth = new Map<string, number>()
-  const resolve = (id: string, seen: Set<string>): number => {
-    const cached = depth.get(id)
-    if (cached !== undefined) return cached
-    const node = byId.get(id)
-    const parentId = node?.parentId
-    const d =
-      parentId && parentId !== id && byId.has(parentId) && !seen.has(parentId)
-        ? resolve(parentId, new Set(seen).add(id)) + 1
-        : 0
-    depth.set(id, Math.min(d, 8))
-    return depth.get(id) ?? 0
-  }
-  for (const s of spans) resolve(s.id, new Set())
-  return depth
-}
 
 // The observability-grade trace detail — a near-fullscreen modal: waterfall on the left, the selected
 // span's I/O + attributes in a side panel on the right (so a long timeline never buries the detail).
@@ -122,11 +87,6 @@ export function TraceDetailDialog({
 
   const spans = result?.detail?.spans ?? []
   const rollup = result?.detail?.rollup
-  const depths = useMemo(() => computeDepths(spans), [spans])
-  const total = useMemo(
-    () => Math.max(1, ...spans.map((s) => s.startOffsetMs + s.durationMs)),
-    [spans]
-  )
   const selected = spans.find((s) => s.id === selectedId) ?? spans[0]
 
   // Meta strip values — prefer the inspect rollup, fall back to the list summary.
@@ -232,80 +192,16 @@ export function TraceDetailDialog({
           <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
             <section className="min-w-0 flex-1 px-5 py-4 lg:overflow-y-auto">
               <SectionHead title={t('waterfall')}>
-                <Legend />
+                <SpanLegend />
               </SectionHead>
-              <div className="mt-2 space-y-0.5">
-                {spans.map((s) => {
-                  const depth = depths.get(s.id) ?? 0
-                  const leftPct = (s.startOffsetMs / total) * 100
-                  const widthPct = Math.max(0.6, (s.durationMs / total) * 100)
-                  const isSel = selected?.id === s.id
-                  const hasTokens = s.tokens?.input != null || s.tokens?.output != null
-                  // The row stays ONE line: tokens + cost sit in a fixed-width right rail (so every bar keeps a
-                  // shared time axis), and the I/O preview rides the hover tooltip — full I/O is a click away in
-                  // the side panel. This keeps tool-vs-model signal visible without fattening the row.
-                  const ioTitle =
-                    [
-                      s.input ? `${t('input')}: ${compactPreview(s.input)}` : null,
-                      s.output ? `${t('output')}: ${compactPreview(s.output)}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join('\n') || undefined
-                  return (
-                    <button
-                      type="button"
-                      key={s.id}
-                      onClick={() => setSelectedId(s.id)}
-                      title={ioTitle}
-                      className={cn(
-                        'grid w-full items-center gap-2 rounded-md py-1 text-left [grid-template-columns:minmax(110px,200px)_1fr_7rem] hover:bg-elevated/50',
-                        isSel && 'bg-primary/10'
-                      )}
-                    >
-                      <span
-                        className="flex min-w-0 items-center gap-1.5 text-[12px]"
-                        style={{ paddingLeft: depth * 14 }}
-                      >
-                        <SpanTypeTag type={s.type} />
-                        <span className="truncate text-foreground/90">{s.name}</span>
-                      </span>
-                      <span className="relative h-4 border-l border-border">
-                        <span
-                          className="absolute top-1/2 h-2.5 -translate-y-1/2 rounded-sm"
-                          style={{
-                            left: `${leftPct}%`,
-                            width: `${widthPct}%`,
-                            backgroundColor: SPAN_COLOR[s.type],
-                            minWidth: 3,
-                          }}
-                        />
-                        <span
-                          className="absolute top-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[9.5px] tabular-nums text-faint"
-                          style={{ left: `calc(min(${leftPct + widthPct}%, 88%) + 6px)` }}
-                        >
-                          {fmtDurationMs(s.durationMs)}
-                        </span>
-                      </span>
-                      {/* Right rail — tokens (models) + cost, right-aligned; fixed width keeps bars aligned. */}
-                      <span className="flex items-center justify-end gap-1.5 overflow-hidden pr-1 font-mono text-[10px] tabular-nums text-faint">
-                        {hasTokens && (
-                          <span
-                            className="flex items-center gap-0.5 whitespace-nowrap"
-                            title={t('colTokens')}
-                          >
-                            <Hash className="size-2.5 opacity-70" />
-                            {fmtTokens(s.tokens?.input)}→{fmtTokens(s.tokens?.output)}
-                          </span>
-                        )}
-                        {s.costUsd != null && (
-                          <span className="whitespace-nowrap text-faint/80">
-                            {fmtUsd(s.costUsd)}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  )
-                })}
+              {/* The shared waterfall — the SAME component the owned trajectory renders through, so the two
+                  surfaces cannot drift into looking like different products. */}
+              <div className="mt-2">
+                <SpanWaterfall
+                  spans={spans}
+                  {...(selected ? { selectedId: selected.id } : {})}
+                  onSelect={setSelectedId}
+                />
               </div>
             </section>
 
@@ -329,7 +225,7 @@ export function TraceDetailDialog({
                     </div>
                     {(selected.model || selected.tokens || selected.costUsd != null) && (
                       <div className="mt-1 font-mono text-[11px] tabular-nums text-muted-foreground">
-                        {metricLine(selected)}
+                        {spanMetricLine(selected)}
                       </div>
                     )}
                   </div>
@@ -404,45 +300,6 @@ function SectionHead({
       {children}
     </div>
   )
-}
-
-function SpanTypeTag({ type }: { type: TraceSpanNode['type'] }) {
-  return (
-    <span
-      className="rounded-[3px] px-1 text-[9px] font-[700] uppercase tracking-wide"
-      style={{ backgroundColor: `${SPAN_COLOR[type]}28`, color: SPAN_COLOR[type] }}
-    >
-      {type}
-    </span>
-  )
-}
-
-function Legend() {
-  return (
-    <span className="flex gap-3">
-      {(['agent', 'llm', 'tool'] as const).map((k) => (
-        <span key={k} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <span className="size-2 rounded-[2px]" style={{ backgroundColor: SPAN_COLOR[k] }} />
-          {k}
-        </span>
-      ))}
-    </span>
-  )
-}
-
-// One-line, whitespace-collapsed preview of a payload for the waterfall row (the full value lives in the
-// side panel). Capped so a huge payload never bloats the row DOM — the truncate class elides the rest.
-function compactPreview(v: string): string {
-  const s = v.replace(/\s+/g, ' ').trim()
-  return s.length > 160 ? `${s.slice(0, 160)}…` : s
-}
-
-function metricLine(s: TraceSpanNode): string {
-  const parts: string[] = []
-  if (s.model) parts.push(s.model)
-  if (s.tokens) parts.push(`${fmtTokens(s.tokens.input)}→${fmtTokens(s.tokens.output)}`)
-  if (s.costUsd != null) parts.push(fmtUsd(s.costUsd))
-  return parts.join(' · ') || '–'
 }
 
 // Everdict origin chips — deep-link a pulled trace back to the run/scorecard/dataset/harness that produced it, so a

@@ -122,9 +122,22 @@ collector and the store**.
   browse surface over the owned ledger), Settings › Traces gains the PRIMARY "everdict traces" section
   (each row opens its run — the run is the home), and the run detail page dual-reads: row embed first,
   else the sealed trajectory (labeled with its provenance source) — this is how agent/sandbox/OTLP runs
-  render a trace at all. Remaining: chat trace chips for own-store trajectories ride the existing `run`
-  reference (zero new contract); a dedicated internal waterfall + `LiveTraceRef` internal rewrite arrive
-  with the N2 ingestion surfaces.
+  render a trace at all. **The internal waterfall SHIPPED** — and the reason it lagged was the MODEL, not the
+  view: our ledger normalized every source into a flat `TraceEvent` stream whose only positional field was a
+  scalar `t`, so the same trace was a span tree in the platform's own UI and a list in ours (an agent turn was
+  worse still: `t` was a step index with no anchor, so there was not even a time axis). `TraceEvent` now
+  carries optional STRUCTURE — `spanId` · `parentId` · `durationMs` · `at` — which normalization
+  (`spansToTraceEvents`, `parseOtlpSpans`) and the agent's own transcript projection both fill in, and
+  `apps/web` renders BOTH sources through one `SpanWaterfall`. Additive and optional throughout: a source that
+  reports none produces exactly the stream it always did, and no judge/grader changes. Remaining: chat trace
+  chips for own-store trajectories ride the existing `run` reference (zero new contract); the `LiveTraceRef`
+  internal rewrite arrives with the N2 ingestion surfaces.
+
+  **Evidence is as private as the execution that made it.** The ledger's browse surface published every
+  member's agent-chat transcript to the whole workspace — a second door onto conversations the session store
+  keeps owner-scoped. A sealed trajectory now carries an `owner` (mig 0116, backfilled from the run ledger);
+  `list` filters on it in the QUERY (a page filtered afterwards would be short) and the detail read answers 404
+  for someone else's. The rule itself is `runAudience` in `@everdict/domain` — see docs/api.md §Run audience.
 - **N2 — Libraries + production ingestion.** `everdict-otel` (TS/Py) + migration recipes; continuous
   evaluation (judges over live traces; platform events from trace facts). **Continuous-evaluation rung
   SHIPPED (master-plan W6)**: the reserved trace source `everdict` points the pull machinery at the owned
