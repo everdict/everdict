@@ -41,7 +41,7 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
           ...(body.status !== undefined ? { status: body.status } : {}),
           ...(body.projectId !== undefined ? { projectId: body.projectId } : {}),
           ...(body.assignee !== undefined ? { assignee: body.assignee } : {}),
-          ...(body.labels !== undefined ? { labels: body.labels } : {}),
+          ...(body.labelIds !== undefined ? { labelIds: body.labelIds } : {}),
           ...(body.links !== undefined ? { links: body.links } : {}),
           ...(agent ? { agent } : {}),
         }),

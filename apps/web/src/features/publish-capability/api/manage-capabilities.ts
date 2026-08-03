@@ -18,7 +18,7 @@ function revalidateCapabilityPages(): void {
   for (const path of [
     '/[workspace]/store',
     '/[workspace]/store/mine',
-    '/[workspace]/settings/tools',
+    '/[workspace]/tools',
     '/[workspace]/settings/environments',
   ])
     revalidatePath(path)

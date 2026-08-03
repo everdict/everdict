@@ -1612,7 +1612,10 @@
     "more": "더 보기",
     "members": "멤버",
     "teams": "팀",
-    "teamHome": "홈"
+    "teamHome": "홈",
+    "agent": "에이전트",
+    "tools": "도구",
+    "skills": "스킬"
   },
   "usagePage": {
     "title": "사용량",
@@ -2819,7 +2822,9 @@
     "imagesDesc": "everdict 자체 스토어에 발행한 이미지",
     "subscriptions": "구독 규칙",
     "teams": "팀",
-    "teamsDesc": "이슈를 소유하고 이름 붙이는 그룹 — 워크스페이스는 항상 팀을 최소 하나 유지합니다."
+    "teamsDesc": "이슈를 소유하고 이름 붙이는 그룹 — 워크스페이스는 항상 팀을 최소 하나 유지합니다.",
+    "labels": "라벨",
+    "labelsDesc": "팀이 이슈를 분류하는 어휘입니다. 이름이나 색을 바꾸면 그 라벨을 단 모든 이슈에 한 번에 반영됩니다."
   },
   "knowledge": {
     "title": "지식",
@@ -3806,11 +3811,18 @@
   },
   "liveScreen": {
     "label": "라이브 화면",
-    "waiting": "첫 프레임을 기다리는 중…"
+    "waiting": "첫 프레임을 기다리는 중…",
+    "takeOver": "제어하기",
+    "driving": "이 브라우저를 직접 제어하는 중",
+    "stopDriving": "제어 그만두기"
   },
   "runTopology": {
     "title": "서비스 토폴로지",
     "notDeployed": "지금 클러스터에 떠 있는 웜 토폴로지가 없어요.",
+    "poolLabel": "세션 풀",
+    "poolInUse": "{used} / {total} 사용 중",
+    "poolTotal": "세션 {total}개",
+    "poolFull": "가득 참 — 추가 케이스는 거절돼요",
     "restarts": "재시작 {count}",
     "role": {
       "service": "서비스",
@@ -4696,8 +4708,6 @@
     "fieldAssignee": "담당자",
     "fieldAssigneeNone": "미지정",
     "fieldLabels": "라벨",
-    "fieldLabelsPlaceholder": "회귀, 브라우저",
-    "fieldLabelsHint": "라벨은 쉼표로 구분합니다.",
     "statusError": "이슈 상태를 바꾸지 못했습니다.",
     "statusControlLabel": "상태 변경",
     "statusMoveTo": "이동",
@@ -4737,7 +4747,12 @@
     "linkCopied": "이슈 링크를 복사했습니다.",
     "prevIssue": "이전 이슈",
     "importedFrom": "가져온 곳",
-    "nextIssue": "다음 이슈"
+    "nextIssue": "다음 이슈",
+    "labelSearchPlaceholder": "라벨 검색 또는 새로 만들기…",
+    "labelCreate": "「{name}」 라벨 만들기",
+    "labelCreateError": "라벨을 만들지 못했습니다.",
+    "labelRemove": "{name} 제거",
+    "labelNoMatch": "일치하는 라벨이 없습니다."
   },
   "issueLinks": {
     "add": "링크 추가",
@@ -5028,5 +5043,28 @@
     "emptyHint": "설정 › 멤버에서 사람을 초대해 시작하세요.",
     "noMatchTitle": "조건에 맞는 멤버가 없습니다",
     "noMatchHint": "다른 이름·이메일·팀으로 찾아보세요."
+  },
+  "labelsPage": {
+    "create": "새 라벨",
+    "createTitle": "새 라벨",
+    "createSubmit": "라벨 만들기",
+    "editTitle": "라벨 편집",
+    "save": "저장",
+    "cancel": "취소",
+    "fieldName": "이름",
+    "fieldNamePlaceholder": "예: flaky",
+    "fieldColor": "색",
+    "fieldDescription": "설명",
+    "fieldDescriptionPlaceholder": "이 라벨이 뜻하는 바를 적어주세요.",
+    "saveError": "라벨을 저장하지 못했습니다.",
+    "edit": "{name} 편집",
+    "delete": "{name} 삭제",
+    "deleteTitle": "라벨 삭제",
+    "deleteConfirm": "삭제",
+    "deleteBody": "「{name}」을(를) 삭제하고, 이 라벨을 단 모든 이슈에서 떼어냅니다.",
+    "deleteBodyCounted": "「{name}」을(를) 삭제하고, 이 라벨을 단 이슈 {count}개에서 떼어냅니다. 되돌릴 수 없습니다.",
+    "deleteError": "라벨을 삭제하지 못했습니다.",
+    "emptyTitle": "아직 라벨이 없습니다",
+    "emptyHint": "팀이 이슈를 분류할 어휘를 정의해보세요."
   }
 }

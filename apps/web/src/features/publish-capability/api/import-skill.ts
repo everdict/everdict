@@ -26,7 +26,7 @@ export async function importSkillAction(body: {
     for (const path of [
       '/[workspace]/store',
       '/[workspace]/store/mine',
-      '/[workspace]/settings/skills',
+      '/[workspace]/skills',
       '/[workspace]/settings/agent',
     ])
       revalidatePath(path)

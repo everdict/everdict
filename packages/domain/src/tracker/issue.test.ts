@@ -24,7 +24,7 @@ describe("Issue — the tracker's unit of intent", () => {
   it("newIssue starts in the backlog and records its own creation in the durable history", () => {
     const record = newIssue();
     expect(record.status).toBe("backlog");
-    expect(record.labels).toEqual([]);
+    expect(record.labelIds).toEqual([]);
     expect(record.links).toEqual([]);
     expect(record.history).toEqual([{ at: NOW, by: "dana", event: "created", detail: { status: "backlog" } }]);
   });
@@ -230,7 +230,7 @@ describe("Issue — the GitHub copy seams", () => {
       {
         title: "Retry drops tool results",
         description: "steps to reproduce",
-        labels: ["bug"],
+        labelIds: ["lbl_bug"],
         state: "closed",
         url: github.url,
         updatedAt: "2026-08-02T10:00:00.000Z",

@@ -525,6 +525,25 @@ describe("DockerTopologyRuntime", () => {
     expect(f.removed).toContain("everdict-bu-1.0.0-browser-run-1");
   });
 
+  it("provisionBrowserEnv: a declared client-extension image replaces the browser AND keeps its own launch args", async () => {
+    // Ignoring target.extension.ref was silent: the case ran against a plain headless browser with no extension
+    // and simply scored badly. Docker is the runtime the self-hosted runner uses, so this is where a harness that
+    // works on Nomad would quietly stop evaluating the thing it exists to evaluate.
+    const f = fakeDocker();
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    const withExt = {
+      ...SPEC,
+      target: { ...SPEC.target, kind: "browser" as const, extension: { ref: "reg/spica-ext:1" } },
+    } as typeof SPEC;
+    await rt.ensureTopology(withExt);
+    await rt.provisionBrowserEnv(withExt, "run-ext");
+
+    const browserRun = f.runs.find((r) => String(r.name).includes("browser-run-ext"));
+    expect(browserRun?.image).toBe("reg/spica-ext:1");
+    // No args: the image launches headful Chromium with --load-extension from its own entrypoint.
+    expect(browserRun?.args).toBeUndefined();
+  });
+
   it("provisionBrowserEnv snapshot: captures the REAL page DOM + screenshot via CDP (browser benchmark grading signals)", async () => {
     // Regression: dom used to be JSON.stringify(targets) (the CDP target list), not the rendered page — so a live
     // front-door run couldn't be graded on page content (dom-contains / WebArena string_match / program_html) and

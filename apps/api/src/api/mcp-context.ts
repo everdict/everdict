@@ -26,6 +26,7 @@ import type { TraceSourceService } from "@everdict/application-control";
 import type {
   GithubIssueSync,
   InitiativeService,
+  IssueLabelService,
   IssueService,
   ProjectService,
   SubscriptionService,
@@ -89,6 +90,7 @@ export interface McpDeps {
   // The eval tracker (docs/tracker.md) — an agent triages its own regressions through these.
   teamService?: TeamService;
   issueService?: IssueService;
+  issueLabelService?: IssueLabelService;
   projectService?: ProjectService;
   initiativeService?: InitiativeService;
   issueSync?: GithubIssueSync; // GitHub import + manual two-way sync (absent = no workspace GitHub App)

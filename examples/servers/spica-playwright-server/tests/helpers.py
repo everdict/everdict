@@ -25,7 +25,7 @@ def build_config(tmp_path: Path, max_browsers: int = 2) -> Config:
             session_id_selector="[data-session-id]",
             activation_timeout_ms=5_000,
         ),
-        cdp=CdpConfig(expose=False, port_base=9300, advertised_host="127.0.0.1"),
+        cdp=CdpConfig(expose=False, advertised_host="127.0.0.1"),
         browser_visible=False,
     )
 

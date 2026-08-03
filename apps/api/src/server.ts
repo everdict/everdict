@@ -108,6 +108,7 @@ import { registerImageRegistryRoutes } from "./api/image-registry/image-registry
 import { registerImagesRoutes } from "./api/images/images.routes.js";
 import { registerInitiativeRoutes } from "./api/initiative/initiative.routes.js";
 import { registerIssueGithubRoutes } from "./api/issue/issue-github.routes.js";
+import { registerIssueLabelRoutes } from "./api/issue/issue-label.routes.js";
 import { registerIssueRoutes } from "./api/issue/issue.routes.js";
 import { registerJudgeRoutes } from "./api/judge/judge.routes.js";
 import { registerKnowledgeRoutes } from "./api/knowledge/knowledge.routes.js";
@@ -255,6 +256,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerTaskRoutes(routes, deps);
     registerTeamRoutes(routes, deps);
     registerIssueRoutes(routes, deps);
+    registerIssueLabelRoutes(routes, deps);
     registerIssueGithubRoutes(routes, deps);
     registerProjectRoutes(routes, deps);
     registerInitiativeRoutes(routes, deps);
@@ -349,6 +351,41 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           pending.length = 0;
         })();
       });
+    });
+  }
+
+  // Interactive RUN screen WebSocket (observability ⑦b) — take over the browser a case is driving. Same relay as
+  // the browser-session socket; what differs is only where the CDP base comes from (the live run, not a
+  // user-owned session). The ticket minted by the creator-or-admin POST above is the auth.
+  if (deps.screenTickets) {
+    const tickets = deps.screenTickets;
+    const wss = new WebSocketServer({ noServer: true });
+    app.server.on("upgrade", (request, socket, head) => {
+      let url: URL;
+      try {
+        url = new URL(request.url ?? "", "http://localhost");
+      } catch {
+        return; // malformed — leave it to the handler that destroys such sockets
+      }
+      const match = /^\/runs\/([^/]+)\/screen$/.exec(url.pathname);
+      if (!match) return; // not our path
+      const runId = decodeURIComponent(match[1] ?? "");
+      if (!tickets.consume(url.searchParams.get("ticket") ?? "", runId)) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      void (async () => {
+        // Resolved at UPGRADE time, not at ticket time: a case can release its browser in the seconds between,
+        // and attaching to a dead address would leave the operator driving nothing.
+        const out = await deps.service.screenEndpoint(runId).catch(() => undefined);
+        if (!out?.endpoint) {
+          socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        wss.handleUpgrade(request, socket, head, (ws) => attachBrowserSessionWs(ws, out.endpoint as string));
+      })();
     });
   }
 

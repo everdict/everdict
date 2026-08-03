@@ -97,7 +97,7 @@ interface IssueRow extends TrackerRow {
   status: string;
   project_id: string | null;
   assignee: string | null;
-  labels: unknown;
+  label_ids: unknown;
   links: unknown;
   resolution: unknown;
   github: unknown;
@@ -105,7 +105,7 @@ interface IssueRow extends TrackerRow {
 }
 
 const ISSUE_COLUMNS =
-  "(id, tenant, team_id, number, identifier, title, description, status, project_id, assignee, labels, links, resolution, github, history, created_by, origin, created_at, updated_at)";
+  "(id, tenant, team_id, number, identifier, title, description, status, project_id, assignee, label_ids, links, resolution, github, history, created_by, origin, created_at, updated_at)";
 const ISSUE_VALUES =
   "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17::jsonb,$18::timestamptz,$19::timestamptz)";
 
@@ -121,7 +121,7 @@ function insertParams(record: IssueRecord): unknown[] {
     record.status,
     record.projectId ?? null,
     record.assignee ?? null,
-    JSON.stringify(record.labels),
+    JSON.stringify(record.labelIds),
     JSON.stringify(record.links),
     record.resolution === undefined ? null : JSON.stringify(record.resolution),
     record.github === undefined ? null : JSON.stringify(record.github),
@@ -145,7 +145,7 @@ function rowToRecord(row: IssueRow): IssueRecord {
     status: row.status,
     ...(row.project_id !== null ? { projectId: row.project_id } : {}),
     ...(row.assignee !== null ? { assignee: row.assignee } : {}),
-    labels: row.labels ?? [],
+    labelIds: row.label_ids ?? [],
     links: row.links ?? [],
     ...(row.resolution !== null ? { resolution: row.resolution } : {}),
     ...(row.github !== null ? { github: row.github } : {}),
@@ -268,7 +268,7 @@ export class PgIssueStore implements IssueStore {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
     const next: IssueRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
-    const sets = `title=$3, description=$4, status=$5, project_id=$6, assignee=$7, labels=$8::jsonb, links=$9::jsonb,
+    const sets = `title=$3, description=$4, status=$5, project_id=$6, assignee=$7, label_ids=$8::jsonb, links=$9::jsonb,
        resolution=$10::jsonb, github=$11::jsonb, history=$12::jsonb, origin=$13::jsonb, updated_at=$14::timestamptz`;
     const params: unknown[] = [
       tenant,
@@ -278,7 +278,7 @@ export class PgIssueStore implements IssueStore {
       next.status,
       next.projectId ?? null,
       next.assignee ?? null,
-      JSON.stringify(next.labels),
+      JSON.stringify(next.labelIds),
       JSON.stringify(next.links),
       next.resolution === undefined ? null : JSON.stringify(next.resolution),
       next.github === undefined ? null : JSON.stringify(next.github),

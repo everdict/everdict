@@ -7,6 +7,7 @@ import {
   isCaseInspectable,
   isObservable,
   isRecoverable,
+  isScreenAttachable,
   isScreenCapturable,
   isShellable,
   isTopologyInspectable,
@@ -119,6 +120,22 @@ export function buildRuntimeAccess(deps: {
     return b64;
   };
 
+  // Where a run's live browser can be REACHED (⑦b, interactive) — the address the takeover relay drives, as
+  // opposed to a frame of it. Same lane resolution as the capture; only topology backends can answer.
+  const screenEndpointFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    runId: string,
+  ): Promise<string | undefined> => {
+    let endpoint: string | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isScreenAttachable(backend)) return false;
+      endpoint = await backend.screenEndpoint(runId).catch(() => undefined);
+      return endpoint !== undefined;
+    });
+    return endpoint;
+  };
+
   // One-shot exec into a case's live sandbox (web terminal / live screen) — same lane resolution as logs.
   const execInSandboxFn = async (
     tenant: string,
@@ -198,6 +215,7 @@ export function buildRuntimeAccess(deps: {
     readCaseLogsFn,
     openTerminalStreamFn,
     captureBrowserScreenFn,
+    screenEndpointFn,
     execInSandboxFn,
     inspectCasePlacementFn,
     inspectTopologyFn,

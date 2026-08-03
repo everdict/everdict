@@ -250,6 +250,10 @@ export const controlPlane = {
   // Sealed replay recording of a settled run (ReplayPlayer). Creator-or-admin, enforced by the control plane.
   getRunRecording: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/recording`),
+  // Interactive run-SCREEN ticket (⑦b) — take over the browser the case is driving. Creator-or-admin, enforced by
+  // the control plane, which also 404s a run with nothing attachable.
+  runScreenTicket: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/screen-ticket`, { method: 'POST' }),
   // Interactive-terminal ticket (LiveTerminal — observability ⑥). Creator-or-admin, enforced by the control plane.
   terminalTicket: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/terminal-ticket`, { method: 'POST' }),
@@ -521,6 +525,20 @@ export const controlPlane = {
   // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer over the
   // capabilities. One authz pair for all three (issues:read viewer+ / issues:write member+); delete is
   // additionally creator-or-admin, decided server-side.
+  // The workspace label registry an issue's labelIds point at. Read on any page that draws a chip.
+  listIssueLabels: <T>(auth: AuthContext) => call<T>(auth, '/issue-labels'),
+  createIssueLabel: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/issue-labels', { method: 'POST', body: JSON.stringify(body) }),
+  updateIssueLabel: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/issue-labels/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteIssueLabel: (auth: AuthContext, id: string) =>
+    call<void>(auth, `/issue-labels/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 삭제 전에 "몇 개 이슈에서 떨어져 나가는지"를 보여주기 위한 카운트.
+  issueLabelUsage: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/issue-labels/${encodeURIComponent(id)}/usage`),
   listIssues: <T>(
     auth: AuthContext,
     filter?: {
@@ -692,13 +710,21 @@ export const controlPlane = {
   // filter.dataset / filter.harness = every batch that exercised a capability (the tracker's evaluation history).
   listScorecards: <T>(
     auth: AuthContext,
-    filter?: { judge?: string; schedule?: string; dataset?: string; harness?: string }
+    filter?: {
+      judge?: string
+      schedule?: string
+      dataset?: string
+      harness?: string
+      team?: string
+    }
   ) => {
     const q = new URLSearchParams()
     if (filter?.schedule) q.set('schedule', filter.schedule)
     else if (filter?.judge) q.set('judge', filter.judge)
     if (filter?.dataset) q.set('dataset', filter.dataset)
     if (filter?.harness) q.set('harness', filter.harness)
+    // 팀 스코프는 위 좁힘과 결합한다 — "이 중에 우리 팀 것"이 팀 사이드바가 묻는 질문이다.
+    if (filter?.team) q.set('team', filter.team)
     const qs = q.toString()
     return call<T>(auth, qs ? `/scorecards?${qs}` : '/scorecards')
   },

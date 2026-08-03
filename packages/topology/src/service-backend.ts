@@ -3,6 +3,7 @@ import {
   type Backend,
   type BackendCapacity,
   type DispatchOptions,
+  type ScreenAttachable,
   type ScreenCapturable,
   type TopologyInspectable,
   dispatchAborted,
@@ -42,9 +43,12 @@ import {
   type SubmitFn,
   type TraceReadyFn,
   fetchJson,
+  getField,
   interpolateHeaders,
   interpolateString,
   interpolateTemplate,
+  joinUrl,
+  methodPath,
 } from "./front-door/front-door-driver.js";
 import { extractInlineTrace } from "./front-door/inline-trace.js";
 import { observationSourceFor } from "./front-door/observation-source.js";
@@ -109,9 +113,16 @@ export interface ServiceTopologyBackendOptions {
   recordSink?: (runId: string) => EnvRecordSink | undefined;
 }
 
+// A declared pool coordinate that is not a finite number tells us nothing, and reporting a guess as capacity is
+// worse than reporting none — an operator would size batches against it.
+function numberAt(body: unknown, path: string): number | undefined {
+  const value = getField(body, path);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
 // ensure warm topology → per-case browser → drive (front-door, per-run wiring) → collectTrace → observe → grade.
-export class ServiceTopologyBackend implements Backend, ScreenCapturable, TopologyInspectable {
+export class ServiceTopologyBackend implements Backend, ScreenCapturable, ScreenAttachable, TopologyInspectable {
   // Live target lookup for in-flight cases: runId → the control-plane-reachable CDP base of THIS case's browser,
   // recorded once the target is acquired and dropped when it is released. `captureScreen` is a separate call stack
   // from `dispatch` (an API request vs the running dispatch), so without this it can only ask the runtime to
@@ -132,9 +143,38 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Topolo
     try {
       const spec = await this.opts.specFor(tenant ?? "default", harness.id, harness.version);
       const zone = this.opts.trustZones?.resolve(tenant ?? "default");
-      return await this.opts.runtime.describeTopology?.(spec, zone);
+      const status = await this.opts.runtime.describeTopology?.(spec, zone);
+      if (!status) return status;
+      const pool = await this.readPool(spec, zone);
+      return pool ? { ...status, pool } : status;
     } catch {
       return undefined; // best-effort — observability must never fail a run
+    }
+  }
+
+  // The session pool behind a service-acquired target. The orchestrator can only see the container; how many
+  // sessions live inside it is something only the service knows, so the harness declares where to ask. Without
+  // this the roster says "healthy" while a batch wider than the pool is being refused case by case.
+  private async readPool(
+    spec: ServiceHarnessSpec,
+    zone: TrustZone | undefined,
+  ): Promise<TopologyStatus["pool"] | undefined> {
+    const acquire = spec.target?.acquire;
+    if (acquire?.mode !== "service" || !acquire.capacity) return undefined;
+    const capacity = acquire.capacity;
+    try {
+      const topo = await this.opts.runtime.ensureTopology(spec, zone);
+      const base = topo.endpoints[capacity.service ?? acquire.service];
+      if (!base) return undefined;
+      const { path } = methodPath(capacity.poll);
+      const url = joinUrl(base, path);
+      const body = await (this.opts.getJson ?? fetchJson)(url);
+      const total = numberAt(body, capacity.total);
+      if (total === undefined) return undefined; // a pool we cannot size is not a pool worth reporting
+      const used = capacity.used ? numberAt(body, capacity.used) : undefined;
+      return { total, ...(used !== undefined ? { used } : {}), endpoint: url };
+    } catch {
+      return undefined; // best-effort — the roster is still worth serving without the pool line
     }
   }
 
@@ -179,12 +219,17 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Topolo
 
   // Live browser frame (observability ⑦): rediscover this run's browser CDP endpoint (by runId) and capture a
   // PNG. undefined when the runtime has no per-case browser rediscovery or none is running. base64, no data: prefix.
+  // Where this run's browser can be REACHED (ScreenAttachable) — the same address the capture uses, handed out so
+  // an operator can drive it instead of only watching. Undefined once the case released its target.
+  async screenEndpoint(runId: string): Promise<string | undefined> {
+    return this.liveTargets.get(runId) ?? (await this.opts.runtime.browserCdpBase?.(runId).catch(() => undefined));
+  }
+
   async captureScreen(runId: string): Promise<string | undefined> {
     // The live case's own target wins: it covers BOTH acquisition modes (a session-acquired browser is not ours to
     // rediscover) and carries the zone-correct address. The runtime rediscovery stays as the fallback for a browser
     // this process did not dispatch (another replica / after a restart).
-    const base =
-      this.liveTargets.get(runId) ?? (await this.opts.runtime.browserCdpBase?.(runId).catch(() => undefined));
+    const base = await this.screenEndpoint(runId);
     if (!base) return undefined;
     return await captureCdpScreenshot(base).catch(() => undefined);
   }
@@ -273,7 +318,11 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Topolo
       // the agent drives it, so the eval runs already logged-in. Best-effort: a seed failure leaves the eval
       // unauthenticated but never fails the run (like the trace-source/export seams).
       if (spec.target?.profile && this.opts.seedProfile) {
-        const cdpBase = await this.opts.runtime.browserCdpBase?.(runId, zone).catch(() => undefined);
+        // The acquired target's own address first: asking the runtime to rediscover a browser finds nothing when
+        // the session API owns it, and a saved login that silently does not get injected produces an eval that
+        // runs logged-out and scores as a capability failure.
+        const cdpBase =
+          target?.cdpBase ?? (await this.opts.runtime.browserCdpBase?.(runId, zone).catch(() => undefined));
         if (cdpBase) await this.opts.seedProfile(spec.target.profile, cdpBase, job).catch(() => undefined);
       }
 

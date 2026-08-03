@@ -103,9 +103,11 @@ class BrowserService:
             )
             remote = await activate(context, extension_id, self._config.remote_mode)
             if cdp_port is not None:
-                endpoint = await cdp_bridge.publish(
-                    cdp_port, self._config.cdp.advertised_host, self._config.cdp.port_base
-                )
+                # No preferred port. Handing every session the same base means a closed session's address is
+                # immediately handed to the next one, and an observer holding that address then watches a
+                # DIFFERENT case's browser — one case's screen and network trace attributed to another, which is
+                # worse than no observability at all.
+                endpoint = await cdp_bridge.publish(cdp_port, self._config.cdp.advertised_host)
             session = BrowserSession(
                 session_id=remote.session_id,
                 user_data_dir=user_data_dir,

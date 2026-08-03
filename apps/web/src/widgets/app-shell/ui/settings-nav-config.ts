@@ -1,29 +1,4 @@
-import {
-  BookOpen,
-  Boxes,
-  Building2,
-  Container,
-  Cpu,
-  Fingerprint,
-  GitBranch,
-  Globe,
-  HardDrive,
-  KeyRound,
-  Lock,
-  Network,
-  Plug,
-  Shield,
-  SlidersHorizontal,
-  Sparkles,
-  Telescope,
-  UserCircle,
-  Users,
-  UsersRound,
-  Wallet,
-  Wrench,
-  Zap,
-  type LucideIcon,
-} from 'lucide-react'
+import { Boxes, Building2, Container, Cpu, Fingerprint, GitBranch, Globe, HardDrive, KeyRound, Lock, Plug, Shield, SlidersHorizontal, Sparkles, Tag, Telescope, UserCircle, Users, UsersRound, Wallet, Zap, type LucideIcon } from 'lucide-react'
 
 import type { WebAction } from '@/shared/auth/can'
 
@@ -72,6 +47,8 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       },
       { href: '/members', labelKey: 'members', icon: Users, requiredAction: 'members:read' },
       { href: '/teams', labelKey: 'teams', icon: UsersRound, requiredAction: 'teams:read' },
+      // 트래커 어휘 — 팀 바로 아래. 권한은 이슈와 같은 쌍을 쓴다(별도 표면이 아니다).
+      { href: '/labels', labelKey: 'labels', icon: Tag, requiredAction: 'issues:read' },
       { href: '/secrets', labelKey: 'secrets', icon: Shield, requiredAction: 'secrets:read' },
       { href: '/models', labelKey: 'models', icon: Cpu, requiredAction: 'models:read' },
       {
@@ -105,21 +82,19 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   },
   {
     // Evaluation-specialized workspace env — the workspace assistant as ONE concern: the agent's config, the tools it
-    // can use (workspace-authored mcp/code capabilities), the skills it follows, and the knowledge graph it draws on.
-    // Reads are role-gated per item; writes are enforced in-page and by the control plane.
+    // Settings keeps the agent's CONFIGURATION (its spec, and the event→reaction subscriptions that wake it).
+    // Its working material — tools, skills, knowledge — moved to the sidebar's Agent group: those are things
+    // you author and consult while working, not settings you set once.
     headingKey: 'groupAgent',
     items: [
       { href: '/agent', labelKey: 'agent', icon: Sparkles, requiredAction: 'agents:read' },
-      { href: '/tools', labelKey: 'tools', icon: Wrench, requiredAction: 'capabilities:read' },
-      { href: '/skills', labelKey: 'skills', icon: BookOpen, requiredAction: 'skills:read' },
-      {
-        href: '/knowledge',
-        labelKey: 'knowledge',
-        icon: Network,
-        requiredAction: 'scorecards:read',
-      },
       // The E3 registry — event → reaction rules (wake an agent · signed webhook · durable chain).
-      { href: '/subscriptions', labelKey: 'subscriptions', icon: Zap, requiredAction: 'agents:read' },
+      {
+        href: '/subscriptions',
+        labelKey: 'subscriptions',
+        icon: Zap,
+        requiredAction: 'agents:read',
+      },
     ],
   },
   {

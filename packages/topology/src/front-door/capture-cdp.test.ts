@@ -1,6 +1,6 @@
 import { UpstreamError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type CdpSocket, captureCdpDom, captureCdpScreenshot } from "./capture-cdp.js";
+import { type CdpSocket, captureCdpDom, captureCdpScreenshot, pickPageTarget } from "./capture-cdp.js";
 
 // A fake CDP WebSocket — replays open then a scripted reply to captureScreenshot.
 function fakeSocket(reply: (sent: unknown) => unknown): { connect: (url: string) => CdpSocket; opened: string[] } {
@@ -115,5 +115,40 @@ describe("captureCdpDom", () => {
         connect,
       }),
     ).rejects.toBeInstanceOf(UpstreamError);
+  });
+});
+
+describe("pickPageTarget", () => {
+  const panel = { type: "page", url: "chrome-extension://abc/sidepanel.html", webSocketDebuggerUrl: "ws://panel" };
+  const blank = { type: "page", url: "about:blank", webSocketDebuggerUrl: "ws://blank" };
+  const work = { type: "page", url: "https://example.com/", webSocketDebuggerUrl: "ws://work" };
+  const worker = { type: "service_worker", url: "chrome-extension://abc/bg.js", webSocketDebuggerUrl: "ws://sw" };
+
+  it("follows the browser's most-recently-active ordering — the session brings its work tab to front", () => {
+    expect(pickPageTarget([work, panel, blank])?.webSocketDebuggerUrl).toBe("ws://work");
+    expect(pickPageTarget([panel, work])?.webSocketDebuggerUrl).toBe("ws://panel");
+  });
+
+  it("never settles on a blank tab while a real page is open", () => {
+    // The ordering can put about:blank first, and a recording of a blank tab is silently empty rather than wrong.
+    expect(pickPageTarget([blank, work, panel])?.webSocketDebuggerUrl).toBe("ws://work");
+    expect(pickPageTarget([blank, panel])?.webSocketDebuggerUrl).toBe("ws://panel");
+  });
+
+  it("keeps an extension page as a candidate — the work tab starts out as one", () => {
+    // A rule that skipped chrome-extension:// URLs would pick the blank tab at exactly the moment recording
+    // starts, because remote mode opens its work tab on an extension page before navigating anywhere.
+    const beforeNavigation = {
+      type: "page",
+      url: "chrome-extension://abc/work.html",
+      webSocketDebuggerUrl: "ws://work0",
+    };
+    expect(pickPageTarget([beforeNavigation, panel, blank])?.webSocketDebuggerUrl).toBe("ws://work0");
+  });
+
+  it("falls back through the looser choices rather than finding nothing", () => {
+    expect(pickPageTarget([blank])?.webSocketDebuggerUrl).toBe("ws://blank");
+    expect(pickPageTarget([worker])?.webSocketDebuggerUrl).toBe("ws://sw");
+    expect(pickPageTarget([])).toBeUndefined();
   });
 });

@@ -21,6 +21,7 @@ export const CreateIssueBodySchema = z.object({
   status: IssueStatusSchema.exclude(["done", "regressed"]).optional(),
   projectId: z.string().min(1).max(200).optional(),
   assignee: z.string().min(1).max(200).optional(),
-  labels: z.array(z.string().min(1).max(100)).max(50).optional(),
+  // Registry ids (GET /issue-labels), not names — a label is a record now, so an issue points at one.
+  labelIds: z.array(z.string().min(1).max(200)).max(50).optional(),
   links: z.array(IssueLinkInputSchema).max(50).optional(),
 });

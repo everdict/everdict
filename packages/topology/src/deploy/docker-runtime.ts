@@ -455,13 +455,18 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     const network = this.warm.get(key)?.network ?? netName(spec);
     const alias = `browser-${sanitize(runId)}`;
     const cname = `${network}-${alias}`;
+    // The harness's client-extension browser wins over any default: it is a headful image that loads the
+    // extension from its OWN entrypoint, so it also gets NO args — passing them would replace that launch line.
+    // Ignoring the declaration was silent, and silence here means the case runs without the extension it exists
+    // to evaluate and scores badly for a reason nothing reports.
+    const extensionImage = spec.target?.extension?.ref;
     await this.docker.run({
       name: cname,
-      image: this.opts.browserImage ?? DEFAULT_BROWSER_IMAGE,
+      image: extensionImage ?? this.opts.browserImage ?? DEFAULT_BROWSER_IMAGE,
       network,
       alias,
       publish: 9222,
-      args: ["--remote-allow-origins=*"], // headless-shell exposes CDP itself on 9222
+      ...(extensionImage ? {} : { args: ["--remote-allow-origins=*"] }), // headless-shell exposes CDP itself on 9222
     });
     try {
       const hostPort = await this.docker.hostPort(cname, 9222);

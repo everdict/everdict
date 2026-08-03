@@ -6,6 +6,7 @@ import type {
   EventConsumerStateStore,
   FsRevisionStore,
   InitiativeStore,
+  IssueLabelStore,
   IssueStore,
   ProjectStore,
   TeamStore,
@@ -30,6 +31,7 @@ import {
   InMemoryEventConsumerStateStore,
   InMemoryFsRevisionStore,
   InMemoryInitiativeStore,
+  InMemoryIssueLabelStore,
   InMemoryIssueStore,
   InMemoryKnowledgeEntryStore,
   InMemoryKnowledgeStore,
@@ -72,6 +74,7 @@ import {
   PgEventConsumerStateStore,
   PgFsRevisionStore,
   PgInitiativeStore,
+  PgIssueLabelStore,
   PgIssueStore,
   PgKnowledgeEntryStore,
   PgKnowledgeStore,
@@ -193,6 +196,7 @@ export interface Persistence {
   // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer.
   teamStore: TeamStore;
   issueStore: IssueStore;
+  issueLabelStore: IssueLabelStore;
   projectStore: ProjectStore;
   initiativeStore: InitiativeStore;
   browserProfileStore: BrowserProfileStore; // saved authenticated browser profiles (browser-profiles S2) — personal metadata
@@ -249,6 +253,12 @@ export async function makePersistence(): Promise<Persistence> {
     const harnessTemplateRegistry = new InMemoryHarnessTemplateRegistry();
     // The run store and the event log form the E0 outbox pair — the store appends transition facts itself.
     const platformEventStore = new InMemoryPlatformEventStore();
+    // Postgres deletes a label and strips it off every issue in one CTE (mig 0107). In memory the two stores are
+    // separate objects, so the composition root hands the issues over — otherwise a delete would leave `labelIds`
+    // pointing at a label that no longer exists, and the two bindings would not be interchangeable.
+    const inMemoryIssues = new InMemoryIssueStore();
+    const inMemoryIssueLabels = new InMemoryIssueLabelStore();
+    inMemoryIssueLabels.attachIssues(inMemoryIssues);
     return {
       store: new InMemoryRunStore(platformEventStore),
       recordingStore: new InMemoryRecordingStore(),
@@ -286,7 +296,8 @@ export async function makePersistence(): Promise<Persistence> {
       viewStore: new InMemoryViewStore(),
       taskStore: new InMemoryAgentTaskStore(),
       teamStore: new InMemoryTeamStore(),
-      issueStore: new InMemoryIssueStore(),
+      issueStore: inMemoryIssues,
+      issueLabelStore: inMemoryIssueLabels,
       projectStore: new InMemoryProjectStore(),
       initiativeStore: new InMemoryInitiativeStore(),
       browserProfileStore: new InMemoryBrowserProfileStore(),
@@ -342,6 +353,7 @@ export async function makePersistence(): Promise<Persistence> {
     taskStore: new PgAgentTaskStore(client),
     teamStore: new PgTeamStore(client),
     issueStore: new PgIssueStore(client),
+    issueLabelStore: new PgIssueLabelStore(client),
     projectStore: new PgProjectStore(client),
     initiativeStore: new PgInitiativeStore(client),
     browserProfileStore: new PgBrowserProfileStore(client),

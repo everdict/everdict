@@ -2417,6 +2417,79 @@ describe("ServiceTopologyBackend — inspectTopology / topologyServiceLogs (Topo
     },
   });
 
+  it("reports the session pool a service-acquired target draws from, so a refused batch has a visible cause", async () => {
+    // The pool lives inside a service container: the orchestrator can only see "the service is running" while
+    // every case beyond its size is refused. The harness declares where to read it, and the roster carries it.
+    const POOLED: ServiceHarnessSpec = {
+      ...SPEC,
+      target: {
+        kind: "browser",
+        engine: "chromium",
+        lifecycle: "per-case-instance",
+        observe: ["dom"],
+        acquire: {
+          mode: "service",
+          service: "agent-server",
+          open: "POST /sessions",
+          coordinates: { session_id: "id" },
+          capacity: { poll: "GET /health", total: "max_browsers", used: "active_browsers" },
+        },
+      },
+    };
+    const runtime = observableRuntime([]);
+    runtime.ensureTopology = async () => ({ endpoints: { "agent-server": "http://agent-server:8000" } });
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => POOLED,
+      getJson: async () => ({ max_browsers: 8, active_browsers: 3 }),
+    });
+
+    const topo = await backend.inspectTopology({ id: "x", version: "1" }, "acme");
+    expect(topo?.pool).toEqual({ total: 8, used: 3, endpoint: "http://agent-server:8000/health" });
+  });
+
+  it("leaves the pool off when the service cannot be asked — a roster without it still beats no roster", async () => {
+    const POOLED: ServiceHarnessSpec = {
+      ...SPEC,
+      target: {
+        kind: "browser",
+        engine: "chromium",
+        lifecycle: "per-case-instance",
+        observe: ["dom"],
+        acquire: {
+          mode: "service",
+          service: "agent-server",
+          open: "POST /sessions",
+          coordinates: { session_id: "id" },
+          capacity: { poll: "GET /health", total: "max_browsers" },
+        },
+      },
+    };
+    const runtime = observableRuntime([]);
+    runtime.ensureTopology = async () => ({ endpoints: { "agent-server": "http://agent-server:8000" } });
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => POOLED,
+      getJson: async () => {
+        throw new Error("unreachable");
+      },
+    });
+
+    const topo = await backend.inspectTopology({ id: "x", version: "1" }, "acme");
+    expect(topo?.deployed).toBe(true);
+    expect(topo?.pool).toBeUndefined();
+  });
+
   it("resolves the harness spec + tenant zone and returns the runtime's roster / log tail", async () => {
     const seen: Array<{ what: string; zone?: string }> = [];
     const backend = new ServiceTopologyBackend({

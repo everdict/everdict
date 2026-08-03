@@ -90,6 +90,14 @@ export {
   type NewIssueLinkInput,
 } from "./tracker/issue.js";
 export {
+  IssueLabel,
+  type IssueLabelEditInput,
+  issueLabelNameKey,
+  type IssueLabelTransition,
+  type NewIssueLabelInput,
+  normalizeIssueLabelName,
+} from "./tracker/issue-label.js";
+export {
   type NewProjectInput,
   Project,
   type ProjectEditInput,

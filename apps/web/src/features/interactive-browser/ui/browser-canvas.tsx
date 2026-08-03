@@ -70,9 +70,13 @@ const vkOf = (key: string): number | undefined => {
 export function BrowserCanvas({
   sessionId,
   initialUrl,
+  ticketPath,
 }: {
   sessionId: string
   initialUrl?: string // navigate here once the session is live (warm re-login lands on the profile's site)
+  // Where to mint the WS ticket. The canvas is the same surface whether the browser belongs to a login session or
+  // to a running case — only the endpoint that authorizes it differs.
+  ticketPath?: string
 }) {
   const t = useTranslations('interactiveBrowser')
   const [state, setState] = useState<ConnState>('connecting')
@@ -147,7 +151,7 @@ export function BrowserCanvas({
     let stopped = false
     ;(async () => {
       try {
-        const res = await fetch(`/api/browser-sessions/${encodeURIComponent(sessionId)}/ticket`, {
+        const res = await fetch(ticketPath ?? `/api/browser-sessions/${encodeURIComponent(sessionId)}/ticket`, {
           method: 'POST',
         })
         if (!res.ok) {
@@ -195,7 +199,7 @@ export function BrowserCanvas({
       stopped = true
       ws?.close()
     }
-  }, [sessionId])
+  }, [sessionId, ticketPath])
 
   // Remote viewport follows the canvas size (debounced) — frames stay 1:1 with the on-screen pixels.
   useEffect(() => {

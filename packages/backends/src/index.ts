@@ -15,6 +15,7 @@ export {
   isObservable,
   isProbeable,
   isRecoverable,
+  isScreenAttachable,
   isScreenCapturable,
   isShellable,
   isTopologyInspectable,
@@ -25,6 +26,7 @@ export {
   type ProbeResult,
   type Reclaimable,
   type Recoverable,
+  type ScreenAttachable,
   type ScreenCapturable,
   type Shellable,
 } from "./backend.js";

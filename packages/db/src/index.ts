@@ -168,6 +168,7 @@ export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent
 export { InMemoryAgentTaskStore, PgAgentTaskStore } from "./activity/agent-task-store.js";
 // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, facts on the E0 same-tx outbox.
 export { InMemoryIssueStore, PgIssueStore } from "./tracker/issue-store.js";
+export { InMemoryIssueLabelStore, PgIssueLabelStore } from "./tracker/issue-label-store.js";
 export { InMemoryTeamStore, PgTeamStore } from "./tracker/team-store.js";
 export { InMemoryProjectStore, PgProjectStore } from "./tracker/project-store.js";
 export { InMemoryInitiativeStore, PgInitiativeStore } from "./tracker/initiative-store.js";

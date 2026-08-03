@@ -136,6 +136,18 @@ Everdict stays the **client**: there is no inbound webhook (`docs/architecture/w
 and no periodic sweep. A pull happens when someone presses Sync; a push happens as the effect of a local
 transition on a copy whose owner opted in.
 
+**Labels are records, not strings.** An issue carries `labelIds` into a workspace-level registry
+(`everdict_issue_labels`, mig 0107): `{name, color, description}` with the name unique per workspace
+(case-insensitive) and the colour drawn from a CLOSED vocabulary (`ISSUE_LABEL_COLORS`) so a chip stays
+legible in both themes. Renaming or recolouring is one write every issue sees at once, and deleting a label
+strips its id off every issue in the SAME transaction — `labelIds` can never dangle. `GET/POST /issue-labels`
++ `PATCH/DELETE /issue-labels/:id` + `GET /issue-labels/:id/usage` (BFF↔MCP parity: `list_issue_labels` /
+`create_issue_label` / `update_issue_label` / `delete_issue_label` / `issue_label_usage`), all on the
+tracker's existing action pair
+(`issues:read` / `issues:write`); facts `issue_label.created` / `.updated` / `.deleted`. The web surface is
+**Settings › Labels** (define/rename/recolour/delete, with the delete confirmation showing how many issues the
+label comes off) plus the picker on an issue, which can define a label inline the way Linear does.
+
 **Ownership split.** GitHub owns `title` / `description` / `labels` / comments and the open↔closed
 state-of-record. Everdict owns the status nuance (`in_progress` / `in_review` / `regressed`), `projectId`,
 `links`, `resolution` and `assignee`. Pull lets the remote win on GitHub-owned fields; push writes state plus an

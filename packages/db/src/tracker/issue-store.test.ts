@@ -12,7 +12,7 @@ const issue = (over: Partial<IssueRecord>): IssueRecord => ({
   identifier: "ENG-1",
   title: "Agent drops the tool result on retry",
   status: "todo",
-  labels: [],
+  labelIds: [],
   links: [],
   history: [],
   createdBy: "dana",
@@ -167,7 +167,7 @@ describe("PgIssueStore", () => {
         status: "regressed",
         project_id: "prj-1",
         assignee: null,
-        labels: ["bug"],
+        label_ids: ["lbl_bug"],
         links: [{ type: "harness", id: "web-agent", addedBy: "dana", addedAt: "2026-07-31T00:00:00.000Z" }],
         resolution: { scorecardId: "sc-1", by: "dana", at: "2026-07-31T00:00:00.000Z" },
         github: null,
@@ -180,7 +180,7 @@ describe("PgIssueStore", () => {
     ]);
     const record = await new PgIssueStore(client).get("acme", "a");
     expect(record?.status).toBe("regressed");
-    expect(record?.labels).toEqual(["bug"]);
+    expect(record?.labelIds).toEqual(["lbl_bug"]);
     expect(record?.resolution?.scorecardId).toBe("sc-1");
     expect(record?.history).toHaveLength(1);
     expect(record?.description).toBeUndefined();

@@ -59,11 +59,21 @@ export interface GithubIssueSyncDeps {
   issues: IssueService;
   // Same collaborator IssueService uses — an imported copy is numbered by the team it lands in.
   teams: IssueTeamAllocator;
+  // GitHub owns labels by NAME, everdict stores ids — so every pull maps the remote names onto the workspace
+  // registry (defining what is missing) before the pure aggregate sees them. Absent = the deployment has no
+  // registry wired and imported labels are dropped rather than half-applied.
+  labels?: IssueLabelResolver;
   tokens: GithubRepositoryTokenSource;
   writers: GithubRepoWriterFactory;
   // Public web base URL — lets a push comment link back to the everdict issue. Absent = the comment omits the link.
   webBaseUrl?: string;
   now?: () => string;
+}
+
+// The one thing the sync needs from the label registry. A narrow function rather than the whole service so
+// this module keeps depending on behaviour, not on a class.
+export interface IssueLabelResolver {
+  resolveNames(tenant: string, names: string[], actor: { subject: string }): Promise<string[]>;
 }
 
 const DEFAULT_SYNC: IssueGithubSync = { pull: true, push: false };
@@ -85,6 +95,13 @@ export class GithubIssueSync {
 
   constructor(private readonly deps: GithubIssueSyncDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
+  }
+
+  // Remote label names → registry ids. With no registry wired the remote's labels are dropped rather than
+  // written as ids that point at nothing — losing classification beats corrupting the join.
+  private async resolveLabels(tenant: string, names: string[], subject: string): Promise<string[]> {
+    if (!this.deps.labels) return [];
+    return this.deps.labels.resolveNames(tenant, names, { subject });
   }
 
   // What can still be imported: the repo's issues minus pull requests minus the ones this workspace already has.
@@ -157,7 +174,7 @@ export class GithubIssueSync {
           ? { resolution: { note: "Closed on GitHub before import.", by: actor.subject, at: now } }
           : {}),
         ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
-        labels: remote.labels,
+        labelIds: await this.resolveLabels(tenant, remote.labels, actor.subject),
         github,
         createdBy: actor.subject,
         ...(actor.agent !== undefined ? { origin: actor.agent } : {}),
@@ -276,7 +293,7 @@ export class GithubIssueSync {
         {
           title: remote.title,
           ...(remote.body !== undefined ? { description: remote.body } : {}),
-          labels: remote.labels,
+          labelIds: await this.resolveLabels(record.tenant, remote.labels, actor.subject),
           state: remoteState,
           url: remote.url,
           updatedAt: remote.updatedAt,

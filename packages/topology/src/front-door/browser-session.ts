@@ -1,5 +1,5 @@
 import { UpstreamError } from "@everdict/contracts";
-import type { CdpSocket, CdpTarget } from "./capture-cdp.js";
+import { type CdpSocket, type CdpTarget, pickPageTarget } from "./capture-cdp.js";
 import { reachableWsUrl } from "./cdp-ws.js";
 
 // Interactive live browser session over CDP — the bidirectional sibling of capture-cdp's one-shot screenshot.
@@ -96,9 +96,10 @@ export async function openBrowserSession(
   const listRes = await fetchImpl(`${cdpHttpBase}/json`);
   if (!listRes.ok) throw new UpstreamError("UPSTREAM_ERROR", { status: listRes.status }, "CDP /json unreachable.");
   const targets = (await listRes.json()) as CdpTarget[];
-  const wsUrl = (
-    targets.find((t) => t.type === "page" && t.webSocketDebuggerUrl) ?? targets.find((t) => t.webSocketDebuggerUrl)
-  )?.webSocketDebuggerUrl;
+  // Same selection as the one-shot captures: in an extension-loaded browser the panel is a page target too, and
+  // driving one interactively is even worse than screenshotting it — the operator would be clicking the extension's
+  // own UI while believing they were driving the page.
+  const wsUrl = pickPageTarget(targets)?.webSocketDebuggerUrl;
   if (!wsUrl) throw new UpstreamError("UPSTREAM_ERROR", undefined, "No CDP page target for an interactive session.");
 
   const ws = connect(reachableWsUrl(wsUrl, cdpHttpBase));

@@ -302,6 +302,31 @@ export const TargetAcquireSchema = z.discriminatedUnion("mode", [
     // environment recorder (network/console/nav + screencast → replay) and the live-screen capture both work — without it
     // Everdict owns no browser to look at. Optional: absent = today (trace-only, no live view).
     cdpBase: z.string().optional(),
+    // Where the session service reports how many sessions it can hold. A session pool lives INSIDE a service
+    // container, so the thing that actually limits a batch is invisible to the orchestrator: the topology roster
+    // can say "the service is running" while every further case is being refused. Declaring this makes the pool a
+    // first-class part of the infra read (`GET /runs/:id/topology`), which is what an operator needs to tell
+    // "my harness is broken" from "the batch is wider than the pool". Optional: absent = today (no pool view).
+    capacity: z
+      .object({
+        service: z.string().optional(), // unset = acquire.service
+        poll: z.string(), // "GET /health" (method+path; wiring {var} interpolation)
+        total: z.string(), // dot-path to the pool size in that response
+        used: z.string().optional(), // dot-path to how many are in use right now
+      })
+      .optional(),
+    // A pool that is momentarily full is a QUEUE, not a failure. A batch is routinely wider than the session pool
+    // (the scheduler admits against cluster slots, which have nothing to do with how many browsers a service holds),
+    // so without this its overflow fails with the pool's refusal instead of waiting for the cases ahead to finish —
+    // a scoreboard full of infra failures that says nothing about the harness.
+    wait: z
+      .object({
+        // Which refusals mean "full, try again" rather than "wrong request". Defaults cover the two standard ones.
+        statuses: z.array(z.number().int()).default([409, 429]),
+        timeoutMs: z.number().int().positive().default(120_000),
+        intervalMs: z.number().int().positive().default(1000),
+      })
+      .optional(),
     // Readiness gate — right after open the session exists, but until its client (browser etc.) self-registers via back-connect,
     // a front-door command bounces with 404. If ready is present, poll until the status URL is 200 (2xx), then hand over the coordinates.
     // service = the service to check readiness on (unset = acquire.service). poll = "GET /ready" (method+path; wiring+coordinates {var} interpolation).

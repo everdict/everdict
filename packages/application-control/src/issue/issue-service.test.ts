@@ -267,7 +267,7 @@ describe("IssueService", () => {
       identifier: "ENG-1",
       title: "t",
       status: "todo",
-      labels: [],
+      labelIds: [],
       links: [],
       history: [],
       github: {

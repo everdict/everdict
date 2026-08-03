@@ -65,7 +65,7 @@ function navRowClass(active: boolean) {
 const NAV_GROUP_STORAGE_PREFIX = 'everdict-nav-group:'
 
 // 팀으로 좁혀 볼 수 있는 목록 화면들 — 이 경로에서 ?team= 이 붙어 있으면 그 팀을 보고 있는 것이다.
-const TEAM_SCOPED_PAGES = ['issues', 'projects', 'harnesses', 'datasets', 'judges'] as const
+const TEAM_SCOPED_PAGES = ['issues', 'projects', 'scorecards'] as const
 
 function NavLinks({
   workspace,
@@ -280,16 +280,15 @@ function TeamsNav({
         // Home 은 팀의 요약(라우트가 팀 id 를 갖는 유일한 자식)이고, Issues/Projects 는 워크스페이스 목록을
         // 팀으로 스코프한 같은 화면이다 — 목록을 두 벌 만들지 않기 위해 쿼리 파라미터로 좁힌다.
         const home = `/${workspace}/teams/${encodeURIComponent(team.id)}`
-        // 팀이 소유하는 것 전부 — 이슈·프로젝트와 평가 자산이 같은 축에 있다. 하네스·데이터셋·저지도
-        // 팀이 소유하므로(레지스트리의 team_id) 이슈와 똑같이 팀 안에서 좁혀 보는 게 맞다.
+        // 팀이 소유하는 것 — 이슈·프로젝트, 그리고 평가 결과인 스코어카드. 하네스·데이터셋·저지도 팀 소유지만
+        // 사이드바 행은 주지 않는다: 이름을 대고 찾아가는 것은 스코어카드이고, 나머지는 그 스코어카드나 팀에서
+        // 도달한다. 행이 늘어날수록 팀 그룹이 목록이 아니라 벽이 된다.
         const scoped = (page: string) => `/${workspace}/${page}?team=${encodeURIComponent(team.id)}`
         const children = [
           { href: home, labelKey: 'teamHome', page: 'home' },
           { href: scoped('issues'), labelKey: 'issues', page: 'issues' },
           { href: scoped('projects'), labelKey: 'projects', page: 'projects' },
-          { href: scoped('harnesses'), labelKey: 'harnesses', page: 'harnesses' },
-          { href: scoped('datasets'), labelKey: 'datasets', page: 'datasets' },
-          { href: scoped('judges'), labelKey: 'judges', page: 'judges' },
+          { href: scoped('scorecards'), labelKey: 'scorecards', page: 'scorecards' },
         ]
         return (
           <div key={team.id} className="flex flex-col gap-0.5">

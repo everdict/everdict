@@ -97,6 +97,21 @@ const docs = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
+  screenTicket: {
+    summary: "Mint a WebSocket ticket to TAKE OVER a run's browser",
+    description:
+      "Mints a short-lived single-use ticket for the interactive screen: the browser then opens " +
+      "WS /runs/:id/screen?ticket=… and drives the run's own browser (a browser cannot send an Authorization " +
+      "header on a WebSocket). This is intervention, not observation — getting a stuck case past a login wall or " +
+      "a captcha — so it is creator-or-admin gated exactly like exec, and requires runs:read. 404 when the run " +
+      "has no live screen to attach to.",
+    tags: ["run"],
+    params: runIdParams,
+    response: {
+      200: { description: "The minted ticket", ...toJsonSchema(TerminalTicketResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
   terminalTicket: {
     summary: "Mint a WebSocket terminal ticket",
     description:

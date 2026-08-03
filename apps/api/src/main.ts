@@ -1,6 +1,7 @@
 import {
   GithubIssueSync,
   InitiativeService,
+  IssueLabelService,
   IssueService,
   KnowledgeEntryService,
   KnowledgeService,
@@ -178,6 +179,7 @@ async function main(): Promise<void> {
     taskStore,
     teamStore,
     issueStore,
+    issueLabelStore,
     projectStore,
     initiativeStore,
     browserProfileStore,
@@ -507,6 +509,7 @@ async function main(): Promise<void> {
     readCaseLogsFn,
     openTerminalStreamFn,
     captureBrowserScreenFn,
+    screenEndpointFn,
     execInSandboxFn,
     inspectCasePlacementFn,
     inspectTopologyFn,
@@ -555,6 +558,7 @@ async function main(): Promise<void> {
       readCaseLogsFn,
       execInSandboxFn,
       captureBrowserScreenFn,
+      screenEndpointFn,
       openTerminalStreamFn,
       inspectCasePlacementFn,
       inspectTopologyFn,
@@ -659,6 +663,11 @@ async function main(): Promise<void> {
     issues: issueStore,
     events: platformEventService,
   });
+  // The label registry the tracker classifies with — also the name→id resolver a GitHub import needs.
+  const issueLabelService = new IssueLabelService({
+    labels: issueLabelStore,
+    events: platformEventService,
+  });
   const issueService = new IssueService({
     store: issueStore,
     teams: teamService,
@@ -673,6 +682,7 @@ async function main(): Promise<void> {
     teams: teamService,
     tokens: githubAppService,
     writers: githubRepoWriterFactory(),
+    labels: issueLabelService,
     ...(process.env.WEB_BASE_URL ? { webBaseUrl: process.env.WEB_BASE_URL } : {}),
   });
   githubSyncRef.current = githubIssueSync;
@@ -712,6 +722,8 @@ async function main(): Promise<void> {
   const browserProfileService = buildBrowserProfile({ browserProfileStore });
 
   const terminalTickets = new TerminalTicketStore();
+  // Separate store from the terminal's: a ticket minted to open a shell must never be replayable to take over a browser.
+  const screenTickets = new TerminalTicketStore();
   // Interactive browser sessions (browser-profiles S1) — env-gated. The provisioner is selectable:
   //   • EVERDICT_BROWSER_PROVISIONER=remote — LEASE a whole browser from a fixed pool of headless-shell sidecars
   //     (EVERDICT_BROWSER_CDP_POOL, comma-separated CDP bases). No host Chrome, no Docker socket, no docker CLI —
@@ -854,6 +866,7 @@ async function main(): Promise<void> {
 
   const app = buildServer({
     terminalTickets,
+    screenTickets,
     ...(browserSessionService && browserTickets ? { browserSessionService, browserTickets } : {}),
     ...(sandboxSessions ? { sandboxSessions } : {}), // sandbox session runs (P6) — routes/tools absent without a driver
     trajectoryStore, // the owned evidence ledger's browse surface (N1 look-inward): GET /trajectories + list_trajectories
@@ -899,6 +912,7 @@ async function main(): Promise<void> {
     taskService,
     teamService,
     issueService,
+    issueLabelService,
     issueSync: githubIssueSync,
     projectService,
     initiativeService,

@@ -184,16 +184,21 @@ function fakePg(): SqlClient {
         const r = rows.some((x) => x.tenant === p[0] && x.id === p[1] && live(x));
         return { rows: (r ? [{}] : []) as R[] };
       }
-      // listMeta per-id — version/created_at/created_by of live versions (no tags column on models).
+      // listMeta per-id — version/created_at/created_by/team_id of live versions (no tags column on models).
       if (
         t.startsWith(
-          "SELECT version, created_at, created_by FROM everdict_models WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+          "SELECT version, created_at, created_by, team_id FROM everdict_models WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
         )
       ) {
         return {
           rows: rows
             .filter((x) => x.tenant === p[0] && x.id === p[1] && live(x))
-            .map((x) => ({ version: x.version, created_at: x.created_at, created_by: x.created_by })) as R[],
+            .map((x) => ({
+              version: x.version,
+              created_at: x.created_at,
+              created_by: x.created_by,
+              team_id: null,
+            })) as R[],
         };
       }
       // ownerVersions — live versions only.

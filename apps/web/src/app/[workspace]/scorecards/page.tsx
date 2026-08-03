@@ -17,16 +17,22 @@ export const dynamic = 'force-dynamic'
 
 export default async function ScorecardsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ workspace: string }>
+  searchParams: Promise<{ team?: string }>
 }) {
   const { workspace } = await params
+  // 팀 스코프 — 사이드바의 팀 하위 스코어카드가 이 파라미터로 들어온다.
+  const { team } = await searchParams
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('scorecardsPage')
   let error: string | undefined
   let scorecards = scorecardsSchema.parse([])
   try {
-    scorecards = scorecardsSchema.parse(await controlPlane.listScorecards(ctx))
+    scorecards = scorecardsSchema.parse(
+      await controlPlane.listScorecards(ctx, team ? { team } : undefined)
+    )
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }

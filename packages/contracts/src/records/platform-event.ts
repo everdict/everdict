@@ -93,6 +93,12 @@ export const PLATFORM_EVENT_KINDS = [
   "issue.created",
   "issue.status_changed",
   "issue.linked", // a capability (harness/dataset/judge/scorecard/run/view) was attached to an issue
+  // The workspace label vocabulary (records/tracker.ts). Defining or retiring a label reshapes how the whole
+  // workspace classifies its work — that is news in the same sense a new team is. A recolour/rename is content
+  // editing on an existing label, so it emits `updated` rather than pretending to be a new definition.
+  "issue_label.created",
+  "issue_label.updated",
+  "issue_label.deleted",
   "project.created",
   "project.status_changed",
   "initiative.created",

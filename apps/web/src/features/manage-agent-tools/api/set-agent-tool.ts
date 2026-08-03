@@ -19,7 +19,7 @@ export async function setAgentToolAction(
   const ctx = await authContext()
   try {
     await controlPlane.setAgentTool(ctx, key, enabled)
-    revalidatePath('/[workspace]/settings/tools')
+    revalidatePath('/[workspace]/tools')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

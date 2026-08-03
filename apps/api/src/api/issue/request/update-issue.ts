@@ -6,7 +6,8 @@ export const UpdateIssueBodySchema = z
   .object({
     title: z.string().min(1).max(300).optional(),
     description: z.string().max(50_000).nullable().optional(),
-    labels: z.array(z.string().min(1).max(100)).max(50).optional(),
+    // Whole-array replacement of the issue's labels, by registry id (GET /issue-labels).
+    labelIds: z.array(z.string().min(1).max(200)).max(50).optional(),
     assignee: z.string().min(1).max(200).nullable().optional(),
     projectId: z.string().min(1).max(200).nullable().optional(),
   })

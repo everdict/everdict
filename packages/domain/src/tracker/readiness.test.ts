@@ -13,7 +13,7 @@ function issue(id: string, status: IssueStatus, scorecardId?: string): IssueReco
     identifier: `ENG-${id}`,
     title: `issue ${id}`,
     status,
-    labels: [],
+    labelIds: [],
     links: [],
     ...(status === "done" || status === "regressed"
       ? { resolution: { ...(scorecardId !== undefined ? { scorecardId } : {}), by: "dana", at: NOW } }

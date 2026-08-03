@@ -35,6 +35,7 @@ import type { TraceSourceService } from "@everdict/application-control";
 import type {
   GithubIssueSync,
   InitiativeService,
+  IssueLabelService,
   IssueService,
   ProjectService,
   SubscriptionService,
@@ -161,6 +162,8 @@ export interface ServerDeps {
   // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).
   teamService?: TeamService; // teams own issues and name them (ENG-12); a workspace always keeps one default
   issueService?: IssueService;
+  // The workspace label registry an issue's labelIds point at (docs/tracker.md).
+  issueLabelService?: IssueLabelService;
   projectService?: ProjectService;
   initiativeService?: InitiativeService;
   issueSync?: GithubIssueSync; // GitHub import + manual two-way sync (absent = no workspace GitHub App)
@@ -264,6 +267,9 @@ export interface ServerDeps {
   authorizationServers?: string[]; // MCP OAuth: authorization servers in the protected-resource metadata (Keycloak issuer)
   logLevel?: string; // pino log level (info/debug/warn/…). Absent = logging disabled (silent tests). main injects it via EVERDICT_LOG_LEVEL.
   callbackSink?: CallbackSink; // inbound receiver for the front-door callback completion model (/frontdoor-callback disabled if absent)
+  // Interactive takeover of a run's browser (observability ⑦b) — same ticket primitive as the terminal, separate
+  // store so a terminal ticket can never be replayed as a takeover.
+  screenTickets?: TerminalTicketStore;
   terminalTickets?: TerminalTicketStore; // WS terminal (observability ⑥) — mints/consumes short-lived tickets (WS routes disabled if absent)
   liveFrames?: LiveFrameStore; // live-screen frames pushed by a self-hosted runner (report_case_screen) — served by RunService.screen()
   liveLogs?: LiveLogStore; // live execution log pushed by a self-hosted runner (report_case_log) — served by RunService.logs()

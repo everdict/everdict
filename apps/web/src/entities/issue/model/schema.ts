@@ -126,7 +126,8 @@ export const issueSchema = z.object({
   status: issueStatusSchema,
   projectId: z.string().optional(),
   assignee: z.string().optional(),
-  labels: z.array(z.string()).default([]),
+  // Registry ids (entities/issue-label), not names — join against listIssueLabels to draw a chip.
+  labelIds: z.array(z.string()).default([]),
   links: z.array(issueLinkSchema).default([]),
   resolution: issueResolutionSchema.optional(),
   github: issueGithubSchema.optional(),

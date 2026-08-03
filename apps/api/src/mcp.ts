@@ -25,6 +25,7 @@ import { registerImageRegistryTools } from "./api/image-registry/image-registry.
 import { registerImagesTools } from "./api/images/images.mcp.js";
 import { registerInitiativeTools } from "./api/initiative/initiative.mcp.js";
 import { registerIssueGithubTools } from "./api/issue/issue-github.mcp.js";
+import { registerIssueLabelTools } from "./api/issue/issue-label.mcp.js";
 import { registerIssueTools } from "./api/issue/issue.mcp.js";
 import { registerJudgeTools } from "./api/judge/judge.mcp.js";
 import { registerKnowledgeTools } from "./api/knowledge/knowledge.mcp.js";
@@ -99,6 +100,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerTaskTools(server, ctx);
   registerTeamTools(server, ctx);
   registerIssueTools(server, ctx);
+  registerIssueLabelTools(server, ctx);
   registerIssueGithubTools(server, ctx);
   registerProjectTools(server, ctx);
   registerInitiativeTools(server, ctx);

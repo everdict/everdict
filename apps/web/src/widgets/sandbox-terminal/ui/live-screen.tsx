@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
+import { BrowserCanvas } from '@/features/interactive-browser'
+import { Button } from '@/shared/ui/button'
+
 const TERMINAL = new Set(['succeeded', 'failed', 'superseded'])
 
 // 라이브 화면 — 실행 중인 케이스의 현재 프레임을 2초마다 폴링해 <img>로 보여준다. 프레임 출처 3종: os-use scrot ·
@@ -13,9 +16,11 @@ export function LiveScreen({ runId, initialStatus }: { runId: string; initialSta
   const t = useTranslations('liveScreen')
   const [src, setSrc] = useState('')
   const [supported, setSupported] = useState(false)
+  const [driving, setDriving] = useState(false)
 
   useEffect(() => {
     if (initialStatus && TERMINAL.has(initialStatus)) return
+    if (driving) return // 제어 중에는 스크린캐스트가 화면을 대신한다 — 폴링을 겹치면 같은 브라우저를 두 번 긁는다
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const tick = async () => {
@@ -43,13 +48,37 @@ export function LiveScreen({ runId, initialStatus }: { runId: string; initialSta
       stopped = true
       if (timer) clearTimeout(timer)
     }
-  }, [runId, initialStatus])
+  }, [runId, initialStatus, driving])
 
   // 라이브 화면이 없는 run(또는 아직 첫 프레임 전) — 빈 박스 대신 통째로 숨긴다.
   if (!supported && !src) return null
+
+  // 제어 모드 — 보는 것에서 하는 것으로. 케이스가 로그인 벽·캡차에 막혔을 때 사람이 직접 넘겨주는 통로라,
+  // 붙는 순간 폴링 이미지 대신 실제 브라우저(스크린캐스트+입력)로 바뀐다.
+  if (driving) {
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[11.5px] text-faint">{t('driving')}</span>
+          <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={() => setDriving(false)}>
+            {t('stopDriving')}
+          </Button>
+        </div>
+        <BrowserCanvas sessionId={runId} ticketPath={`/api/runs/${encodeURIComponent(runId)}/screen-ticket`} />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-1.5">
-      <span className="text-[11.5px] text-faint">{t('label')}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-[11.5px] text-faint">{t('label')}</span>
+        {src && (
+          <Button type="button" size="sm" variant="secondary" className="ml-auto" onClick={() => setDriving(true)}>
+            {t('takeOver')}
+          </Button>
+        )}
+      </div>
       <div className="overflow-hidden rounded-lg border border-border bg-black">
         {src ? (
           // eslint-disable-next-line @next/next/no-img-element

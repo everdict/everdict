@@ -29,7 +29,7 @@ function issue(id: string, teamId: string, projectId?: string): IssueRecord {
     identifier: `${teamId.toUpperCase()}-1`,
     title: id,
     status: "todo",
-    labels: [],
+    labelIds: [],
     links: [],
     history: [],
     createdBy: "u",

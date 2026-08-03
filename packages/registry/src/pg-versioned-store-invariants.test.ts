@@ -52,6 +52,7 @@ interface Row {
   dataset: unknown; // stored key-order-normalized (jsonb fidelity)
   created_at: string;
   created_by: string | null;
+  team_id?: string | null;
   deleted_at: number | null;
   tags: unknown;
 }
@@ -136,7 +137,7 @@ function fakePg(): FakePg {
               dataset: x.dataset,
               created_at: x.created_at,
               created_by: x.created_by,
-              team_id: null,
+              team_id: x.team_id ?? null,
               tags: x.tags,
             })) as R[],
         };

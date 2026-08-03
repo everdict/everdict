@@ -43,6 +43,42 @@ export const IssueLinkSchema = z.object({
 });
 export type IssueLink = z.infer<typeof IssueLinkSchema>;
 
+// --- Issue labels: a workspace-level registry, referenced by id ---
+// Labels are RECORDS, not the free strings they used to be (mig 0107 promoted the old string arrays). An issue
+// stores `labelIds`, so renaming a label or recolouring it is one write that every issue sees at once — the
+// property the string model could never have. The registry is workspace-wide (not per-team) because a workspace
+// IS the tenant here, and one shared vocabulary is what makes a cross-team filter mean anything.
+//
+// Colour is a CLOSED vocabulary, not a hex string: the web maps each token to a theme token, so a label stays
+// legible in light and dark and nobody can author an off-theme (or invisible) chip. Same rule as charts.
+export const ISSUE_LABEL_COLORS = [
+  "gray",
+  "purple",
+  "blue",
+  "teal",
+  "green",
+  "yellow",
+  "orange",
+  "red",
+  "pink",
+] as const;
+export const IssueLabelColorSchema = z.enum(ISSUE_LABEL_COLORS);
+export type IssueLabelColor = z.infer<typeof IssueLabelColorSchema>;
+
+export const IssueLabelRecordSchema = z.object({
+  id: z.string(),
+  tenant: z.string(),
+  // Unique per workspace, compared case-insensitively by the store — "Flaky" and "flaky" are one label, which is
+  // also what a GitHub import needs when it maps a remote name onto the registry.
+  name: z.string().min(1).max(64),
+  color: IssueLabelColorSchema,
+  description: z.string().max(500).optional(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type IssueLabelRecord = z.infer<typeof IssueLabelRecordSchema>;
+
 // --- Durable history (record-embedded, NOT the platform-event log) ---
 // The event log is swept (deleteOlderThan), so it cannot be the answer to "why did this regress six months ago".
 // The tracker's history rides on the record itself — the ScorecardRecord.steps precedent — and the matching
@@ -164,7 +200,10 @@ export const IssueRecordSchema = z.object({
   status: IssueStatusSchema,
   projectId: z.string().optional(),
   assignee: z.string().optional(),
-  labels: z.array(z.string()).default([]),
+  // Ids into the workspace label registry above — NOT names. A reader that needs to draw a chip joins against
+  // `GET /issue-labels` (the same join the web already does for members and projects); a dangling id cannot
+  // happen because deleting a label strips it from every issue in the same transaction.
+  labelIds: z.array(z.string()).default([]),
   links: z.array(IssueLinkSchema).default([]),
   // Set when the issue reached `done`. Kept across a reopen — a regressed issue must remember the scorecard it
   // fell from, which is exactly the baseline the regression watch needs.

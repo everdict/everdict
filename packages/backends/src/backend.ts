@@ -128,6 +128,15 @@ export interface ScreenCapturable {
   captureScreen(runId: string): Promise<string | undefined>;
 }
 
+// ScreenAttachable — where a run's live browser can be REACHED, as opposed to a frame of it. Watching answers
+// "what is the agent doing"; attaching answers "let me do it myself" — the login wall, the captcha, the consent
+// dialog a case cannot get past on its own. Separate from ScreenCapturable because a lane may be able to take a
+// picture (an exec + screenshot) without offering anything to drive.
+export interface ScreenAttachable {
+  // Control-plane-reachable CDP HTTP base of the run's live browser, or undefined once it is gone.
+  screenEndpoint(runId: string): Promise<string | undefined>;
+}
+
 // Probeable — a connection test: a light call to the cluster API without a job, to check reachability/auth.
 export interface Probeable {
   probe(): Promise<ProbeResult>;
@@ -207,6 +216,10 @@ export function isShellable(backend: Backend): backend is Backend & Shellable {
 
 export function isScreenCapturable(backend: Backend): backend is Backend & ScreenCapturable {
   return typeof (backend as Partial<ScreenCapturable>).captureScreen === "function";
+}
+
+export function isScreenAttachable(backend: Backend): backend is Backend & ScreenAttachable {
+  return typeof (backend as Partial<ScreenAttachable>).screenEndpoint === "function";
 }
 
 export function isProbeable(backend: Backend): backend is Backend & Probeable {

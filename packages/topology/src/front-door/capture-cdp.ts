@@ -11,7 +11,23 @@ import { reachableWsUrl } from "./cdp-ws.js";
 
 export interface CdpTarget {
   type?: string;
+  url?: string;
   webSocketDebuggerUrl?: string;
+}
+
+// A browser that loads a client extension always has more than one page target: the extension's own panel, a blank
+// tab, and the tab the agent works in — so "the first page target" can put a live view, a graded screenshot, or a
+// whole environment recording on the extension's UI instead of the page under test.
+//
+// Chrome lists targets most-recently-active first, which IS the signal for which tab is the work surface (the
+// session server brings it to front on activation), so the order is respected rather than second-guessed. What is
+// filtered is only what can never be the work surface: a blank tab. Judging by URL is deliberately avoided — the
+// work tab of an extension-driven session starts out on a `chrome-extension://` page itself, so a rule that skips
+// extension URLs picks the blank tab at exactly the moment recording starts.
+export function pickPageTarget(targets: CdpTarget[]): CdpTarget | undefined {
+  const pages = targets.filter((t) => t.type === "page" && t.webSocketDebuggerUrl);
+  const isBlank = (t: CdpTarget): boolean => (t.url ?? "") === "" || (t.url ?? "").startsWith("about:");
+  return pages.find((t) => !isBlank(t)) ?? pages[0] ?? targets.find((t) => t.webSocketDebuggerUrl);
 }
 
 // Minimal WS surface (Node 22 global WebSocket satisfies it) — injectable for tests.
@@ -53,9 +69,7 @@ async function cdpCommand<T>(
   const listRes = await fetchImpl(`${cdpHttpBase}/json`);
   if (!listRes.ok) throw new UpstreamError("UPSTREAM_ERROR", { status: listRes.status }, "CDP /json unreachable.");
   const targets = (await listRes.json()) as CdpTarget[];
-  const page =
-    targets.find((t) => t.type === "page" && t.webSocketDebuggerUrl) ?? targets.find((t) => t.webSocketDebuggerUrl);
-  const wsUrl = page?.webSocketDebuggerUrl;
+  const wsUrl = pickPageTarget(targets)?.webSocketDebuggerUrl;
   if (!wsUrl) throw new UpstreamError("UPSTREAM_ERROR", undefined, `No CDP page target to capture ${what}.`);
 
   return await new Promise<T>((resolve, reject) => {

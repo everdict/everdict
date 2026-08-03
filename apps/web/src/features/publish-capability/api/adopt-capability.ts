@@ -36,7 +36,7 @@ function revalidateAdoptionPages(): void {
     '/[workspace]/store/mine',
     '/[workspace]/settings',
     '/[workspace]/settings/agent',
-    '/[workspace]/settings/tools',
+    '/[workspace]/tools',
   ])
     revalidatePath(path)
   // 추가/제거를 실제로 누르는 자리 — 동적 세그먼트라 'page' 타입으로 지정해야 매칭된다.

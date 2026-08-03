@@ -27,7 +27,7 @@ export async function createIssueAction(input: {
   status?: IssueStatus
   projectId?: string
   assignee?: string
-  labels?: string[]
+  labelIds?: string[]
   links?: { type: IssueLinkType; id: string; version?: string; note?: string }[]
 }): Promise<IssueActionResult> {
   const ctx = await authContext()
@@ -47,7 +47,7 @@ export async function updateIssueAction(
   patch: {
     title?: string
     description?: string | null
-    labels?: string[]
+    labelIds?: string[]
     assignee?: string | null
     projectId?: string | null
   }

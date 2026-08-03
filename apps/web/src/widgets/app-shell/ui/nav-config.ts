@@ -1,22 +1,20 @@
 import {
-  BarChart3,
   Bookmark,
   BookOpen,
   Bot,
-  Boxes,
   CircleDot,
-  Database,
   Ellipsis,
   FolderKanban,
-  Gavel,
   LayoutDashboard,
   MonitorDown,
+  Network,
   Puzzle,
   Rocket,
   Store,
   Terminal,
   Users,
   UsersRound,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -49,8 +47,15 @@ export interface NavSection {
 // the way you navigate to work, which is what made the team axis invisible before.
 // The sidebar leads with the TRACKER (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue. That is the deliberate
 // order of the product's questions: "why are we evaluating this, and can we ship" comes first, and the eval
-// primitives that answer "what ran" (harness · dataset · scorecard · judge · store · view · agent) sit under a
-// collapsed "Evaluation" group. Nothing is removed — the group expands on click, auto-expands whenever the
+// The second group is the AGENT — what it is, what it can use, and what it knows. Tools · skills · knowledge were
+// Settings pages, which made them read as one-time configuration; they are none of that, they are the working
+// material of the agent and belong beside it. Their pages MOVED out of /settings rather than being copied, so the
+// product still has exactly one Skills page and one Tools page.
+// The eval primitives that answer "what ran" no longer have a group at all — except the ones a TEAM owns.
+// Harness · dataset · judge · scorecard all carry a team (registry `team_id`), so their sidebar home is the team,
+// not a workspace-wide list: only the scorecard gets a row there, because that is the one you go looking for by
+// name. The harness/dataset/judge routes stay reachable by URL and from the command palette; they are simply not
+// how you navigate — you arrive at them from the scorecard or the team that owns them. Nothing is removed — the group expands on click, auto-expands whenever the
 // active route is inside it, and every entry stays in the command palette (ALL_NAV_ITEMS).
 // Infra concerns (runs · schedules · runtimes · work queue) are NOT sidebar entries — they live on the vertical
 // infra rail (widgets/infra-panel) on the right; their full pages remain routable (panel "full page" links,
@@ -123,44 +128,38 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    headingKey: 'evaluation',
+    headingKey: 'agent',
     collapsible: true,
     items: [
       {
-        href: '/harnesses',
-        labelKey: 'harnesses',
-        icon: Boxes,
-        keywords: 'harness agent codex claude',
+        href: '/agents',
+        labelKey: 'agents',
+        icon: Bot,
+        keywords: 'agent fleet run trigger automation 에이전트 자동화 플릿',
       },
       {
-        href: '/datasets',
-        labelKey: 'datasets',
-        icon: Database,
-        keywords: 'benchmark dataset case pinch', // keep "benchmark" as a search alias
+        href: '/tools',
+        labelKey: 'tools',
+        icon: Wrench,
+        keywords: 'tool mcp code capability function 도구 기능',
       },
       {
-        href: '/scorecards',
-        labelKey: 'scorecards',
-        icon: BarChart3,
-        keywords: 'scorecard batch evaluate compare leaderboard trend',
+        href: '/skills',
+        labelKey: 'skills',
+        icon: BookOpen,
+        keywords: 'skill playbook recipe instruction 스킬 지침',
       },
       {
-        href: '/judges',
-        labelKey: 'judges',
-        icon: Gavel,
-        keywords: 'judge grader model harness rubric verdict score',
+        href: '/knowledge',
+        labelKey: 'knowledge',
+        icon: Network,
+        keywords: 'knowledge graph entry claim lineage 지식 그래프',
       },
       {
         href: '/store',
         labelKey: 'store',
         icon: Store,
         keywords: 'store capability tool mcp code skill adopt publish marketplace 도구 스토어',
-      },
-      {
-        href: '/agents',
-        labelKey: 'agents',
-        icon: Bot,
-        keywords: 'agent fleet run trigger automation 에이전트 자동화 플릿',
       },
     ],
   },

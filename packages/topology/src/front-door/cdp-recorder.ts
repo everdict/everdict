@@ -1,5 +1,5 @@
 import type { TrackEntry } from "@everdict/contracts";
-import type { CdpSocket, CdpTarget } from "./capture-cdp.js";
+import { type CdpSocket, type CdpTarget, pickPageTarget } from "./capture-cdp.js";
 import { reachableWsUrl } from "./cdp-ws.js";
 
 // Environment-plane recorder for a CDP browser target (replay ②). The bidirectional sibling of capture-cdp's one-shot
@@ -25,6 +25,9 @@ export interface CdpEnvironmentRecorderOptions {
   now?: () => number; // wall clock — track.t must share the agent trace's epoch clock (D1) so the player aligns them. Default Date.now.
   frames?: boolean; // also stream screencast frames through sink.frame (default false — the text lanes are cheap; frames offload downstream)
   frameThrottleMs?: number; // min gap between EMITTED frames (default 1000ms) — bounds screencast offload volume
+  // How long start() waits for the subscriptions to be acknowledged before letting the case proceed unrecorded
+  // (default 5s). A cap, not a target: a browser that never answers must not hold an eval behind a recording.
+  subscribeTimeoutMs?: number;
   timeoutMs?: number; // page-target discovery cap (default 10s)
 }
 
@@ -53,6 +56,8 @@ export class CdpEnvironmentRecorder {
   private readonly pending = new Map<string, { t: number; method: string; url: string; status?: number }>();
   private lastNavUrl: string | undefined;
   private lastFrameAt = Number.NEGATIVE_INFINITY; // so the FIRST frame always emits (0 - 0 would otherwise be throttled)
+  private onSubscribed: (() => void) | undefined;
+  private pendingSubscribeId: number | undefined;
   private readonly now: () => number;
   private readonly fetchImpl: typeof fetch;
   private readonly connect: (url: string) => CdpSocket;
@@ -76,14 +81,21 @@ export class CdpEnvironmentRecorder {
     const listRes = await this.fetchImpl(`${this.cdpHttpBase}/json`);
     if (!listRes.ok) throw new Error(`CDP /json unreachable (${listRes.status}).`);
     const targets = (await listRes.json()) as CdpTarget[];
-    const wsUrl = (
-      targets.find((t) => t.type === "page" && t.webSocketDebuggerUrl) ?? targets.find((t) => t.webSocketDebuggerUrl)
-    )?.webSocketDebuggerUrl;
+    // Same selection as the captures: recording the extension's panel would fill the replay's network and console
+    // lanes with the extension's own traffic instead of the page the case acted on.
+    const wsUrl = pickPageTarget(targets)?.webSocketDebuggerUrl;
     if (!wsUrl) throw new Error("No CDP page target to record.");
     if (this.stopped) return; // stop() raced start() — don't open a socket we'll never close
 
     const ws = this.connect(reachableWsUrl(wsUrl, this.cdpHttpBase));
     this.ws = ws;
+    // Returning as soon as the socket object exists made recording a race the CASE could win: the caller starts the
+    // agent immediately, and a page that loads in a few hundred milliseconds is over before Network.enable is even
+    // sent. The result was the worst shape of failure — long cases recorded fine while short ones came back with an
+    // empty replay and no error anywhere. So start() resolves only once the subscriptions are acknowledged.
+    const subscribed = new Promise<void>((resolve) => {
+      this.onSubscribed = resolve;
+    });
     ws.addEventListener("open", () => {
       this.opened = true;
       // Subscribe to the environment domains. Network/Runtime/Page.enable start the event streams; screencast is opt-in.
@@ -91,12 +103,31 @@ export class CdpEnvironmentRecorder {
       this.send("Runtime.enable");
       this.send("Page.enable");
       if (this.opts.frames) this.send("Page.startScreencast", { format: "png", everyNthFrame: 1 });
+      this.pendingSubscribeId = this.commandId; // the last enable — its reply means the stream is live
       for (const payload of this.backlog.splice(0)) ws.send(payload);
     });
     ws.addEventListener("message", (ev) => this.onMessage(ev.data));
     ws.addEventListener("error", () => {
       // Socket error — stop recording silently (the run continues; the recording is best-effort).
       this.stop();
+      this.settleSubscribed();
+    });
+    // Bounded: a browser that never acknowledges must not hold the case behind an observability concern.
+    await Promise.race([subscribed, this.delay(this.opts.subscribeTimeoutMs ?? 5_000)]);
+  }
+
+  // Resolve start()'s wait exactly once, whether the subscriptions landed, the socket died, or we gave up.
+  private settleSubscribed(): void {
+    const resolve = this.onSubscribed;
+    this.onSubscribed = undefined;
+    resolve?.();
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      // Never keep a process alive for a recording that has already given up.
+      (timer as unknown as { unref?: () => void }).unref?.();
     });
   }
 
@@ -128,14 +159,21 @@ export class CdpEnvironmentRecorder {
 
   private onMessage(data: unknown): void {
     if (this.stopped) return;
-    let msg: { method?: string; params?: Record<string, unknown> };
+    let msg: { id?: number; method?: string; params?: Record<string, unknown> };
     try {
       msg = JSON.parse(String(data)) as typeof msg;
     } catch {
       return; // non-JSON
     }
     const method = msg.method;
-    if (!method) return; // a command reply (id-only) — the recorder only cares about events
+    if (!method) {
+      // A command reply. The only one that matters is the last enable's: it is the moment the event stream is
+      // actually live, which is what start() waits for.
+      if (msg.id !== undefined && this.pendingSubscribeId !== undefined && msg.id >= this.pendingSubscribeId) {
+        this.settleSubscribed();
+      }
+      return;
+    }
     const params = msg.params ?? {};
     try {
       switch (method) {

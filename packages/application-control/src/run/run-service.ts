@@ -157,6 +157,9 @@ export interface RunServiceDeps {
     runtimeList: string | undefined,
     runId: string,
   ) => Promise<string | undefined>;
+  // Where the run's live browser can be REACHED, for the interactive takeover relay (watching answers "what is
+  // the agent doing"; attaching answers "let me get it past this login wall myself").
+  screenEndpoint?: (tenant: string, runtimeList: string | undefined, runId: string) => Promise<string | undefined>;
   // Latest live-screen frame PUSHED by a self-hosted runner (report_case_screen), by CP-minted runId. base64 PNG (no
   // data: prefix) or undefined. Takes precedence over the env-kind pull paths: a self-hosted container is unreachable
   // from the control plane, so a self-driven-browser command harness (e.g. browser-use, env.kind "prompt") relies on
@@ -401,6 +404,21 @@ export class RunService {
       .catch(() => undefined);
     const b64 = out && out.exitCode === 0 ? out.stdout.trim() : "";
     return { record, dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined, supported: Boolean(b64) };
+  }
+
+  // Where this run's live browser can be driven from (observability ⑦b). Returns the record (for authz/scoping)
+  // + the reachable CDP base, or undefined endpoint when there is nothing to take over (settled run, a lane with
+  // no per-case browser). The caller mints a WS ticket against it; the relay does the driving.
+  async screenEndpoint(id: string): Promise<{ record: RunRecord; endpoint: string | undefined } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const endpoint =
+      record.runtime && this.deps.screenEndpoint
+        ? await this.deps
+            .screenEndpoint(record.tenant, record.runtime, RunService.runIdFor(record))
+            .catch(() => undefined)
+        : undefined;
+    return { record, endpoint };
   }
 
   // Case-scoped placement read (runtime debugging) — the record (for authz/scoping) + where the case's job stands

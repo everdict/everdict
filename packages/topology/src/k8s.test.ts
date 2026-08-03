@@ -453,3 +453,31 @@ describe("K8sTopologyRuntime", () => {
     expect(calls.some((c) => c.startsWith("exec:") && c.includes("tenant_acme"))).toBe(true); // -d tenant_acme
   });
 });
+
+describe("buildBrowserManifests — the harness's client-extension browser", () => {
+  it("uses the declared extension image and passes it no args, so its own entrypoint loads the extension", () => {
+    // Extensions do not load in headless-shell, so the whole image is swapped; and such an image launches
+    // Chromium from its CMD (headful + --load-extension), which any args would replace. Nomad has behaved this
+    // way from the start — K8s ignoring the field meant a harness silently ran WITHOUT its extension here.
+    const [deployment] = buildBrowserManifests("run-1", { extensionImage: "reg/spica-ext:1" });
+    const container = (
+      deployment as unknown as {
+        spec: { template: { spec: { containers: Array<{ image: string; args?: string[] }> } } };
+      }
+    ).spec.template.spec.containers[0];
+
+    expect(container?.image).toBe("reg/spica-ext:1");
+    expect(container?.args).toBeUndefined();
+  });
+
+  it("keeps the allow-origins arg for the default headless browser", () => {
+    const [deployment] = buildBrowserManifests("run-1", {});
+    const container = (
+      deployment as unknown as {
+        spec: { template: { spec: { containers: Array<{ image: string; args?: string[] }> } } };
+      }
+    ).spec.template.spec.containers[0];
+
+    expect(container?.args).toEqual(["--remote-allow-origins=*"]);
+  });
+});

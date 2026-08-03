@@ -7,6 +7,8 @@ export interface ScorecardListFilter {
   dataset?: string; // dataset.id
   harness?: string; // harness.id
   status?: ScorecardStatus;
+  // 소유 팀 — 팀 사이드바의 스코어카드가 이 필터로 좁혀진다(다른 팀 것을 숨기지는 않는다: 읽기는 전역).
+  teamId?: string;
   judge?: string; // applied Agent Judge id (orchestration.judges[].id, any version) — the judge detail's evaluation history
   scheduleId?: string; // the schedule that fired the run (origin.scheduleId) — the schedule detail's run history
   // Cascade-cancel walk (§5.5): the batches a given run caused (origin.causedByRunId) — the kill switch's read.

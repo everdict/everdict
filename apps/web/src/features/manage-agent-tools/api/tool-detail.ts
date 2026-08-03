@@ -49,8 +49,8 @@ export async function bindAgentToolSecretsAction(
     const tool = agentToolDetailSchema.parse(
       await controlPlane.bindAgentToolSecrets(ctx, key, bindings)
     )
-    revalidatePath('/[workspace]/settings/tools')
-    revalidatePath('/[workspace]/settings/tools/[key]')
+    revalidatePath('/[workspace]/tools')
+    revalidatePath('/[workspace]/tools/[key]')
     return { ok: true, tool }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

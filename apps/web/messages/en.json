@@ -1612,7 +1612,10 @@
     "more": "More",
     "members": "Members",
     "teams": "Teams",
-    "teamHome": "Home"
+    "teamHome": "Home",
+    "agent": "Agent",
+    "tools": "Tools",
+    "skills": "Skills"
   },
   "usagePage": {
     "title": "Usage",
@@ -2819,7 +2822,9 @@
     "imagesDesc": "Images published to everdict's own store",
     "subscriptions": "Subscriptions",
     "teams": "Teams",
-    "teamsDesc": "The groups that own issues and name them — a workspace always keeps at least one."
+    "teamsDesc": "The groups that own issues and name them — a workspace always keeps at least one.",
+    "labels": "Labels",
+    "labelsDesc": "The vocabulary your team classifies issues with. Renaming or recolouring a label reaches every issue that wears it."
   },
   "knowledge": {
     "title": "Knowledge",
@@ -3806,11 +3811,18 @@
   },
   "liveScreen": {
     "label": "Live screen",
-    "waiting": "Waiting for the first frame…"
+    "waiting": "Waiting for the first frame…",
+    "takeOver": "Take over",
+    "driving": "You are driving this browser",
+    "stopDriving": "Stop driving"
   },
   "runTopology": {
     "title": "Service topology",
     "notDeployed": "No warm topology is standing on the cluster right now.",
+    "poolLabel": "Session pool",
+    "poolInUse": "{used} / {total} in use",
+    "poolTotal": "{total} sessions",
+    "poolFull": "full — further cases are refused",
     "restarts": "restarts {count}",
     "role": {
       "service": "service",
@@ -4696,8 +4708,6 @@
     "fieldAssignee": "Assignee",
     "fieldAssigneeNone": "Unassigned",
     "fieldLabels": "Labels",
-    "fieldLabelsPlaceholder": "regression, browser",
-    "fieldLabelsHint": "Separate labels with commas.",
     "statusError": "Couldn't move the issue.",
     "statusControlLabel": "Change status",
     "statusMoveTo": "Move to",
@@ -4737,7 +4747,12 @@
     "linkCopied": "Issue link copied.",
     "prevIssue": "Previous issue",
     "importedFrom": "Imported from",
-    "nextIssue": "Next issue"
+    "nextIssue": "Next issue",
+    "labelSearchPlaceholder": "Search or create a label…",
+    "labelCreate": "Create label “{name}”",
+    "labelCreateError": "Couldn't create the label.",
+    "labelRemove": "Remove {name}",
+    "labelNoMatch": "No labels match."
   },
   "issueLinks": {
     "add": "Add link",
@@ -5028,5 +5043,28 @@
     "emptyHint": "Invite people from Settings › Members to get started.",
     "noMatchTitle": "No members found",
     "noMatchHint": "Try a different name, email or team."
+  },
+  "labelsPage": {
+    "create": "New label",
+    "createTitle": "New label",
+    "createSubmit": "Create label",
+    "editTitle": "Edit label",
+    "save": "Save",
+    "cancel": "Cancel",
+    "fieldName": "Name",
+    "fieldNamePlaceholder": "e.g. flaky",
+    "fieldColor": "Color",
+    "fieldDescription": "Description",
+    "fieldDescriptionPlaceholder": "What does this label mean?",
+    "saveError": "Couldn't save the label.",
+    "edit": "Edit {name}",
+    "delete": "Delete {name}",
+    "deleteTitle": "Delete label",
+    "deleteConfirm": "Delete",
+    "deleteBody": "“{name}” will be deleted and removed from every issue that carries it.",
+    "deleteBodyCounted": "“{name}” will be deleted and removed from {count} issue(s) that carry it. This cannot be undone.",
+    "deleteError": "Couldn't delete the label.",
+    "emptyTitle": "No labels yet",
+    "emptyHint": "Define the vocabulary your team classifies issues with."
   }
 }

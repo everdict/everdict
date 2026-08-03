@@ -31,7 +31,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         status: IssueStatusSchema.exclude(["done", "regressed"]).optional(),
         projectId: z.string().optional().describe("the project this issue belongs to"),
         assignee: z.string().optional(),
-        labels: z.array(z.string()).max(50).optional(),
+        labelIds: z.array(z.string()).max(50).optional(),
         links: z
           .array(
             z.object({
@@ -57,7 +57,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
             ...(a.status !== undefined ? { status: a.status } : {}),
             ...(a.projectId !== undefined ? { projectId: a.projectId } : {}),
             ...(a.assignee !== undefined ? { assignee: a.assignee } : {}),
-            ...(a.labels !== undefined ? { labels: a.labels } : {}),
+            ...(a.labelIds !== undefined ? { labelIds: a.labelIds } : {}),
             ...(a.links !== undefined ? { links: a.links } : {}),
             ...(agent ? { agent } : {}),
           }),
@@ -118,7 +118,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         id: z.string(),
         title: z.string().min(1).max(300).optional(),
         description: z.string().max(50_000).nullable().optional(),
-        labels: z.array(z.string()).max(50).optional(),
+        labelIds: z.array(z.string()).max(50).optional(),
         assignee: z.string().nullable().optional(),
         projectId: z.string().nullable().optional(),
       },

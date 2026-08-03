@@ -288,6 +288,15 @@ seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`.
   (`{service?, poll:"GET /path", intervalMs, timeoutMs}`) polls the status URL (injectable `ProbeFn`, default
   `fetchProbe` = 2xx?; path `{var}`-interpolated with wiring+coordinates, e.g. `{session_id}`) until 2xx **before**
   handing back coordinates. Timeout ⇒ best-effort `close` (no leak) then `UpstreamError`. Absent = no gate (today).
+- **Target choice is `pickPageTarget` (`capture-cdp.ts`), never `targets[0]`.** Captures, the CDP recorder and the
+  interactive session all route through it. It keeps the browser's most-recently-active ordering (the work-surface
+  signal) and filters only blank tabs. Do NOT add a "skip `chrome-extension://`" rule: an extension-driven work tab
+  IS an extension page until it navigates, so that rule selects the blank tab exactly when recording starts.
+- **`acquire.capacity` — the pool the orchestrator cannot see.** A session pool lives INSIDE a service container,
+  so the thing that actually limits a batch is invisible to placement: the roster reports a healthy service while
+  every case beyond the pool size is refused. Declaring `{poll, total, used?}` puts it on `TopologyStatus.pool`
+  (→ `GET /runs/:id/topology`, MCP, the web panel). This is a MONITORING read, not admission control —
+  `Backend.capacity()` is per-backend, not per-harness, so the Scheduler still cannot size a batch by it.
 - **`acquire.cdpBase` — the session's watchable address.** A dot-path into the open response yielding a
   **control-plane-reachable** CDP base (NOT the agent-facing coordinate — that one is an internal alias). It fills
   `TargetEnvHandle.cdpBase`, which is the single switch behind the CDP environment recorder AND the live screen,

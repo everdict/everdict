@@ -122,7 +122,8 @@ export function serviceAcquirer(
         );
       }
       const open = methodPath(acquire.open);
-      const res = await request(open.method, joinUrl(base, interpolatePath(open.path, wiring)));
+      const openUrl = joinUrl(base, interpolatePath(open.path, wiring));
+      const res = await openSession(request, open.method, openUrl, acquire.wait, { now, sleep });
 
       // Coordinate mapping: dot-path in the open response → wiring variables. Missing/format-mismatch fails explicitly rather than silently (external-contract error).
       const coords: Record<string, string> = {};
@@ -203,6 +204,45 @@ export function serviceAcquirer(
       };
     },
   };
+}
+
+// What "the pool is full, come back" looks like on the wire when the harness does not say.
+const POOL_FULL_STATUSES = [409, 429];
+
+// The HTTP status behind a refused session open. AppError carries its payload on `extra` (`toEnvelope` is what
+// renames it to `data` on the wire) — reading the wire name here is why a full pool went unrecognised.
+function refusedStatus(err: unknown): number | undefined {
+  const extra = (err as { extra?: { status?: unknown } } | undefined)?.extra;
+  return typeof extra?.status === "number" ? extra.status : undefined;
+}
+
+// Open a session, waiting out a FULL pool when the harness says how long to wait. Everything else — a bad request,
+// an unreachable service, a refusal that is not about capacity — fails immediately: waiting on those would turn a
+// clear error into a timeout.
+async function openSession(
+  request: AcquireRequestFn,
+  method: string,
+  url: string,
+  wait: Extract<TargetAcquire, { mode: "service" }>["wait"],
+  io: { now: () => number; sleep: (ms: number) => Promise<void> },
+): Promise<unknown> {
+  if (!wait) return await request(method, url);
+  const deadline = io.now() + wait.timeoutMs;
+  for (;;) {
+    try {
+      return await request(method, url);
+    } catch (err) {
+      const status = refusedStatus(err);
+      // Not read off `wait.statuses` directly: a spec can reach here without having passed through the schema
+      // (an inline spec, an injected registry), and depending on a Zod default to have been applied turns a
+      // missing field into a crash inside error handling.
+      const full = wait.statuses ?? POOL_FULL_STATUSES;
+      // Out of time, or a refusal that means something other than "full" — surface the real error, which still
+      // carries the service's own message.
+      if (status === undefined || !full.includes(status) || io.now() >= deadline) throw err;
+      await io.sleep(wait.intervalMs ?? 1000);
+    }
+  }
 }
 
 // A declared observation coordinate is only usable as a URL base. Anything else (absent, wrong type, empty) reads as

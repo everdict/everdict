@@ -79,6 +79,23 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
         {!topology.deployed && (
           <p className="px-4 py-3 text-[12.5px] text-muted-foreground">{t('notDeployed')}</p>
         )}
+        {/* 세션 풀 — 서비스 컨테이너 "안"의 자원이라 오케스트레이터 로스터에는 안 보인다. 배치가 풀보다 넓으면
+            서비스는 정상인데 케이스만 계속 거절되므로, 이 줄이 그 원인을 눈에 보이게 한다. */}
+        {topology.pool && (
+          <div className="flex items-center gap-2 px-4 py-2.5">
+            <span className="text-[11.5px] text-faint">{t('poolLabel')}</span>
+            <span className="font-mono text-[12.5px]">
+              {topology.pool.used !== undefined
+                ? t('poolInUse', { used: topology.pool.used, total: topology.pool.total })
+                : t('poolTotal', { total: topology.pool.total })}
+            </span>
+            {topology.pool.used !== undefined && topology.pool.used >= topology.pool.total && (
+              <span className="rounded bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-[11px] text-[var(--color-warning)]">
+                {t('poolFull')}
+              </span>
+            )}
+          </div>
+        )}
         {topology.services.map((svc) => {
           // 라이브 상세 요약 줄 — 값이 있는 항목만 · 구분자로 잇는다(빈 섹션 숨김 관례).
           const detail = [

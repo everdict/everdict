@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { Issue } from '@/entities/issue'
+import type { IssueLabel } from '@/entities/issue-label'
 import { Button } from '@/shared/ui/button'
 import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -20,10 +21,15 @@ export function IssueActions({
   workspace,
   issue,
   projects,
+  labels,
+  canWrite,
 }: {
   workspace: string
   issue: Issue
   projects: { id: string; name: string }[]
+  // 편집 다이얼로그의 라벨 선택기가 고를 워크스페이스 레지스트리.
+  labels: IssueLabel[]
+  canWrite: boolean
 }) {
   const t = useTranslations('issuesPage')
   const router = useRouter()
@@ -72,6 +78,8 @@ export function IssueActions({
       </DropdownMenu>
 
       <EditIssueDialog
+        labels={labels}
+        canWrite={canWrite}
         issue={issue}
         open={editing}
         onClose={() => setEditing(false)}

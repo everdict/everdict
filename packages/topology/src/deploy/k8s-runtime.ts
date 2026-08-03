@@ -380,10 +380,12 @@ export class K8sTopologyRuntime implements TopologyRuntime {
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle> {
     const ns = this.nsFor(zone);
     const name = browserDeployName(runId);
+    const extensionImage = spec.target?.extension?.ref;
     const manifests = buildBrowserManifests(runId, {
       namespace: ns,
       runtimeClass: this.opts.runtimeClass,
       image: this.opts.browserImage,
+      ...(extensionImage ? { extensionImage } : {}),
       imagePullPolicy: this.opts.imagePullPolicy,
     });
     await this.kubectl.apply(manifests);

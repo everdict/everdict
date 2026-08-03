@@ -24,6 +24,12 @@ import {
   issuesSchema,
   type Issue,
 } from '@/entities/issue'
+import {
+  IssueLabelChips,
+  issueLabelDirectoryOf,
+  issueLabelsSchema,
+  type IssueLabel,
+} from '@/entities/issue-label'
 import { memberDirectoryOf, memberNameOf, membersSchema, type Member } from '@/entities/member'
 import { projectsSchema, type Project } from '@/entities/project'
 import { TeamKeyBadge, teamWithSummarySchema, type TeamWithSummary } from '@/entities/team'
@@ -141,7 +147,7 @@ export default async function IssueDetailPage({
 
   // Supplementary reads — the detail still renders if any of them fails, so they run together and a failure
   // degrades only its own slot (팀을 못 읽으면 브레드크럼이 한 칸 짧아질 뿐이다).
-  const [evaluation, projects, members, team, siblings] = await Promise.all([
+  const [evaluation, projects, members, team, siblings, labels] = await Promise.all([
     controlPlane
       .listIssueScorecards(ctx, current.id)
       .then((r) => issueScorecardsSchema.parse(r))
@@ -162,12 +168,18 @@ export default async function IssueDetailPage({
       .listIssues(ctx, { team: current.teamId, limit: SIBLING_WINDOW })
       .then((r) => issuesSchema.parse(r))
       .catch((): Issue[] => []),
+    controlPlane
+      .listIssueLabels(ctx)
+      .then((r) => issueLabelsSchema.parse(r))
+      .catch((): IssueLabel[] => []),
   ])
 
   const canWrite = can(principal?.roles ?? [], 'issues:write')
   const project = current.projectId ? projects.find((p) => p.id === current.projectId) : undefined
   // 이력·담당자·해결 기록이 같은 이름·같은 얼굴을 쓰도록 subject → 프로필을 한 번만 만든다.
   const actors = memberDirectoryOf(members)
+  // 이슈는 라벨 id 만 들고 있다 — 칩을 그리려면 레지스트리와 한 번 이어 붙인다(멤버/프로젝트와 같은 조인).
+  const labelDirectory = issueLabelDirectoryOf(labels)
   const displayName = (subject: string): string => memberNameOf(actors, subject)
 
   const at = siblings.findIndex((s) => s.id === current.id)
@@ -242,6 +254,8 @@ export default async function IssueDetailPage({
               workspace={workspace}
               issue={current}
               projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+              labels={labels}
+              canWrite={canWrite}
             />
           )}
         </div>
@@ -308,15 +322,9 @@ export default async function IssueDetailPage({
                 </Link>
               </PropertyRow>
             )}
-            {current.labels.length > 0 && (
+            {current.labelIds.length > 0 && (
               <PropertyRow label={t('fieldLabels')}>
-                <span className="flex flex-wrap gap-1">
-                  {current.labels.map((label) => (
-                    <Badge key={label} tone="outline">
-                      {label}
-                    </Badge>
-                  ))}
-                </span>
+                <IssueLabelChips labelIds={current.labelIds} directory={labelDirectory} />
               </PropertyRow>
             )}
             <PropertyRow label={t('metaCreated')}>

@@ -95,4 +95,12 @@ async def activate(context: "BrowserContext", extension_id: str, cfg: RemoteMode
         work_page = None
 
     session_id = await _read_session_id(panel, cfg.session_id_selector, timeout)
+    if work_page is not None:
+        # Put the work tab in front so the browser lists it first: an observer attaching over CDP has to choose
+        # among several page targets (this tab, the extension panel, a blank tab) and would otherwise be as likely
+        # to watch the extension's own UI as the page the agent is driving.
+        try:
+            await work_page.bring_to_front()
+        except Exception:
+            pass  # cosmetic ordering only — never worth failing an activated session over
     return RemoteSession(session_id=session_id, panel_page=panel, work_page=work_page)

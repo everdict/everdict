@@ -160,6 +160,9 @@ describe("GithubIssueSync — import", () => {
       teams: teamAllocator,
       tokens: { tokenForRepository: async () => ({ token: "tok" }) },
       writers: fakeWriters(remote),
+      // GitHub owns labels by NAME; the sync maps them onto registry ids first. Deriving the id from the
+      // name keeps the assertion readable and proves the mapping ran.
+      labels: { resolveNames: async (_tenant: string, names: string[]) => names.map((n) => `lbl_${n}`) },
       now: () => NOW,
     });
     return { issues, sync };
@@ -178,7 +181,7 @@ describe("GithubIssueSync — import", () => {
 
     expect(result.created).toHaveLength(2);
     const [open, closed] = result.created;
-    expect(open).toMatchObject({ status: "todo", description: "steps", labels: ["bug"] });
+    expect(open).toMatchObject({ status: "todo", description: "steps", labelIds: ["lbl_bug"] });
     expect(open?.github).toMatchObject({ repository: "acme/agent", number: 1, sync: { pull: true, push: false } });
     expect(closed?.status).toBe("done");
     // A scorecard we do not have would poison every regression comparison downstream.
@@ -235,6 +238,9 @@ describe("GithubIssueSync — pull", () => {
       teams: teamAllocator,
       tokens: { tokenForRepository: async () => ({ token: "tok" }) },
       writers: fakeWriters(remote),
+      // GitHub owns labels by NAME; the sync maps them onto registry ids first. Deriving the id from the
+      // name keeps the assertion readable and proves the mapping ran.
+      labels: { resolveNames: async (_tenant: string, names: string[]) => names.map((n) => `lbl_${n}`) },
       now: () => NOW,
     });
     return { issues, sync };
@@ -266,7 +272,7 @@ describe("GithubIssueSync — pull", () => {
       }),
     );
     const pulled = await sync.pullIssue("acme", record.id, actor);
-    expect(pulled).toMatchObject({ title: "renamed", description: "new body", labels: ["p1"] });
+    expect(pulled).toMatchObject({ title: "renamed", description: "new body", labelIds: ["lbl_p1"] });
     expect(pulled.github?.syncedAt).toBe("2026-08-01T00:00:00.000Z");
   });
 
@@ -325,6 +331,9 @@ describe("GithubIssueSync — push", () => {
       teams: teamAllocator,
       tokens: { tokenForRepository: async () => ({ token: "tok" }) },
       writers: fakeWriters(remote),
+      // GitHub owns labels by NAME; the sync maps them onto registry ids first. Deriving the id from the
+      // name keeps the assertion readable and proves the mapping ran.
+      labels: { resolveNames: async (_tenant: string, names: string[]) => names.map((n) => `lbl_${n}`) },
       webBaseUrl: "https://everdict.example.com",
       now: () => NOW,
     });

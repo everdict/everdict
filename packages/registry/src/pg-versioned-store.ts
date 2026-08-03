@@ -250,9 +250,10 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
         version: string;
         created_at: string | Date;
         created_by: string | null;
+        team_id: string | null;
         tags: unknown;
       }>(
-        `SELECT version, created_at${this.hasCreatedBy ? ", created_by" : ""}${this.hasTags ? ", tags" : ""} FROM ${this.table} WHERE tenant = $1 AND id = $2${this.live}`,
+        `SELECT version, created_at${this.hasCreatedBy ? ", created_by" : ""}${this.hasTeamId ? ", team_id" : ""}${this.hasTags ? ", tags" : ""} FROM ${this.table} WHERE tenant = $1 AND id = $2${this.live}`,
         [owner, id],
       );
       const versions = sortVersions(r.rows.map((x) => x.version));
@@ -275,6 +276,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
         versionCount: versions.length,
         ...(earliest?.created_by != null ? { createdBy: earliest.created_by } : {}),
         ...(latestVersionRow?.created_by != null ? { latestCreatedBy: latestVersionRow.created_by } : {}),
+        ...(latestVersionRow?.team_id != null ? { teamId: latestVersionRow.team_id } : {}),
         ...(earliest ? { createdAt: new Date(earliest.created_at).toISOString() } : {}),
         ...(latest ? { updatedAt: new Date(latest.created_at).toISOString() } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),

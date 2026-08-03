@@ -34,6 +34,7 @@ export interface RuntimeAccessReaders {
     caseId: string,
     command: string,
   ) => Promise<{ stdout: string; stderr: string; exitCode: number } | undefined>;
+  screenEndpointFn: (tenant: string, runtimeList: string | undefined, runId: string) => Promise<string | undefined>;
   captureBrowserScreenFn: (
     tenant: string,
     runtimeList: string | undefined,
@@ -123,6 +124,7 @@ export function buildRun(deps: {
     readCaseLogsFn,
     execInSandboxFn,
     captureBrowserScreenFn,
+    screenEndpointFn,
     openTerminalStreamFn,
     inspectCasePlacementFn,
     inspectTopologyFn,
@@ -138,6 +140,7 @@ export function buildRun(deps: {
     readCaseLogs: (tenant, runtimeList, caseId, stream) => readCaseLogsFn(tenant, runtimeList, caseId, stream),
     execInSandbox: (tenant, runtimeList, caseId, command) => execInSandboxFn(tenant, runtimeList, caseId, command),
     captureBrowserScreen: (tenant, runtimeList, runId) => captureBrowserScreenFn(tenant, runtimeList, runId),
+    screenEndpoint: (tenant, runtimeList, runId) => screenEndpointFn(tenant, runtimeList, runId),
     // Pushed frames (self-hosted) — RunService.screen() prefers this over the CDP pull for unreachable containers.
     liveFrame: (runId) => liveFrames.get(runId)?.frameBase64,
     // Pushed log (self-hosted) — RunService.logs() prefers this over the backend tail for unreachable runners.

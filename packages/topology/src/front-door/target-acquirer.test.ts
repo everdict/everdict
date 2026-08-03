@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TargetAcquire, TopologyTarget } from "@everdict/contracts";
+import { type ServiceHarnessSpec, type TargetAcquire, type TopologyTarget, UpstreamError } from "@everdict/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TopologyRuntime } from "../deploy/topology-runtime.js";
 import {
@@ -292,5 +292,127 @@ describe("targetAcquirerFor", () => {
 
     expect(provisioned).toBe(true);
     expect(handle.wiring.target_cdp_url).toBe("ws://provisioned");
+  });
+});
+
+describe("serviceAcquirer — waiting out a full session pool", () => {
+  // The real transport throws an UpstreamError, whose payload lives on `extra` — a fake that used a different
+  // shape is exactly how the pool-full path shipped unrecognised.
+  const full = () => new UpstreamError("UPSTREAM_ERROR", { status: 409 }, "session request failed: HTTP 409 pool full");
+
+  function refusingRequest(refusals: number): { fn: AcquireRequestFn; opens: number } {
+    const state = { opens: 0 };
+    const fn: AcquireRequestFn = async (method) => {
+      if (method !== "POST") return {};
+      state.opens += 1;
+      if (state.opens <= refusals) throw full();
+      return { id: "sess-1" };
+    };
+    return {
+      fn,
+      get opens() {
+        return state.opens;
+      },
+    };
+  }
+
+  const WAITING: Extract<TargetAcquire, { mode: "service" }> = {
+    ...SERVICE_ACQUIRE,
+    coordinates: { session_id: "id" },
+    wait: { statuses: [409, 429], timeoutMs: 10_000, intervalMs: 10 },
+  };
+
+  it("retries a full pool until a session frees up — a batch wider than the pool queues instead of failing", async () => {
+    const req = refusingRequest(3);
+    let clock = 0;
+    const acq = serviceAcquirer(WAITING, req.fn, {
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+
+    const handle = await acq.acquire({
+      spec: SPEC,
+      runId: "r1",
+      endpoints: { browsers: "http://browsers:7000" },
+      wiring: { run_id: "r1" },
+    });
+
+    expect(handle.wiring.session_id).toBe("sess-1");
+    expect(req.opens).toBe(4); // three refusals waited out, the fourth admitted
+  });
+
+  it("gives up at the deadline and surfaces the service's own refusal", async () => {
+    const req = refusingRequest(Number.POSITIVE_INFINITY);
+    let clock = 0;
+    const acq = serviceAcquirer({ ...WAITING, wait: { statuses: [409], timeoutMs: 50, intervalMs: 10 } }, req.fn, {
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+
+    // The real error, not a synthetic timeout — it still carries what the service said.
+    await expect(
+      acq.acquire({ spec: SPEC, runId: "r1", endpoints: { browsers: "http://browsers:7000" }, wiring: {} }),
+    ).rejects.toThrow(/pool full/);
+  });
+
+  it("never waits on a refusal that is not about capacity", async () => {
+    const bad: AcquireRequestFn = async () => {
+      throw new UpstreamError("UPSTREAM_ERROR", { status: 400 }, "bad request");
+    };
+    let slept = 0;
+    const acq = serviceAcquirer(WAITING, bad, {
+      now: () => 0,
+      sleep: async () => {
+        slept += 1;
+      },
+    });
+
+    // Waiting on a 400 would turn a clear authoring error into a two-minute timeout.
+    await expect(
+      acq.acquire({ spec: SPEC, runId: "r1", endpoints: { browsers: "http://browsers:7000" }, wiring: {} }),
+    ).rejects.toThrow(/bad request/);
+    expect(slept).toBe(0);
+  });
+});
+
+describe("serviceAcquirer — wait without schema defaults applied", () => {
+  it("still recognises a full pool when the spec never went through the schema (inline / injected specs)", async () => {
+    // Depending on a Zod default having been applied turns a missing field into a crash inside error handling —
+    // which is how a declared wait produced "Cannot read properties of undefined" instead of queueing.
+    let opens = 0;
+    const request: AcquireRequestFn = async (method) => {
+      if (method !== "POST") return {};
+      opens += 1;
+      if (opens === 1) throw new UpstreamError("UPSTREAM_ERROR", { status: 409 }, "pool full");
+      return { id: "sess-1" };
+    };
+    let clock = 0;
+    const acq = serviceAcquirer(
+      {
+        ...SERVICE_ACQUIRE,
+        coordinates: { session_id: "id" },
+        wait: { timeoutMs: 5_000 } as Extract<TargetAcquire, { mode: "service" }>["wait"],
+      },
+      request,
+      {
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms;
+        },
+      },
+    );
+
+    const handle = await acq.acquire({
+      spec: SPEC,
+      runId: "r1",
+      endpoints: { browsers: "http://browsers:7000" },
+      wiring: {},
+    });
+    expect(handle.wiring.session_id).toBe("sess-1");
+    expect(opens).toBe(2);
   });
 });

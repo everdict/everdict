@@ -42,7 +42,8 @@ export interface CreateIssueInput {
   status?: IssueStatus;
   projectId?: string;
   assignee?: string;
-  labels?: string[];
+  // Registry ids — the caller (route/MCP/import) resolved any names first.
+  labelIds?: string[];
   links?: NewIssueLinkInput[];
   agent?: IssueAgentAttribution;
 }
@@ -112,7 +113,7 @@ export class IssueService {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
-      ...(input.labels !== undefined ? { labels: input.labels } : {}),
+      ...(input.labelIds !== undefined ? { labelIds: input.labelIds } : {}),
       ...(input.links !== undefined ? { links: input.links } : {}),
       ...(input.agent?.agentId !== undefined || input.agent?.conversationId !== undefined
         ? {

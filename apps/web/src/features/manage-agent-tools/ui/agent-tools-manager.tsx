@@ -69,7 +69,7 @@ export function AgentToolsManager({ tools }: { tools: AgentToolEntry[] }) {
                 <ToolRow
                   key={tool.key}
                   tool={tool}
-                  href={`/${workspace}/settings/tools/${encodeURIComponent(tool.key)}`}
+                  href={`/${workspace}/tools/${encodeURIComponent(tool.key)}`}
                   pending={pendingKey === tool.key}
                   onToggle={(enabled) => apply(tool, enabled)}
                   onReset={() => apply(tool, null)}

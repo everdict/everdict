@@ -19,7 +19,7 @@ export async function setAgentSkillAction(
   const ctx = await authContext()
   try {
     await controlPlane.setAgentSkill(ctx, key, enabled)
-    revalidatePath('/[workspace]/settings/skills')
+    revalidatePath('/[workspace]/skills')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

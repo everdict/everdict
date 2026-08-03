@@ -16,16 +16,32 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-def free_port(preferred: Optional[int] = None) -> int:
-    """A bindable TCP port — the preferred one when it is free, else whatever the OS hands out."""
-    if preferred is not None:
-        with contextlib.suppress(OSError), socket.socket() as probe:
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            probe.bind(("127.0.0.1", preferred))
-            return preferred
+def free_port() -> int:
+    """An ephemeral TCP port the OS says is free.
+
+    Deliberately never a preferred/base port: reusing one address across sessions means a closed session's
+    address is immediately valid again for a different browser, and an observer holding it silently starts
+    watching another case.
+    """
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
+
+
+async def _await_listening(port: int, timeout: float = 5.0, interval: float = 0.05) -> bool:
+    """Block until something accepts on the port, or give up. Returning early on failure is deliberate: the
+    address is still handed back, so a caller that retries can still succeed."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            _, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            return True
+        except OSError:
+            await asyncio.sleep(interval)
+    return False
 
 
 @dataclass
@@ -46,7 +62,7 @@ class CdpEndpoint:
             bridge.kill()
 
 
-async def publish(internal_port: int, advertised_host: str, port_hint: Optional[int] = None) -> CdpEndpoint:
+async def publish(internal_port: int, advertised_host: str) -> CdpEndpoint:
     """Republish a loopback-bound debugging port on all interfaces and return its outside address.
 
     Without socat the endpoint is still returned, pointing at the loopback port — honest for a caller in
@@ -59,7 +75,7 @@ async def publish(internal_port: int, advertised_host: str, port_hint: Optional[
             published_port=internal_port,
             url=f"http://{advertised_host}:{internal_port}",
         )
-    published = free_port(port_hint)
+    published = free_port()
     bridge = await asyncio.create_subprocess_exec(
         socat,
         f"TCP-LISTEN:{published},fork,reuseaddr",
@@ -67,6 +83,10 @@ async def publish(internal_port: int, advertised_host: str, port_hint: Optional[
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
+    # Spawning is not listening. Returning the address a moment early is invisible to a poller (it retries) but
+    # fatal to anything that attaches ONCE — an environment recorder gets connection-refused, gives up, and the
+    # case records nothing, intermittently and with no error anywhere.
+    await _await_listening(published)
     return CdpEndpoint(
         internal_port=internal_port,
         published_port=published,

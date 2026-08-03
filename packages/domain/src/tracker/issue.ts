@@ -44,7 +44,9 @@ export interface NewIssueInput {
   status?: IssueStatus;
   projectId?: string;
   assignee?: string;
-  labels?: string[];
+  // Registry ids, already resolved by the caller — the aggregate is pure, so name→id resolution (and the
+  // auto-create a GitHub import needs) belongs to the service that owns the label store.
+  labelIds?: string[];
   links?: NewIssueLinkInput[];
   resolution?: IssueResolution;
   github?: IssueGithub;
@@ -56,7 +58,7 @@ export interface NewIssueInput {
 export interface IssueEditInput {
   title?: string;
   description?: string | null;
-  labels?: string[];
+  labelIds?: string[];
   assignee?: string | null;
   projectId?: string | null;
 }
@@ -120,7 +122,7 @@ export class Issue {
       status,
       ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
-      labels: input.labels ?? [],
+      labelIds: input.labelIds ?? [],
       links: (input.links ?? []).map((link) => ({
         type: link.type,
         id: link.id,
@@ -202,8 +204,10 @@ export class Issue {
         changed.push("description");
       }
     }
-    if (fields.labels !== undefined) {
-      patch.labels = fields.labels;
+    if (fields.labelIds !== undefined) {
+      patch.labelIds = fields.labelIds;
+      // The history detail names what a READER sees ("labels"), not the storage field — the same token the
+      // tracker-history renderer already knows, and it survives the string→id move unchanged.
       changed.push("labels");
     }
     if (fields.assignee !== undefined) {
@@ -419,12 +423,13 @@ export class Issue {
 
   // Remote-owned fields land verbatim (GitHub is the source of record for title/body/labels/comments) and
   // `syncedAt` records the REMOTE clock reading — the watermark that both skips unchanged issues and swallows
-  // the echo of our own push.
+  // the echo of our own push. `labelIds` arrives already resolved: the caller maps GitHub's label NAMES onto the
+  // workspace registry (creating what is missing) before it gets here, because that lookup is I/O.
   applyGithubPull(
     remote: {
       title: string;
       description?: string;
-      labels: string[];
+      labelIds: string[];
       state: "open" | "closed";
       url: string;
       updatedAt: string;
@@ -439,7 +444,7 @@ export class Issue {
     if (remote.description !== this.record.description) changed.push("description");
     // \0 must stay ESCAPED: a literal NUL byte in the source makes this file binary to grep and to
     // git diff, which quietly removes the tracker's core aggregate from every code search.
-    if (remote.labels.join("\0") !== this.record.labels.join("\0")) changed.push("labels");
+    if (remote.labelIds.join("\0") !== this.record.labelIds.join("\0")) changed.push("labels");
     if (remote.state !== github.state) changed.push("state");
     // lastError is dropped by omission — a successful pull clears whatever failed before it.
     const { lastError: _cleared, ...rest } = github;
@@ -454,7 +459,7 @@ export class Issue {
       patch: {
         title: remote.title,
         description: remote.description,
-        labels: remote.labels,
+        labelIds: remote.labelIds,
         github: nextGithub,
         history: appendHistory(this.record.history, {
           at: now,

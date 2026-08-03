@@ -271,20 +271,29 @@ export interface K8sBrowserOptions {
   namespace?: string;
   runtimeClass?: string;
   image?: string;
+  // The harness's client-extension browser (`target.extension.ref`). Takes precedence over `image` and suppresses
+  // the arg override, because such an image loads the extension from its own entrypoint.
+  extensionImage?: string;
   cdpPort?: number;
   args?: string[];
   imagePullPolicy?: string;
 }
 
 // per-case browser (target env II): a headless Chromium Deployment + Service. Exposes the CDP port.
+// `extensionImage` is the harness's declared client-extension browser (`target.extension.ref`) — a headful image
+// that loads the extension from its OWN entrypoint. Ignoring it does not fail: the case runs against a plain
+// browser with no extension and simply scores badly, so a harness that works on Nomad would quietly mean
+// something else here. Nomad's builder has honored it from the start; this keeps the runtimes isomorphic.
 export function buildBrowserManifests(runId: string, opts: K8sBrowserOptions = {}): K8sManifest[] {
   const ns = opts.namespace ?? "default";
-  const image = opts.image ?? DEFAULT_BROWSER_IMAGE;
+  const image = opts.extensionImage ?? opts.image ?? DEFAULT_BROWSER_IMAGE;
   const cdpPort = opts.cdpPort ?? 9222;
   const name = browserDeployName(runId);
   const labels = { app: name, "everdict/runId": runId };
-  // headless-shell exposes CDP itself on 9222 (socat) → add only allow-origins (do not override the port).
-  const args = opts.args ?? ["--remote-allow-origins=*"];
+  // headless-shell exposes CDP itself on 9222 (socat) → add only allow-origins (do not override the port). An
+  // extension image launches Chromium from its own CMD (headful + --load-extension), so passing args would
+  // REPLACE that launch line and the extension would never load.
+  const args = opts.args ?? (opts.extensionImage ? undefined : ["--remote-allow-origins=*"]);
   return [
     {
       apiVersion: "apps/v1",
@@ -302,7 +311,9 @@ export function buildBrowserManifests(runId: string, opts: K8sBrowserOptions = {
                 name: "browser",
                 image,
                 imagePullPolicy: opts.imagePullPolicy,
-                args,
+                // Omitted entirely (not `args: undefined`) for an extension image, so the manifest carries no
+                // command override at all and the image's own entrypoint runs.
+                ...(args ? { args } : {}),
                 ports: [{ containerPort: cdpPort }],
               },
             ],

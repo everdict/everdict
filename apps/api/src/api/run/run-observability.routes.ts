@@ -161,6 +161,36 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
     },
   );
 
+  // Interactive takeover ticket (observability ⑦b) — mints the short-lived credential for WS /runs/:id/screen,
+  // which drives the run's own browser. Gated exactly like exec: this is not watching, it is acting inside a live
+  // eval, so it is the run's creator or a workspace admin. A run with nothing attachable is 404 here rather than
+  // handing out a ticket that the upgrade would then refuse.
+  app.post<{ Params: { id: string } }>(
+    "/runs/:id/screen-ticket",
+    { schema: runObservabilityDocs.screenTicket },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        if (!deps.screenTickets)
+          return reply.code(404).send({ code: "NOT_FOUND", message: "interactive screen not configured" });
+        const out = await deps.service.screenEndpoint(req.params.id);
+        if (!out || out.record.tenant !== principal.workspace)
+          return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+        if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+          return reply
+            .code(403)
+            .send({ code: "FORBIDDEN", message: "only the run's creator or an admin can take over the screen." });
+        if (!out.endpoint)
+          return reply.code(404).send({ code: "NOT_FOUND", message: "this run has no live screen to attach to." });
+        return reply.send({ ticket: deps.screenTickets.issue(req.params.id, principal.subject) });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // Live screen frame (observability ⑤ — os-use desktop): current screenshot as a PNG data URL. supported=false
   // for non-desktop env kinds (no single-container screen). Same creator-or-admin gate as exec (it execs scrot).
   app.get<{ Params: { id: string } }>(

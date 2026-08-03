@@ -34,6 +34,16 @@ export const TopologyStatusSchema = z.object({
   runtime: z.string().optional().describe("The topology runtime kind that answered (nomad | k8s | docker)"),
   namespace: z.string().optional().describe("Orchestrator namespace (tenant trust zone), when applicable"),
   services: z.array(TopologyServiceStatusSchema).default([]),
+  // The session pool a service-acquired target draws from, when the harness declares where to read it
+  // (`target.acquire.capacity`). The orchestrator cannot see inside a service container, so without this the
+  // roster reports a healthy service while the batch is being refused for want of sessions.
+  pool: z
+    .object({
+      total: z.number().describe("How many sessions the service can hold at once"),
+      used: z.number().optional().describe("How many are in use right now, when the service reports it"),
+      endpoint: z.string().describe("Where this was read from"),
+    })
+    .optional(),
 });
 export type TopologyStatus = z.infer<typeof TopologyStatusSchema>;
 

@@ -76,7 +76,7 @@ function issue(id: string, projectId: string, status: IssueRecord["status"]): Is
     title: `issue ${id}`,
     status,
     projectId,
-    labels: [],
+    labelIds: [],
     links: [],
     ...(status === "done" || status === "regressed"
       ? { resolution: { scorecardId: "sc-1", by: "dana", at: NOW } }

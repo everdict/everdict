@@ -16,6 +16,12 @@ import {
   IssueStatusIcon,
   type Issue,
 } from '@/entities/issue'
+import {
+  IssueLabelChips,
+  issueLabelDirectoryOf,
+  issueLabelsSchema,
+  type IssueLabel,
+} from '@/entities/issue-label'
 import { projectsSchema, type Project } from '@/entities/project'
 import { teamsWithSummarySchema, type TeamWithSummary } from '@/entities/team'
 import { can } from '@/shared/auth/can'
@@ -23,7 +29,6 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { fmtDateTime } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
-import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -72,6 +77,12 @@ export default async function IssuesPage({
     .then((r) => projectsSchema.parse(r))
     .catch(() => [])
   const projectName = new Map(projects.map((p) => [p.id, p.name]))
+  // 행의 라벨 칩은 id→정의 조인이 있어야 그려진다. 실패해도 목록은 뜬다(칩만 사라진다).
+  const labels: IssueLabel[] = await controlPlane
+    .listIssueLabels(ctx)
+    .then((r) => issueLabelsSchema.parse(r))
+    .catch(() => [])
+  const labelDirectory = issueLabelDirectoryOf(labels)
   const canWrite = can(principal?.roles ?? [], 'issues:write')
 
   // The import picker needs the workspace App's repo list, and that read is settings:read (admin) — so the entry
@@ -252,11 +263,7 @@ export default async function IssuesPage({
                     </span>
                   )}
                   {issue.assignee && <span className="truncate">{issue.assignee}</span>}
-                  {issue.labels.map((label) => (
-                    <Badge key={label} tone="outline">
-                      {label}
-                    </Badge>
-                  ))}
+                  <IssueLabelChips labelIds={issue.labelIds} directory={labelDirectory} />
                   {issue.links.length > 0 && (
                     <span>{t('rowLinkCount', { count: issue.links.length })}</span>
                   )}

@@ -7,15 +7,25 @@ import { CdpEnvironmentRecorder, type EnvRecordSink } from "./cdp-recorder.js";
 class FakeSocket {
   sent: Array<Record<string, unknown>> = [];
   closed = false;
+  // A browser that accepts commands but never answers â€” the recorder must not wait on it forever.
+  silent = false;
   private readonly handlers: Record<string, Array<(ev?: unknown) => void>> = {};
   send(data: string): void {
-    this.sent.push(JSON.parse(data));
+    const message = JSON.parse(data) as { id?: number };
+    this.sent.push(message);
+    // Real CDP replies to every command with its id. The fake used to stay silent, which is exactly the fiction
+    // that let a recorder ship believing it was subscribed when it was not.
+    if (message.id !== undefined && !this.silent)
+      queueMicrotask(() => this.emit("message", { data: JSON.stringify({ id: message.id }) }));
   }
   close(): void {
     this.closed = true;
   }
   addEventListener(type: string, cb: (ev?: unknown) => void): void {
     this.handlers[type] = [...(this.handlers[type] ?? []), cb];
+    // A real socket connects on its own; the recorder subscribes when it opens. Self-timing here keeps the tests
+    // from having to guess when the recorder is ready to hear it.
+    if (type === "open") queueMicrotask(() => cb());
   }
   emit(type: string, ev?: unknown): void {
     for (const cb of this.handlers[type] ?? []) cb(ev);
@@ -54,6 +64,7 @@ function setup(opts?: { frames?: boolean; now?: () => number }): {
     ...(opts?.frames !== undefined ? { frames: opts.frames } : {}),
     ...(opts?.now ? { now: opts.now } : {}),
   });
+  // start() now resolves only once the subscriptions are acknowledged â€” the socket opens and acks on its own.
   return { sock, tracks, frames, recorder, start: () => recorder.start() };
 }
 
@@ -61,7 +72,6 @@ describe("CdpEnvironmentRecorder (environment plane: browser CDP event stream â†
   it("subscribes to the environment domains on open (Network/Runtime/Page.enable)", async () => {
     const { sock, start } = setup();
     await start();
-    sock.emit("open");
     expect(sock.methods()).toEqual(expect.arrayContaining(["Network.enable", "Runtime.enable", "Page.enable"]));
     // Screencast is opt-in â€” not enabled by default (the text lanes are the cheap default).
     expect(sock.methods()).not.toContain("Page.startScreencast");
@@ -71,7 +81,6 @@ describe("CdpEnvironmentRecorder (environment plane: browser CDP event stream â†
     let clock = 1000;
     const { sock, tracks, start } = setup({ now: () => clock });
     await start();
-    sock.emit("open");
     sock.emit(
       "message",
       msg("Network.requestWillBeSent", { requestId: "r1", request: { method: "GET", url: "https://x/a" } }),
@@ -89,7 +98,6 @@ describe("CdpEnvironmentRecorder (environment plane: browser CDP event stream â†
     let clock = 5;
     const { sock, tracks, start } = setup({ now: () => clock });
     await start();
-    sock.emit("open");
     clock = 42;
     sock.emit(
       "message",
@@ -107,7 +115,6 @@ describe("CdpEnvironmentRecorder (environment plane: browser CDP event stream â†
   it("records a main-frame navigation as a nav track, ignoring sub-frames and consecutive duplicates", async () => {
     const { sock, tracks, start } = setup({ now: () => 1 });
     await start();
-    sock.emit("open");
     sock.emit("message", msg("Page.frameNavigated", { frame: { url: "https://x/home" } }));
     sock.emit("message", msg("Page.frameNavigated", { frame: { url: "https://ad/iframe", parentId: "f0" } })); // sub-frame â†’ ignored
     sock.emit("message", msg("Page.frameNavigated", { frame: { url: "https://x/home" } })); // dup â†’ ignored
@@ -122,7 +129,6 @@ describe("CdpEnvironmentRecorder (environment plane: browser CDP event stream â†
     let clock = 0;
     const { sock, frames, start } = setup({ frames: true, now: () => clock });
     await start();
-    sock.emit("open");
     expect(sock.methods()).toContain("Page.startScreencast");
     sock.emit("message", msg("Page.screencastFrame", { data: "AAAA", sessionId: 3 }));
     clock = 2000; // past the 1s throttle
@@ -137,7 +143,6 @@ describe("CdpEnvironmentRecorder (environment plane: browser CDP event stream â†
     let clock = 0;
     const { sock, frames, start } = setup({ frames: true, now: () => clock });
     await start();
-    sock.emit("open");
     sock.emit("message", msg("Page.screencastFrame", { data: "A", sessionId: 1 }));
     clock = 200; // within the 1s throttle â†’ acked but not emitted
     sock.emit("message", msg("Page.screencastFrame", { data: "B", sessionId: 2 }));
@@ -161,7 +166,6 @@ describe("CdpEnvironmentRecorder (environment plane: browser CDP event stream â†
       },
     );
     await recorder.start();
-    sock.emit("open");
     expect(() => sock.emit("message", msg("Page.frameNavigated", { frame: { url: "https://x" } }))).not.toThrow();
   });
 
@@ -172,5 +176,47 @@ describe("CdpEnvironmentRecorder (environment plane: browser CDP event stream â†
       { fetch: fakeFetch([]), connect: () => new FakeSocket() as unknown as CdpSocket },
     );
     await expect(recorder.start()).rejects.toThrow(/no cdp page target/i);
+  });
+});
+
+describe("CdpEnvironmentRecorder â€” start() waits for the subscription to be live", () => {
+  it("does not resolve until the enables are acknowledged, so a fast case cannot outrun the recording", async () => {
+    // The defect this covers: start() used to resolve as soon as the socket OBJECT existed. The caller then let the
+    // agent go, and a page that loaded in a few hundred ms was over before Network.enable was even sent â€” long
+    // cases recorded fine while short ones produced an empty replay with no error anywhere.
+    const sock = new FakeSocket();
+    const recorder = new CdpEnvironmentRecorder(
+      "http://b:9222",
+      { track: () => {} },
+      {
+        fetch: fakeFetch([{ type: "page", webSocketDebuggerUrl: "ws://b/page" }]),
+        connect: () => sock as unknown as CdpSocket,
+        subscribeTimeoutMs: 5_000,
+      },
+    );
+
+    const began = Date.now();
+    await recorder.start();
+
+    // Resolved via the acknowledgement (fast), not by falling through the timeout.
+    expect(Date.now() - began).toBeLessThan(1_000);
+    expect(sock.methods()).toEqual(expect.arrayContaining(["Network.enable", "Runtime.enable", "Page.enable"]));
+  });
+
+  it("gives up on a browser that never acknowledges rather than holding the case", async () => {
+    const sock = new FakeSocket();
+    sock.silent = true;
+    const recorder = new CdpEnvironmentRecorder(
+      "http://b:9222",
+      { track: () => {} },
+      {
+        fetch: fakeFetch([{ type: "page", webSocketDebuggerUrl: "ws://b/page" }]),
+        connect: () => sock as unknown as CdpSocket,
+        subscribeTimeoutMs: 20,
+      },
+    );
+
+    // Bounded: an eval must never be held behind an observability concern.
+    await expect(recorder.start()).resolves.toBeUndefined();
   });
 });

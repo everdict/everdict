@@ -11,7 +11,6 @@ DEFAULT_USER_DATA_DIR = "/tmp/spica-profiles"
 DEFAULT_MAX_CONCURRENT_BROWSERS = 8
 DEFAULT_SESSION_TIMEOUT_MINUTES = 15
 DEFAULT_CLEANUP_INTERVAL_MINUTES = 1
-DEFAULT_CDP_PORT_BASE = 9300
 
 
 def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
@@ -87,7 +86,6 @@ class CdpConfig:
     """
 
     expose: bool
-    port_base: int
     advertised_host: str
 
 
@@ -121,7 +119,6 @@ class Config:
             ),
             cdp=CdpConfig(
                 expose=_bool_env("SPICA_CDP_EXPOSE"),
-                port_base=_int_env("SPICA_CDP_PORT_BASE", DEFAULT_CDP_PORT_BASE, minimum=1024),
                 advertised_host=os.environ.get("SPICA_CDP_ADVERTISED_HOST", "127.0.0.1"),
             ),
             browser_visible=_bool_env("SPICA_PLAYWRIGHT_BROWSER_VISIBLE"),

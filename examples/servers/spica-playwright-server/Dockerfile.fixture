@@ -1,0 +1,7 @@
+# The server with the fixture extension baked in — a self-contained image for orchestrators that build the
+# container themselves and cannot bind-mount an extension from the host (Everdict's topology runtimes).
+#
+#   docker build -t spica-playwright-server:0.1.0 .
+#   docker build -t spica-playwright-server:fixture -f Dockerfile.fixture .
+FROM spica-playwright-server:0.1.0
+COPY fixture-extension /ext

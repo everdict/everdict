@@ -91,6 +91,20 @@ stack than `dispatch` and can otherwise only ask the runtime to rediscover a bro
 resolves the zone-correct address — the rediscovery call could not see the trust zone). Declared-but-unresolvable
 degrades visibly: the run's trajectory carries an `infra` event saying the session returned no reachable CDP.
 
+**Which tab is watched** is a decision, not an accident, once an extension is in the picture: such a browser
+always reports several page targets (the extension's side panel, a blank tab, the tab the agent works in), so
+"the first page target" put the live view, a graded screenshot, and the whole environment recording on whichever
+one Chrome happened to list first. `pickPageTarget` (`front-door/capture-cdp.ts`, shared by the captures, the
+recorder and the interactive session) respects the browser's most-recently-active ordering — the signal for which
+tab is the work surface, which a session server makes deterministic by bringing it to front — and only filters
+what can never be it (a blank tab). Judging by URL is deliberately avoided: an extension-driven work tab starts
+out on a `chrome-extension://` page itself, so a rule that skips extension URLs picks the blank tab at exactly
+the moment recording starts (live-verified — it produced an empty replay while the live screen looked fine).
+
+**Saved-profile injection** follows the same address as the live reads: the acquired target's own `cdpBase` first,
+the runtime's rediscovery second. Asking the runtime alone meant a session-acquired browser silently ran
+logged-out, which scores as a capability failure rather than a configuration one.
+
 **browser-use (topology)** now works too: the per-case browser is a SIBLING container reached via CDP,
 so the control plane rediscovers it by the CP-minted runId (`ServiceTopologyBackend` prefers
 `job.runId`, so the browser alloc is keyed by the record-derivable id) and captures a live frame with
@@ -179,6 +193,21 @@ STRUCTURED promotion of the old timeout-only `diagnose()` string); a declared un
 honestly as `absent`. Surfaces: `GET /runs/:id/topology` +
 `GET /runs/:id/topology/services/:service/logs` + MCP `get_run_topology`/`get_topology_service_logs` + the
 run detail's "Service topology" panel (roster + per-row on-demand log fold; self-null for non-service runs).
+
+### The session pool (`TopologyStatus.pool`)
+
+For a session-acquired target the resource that bounds a batch is not a cluster unit — it is a pool of browsers
+INSIDE a service container, which no orchestrator read can see. The symptom is a roster that says "the service is
+running" while case after case is refused, so the operator has nothing to reason from. A harness declares where the
+service reports itself (`target.acquire.capacity: {poll, total, used?}`) and `inspectTopology` carries it as
+`pool {total, used, endpoint}` through `GET /runs/:id/topology` / MCP / the run detail's topology panel, which flags
+saturation.
+
+Deliberately monitoring, not admission control: `Backend.capacity()` is keyed per backend, not per harness, so the
+Scheduler still admits a batch against a number unrelated to the pool. Live-drilled at both ends — a batch inside
+the pool runs clean with the pool visible (peak 3/4), and a batch wider than it saturates (4/4) and fails its
+overflow with `CAPACITY_EXCEEDED` rather than queueing. Making the Scheduler pool-aware needs a harness-keyed
+capacity signature across every backend; until then the read is what closes the diagnostic gap.
 
 ### Failure evidence retention (`CaseFailure.placement`/`logTail`)
 

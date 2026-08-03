@@ -165,7 +165,7 @@ describe("regressionWatch", () => {
       identifier: "ENG-1",
       title: "Agent drops the tool result on retry",
       status: "done",
-      labels: [],
+      labelIds: [],
       links: [
         { type: "dataset", id: "regression-suite", addedBy: "dana", addedAt: RESOLVED_AT },
         { type: "harness", id: "web-agent", addedBy: "dana", addedAt: RESOLVED_AT },

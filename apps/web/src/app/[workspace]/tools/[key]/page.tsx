@@ -56,7 +56,7 @@ export default async function AgentToolDetailPage({
   return (
     <div className="space-y-6">
       <Link
-        href={`/${workspace}/settings/tools`}
+        href={`/${workspace}/tools`}
         className="inline-flex items-center gap-1 text-[13px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="size-3.5" />

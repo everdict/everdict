@@ -51,6 +51,7 @@ export class InMemoryScorecardStore implements ScorecardStore {
       .filter((c) => !filter?.dataset || c.dataset.id === filter.dataset)
       .filter((c) => !filter?.harness || c.harness.id === filter.harness)
       .filter((c) => !filter?.status || c.status === filter.status)
+      .filter((c) => !filter?.teamId || c.teamId === filter.teamId)
       .filter((c) => !filter?.judge || (c.orchestration?.judges ?? []).some((j) => j.id === filter.judge))
       .filter((c) => !filter?.scheduleId || c.origin?.scheduleId === filter.scheduleId)
       .filter((c) => !filter?.causedByRunId || c.origin?.causedByRunId === filter.causedByRunId)

@@ -60,6 +60,13 @@ export type { SubscriptionStore } from "./ports/subscription-store.js";
 export type { UsageStore } from "./ports/usage-store.js";
 export type { AgentTaskStore } from "./ports/agent-task-store.js";
 export type { IssueListFilter, IssueStore } from "./ports/issue-store.js";
+export {
+  type CreateIssueLabelInput,
+  type IssueLabelActor,
+  IssueLabelService,
+  type IssueLabelServiceDeps,
+} from "./issue/issue-label-service.js";
+export type { IssueLabelStore } from "./ports/issue-label-store.js";
 export type { IssueNumberGrant, TeamListFilter, TeamStore } from "./ports/team-store.js";
 export type { ProjectListFilter, ProjectStore } from "./ports/project-store.js";
 export type { InitiativeListFilter, InitiativeStore } from "./ports/initiative-store.js";
