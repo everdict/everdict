@@ -429,7 +429,7 @@
   "discussDataset": {
     "showPrevious": "Show {count} earlier",
     "createdSuffix": "created this dataset",
-    "scorecardRan": "<name>{actor}</name> ran a <cardLink>scorecard</cardLink> on <harnessLink>{harness}</harnessLink> ·",
+    "scorecardRan": "<name>{actor}</name> ran a <cardLink>scorecard</cardLink> on <harnessLink>{harness}</harnessLink>",
     "passRate": "{pct}% pass rate",
     "status": {
       "succeeded": "Succeeded",
@@ -4621,20 +4621,53 @@
       "run": "Run",
       "view": "View"
     },
-    "historyEvent": {
-      "created": "Created",
-      "updated": "Edited",
-      "status_changed": "Status changed",
-      "resolved": "Resolved",
-      "reopened": "Reopened",
-      "linked": "Link added",
-      "unlinked": "Link removed",
-      "github_imported": "Imported from GitHub",
-      "github_pulled": "Pulled from GitHub",
-      "github_pushed": "Pushed to GitHub",
-      "github_push_failed": "GitHub push failed",
-      "completed": "Completed",
-      "cancelled": "Cancelled"
+    "subject": {
+      "issue": "issue",
+      "project": "project",
+      "initiative": "initiative"
+    },
+    "historyField": {
+      "title": "title",
+      "description": "description",
+      "labels": "labels",
+      "assignee": "assignee",
+      "project": "project",
+      "name": "name",
+      "targetDate": "target date",
+      "initiative": "initiative",
+      "state": "state",
+      "github": "GitHub link"
+    },
+    "historyCause": {
+      "github_sync": "GitHub sync",
+      "regression": "Regression watch"
+    },
+    "historyGithubState": {
+      "open": "Open on GitHub",
+      "closed": "Closed on GitHub"
+    },
+    "history": {
+      "showPrevious": "Show {count} earlier",
+      "created": "created the {subject}",
+      "updated": "updated {fields}",
+      "updatedUnknown": "made an edit",
+      "statusChanged": "changed status",
+      "resolved": "resolved the {subject}",
+      "reopened": "reopened the {subject}",
+      "linked": "added a link",
+      "unlinked": "removed a link",
+      "completed": "completed the {subject}",
+      "cancelled": "cancelled the {subject}",
+      "forced": "Forced",
+      "openIssues": "{count} still open",
+      "late": "Past the target date",
+      "githubImported": "imported the {subject} from GitHub",
+      "githubPulled": "synced from GitHub",
+      "githubPulledFields": "synced {fields} from GitHub",
+      "githubPushed": "pushed to GitHub",
+      "githubPushFailed": "couldn't push to GitHub",
+      "memberAdded": "added a member",
+      "memberRemoved": "removed a member"
     }
   },
   "issuesPage": {
@@ -4684,8 +4717,7 @@
     "backToList": "Issues",
     "detailFallbackTitle": "Issue",
     "metaCreated": "Created",
-    "metaUpdated": "updated",
-    "descriptionTitle": "Description",
+    "metaUpdated": "Updated",
     "linksTitle": "Linked capabilities",
     "evaluationTitle": "Evaluation history",
     "evaluationCount": "{count} scorecards",
@@ -4699,7 +4731,13 @@
     "discussTitle": "Discussion",
     "githubTitle": "GitHub",
     "connectGithub": "Connect GitHub to import",
-    "fieldTeam": "Team"
+    "fieldTeam": "Team",
+    "breadcrumbLabel": "Issue location",
+    "copyLink": "Copy link",
+    "linkCopied": "Issue link copied.",
+    "prevIssue": "Previous issue",
+    "importedFrom": "Imported from",
+    "nextIssue": "Next issue"
   },
   "issueLinks": {
     "add": "Add link",
@@ -4749,6 +4787,10 @@
     "emptyHint": "Group the issues you want evaluated by one deadline.",
     "backToList": "Projects",
     "detailFallbackTitle": "Project",
+    "breadcrumbLabel": "Project location",
+    "copyLink": "Copy link",
+    "linkCopied": "Project link copied.",
+    "fieldStatus": "Status",
     "metaTargetDate": "Target",
     "metaCompleted": "Completed",
     "metaCreated": "Created",
@@ -4768,6 +4810,7 @@
     "description": "The deployment umbrella over projects — is everything resolved, can we ship?",
     "create": "New initiative",
     "createTitle": "New initiative",
+    "createSubmit": "Create initiative",
     "createError": "Couldn't create the initiative.",
     "cancel": "Cancel",
     "save": "Save",
@@ -4782,7 +4825,9 @@
     "fieldName": "Name",
     "fieldNamePlaceholder": "e.g. 2026 Q3 release",
     "fieldDescription": "Description",
+    "fieldDescriptionPlaceholder": "What has to land together, and what does shipping it mean?",
     "fieldTargetDate": "Target date",
+    "fieldTargetDatePast": "That date has already passed — this initiative will read as overdue as soon as it exists.",
     "statusError": "Couldn't move the initiative.",
     "statusControlLabel": "Change status",
     "statusMoveTo": "Move to",
@@ -4944,5 +4989,44 @@
     "projects": "Projects this team is working on",
     "viewAll": "View all",
     "noIssues": "No issues in this team yet."
+  },
+  "teamsDirectory": {
+    "title": "Teams",
+    "description": "Every team in this workspace. A team owns its issues and mints their identifiers, so this is where work is divided.",
+    "manage": "Manage teams",
+    "default": "Default",
+    "empty": "No teams yet.",
+    "emptyHint": "An admin creates teams; issues land in the default one until then.",
+    "emptyHintAdmin": "Create one in Settings — its key becomes the prefix of every issue it mints.",
+    "rowSummary": "{members} members · {open} open"
+  },
+  "membersDirectory": {
+    "title": "Members",
+    "description": "Everyone in this workspace and the teams they belong to. Roles and invitations live in Settings.",
+    "manage": "Manage members",
+    "searchPlaceholder": "Search by name, email or team",
+    "allTeams": "All teams",
+    "allRoles": "All roles",
+    "sortName": "Name",
+    "sortJoined": "Recently joined",
+    "sortRole": "Role",
+    "sortAria": "Sort members",
+    "countAll": "{total} members",
+    "countFiltered": "{shown} of {total} members",
+    "colName": "Name",
+    "colTeams": "Teams",
+    "colRole": "Role",
+    "colJoined": "Joined",
+    "noTeam": "No team",
+    "you": "You",
+    "apiKeyMember": "API key",
+    "roleAdmin": "Admin",
+    "roleMember": "Member",
+    "roleViewer": "Viewer",
+    "roleCi": "CI",
+    "emptyTitle": "No members yet",
+    "emptyHint": "Invite people from Settings › Members to get started.",
+    "noMatchTitle": "No members found",
+    "noMatchHint": "Try a different name, email or team."
   }
 }

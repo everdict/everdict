@@ -338,7 +338,10 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),
+  // `team` 은 한 팀 소유의 것만 남긴다 — 소유권이 읽기에 하는 일은 필터이지 403 이 아니다.
+  // 팀 사이드바의 하네스·데이터셋·저지가 이 파라미터로 좁혀진다.
+  listHarnesses: <T>(auth: AuthContext, team?: string) =>
+    call<T>(auth, team ? `/harnesses?team=${encodeURIComponent(team)}` : '/harnesses'),
   // GET /harnesses/:id — a harness's instance version tag list.
   getHarness: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}`),
@@ -403,7 +406,10 @@ export const controlPlane = {
     call<T>(auth, '/harness-templates', { method: 'POST', body: JSON.stringify(spec) }),
   validateHarnessTemplate: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/harness-templates/validate', { method: 'POST', body: JSON.stringify(spec) }),
-  listDatasets: <T>(auth: AuthContext) => call<T>(auth, '/datasets'),
+  // `team` 은 한 팀 소유의 것만 남긴다 — 소유권이 읽기에 하는 일은 필터이지 403 이 아니다.
+  // 팀 사이드바의 하네스·데이터셋·저지가 이 파라미터로 좁혀진다.
+  listDatasets: <T>(auth: AuthContext, team?: string) =>
+    call<T>(auth, team ? `/datasets?team=${encodeURIComponent(team)}` : '/datasets'),
   getDataset: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   // Diff between versions — base↔candidate case additions/deletions/changes + meta changes. version can be "latest".
@@ -758,7 +764,10 @@ export const controlPlane = {
   },
   // Agent Judges (workspace-owned + _shared defaults) — model (LLM/VLM call) | harness (delegate to an agent).
   // Read judges:read (viewer+), register/validate judges:write (member+) — the control plane enforces.
-  listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
+  // `team` 은 한 팀 소유의 것만 남긴다 — 소유권이 읽기에 하는 일은 필터이지 403 이 아니다.
+  // 팀 사이드바의 하네스·데이터셋·저지가 이 파라미터로 좁혀진다.
+  listJudges: <T>(auth: AuthContext, team?: string) =>
+    call<T>(auth, team ? `/judges?team=${encodeURIComponent(team)}` : '/judges'),
   getJudge: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   // GET /judges/:id/diff — field-level diff between two judge versions (base↔candidate). version can be "latest".

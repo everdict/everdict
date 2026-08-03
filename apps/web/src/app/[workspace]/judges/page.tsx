@@ -17,15 +17,23 @@ import { PageHeader } from '@/shared/ui/page-header'
 export const dynamic = 'force-dynamic'
 
 // Judges — Agent Judges (model | harness), workspace-owned + shared defaults.
-export default async function JudgesPage({ params }: { params: Promise<{ workspace: string }> }) {
+export default async function JudgesPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ workspace: string }>
+  searchParams: Promise<{ team?: string }>
+}) {
   const { workspace } = await params
+  // 팀 스코프 — 사이드바의 팀 하위 항목이 이 파라미터로 들어온다.
+  const { team } = await searchParams
   const t = await getTranslations('judgesPage')
   const { principal, ctx } = await currentPrincipal()
 
   let error: string | undefined
   let judges = judgesSchema.parse([])
   try {
-    judges = judgesSchema.parse(await controlPlane.listJudges(ctx))
+    judges = judgesSchema.parse(await controlPlane.listJudges(ctx, team))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }

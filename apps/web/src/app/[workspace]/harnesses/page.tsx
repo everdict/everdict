@@ -19,17 +19,21 @@ export const dynamic = 'force-dynamic'
 
 export default async function HarnessesPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ workspace: string }>
+  searchParams: Promise<{ team?: string }>
 }) {
   const { workspace } = await params
+  // 팀 스코프 — 사이드바의 팀 하위 항목이 이 파라미터로 들어온다.
+  const { team } = await searchParams
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('harnessesPage')
 
   let error: string | undefined
   let harnesses = harnessesSchema.parse([])
   try {
-    harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
+    harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx, team))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }

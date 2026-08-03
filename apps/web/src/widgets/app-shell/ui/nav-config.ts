@@ -96,25 +96,27 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Bookmark,
         keywords: 'view analysis saved dashboard leaderboard trend compare pivot',
       },
-      // ⚠ The two rosters are /settings routes on purpose — the sidebar surfaces them, Settings owns them,
-      // so the product has exactly one Members page. Clicking one hands the sidebar over to Settings.
+      // These are APP routes, not /settings ones: looking up a team or a person is reading, and reading should
+      // not hand the sidebar over to configuration. The settings pages still exist and own the other half —
+      // /teams and /members browse (teams:read · members:read, viewer+), Settings creates·renames·invites·
+      // changes roles (teams:write · members:write, admin). Each links to the other for whoever may do both.
       {
-        href: '/settings/members',
+        href: '/members',
         labelKey: 'more',
         icon: Ellipsis,
         keywords: 'more member team roster 더보기 멤버 팀',
         children: [
           {
-            href: '/settings/members',
+            href: '/members',
             labelKey: 'members',
             icon: Users,
-            keywords: 'member people invite role 멤버 초대 역할',
+            keywords: 'member people directory who 멤버 사람 디렉토리',
           },
           {
-            href: '/settings/teams',
+            href: '/teams',
             labelKey: 'teams',
             icon: UsersRound,
-            keywords: 'team roster key 팀 로스터',
+            keywords: 'team directory browse key 팀 목록',
           },
         ],
       },

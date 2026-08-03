@@ -18,15 +18,23 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-export default async function DatasetsPage({ params }: { params: Promise<{ workspace: string }> }) {
+export default async function DatasetsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ workspace: string }>
+  searchParams: Promise<{ team?: string }>
+}) {
   const { workspace } = await params
+  // 팀 스코프 — 사이드바의 팀 하위 항목이 이 파라미터로 들어온다.
+  const { team } = await searchParams
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('datasetsPage')
 
   let error: string | undefined
   let datasets = datasetsSchema.parse([])
   try {
-    datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
+    datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx, team))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
