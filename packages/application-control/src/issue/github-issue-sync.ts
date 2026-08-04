@@ -403,7 +403,7 @@ export class GithubIssueSync {
 
   private pushComment(record: IssueRecord): string {
     const link = this.deps.webBaseUrl
-      ? `\n\n[View in everdict](${this.deps.webBaseUrl.replace(/\/$/, "")}/${record.tenant}/issues/${record.id})`
+      ? `\n\n[View in everdict](${this.deps.webBaseUrl.replace(/\/$/, "")}/${record.tenant}/issue/${record.identifier})`
       : "";
     if (record.status === "regressed")
       return `Reopened in everdict — this issue **regressed**: a later evaluation fell below the scorecard that closed it.${link}`;

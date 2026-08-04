@@ -386,7 +386,9 @@ describe("GithubIssueSync — push", () => {
     expect(comment).toContain("Resolved in everdict");
     expect(comment).toContain("green");
     expect(comment).toContain("sc-1");
-    expect(comment).toContain("https://everdict.example.com/acme/issues/");
+    // The link back is the address a person would paste: the SINGULAR detail segment, and the issue's own
+    // identifier rather than its uuid — the same spelling the web canonicalizes to.
+    expect(comment).toContain(`https://everdict.example.com/acme/issue/${resolved.identifier}`);
     expect((await store.get("acme", record.id))?.github?.state).toBe("closed");
   });
 
