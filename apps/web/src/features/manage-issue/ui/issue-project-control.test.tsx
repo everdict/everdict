@@ -40,7 +40,7 @@ describe('issue project control', () => {
   it('keeps the assigned project a link, with the picker next to it', () => {
     const out = render(APOLLO, true)
 
-    expect(out).toContain('href="/acme/projects/p1"')
+    expect(out).toContain('href="/acme/project/p1"')
     expect(out).toContain('Apollo')
     // 프로젝트로 가는 길(링크)은 그대로 두고, 바꾸는 자리는 그 옆에 따로 선다.
     expect(out).toContain('aria-expanded="false"')
@@ -49,7 +49,7 @@ describe('issue project control', () => {
   it('gives a reader the link only — no picker', () => {
     const out = render(APOLLO, false)
 
-    expect(out).toContain('href="/acme/projects/p1"')
+    expect(out).toContain('href="/acme/project/p1"')
     expect(out).not.toContain('aria-expanded')
   })
 

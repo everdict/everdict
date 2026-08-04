@@ -184,7 +184,7 @@ function HistoryRow({
   const scorecardId = detailString(detail, 'scorecardId')
   const scorecardChip = scorecardId ? (
     <Link
-      href={`/${workspace}/scorecards/${encodeURIComponent(scorecardId)}`}
+      href={`/${workspace}/scorecard/${encodeURIComponent(scorecardId)}`}
       className="transition-colors hover:text-foreground"
     >
       <Badge tone="neutral">

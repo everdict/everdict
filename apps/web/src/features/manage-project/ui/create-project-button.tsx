@@ -60,7 +60,7 @@ export function CreateProjectButton({
       setInitiativeIds([])
       setTeamIds(defaultTeamIds ?? [])
       setTargetDate('')
-      router.push(`/${workspace}/projects/${encodeURIComponent(r.project.id)}`)
+      router.push(`/${workspace}/project/${encodeURIComponent(r.project.id)}`)
     })
   }
 

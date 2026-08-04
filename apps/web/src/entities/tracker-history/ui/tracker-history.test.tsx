@@ -76,7 +76,7 @@ describe('tracker history', () => {
       },
     ])
 
-    expect(out).toContain('/acme/datasets/browser-suite')
+    expect(out).toContain('/acme/dataset/browser-suite')
     expect(out).toContain('browser-suite')
     expect(out).toContain('1.2.0')
     expect(out).toContain('title, labels')

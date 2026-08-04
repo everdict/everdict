@@ -11,6 +11,6 @@ export function initiativeHref(
   id: string,
   section: InitiativeSection = 'overview'
 ): string {
-  const base = `/${workspace}/initiatives/${encodeURIComponent(id)}`
+  const base = `/${workspace}/initiative/${encodeURIComponent(id)}`
   return section === 'overview' ? base : `${base}/${section}`
 }

@@ -6,12 +6,18 @@ import type {
 } from '@everdict/contracts'
 import { z } from 'zod'
 
+import type { IssueDisplay } from './display'
 import { ISSUE_PRIORITIES, ISSUE_STATUSES, type IssuePriority, type IssueStatus } from './schema'
 
-// 이슈 목록을 "어떻게 볼 것인가" — 묶는 기준·정렬·레이아웃·필터. 목록의 상태이지 이슈의 상태가 아니므로
-// 레코드가 아니라 URL 이 들고 있고(붙여넣은 링크가 같은 화면을 연다), 여기 있는 것은 그 URL 과 화면 사이의
-// 순수 산술뿐이다: 파싱·직렬화·그룹 나누기. 컴포넌트가 이 규칙을 각자 발명하면 필터 칩과 그룹 헤더가
-// 서로 다른 목록을 말하기 시작한다.
+// What an issue list shows and how it is drawn. The two halves have different homes, and keeping the arithmetic
+// between them in one module is what stops a filter chip and a group header from describing different lists:
+//
+//   · WHICH issues — the filters. They live in the URL, because they decide the SET and a pasted link has to
+//     open the same set for everybody who follows it.
+//   · HOW they are drawn — grouping, ordering, layout, the two "show these too" toggles. Per reader, stored in a
+//     cookie (`./display`), because a link should not re-arrange the recipient's screen.
+//
+// Only the type crosses from `./display` — the runtime direction is display → view, never back.
 
 // 묶는 기준. 전부 이슈의 스칼라 필드라 한 이슈는 정확히 한 그룹에 속한다 — 라벨이 빠진 이유는 제어 평면과
 // 같다(이슈 하나가 여러 라벨을 들고 있어서 그룹 합이 목록보다 커진다).
@@ -49,17 +55,8 @@ export const issueGroupCountsSchema = z.object({
 export type IssueGroupCount = WireIssueGroupCount
 export type IssueGroupCounts = WireIssueGroupCounts
 
-// 화면 하나를 완전히 결정하는 값. URL 로 왕복하므로 두 사람이 같은 링크에서 같은 화면을 본다.
-export interface IssueView {
-  grouping: IssueGrouping
-  order: IssueOrder
-  layout: IssueLayout
-  // 완료·취소된 이슈를 함께 볼지. 기본이 「감춤」인 이유는 리니어와 같다 — 목록은 "지금 할 일"이고,
-  // 끝난 일은 대개 그 화면의 답이 아니다. 상태를 명시적으로 고르면 그 선택이 이긴다.
-  showCompleted: boolean
-  // 하위 이슈를 각자의 줄로 낼지, 최상위만 낼지. 후자가 보드의 기본형이다(자식이 부모와 따로 서면 같은
-  // 일이 두 번 세어진 것처럼 읽힌다).
-  subIssues: 'all' | 'top'
+// One screen, fully determined: the reader's display preference plus the filters the URL carries.
+export interface IssueView extends IssueDisplay {
   filters: IssueFilters
 }
 
@@ -85,25 +82,13 @@ export const ISSUE_FILTER_FACETS = [
 ] as const
 export type IssueFilterFacet = (typeof ISSUE_FILTER_FACETS)[number]
 
-export const DEFAULT_ISSUE_VIEW: IssueView = {
-  grouping: 'status',
-  order: 'updated',
-  layout: 'list',
-  showCompleted: false,
-  subIssues: 'all',
-  filters: {},
-}
-
-// 완료/취소 — 「완료 이슈 표시」가 끄는 대상. 회귀는 여기 없다: 판정이 무너진 이슈는 끝난 일이 아니다.
+// Completed/cancelled — what "show completed issues" turns back on. A regression is deliberately not here: an
+// issue whose verdict stopped holding is not finished work.
 const COMPLETED_STATUSES: IssueStatus[] = ['done', 'cancelled']
 
-// URL 이 들고 다니는 이름들. 짧게 쓰지 않는 이유는 붙여넣은 주소를 사람이 읽기 때문이다.
+// The names the URL carries. Filters only — display options are the reader's and live in a cookie, so they never
+// appear here. Spelled in full rather than abbreviated because a pasted address is read by people.
 export type IssueViewParams = {
-  group?: string
-  order?: string
-  layout?: string
-  completed?: string
-  sub?: string
   status?: string | string[]
   priority?: string | string[]
   assignee?: string | string[]
@@ -119,12 +104,8 @@ function asArray(value: string | string[] | undefined): string[] | undefined {
   return Array.isArray(value) ? value : [value]
 }
 
-// 닫힌 어휘만 통과시킨다 — 주소창에 아무 값이나 칠 수 있으므로, 모르는 값은 무시하고 기본값으로 떨어진다
-// (목록이 400 으로 죽는 것보다 낫다).
-function pickEnum<T extends string>(value: string | undefined, allowed: readonly T[]): T | undefined {
-  return allowed.find((option) => option === value)
-}
-
+// Closed vocabularies only — anything can be typed into an address bar, so an unknown value is dropped rather
+// than passed through (a list that 400s is worse than a list that ignores one word).
 function pickAll<T extends string>(
   value: string | string[] | undefined,
   allowed: readonly T[]
@@ -134,11 +115,9 @@ function pickAll<T extends string>(
   return raw.filter((item): item is T => allowed.some((option) => option === item))
 }
 
-// URL → 화면. 알 수 없는 값은 조용히 기본값이 되고, 뜻이 통하지 않는 조합(보드인데 안 묶음)은 통하는 쪽으로
-// 정규화된다 — 사용자가 만들 수 있는 주소 중에 "아무것도 안 나오는 화면"이 없도록.
-export function issueViewOf(params: IssueViewParams): IssueView {
-  const grouping = pickEnum(params.group, ISSUE_GROUPINGS) ?? DEFAULT_ISSUE_VIEW.grouping
-  const layout = pickEnum(params.layout, ISSUE_LAYOUTS) ?? DEFAULT_ISSUE_VIEW.layout
+// The two halves joined: filters read off the URL, display handed in by whoever read the reader's cookie. An
+// unrecognised filter value is silently dropped, so no address a user can type produces a screen that errors.
+export function issueViewOf(params: IssueViewParams, display: IssueDisplay): IssueView {
   const filters: IssueFilters = {
     ...(pickAll(params.status, ISSUE_STATUSES) !== undefined
       ? { status: pickAll(params.status, ISSUE_STATUSES) }
@@ -151,33 +130,21 @@ export function issueViewOf(params: IssueViewParams): IssueView {
     ...(asArray(params.project) !== undefined ? { project: asArray(params.project) } : {}),
     ...(asArray(params.cycle) !== undefined ? { cycle: asArray(params.cycle) } : {}),
   }
-  return {
-    // 보드는 컬럼이 곧 그룹이다 — 묶지 않은 보드는 그릴 것이 없으므로 상태 컬럼으로 되돌린다.
-    grouping: layout === 'board' && grouping === 'none' ? 'status' : grouping,
-    order: pickEnum(params.order, ISSUE_ORDERS) ?? DEFAULT_ISSUE_VIEW.order,
-    layout,
-    showCompleted: params.completed === '1',
-    subIssues: params.sub === 'top' ? 'top' : 'all',
-    filters,
-  }
+  return { ...display, filters }
 }
 
-// 화면 → URL. 기본값은 쓰지 않는다: 주소가 짧아야 사람이 읽고, 기본값이 박힌 주소는 나중에 기본값을 바꿔도
-// 옛 화면에 고정된다.
+// Screen → URL. Filters only, and never the display: an address that carried the reader's grouping would impose
+// it on whoever the link is sent to, which is exactly what moving those to a cookie was for.
 export function issueViewQuery(view: IssueView): URLSearchParams {
   const q = new URLSearchParams()
-  if (view.grouping !== DEFAULT_ISSUE_VIEW.grouping) q.set('group', view.grouping)
-  if (view.order !== DEFAULT_ISSUE_VIEW.order) q.set('order', view.order)
-  if (view.layout !== DEFAULT_ISSUE_VIEW.layout) q.set('layout', view.layout)
-  if (view.showCompleted) q.set('completed', '1')
-  if (view.subIssues === 'top') q.set('sub', 'top')
   for (const facet of ISSUE_FILTER_FACETS) {
     for (const value of view.filters[facet] ?? []) q.append(facet, value)
   }
   return q
 }
 
-// 이 화면의 주소. 커서는 절대 물려주지 않는다 — 다른 목록의 위치이므로, 보기가 바뀌면 언제나 1장부터다.
+// This screen's address. The cursor is never inherited — it is a position in a different list, so a changed view
+// always starts from page one.
 export function issueViewHref(basePath: string, view: IssueView): string {
   const qs = issueViewQuery(view).toString()
   return `${basePath}${qs ? `?${qs}` : ''}`
@@ -232,7 +199,11 @@ export function orderIssueGroups(
   groupBy: IssueGroupBy
 ): IssueGroupCount[] {
   const vocabulary: readonly string[] | undefined =
-    groupBy === 'status' ? STATUS_BOARD_ORDER : groupBy === 'priority' ? ISSUE_PRIORITIES : undefined
+    groupBy === 'status'
+      ? STATUS_BOARD_ORDER
+      : groupBy === 'priority'
+        ? ISSUE_PRIORITIES
+        : undefined
   if (vocabulary === undefined) return [...groups]
   return [...groups].sort((a, b) => {
     if (a.key === null) return b.key === null ? 0 : 1

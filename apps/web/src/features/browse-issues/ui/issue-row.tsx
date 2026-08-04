@@ -86,7 +86,7 @@ export const IssueRow = memo(function IssueRow({
       {/* 고르는 중에는 제목 클릭이 이슈를 열지 않고 토글한다 — 스무 건을 고르는 도중 한 번의 오클릭으로
           화면이 통째로 바뀌면 고른 것이 전부 사라진다(스코어카드 목록과 같은 규칙). */}
       <Link
-        href={issueHref(workspace, issue.identifier)}
+        href={issueHref(workspace, issue.identifier, issue.title)}
         className="min-w-0 flex-1"
         onClick={(e) => {
           if (!picking || !selection) return

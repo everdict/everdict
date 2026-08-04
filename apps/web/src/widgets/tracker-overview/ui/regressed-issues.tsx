@@ -19,7 +19,7 @@ export async function RegressedIssues({
       {issues.map((issue) => (
         <Link
           key={issue.id}
-          href={issueHref(workspace, issue.identifier)}
+          href={issueHref(workspace, issue.identifier, issue.title)}
           className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-elevated"
         >
           <span className="size-1.5 shrink-0 rounded-full bg-destructive" />

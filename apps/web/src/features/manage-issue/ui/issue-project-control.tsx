@@ -76,7 +76,7 @@ export function IssueProjectControl({
 
   const chip = project ? (
     <Link
-      href={`/${workspace}/projects/${encodeURIComponent(project.id)}`}
+      href={`/${workspace}/project/${encodeURIComponent(project.id)}`}
       className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
     >
       <ProjectName project={project} />

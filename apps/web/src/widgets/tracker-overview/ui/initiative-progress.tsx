@@ -84,7 +84,7 @@ export async function InitiativeProgress({
                 {readiness.blockers.slice(0, BLOCKER_PREVIEW).map((blocker) => (
                   <li key={blocker.issueId}>
                     <Link
-                      href={issueHref(workspace, blocker.identifier)}
+                      href={issueHref(workspace, blocker.identifier, blocker.title)}
                       className="group flex items-center gap-2 text-[12.5px] text-secondary-foreground hover:text-foreground"
                     >
                       <IssueStatusIcon status={blocker.status} className="size-3.5 shrink-0" />

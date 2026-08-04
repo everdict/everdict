@@ -29,7 +29,18 @@ export {
   type TrackerHistoryEntry,
 } from './model/schema'
 export {
-  DEFAULT_ISSUE_VIEW,
+  DEFAULT_ISSUE_DISPLAY,
+  ISSUE_DISPLAY_COOKIE,
+  decodeIssueDisplays,
+  encodeIssueDisplays,
+  issueDisplayFor,
+  issueDisplaySchema,
+  issueViewKeyOf,
+  normalizeIssueDisplay,
+  withIssueDisplay,
+  type IssueDisplay,
+} from './model/display'
+export {
   ISSUE_FILTER_FACETS,
   ISSUE_GROUP_BYS,
   ISSUE_GROUPINGS,
@@ -58,13 +69,9 @@ export {
   type IssueView,
   type IssueViewParams,
 } from './model/view'
-export { issueHref } from './lib/href'
+export { issueHref, issueSlug } from './lib/href'
 export { issueAttachmentProxy } from './lib/attachment-proxy'
 export { ISSUE_CAPABILITY_LINK_TYPES, ISSUE_LINK_REF_KIND, issueLinkHref } from './lib/link-target'
 export { issueStatusTone, type IssueStatusTone } from './model/status'
-export {
-  IssuePriorityBadge,
-  IssuePriorityIcon,
-  issuePriorityIcon,
-} from './ui/issue-priority-badge'
+export { IssuePriorityBadge, IssuePriorityIcon, issuePriorityIcon } from './ui/issue-priority-badge'
 export { IssueStatusBadge, IssueStatusIcon, issueStatusIcon } from './ui/issue-status-badge'

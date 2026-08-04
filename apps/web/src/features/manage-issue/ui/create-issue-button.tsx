@@ -91,7 +91,7 @@ export function CreateIssueButton({
       setDueDate('')
       // 하위 이슈를 만들 때는 부모 화면에 머문다(다음 조각을 이어서 적는 흐름) — 그 외에는 만든 이슈로 간다.
       if (parentId !== undefined) router.refresh()
-      else router.push(issueHref(workspace, r.issue.identifier))
+      else router.push(issueHref(workspace, r.issue.identifier, r.issue.title))
     })
   }
 

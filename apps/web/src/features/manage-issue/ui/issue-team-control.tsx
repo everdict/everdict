@@ -48,7 +48,7 @@ export function IssueTeamControl({
         toast.error(r.error ?? t('moveError'))
         return
       }
-      router.replace(issueHref(workspace, r.issue.identifier))
+      router.replace(issueHref(workspace, r.issue.identifier, r.issue.title))
       router.refresh()
     })
   }

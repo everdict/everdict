@@ -1,5 +1,6 @@
 'use client'
 
+import { useOptimistic, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Columns3, List, SlidersHorizontal } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -7,24 +8,41 @@ import { useTranslations } from 'next-intl'
 import {
   ISSUE_GROUPINGS,
   ISSUE_ORDERS,
-  issueViewHref,
+  normalizeIssueDisplay,
+  type IssueDisplay,
   type IssueLayout,
-  type IssueView,
 } from '@/entities/issue'
 import { cn } from '@/shared/lib/utils'
-import { DropdownItem, DropdownLabel, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
+import {
+  DropdownItem,
+  DropdownLabel,
+  DropdownMenu,
+  DropdownSeparator,
+} from '@/shared/ui/dropdown-menu'
 
-// 「표시」 — 리니어의 Display 메뉴. 묶는 기준·정렬·레이아웃·완료 표시·하위 이슈, 즉 같은 이슈들을 어떻게
-// 볼 것인가. 전부 URL 에 실리므로 고른 화면을 그대로 붙여넣을 수 있고, 뒤로 가기가 되돌리기가 된다 —
-// 이 메뉴가 로컬 상태를 들고 있었다면 둘 다 못 한다.
-export function IssueDisplayMenu({ basePath, view }: { basePath: string; view: IssueView }) {
+import { setIssueDisplay } from '../api/set-issue-display'
+
+// "Display" — Linear's menu of the same name: grouping, ordering, layout, completed issues, sub-issues. All of
+// it answers "how do I want to look at these", never "which of these", and that is why none of it goes in the
+// URL: a link you send someone must not rearrange their screen. The choice is stored per reader and per view
+// (`viewKey`), so the cycle board and the team's list can be read differently by the same person.
+//
+// The write is a server action rather than local state because the list is a server component — it needs the
+// grouping to ask for group counts at all. `router.refresh()` re-runs it with the new cookie, and the optimistic
+// value keeps the checkmark from lagging behind the click.
+export function IssueDisplayMenu({ viewKey, display }: { viewKey: string; display: IssueDisplay }) {
   const t = useTranslations('issuesPage')
   const router = useRouter()
+  const [, startTransition] = useTransition()
+  const [view, showOptimistically] = useOptimistic(display)
 
-  function apply(next: Partial<IssueView>) {
-    // 보기가 바뀌면 언제나 1장부터다 — 커서는 이전 목록의 위치라서 이어 붙이면 엉뚱한 구간이 나온다
-    // (`issueViewHref` 가 커서를 아예 싣지 않는다).
-    router.push(issueViewHref(basePath, { ...view, ...next }))
+  function apply(next: Partial<IssueDisplay>) {
+    const merged = normalizeIssueDisplay({ ...view, ...next })
+    startTransition(async () => {
+      showOptimistically(merged)
+      await setIssueDisplay(viewKey, merged)
+      router.refresh()
+    })
   }
 
   const layouts: { key: IssueLayout; icon: typeof List }[] = [
@@ -48,7 +66,8 @@ export function IssueDisplayMenu({ basePath, view }: { basePath: string; view: I
         </button>
       )}
     >
-      {/* 레이아웃만 세그먼티드다 — 둘 중 하나이고, 어느 쪽인지가 한눈에 보여야 하는 유일한 축이다. */}
+      {/* Layout is the one segmented control: it is a choice between two, and the only axis where which one is
+          active has to be readable at a glance. */}
       <div className="flex gap-1 p-1">
         {layouts.map(({ key, icon: Icon }) => (
           <button
@@ -72,7 +91,8 @@ export function IssueDisplayMenu({ basePath, view }: { basePath: string; view: I
 
       <DropdownLabel>{t('grouping')}</DropdownLabel>
       {ISSUE_GROUPINGS.filter(
-        // 보드는 컬럼이 곧 그룹이라 「묶지 않음」이라는 답이 없다 — 고를 수 없는 것을 내밀지 않는다.
+        // A board's columns ARE its groups, so "no grouping" is not an answer it has — an option that cannot be
+        // chosen is not offered.
         (grouping) => !(view.layout === 'board' && grouping === 'none')
       ).map((grouping) => (
         <DropdownItem

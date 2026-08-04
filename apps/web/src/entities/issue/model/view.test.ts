@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { DEFAULT_ISSUE_DISPLAY } from './display'
 import {
-  DEFAULT_ISSUE_VIEW,
   issueFilterCount,
   issueGroupsToRender,
   issueQueryFilters,
@@ -12,41 +12,62 @@ import {
   type IssueView,
 } from './view'
 
-const view = (over: Partial<IssueView> = {}): IssueView => ({ ...DEFAULT_ISSUE_VIEW, ...over })
+const view = (over: Partial<IssueView> = {}): IssueView => ({
+  ...DEFAULT_ISSUE_DISPLAY,
+  filters: {},
+  ...over,
+})
 
-describe('issue view — the URL is the screen', () => {
-  it('round-trips a view through the query string and leaves defaults out of the address', () => {
-    const configured = view({
+describe('issue view — the URL carries the filters, and only the filters', () => {
+  it('round-trips the filters through the query string', () => {
+    const href = issueViewHref(
+      '/acme/team/ENG',
+      view({ filters: { status: ['todo'], label: ['bug', 'flaky'] } })
+    )
+    const parsed = issueViewOf(
+      Object.fromEntries(new URL(href, 'https://x').searchParams),
+      DEFAULT_ISSUE_DISPLAY
+    )
+    expect(parsed.filters.status).toEqual(['todo'])
+    expect(issueViewHref('/acme/team/ENG', view())).toBe('/acme/team/ENG')
+  })
+
+  it('never writes the display into the address — a shared link must not re-arrange the reader’s screen', () => {
+    // Grouping, ordering and layout are the READER's, stored per user. Putting them in the URL is how a pasted
+    // link ends up imposing the sender's board on someone who wanted their list.
+    const href = issueViewHref(
+      '/acme/team/ENG',
+      view({
+        grouping: 'assignee',
+        order: 'priority',
+        layout: 'board',
+        showCompleted: true,
+        subIssues: 'top',
+      })
+    )
+    expect(href).toBe('/acme/team/ENG')
+  })
+
+  it('takes the display from the reader, not from whatever the address happens to say', () => {
+    // The old display parameters are now just unknown words in the query: they are ignored rather than obeyed,
+    // so a link someone saved before the split cannot override the recipient's preference.
+    const savedBeforeTheSplit = Object.fromEntries(new URLSearchParams('group=cycle&layout=board'))
+    const parsed = issueViewOf(savedBeforeTheSplit, {
+      ...DEFAULT_ISSUE_DISPLAY,
       grouping: 'assignee',
-      order: 'priority',
-      layout: 'board',
-      showCompleted: true,
-      filters: { status: ['todo'], label: ['bug', 'flaky'] },
     })
-    const href = issueViewHref('/acme/teams/ENG', configured)
-    expect(issueViewOf(Object.fromEntries(new URL(href, 'https://x').searchParams))).toMatchObject({
-      grouping: 'assignee',
-      order: 'priority',
-      layout: 'board',
-      showCompleted: true,
-    })
-    // A default never appears in the address: the URL stays readable, and changing a default later does not
-    // leave old links pinned to the value it used to have.
-    expect(issueViewHref('/acme/teams/ENG', view())).toBe('/acme/teams/ENG')
+    expect(parsed.grouping).toBe('assignee')
+    expect(parsed.layout).toBe('list')
   })
 
   it('reads a repeated key as a set, and drops values the vocabulary does not have', () => {
-    const parsed = issueViewOf({ status: ['todo', 'nonsense', 'done'], priority: 'urgent' })
+    const parsed = issueViewOf(
+      { status: ['todo', 'nonsense', 'done'], priority: 'urgent' },
+      DEFAULT_ISSUE_DISPLAY
+    )
     expect(parsed.filters.status).toEqual(['todo', 'done'])
     expect(parsed.filters.priority).toEqual(['urgent'])
     expect(issueFilterCount(parsed.filters)).toBe(3)
-  })
-
-  it('never leaves a board with nothing to draw', () => {
-    // Columns ARE the groups, so an ungrouped board has no shape — it normalizes to the status board rather
-    // than rendering an empty screen from an address a member can perfectly well type.
-    expect(issueViewOf({ layout: 'board', group: 'none' }).grouping).toBe('status')
-    expect(issueViewOf({ group: 'none' }).grouping).toBe('none')
   })
 
   it('turns "hide completed" into the status set the control plane understands — unless statuses were chosen', () => {
@@ -95,9 +116,9 @@ describe('issue groups — what the screen actually stands up', () => {
     expect(columns).toContainEqual({ key: 'in_progress', count: 0 })
     // …but not the columns the "hide completed" toggle just switched off.
     expect(columns.map((c) => c.key)).not.toContain('done')
-    expect(issueGroupsToRender([], 'status', view({ showCompleted: true })).map((c) => c.key)).toContain(
-      'done'
-    )
+    expect(
+      issueGroupsToRender([], 'status', view({ showCompleted: true })).map((c) => c.key)
+    ).toContain('done')
   })
 
   it('does not invent a column per member — an open vocabulary shows only the groups that hold issues', () => {
