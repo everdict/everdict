@@ -45,7 +45,13 @@ export class PgHarnessTemplateRegistry implements HarnessTemplateRegistry {
   ownVersions(tenant: string, id: string): Promise<string[]> {
     return this.store.ownVersions(tenant, id);
   }
-  list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
-    return this.store.listIds(tenant);
+  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string; teamId?: string }>> {
+    // listMeta rather than listIds: the owning team rides on the meta, and the read narrows by it.
+    return (await this.store.listMeta(tenant)).map((m) => ({
+      id: m.id,
+      versions: m.versions,
+      owner: m.owner,
+      ...(m.teamId !== undefined ? { teamId: m.teamId } : {}),
+    }));
   }
 }

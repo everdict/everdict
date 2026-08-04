@@ -7,6 +7,9 @@ Result store (`RunStore`) + Postgres impl + migrations. See `docs/migration/`, s
 
 - `PgRunStore` and the migrator depend on the injectable `SqlClient` (not `pg` directly) — so logic is
   unit-testable with a fake; `pg.Pool` is wrapped via `sqlClient()` only at the edge.
+- Migration numbers are **unique** — `pnpm migrations` (CI) refuses a new duplicate. Two files sharing a
+  number both apply, in an order decided by what follows the digits, which is alphabetical accident rather than
+  intent. Pairs that already shipped are grandfathered by name in the guard; never add to that list.
 - Migrations are **numbered SQL files** in `migrations/`; `migrate()` is **idempotent** (tracks
   `everdict_schema_migrations`, applies only un-applied). Never edit an already-applied migration — add a new one.
 - Destructive/breaking changes are **expand → deploy → contract** with a `preflight`

@@ -1,6 +1,7 @@
 import { HarnessTemplateSpecSchema } from "@everdict/contracts";
-import { checkPortability } from "@everdict/domain";
+import { checkPortability, ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { harnessTemplateDocs } from "./harness-template.docs.js";
 
@@ -60,7 +61,10 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
-      return reply.send(await deps.harnessTemplates.list(principal.workspace));
+      // A private team's authored entry is that team's — the ceiling every other team-owned read stays under.
+      const seen = await visibleTeamsFor(deps, principal);
+      const entries = await deps.harnessTemplates.list(principal.workspace);
+      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, seen)));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -96,6 +100,14 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
       if (!principal) return reply;
       try {
         gate(principal, "harnesses:read");
+        await assertEntityVisible(
+          deps,
+          principal,
+          deps.harnessTemplates,
+          principal.workspace,
+          req.params.id,
+          "harness template",
+        );
         return reply.send(await deps.harnessTemplates.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // missing id/version → 404

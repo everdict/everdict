@@ -1,8 +1,9 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/contracts";
 import { RuntimeControlCommandSchema } from "@everdict/contracts/wire";
-import { runtimeSpecWithCapabilities } from "@everdict/domain";
+import { ownedByVisibleTeam, runtimeSpecWithCapabilities } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { runtimeDocs } from "./runtime.docs.js";
 
@@ -97,7 +98,10 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!principal) return reply;
     try {
       gate(principal, "runtimes:read");
-      return reply.send(await deps.runtimeRegistry.list(principal.workspace));
+      // A private team's registered infra is that team's — the ceiling every other team-owned read stays under.
+      const seen = await visibleTeamsFor(deps, principal);
+      const entries = await deps.runtimeRegistry.list(principal.workspace);
+      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, seen)));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -113,6 +117,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
       if (!principal) return reply;
       try {
         gate(principal, "runtimes:read");
+        await assertEntityVisible(deps, principal, deps.runtimeRegistry, principal.workspace, req.params.id, "runtime");
         return reply.send(await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err);

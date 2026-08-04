@@ -1,12 +1,20 @@
 import { deleteModelVersion, deleteModelVersions } from "@everdict/application-control";
 import { ModelSpecSchema } from "@everdict/contracts";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 import { SaveModelBodySchema } from "./request/save-model.js";
 import { TestModelConnectionBodySchema } from "./request/test-connection.js";
 
 // Model MCP tools — the MCP twin of model.routes.ts.
+// A private team's authored entry is that team's — the same ceiling the HTTP twin stays under.
+async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
+  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
+  return rows.filter((row) => ownedByVisibleTeam(row, seen));
+}
+
 export function registerModelTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
 
@@ -15,7 +23,7 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "list_models",
       { description: "Models visible to this workspace (inference/judge models: owned + _shared)", inputSchema: {} },
-      () => run(principal, "models:read", async () => ok(await models.list(ws))),
+      () => run(principal, "models:read", async () => ok(await keepVisible(ctx, await models.list(ws)))),
     );
 
     server.registerTool(
@@ -25,7 +33,11 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
           "A full ModelSpec (provider + underlying model + baseUrl). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
-      ({ id, version }) => run(principal, "models:read", async () => ok(await models.get(ws, id, version ?? "latest"))),
+      ({ id, version }) =>
+        run(principal, "models:read", async () => {
+          await assertEntityVisible(ctx.deps, principal, models, ws, id, "model");
+          return ok(await models.get(ws, id, version ?? "latest"));
+        }),
     );
 
     server.registerTool(

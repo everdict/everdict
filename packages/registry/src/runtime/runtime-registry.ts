@@ -52,11 +52,14 @@ export class InMemoryRuntimeRegistry implements RuntimeRegistry {
     const out: RuntimeListEntry[] = [];
     for (const { id, owner, versions } of this.store.listIds(tenant)) {
       const versionTags = this.store.versionTags(owner, id);
+      // Ownership belongs to the thing, not to one release of it — read it off the newest version.
+      const teamId = this.store.teamOfVersion(owner, id, versions[versions.length - 1] ?? "");
       const capabilities = this.store.get(owner, id).capabilities; // latest (default ref)
       out.push({
         id,
         owner,
         versions,
+        ...(teamId !== undefined ? { teamId } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
         ...(capabilities && capabilities.length > 0 ? { capabilities } : {}),
       });

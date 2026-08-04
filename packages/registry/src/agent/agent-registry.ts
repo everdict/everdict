@@ -38,12 +38,15 @@ export class InMemoryAgentRegistry implements AgentRegistry {
   async get(tenant: string, id: string, ref?: string): Promise<AgentSpec> {
     return this.store.get(tenant, id, ref);
   }
-  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string; createdBy?: string }>> {
+  async list(
+    tenant: string,
+  ): Promise<Array<{ id: string; versions: string[]; owner: string; createdBy?: string; teamId?: string }>> {
     return this.store.listMeta(tenant).map((m) => ({
       id: m.id,
       versions: m.versions,
       owner: m.owner,
       ...(m.createdBy !== undefined ? { createdBy: m.createdBy } : {}),
+      ...(m.teamId !== undefined ? { teamId: m.teamId } : {}),
     }));
   }
   async creatorOf(tenant: string, id: string, version: string): Promise<string | undefined> {

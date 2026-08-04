@@ -1,9 +1,17 @@
 import { HarnessTemplateSpecSchema } from "@everdict/contracts";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 
 // Harness-template MCP tools — the MCP twin of harness-template.routes.ts.
+// A private team's authored entry is that team's — the same ceiling the HTTP twin stays under.
+async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
+  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
+  return rows.filter((row) => ownedByVisibleTeam(row, seen));
+}
+
 export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
 
@@ -13,7 +21,7 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
     server.registerTool(
       "list_harness_templates",
       { description: "Harness templates this workspace sees (categories; owned + _shared)", inputSchema: {} },
-      () => run(principal, "harnesses:read", async () => ok(await templates.list(ws))),
+      () => run(principal, "harnesses:read", async () => ok(await keepVisible(ctx, await templates.list(ws)))),
     );
 
     server.registerTool(
@@ -23,7 +31,11 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
           "Fetch one harness template (category) structure spec — for config view / new-version edit prefill",
         inputSchema: { id: z.string(), version: z.string().describe('template version or "latest"') },
       },
-      ({ id, version }) => run(principal, "harnesses:read", async () => ok(await templates.get(ws, id, version))),
+      ({ id, version }) =>
+        run(principal, "harnesses:read", async () => {
+          await assertEntityVisible(ctx.deps, principal, templates, ws, id, "harness template");
+          return ok(await templates.get(ws, id, version));
+        }),
     );
 
     server.registerTool(

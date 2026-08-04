@@ -1,6 +1,8 @@
 import { deleteModelVersion, deleteModelVersions } from "@everdict/application-control";
 import { ModelSpecSchema } from "@everdict/contracts";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { modelDocs } from "./model.docs.js";
 import { DeleteModelVersionsBodySchema } from "./request/delete-model-versions.js";
@@ -121,7 +123,10 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!principal) return reply;
     try {
       gate(principal, "models:read");
-      return reply.send(await deps.modelRegistry.list(principal.workspace));
+      // A private team's authored entry is that team's — the ceiling every other team-owned read stays under.
+      const seen = await visibleTeamsFor(deps, principal);
+      const entries = await deps.modelRegistry.list(principal.workspace);
+      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, seen)));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -138,6 +143,7 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
       if (!principal) return reply;
       try {
         gate(principal, "models:read");
+        await assertEntityVisible(deps, principal, deps.modelRegistry, principal.workspace, req.params.id, "model");
         return reply.send(await deps.modelRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404

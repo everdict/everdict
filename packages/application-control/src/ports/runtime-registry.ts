@@ -8,6 +8,8 @@ export interface RuntimeListEntry {
   id: string;
   versions: string[];
   owner: string;
+  // The owning team (mig 0106) — absent = unowned (a `_shared`/seeded runtime), which is the workspace's.
+  teamId?: string;
   versionTags?: Record<string, string[]>; // version → free-form label — mutable registry metadata (outside the spec)
   // version → where that version came from (only stamped versions; omitted entirely when none was).
   versionOrigins?: Record<string, CapabilityOrigin>;

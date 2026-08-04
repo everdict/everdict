@@ -1,11 +1,19 @@
 import { deleteAgentVersion, deleteAgentVersions } from "@everdict/application-control";
 import { AgentSpecSchema } from "@everdict/contracts";
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 import { SaveAgentBodySchema } from "./request/save-agent.js";
 
 // Agent MCP tools — the MCP twin of agent.routes.ts (the workspace's conversational-agent configuration).
+// A private team's authored entry is that team's — the same ceiling the HTTP twin stays under.
+async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
+  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
+  return rows.filter((row) => ownedByVisibleTeam(row, seen));
+}
+
 export function registerAgentTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
 
@@ -18,7 +26,7 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
           "Agent configurations visible to this workspace (instructions + MCP servers + model; owned + _shared)",
         inputSchema: {},
       },
-      () => run(principal, "agents:read", async () => ok(await agents.list(ws))),
+      () => run(principal, "agents:read", async () => ok(await keepVisible(ctx, await agents.list(ws)))),
     );
 
     server.registerTool(
@@ -28,7 +36,11 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
           "A full AgentSpec (instructions + MCP tool servers + model). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
-      ({ id, version }) => run(principal, "agents:read", async () => ok(await agents.get(ws, id, version ?? "latest"))),
+      ({ id, version }) =>
+        run(principal, "agents:read", async () => {
+          await assertEntityVisible(ctx.deps, principal, agents, ws, id, "agent config");
+          return ok(await agents.get(ws, id, version ?? "latest"));
+        }),
     );
 
     server.registerTool(
