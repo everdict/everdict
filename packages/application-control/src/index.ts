@@ -48,6 +48,10 @@ export {
 export { runFeedConsumer, scorecardFeedConsumer } from "./notification/feed-consumers.js";
 export { mattermostConsumer } from "./notification/mattermost-consumer.js";
 export {
+  trackerUpdateConsumer,
+  type TrackerUpdateConsumerDeps,
+} from "./notification/tracker-update-consumer.js";
+export {
   signSubscriptionPayload,
   type SubscriptionReactionDeps,
   subscriptionReactionConsumer,
@@ -69,7 +73,6 @@ export {
 } from "./team/workflow-state-service.js";
 export {
   type CreateCycleInput,
-  CYCLE_CADENCE_ACTOR,
   type CycleActor,
   type CycleDetail,
   CycleService,

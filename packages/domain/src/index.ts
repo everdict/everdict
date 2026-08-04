@@ -131,25 +131,22 @@ export {
   type InitiativeTransition,
   type NewInitiativeInput,
 } from "./tracker/initiative.js";
-export { initiativeReadiness, projectRollup } from "./tracker/readiness.js";
+export {
+  initiativeProgress,
+  initiativeReadiness,
+  projectRollup,
+  type ProjectIssueCount,
+} from "./tracker/readiness.js";
+export { excerptOf, TRACKER_UPDATE_EXCERPT_LIMIT } from "./tracker/update-excerpt.js";
 export {
   addCalendarDays,
-  alignToStartDay,
   Cycle,
-  cycleBurndown,
-  type CycleCadence,
-  cycleDaysRemaining,
   type CycleEditInput,
-  cyclePipelinePlan,
   cycleProgress,
   cycleStateOf,
   type CycleTransition,
-  daysBetween,
-  issueInCycleOn,
-  issueStatusOn,
   type NewCycleInput,
   nextCycleWindow,
-  weekdayOf,
 } from "./tracker/cycle.js";
 export {
   type IssueNumberAllocation,
