@@ -87,8 +87,8 @@ describe("a cycle and a board follow their team's visibility", () => {
   it("refuses a PRIVATE team's board to outsiders — the columns are the team's own", async () => {
     const ctx = await build();
     const outsider = serverFor(ctx, "other", [ctx.open.id]);
-    expect((await outsider.inject({ method: "GET", url: `/teams/SEC/states`, headers: bearer })).statusCode).toBe(404);
-    expect((await outsider.inject({ method: "GET", url: `/teams/WEB/states`, headers: bearer })).statusCode).toBe(200);
+    expect((await outsider.inject({ method: "GET", url: "/teams/SEC/states", headers: bearer })).statusCode).toBe(404);
+    expect((await outsider.inject({ method: "GET", url: "/teams/WEB/states", headers: bearer })).statusCode).toBe(200);
     await outsider.close();
   });
 });
