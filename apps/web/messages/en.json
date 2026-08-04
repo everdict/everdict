@@ -4884,6 +4884,8 @@
     "assigneeControlLabel": "Change assignee",
     "assigneeSetTo": "Assign to",
     "assigneeClear": "Unassign",
+    "assigneeSearchPlaceholder": "Search members",
+    "assigneeNoMatch": "No members match.",
     "assigneeError": "Could not change the assignee.",
     "display": "Display",
     "grouping": "Grouping",

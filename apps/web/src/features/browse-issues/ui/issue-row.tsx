@@ -5,7 +5,11 @@ import Link from 'next/link'
 import { MessageSquare } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
-import { IssuePriorityControl, IssueStatusControl } from '@/features/manage-issue'
+import {
+  IssueAssigneeControl,
+  IssuePriorityControl,
+  IssueStatusControl,
+} from '@/features/manage-issue'
 import { isOpenIssueStatus, issueHref, type IssueSummary } from '@/entities/issue'
 import { IssueLabelChips } from '@/entities/issue-label'
 import { isPastDue } from '@/entities/project'
@@ -14,7 +18,6 @@ import { cn } from '@/shared/lib/utils'
 
 import type { IssueDirectories } from '../model/directories'
 import { ISSUE_ROW_ATTR, useIssueSelection } from '../model/issue-selection'
-import { IssueAssigneeControl } from './issue-assignee-control'
 
 // 목록 한 줄. 예전 행과 다른 점은 하나뿐이지만 그게 리니어의 핵심 속도다: 상태·우선순위·담당자를 **여기서**
 // 바꾼다. 그래서 행 전체가 `<Link>` 일 수 없다 — 링크 안의 버튼은 유효한 마크업도 아니고, 드롭다운을 여는
@@ -149,6 +152,7 @@ export const IssueRow = memo(function IssueRow({
         actors={directories.actors}
         members={directories.members}
         canWrite={canWrite}
+        variant="icon"
         className="shrink-0"
       />
     </div>

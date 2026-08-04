@@ -11,6 +11,7 @@ import { IssueLinks } from '@/features/issue-links'
 import {
   CreateIssueButton,
   IssueActions,
+  IssueAssigneeControl,
   IssueCycleControl,
   IssueLabelControl,
   IssuePriorityControl,
@@ -56,7 +57,6 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
-import { Avatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
@@ -295,7 +295,13 @@ export default async function IssueDetailPage({
   }))
 
   const assignee = current.assignee
-  const assigneeAvatar = assignee ? actors[assignee]?.avatarUrl : undefined
+  // 맡길 수 있는 사람 — 지금 워크스페이스 멤버인 사람뿐이다. `actors` 는 이미 나간 사람의 이름까지 알지만
+  // (예전 이슈의 담당자·이력을 그려야 하므로), 새로 맡길 수 있는 건 이쪽이다.
+  const assignableMembers = members.map((m) => ({
+    subject: m.subject,
+    name: actors[m.subject]?.name ?? m.subject,
+    ...(m.avatarUrl !== undefined ? { avatarUrl: m.avatarUrl } : {}),
+  }))
   // 속성 열이 보여주는 링크 = 이슈를 검증하는 능력(하니스·데이터셋·평가자)뿐. 스코어카드 링크는 증거이고
   // 아래 "평가 이력"이 이미 고정 배지로 보여주므로, 여기 세면 빈 섹션 판정이 틀어진다.
   const capabilityLinks = current.links.filter((link) =>
@@ -411,16 +417,18 @@ export default async function IssueDetailPage({
                 canWrite={canWrite}
               />
             </PropertyRow>
-            {assignee && (
+            {/* 담당자도 이 열에서 바로 지정하고 뗀다 — 예전에는 이미 맡은 사람이 있을 때만 이름 한 줄이
+                떴고, 이슈를 열어 놓고도 사람을 지정할 길이 상세 화면 어디에도 없었다(목록 행으로 돌아가야
+                했다). 쓸 수 있는 사람에게는 비어 있어도 행을 낸다 — 읽기 전용일 때만 빈 행을 숨긴다. */}
+            {(canWrite || assignee !== undefined) && (
               <PropertyRow label={t('fieldAssignee')}>
-                <span className="inline-flex min-w-0 items-center gap-1.5">
-                  <Avatar
-                    name={displayName(assignee)}
-                    size="sm"
-                    {...(assigneeAvatar !== undefined ? { url: assigneeAvatar } : {})}
-                  />
-                  <span className="truncate">{displayName(assignee)}</span>
-                </span>
+                <IssueAssigneeControl
+                  id={current.id}
+                  {...(assignee !== undefined ? { assignee } : {})}
+                  actors={actors}
+                  members={assignableMembers}
+                  canWrite={canWrite}
+                />
               </PropertyRow>
             )}
             <PropertyRow label={t('fieldTeam')}>

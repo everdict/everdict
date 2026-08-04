@@ -12,6 +12,7 @@ export {
 export { CreateIssueButton } from './ui/create-issue-button'
 export { EditIssueDialog } from './ui/edit-issue-dialog'
 export { IssueActions } from './ui/issue-actions'
+export { IssueAssigneeControl } from './ui/issue-assignee-control'
 export { IssueCycleControl, type IssueCycleOption } from './ui/issue-cycle-control'
 export { IssueLabelControl } from './ui/issue-label-control'
 export { IssuePriorityControl } from './ui/issue-priority-control'
