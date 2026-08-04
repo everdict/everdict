@@ -74,7 +74,7 @@ export function ViewList({
             className="flex items-center gap-3 rounded-lg border bg-card px-4 py-3 shadow-raise transition-colors hover:border-border-strong"
           >
             <Link
-              href={`/${workspace}/views/${encodeURIComponent(v.id)}`}
+              href={`/${workspace}/view/${encodeURIComponent(v.id)}`}
               className="min-w-0 flex-1"
             >
               <div className="flex items-center gap-2">

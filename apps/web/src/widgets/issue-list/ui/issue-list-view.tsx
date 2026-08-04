@@ -1,4 +1,5 @@
 import { Suspense } from 'react'
+import { cookies } from 'next/headers'
 import Link from 'next/link'
 import { CircleDot } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
@@ -18,10 +19,13 @@ import {
 } from '@/features/browse-issues'
 import { cycleLabel, cyclesSchema, cycleStateOf, todayIso, type Cycle } from '@/entities/cycle'
 import {
+  ISSUE_DISPLAY_COOKIE,
+  issueDisplayFor,
   issueGroupCountsSchema,
   issueGroupsToRender,
   issuePageSchema,
   issueQueryFilters,
+  issueViewKeyOf,
   issueViewOf,
   orderIssueGroups,
   type IssueGroupCount,
@@ -60,9 +64,14 @@ export type IssueListFilters = IssueViewParams
 // `/issues` twin (that team's), plus `/triage` for a team's inbox. The team is a PATH, not a query parameter —
 // a list scoped to a team is a different resource, not the same resource filtered.
 //
-// 화면의 모양(묶기·정렬·레이아웃·필터)은 전부 URL 이 들고 있고(`issueViewOf`), 그룹의 개수는 서버 집계에서
-// 온다. 이 둘이 분리되어 있는 것이 요점이다: 목록은 그룹마다 한 장씩만 들고 있으므로, 받은 행을 세면
-// 페이지 크기를 되풀이할 뿐 "진행 중이 몇 건인가"에는 답하지 못한다.
+// The screen is assembled from two sources on purpose: the FILTERS come from the URL (they decide which issues,
+// so a pasted link has to reproduce them) and the DISPLAY comes from the reader's cookie, keyed by this list's
+// address (it decides only how they are drawn, so a link must not impose it). `entities/issue/model/display.ts`
+// carries the full reasoning.
+//
+// Group COUNTS come from a server aggregate, separately from the rows. That separation is the point: the list
+// holds one page per group, so counting the rows it received would just restate the page size instead of
+// answering "how many are in progress".
 export async function IssueListView({
   workspace,
   team,
@@ -83,7 +92,11 @@ export async function IssueListView({
   const t = await getTranslations('issuesPage')
   const timeZone = await getTimeZone()
   const { principal, ctx } = await currentPrincipal()
-  const view = issueViewOf(filters)
+  // Which list this is, for the purpose of remembering how it is drawn. The team is named by its KEY rather than
+  // its id so the stored preference stays readable and survives nothing in particular being renamed.
+  const viewKey = issueViewKeyOf({ team: team?.key, triage, cycle: cycle !== undefined })
+  const display = issueDisplayFor((await cookies()).get(ISSUE_DISPLAY_COOKIE)?.value, viewKey)
+  const view = issueViewOf(filters, display)
 
   // 쓰기 버튼은 역할 + 팀 두 축을 모두 통과해야 뜬다 — 속하지 않은 팀의 목록에서 「이슈 만들기」를 내밀면
   // 제어 평면이 403 을 줄 게 확실한 버튼을 보여 주는 것이다(강제는 여전히 제어 평면 몫).
@@ -113,38 +126,38 @@ export async function IssueListView({
   // 이 읽기들은 서로를 기다릴 이유가 없다 — 순차 await 이면 왕복 시간이 그대로 더해진다. 목록만 실패를
   // 표면에 올리고, 나머지는 자기 자리만 비운다.
   const [counts, teams, projects, cycles, labels, members] = await Promise.all([
-      view.grouping === 'none'
-        ? Promise.resolve(undefined)
-        : controlPlane
-            .countIssues(ctx, view.grouping, scope)
-            .then((r) => issueGroupCountsSchema.parse(r))
-            .catch(() => undefined),
-      // 팀 칩은 워크스페이스 전체 목록에서만 그려진다 — 팀 스코프에서는 기다릴 이유가 없다.
-      team ? Promise.resolve<TeamWithSummary[]>([]) : teamsPromise,
-      // Projects power both the filter and the per-row project name; a failure here must not blank the list.
-      controlPlane
-        .listProjects(ctx, team ? { team: team.id } : undefined)
-        .then((r) => projectsSchema.parse(r))
-        .catch((): Project[] => []),
-      // 사이클은 팀의 것이다 — 워크스페이스 전체 목록에서는 고를 대상이 없으므로 아예 읽지 않는다.
-      team
-        ? controlPlane
-            .listCycles(ctx, { team: team.id })
-            .then((r) => cyclesSchema.parse(r))
-            .catch((): Cycle[] => [])
-        : Promise.resolve<Cycle[]>([]),
-      // 행의 라벨 칩은 id→정의 조인이 있어야 그려진다. 실패해도 목록은 뜬다(칩만 사라진다).
-      controlPlane
-        .listIssueLabels(ctx)
-        .then((r) => issueLabelsSchema.parse(r))
-        .catch((): IssueLabel[] => []),
-      // 담당자는 이슈에 subject 로만 저장된다 — 그대로 그리면 uuid 나 `key:acme` 같은 내부 문자열이 뜬다.
-      // 상세 페이지와 같은 디렉터리 조인으로 이름·아바타를 붙인다(라벨·프로젝트와 같은 조인).
-      controlPlane
-        .listMembers(ctx)
-        .then((r) => membersSchema.parse(r))
-        .catch((): Member[] => []),
-    ])
+    view.grouping === 'none'
+      ? Promise.resolve(undefined)
+      : controlPlane
+          .countIssues(ctx, view.grouping, scope)
+          .then((r) => issueGroupCountsSchema.parse(r))
+          .catch(() => undefined),
+    // 팀 칩은 워크스페이스 전체 목록에서만 그려진다 — 팀 스코프에서는 기다릴 이유가 없다.
+    team ? Promise.resolve<TeamWithSummary[]>([]) : teamsPromise,
+    // Projects power both the filter and the per-row project name; a failure here must not blank the list.
+    controlPlane
+      .listProjects(ctx, team ? { team: team.id } : undefined)
+      .then((r) => projectsSchema.parse(r))
+      .catch((): Project[] => []),
+    // 사이클은 팀의 것이다 — 워크스페이스 전체 목록에서는 고를 대상이 없으므로 아예 읽지 않는다.
+    team
+      ? controlPlane
+          .listCycles(ctx, { team: team.id })
+          .then((r) => cyclesSchema.parse(r))
+          .catch((): Cycle[] => [])
+      : Promise.resolve<Cycle[]>([]),
+    // 행의 라벨 칩은 id→정의 조인이 있어야 그려진다. 실패해도 목록은 뜬다(칩만 사라진다).
+    controlPlane
+      .listIssueLabels(ctx)
+      .then((r) => issueLabelsSchema.parse(r))
+      .catch((): IssueLabel[] => []),
+    // 담당자는 이슈에 subject 로만 저장된다 — 그대로 그리면 uuid 나 `key:acme` 같은 내부 문자열이 뜬다.
+    // 상세 페이지와 같은 디렉터리 조인으로 이름·아바타를 붙인다(라벨·프로젝트와 같은 조인).
+    controlPlane
+      .listMembers(ctx)
+      .then((r) => membersSchema.parse(r))
+      .catch((): Member[] => []),
+  ])
 
   const actors = memberDirectoryOf(members)
   const directories: IssueDirectories = {
@@ -216,9 +229,7 @@ export async function IssueListView({
     team && !cycle ? { workspace, team, section: triage ? 'triage' : 'issues' } : undefined
 
   const empty =
-    view.grouping === 'none'
-      ? (flatPage?.items.length ?? 0) === 0
-      : (counts?.total ?? 0) === 0
+    view.grouping === 'none' ? (flatPage?.items.length ?? 0) === 0 : (counts?.total ?? 0) === 0
 
   // 일괄 편집이 있는 곳은 팀 스코프뿐이다 — 이슈는 자기 팀의 사이클에만 들어가므로(제어 평면이 거절한다),
   // 여러 팀이 섞인 워크스페이스 목록에서는 "이 사이클로"가 성립하지 않는다. 고를 수 있는 것은 열린 사이클뿐.
@@ -237,7 +248,11 @@ export async function IssueListView({
         <PageHeader
           title={triage ? t('triageTitle') : team ? team.name : t('title')}
           description={
-            triage ? t('triageDescription') : team ? (team.description ?? undefined) : t('description')
+            triage
+              ? t('triageDescription')
+              : team
+                ? (team.description ?? undefined)
+                : t('description')
           }
           actions={
             canWrite ? (
@@ -274,7 +289,7 @@ export async function IssueListView({
               {t('totalCount', { count: counts.total })}
             </span>
           )}
-          <IssueDisplayMenu basePath={basePath} view={view} />
+          <IssueDisplayMenu viewKey={viewKey} display={display} />
         </div>
       </div>
       {!team && teams.length > 1 && (
@@ -364,7 +379,9 @@ export async function IssueListView({
 
       {/* 조용한 상한은 "전부 봤다"로 읽힌다 — 몇 그룹을 안 세웠는지 말한다. */}
       {dropped > 0 && (
-        <p className="text-[11.5px] text-muted-foreground">{t('groupsTruncated', { count: dropped })}</p>
+        <p className="text-[11.5px] text-muted-foreground">
+          {t('groupsTruncated', { count: dropped })}
+        </p>
       )}
       {bulkCycles.length > 0 && <IssueBulkBar cycles={bulkCycles} />}
     </div>

@@ -43,7 +43,7 @@ export function ScheduleDetailActions({
       setError(undefined)
       const res = await fireScheduleAction(id)
       if (res.ok && res.scorecardId)
-        router.push(`/${workspace}/scorecards/${encodeURIComponent(res.scorecardId)}`)
+        router.push(`/${workspace}/scorecard/${encodeURIComponent(res.scorecardId)}`)
       else setError(res.error ?? t('actionFailed'))
     })
 
@@ -83,7 +83,7 @@ export function ScheduleDetailActions({
         )}
         {canEdit && (
           <Link
-            href={`/${workspace}/schedules/${encodeURIComponent(id)}/edit`}
+            href={`/${workspace}/schedule/${encodeURIComponent(id)}/edit`}
             className={buttonVariants({ variant: 'secondary', size: 'sm' })}
           >
             <Pencil />

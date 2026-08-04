@@ -1,4 +1,4 @@
-import { teamSectionHref } from '@/entities/team'
+import { teamHref, teamSectionHref } from '@/entities/team'
 
 import type { Cycle, CycleState } from '../model/schema'
 
@@ -47,15 +47,16 @@ export function daysRemaining(cycle: Cycle, today: string): number {
 
 // 창의 전체 길이(일). 번다운의 이상선이 이 길이를 따라 스코프에서 0 까지 내려간다.
 export function cycleLengthDays(cycle: Cycle): number {
-  const ms = Date.parse(`${cycle.endsAt}T00:00:00.000Z`) - Date.parse(`${cycle.startsAt}T00:00:00.000Z`)
+  const ms =
+    Date.parse(`${cycle.endsAt}T00:00:00.000Z`) - Date.parse(`${cycle.startsAt}T00:00:00.000Z`)
   return Math.round(ms / 86_400_000) + 1
 }
 
-// 사이클의 주소는 팀 아래에 있고, 슬러그는 번호다 — `/{ws}/teams/ENG/cycles/7`. "Cycle 7"은 그 팀의 일곱
-// 번째라는 뜻이므로, 팀 키가 빠진 주소는 누구의 일곱 번째인지 말하지 못한다. 링크를 만드는 곳은 전부 여기를
-// 거친다(팀 슬러그가 같은 규칙을 따르는 것과 같은 이유).
+// A cycle's address lives under its team and its slug is the number — `/{ws}/team/ENG/cycle/7`. "Cycle 7" means
+// that team's seventh, so an address without the team key cannot say whose seventh it is. Singular, because it
+// addresses ONE cycle: the team's `…/cycles` is the collection and answers a different question.
 export function cycleHref(workspace: string, teamKey: string, number: number): string {
-  return `${teamSectionHref(workspace, teamKey, 'cycles')}/${number}`
+  return `${teamHref(workspace, teamKey)}/cycle/${number}`
 }
 
 // 팀의 전체 사이클 목록 — 랜딩은 활성 사이클이므로, "전부 보기"는 자기 주소를 따로 갖는다.

@@ -14,11 +14,13 @@ export {
 } from './model/schema'
 export {
   matchTeamPath,
+  TEAM_EVAL_SECTIONS,
   TEAM_SECTIONS,
   teamHref,
   teamNewHref,
   teamSectionHref,
   teamSettingsHref,
+  type TeamEvalSection,
   type TeamPathScope,
   type TeamSection,
 } from './lib/href'

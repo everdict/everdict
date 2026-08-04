@@ -152,7 +152,7 @@ export async function ProjectListView({
             return (
               <Link
                 key={p.id}
-                href={`/${workspace}/projects/${encodeURIComponent(p.id)}`}
+                href={`/${workspace}/project/${encodeURIComponent(p.id)}`}
                 className="group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
                 <div className="min-w-0 flex-1">

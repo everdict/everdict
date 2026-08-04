@@ -39,6 +39,15 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
   action). Slug-less entry points (`onboarding`/`new-workspace`/`invite`) stay top-level, never under `[workspace]`;
   keep their slugs reserved. Shared URL↔cookie↔header constants live in `shared/auth/workspace-scope.ts`
   (non-`server-only`, importable from middleware).
+- **A collection is PLURAL, one thing is SINGULAR** (Linear's spelling): `/{ws}/scorecards` is the list,
+  `/{ws}/scorecard/{id}` is one — and the collection's own named screens keep the plural (`…/scorecards/new`).
+  `/teams` is the directory; one team is `/{ws}/team/ENG/…`. Moved addresses redirect via `next.config.ts`
+  `DETAIL_MOVES`. An issue's title rides as a decorative trailing slug that nothing reads.
+- **A list's FILTERS live in the URL; its DISPLAY lives with the reader.** Which issues (status/priority/label/…)
+  is a query parameter, so a pasted link opens the same set for everyone. How they are drawn (grouping, ordering,
+  layout, show-completed, sub-issues) is NEVER in the URL — a link must not rearrange the recipient's screen — and
+  is stored per view in the `everdict-issue-display` cookie (`entities/issue/model/display.ts`, written by the
+  `setIssueDisplay` action). Cookie rather than localStorage because the list is a server component.
 - **Styling**: Tailwind v4 tokens in `globals.css` `@theme inline` (**Linear-style**: indigo `#5e6ad2` primary,
   tight radius `0.5rem`, near-black `#08090a` dark surface, thin low-alpha borders, top indigo glow + subtle
   grain overlay); `cn()` from `shared/lib/utils`. shadcn new-york conventions. Light **and** dark themes via the

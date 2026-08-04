@@ -135,7 +135,7 @@ export function ActivityConsole({ workspace }: { workspace: string }) {
                         {tr('batchGroup')}
                       </span>
                       <Link
-                        href={`/${workspace}/scorecards/${block.batch.id}`}
+                        href={`/${workspace}/scorecard/${block.batch.id}`}
                         onClick={(e) => e.stopPropagation()}
                         className="font-mono text-[12px] text-link transition-colors hover:text-foreground"
                       >

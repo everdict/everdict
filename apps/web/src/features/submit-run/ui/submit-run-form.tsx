@@ -78,7 +78,7 @@ export function SubmitRunForm({
       ...values,
       ...(Number.isFinite(mins) && mins > 0 ? { timeoutSec: mins * 60 } : {}),
     })
-    if (res.ok && res.id) router.push(`/${workspace}/runs/${res.id}`)
+    if (res.ok && res.id) router.push(`/${workspace}/run/${res.id}`)
     else setServerError(res.error ?? t('submitError'))
   }
 

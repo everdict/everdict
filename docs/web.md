@@ -185,14 +185,19 @@ panel/list guidance is not.
   the live probe (`POST /runtimes/probe`) to confirm the cluster actually responds before committing. The scorecard
   run form gains a runtime selector. See `docs/runtimes.md`.
 - **Sidebar teams section** (`widgets/app-shell` `TeamsNav`) — Linear's "Your teams": the teams the signed-in
-  member belongs to, each expanding to what that team owns under its own path (`/{workspace}/teams/ENG/issues`,
-  `…/triage` when the team turned one on, `…/cycles`, `…/projects`, `…/scorecards`). There is no "Home" row: the
-  team's short address (`/{workspace}/teams/ENG`) IS its issue list — same component, canonical `…/issues` twin —
+  member belongs to, each expanding to what that team owns under its own path (`/{workspace}/team/ENG/issues`,
+  `…/triage` when the team turned one on, `…/cycles`, `…/projects`) plus an **Evaluation** disclosure holding what
+  the team evaluates with — `…/scorecards`, `…/harnesses`, `…/datasets`, `…/judges` (`TEAM_EVAL_SECTIONS`; those four
+  all carry a registry `team_id`, so the team is where they live, and the workspace-wide lists stay as the other
+  address onto the same collection). It is a disclosure for the same reason `Workspace › More` is one: eight flat rows
+  per team turn the group into a wall in front of the issues. It auto-expands on any of its own pages and remembers
+  the toggle PER TEAM. There is no "Home" row: the
+  team's short address (`/{workspace}/team/ENG`) IS its issue list — same component, canonical `…/issues` twin —
   so `matchTeamPath` reads the bare path as `issues` and one destination never gets two nav rows. The active row is decided by the
   PATH alone now — the group used to read `?team=` off the query string, which meant two different judgements for
-  "which team am I looking at". Hidden entirely while the workspace has
-  fewer than two teams — a group with no choice in it is decoration, and the tracker's own "Issues" entry is already
-  that destination. The list is fetched once in `[workspace]/layout.tsx` and threaded through `ShellSwitch` → `AppShell`
+  "which team am I looking at". A single-team workspace still shows the group (expanded — there is nothing to choose
+  between): hiding it hid the fact that issues belong to a team at all, and the key is already baked into `ENG-12`.
+  The list is fetched once in `[workspace]/layout.tsx` and threaded through `ShellSwitch` → `AppShell`
   → `Sidebar`; a failed read degrades to no section rather than breaking the shell. The issue list carries the matching
   key chips and the create dialog a team picker (both appear only past two teams), and every issue reads as `ENG-12` —
   the identifier is stored on the record, so neither surface re-reads the team to render it.

@@ -37,7 +37,7 @@ export function HarnessDiffPicker({
   function compare() {
     if (b && c)
       router.push(
-        `/${workspace}/harnesses/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
+        `/${workspace}/harness/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
       )
   }
 

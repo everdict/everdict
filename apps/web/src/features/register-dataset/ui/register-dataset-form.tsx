@@ -138,7 +138,7 @@ export function RegisterDatasetForm({
     setBusy(false)
     if (res.ok) {
       // When publishing a new version (prefill entry), return to that dataset's detail — the just-published version is now latest.
-      if (lockId) router.push(`/${workspace}/datasets/${encodeURIComponent(id)}`)
+      if (lockId) router.push(`/${workspace}/dataset/${encodeURIComponent(id)}`)
       else router.push(`/${workspace}/datasets`)
     } else setCreateError(res.error ?? t('createError'))
   }

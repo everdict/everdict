@@ -84,7 +84,7 @@ export function RawRowsTable({
                   <TR key={sc.id}>
                     <TD className="whitespace-nowrap text-muted-foreground">
                       <Link
-                        href={`/${workspace}/scorecards/${sc.id}`}
+                        href={`/${workspace}/scorecard/${sc.id}`}
                         className="hover:text-foreground hover:underline"
                       >
                         {fmtDateTime(sc.createdAt)}

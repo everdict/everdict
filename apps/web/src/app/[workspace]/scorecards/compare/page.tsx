@@ -42,7 +42,7 @@ function SideRef({
     <span className="inline-flex items-center gap-1.5">
       <span className="text-[11px] uppercase tracking-wide text-faint">{label}</span>
       <Link
-        href={`/${workspace}/scorecards/${encodeURIComponent(id)}`}
+        href={`/${workspace}/scorecard/${encodeURIComponent(id)}`}
         className="font-mono text-[12px] font-[510] text-link transition-colors hover:text-foreground"
         title={id}
       >

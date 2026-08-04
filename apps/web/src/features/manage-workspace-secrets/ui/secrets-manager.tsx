@@ -56,11 +56,11 @@ function usageHref(ref: SecretUsageMetaRef, workspace: string): string | undefin
   switch (ref.kind) {
     case 'harness':
       return ref.resourceId
-        ? `/${workspace}/harnesses/${encodeURIComponent(ref.resourceId)}`
+        ? `/${workspace}/harness/${encodeURIComponent(ref.resourceId)}`
         : undefined
     case 'runtime':
       return ref.resourceId
-        ? `/${workspace}/runtimes/${encodeURIComponent(ref.resourceId)}`
+        ? `/${workspace}/runtime/${encodeURIComponent(ref.resourceId)}`
         : undefined
     case 'model':
       return `/${workspace}/settings/models`

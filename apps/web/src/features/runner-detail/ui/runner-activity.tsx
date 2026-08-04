@@ -83,7 +83,7 @@ export function RunnerActivity({ runnerId, workspace }: { runnerId: string; work
           {runs.map((r) => (
             <Link
               key={r.id}
-              href={`/${workspace}/runs/${encodeURIComponent(r.id)}`}
+              href={`/${workspace}/run/${encodeURIComponent(r.id)}`}
               className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-elevated"
             >
               <Cpu className="size-3.5 shrink-0 text-faint" />

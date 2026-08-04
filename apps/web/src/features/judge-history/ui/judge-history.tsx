@@ -49,7 +49,7 @@ export function JudgeHistory({
         return (
           <Link
             key={s.id}
-            href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
+            href={`/${workspace}/scorecard/${encodeURIComponent(s.id)}`}
             className="group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
           >
             {/* 데이터셋 · 하네스 — 우선 폭(내용 폭 유지). flex-basis 0 이라 여백을 흡수하고, 극단적으로 긴 id 에서만 truncate. */}

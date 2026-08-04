@@ -1,0 +1,317 @@
+import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import { ChevronLeft, GitCompare } from 'lucide-react'
+import { getTimeZone, getTranslations } from 'next-intl/server'
+
+import { MentionInChatButton, OpenConversationButton } from '@/widgets/infra-panel'
+import { CapabilityLineage, loadLinkedIssues } from '@/features/capability-lineage'
+import { DeleteJudgeButton } from '@/features/delete-judge'
+import { JudgeHistory, type JudgeHistoryEntry } from '@/features/judge-history'
+import { pickOrigin } from '@/entities/capability-origin'
+import {
+  isRubricRef,
+  judgeModelLabel,
+  judgeSpecSchema,
+  judgesSchema,
+  type JudgeSpec,
+} from '@/entities/judge'
+import { membersSchema } from '@/entities/member'
+import { scorecardsSchema } from '@/entities/scorecard'
+import { can } from '@/shared/auth/can'
+import { currentPrincipal } from '@/shared/auth/principal'
+import { controlPlane } from '@/shared/lib/control-plane'
+import { fmtSubject } from '@/shared/lib/format'
+import { sortSemverDesc } from '@/shared/lib/semver'
+import { Badge } from '@/shared/ui/badge'
+import { buttonVariants } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
+import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
+import { CodeEditor } from '@/shared/ui/code-editor'
+import { PageHeader } from '@/shared/ui/page-header'
+import { SectionHeader } from '@/shared/ui/section-header'
+
+export const dynamic = 'force-dynamic'
+
+function BackLink({ workspace, label }: { workspace: string; label: string }) {
+  return (
+    <Link
+      href={`/${workspace}/judges`}
+      className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <ChevronLeft className="size-3.5" />
+      {label}
+    </Link>
+  )
+}
+
+// Judge detail — meta strip (kind/ownership/version + kind-specific facts) + rubric section.
+// judge.rubric has two shapes: inline text (rendered verbatim) or a registered-rubric reference (rendered as a link).
+export default async function JudgeDetailPage({
+  params,
+}: {
+  params: Promise<{ workspace: string; id: string }>
+}) {
+  const { workspace, id } = await params
+  const t = await getTranslations('judgesPage')
+  const timeZone = await getTimeZone()
+  const { principal, ctx } = await currentPrincipal()
+
+  // Summary (owner/versions) from the list — back to the list if the judge doesn't exist or the connection fails.
+  let summary
+  try {
+    summary = judgesSchema.parse(await controlPlane.listJudges(ctx)).find((j) => j.id === id)
+  } catch {
+    summary = undefined
+  }
+  if (!summary) redirect(`/${workspace}/judges`)
+
+  const versions = sortSemverDesc(summary.versions)
+  const latest = versions[0] ?? summary.versions[0] ?? 'latest'
+
+  // Delete (versions / whole judge) — admin only (the creator exception is server-side) + workspace-owned
+  // (_shared/first-party delete 404s at the control plane, so the affordance is hidden for them).
+  const currentWorkspace = principal?.workspace ?? workspace
+  const canDeleteJudge =
+    can(principal?.roles, 'judges:delete') && summary.owner === currentWorkspace
+
+  let judge: JudgeSpec | undefined
+  let error: string | undefined
+  try {
+    judge = judgeSpecSchema.parse(await controlPlane.getJudge(ctx, id, latest))
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e)
+  }
+
+  // Evaluation history — batches that applied this judge (server-side ?judge= narrowing; the list is
+  // lightweight). Supplementary: the detail still renders when it fails. Members resolve runner avatars.
+  const history = await controlPlane
+    .listScorecards(ctx, { judge: id })
+    .then((r) => scorecardsSchema.parse(r))
+    .then((list) => [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    .catch(() => [])
+  // 이 저지를 지켜보는 이슈들 + 태어난 자리 — 상세가 "왜 이게 있나"를 답하는 근거. 보조 정보라
+  // 실패해도 상세는 그대로 그린다.
+  const linkedIssues = await loadLinkedIssues(ctx, 'judge', id)
+  const origin = pickOrigin(summary.versionOrigins, latest, summary.versions)
+  const members =
+    history.length > 0 || summary.createdBy !== undefined
+      ? await controlPlane
+          .listMembers(ctx)
+          .then((r) => membersSchema.parse(r))
+          .catch(() => [])
+      : []
+  const resolveRunner = (subject?: string) => {
+    if (!subject) return undefined
+    const m = members.find((x) => x.subject === subject)
+    return {
+      name: m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(subject),
+      ...(m?.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+    }
+  }
+  // Shape each batch into a serializable row for the client history island — narrow the summary to THIS
+  // judge's metrics (overall + criteria) up front so the chips stay compact and the client stays dumb.
+  const historyEntries: JudgeHistoryEntry[] = history.map((s) => {
+    const runner = resolveRunner(s.createdBy)
+    return {
+      id: s.id,
+      dataset: s.dataset,
+      harness: s.harness,
+      metrics: (s.summary ?? [])
+        .filter((m) => m.metric === `judge:${id}` || m.metric.startsWith(`judge:${id}:`))
+        .map((m) => ({
+          metric: m.metric,
+          mean: m.mean,
+          ...(m.passRate != null ? { passRate: m.passRate } : {}),
+        })),
+      ...(runner ? { runner } : {}),
+      createdAt: s.createdAt,
+      status: s.status,
+    }
+  })
+
+  if (!judge) {
+    return (
+      <div className="space-y-5">
+        <BackLink workspace={workspace} label={t('title')} />
+        <PageHeader title={id} />
+        <Callout tone="danger">{t('loadError', { detail: error ? `: ${error}` : '' })}</Callout>
+      </div>
+    )
+  }
+
+  const rubric = judge.rubric
+
+  return (
+    <div className="space-y-7">
+      <div className="space-y-3">
+        <BackLink workspace={workspace} label={t('title')} />
+        <PageHeader
+          title={judge.id}
+          description={judge.description}
+          actions={
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <MentionInChatButton
+                reference={{
+                  type: 'judge',
+                  id: judge.id,
+                  version: judge.version,
+                  label: judge.id,
+                }}
+                mission="judgeEdit"
+              />
+              {versions.length > 1 && (
+                <Link
+                  href={`/${workspace}/judge/${encodeURIComponent(judge.id)}/diff`}
+                  className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                >
+                  <GitCompare className="size-3.5" />
+                  {t('compareVersions')}
+                </Link>
+              )}
+              {canDeleteJudge && (
+                <DeleteJudgeButton
+                  id={judge.id}
+                  versions={[...versions].reverse()}
+                  latest={latest}
+                  workspace={workspace}
+                  versionTags={summary.versionTags ?? {}}
+                />
+              )}
+            </div>
+          }
+        />
+        {/* Meta strip — kind · ownership · version · kind-specific facts. Absent facts are simply not rendered. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone="info">{judge.kind}</Badge>
+          <Badge tone={summary.owner === '_shared' ? 'neutral' : 'success'}>
+            {summary.owner === '_shared' ? t('sharedBadge') : t('workspaceBadge')}
+          </Badge>
+          <span className="font-mono text-[12px] text-faint">
+            {t('latestVersion', { version: judge.version })}
+          </span>
+          {judge.kind === 'model' && judge.model && (
+            <ModelChip>{judgeModelLabel(judge.model)}</ModelChip>
+          )}
+          {judge.kind === 'model' && judge.provider && (
+            <code className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+              {judge.provider}
+            </code>
+          )}
+          {judge.kind === 'model' && (judge.inputs?.length ?? 0) > 0 && (
+            <code className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+              {judge.inputs?.join(', ')}
+            </code>
+          )}
+          {judge.kind === 'model' && judge.passThreshold !== undefined && (
+            <code className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+              {t('passThresholdChip', { value: judge.passThreshold })}
+            </code>
+          )}
+          {judge.kind === 'harness' && judge.harness && (
+            <span className="text-[12px] text-muted-foreground">
+              <EntityRef id={judge.harness.id} version={judge.harness.version} kind="harness" />
+            </span>
+          )}
+          {judge.kind === 'code' && judge.language && (
+            <code className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+              {judge.language}
+            </code>
+          )}
+          {judge.kind === 'code' && judge.model && (
+            <ModelChip>{judgeModelLabel(judge.model)}</ModelChip>
+          )}
+          {judge.kind === 'code' && judge.runtime && <RuntimeChip label={judge.runtime} />}
+          {judge.kind === 'harness' && judge.runtime && <RuntimeChip label={judge.runtime} />}
+        </div>
+      </div>
+
+      {/* 리니지 — 이 저지가 어디서 태어났고 어떤 이슈들이 그것을 지켜보는지. 그릴 게 없으면 섹션이 없다. */}
+      <CapabilityLineage
+        workspace={workspace}
+        {...(origin ? { origin } : {})}
+        issues={linkedIssues}
+        {...(summary.createdBy ? { createdByLabel: resolveRunner(summary.createdBy)?.name } : {})}
+        {...(summary.createdAt ? { createdAt: summary.createdAt } : {})}
+        timeZone={timeZone}
+        {...(origin?.conversationId
+          ? { conversationAction: <OpenConversationButton sessionId={origin.conversationId} /> }
+          : {})}
+      />
+
+      {/* Code judge — the code IS the judging logic; show it in the same highlighted editor the wizard uses,
+          read-only (entrypoint-in-image judges have no code to show, so they keep the plain path line). */}
+      {judge.kind === 'code' && (judge.code ?? judge.entrypoint) && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('codeSection')} />
+          {judge.code ? (
+            <CodeEditor
+              value={judge.code}
+              language={judge.language === 'node' ? 'node' : 'python'}
+              readOnly
+              minHeight="120px"
+              maxHeight="480px"
+              aria-label={t('codeSection')}
+            />
+          ) : (
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-4 py-3 font-mono text-[12px] leading-relaxed text-muted-foreground">
+              {`${judge.image ?? '(agent image)'} → ${judge.entrypoint}`}
+            </pre>
+          )}
+        </section>
+      )}
+
+      {rubric !== undefined && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('rubricSection')} />
+          {isRubricRef(rubric) ? (
+            // Registered rubric — link to the rubric's own detail instead of freezing/inlining its text here.
+            <Link
+              href={`/${workspace}/rubric/${encodeURIComponent(rubric.id)}`}
+              className="inline-flex items-center gap-2 rounded-lg border bg-card px-3.5 py-2.5 text-[13px] shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+            >
+              <EntityRef id={rubric.id} version={rubric.version} />
+              <span className="text-[11px] text-faint">{t('rubricRefBadge')}</span>
+            </Link>
+          ) : (
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-4 py-3 font-mono text-[12px] leading-relaxed text-muted-foreground">
+              {rubric}
+            </pre>
+          )}
+        </section>
+      )}
+
+      {versions.length > 0 && (
+        <section className="space-y-2.5">
+          <SectionHeader title={t('versions')} />
+          <div className="flex flex-wrap gap-1.5">
+            {versions.map((v) => (
+              <code
+                key={v}
+                className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground"
+              >
+                {v}
+              </code>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Evaluation history — the batches this judge scored, newest first (empty → the section is hidden,
+          detail-view convention). Paginated 10-at-a-time in a client island; the chips are THIS judge's
+          metrics, rendered compact so dataset/harness keep priority width. */}
+      {historyEntries.length > 0 && (
+        <section className="space-y-2.5">
+          <SectionHeader
+            title={t('evaluationHistory')}
+            action={
+              <span className="text-[12px] tabular-nums text-faint">
+                {t('evaluationHistoryCount', { count: historyEntries.length })}
+              </span>
+            }
+          />
+          <JudgeHistory workspace={workspace} entries={historyEntries} timeZone={timeZone} />
+        </section>
+      )}
+    </div>
+  )
+}

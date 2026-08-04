@@ -37,7 +37,7 @@ export function JudgeDiffPicker({
   function compare() {
     if (b && c)
       router.push(
-        `/${workspace}/judges/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
+        `/${workspace}/judge/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
       )
   }
 

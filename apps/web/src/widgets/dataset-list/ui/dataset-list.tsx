@@ -195,7 +195,7 @@ export function DatasetList({
             return (
               <Link
                 key={d.id}
-                href={`/${workspace}/datasets/${encodeURIComponent(d.id)}`}
+                href={`/${workspace}/dataset/${encodeURIComponent(d.id)}`}
                 className="group block rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
                 <div className="flex items-start justify-between gap-3">

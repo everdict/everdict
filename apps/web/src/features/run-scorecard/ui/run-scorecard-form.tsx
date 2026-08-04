@@ -133,7 +133,7 @@ export function RunScorecardForm({
       ...(Number.isFinite(tn) && tn > 1 ? { trials: tn } : {}),
       ...(Object.keys(cases).length > 0 ? { cases } : {}),
     })
-    if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
+    if (res.ok && res.id) router.push(`/${workspace}/scorecard/${res.id}`)
     else setServerError(res.error ?? t('submitError'))
   }
 

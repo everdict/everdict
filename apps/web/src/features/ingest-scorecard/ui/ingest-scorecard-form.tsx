@@ -81,7 +81,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
             runsJson,
           })
     setBusy(false)
-    if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
+    if (res.ok && res.id) router.push(`/${workspace}/scorecard/${res.id}`)
     else setServerError(res.error ?? t('submitError'))
   }
 

@@ -92,8 +92,9 @@ type InfraPanelValue = {
   openSchedule: (id: string) => void
   frameRequest: FrameRequest | null
   // Open the agent chat and drop an entity reference into the composer (from an entity detail page). `mission`
-  // frames the chat for a domain-specific task (e.g. editing a skill) instead of the generic analysis copy.
-  mentionInChat: (ref: AgentReference, mission?: AgentChatMission) => void
+  // frames the chat for a domain-specific task (e.g. editing a skill) instead of the generic analysis copy;
+  // `fresh` starts that framing in a new conversation the way an edit mission does.
+  mentionInChat: (ref: AgentReference, mission?: AgentChatMission, fresh?: boolean) => void
   // Open the agent chat with a draft prompt pre-typed (and optionally an entity referenced) — nothing auto-sends.
   // A mission (studio/edit entry) rides along to frame the chat exactly like mentionInChat's; `fresh` marks a
   // creation entry that must start its own conversation.
@@ -207,11 +208,14 @@ export function InfraPanelProvider({
     })()
   }, [open])
 
-  // Close with Esc.
+  // Close with Esc — but only as the LAST rung of the ladder. Esc is overloaded inside the panel (the chat
+  // composer cancels a running turn, then clears the draft; a picker backs out of itself), and whoever consumed
+  // it already said so by calling preventDefault. Closing the whole panel on top of that loses the member's
+  // draft for a keypress they aimed at something else.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape' && !e.defaultPrevented) setOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -242,8 +246,10 @@ export function InfraPanelProvider({
     setOpen(true)
   }, [])
 
+  // The tab is the COLLECTION these belong to (`/runs`, `/runtimes` — the home each stack falls back to); the
+  // path opened inside it addresses one thing, and so is singular.
   const openRun = useCallback(
-    (id: string) => request('runs', `/runs/${encodeURIComponent(id)}`),
+    (id: string) => request('runs', `/run/${encodeURIComponent(id)}`),
     [request]
   )
 
@@ -252,8 +258,8 @@ export function InfraPanelProvider({
       request(
         'runtimes',
         kind === 'runner'
-          ? `/runtimes/self/${encodeURIComponent(id)}`
-          : `/runtimes/${encodeURIComponent(id)}`
+          ? `/runtime/self/${encodeURIComponent(id)}`
+          : `/runtime/${encodeURIComponent(id)}`
       ),
     [request]
   )
@@ -262,12 +268,16 @@ export function InfraPanelProvider({
   const openSchedule = useCallback((_id: string) => request('schedules', '/schedules'), [request])
 
   // Reveal the agent chat with this entity pre-mentioned. Buffer the reference (the panel consumes it on mount)
-  // and open on the 'agent' tab. A mission (전용 진입) rides along so the panel can frame the task.
-  const mentionInChat = useCallback((ref: AgentReference, mission?: AgentChatMission) => {
-    setPendingMention({ ref, ...(mission ? { mission } : {}) })
-    setTab('agent')
-    setOpen(true)
-  }, [])
+  // and open on the 'agent' tab. A mission (전용 진입) rides along so the panel can frame the task, and `fresh`
+  // asks for that framing in a new conversation (an entry whose subject is ONE record, not the open thread's).
+  const mentionInChat = useCallback(
+    (ref: AgentReference, mission?: AgentChatMission, fresh?: boolean) => {
+      setPendingMention({ ref, ...(mission ? { mission } : {}), ...(fresh ? { fresh } : {}) })
+      setTab('agent')
+      setOpen(true)
+    },
+    []
+  )
 
   // Reveal the agent chat with a draft prompt pre-typed (and optionally an entity referenced) — the "ask the
   // agent to do X with this" entry (e.g. edit a skill from its detail page). The member still presses send.
@@ -391,20 +401,21 @@ export function useInfraPanelOptional(): InfraPanelValue | null {
 // observability trace browser (which mentions a trace by (source, id)).
 export function useMentionInChat(): (
   reference: AgentReference,
-  mission?: AgentChatMission
+  mission?: AgentChatMission,
+  fresh?: boolean
 ) => void {
   const infra = useInfraPanelOptional()
   return useCallback(
-    (reference: AgentReference, mission?: AgentChatMission) => {
+    (reference: AgentReference, mission?: AgentChatMission, fresh?: boolean) => {
       const framed = typeof window !== 'undefined' && window.self !== window.top
       if (framed) {
         window.parent.postMessage(
-          { type: MENTION_IN_CHAT_MESSAGE, reference, mission },
+          { type: MENTION_IN_CHAT_MESSAGE, reference, mission, fresh },
           window.location.origin
         )
         return
       }
-      infra?.mentionInChat(reference, mission)
+      infra?.mentionInChat(reference, mission, fresh)
     },
     [infra]
   )

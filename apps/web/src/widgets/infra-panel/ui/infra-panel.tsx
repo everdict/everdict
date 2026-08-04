@@ -236,7 +236,11 @@ export function InfraPanel({
             data.fresh === true
           )
         else if (parsed.success)
-          mentionInChat(parsed.data, mission.success ? mission.data : undefined)
+          mentionInChat(
+            parsed.data,
+            mission.success ? mission.data : undefined,
+            data.fresh === true
+          )
         return
       }
       // A comment thread's agent answer asked to open its backing discussion session (features/discuss posts

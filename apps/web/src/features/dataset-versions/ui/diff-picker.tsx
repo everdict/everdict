@@ -32,7 +32,7 @@ export function DiffPicker({
   function compare() {
     if (b && c)
       router.push(
-        `/${workspace}/datasets/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
+        `/${workspace}/dataset/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
       )
   }
 

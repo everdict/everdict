@@ -443,7 +443,7 @@ export function ScorecardList({
                   // Fixed-format card — 3 lines (dataset/harness/aggregate), no arrow·inline name. Status is a color icon only.
                   <Link
                     key={s.id}
-                    href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
+                    href={`/${workspace}/scorecard/${encodeURIComponent(s.id)}`}
                     style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
                     onClick={(e) => {
                       // Selection mode: a card click toggles (no-op on a non-deletable row) instead of navigating —

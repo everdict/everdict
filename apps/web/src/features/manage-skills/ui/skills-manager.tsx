@@ -175,7 +175,7 @@ export function SkillsManager({
                   key={skill.id}
                   skill={skill}
                   author={authorOf(skill.createdBy)}
-                  href={`/${workspace}/skills/${encodeURIComponent(skill.id)}`}
+                  href={`/${workspace}/skill/${encodeURIComponent(skill.id)}`}
                   canManage={canManage(skill)}
                   pending={pending}
                   onShare={share}

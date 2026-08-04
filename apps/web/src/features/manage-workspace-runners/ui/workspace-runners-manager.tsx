@@ -146,7 +146,7 @@ export function WorkspaceRunnersManager({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <Link
-                      href={`/${workspace}/runtimes/self/${encodeURIComponent(r.id)}`}
+                      href={`/${workspace}/runtime/self/${encodeURIComponent(r.id)}`}
                       className="truncate text-[13px] font-[510] text-foreground transition-colors hover:text-link hover:underline"
                     >
                       {r.label}

@@ -1,22 +1,11 @@
-import Link from 'next/link'
-import { Boxes } from 'lucide-react'
-import { getTranslations } from 'next-intl/server'
+import { HarnessListView } from '@/widgets/harness-list'
 
-import { HarnessList } from '@/widgets/harness-list'
-import { harnessesSchema } from '@/entities/harness'
-import { membersSchema } from '@/entities/member'
-import { scorecardsSchema } from '@/entities/scorecard'
-import { can } from '@/shared/auth/can'
-import { currentPrincipal } from '@/shared/auth/principal'
-import { controlPlane } from '@/shared/lib/control-plane'
-import { buildHarnessRelations } from '@/shared/lib/harness-relations'
-import { buttonVariants } from '@/shared/ui/button'
-import { Callout } from '@/shared/ui/callout'
-import { EmptyState } from '@/shared/ui/empty-state'
-import { PageHeader } from '@/shared/ui/page-header'
+import { redirectLegacyTeamScope } from '../team-scope'
 
 export const dynamic = 'force-dynamic'
 
+// 워크스페이스 전체의 하네스. 한 팀이 소유한 것만 보려면 팀 아래의 주소를 쓴다
+// (`/{workspace}/teams/ENG/harnesses`) — `?team=` 이 붙은 예전 링크는 그리로 넘긴다.
 export default async function HarnessesPage({
   params,
   searchParams,
@@ -25,76 +14,7 @@ export default async function HarnessesPage({
   searchParams: Promise<{ team?: string }>
 }) {
   const { workspace } = await params
-  // 팀 스코프 — 사이드바의 팀 하위 항목이 이 파라미터로 들어온다.
-  const { team } = await searchParams
-  const { principal, ctx } = await currentPrincipal()
-  const t = await getTranslations('harnessesPage')
-
-  let error: string | undefined
-  let harnesses = harnessesSchema.parse([])
-  try {
-    harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx, team))
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e)
-  }
-
-  // Run benchmarks (derived from scorecards) + registrant (members join) are supplementary info — the list shows up even if it fails.
-  const scorecards = await controlPlane
-    .listScorecards(ctx)
-    .then((r) => scorecardsSchema.parse(r))
-    .catch(() => [])
-  const members = await controlPlane
-    .listMembers(ctx)
-    .then((r) => membersSchema.parse(r))
-    .catch(() => [])
-
-  const relations = buildHarnessRelations(scorecards)
-  const authors: Record<string, { name: string; avatarUrl?: string }> = {}
-  for (const m of members)
-    authors[m.subject] = {
-      name: m.name ?? m.email?.split('@')[0] ?? m.subject,
-      ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
-    }
-
-  const currentWorkspace = principal?.workspace ?? workspace
-  // Only expose harnesses registered by this workspace — shared (first-party) harnesses are excluded from the list.
-  const ownHarnesses = harnesses.filter((h) => h.owner === currentWorkspace)
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title={t('title')}
-        description={t('description')}
-        actions={
-          <div className="flex items-center gap-3">
-            {/* 형상 카탈로그로 — "무엇으로 평가하는가"(여기)와 "어떤 형상이 있는가"는 다른 질문이다. */}
-            <Link
-              href={`/${workspace}/harness-templates`}
-              className="text-[12px] font-[510] text-link transition-colors hover:text-foreground"
-            >
-              {t('shapesLink')}
-            </Link>
-            {can(principal?.roles, 'harnesses:register') ? (
-              <Link href={`/${workspace}/harnesses/new`} className={buttonVariants({ size: 'sm' })}>
-                {t('register')}
-              </Link>
-            ) : null}
-          </div>
-        }
-      />
-      {error ? (
-        <Callout tone="danger">{t('connectError', { error })}</Callout>
-      ) : ownHarnesses.length === 0 ? (
-        <EmptyState icon={<Boxes />} title={t('emptyTitle')} hint={t('emptyHint')} />
-      ) : (
-        <HarnessList
-          workspace={workspace}
-          harnesses={ownHarnesses}
-          relations={relations}
-          authors={authors}
-          canDelete={can(principal?.roles, 'harnesses:delete')}
-        />
-      )}
-    </div>
-  )
+  const search = await searchParams
+  await redirectLegacyTeamScope({ workspace, section: 'harnesses', search })
+  return <HarnessListView workspace={workspace} />
 }

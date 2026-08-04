@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { teamHref, teamSectionHref } from '@/entities/team'
+import { TEAM_SECTIONS, teamHref, teamSectionHref } from '@/entities/team'
 
 import { ALL_SIDEBAR_ROWS, isNavItemActive } from './nav-config'
 
@@ -23,14 +23,34 @@ describe('sidebar active state — at most one row owns a path', () => {
     expect(activeRows('/acme/store/mine')).toEqual(['store'])
   })
 
+  // Regression: the nav points at a COLLECTION (`/scorecards`) while one of them lives at the SINGULAR address
+  // (`/scorecard/{id}`). A plain prefix test therefore lit no row at all on a detail page — the row went dark
+  // exactly when the reader had drilled into it.
+  it('keeps the collection’s row lit when you open ONE of them', () => {
+    expect(activeRows('/acme/project/p1')).toEqual(['projects'])
+    expect(activeRows('/acme/initiative/i1')).toEqual(['initiatives'])
+    expect(activeRows('/acme/view/v1')).toEqual(['views'])
+    expect(activeRows('/acme/skill/s1')).toEqual(['skills'])
+    // …and still through the decorative title slug an issue link carries.
+    expect(
+      isNavItemActive({ href: '/issues' }, '/acme/issue/ENG-12/the-judge-drops-cost-scores', 'acme')
+    ).toBe(true)
+    // A resource with NO workspace-wide row (its home is the team's Evaluation group, and the all-issues list is
+    // palette-only) still lights nothing — a detail address must not invent an owner the collection never had.
+    expect(activeRows('/acme/scorecard/sc-1')).toEqual([])
+    expect(activeRows('/acme/issue/ENG-12')).toEqual([])
+  })
+
   // 회귀: `/teams` 행이 접두사만 보고 팀 하위 페이지를 자기 것이라 주장해, 팀의 자기 행과 함께 두 개가 켜졌다.
   // 팀 스코프 경로의 주인은 사이드바의 팀 그룹이며, 워크스페이스 나브의 어떤 행도 그 경로를 갖지 않는다.
   it('hands every team-scoped path to the team group, claiming none of it', () => {
     expect(activeRows(teamHref('acme', 'ENG'))).toEqual([])
-    for (const section of ['issues', 'triage', 'cycles', 'projects', 'scorecards'] as const) {
+    // 섹션 목록 자체를 읽어 온다 — 팀이 소유하는 자원이 늘어나도(하네스·데이터셋·저지) 이 불변식이 같이 늘어난다.
+    for (const section of TEAM_SECTIONS) {
       expect(activeRows(teamSectionHref('acme', 'ENG', section))).toEqual([])
     }
-    expect(activeRows('/acme/teams/ENG/issues/ENG-12')).toEqual([])
+    // 상세 화면도 그 섹션의 것이다. 주소는 빌더로 만든다 — 팀 세그먼트 철자가 바뀌어도 이 진술은 살아남는다.
+    expect(activeRows(`${teamSectionHref('acme', 'ENG', 'issues')}/ENG-12`)).toEqual([])
   })
 
   it('scopes the answer to the workspace in the URL', () => {

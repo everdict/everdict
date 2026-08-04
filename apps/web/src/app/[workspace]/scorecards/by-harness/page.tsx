@@ -110,7 +110,7 @@ export default async function ByHarnessPage({
                       <TR key={s.id}>
                         <TD>
                           <Link
-                            href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
+                            href={`/${workspace}/scorecard/${encodeURIComponent(s.id)}`}
                             className="font-mono text-[12px] font-[510] text-link transition-colors hover:text-foreground"
                           >
                             @{s.harness.version}

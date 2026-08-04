@@ -247,7 +247,7 @@ export default async function TrendPage({
                       </TD>
                       <TD>
                         <Link
-                          href={`/${workspace}/scorecards/${p.scorecardId}`}
+                          href={`/${workspace}/scorecard/${p.scorecardId}`}
                           className="font-[510] text-link transition-colors hover:text-foreground"
                         >
                           <EntityRef id={p.harness} kind="harness" />

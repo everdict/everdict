@@ -42,7 +42,7 @@ export function ImportTerminalBenchForm() {
       tasksJson,
     })
     setBusy(false)
-    if (res.ok && res.id) router.push(`/${workspace}/datasets/${res.id}`)
+    if (res.ok && res.id) router.push(`/${workspace}/dataset/${res.id}`)
     else setServerError(res.error ?? t('tbSubmitError'))
   }
 

@@ -31,7 +31,7 @@ export function HarnessVersionSwitcher({
       aria-label={t('versionsAria', { count: versions.length })}
       value={current}
       onChange={(v) =>
-        router.push(`/${workspace}/harnesses/${encodeURIComponent(id)}?v=${encodeURIComponent(v)}`)
+        router.push(`/${workspace}/harness/${encodeURIComponent(id)}?v=${encodeURIComponent(v)}`)
       }
       options={[...versions].reverse().map((v) => {
         const tags = versionTags?.[v]

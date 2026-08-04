@@ -101,7 +101,7 @@ describe('cycleLengthDays', () => {
 
 describe('cycle addresses', () => {
   it('addresses a cycle by its NUMBER under the owning team', () => {
-    expect(cycleHref('acme', 'ENG', 7)).toBe('/acme/teams/ENG/cycles/7')
-    expect(cycleIndexHref('acme', 'ENG')).toBe('/acme/teams/ENG/cycles/all')
+    expect(cycleHref('acme', 'ENG', 7)).toBe('/acme/team/ENG/cycle/7')
+    expect(cycleIndexHref('acme', 'ENG')).toBe('/acme/team/ENG/cycles/all')
   })
 })

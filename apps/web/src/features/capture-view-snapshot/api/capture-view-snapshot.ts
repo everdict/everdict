@@ -22,7 +22,7 @@ export async function captureViewSnapshot(
   try {
     const ctx = await authContext()
     const result = captureResultSchema.parse(await controlPlane.captureViewSnapshot(ctx, viewId))
-    revalidatePath(`/${workspace}/views/${viewId}`)
+    revalidatePath(`/${workspace}/view/${viewId}`)
     return { ok: true, result }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

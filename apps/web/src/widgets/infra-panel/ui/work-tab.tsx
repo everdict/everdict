@@ -148,7 +148,7 @@ function ItemRow({
     )
   return (
     <Link
-      href={`/${workspace}/scorecards/${encodeURIComponent(item.id)}`}
+      href={`/${workspace}/scorecard/${encodeURIComponent(item.id)}`}
       onClick={onNavigate}
       className={rowClass}
     >

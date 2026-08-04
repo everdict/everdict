@@ -86,7 +86,7 @@ export function RerunScorecardButton({
     const overrides = scope === 'all' ? { judges: judgeRefs, ...(runtime ? { runtime } : {}) } : {}
     start(async () => {
       const res = await rerunScorecardAction({ id, scope, ...overrides })
-      if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
+      if (res.ok && res.id) router.push(`/${workspace}/scorecard/${res.id}`)
       else setError(res.error ?? t('error'))
     })
   }

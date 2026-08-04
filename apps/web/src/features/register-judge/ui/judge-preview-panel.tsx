@@ -303,7 +303,7 @@ export function JudgePreviewPanel({
               <span className="font-mono text-[11px] text-faint">{trackedRunId}</span>
             </div>
             <Link
-              href={`/${workspace}/runs/${trackedRunId}`}
+              href={`/${workspace}/run/${trackedRunId}`}
               target="_blank"
               className="flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
             >

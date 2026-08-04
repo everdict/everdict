@@ -31,7 +31,7 @@ export function VersionSwitcher({
       value={current}
       onChange={(v) =>
         router.push(
-          `/${workspace}/datasets/${encodeURIComponent(id)}?version=${encodeURIComponent(v)}`
+          `/${workspace}/dataset/${encodeURIComponent(id)}?version=${encodeURIComponent(v)}`
         )
       }
       options={versions.map((v) => {

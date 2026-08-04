@@ -51,14 +51,27 @@ cookie-only path. `app/[workspace]/layout.tsx` is the authoritative validator (r
 prefixed at render; switching workspace = `router.push('/'+id)`. Slug-less entry points stay top-level
 (`RESERVED_TOP_LEVEL`: `onboarding`/`new-workspace`/`invite`/`api`).
 
+**A COLLECTION is plural; ONE THING is singular** (Linear's spelling). `/{workspace}/scorecards` is the list;
+`/{workspace}/scorecard/{id}` is one scorecard — a different screen, so a different word. Holds for every
+resource with a detail route (issue · project · initiative · cycle · dataset · harness · judge · rubric · run ·
+runtime · schedule · scorecard · skill · view · team · tool), and for a team's own cycle
+(`/{workspace}/team/ENG/cycle/7`). The collection's NAMED screens keep its plural (`…/scorecards/new`,
+`…/datasets/import`, `…/scorecards/analyze`) — they are that collection's screens, not one thing. `/teams` stays
+plural too: it is the directory of teams. Old plural detail addresses redirect in `next.config.ts`
+(`DETAIL_MOVES`, reserved names excluded by lookahead); they are 307 until the scheme is confirmed live.
+An ISSUE carries its title as a trailing decorative slug — `/{workspace}/issue/ENG-12/the-judge-drops-cost-scores`
+(`issueHref(workspace, identifier, title)`; the route is `issue/[id]/[[...slug]]`). Nothing reads the slug: the
+identifier alone resolves, a stale slug after a rename still opens, and `/issue/ENG-12` is equally valid.
+
 **A scope is a PATH; a filter is a query parameter.** The same rule one level down: what a TEAM owns lives under
-the team's slug — `/{workspace}/teams/ENG/{issues,triage,cycles,projects,scorecards}` — never `?team=<id>` on the
+the team's slug — `/{workspace}/team/ENG/{issues,triage,cycles,projects,scorecards,harnesses,datasets,judges}`
+(`TEAM_SECTIONS`; the last four are `TEAM_EVAL_SECTIONS`, what the team evaluates WITH) — never `?team=<id>` on the
 workspace-wide list. Each team holds different things (its triage inbox exists only if it turned one on, its
 cycles are numbered in its own sequence), so "the same list, filtered" is the wrong description of it. Status,
 priority, project and the page cursor stay query parameters, because those really are filters over whichever list
 the path named. Slug = the team KEY (`ENG`), decided in `entities/team/lib/href.ts` (`teamHref` /
 `teamSectionHref` / `teamSettingsHref`) — every link goes through those, never a hand-built string.
-The team's SHORT address is the issue list itself (`/{workspace}/teams/ENG` renders `IssueListView`, with
+The team's SHORT address is the issue list itself (`/{workspace}/team/ENG` renders `IssueListView`, with
 `…/issues` as the canonical twin) — Linear's landing, and the reason `matchTeamPath` reads a bare team path as
 `issues` and the sidebar has no separate "Home" row.
 `app/[workspace]/team-scope.ts` is the one entry procedure: resolve the slug (`GET /teams/:ref` takes key or id),
@@ -67,13 +80,16 @@ The team's SHORT address is the issue list itself (`/{workspace}/teams/ENG` rend
 `redirectLegacyTeamScope` in the same module.
 
 **A list that has two addresses is ONE component**, not two pages: the fetch-and-render body lives in a widget
-(`widgets/{issue,project,cycle,scorecard}-list` — `<Resource>ListView`, a server component taking an optional
-`team`), and both route files are thin adapters. Duplicating a list to scope it is how the two copies drift.
+(`widgets/{issue,project,cycle,scorecard,harness,dataset,judge}-list` — `<Resource>ListView`, a server component
+taking an optional `team`), and both route files are thin adapters. A team address NARROWS the read (`?team=` on the
+control-plane call) and adds the scope bar; it never gates it. Harness/dataset/judge creation is NOT yet team-pinned
+(no `…/new` under the team — the wizards don't carry `teamId`), so their CTA points at the workspace form from both
+addresses rather than promising an owner the form cannot honour. Duplicating a list to scope it is how the two copies drift.
 The rule holds when a screen EMBEDS the list too: the cycle board (`widgets/cycle-board`) draws its own header,
 progress and burn-down and then renders `IssueListView` with a `cycle` scope — the widget suppresses its own
 header, pins the facet and re-bases its filter links, rather than a second issue list growing under `cycles/`.
 
-**A section's landing answers the question people came with.** `…/teams/ENG/cycles` opens the iteration the team
+**A section's landing answers the question people came with.** `…/team/ENG/cycles` opens the iteration the team
 is IN (then the next, then the most recent) — not a list of iterations, because everyone who clicks "Cycles" is
 asking about this fortnight. The index gets its own address (`…/cycles/all`) and a specific one is addressed by
 the number people cite (`…/cycles/7`, built by `entities/cycle/lib/cycle-view.ts` — one href builder, same rule
@@ -88,7 +104,7 @@ to read. The one narrowing is a team choosing to be PRIVATE (`isPrivate`), decid
 simply never arrives, and asking for it by id answers NOT FOUND (never 403 — "you may not see this" still
 confirms it exists). That is why `canInTeam` passes every `:read` action.
 
-**Creating happens at the OWNER's address.** `…/teams/ENG/scorecards/new` files the batch as that team's because
+**Creating happens at the OWNER's address.** `…/team/ENG/scorecards/new` files the batch as that team's because
 the URL says so; the workspace-level `…/scorecards/new` pins nothing and the control plane files the result
 under the team that owns the harness chosen. Both are the same server component (`<ScorecardCreateView>`, an
 optional `team`), and `teamNewHref` builds the link. A normalizing redirect on a create screen must pass
@@ -235,13 +251,25 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   names the target from the reference chip that arrived with it. Every mission has an INTENT
   (`AGENT_CHAT_MISSION_INTENTS`): `edit` (skill/tool/harness/dataset/judge/runtime/environment/agentCraft) lands on
   a FRESH DRAFT when a persisted conversation is open and defaults the button caption to "대화로 편집하기";
-  `analyze`/`ask` (view/scorecard/run · knowledge) keep the open thread — comparing two scorecards in one
-  conversation must survive the entry — and only frame the chat when it is empty. An entry that CREATES the thing
-  it talks about (the blank analysis canvas) passes `fresh` alongside its analyze-intent mission to get the
-  edit-intent behavior for that one entry, instead of bending the mission's intent. Mission state clears on
+  `analyze`/`ask` (view/scorecard/run/issue · knowledge) keep the open thread — comparing two scorecards in one
+  conversation must survive the entry — and only frame the chat when it is empty. **Framing only shows on an empty
+  chat, so whether an entry starts fresh IS whether its framing is ever seen** — one rule decides it,
+  `startsFreshConversation(entry)` in `entities/agent-session` (guarded by `mission-intent.test.ts`), never an
+  inline condition at a call site. An analyze/ask entry whose subject is ONE record rather than whatever thread was
+  open — the issue detail, the blank analysis canvas — passes `fresh` to get the edit-intent start for that one
+  entry, instead of bending the mission's intent. `fresh` rides the same path as `mission` (button prop →
+  `useMentionInChat`/`askAgent` → the framed `postMessage` → `PendingMention`). Mission state clears on
   new-conversation / session switch. A new mission = one enum value + one intent entry + one catalog block in BOTH
   locales + the prop at the entry — never a second chat component. Every detail-page chat entry passes its mission;
   only truly generic surfaces (the @-picker, the trace browser's chip-adder) stay mission-less with default copy.
+  A record header that is a strip of ICONS rather than a row of buttons (the issue view's breadcrumb line) passes
+  `compact` to `MentionInChatButton` — same component, same caption logic, caption folded into the tooltip — instead
+  of growing a second entry component or standing an outline button in a 20px bar. **A reference is keyed by the
+  name the entity is CITED by, and both entries mint the same one**: an issue's `AgentReference.id` is its
+  identifier (`ENG-12`), which `get_issue` accepts exactly like the uuid — so the detail's button and the @-picker
+  (`app/api/agent/mentions/[type]`, which maps the row's identifier onto `id`) produce one reference, not two chips
+  for one issue. `agentChat.refType.<type>` must exist in BOTH locales for every `AGENT_REFERENCE_TYPES` entry —
+  the catalog is JSON, so nothing but `entities/agent-session/model/catalog.test.ts` will notice a missing label.
 - **Every chat transcript item is `memo`-wrapped** (`features/agent-chat/ui/*`, guarded by
   `transcript-render.test.tsx`): the composer's draft is state ABOVE the transcript, so a keystroke re-renders
   `ConversationView`, and a transcript item re-parses its markdown through the whole unified pipeline
@@ -273,11 +301,18 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   derived by the control plane with `caseVerdict` on the same read as `usage`) — never recompute the authority
   ranking in the web (those mirrors were deleted in re-architecture P1g; one authority, one answer). Live attach
   panels (logs/exec/terminal/screen) render only for channels the run declares in `attach`.
-- **A work LIST is a view, and the view lives in the URL** (`widgets/issue-list` + `features/browse-issues` +
-  `entities/issue/model/view.ts` — the tracker's issue list is the reference). Grouping · ordering · layout ·
-  "show completed" · sub-issues · every filter facet serialize into the query string (`issueViewOf` /
-  `issueViewHref`, defaults deliberately OMITTED so a pasted link is readable and a changed default is not
-  frozen into old links), so back is undo and two people opening one link see one screen. Filters are a SET per
+- **A work LIST is a view with two halves: WHICH issues is the URL's, HOW they are drawn is the READER's**
+  (`widgets/issue-list` + `features/browse-issues` + `entities/issue/model/{view,display}.ts` — the tracker's
+  issue list is the reference). A filter decides the SET, so it serializes into the query string (`issueViewOf` /
+  `issueViewHref`) and a pasted link opens the same issues for everybody. Grouping · ordering · layout ·
+  "show completed" · sub-issues decide only presentation, so they are **never** in the URL: sending someone a
+  link must not rearrange their screen. They live per reader in the `everdict-issue-display` COOKIE, keyed by the
+  list's address (`issueViewKeyOf` — workspace list / team issues / team triage / cycle board), written by the
+  `setIssueDisplay` server action and re-read on `router.refresh()`. Cookie, not localStorage, because the list is
+  a server component that needs the grouping before it can ask for group counts — localStorage would make the
+  chosen view a flicker. The cookie is bounded (12 views, least-recently-changed evicted) because it rides every
+  request, and each field falls back independently so one renamed grouping does not discard the whole preference.
+  Filters are a SET per
   facet (`?status=todo&status=in_progress`); toggling the last value off DELETES the facet rather than leaving
   `[]`, which the control plane reads as "chosen, and nothing matches". **Group headers show the SERVER's
   count** (`GET /issues/counts`), never the rows received: a grouped screen fetches one page PER GROUP, so
@@ -289,7 +324,7 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   the scorecard list** (`features/browse-issues` `IssueSelectionProvider` + `IssueBulkBar`): hover-revealed
   checkbox, shift-click range, click-toggles-instead-of-opening while selecting, Esc clears, action bar portaled
   to `<body>` and measured against the enclosing `<main>`. Two deltas from the scorecard list, both deliberate —
-  the selection is NOT persisted (the whole view lives in the URL, so one back navigation makes a restored
+  the selection is NOT persisted (the filters live in the URL, so one back navigation makes a restored
   selection unanswerable), and shift-ranges resolve against **DOM order** (`[data-issue-id]`) because groups
   append rows client-side and the server's ordering can no longer describe what is on screen. The provider is
   only mounted where an action exists (a team scope); elsewhere rows render exactly as before. Beyond a group cap the screen SAYS how

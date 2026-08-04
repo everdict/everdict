@@ -93,7 +93,7 @@ export function DeleteDatasetDialog({
       } else {
         toast.success(t('deletedVersions', { count: res.deleted.length, id }))
         // Land on the dataset (latest remaining version) rather than a possibly-deleted ?version= URL.
-        router.push(`/${workspace}/datasets/${encodeURIComponent(id)}`)
+        router.push(`/${workspace}/dataset/${encodeURIComponent(id)}`)
       }
       router.refresh()
     })

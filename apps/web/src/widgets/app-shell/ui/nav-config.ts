@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 
 import { matchTeamPath } from '@/entities/team'
+import { singularSegment } from '@/shared/lib/resource-routes'
 
 export interface NavItem {
   // Workspace-relative path suffix (e.g. '' = overview, '/scorecards'). Prefixed with the active workspace at render → /{workspace}{suffix}.
@@ -37,10 +38,12 @@ export interface NavSection {
   heading?: string
   headingKey?: string // nav.* key — preferred over `heading` (raw) so section titles are localized
   items: NavItem[]
-  // 접이식 섹션(기본 접힘). 사이드바의 1차 관심사는 트래커이고, 평가 primitive 들은 그 아래로 물러난다.
-  // 접혀 있어도 ① 현재 경로가 이 섹션 안이면 자동으로 펼쳐지고 ② 명령 팔레트에는 그대로 남아, 도달성은 유지된다.
-  collapsible?: boolean
 }
+
+// 섹션에는 접기가 없다 — 헤딩은 라벨이지 버튼이 아니고, 그 아래 줄들은 항상 보인다(워크스페이스 그룹이 그렇듯).
+// 접히는 것은 섹션이 아니라 **항목**이다(Workspace › More, 팀 › 평가): 자주 가지 않는 목적지 몇 개를 한 줄
+// 뒤로 미루는 것과, 축 하나를 통째로 감추는 것은 다른 일이다. 에이전트는 매일 쓰는 축이라 접힌 채로 시작하던
+// 것을 되돌렸다 — 접힌 그룹은 "이 제품에 그런 게 있다"는 사실 자체를 화면에서 지운다.
 
 // Issues are NOT a top-level entry: every issue carries a required `teamId` and its identifier is minted by the
 // team (`ENG-123`), so the team is where issues live, not a filter over a global list. Each team in the sidebar's
@@ -53,12 +56,10 @@ export interface NavSection {
 // Settings pages, which made them read as one-time configuration; they are none of that, they are the working
 // material of the agent and belong beside it. Their pages MOVED out of /settings rather than being copied, so the
 // product still has exactly one Skills page and one Tools page.
-// The eval primitives that answer "what ran" no longer have a group at all — except the ones a TEAM owns.
-// Harness · dataset · judge · scorecard all carry a team (registry `team_id`), so their sidebar home is the team,
-// not a workspace-wide list: only the scorecard gets a row there, because that is the one you go looking for by
-// name. The harness/dataset/judge routes stay reachable by URL and from the command palette; they are simply not
-// how you navigate — you arrive at them from the scorecard or the team that owns them. Nothing is removed — the group expands on click, auto-expands whenever the
-// active route is inside it, and every entry stays in the command palette (ALL_NAV_ITEMS).
+// The eval primitives that answer "what ran" have no group here at all — they are the ones a TEAM owns.
+// Harness · dataset · judge · scorecard all carry a team (registry `team_id`), so their sidebar home is the team's
+// `Evaluation` disclosure (TeamsNav in sidebar.tsx), not a workspace-wide row. The workspace-wide routes stay
+// reachable by URL and from the command palette — they are simply not how you navigate.
 // Infra concerns (runs · schedules · runtimes · work queue) are NOT sidebar entries — they live on the vertical
 // infra rail (widgets/infra-panel) on the right; their full pages remain routable (panel "full page" links,
 // command palette infra group).
@@ -132,7 +133,6 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     headingKey: 'agent',
-    collapsible: true,
     items: [
       {
         href: '/agents',
@@ -235,7 +235,13 @@ export function isNavItemActive(
 ): boolean {
   if (matchTeamPath(pathname, workspace) !== null) return false
   const full = `/${workspace}${item.href}`
-  return item.exact === true
-    ? pathname === full
-    : pathname === full || pathname.startsWith(`${full}/`)
+  if (item.exact === true) return pathname === full
+  if (pathname === full || pathname.startsWith(`${full}/`)) return true
+  // A DETAIL page belongs to its collection's row. The nav points at the plural (`/scorecards`) while one
+  // scorecard lives at the singular (`/scorecard/{id}`), so a prefix test alone leaves every detail page with no
+  // row lit at all — the row goes dark exactly when the user has drilled into it.
+  const singular = singularSegment(item.href.replace(/^\//, ''))
+  if (singular === undefined) return false
+  const detail = `/${workspace}/${singular}`
+  return pathname === detail || pathname.startsWith(`${detail}/`)
 }

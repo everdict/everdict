@@ -110,7 +110,7 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
             {runtimes.map((r) => (
               <Link
                 key={r.id}
-                href={`/${workspace}/runtimes/${encodeURIComponent(r.id)}`}
+                href={`/${workspace}/runtime/${encodeURIComponent(r.id)}`}
                 className="flex h-[52px] items-center gap-3 rounded-lg border bg-card px-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
                 <Server className="size-4 shrink-0 text-[#6ec6a8]" />

@@ -58,7 +58,7 @@ export function RunRow({
     <TR className="group">
       <TD className={isChild ? 'pl-7' : undefined}>
         <Link
-          href={`/${workspace}/runs/${run.id}`}
+          href={`/${workspace}/run/${run.id}`}
           className="font-mono text-[12px] text-link transition-colors hover:text-foreground"
         >
           {run.id.slice(0, 8)}

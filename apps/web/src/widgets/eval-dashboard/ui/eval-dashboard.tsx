@@ -127,7 +127,7 @@ export function EvalDashboard({
               {b.runs.slice(0, 4).map((s, i) => (
                 <li key={s.id}>
                   <Link
-                    href={`/${workspace}/scorecards/${s.id}`}
+                    href={`/${workspace}/scorecard/${s.id}`}
                     className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1.5 transition-colors hover:bg-elevated"
                   >
                     <Rank rank={i + 1} />

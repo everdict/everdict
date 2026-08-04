@@ -152,7 +152,7 @@ export default async function LeaderboardPage({
                       </TD>
                       <TD>
                         <Link
-                          href={`/${workspace}/scorecards/${r.scorecardId}`}
+                          href={`/${workspace}/scorecard/${r.scorecardId}`}
                           className="font-mono text-[12px] font-[510] text-link transition-colors hover:text-foreground"
                         >
                           {r.harness.id}

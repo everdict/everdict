@@ -92,7 +92,7 @@ export function RunsTable({
                       {t('batchGroup')}
                     </span>
                     <Link
-                      href={`/${workspace}/scorecards/${block.scorecardId}`}
+                      href={`/${workspace}/scorecard/${block.scorecardId}`}
                       className="font-mono text-[12px] text-link transition-colors hover:text-foreground"
                     >
                       {block.scorecardId.slice(0, 8)}

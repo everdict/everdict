@@ -398,7 +398,7 @@ export function RegisterRuntimeForm({
       if (r.ok) {
         if (editing) {
           toast.success(t('updated', { id: r.id ?? f.id }))
-          router.push(`/${workspace}/runtimes/${encodeURIComponent(f.id)}`)
+          router.push(`/${workspace}/runtime/${encodeURIComponent(f.id)}`)
         } else {
           toast.success(t('registered', { id: r.id ?? '', version: r.version ?? '' }))
           router.push(`/${workspace}/runtimes`)
@@ -788,7 +788,7 @@ export function RegisterRuntimeForm({
           onClick={() =>
             router.push(
               editing
-                ? `/${workspace}/runtimes/${encodeURIComponent(f.id)}`
+                ? `/${workspace}/runtime/${encodeURIComponent(f.id)}`
                 : `/${workspace}/runtimes`
             )
           }

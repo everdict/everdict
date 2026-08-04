@@ -103,7 +103,7 @@ export async function CapabilityLineage({
         {linked.map((issue) => (
           <Link
             key={issue.id}
-            href={issueHref(workspace, issue.identifier)}
+            href={issueHref(workspace, issue.identifier, issue.title)}
             className="flex items-center gap-2.5 px-3.5 py-2.5 text-[13px] transition-colors hover:bg-elevated"
           >
             <IssueStatusIcon status={issue.status} />

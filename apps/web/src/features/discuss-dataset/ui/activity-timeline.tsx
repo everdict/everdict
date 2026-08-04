@@ -137,7 +137,7 @@ function EventText({ workspace, item }: { workspace: string; item: ActivityItem 
           name: (chunks) => <span className="font-[560] text-foreground">{chunks}</span>,
           harnessLink: (chunks) => (
             <Link
-              href={`/${workspace}/harnesses/${encodeURIComponent(item.harnessId)}`}
+              href={`/${workspace}/harness/${encodeURIComponent(item.harnessId)}`}
               className="underline-offset-2 hover:text-foreground hover:underline"
             >
               <code className="font-mono text-foreground">{chunks}</code>
@@ -145,7 +145,7 @@ function EventText({ workspace, item }: { workspace: string; item: ActivityItem 
           ),
           cardLink: (chunks) => (
             <Link
-              href={`/${workspace}/scorecards/${encodeURIComponent(item.scorecardId)}`}
+              href={`/${workspace}/scorecard/${encodeURIComponent(item.scorecardId)}`}
               className="font-[510] text-foreground underline-offset-2 hover:text-primary hover:underline"
             >
               {chunks}

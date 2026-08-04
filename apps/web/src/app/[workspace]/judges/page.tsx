@@ -1,22 +1,11 @@
-import Link from 'next/link'
-import { Gavel } from 'lucide-react'
-import { getTranslations } from 'next-intl/server'
+import { JudgeListView } from '@/widgets/judge-list'
 
-import { DeleteJudgeRowButton } from '@/features/delete-judge'
-import { judgesSchema } from '@/entities/judge'
-import { can } from '@/shared/auth/can'
-import { currentPrincipal } from '@/shared/auth/principal'
-import { controlPlane } from '@/shared/lib/control-plane'
-import { sortSemverDesc } from '@/shared/lib/semver'
-import { Badge } from '@/shared/ui/badge'
-import { buttonVariants } from '@/shared/ui/button'
-import { Callout } from '@/shared/ui/callout'
-import { EmptyState } from '@/shared/ui/empty-state'
-import { PageHeader } from '@/shared/ui/page-header'
+import { redirectLegacyTeamScope } from '../team-scope'
 
 export const dynamic = 'force-dynamic'
 
-// Judges — Agent Judges (model | harness), workspace-owned + shared defaults.
+// 워크스페이스 전체의 저지. 한 팀이 소유한 것만 보려면 팀 아래의 주소를 쓴다
+// (`/{workspace}/teams/ENG/judges`) — `?team=` 이 붙은 예전 링크는 그리로 넘긴다.
 export default async function JudgesPage({
   params,
   searchParams,
@@ -25,91 +14,7 @@ export default async function JudgesPage({
   searchParams: Promise<{ team?: string }>
 }) {
   const { workspace } = await params
-  // 팀 스코프 — 사이드바의 팀 하위 항목이 이 파라미터로 들어온다.
-  const { team } = await searchParams
-  const t = await getTranslations('judgesPage')
-  const { principal, ctx } = await currentPrincipal()
-
-  let error: string | undefined
-  let judges = judgesSchema.parse([])
-  try {
-    judges = judgesSchema.parse(await controlPlane.listJudges(ctx, team))
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e)
-  }
-
-  const currentWorkspace = principal?.workspace ?? workspace
-  // Delete = admin only (the creator exception is server-side); the affordance shows only on workspace-owned judges
-  // (_shared/first-party delete 404s at the control plane).
-  const canDeleteJudges = can(principal?.roles, 'judges:delete')
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title={t('title')}
-        description={t('description')}
-        actions={
-          can(principal?.roles, 'judges:write') ? (
-            <Link href={`/${workspace}/judges/new`} className={buttonVariants({ size: 'sm' })}>
-              {t('register')}
-            </Link>
-          ) : null
-        }
-      />
-      {error ? (
-        <Callout tone="danger">{t('connectError', { error })}</Callout>
-      ) : judges.length === 0 ? (
-        <EmptyState
-          icon={<Gavel strokeWidth={1.75} />}
-          title={t('emptyTitle')}
-          hint={t('emptyHint')}
-        />
-      ) : (
-        <div className="space-y-2">
-          {judges.map((j) => (
-            <Link
-              key={j.id}
-              href={`/${workspace}/judges/${encodeURIComponent(j.id)}`}
-              className="group flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border">
-                  <Gavel className="size-[18px]" strokeWidth={1.75} />
-                </span>
-                <div className="min-w-0 space-y-1">
-                  <div className="truncate font-mono text-[13px] font-[560] text-foreground">
-                    {j.id}
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {j.versions.map((v) => (
-                      <code
-                        key={v}
-                        className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border"
-                      >
-                        {v}
-                      </code>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Badge tone={j.owner === currentWorkspace ? 'success' : 'neutral'}>
-                  {j.owner === currentWorkspace ? t('workspaceBadge') : t('sharedBadge')}
-                </Badge>
-                {canDeleteJudges && j.owner === currentWorkspace && (
-                  <DeleteJudgeRowButton
-                    id={j.id}
-                    versions={[...sortSemverDesc(j.versions)].reverse()}
-                    latest={sortSemverDesc(j.versions)[0] ?? j.versions[0] ?? ''}
-                    workspace={workspace}
-                    versionTags={j.versionTags ?? {}}
-                  />
-                )}
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+  const search = await searchParams
+  await redirectLegacyTeamScope({ workspace, section: 'judges', search })
+  return <JudgeListView workspace={workspace} />
 }

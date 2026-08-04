@@ -80,7 +80,7 @@ export function TaskCard({
           {task.taskPreview}
         </p>
         <Link
-          href={`/${workspace}/runs/${task.runId}`}
+          href={`/${workspace}/run/${task.runId}`}
           aria-label={t('viewRun')}
           className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
         >

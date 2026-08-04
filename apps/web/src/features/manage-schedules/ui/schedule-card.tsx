@@ -83,7 +83,7 @@ export function ScheduleCard({
         {/* ① Name — links to the schedule detail (the row's primary drill-in). */}
         <div className="flex items-center overflow-hidden whitespace-nowrap text-[13px] font-[560]">
           <Link
-            href={`/${workspace}/schedules/${encodeURIComponent(s.id)}`}
+            href={`/${workspace}/schedule/${encodeURIComponent(s.id)}`}
             className="truncate rounded-sm hover:underline"
           >
             {s.name}
@@ -103,7 +103,7 @@ export function ScheduleCard({
           ) : (
             <>
               <Link
-                href={`/${workspace}/datasets/${encodeURIComponent(s.runTemplate.dataset?.id ?? '')}`}
+                href={`/${workspace}/dataset/${encodeURIComponent(s.runTemplate.dataset?.id ?? '')}`}
                 className="min-w-0 overflow-hidden whitespace-nowrap rounded-sm hover:text-foreground hover:underline"
                 title={t('datasetDetail')}
               >
@@ -115,7 +115,7 @@ export function ScheduleCard({
               </Link>
               <span className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap">
                 <Link
-                  href={`/${workspace}/harnesses/${encodeURIComponent(s.runTemplate.harness?.id ?? '')}`}
+                  href={`/${workspace}/harness/${encodeURIComponent(s.runTemplate.harness?.id ?? '')}`}
                   className="min-w-0 truncate rounded-sm hover:text-foreground hover:underline"
                   title={t('harnessDetail')}
                 >
@@ -128,7 +128,7 @@ export function ScheduleCard({
                 <span className="hidden shrink-0 sm:inline-flex">
                   {s.runTemplate.runtime && !s.runTemplate.runtime.startsWith('self:') ? (
                     <Link
-                      href={`/${workspace}/runtimes/${encodeURIComponent(s.runTemplate.runtime)}`}
+                      href={`/${workspace}/runtime/${encodeURIComponent(s.runTemplate.runtime)}`}
                       className="rounded-sm hover:underline"
                       title={t('runtimeDetail')}
                     >
@@ -204,7 +204,7 @@ export function ScheduleCard({
                 <DropdownItem
                   icon={<Pencil />}
                   onSelect={() =>
-                    router.push(`/${workspace}/schedules/${encodeURIComponent(s.id)}/edit`)
+                    router.push(`/${workspace}/schedule/${encodeURIComponent(s.id)}/edit`)
                   }
                 >
                   {t('edit')}

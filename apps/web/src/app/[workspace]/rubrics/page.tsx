@@ -71,7 +71,7 @@ export default async function RubricsPage({ params }: { params: Promise<{ worksp
           {rows.map(({ summary, latest, spec }) => (
             <Link
               key={summary.id}
-              href={`/${workspace}/rubrics/${encodeURIComponent(summary.id)}`}
+              href={`/${workspace}/rubric/${encodeURIComponent(summary.id)}`}
               className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
             >
               <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border">
