@@ -40,6 +40,18 @@ path → runs on **Local / Nomad / K8s** backends with the existing isolation.
   (`{id:"text-metric", config:{pattern:"^steps: (\\d+)", metric:"agent_steps"}}` — one capture group over the
   final assistant message), so a trace:none run still gets a per-case step/score axis; real trajectory/cost
   still requires instrumentation (`otel`/`mlflow`) or the `meterUsage` proxy.
+- **`file`** — the **self-reported plane**: `{"kind":"file","path":"everdict-trace.json"}` and the agent writes its
+  own `TraceEvent`s (a JSON array or JSONL, one line per step; a relative path resolves under the harness workDir).
+  Malformed lines are dropped individually and a missing file just means the agent chose not to report — the stdout
+  answer still stands, and it is still emitted when the file carries no assistant `message`. The events pass through
+  **verbatim**, which makes their TIME the agent's responsibility:
+  - Stamp **`at`** (ISO-8601 absolute instant) on every event. `t` alone is a scalar in a unit only the emitter
+    knows, so an event without `at` sits OFF the trajectory viewer's wall-clock axis — reported as unanchored, never
+    guessed onto it. An agent that numbered its steps `t: 1, 2, 3…` and stamped nothing is why: its fifteen steps
+    were once drawn inside the first fifteen *milliseconds* of a twenty-three second run.
+  - Stamp **`spanId`** on a `tool_call` and **`parentId`** on the `tool_result` that answers it (and on any step
+    nested under another) to get a span TREE instead of a flat list. Optional, additive, ignored by graders.
+  - `durationMs` is optional — a `tool_call` without one takes its length from its result's arrival.
 - **`otel` / `mlflow` / `langfuse` / `langsmith` / `phoenix`** — after the command, the trace is pulled via
   `@everdict/trace` `buildTraceSource` (the same 5 kinds as pull-ingest; phoenix needs `project`) by
   `EVERDICT_RUN_ID`. The agent must tag its spans with that id

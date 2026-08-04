@@ -5,10 +5,15 @@ import {
   type HarnessTraceSource,
   InternalError,
   type RunContext,
+  TRACEPARENT_ENV,
   type TraceEvent,
   TraceEventSchema,
+  formatTraceparent,
   isPulledCommandTrace,
+  newSpanId,
   shq,
+  stamp,
+  traceIdForRun,
 } from "@everdict/contracts";
 import { flattenEnv } from "@everdict/domain";
 import { type StartedUsageProxy, type TraceSource, buildTraceSource, startUsageProxy } from "@everdict/trace";
@@ -30,6 +35,7 @@ export interface CommandHarnessOptions {
   meterEnvVar?: string; // The model base-URL env var (default OPENAI_API_BASE). Its value becomes the proxy upstream.
   // Test injection: swap the proxy starter instead of using a real socket.
   startUsageProxy?: typeof startUsageProxy;
+  clock?: () => number; // Event-time source; defaults to the wall clock (`Date.now`). Injected for deterministic tests.
 }
 
 function defaultRunId(): string {
@@ -52,6 +58,12 @@ export class CommandHarness implements EvaluableHarness {
   // Working directory: spec workDir (an absolute path like "/tmp" for os-use etc.) > opts.workDir > default "work".
   private get cwd(): string {
     return this.spec.workDir ?? this.opts.workDir ?? "work";
+  }
+
+  // The clock every event this harness mints is stamped from — real time, so its trace lands on the reader's
+  // shared axis instead of hanging off it.
+  private get now(): () => number {
+    return this.opts.clock ?? (() => Date.now());
   }
 
   async install(compute: ComputeHandle): Promise<void> {
@@ -92,6 +104,11 @@ export class CommandHarness implements EvaluableHarness {
   // line per step should not have to buffer the whole run to stay valid. Malformed events are DROPPED
   // individually rather than failing the case: a broken line is a gap in evidence, never a lost result, and a
   // missing file just means the agent chose not to report (the stdout answer still stands).
+  //
+  // These events are the AGENT's own account and pass through verbatim — including their time. An agent that
+  // numbers its steps (`t: 1, 2, 3…`) and stamps no `at` has told us the ORDER of its work and nothing about
+  // its duration, so the reader keeps those steps off the wall-clock axis instead of inventing millisecond
+  // offsets for them. Stamp `at` in the report to get a real timeline (docs/command-harness.md).
   private async readSelfReportedTrace(compute: ComputeHandle, path: string): Promise<TraceEvent[]> {
     let raw: string;
     try {
@@ -176,6 +193,16 @@ export class CommandHarness implements EvaluableHarness {
       ...flattenEnv(this.spec.env),
       EVERDICT_RUN_ID: runId, // Injected so the agent can correlate the trace
       ...(this.spec.trace.kind !== "none" ? { OTEL_RESOURCE_ATTRIBUTES: `everdict.run_id=${runId}` } : {}),
+      // W3C trace context: the run's trace id crosses the process boundary, so an instrumented agent's spans
+      // are CHILDREN of the run rather than a separate trace that happens to share a correlation tag. The
+      // trace id is derived from the run id (`traceIdForRun`), which is how the control plane, the placement
+      // plane and the agent all arrive at the same one without speaking to each other. The parent span id is
+      // this harness invocation; a sampled flag of 01 says "record it" — we are the collector.
+      [TRACEPARENT_ENV]: formatTraceparent({
+        traceId: traceIdForRun(runId),
+        spanId: newSpanId(),
+        sampled: true,
+      }),
     };
     const trace = this.spec.trace;
     // Usage metering applies only to harnesses without their own trace (trace:none) — avoids double-counting cost. Meaningful only if the base env exists.
@@ -206,7 +233,7 @@ export class CommandHarness implements EvaluableHarness {
       // Surface a failure (exit≠0) — previously swallowed silently, so it looked like "success with an empty result" (only the score was 0).
       if (res.exitCode !== 0) {
         yield {
-          t: Date.now(),
+          ...stamp(this.now),
           kind: "error",
           message: `command exit ${res.exitCode}: ${res.stderr.trim().slice(-2_000)}`,
         };
@@ -225,11 +252,11 @@ export class CommandHarness implements EvaluableHarness {
       }
       if (trace.kind === "none" || (trace.kind === "file" && !selfReportedAnswer)) {
         const text = res.stdout.trim().slice(-32_000);
-        if (text) yield { t: Date.now(), kind: "message", role: "assistant", text };
+        if (text) yield { ...stamp(this.now), kind: "message", role: "assistant", text };
         // Evidence fallback: black-box CLIs log progress to stderr — without this, a successful run leaves no
         // trail at all (the error event above fires only on exit≠0). Tail-capped to avoid record bloat.
         const errText = res.stderr.trim().slice(-16_000);
-        if (errText) yield { t: Date.now(), kind: "log", stream: "stderr", text: errText };
+        if (errText) yield { ...stamp(this.now), kind: "log", stream: "stderr", text: errText };
       }
 
       // Emit the metered tokens+cost as a synthetic llm_call — aggregated by the sumCost/cost grader via the existing path.
@@ -238,7 +265,7 @@ export class CommandHarness implements EvaluableHarness {
         const u = proxy.tally.get(runId);
         if (u.calls > 0)
           yield {
-            t: Date.now(),
+            ...stamp(this.now),
             kind: "llm_call",
             model: modelSlot,
             cost: { inputTokens: u.promptTokens, outputTokens: u.completionTokens, usd: u.usd },

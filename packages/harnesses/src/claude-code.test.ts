@@ -167,5 +167,8 @@ describe("ClaudeCodeHarness", () => {
     const span = (events[events.length - 1]?.t ?? 0) - (events[0]?.t ?? 0);
     expect(span).toBe((events.length - 1) * 1000);
     expect(span).toBeGreaterThan(events.length);
+    // And every event says WHEN it happened, so the sealed trajectory can be laid on a wall clock at all
+    // (pre-fix `at` was absent everywhere and the trace viewer could only draw a list).
+    expect(events.map((e) => e.at)).toEqual(events.map((_, index) => new Date(base + index * 1000).toISOString()));
   });
 });

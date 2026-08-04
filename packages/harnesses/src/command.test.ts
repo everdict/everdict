@@ -1,4 +1,10 @@
-import type { CommandHarnessSpec, ComputeHandle, RunContext, TraceEvent } from "@everdict/contracts";
+import {
+  type CommandHarnessSpec,
+  type ComputeHandle,
+  type RunContext,
+  type TraceEvent,
+  traceIdForRun,
+} from "@everdict/contracts";
 import type { StartedUsageProxy, TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
 import { CommandHarness } from "./command.js";
@@ -40,6 +46,19 @@ async function collect(it: AsyncIterable<TraceEvent>): Promise<TraceEvent[]> {
 }
 
 describe("CommandHarness", () => {
+  // One run is one trace only if the parent's identity crosses the process boundary. `everdict.run_id`
+  // correlates; `traceparent` PARENTS — the difference between "these spans mention the same run" and "these
+  // spans are part of it" (otel-trace-model.md).
+  it("propagates W3C trace context so an instrumented agent's spans join the run's trace", async () => {
+    const { compute, execs } = fakeCompute();
+    const ctx: RunContext = { apiKeyEnv: {}, timeoutSec: 60, runId: "run-abc" };
+    await collect(new CommandHarness(spec()).run(compute, "t", ctx));
+    const header = execs[0]?.env?.TRACEPARENT;
+    expect(header).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    // The trace id is DERIVED from the run id, so the control plane and the agent agree without coordinating.
+    expect(header?.split("-")[1]).toBe(traceIdForRun("run-abc"));
+  });
+
   it("install runs the setup commands in order", async () => {
     const { compute, execs } = fakeCompute();
     await new CommandHarness(spec({ setup: ["a", "b"] })).install(compute);
@@ -83,7 +102,13 @@ describe("CommandHarness", () => {
     };
     const events = await collect(new CommandHarness(spec()).run(compute, "debt?", ctx));
     expect(events).toEqual([
-      { t: expect.any(Number), kind: "message", role: "assistant", text: "thinking...\nThe answer is 258.7 billion." },
+      {
+        t: expect.any(Number),
+        at: expect.any(String),
+        kind: "message",
+        role: "assistant",
+        text: "thinking...\nThe answer is 258.7 billion.",
+      },
     ]);
   });
 
@@ -100,9 +125,20 @@ describe("CommandHarness", () => {
     };
     const events = await collect(new CommandHarness(spec()).run(compute, "t", ctx));
     expect(events).toEqual([
-      { t: expect.any(Number), kind: "error", message: "command exit 127: sh: codex: command not found" },
+      {
+        t: expect.any(Number),
+        at: expect.any(String),
+        kind: "error",
+        message: "command exit 127: sh: codex: command not found",
+      },
       // trace:none evidence fallback — the stderr tail also lands as a log event (full context next to the reason)
-      { t: expect.any(Number), kind: "log", stream: "stderr", text: "sh: codex: command not found" },
+      {
+        t: expect.any(Number),
+        at: expect.any(String),
+        kind: "log",
+        stream: "stderr",
+        text: "sh: codex: command not found",
+      },
     ]);
   });
 
@@ -308,6 +344,7 @@ describe("CommandHarness", () => {
     expect(events).toEqual([
       {
         t: expect.any(Number),
+        at: expect.any(String),
         kind: "llm_call",
         model: "sonnet",
         cost: { inputTokens: 100, outputTokens: 20, usd: 0.012 }, // $ recovered from the header too
@@ -510,5 +547,21 @@ describe("CommandHarness — trace:file (the self-reported plane)", () => {
   it("never pulls from a platform — collectTrace stays empty because the sandbox is already gone", async () => {
     expect(await new CommandHarness(fileSpec()).collectTrace("run-1")).toEqual([]);
     expect(new CommandHarness(fileSpec()).traceSource()).toBeUndefined();
+  });
+
+  // The agent's own account passes through verbatim, TIME INCLUDED. An agent that numbers its steps has told
+  // us their order and nothing about their duration; inventing an `at` for them would put fifteen steps inside
+  // the first fifteen milliseconds of a twenty-three second run, which is a picture, not evidence. The events
+  // the HARNESS itself mints alongside are stamped, because for those we do know when they happened.
+  it("passes a self-reported step through with the time the agent gave it, inventing none", async () => {
+    const clock = () => 1_700_000_000_000;
+    const { compute } = computeWithTraceFile('[{"t":1,"kind":"tool_call","id":"c1","name":"a"}]', "printed");
+    const out = await collectSelfReported(new CommandHarness(fileSpec(), { clock }), compute);
+
+    const call = out.find((e) => e.kind === "tool_call");
+    expect(call?.t).toBe(1);
+    expect(call?.at).toBeUndefined(); // off the wall clock, and honestly so
+    const answer = out.find((e) => e.kind === "message");
+    expect(answer?.at).toBe(new Date(1_700_000_000_000).toISOString()); // ours, so stamped
   });
 });

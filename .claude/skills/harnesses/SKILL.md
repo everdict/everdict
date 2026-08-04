@@ -72,6 +72,16 @@ Graders only read the normalized event stream, so every harness converts its nat
 stdout tail as one `assistant` message (for QA grading), and `meterUsage` (opt-in) can proxy an OpenAI-base
 black-box harness to recover a synthetic `llm_call`.
 
+**Every event a harness mints carries `at` — build it with `stamp(now)` (`@everdict/contracts`), never
+`t: Date.now()` by hand.** `t` is the emitter's own scalar (a step index here, epoch ms there); `at` is the
+absolute instant, and it is the ONLY thing that puts an event on the trajectory reader's shared axis. Without
+it the reader must guess `t`'s unit, and guessing is how a self-reported trace numbered 1,2,3… drew fifteen
+agent steps inside the first fifteen *milliseconds* of a twenty-three second run. Stamp the span edges too —
+`spanId` on a `tool_call` (the call IS the span; mint none for an anonymous call so two never collapse into one
+node) and `parentId` on the `tool_result` that answers it — or the waterfall can only draw a flat list. All of
+it is additive and optional in the schema: graders and judges are untouched. A `trace:file` CommandHarness
+passes the AGENT's events through verbatim, so there the stamping is the agent's job (`docs/command-harness.md`).
+
 ## Cross-refs & non-goals
 - **Where it runs** = skill `drivers` (`ComputeHandle`, `LocalDriver`) + skill `backends` (placement of the agent job).
 - **Scoring is separate** = skill `evaluation` (graders/judges read the trace; the harness never scores itself).

@@ -1,4 +1,11 @@
-import { type ComputeHandle, type EvaluableHarness, type RunContext, type TraceEvent, shq } from "@everdict/contracts";
+import {
+  type ComputeHandle,
+  type EvaluableHarness,
+  type RunContext,
+  type TraceEvent,
+  shq,
+  stamp,
+} from "@everdict/contracts";
 import { ChunkLineQueue } from "./line-stream.js";
 import { mapClaudeStreamJson } from "./stream-json.js";
 
@@ -58,7 +65,7 @@ export class ClaudeCodeHarness implements EvaluableHarness {
       // parses whatever stdout carries and leaves failure classification to the case pipeline).
       if (res.exitCode !== 0) {
         yield {
-          t: now(),
+          ...stamp(now),
           kind: "error",
           message: (res.stderr.trim() || `claude exited with code ${res.exitCode}`).slice(-2000),
         };
