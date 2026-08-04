@@ -4,6 +4,7 @@ import { VersionSchema } from "../version.js";
 import {
   CommandHarnessSpecSchema,
   CommandTraceSpecSchema,
+  type EnvValue,
   EnvValueSchema,
   FrontDoorSpecSchema,
   type HarnessSpec,
@@ -17,6 +18,7 @@ import {
   TopologyTargetSchema,
   TraceSourceSpecSchema,
 } from "./harness-spec.js";
+import { ModelBindingSchema } from "./model-spec.js";
 
 // Harness taxonomy: Template (category) + Instance (individual harness).
 // Template = the structural skeleton (versions not pinned, version target = slot). Instance = a template reference + pins (slot→concrete version/image, delta).
@@ -27,24 +29,35 @@ import {
 export const HarnessCategorySchema = z.string().min(1);
 
 // --- service(topology) template ---
-// Service structure only (no images). slot = the key name the instance pins (name if unspecified).
-export const TemplateServiceSchema = TopologyServiceSchema.omit({ image: true }).extend({
+// Service structure. slot = the key name the instance pins (name if unspecified). `image` is the DEFAULT for that
+// slot: without it every instance had to re-state every service's image just to vary one, which is what pushed
+// "same shape, one image different" back into editing the template. Unset = the pin is required (previous behavior).
+export const TemplateServiceSchema = TopologyServiceSchema.extend({
   slot: z.string().optional(),
 });
 export type TemplateService = z.infer<typeof TemplateServiceSchema>;
 
-// Template services carry no image (pins provide it at instance time) — only the host-exec command rule applies here;
-// the full image↔exec pairing (validateServiceExec) runs on the resolved spec.
+// A template service's image is OPTIONAL (the pin may supply it), so the resolved-spec pairing (validateServiceExec,
+// which requires one) cannot run here. What still holds at template time: a host-exec service takes no image and
+// must declare its command.
 function validateTemplateServiceExec(
-  services: Array<Pick<TemplateService, "name" | "exec">>,
+  services: Array<Pick<TemplateService, "name" | "exec" | "image">>,
   ctx: z.RefinementCtx,
 ): void {
   services.forEach((svc, i) => {
-    if (svc.exec?.kind === "host" && (!svc.exec.command || svc.exec.command.length === 0)) {
+    if (svc.exec?.kind !== "host") return;
+    if (!svc.exec.command || svc.exec.command.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [i, "exec", "command"],
         message: `Host-exec service "${svc.name}" requires exec.command (the program to run on the node).`,
+      });
+    }
+    if (svc.image !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [i, "image"],
+        message: `Host-exec service "${svc.name}" takes no image (it runs directly on the node).`,
       });
     }
   });
@@ -101,10 +114,17 @@ export type HarnessTemplateSpec = z.infer<typeof HarnessTemplateSpecSchema>;
 // Design: docs/architecture/harness-taxonomy.md "Instance variation".
 export const InstanceServiceOverrideSchema = z.object({
   env: z.record(EnvValueSchema).optional(), // static service env overlay (merged on top of the template env; below storeEnv) — Phase 1
+  // env keys to DROP from the template's env, applied after the merge. The overlay alone can only add or replace, so a
+  // template default the variation must not carry (a base URL, a feature flag) had no expression short of a new shape
+  // version. Naming a key the template never set is a no-op, not an error — the intent ("this must not be set") holds.
+  unsetEnv: z.array(z.string().min(1)).optional(),
   replicas: z.number().int().positive().optional(), // Phase 2 — honored by nomad/k8s (docker single-host = 1)
   resources: ServiceResourcesSchema.optional(), // Phase 2 — cpu/memory (scalar substitution)
   volumes: z.array(z.string()).optional(), // Phase 3 — honored by docker (nomad/k8s follow-up) (scalar substitution)
   readiness: ServiceReadinessSchema.optional(), // Phase 3 — readiness polling bound (scalar substitution)
+  // The agent-server model binding (scalar substitution). "Same topology, a different model" is the single most
+  // common variation there is, and without this it was a template edit — even though the shape never changes.
+  model: ModelBindingSchema.optional(),
 });
 export type InstanceServiceOverride = z.infer<typeof InstanceServiceOverrideSchema>;
 
@@ -127,7 +147,12 @@ export const InstanceOverridesSchema = z.object({
   target: z.object({ extension: z.object({ ref: z.string() }) }).optional(),
   // command template: env overlay + {{var}} values. Each merged on top of the template.
   env: z.record(EnvValueSchema).optional(),
+  // command template: env keys to DROP (applied after the merge) — same reason as the per-service `unsetEnv`.
+  unsetEnv: z.array(z.string().min(1)).optional(),
   params: z.record(z.string()).optional(),
+  // command template: the job's resource request (scalar substitution). A heavier variation of the same CLI agent —
+  // one that needs 8 GB where the template asks for 2 — was a template edit, so every such run forked the shape.
+  resources: ServiceResourcesSchema.optional(),
 });
 export type InstanceOverrides = z.infer<typeof InstanceOverridesSchema>;
 
@@ -159,6 +184,14 @@ export const HarnessInstanceSpecSchema = z.object({
 });
 export type HarnessInstanceSpec = z.infer<typeof HarnessInstanceSpecSchema>;
 
+// Drop the named keys from a merged env map. Returns the input untouched when nothing is named, so a spec without
+// `unsetEnv` keeps its exact object (and callers comparing specs see no change).
+function dropEnvKeys(env: Record<string, EnvValue>, unset: string[] | undefined): Record<string, EnvValue> {
+  if (!unset || unset.length === 0) return env;
+  const drop = new Set(unset);
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !drop.has(k)));
+}
+
 // Template (structure) + Instance (pins) → resolved HarnessSpec. Missing/mismatched slots throw BadRequestError.
 export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: HarnessInstanceSpec): HarnessSpec {
   if (template.id !== instance.template.id || template.version !== instance.template.version) {
@@ -188,10 +221,11 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
       }
       const services = template.services.map((s) => {
         const slot = s.slot ?? s.name;
-        const image = pins[slot];
+        // The pin wins; absent, the template's own image is the default. A slot with neither is still an error.
+        const image = pins[slot] ?? s.image;
         // A host-exec service runs directly on the node — its slot takes no image pin (there is no container).
         const hostExec = s.exec?.kind === "host";
-        if (hostExec && image !== undefined) {
+        if (hostExec && pins[slot] !== undefined) {
           throw new BadRequestError(
             "BAD_REQUEST",
             { service: s.name, slot },
@@ -206,11 +240,14 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
           );
         }
         const ov = overrides?.services?.[s.name];
-        // env is merged (instance wins; the runtime does connEnv < this env < storeEnv). The other knobs are scalar-substituted (instance if present, else template).
-        const env = ov?.env ? { ...s.env, ...ov.env } : s.env;
+        // env is merged (instance wins; the runtime does connEnv < this env < storeEnv), THEN the instance's
+        // unsetEnv drops keys — the only way a variation can refuse a template default. The other knobs are
+        // scalar-substituted (instance if present, else template).
+        const env = dropEnvKeys(ov?.env ? { ...s.env, ...ov.env } : s.env, ov?.unsetEnv);
         const volumes = ov?.volumes ?? s.volumes;
         const readiness = ov?.readiness ?? s.readiness;
         const resources = ov?.resources ?? s.resources;
+        const model = ov?.model ?? s.model;
         // Spread the template service instead of rebuilding it field-by-field: an allowlist here silently
         // DROPS every field it doesn't name — that bug class ate volumes/readiness once, and later
         // requires/wiring/model (a requires.os=windows topology lost its OS requirement on resolve, so the
@@ -225,6 +262,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
           ...(volumes !== undefined ? { volumes } : {}),
           ...(readiness !== undefined ? { readiness } : {}),
           ...(resources !== undefined ? { resources } : {}),
+          ...(model !== undefined ? { model } : {}),
         };
       });
       // front-door: submit body values (shallow-merge) + completion timing (spread on top of completion; keys that don't match the mode are dropped by re-parse).
@@ -276,9 +314,14 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
     case "command": {
       const image = pins.image ?? template.image;
       const model = pins.model ?? template.model;
-      // env/params overlay: merged on top of the template (instance wins). params fills command's {{var}}.
-      const env = overrides?.env ? { ...template.env, ...overrides.env } : template.env;
+      // env/params overlay: merged on top of the template (instance wins), then unsetEnv drops keys.
+      // params fills command's {{var}}. resources is a scalar substitution (instance if present, else template).
+      const env = dropEnvKeys(
+        overrides?.env ? { ...template.env, ...overrides.env } : template.env,
+        overrides?.unsetEnv,
+      );
       const params = overrides?.params ? { ...template.params, ...overrides.params } : template.params;
+      const resources = overrides?.resources ?? template.resources;
       return CommandHarnessSpecSchema.parse({
         kind: "command",
         id: instance.id,
@@ -291,7 +334,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         ...(image !== undefined ? { image } : {}),
         ...(template.workDir !== undefined ? { workDir: template.workDir } : {}),
         ...(model !== undefined ? { model } : {}),
-        ...(template.resources !== undefined ? { resources: template.resources } : {}),
+        ...(resources !== undefined ? { resources } : {}),
         ...(template.liveScreen !== undefined ? { liveScreen: template.liveScreen } : {}),
       });
     }

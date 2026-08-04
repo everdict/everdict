@@ -401,6 +401,144 @@ describe("resolveHarnessInstance — command", () => {
   });
 });
 
+// The four knobs that used to force a TEMPLATE edit even though the shape never changed — the whole point of the
+// instance layer is that a behavioral variation is a delta, not a new structure version.
+describe("resolveHarnessInstance — variation knobs that must not require a new template version", () => {
+  const svcTemplate: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+    kind: "service",
+    category: "topology",
+    id: "vary",
+    version: "1",
+    services: [
+      {
+        name: "planner",
+        needs: [],
+        image: "ghcr.io/acme/planner:base",
+        env: { LOG_LEVEL: "info", OPENAI_BASE_URL: "http://litellm:4000" },
+        model: "gpt-4o",
+      },
+    ],
+    dependencies: [],
+    frontDoor: { service: "planner", submit: "POST /runs" },
+    traceSource: { kind: "otel", endpoint: "http://o:4318" },
+  });
+
+  it("a template service's image is the slot default, so an instance pins only what it changes", () => {
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "vary", version: "1" },
+      id: "vary",
+      version: "v1",
+      pins: {}, // nothing pinned — the template's own image stands in
+    });
+    const resolved = resolveHarnessInstance(svcTemplate, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.services[0]?.image).toBe("ghcr.io/acme/planner:base");
+  });
+
+  it("a pin still wins over the template's default image", () => {
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "vary", version: "1" },
+      id: "vary",
+      version: "pr-9",
+      pins: { planner: "ghcr.io/acme/planner:pr-9" },
+    });
+    const resolved = resolveHarnessInstance(svcTemplate, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.services[0]?.image).toBe("ghcr.io/acme/planner:pr-9");
+  });
+
+  it("overrides.services[].model rebinds the agent-server model without touching the shape", () => {
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "vary", version: "1" },
+      id: "vary-opus",
+      version: "v1",
+      overrides: { services: { planner: { model: "claude-opus-4-8" } } },
+    });
+    const resolved = resolveHarnessInstance(svcTemplate, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.services[0]?.model).toBe("claude-opus-4-8");
+  });
+
+  it("overrides.services[].unsetEnv drops a template env default (which a merge-only overlay cannot express)", () => {
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "vary", version: "1" },
+      id: "vary-direct",
+      version: "v1",
+      overrides: { services: { planner: { unsetEnv: ["OPENAI_BASE_URL"] } } },
+    });
+    const resolved = resolveHarnessInstance(svcTemplate, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.services[0]?.env).toEqual({ LOG_LEVEL: "info" });
+  });
+
+  it("unsetEnv naming a key the template never set is a no-op, not an error", () => {
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "vary", version: "1" },
+      id: "vary",
+      version: "v1",
+      overrides: { services: { planner: { unsetEnv: ["NOT_THERE"] } } },
+    });
+    const resolved = resolveHarnessInstance(svcTemplate, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.services[0]?.env).toEqual({ LOG_LEVEL: "info", OPENAI_BASE_URL: "http://litellm:4000" });
+  });
+
+  it("a command instance can ask for a bigger box (overrides.resources) and drop a template env key", () => {
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "command",
+      category: "cli-agent",
+      id: "aider",
+      version: "1",
+      command: "aider --message {{task}} .",
+      env: { AIDER_YES: "1", OPENAI_BASE_URL: "http://litellm:4000" },
+      resources: { cpu: 1000, memoryMb: 2048 },
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "aider", version: "1" },
+      id: "aider-heavy",
+      version: "v1",
+      overrides: { resources: { cpu: 4000, memoryMb: 8192 }, unsetEnv: ["OPENAI_BASE_URL"] },
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    if (resolved.kind !== "command") throw new Error("expected command");
+    expect(resolved.resources).toEqual({ cpu: 4000, memoryMb: 8192 });
+    expect(resolved.env).toEqual({ AIDER_YES: "1" });
+  });
+
+  it("a command instance without a resources override keeps the template's request", () => {
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "command",
+      category: "cli-agent",
+      id: "aider",
+      version: "1",
+      command: "aider .",
+      resources: { cpu: 1000, memoryMb: 2048 },
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "aider", version: "1" },
+      id: "aider",
+      version: "v1",
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    if (resolved.kind !== "command") throw new Error("expected command");
+    expect(resolved.resources).toEqual({ cpu: 1000, memoryMb: 2048 });
+  });
+
+  it("a host-exec template service still refuses an image (nothing would run it)", () => {
+    const res = HarnessTemplateSpecSchema.safeParse({
+      kind: "service",
+      category: "topology",
+      id: "bad",
+      version: "1",
+      services: [{ name: "win-ui", image: "reg/oops:1", exec: { kind: "host", command: ["x.exe"] } }],
+      dependencies: [],
+      frontDoor: { service: "win-ui", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    });
+    expect(res.success).toBe(false);
+  });
+});
+
 describe("HarnessInstanceSpec — description (version changelog)", () => {
   it("a free-text description (changelog) can be attached to the instance and is preserved on parse", () => {
     const instance = HarnessInstanceSpecSchema.parse({
