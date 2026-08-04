@@ -94,7 +94,8 @@ describe("MattermostCommandService — inbound verification + dispatch", () => {
     });
     expect(r.response_type).toBe("in_channel");
     expect(r.text).toContain("sc-1");
-    expect(r.text).toContain("https://everdict.example.com/acme/scorecards/sc-1");
+    // One scorecard is the SINGULAR address — the link points at the thing, not at the list it came from.
+    expect(r.text).toContain("https://everdict.example.com/acme/scorecard/sc-1");
   });
 
   it("run with too few args → usage guidance (does not fire)", async () => {
