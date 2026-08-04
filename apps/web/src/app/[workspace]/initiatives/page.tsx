@@ -15,6 +15,7 @@ import { HealthBadge } from '@/entities/tracker-health'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { markdownPreview } from '@/shared/lib/markdown-preview'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
@@ -122,8 +123,9 @@ export default async function InitiativesPage({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-[510] text-foreground">{i.name}</p>
                   {i.description && (
+                    // 설명은 마크다운이다 — 한 줄 미리보기에는 문법을 벗겨 낸 텍스트만 넣는다.
                     <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
-                      {i.description}
+                      {markdownPreview(i.description)}
                     </p>
                   )}
                 </div>
