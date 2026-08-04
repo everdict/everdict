@@ -1,6 +1,6 @@
 import type { IssueRecord, IssueStatus, ProjectRecord, ProjectStatus } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { initiativeReadiness, projectRollup } from "./readiness.js";
+import { initiativeProgress, initiativeReadiness, projectRollup } from "./readiness.js";
 
 const NOW = "2026-07-31T00:00:00.000Z";
 const INITIATIVE = "ini-ship";
@@ -137,5 +137,58 @@ describe("initiativeReadiness", () => {
       new Map([["p1", [issue("a", "done", "sc-1"), issue("b", "cancelled")]]]),
     );
     expect(readiness).toMatchObject({ ready: true, openIssues: 0, totalIssues: 2, blockers: [] });
+  });
+});
+
+// The LIST's arithmetic. It must answer exactly what `initiativeReadiness` answers for the same data — a row
+// that disagrees with the page it links to is worse than no row — so every case here is stated against the
+// detail's rules: cancelled projects are off the goal, descendants roll up, and a project with no issues yet
+// contributes nothing rather than a zero.
+describe("initiativeProgress — the same numbers, from an aggregate", () => {
+  it("rolls a descendant's projects up into the parent and skips cancelled work", () => {
+    const initiatives = [{ id: INITIATIVE }, { id: "ini-sub", parentId: INITIATIVE }];
+    const projects = [
+      project("p1", "in_progress"),
+      project("p2", "in_progress", ["ini-sub"]),
+      project("p3", "cancelled"),
+    ];
+    const counts = new Map([
+      ["p1", { open: 1, total: 3 }],
+      ["p2", { open: 2, total: 2 }],
+      ["p3", { open: 9, total: 9 }],
+    ]);
+
+    const progress = initiativeProgress(initiatives, projects, counts);
+    // The parent counts both live projects; the cancelled one is summarized (projects: 3) but never counted.
+    expect(progress.get(INITIATIVE)).toEqual({ open: 3, total: 5, projects: 3 });
+    // The child answers for its own project only.
+    expect(progress.get("ini-sub")).toEqual({ open: 2, total: 2, projects: 1 });
+  });
+
+  it("agrees with the detail's fan-out on the same data", () => {
+    const projects = [project("p1", "in_progress"), project("p2", "cancelled")];
+    const issuesByProject = new Map([
+      ["p1", [issue("a", "regressed"), issue("b", "done", "sc-1")]],
+      ["p2", [issue("c", "todo")]],
+    ]);
+    const readiness = initiativeReadiness(INITIATIVE, projects, issuesByProject);
+    const counts = new Map(
+      [...issuesByProject].map(([id, issues]) => {
+        const rollup = projectRollup(issues);
+        return [id, { open: rollup.open, total: rollup.total }] as const;
+      }),
+    );
+
+    const progress = initiativeProgress([{ id: INITIATIVE }], projects, counts);
+    expect(progress.get(INITIATIVE)).toEqual({
+      open: readiness.openIssues,
+      total: readiness.totalIssues,
+      projects: readiness.projects.length,
+    });
+  });
+
+  it("reports a goal with nothing under it as empty rather than absent", () => {
+    const progress = initiativeProgress([{ id: INITIATIVE }], [], new Map());
+    expect(progress.get(INITIATIVE)).toEqual({ open: 0, total: 0, projects: 0 });
   });
 });

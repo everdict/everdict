@@ -6,7 +6,11 @@ import type {
   InitiativeStatus as WireInitiativeStatus,
   InitiativeUpdateRecord as WireInitiativeUpdateRecord,
 } from '@everdict/contracts'
-import type { InitiativeDetailResponse } from '@everdict/contracts/wire'
+import type {
+  InitiativeDetailResponse,
+  InitiativeListItem as WireInitiativeListItem,
+  InitiativeProgress as WireInitiativeProgress,
+} from '@everdict/contracts/wire'
 import { z } from 'zod'
 
 import { issueStatusSchema, trackerHistoryEntrySchema } from '@/entities/issue'
@@ -42,7 +46,19 @@ export const initiativeSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 })
-export const initiativesSchema = z.array(initiativeSchema)
+// 목록 한 줄이 이고 오는 진척 — 상세의 `readiness` 와 같은 세 숫자를, 이슈를 한 건도 읽지 않고 집계로만
+// 낸 것이다(목표 20개짜리 목록이 팬아웃 20번일 수는 없다). 규칙은 상세와 같아야 한다: 취소된 프로젝트의
+// 일은 목표에서 빠지고, 하위 목표의 프로젝트는 상위로 올라온다.
+export const initiativeProgressSchema = z.object({
+  open: z.number(),
+  total: z.number(),
+  projects: z.number(),
+})
+
+export const initiativeListItemSchema = initiativeSchema.extend({
+  progress: initiativeProgressSchema,
+})
+export const initiativesSchema = z.array(initiativeListItemSchema)
 
 // 목표에 올라온 업데이트 한 건 — 추가만 되고 고쳐지지 않는다.
 export const initiativeUpdateSchema = z.object({
@@ -123,6 +139,22 @@ type _detailBack = AssertAssignable<
   InitiativeDetailResponse,
   z.infer<typeof initiativeDetailSchema>
 >
+type _listItemFwd = AssertAssignable<
+  z.infer<typeof initiativeListItemSchema>,
+  WireInitiativeListItem
+>
+type _listItemBack = AssertAssignable<
+  WireInitiativeListItem,
+  z.infer<typeof initiativeListItemSchema>
+>
+type _progressFwd = AssertAssignable<
+  z.infer<typeof initiativeProgressSchema>,
+  WireInitiativeProgress
+>
+type _progressBack = AssertAssignable<
+  WireInitiativeProgress,
+  z.infer<typeof initiativeProgressSchema>
+>
 type _updateFwd = AssertAssignable<
   z.infer<typeof initiativeUpdateSchema>,
   WireInitiativeUpdateRecord
@@ -133,6 +165,8 @@ type _updateBack = AssertAssignable<
 >
 
 export type Initiative = WireInitiativeRecord
+export type InitiativeListItem = WireInitiativeListItem
+export type InitiativeProgress = WireInitiativeProgress
 export type InitiativeUpdate = WireInitiativeUpdateRecord
 export type InitiativeStatus = WireInitiativeStatus
 export type InitiativeReadiness = WireInitiativeReadiness
@@ -155,4 +189,8 @@ export type __initiativeDriftGuard = [
   _detailBack,
   _updateFwd,
   _updateBack,
+  _listItemFwd,
+  _listItemBack,
+  _progressFwd,
+  _progressBack,
 ]

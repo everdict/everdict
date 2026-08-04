@@ -42,6 +42,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { CopyLinkButton } from '@/shared/ui/copy-link-button'
 import { DistributionBar } from '@/shared/ui/distribution-bar'
+import { Markdown } from '@/shared/ui/markdown'
 import { PageHeader } from '@/shared/ui/page-header'
 import { PropertyList, PropertyRow } from '@/shared/ui/property-list'
 import { SectionHeader } from '@/shared/ui/section-header'
@@ -325,11 +326,8 @@ export default async function ProjectDetailPage({
         {/* ③ 프로젝트가 무엇이고, 그 아래에서 무슨 일이 벌어지고 있는지. */}
         <div className="min-w-0 space-y-7 @3xl:col-start-1 @3xl:row-start-1">
           {/* 설명은 이름 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 프로젝트 그 자체다. */}
-          {current.description && (
-            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
-              {current.description}
-            </p>
-          )}
+          {/* 목표(이니셔티브)의 설명과 같은 마크다운 표면 — 한 층 아래라고 다르게 읽힐 이유가 없다. */}
+          {current.description && <Markdown content={current.description} />}
 
           {grouped.length > 0 && (
             <section className="space-y-4">

@@ -7,6 +7,7 @@ import type {
 } from "@everdict/contracts";
 import { BadRequestError, ConflictError } from "@everdict/contracts";
 import { appendHistory } from "./history.js";
+import { excerptOf } from "./update-excerpt.js";
 
 // The Initiative aggregate — the GOAL several projects work toward (Linear's meaning). Completing one is a
 // gate: it refuses while any issue under any of its projects is still open, because a goal with unfinished work
@@ -182,7 +183,14 @@ export class Initiative {
             kind: "initiative.update_posted",
             subject: { type: "initiative", id: this.record.id },
             actor: by,
-            payload: { health: update.health, ...(from !== undefined ? { from } : {}) },
+            payload: {
+              health: update.health,
+              ...(from !== undefined ? { from } : {}),
+              // The first line of what was said, not the whole thing: every downstream reader of this fact
+              // (the bell row, the chat post) needs the sentence to be worth anything, and none of them can
+              // re-read the timeline from an event. The full body stays the record.
+              excerpt: excerptOf(update.body),
+            },
             message: `${this.record.name} — ${update.health.replace("_", " ")}`,
           },
         ],

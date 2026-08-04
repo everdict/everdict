@@ -1,5 +1,5 @@
 import { InitiativeRecordSchema, InitiativeStatusSchema, InitiativeUpdateRecordSchema } from "@everdict/contracts";
-import { InitiativeDetailResponseSchema } from "@everdict/contracts/wire";
+import { InitiativeDetailResponseSchema, InitiativeListItemSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -34,8 +34,10 @@ export const initiativeDocs: Record<
   list: {
     summary: "List the workspace's initiatives",
     description:
-      "The workspace's initiatives. Filter by status. Rows carry the reported health but no progress — that is " +
-      "a fan-out over every project's issues, served on the detail read. Requires issues:read.",
+      "The workspace's initiatives. Filter by status. Each row carries the reported health AND its progress " +
+      "(open / total issues, project count) — the same three numbers the detail derives, computed from one " +
+      "aggregate rather than a fan-out per row. Naming what is still open stays the detail's job. " +
+      "Requires issues:read.",
     tags: ["initiative"],
     querystring: toJsonSchema(
       z.object({
@@ -44,7 +46,7 @@ export const initiativeDocs: Record<
       }),
     ),
     response: {
-      200: { description: "Initiatives", ...toJsonSchema(z.array(InitiativeRecordSchema)) },
+      200: { description: "Initiatives with their progress", ...toJsonSchema(z.array(InitiativeListItemSchema)) },
       ...errorResponses(400, 401, 403),
     },
   },

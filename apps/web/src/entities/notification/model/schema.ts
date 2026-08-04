@@ -19,6 +19,8 @@ export const notificationKinds = [
   'comment_mention',
   // 닫아둔 이슈의 평가가 무너졌다 — 아무도 안 보고 있는 이슈라서, 이슈 쪽이 사람을 찾아와야 한다.
   'issue_regressed',
+  // 프로젝트/목표에 판정이 올라왔다 — 그 일에 답할 사람에게 간다(docs/tracker.md).
+  'tracker_update_posted',
 ] as const
 export const notificationKindSchema = z.enum(notificationKinds)
 

@@ -14,6 +14,7 @@ import { TrackerHistory } from '@/entities/tracker-history'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/ui/callout'
 import { DistributionBar } from '@/shared/ui/distribution-bar'
+import { Markdown } from '@/shared/ui/markdown'
 import { SectionHeader } from '@/shared/ui/section-header'
 
 import { loadInitiative } from './load-initiative'
@@ -59,12 +60,10 @@ export default async function InitiativeOverviewPage({
 
   return (
     <div className="space-y-7">
-      {/* 설명은 이름 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 목표 그 자체다. */}
-      {current.description && (
-        <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
-          {current.description}
-        </p>
-      )}
+      {/* 설명은 이름 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 목표 그 자체다. 이슈 본문과
+          같은 마크다운 표면을 쓴다: 목표를 정의하는 글에는 링크와 목록이 들어가고, 그걸 평문으로 두면
+          "무엇이 참이면 이룬 것인가"가 한 덩어리 문단이 된다. */}
+      {current.description && <Markdown content={current.description} />}
 
       {(projectSegments.length > 0 || issueSegments.length > 0) && (
         <section className="space-y-4">

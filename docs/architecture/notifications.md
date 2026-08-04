@@ -42,7 +42,8 @@ web bell (poll /notifications) ──▶ new items → Web Notification API ─�
 
 - **Entity** — `{ id, workspace, recipient(subject), kind, title, body?, link{runId|scorecardId},
   createdAt, readAt? }`. `kind`: `run_completed` | `run_failed` | `scorecard_completed` |
-  `scorecard_failed` | `schedule_completed` | `schedule_failed` | `comment_mention` (extensible). A
+  `scorecard_failed` | `schedule_completed` | `schedule_failed` | `comment_mention` | `issue_regressed` |
+  `tracker_update_posted` (extensible). A
   scheduled eval (cron fire **or** manual "run now") reuses the scorecard completion seam but is
   **branded** — `NotificationService.notifyScorecard` emits `schedule_{completed,failed}` (title
   "Scheduled run …") when `record.origin.source === "schedule"`, in place of the generic

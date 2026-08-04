@@ -355,6 +355,43 @@ describe("project + initiative routes — the completion gate", () => {
     await app.close();
   });
 
+  it("the initiative LIST carries each goal's progress, so a row answers 'how far along' without a second read", async () => {
+    const { app } = build();
+    const initiativeId = (
+      await app.inject({
+        method: "POST",
+        url: "/initiatives",
+        headers: H,
+        payload: { name: "agents people trust" },
+      })
+    ).json().id;
+    const projectId = (
+      await app.inject({
+        method: "POST",
+        url: "/projects",
+        headers: H,
+        payload: { name: "conversation quality", initiativeIds: [initiativeId] },
+      })
+    ).json().id;
+    const open = await createIssue(app, { title: "still failing", status: "in_progress", projectId });
+    const closed = await createIssue(app, { title: "fixed", status: "in_progress", projectId });
+    await app.inject({
+      method: "POST",
+      url: `/issues/${closed.id}/status`,
+      headers: H,
+      payload: { status: "done", resolution: { note: "verified" } },
+    });
+
+    const listed = (await app.inject({ method: "GET", url: "/initiatives", headers: H })).json();
+    expect(listed[0]).toMatchObject({ id: initiativeId, progress: { open: 1, total: 2, projects: 1 } });
+
+    // And the row agrees with the page it links to.
+    const detail = (await app.inject({ method: "GET", url: `/initiatives/${initiativeId}`, headers: H })).json();
+    expect(detail.readiness).toMatchObject({ openIssues: 1, totalIssues: 2 });
+    expect(detail.readiness.blockers.map((b: { issueId: string }) => b.issueId)).toEqual([open.id]);
+    await app.close();
+  });
+
   it("posts an update on the goal — the health lands on the record and the sentence stays the timeline", async () => {
     const { app } = build();
     const initiativeId = (

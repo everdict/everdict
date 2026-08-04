@@ -55,8 +55,15 @@ class FakeIssueStore extends FakeStore<IssueRecord> implements IssueStore {
   async getByGithub(): Promise<IssueRecord | undefined> {
     return undefined;
   }
+  // The narrowings the service actually asks for. `projectIds` + `statuses` are what the list's progress
+  // aggregate rides on, so a fake that ignored them would let a broken query pass here.
   async list(tenant: string, filter?: IssueListFilter): Promise<IssueRecord[]> {
-    return this.all(tenant).filter((r) => filter?.projectId === undefined || r.projectId === filter.projectId);
+    return this.all(tenant).filter(
+      (r) =>
+        (filter?.projectId === undefined || r.projectId === filter.projectId) &&
+        (filter?.projectIds === undefined || (r.projectId !== undefined && filter.projectIds.includes(r.projectId))) &&
+        (filter?.statuses === undefined || filter.statuses.includes(r.status)),
+    );
   }
   // Derived from this fake's own `list` via the kernel helpers, so it cannot disagree with production.
   async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
@@ -82,8 +89,11 @@ class FakeProjectStore extends FakeStore<ProjectRecord> implements ProjectStore 
 }
 
 class FakeInitiativeStore extends FakeStore<InitiativeRecord> implements InitiativeStore {
-  async list(tenant: string, _filter?: InitiativeListFilter): Promise<InitiativeRecord[]> {
-    return this.all(tenant);
+  // Filters like the real stores do — the list's progress roll-up has to walk the WHOLE tree even when the
+  // page is narrowed, and a fake that ignored `status` would make that distinction untestable.
+  async list(tenant: string, filter?: InitiativeListFilter): Promise<InitiativeRecord[]> {
+    const rows = this.all(tenant).filter((r) => filter?.status === undefined || r.status === filter.status);
+    return filter?.limit !== undefined ? rows.slice(0, filter.limit) : rows;
   }
 }
 
@@ -168,6 +178,47 @@ describe("InitiativeService — the completion gate", () => {
     expect(detail.readiness.totalIssues).toBe(3);
     expect(detail.readiness.blockers.map((b) => b.issueId)).toEqual(["a", "b"]);
     expect(detail.readiness.projects.map((p) => p.id).sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("the LIST answers the same progress the detail derives — from an aggregate, not a fan-out per row", async () => {
+    const svc = service();
+    const goal = await svc.create({ tenant: "acme", createdBy: "dana", name: "agents people trust" });
+    const sub = await svc.create({ tenant: "acme", createdBy: "dana", name: "cheaper cases", parentId: goal.id });
+    await projects.create(project("p1", goal.id, "in_progress"));
+    await projects.create(project("p2", sub.id, "in_progress"));
+    await projects.create(project("p3", goal.id, "cancelled"));
+    await issues.create(issue("a", "p1", "regressed"));
+    await issues.create(issue("b", "p1", "done"));
+    await issues.create(issue("c", "p2", "todo"));
+    await issues.create(issue("d", "p3", "todo")); // cancelled project — off the goal
+
+    const rows = await svc.list("acme");
+    const parent = rows.find((row) => row.id === goal.id);
+    const child = rows.find((row) => row.id === sub.id);
+    // The parent counts the descendant's project too, and the cancelled one is summarized but never counted.
+    expect(parent?.progress).toEqual({ open: 2, total: 3, projects: 3 });
+    expect(child?.progress).toEqual({ open: 1, total: 1, projects: 1 });
+
+    // And it agrees with the read it links to — a row that disagreed with its page would be worse than no row.
+    const detail = await svc.detail("acme", goal.id);
+    expect(parent?.progress).toEqual({
+      open: detail.readiness.openIssues,
+      total: detail.readiness.totalIssues,
+      projects: detail.readiness.projects.length,
+    });
+  });
+
+  it("counts a filtered-out descendant toward its parent — a filter narrows the PAGE, not the arithmetic", async () => {
+    const svc = service();
+    const goal = await svc.create({ tenant: "acme", createdBy: "dana", name: "agents people trust" });
+    const sub = await svc.create({ tenant: "acme", createdBy: "dana", name: "cheaper cases", parentId: goal.id });
+    await svc.setStatus("acme", sub.id, { status: "cancelled" }, actor);
+    await projects.create(project("p1", sub.id, "in_progress"));
+    await issues.create(issue("a", "p1", "todo"));
+
+    const active = await svc.list("acme", { status: "active" });
+    expect(active.map((row) => row.id)).toEqual([goal.id]);
+    expect(active[0]?.progress).toEqual({ open: 1, total: 1, projects: 1 });
   });
 
   it("a posted update carries the health onto the goal, and the sentence stays the record", async () => {

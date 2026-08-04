@@ -9,11 +9,14 @@ import {
   NotFoundError,
   type TrackerHealth,
 } from "@everdict/contracts";
-import type { InitiativeDetailResponse } from "@everdict/contracts/wire";
+import { ISSUE_STATUSES, ISSUE_STATUS_CATEGORY, type ProjectRecord } from "@everdict/contracts";
+import type { InitiativeDetailResponse, InitiativeListItem, InitiativeProgress } from "@everdict/contracts/wire";
 import {
   Initiative,
   type InitiativeEditInput,
   type InitiativeTransition,
+  type ProjectIssueCount,
+  initiativeProgress,
   initiativeReadiness,
   ownedByAnyVisibleTeam,
 } from "@everdict/domain";
@@ -26,6 +29,16 @@ import type { ProjectStore } from "../ports/project-store.js";
 // The goal several projects work toward. Its one interesting operation is completion, which is a GATE: it reads
 // the live progress across every project's issues and refuses while anything is open. Stores are injected
 // directly (never peer services) so that read is one fan-out, not a chain of service calls.
+
+// A goal nobody has put work under yet — a real answer, and the one a brand-new initiative gives.
+const EMPTY_PROGRESS: InitiativeProgress = { open: 0, total: 0, projects: 0 };
+
+// "Open" has ONE definition in this codebase (records/tracker.ts): anything whose category is neither completed
+// nor canceled — `regressed` included. Derived from the category table rather than listed again, so the count a
+// list row shows can never disagree with the gate.
+const OPEN_ISSUE_STATUSES = ISSUE_STATUSES.filter(
+  (status) => ISSUE_STATUS_CATEGORY[status] !== "completed" && ISSUE_STATUS_CATEGORY[status] !== "canceled",
+);
 
 export interface InitiativeActor {
   subject: string;
@@ -85,8 +98,46 @@ export class InitiativeService {
     return record;
   }
 
-  list(tenant: string, filter?: InitiativeListFilter): Promise<InitiativeRecord[]> {
-    return this.deps.store.list(tenant, filter);
+  // The list carries each goal's progress, because a list of goals with no answer to "how far along" is a list
+  // of names. It is THREE queries for the whole page, not a fan-out per row: every initiative (the tree the
+  // roll-up walks), every project claimed by one, and ONE aggregate counting issues per project — twice, since
+  // "open" and "total" are two filters over the same GROUP BY. The detail's fan-out stays where it belongs: it
+  // is the read that also has to NAME the remaining issues.
+  async list(tenant: string, filter?: InitiativeListFilter): Promise<InitiativeListItem[]> {
+    const rows = await this.deps.store.list(tenant, filter);
+    if (rows.length === 0) return [];
+    // The whole tree, not the filtered page: a parent's progress counts a descendant the filter dropped. Only
+    // a filter that actually narrows costs the second read — an empty filter object is the same set.
+    const narrowed = filter?.status !== undefined || filter?.limit !== undefined;
+    const all = narrowed ? await this.deps.store.list(tenant) : rows;
+    const projects = await this.deps.projects.list(tenant, { initiativeIds: all.map((row) => row.id) });
+    const progress = initiativeProgress(all, projects, await this.countsByProject(tenant, projects));
+    return rows.map((row) => ({ ...row, progress: progress.get(row.id) ?? EMPTY_PROGRESS }));
+  }
+
+  // open/total per project in two aggregates. `countByGroup` returns one row per group under a filter, so the
+  // open pass is the same query narrowed to the open statuses — never a query per project.
+  private async countsByProject(
+    tenant: string,
+    projects: readonly ProjectRecord[],
+  ): Promise<Map<string, ProjectIssueCount>> {
+    const counts = new Map<string, ProjectIssueCount>();
+    if (projects.length === 0) return counts;
+    const projectIds = projects.map((project) => project.id);
+    const [total, open] = await Promise.all([
+      this.deps.issues.countByGroup(tenant, "project", { projectIds }),
+      this.deps.issues.countByGroup(tenant, "project", { projectIds, statuses: OPEN_ISSUE_STATUSES }),
+    ]);
+    for (const row of total) {
+      if (row.key === null) continue; // the unset bucket is "no project", which no goal claims
+      counts.set(row.key, { open: 0, total: row.count });
+    }
+    for (const row of open) {
+      if (row.key === null) continue;
+      const current = counts.get(row.key);
+      if (current !== undefined) current.open = row.count;
+    }
+    return counts;
   }
 
   async get(tenant: string, id: string): Promise<InitiativeRecord> {

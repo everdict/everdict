@@ -21,6 +21,7 @@ import {
   runFeedConsumer,
   scorecardFeedConsumer,
   subscriptionReactionConsumer,
+  trackerUpdateConsumer,
 } from "@everdict/application-control";
 import { ProxyService } from "@everdict/application-control";
 import {
@@ -444,6 +445,11 @@ async function main(): Promise<void> {
   // The Mattermost channel rides the log too (the last direct notification path, re-based): completion +
   // report facts → workspace channel posts. E2's widened facts keep machine-fired coverage intact.
   eventConsumers.register(mattermostConsumer(notificationService));
+  // A posted project/goal update is news for the people answerable for that work — until this consumer existed
+  // it landed in a timeline nobody was watching, which made posting one a private act (docs/tracker.md).
+  eventConsumers.register(
+    trackerUpdateConsumer({ projects: projectStore, initiatives: initiativeStore, feed: notificationStore }),
+  );
   // One Temporal client driver serves every CP-started workflow family (batch cancel aside): approvals'
   // durable WAIT, the session reaper, and the T-d reaction executor below.
   const workflowTemporal = process.env.EVERDICT_TEMPORAL_ADDRESS

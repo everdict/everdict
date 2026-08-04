@@ -31,8 +31,12 @@ export {
   EXECUTION_EMITTERS,
   executionSegment,
   INFRA_EMITTER,
+  placementSpan,
+  sealBody,
   sealExecutionPlanes,
   type SealedTrajectory,
+  type SealInput,
+  type TrajectoryBodyFormat,
   type TrajectoryListResult,
   type TrajectoryMeta,
   trajectoryReadableBy,
@@ -47,6 +51,10 @@ export {
 } from "./platform-event/event-consumer-runner.js";
 export { runFeedConsumer, scorecardFeedConsumer } from "./notification/feed-consumers.js";
 export { mattermostConsumer } from "./notification/mattermost-consumer.js";
+export {
+  trackerUpdateConsumer,
+  type TrackerUpdateConsumerDeps,
+} from "./notification/tracker-update-consumer.js";
 export {
   signSubscriptionPayload,
   type SubscriptionReactionDeps,
@@ -69,6 +77,7 @@ export {
 } from "./team/workflow-state-service.js";
 export {
   type CreateCycleInput,
+  CYCLE_CADENCE_ACTOR,
   type CycleActor,
   type CycleDetail,
   CycleService,

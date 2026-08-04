@@ -8,6 +8,7 @@ import type {
 } from "@everdict/contracts";
 import { BadRequestError, ConflictError } from "@everdict/contracts";
 import { appendHistory } from "./history.js";
+import { excerptOf } from "./update-excerpt.js";
 
 // The Project aggregate — issues grouped under one target date, so "did we finish the evaluation in time" is a
 // question the tracker can answer instead of a spreadsheet. Same {patch, facts} transition contract as Issue.
@@ -239,6 +240,9 @@ export class Project {
             payload: {
               health: update.health,
               ...(from !== undefined ? { from } : {}),
+              // The same excerpt an initiative update carries, for the same reason: a bell row or a chat post
+              // that only says the colour explains nothing, and neither can re-read the timeline.
+              excerpt: excerptOf(update.body),
               teamIds: this.record.teamIds,
               initiativeIds: this.record.initiativeIds,
             },

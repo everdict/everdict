@@ -105,8 +105,9 @@ cycles, projects, scorecards}`, with the team home at `/{workspace}/teams/ENG`. 
 list, filtered", and that is not what it is — each team holds different things, its triage inbox exists only if
 it turned one on, and its cycles are numbered in its own sequence. The workspace-wide `/issues`, `/projects` and
 `/scorecards` stay (they answer a real question: every team's), and one component renders both addresses;
-`/cycles` is a redirect to a team's, because "Cycle 3" has no meaning without whose third it is. Old `?team=`
-links redirect to the new path, so nothing pasted before this change breaks.
+`/cycles` is a redirect to a team's, because "Cycle 3" has no meaning without whose third it is — and so is
+`/cycles/<id>`, which now lands on `…/teams/ENG/cycles/7`. Old `?team=` links redirect to the new path, so
+nothing pasted before this change breaks.
 
 ## Issue
 
@@ -395,21 +396,74 @@ date"), and the two axes never merge.
   explicit close", never "the dates say so".
 - **The number comes from the team's own counter** (`cycleCounter`, the same conditional-UPDATE allocation an
   issue number uses), so `Cycle 7` means the seventh iteration THAT team ran.
-- **Creating one proposes its window** from the team's cadence (`cycleDurationWeeks`, default 2): the day after
-  the latest cycle ends, for that many weeks, end-inclusive. Passing both dates overrides it; passing one is a
-  `400`, because half a window is a mistake rather than a shorthand.
+- **A team switches cycles ON** (`cyclesEnabled`, off by default — the same reasoning triage has). Until it
+  does, it has no cycles, no sidebar row and no cycle row on its issues. Its cadence is three fields:
+  `cycleDurationWeeks` (how long one runs), `cycleStartDay` (0 = Sunday … 6 = Saturday, Monday by default) and
+  `upcomingCycleCount` (how many stay standing in front of the active one, 2 by default).
+- **The pipeline is provisioned on the READ, never on a timer** (`CycleService.list` with a `teamId` →
+  `cyclePipelinePlan`). Asking for one team's cycles stands up the iteration it is in plus `upcomingCycleCount`
+  more, so a member never has to plan a cycle before filing work into it. Three properties make that safe: the
+  plan is computed from what already exists (idempotent), it only ever APPENDS after the latest end date (a team
+  that paused for a month gets one cycle starting this week, not a month of backfill), and a failed plant simply
+  leaves the next read to plan again. Provisioned cycles are credited to `CYCLE_CADENCE_ACTOR`, not to whoever
+  opened the screen. This runtime has no scheduler that owns tenant data, and the tracker already recovers its
+  other structural invariant — a workspace always has a default team — on exactly this kind of read.
+- **Creating one by hand still proposes its window** from the same cadence: the day after the latest cycle ends,
+  or the team's start weekday on or before today when there is no live sequence to continue. Passing both dates
+  overrides it; passing one is a `400`, because half a window is a mistake rather than a shorthand.
 - **Progress counts two things** (`cycleProgress`, derived on the detail read): issues by COUNT and points by
   ESTIMATE. An unestimated issue is real work worth zero points — counting it as one would inflate every
   burn-down a team draws, so `estimated` says how many carry an estimate at all.
+- **The burn-down is replayed, not stored** (`cycleBurndown`, on the same detail read): one point per ELAPSED
+  day carrying what was committed (`scope`) and what was still open (`remaining`). There is no daily-snapshot
+  table on purpose — a stored series is a second truth to reconcile, while a replay of the issues can only ever
+  agree with them. TWO histories feed it, which is what makes it honest: `status_changed` says when work was
+  finished, and the recorded cycle move says when it was in this iteration at all, so work pulled in mid-cycle
+  RAISES the scope line on the day it arrived instead of pretending it was always committed. "We did less than
+  planned" and "we were given more" are different answers and the graph now distinguishes them. The remaining
+  limit is historical only: issues moved before cycle moves were recorded carry no arrival date and count for
+  the whole window — the honest fallback, stated on the screen rather than hidden.
 - **Closing is not a gate.** An iteration ending with unfinished work is the normal case, which is what the next
   cycle is for. `POST /cycles/:id/complete {moveUnfinishedTo}` closes it and carries everything still open into
   another OPEN cycle of the SAME team in one operation — after the close, so a failed carry-over leaves the
-  cycle open (the recoverable half) rather than issues stranded outside a running iteration. The
-  `cycle.completed` fact carries `carriedOver`, which is the number a retro actually asks for, and it is
-  trigger-matchable ("the iteration closed — write the summary").
+  cycle open (the recoverable half) rather than issues stranded outside a running iteration. The carry-over goes
+  through the ISSUE AGGREGATE, never straight at the store, so each moved issue records the move in its own
+  history; a silent row update would make the destination's burn-down count carried work as if it had been there
+  since day one. The `cycle.completed` fact carries `carriedOver`, which is the number a retro actually asks
+  for, and it is trigger-matchable ("the iteration closed — write the summary").
+- **Ending an iteration automatically is OPT-IN** (`cycleAutoClose`, off by default). The default is the
+  deliberate half: a cycle whose dates passed but which nobody closed is a cycle somebody FORGOT, and every list
+  keeps showing it rather than tidying it away — for a team still finding its pace, the forgotten cycle is the
+  signal. A team on a settled rhythm wants the iteration to simply end, so it switches this on and the same
+  provisioning read closes what expired and rolls the leftovers into the next standing cycle, through the same
+  transitions a member's own close uses (so an auto-closed cycle is indistinguishable from a hand-closed one
+  afterwards, down to the `carriedOver` count). Order matters: the pipeline is stocked FIRST, because an expired
+  cycle already fails the "standing" test, so the iteration the leftovers move into exists by the time the close
+  runs. Closing first would strand that work in a closed cycle until the next read.
 - An issue joins a cycle through the ordinary edit (`cycleId`), because pulling work into an iteration is a plan
   change, not a workflow transition. It may only join **its own team's** cycles: an issue on a board it can
-  never appear on is work made invisible.
+  never appear on is work made invisible. The move is the ONE edit whose values go into the history
+  (`cycleFrom` / `cycleTo` on the `updated` entry, `null` for "no cycle") — everything else can be answered by
+  reading the issue as it stands, but "which iteration was this in on the 9th" cannot, and that is what the
+  burn-down replays. An absent key and a `null` are deliberately different: absent means the edit predates this
+  being recorded, which is the only case that licenses "it was in the cycle all along".
+- **Three surfaces put work into an iteration**, because one was not enough: the issue's property column
+  (`IssueCycleControl`, beside status/priority/team/project), the create form, and — the one that makes cycles
+  usable — MULTI-SELECT in the issue list with a floating "move to cycle" bar. Filing twenty issues into a
+  fortnight through a per-issue picker means opening twenty pages, which is how a cycle feature ends up unused.
+  Selection lives only where a team scopes the list (an issue may only join its own team's cycles, so "this
+  cycle" is meaningless on a mixed workspace list), and all three offer OPEN cycles only — a closed iteration is
+  a record, not somewhere to put new work. The bulk move fans the ordinary per-issue edit out rather than adding
+  a batch endpoint: the "is this the issue's own team's cycle" judgement must not exist in two places, and
+  partial failure is a normal result the screen reports as such.
+- **The web's cycle screens** are Linear-shaped. `/{workspace}/teams/ENG/cycles` is not a list: it opens the
+  iteration the team is IN (falling back to the next one, then the most recent), because everyone who clicks
+  "Cycles" is asking about this fortnight and a list answers that only after another click. The title itself is
+  the switcher; `…/cycles/7` addresses one iteration by the number people cite, `…/cycles/all` is the full index
+  grouped by state, and the old `/{workspace}/cycles/<id>` redirects to the canonical team address the same way
+  an id-spelled issue URL redirects to `ENG-12`. The board reuses `IssueListView` under a cycle scope rather
+  than growing a second issue list — grouping, filters and the board layout have to be one component, or the two
+  copies drift.
 
 ## Triage — the queue in front of the workflow
 
@@ -537,6 +591,15 @@ the timeline. Updates are their own append-only timelines (`POST/GET /projects/:
 no sentence is a colour nobody can explain. One health vocabulary (`TrackerHealth`) serves both levels — the same
 three words mean the same three things, and two enums would have made "at risk" depend on which screen you read.
 
+**A posted update REACHES somebody.** Both `*.update_posted` facts carry an `excerpt` of the body (240 chars,
+`excerptOf`) precisely so their downstream readers can say something worth reading, since none of them can
+re-read the timeline from an event. Two consumers ride those facts: `tracker:update-notify`
+(`trackerUpdateConsumer`) writes a `tracker_update_posted` bell row for the people the RECORD already names — a
+project's lead/members/creator, a goal's lead/creator plus the leads of the projects under it, never the poster
+— and the Mattermost channel consumer posts the health line with the excerpt quoted under it. Recipients are
+derived, never subscribed: everdict has no subscription table for tracker records, and inventing one to answer
+"who cares" would be a worse answer than the record already gives.
+
 Beyond that they are thin containers with one interesting operation: **completion is a gate.**
 
 - `POST /projects/:id/status {status: "completed"}` refuses with a `409` while the project has open issues,
@@ -548,7 +611,12 @@ Beyond that they are thin containers with one interesting operation: **completio
 The rollups are **derived on detail reads, never stored** (the `ScorecardRecord.trialSummary` precedent):
 counting issues is cheap arithmetic, whereas a stored rollup is a cache to invalidate on every child write.
 `GET /projects/:id` carries `rollup`, `GET /initiatives/:id` carries `readiness` — how far along the goal is,
-with what is left listed regressions-first, and each project summarized with its status, health and lead. List endpoints stay lean. `GET /projects?team=` and `?initiative=` are containment tests on
+with what is left listed regressions-first, and each project summarized with its status, health and lead.
+`GET /initiatives` carries the same three numbers per row (`progress`: open / total / projects) but computes
+them from ONE aggregate (`countByGroup` over the issue table, twice — total and open) rolled up the tree by
+`initiativeProgress` in the kernel, because a list of 20 goals cannot be 20 fan-outs. The two paths share the
+rules, not the code, so `initiativeProgress` is tested AGAINST `initiativeReadiness` on the same data: a row
+that disagrees with the page it links to is worse than no row. List endpoints stay lean. `GET /projects?team=` and `?initiative=` are containment tests on
 the project's own lists (GIN-indexed), so they answer without touching the issue table.
 
 **The load-bearing invariant:** initiative progress counts open issues across every non-cancelled project

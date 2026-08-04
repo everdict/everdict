@@ -29,8 +29,24 @@ export function mattermostConsumer(channel: ChannelPoster): PlatformEventConsume
       "scorecard.failed",
       "scorecard.cancelled",
       "report.completed",
+      // The tracker's one HUMAN judgment (docs/tracker.md): somebody said where a project or the goal above it
+      // stands. It belongs in the channel for the same reason a finished batch does — it is the news a team
+      // would otherwise have to go looking for — and the excerpt on the fact is what makes the post worth
+      // reading, since a colour with no sentence explains nothing.
+      "project.update_posted",
+      "initiative.update_posted",
     ],
     async handle(event) {
+      if (event.kind === "project.update_posted" || event.kind === "initiative.update_posted") {
+        const health = payloadString(event, "health");
+        const icon = health === "off_track" ? "🔴" : health === "at_risk" ? "🟡" : "🟢";
+        const excerpt = payloadString(event, "excerpt");
+        await channel.postChannelMessage(
+          event.tenant,
+          `${icon} **${event.message}**${excerpt ? `\n> ${excerpt}` : ""}`,
+        );
+        return;
+      }
       if (event.kind === "run.completed" || event.kind === "run.failed") {
         const icon = event.kind === "run.completed" ? "✅" : "❌";
         const status = payloadString(event, "status") || (event.kind === "run.completed" ? "succeeded" : "failed");

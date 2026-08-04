@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   AtSign,
-  TriangleAlert,
   Bell,
   BellOff,
   BellRing,
@@ -15,6 +14,8 @@ import {
   CircleX,
   ClipboardCheck,
   ClipboardX,
+  Megaphone,
+  TriangleAlert,
   type LucideIcon,
 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
@@ -48,6 +49,10 @@ const RESOURCE_PATH: Record<string, (id: string) => string> = {
   schedule: (id) => `schedules/${id}/edit`,
   run: (id) => `runs/${id}`,
   runtime: (id) => `runtimes/${id}`,
+  // 트래커 업데이트가 가리키는 곳 — 판정이 올라온 그 기록. 목표는 업데이트 탭으로 바로 떨어뜨린다(그 문장을
+  // 읽으러 온 것이므로).
+  project: (id) => `projects/${id}`,
+  initiative: (id) => `initiatives/${id}/updates`,
 }
 
 function hrefOf(workspace: string, n: NotificationItem): string {
@@ -74,6 +79,8 @@ const KIND_META: Record<NotificationKind, { Icon: LucideIcon; tone: KindTone }> 
   report_completed: { Icon: ClipboardCheck, tone: 'info' }, // scheduled analysis report pinned to a view
   comment_mention: { Icon: AtSign, tone: 'info' },
   issue_regressed: { Icon: TriangleAlert, tone: 'danger' }, // 닫힌 이슈가 다시 열렸다 — 경보로 읽혀야 한다
+  // 사람이 올린 판정 — 성패가 아니라 보고다. 색으로 결론을 내지 않고(제목이 health 를 말한다) 정보 톤을 쓴다.
+  tracker_update_posted: { Icon: Megaphone, tone: 'info' },
 }
 const TONE_CHIP: Record<KindTone, string> = {
   success: 'bg-[var(--color-success)]/12 text-[var(--color-success)]',

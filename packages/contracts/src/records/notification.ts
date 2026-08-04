@@ -16,6 +16,11 @@ export const NotificationKindSchema = z.enum([
   // scorecard that closed it (docs/tracker.md). The one notification worth interrupting someone for, because
   // nobody is watching a closed issue — that is exactly why it needs to come find them.
   "issue_regressed",
+  // Somebody reported on work you are answerable for — a project or the goal above it (docs/tracker.md). ONE
+  // kind for both levels: the reader's interest is the same ("the thing I am on got a status report"), the
+  // link says which record, and the title carries the health. Two kinds would fork the bell's icon table
+  // without forking any decision the reader makes.
+  "tracker_update_posted",
 ]);
 export type NotificationKind = z.infer<typeof NotificationKindSchema>;
 

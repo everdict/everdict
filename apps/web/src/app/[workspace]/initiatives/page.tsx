@@ -8,7 +8,7 @@ import {
   initiativeHref,
   initiativesSchema,
   InitiativeStatusBadge,
-  type Initiative,
+  type InitiativeListItem,
 } from '@/entities/initiative'
 import { isPastDue } from '@/entities/project'
 import { HealthBadge } from '@/entities/tracker-health'
@@ -23,8 +23,9 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Initiatives — 여러 프로젝트가 함께 향하는 목표들. 진척은 프로젝트마다 이슈를 훑는 팬아웃이라 상세가 갖고,
-// 여기 한 줄은 그 목표가 무엇이고 언제까지이며 책임자가 뭐라고 말했는지(health)까지다.
+// Initiatives — 여러 프로젝트가 함께 향하는 목표들. 한 줄이 그 목표가 무엇이고, 언제까지이고, 책임자가
+// 뭐라고 말했고(health), **얼마나 왔는지**까지 답한다. 진척은 상세의 팬아웃이 아니라 서버가 집계 한 번으로
+// 내려 준 숫자다(초기에는 목록에 없었고, 그래서 목록이 이름의 나열이었다).
 export default async function InitiativesPage({
   params,
   searchParams,
@@ -39,7 +40,7 @@ export default async function InitiativesPage({
   const timeZone = await getTimeZone()
   const { principal, ctx } = await currentPrincipal()
 
-  let initiatives: Initiative[] = []
+  let initiatives: InitiativeListItem[] = []
   let error: string | undefined
   try {
     initiatives = initiativesSchema.parse(
@@ -126,6 +127,30 @@ export default async function InitiativesPage({
                     </p>
                   )}
                 </div>
+                {/* 얼마나 왔나 — 목록에서 목표를 훑는 이유가 이것이다. 일이 하나도 걸려 있지 않은 목표는
+                    막대를 그리지 않는다: 0%는 "시작 안 함"으로 읽히지만, 실제로는 셀 것이 없다는 뜻이다. */}
+                {i.progress.total > 0 && (
+                  <span className="hidden shrink-0 items-center gap-2 @md:flex">
+                    <span
+                      className="h-1.5 w-16 overflow-hidden rounded-full bg-muted/40"
+                      role="img"
+                      aria-label={t('progressDone', {
+                        done: i.progress.total - i.progress.open,
+                        total: i.progress.total,
+                      })}
+                    >
+                      <span
+                        className="block h-full rounded-full bg-[var(--color-success)]"
+                        style={{
+                          width: `${Math.round(((i.progress.total - i.progress.open) / i.progress.total) * 100)}%`,
+                        }}
+                      />
+                    </span>
+                    <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                      {i.progress.total - i.progress.open}/{i.progress.total}
+                    </span>
+                  </span>
+                )}
                 {i.targetDate && (
                   <span
                     className={cn(

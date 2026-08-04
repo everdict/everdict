@@ -2,17 +2,69 @@ import type {
   InitiativeBlocker,
   InitiativeProjectSummary,
   InitiativeReadiness,
+  InitiativeRecord,
   IssueRecord,
   IssueStatus,
   ProjectRecord,
   ProjectRollup,
 } from "@everdict/contracts";
 import { INITIATIVE_BLOCKER_LIMIT, ISSUE_STATUSES } from "@everdict/contracts";
+import type { InitiativeProgress } from "@everdict/contracts/wire";
 import { isOpenIssueStatus } from "./issue.js";
 
 // Rollup + readiness are PURE arithmetic over the issues a caller already fetched — no store, no I/O. They run
 // on detail reads (never stored) for the same reason ScorecardRecord.trialSummary is derived: a cached count is
 // a cache to invalidate on every child write, and the number is cheap.
+
+// --- The LIST's arithmetic ------------------------------------------------------------------------------
+// The same three numbers `initiativeReadiness` derives, for EVERY goal at once and without touching an issue
+// record: a list of 20 goals cannot afford 20 fan-outs, so the caller brings one aggregate (open/total per
+// project) and this rolls it up the tree. The rules must not drift from the detail's — a row that disagrees
+// with the page it links to is worse than no row: work under a CANCELLED project is off the goal (summarized,
+// never counted), and a descendant's projects count toward its ancestors.
+
+export interface ProjectIssueCount {
+  open: number;
+  total: number;
+}
+
+export function initiativeProgress(
+  initiatives: readonly Pick<InitiativeRecord, "id" | "parentId">[],
+  projects: readonly Pick<ProjectRecord, "id" | "initiativeIds" | "status">[],
+  countsByProject: ReadonlyMap<string, ProjectIssueCount>,
+): Map<string, InitiativeProgress> {
+  const childrenOf = new Map<string, string[]>();
+  for (const initiative of initiatives) {
+    if (initiative.parentId === undefined) continue;
+    childrenOf.set(initiative.parentId, [...(childrenOf.get(initiative.parentId) ?? []), initiative.id]);
+  }
+  const progress = new Map<string, InitiativeProgress>();
+  for (const initiative of initiatives) {
+    // Visited-set guarded like the service's own walk: a cycle written by an older build must not hang a list.
+    const scope = new Set<string>();
+    const queue = [initiative.id];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (current === undefined || scope.has(current)) continue;
+      scope.add(current);
+      queue.push(...(childrenOf.get(current) ?? []));
+    }
+    let open = 0;
+    let total = 0;
+    let claimed = 0;
+    for (const project of projects) {
+      if (!project.initiativeIds.some((id) => scope.has(id))) continue;
+      claimed += 1;
+      if (project.status === "cancelled") continue;
+      const counts = countsByProject.get(project.id);
+      if (counts === undefined) continue; // a project with no issues yet contributes nothing, not a zero row
+      open += counts.open;
+      total += counts.total;
+    }
+    progress.set(initiative.id, { open, total, projects: claimed });
+  }
+  return progress;
+}
 
 export function projectRollup(issues: readonly IssueRecord[]): ProjectRollup {
   // Every status key is present (zeroed) so consumers never branch on undefined — the null-discipline rule
