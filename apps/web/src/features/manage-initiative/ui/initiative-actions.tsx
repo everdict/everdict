@@ -2,18 +2,35 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { Loader2, MoreHorizontal, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import type { Initiative } from '@/entities/initiative'
+import type { Initiative, InitiativeResource } from '@/entities/initiative'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { MultiSelect } from '@/shared/ui/multi-select'
 
 import { deleteInitiativeAction, updateInitiativeAction } from '../api/initiatives'
+
+// 반쯤 적다 만 줄은 저장하지 않는다 — 주소 없는 리소스는 링크가 아니다.
+function cleanResources(rows: readonly InitiativeResource[]): InitiativeResource[] {
+  return rows
+    .map((row) => ({ label: row.label.trim(), url: row.url.trim() }))
+    .filter((row) => row.label !== '' && row.url !== '')
+}
+
+function sameResources(
+  a: readonly InitiativeResource[],
+  b: readonly InitiativeResource[]
+): boolean {
+  return (
+    a.length === b.length && a.every((row, i) => row.label === b[i]?.label && row.url === b[i]?.url)
+  )
+}
 
 function cleared(next: string, previous: string | undefined): string | null | undefined {
   const trimmed = next.trim()
@@ -46,6 +63,10 @@ export function InitiativeActions({
   const [description, setDescription] = useState(initiative.description ?? '')
   const [parentId, setParentId] = useState(initiative.parentId ?? '')
   const [lead, setLead] = useState(initiative.lead ?? '')
+  const [icon, setIcon] = useState(initiative.icon ?? '')
+  const [memberIds, setMemberIds] = useState<string[]>(initiative.memberIds)
+  // 빈 줄 하나를 항상 남겨 두지 않는다 — 추가 버튼이 줄을 만든다. 저장할 때 라벨/주소가 빈 줄은 버린다.
+  const [resources, setResources] = useState<InitiativeResource[]>(initiative.resources)
   const [targetDate, setTargetDate] = useState(initiative.targetDate ?? '')
   const [pending, startTransition] = useTransition()
 
@@ -59,6 +80,13 @@ export function InitiativeActions({
         ? { parentId: parentId === '' ? null : parentId }
         : {}),
       ...(lead !== (initiative.lead ?? '') ? { lead: lead === '' ? null : lead } : {}),
+      ...(icon.trim() !== (initiative.icon ?? '')
+        ? { icon: icon.trim() === '' ? null : icon.trim() }
+        : {}),
+      ...(memberIds.join('\u0000') !== initiative.memberIds.join('\u0000') ? { memberIds } : {}),
+      ...(sameResources(cleanResources(resources), initiative.resources)
+        ? {}
+        : { resources: cleanResources(resources) }),
       ...(targetDate !== (initiative.targetDate ?? '')
         ? { targetDate: targetDate === '' ? null : targetDate }
         : {}),
@@ -159,6 +187,16 @@ export function InitiativeActions({
             />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="edit-initiative-icon">{t('fieldIcon')}</Label>
+            <Input
+              id="edit-initiative-icon"
+              value={icon}
+              onChange={(e) => setIcon(e.target.value)}
+              placeholder={t('fieldIconPlaceholder')}
+              className="w-24"
+            />
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor="edit-initiative-lead">{t('fieldLead')}</Label>
             <Combobox
               id="edit-initiative-lead"
@@ -170,6 +208,70 @@ export function InitiativeActions({
                 ...members.map((m) => ({ value: m.subject, label: m.name })),
               ]}
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-initiative-members">{t('fieldMembers')}</Label>
+            <MultiSelect
+              id="edit-initiative-members"
+              options={members.map((m) => ({ value: m.subject, label: m.name }))}
+              selected={memberIds}
+              onChange={setMemberIds}
+              placeholder={t('fieldMembersPlaceholder')}
+              emptyLabel={t('fieldMembersEmpty')}
+              removeLabel={(name) => t('fieldMembersRemove', { name })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t('fieldResources')}</Label>
+            <p className="text-[12px] leading-relaxed text-muted-foreground">{t('resourceHint')}</p>
+            <div className="space-y-1.5">
+              {resources.map((resource, index) => (
+                <div key={`resource-${index}`} className="flex flex-col gap-1.5 @sm:flex-row">
+                  <Input
+                    value={resource.label}
+                    onChange={(e) =>
+                      setResources((rows) =>
+                        rows.map((row, i) =>
+                          i === index ? { ...row, label: e.target.value } : row
+                        )
+                      )
+                    }
+                    placeholder={t('fieldResourceLabel')}
+                    className="min-w-0 flex-1"
+                  />
+                  <Input
+                    value={resource.url}
+                    onChange={(e) =>
+                      setResources((rows) =>
+                        rows.map((row, i) => (i === index ? { ...row, url: e.target.value } : row))
+                      )
+                    }
+                    placeholder={t('fieldResourceUrl')}
+                    className="min-w-0 flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t('resourceRemove', {
+                      label: resource.label || t('fieldResources'),
+                    })}
+                    onClick={() => setResources((rows) => rows.filter((_, i) => i !== index))}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setResources((rows) => [...rows, { label: '', url: '' }])}
+              >
+                <Plus className="size-3.5" />
+                {t('resourceAdd')}
+              </Button>
+            </div>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="edit-initiative-target">{t('fieldTargetDate')}</Label>

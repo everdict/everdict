@@ -4637,6 +4637,7 @@
       "paused": "멈춤"
     },
     "initiativeStatus": {
+      "planned": "계획됨",
       "active": "진행 중",
       "completed": "완료",
       "cancelled": "취소됨"
@@ -5078,7 +5079,20 @@
     "addProjectsDone": "프로젝트 {count}개를 추가했습니다",
     "addProjectsError": "프로젝트를 추가하지 못했습니다.",
     "removeProject": "{name} 을(를) 이 목표에서 빼기",
-    "removeProjectError": "프로젝트를 빼지 못했습니다."
+    "removeProjectError": "프로젝트를 빼지 못했습니다.",
+    "fieldIcon": "아이콘",
+    "fieldIconPlaceholder": "이모지 하나 (예: 🎯)",
+    "fieldMembers": "참여자",
+    "fieldMembersPlaceholder": "참여자 고르기",
+    "fieldMembersEmpty": "고를 멤버가 없어요",
+    "fieldMembersRemove": "{name} 빼기",
+    "resourcesTitle": "리소스",
+    "fieldResources": "리소스",
+    "fieldResourceLabel": "이름",
+    "fieldResourceUrl": "주소",
+    "resourceAdd": "리소스 추가",
+    "resourceRemove": "{label} 빼기",
+    "resourceHint": "설계 문서·대시보드·논의 스레드 — 이 목표를 이해하려면 열어 봐야 하는 것들."
   },
   "importGithubIssues": {
     "open": "GitHub에서 가져오기",

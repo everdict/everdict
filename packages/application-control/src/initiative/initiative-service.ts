@@ -9,7 +9,12 @@ import {
   NotFoundError,
   type TrackerHealth,
 } from "@everdict/contracts";
-import { ISSUE_STATUSES, ISSUE_STATUS_CATEGORY, type ProjectRecord } from "@everdict/contracts";
+import {
+  ISSUE_STATUSES,
+  ISSUE_STATUS_CATEGORY,
+  type InitiativeResource,
+  type ProjectRecord,
+} from "@everdict/contracts";
 import type { InitiativeDetailResponse, InitiativeListItem, InitiativeProgress } from "@everdict/contracts/wire";
 import {
   Initiative,
@@ -52,6 +57,9 @@ export interface CreateInitiativeInput {
   description?: string;
   parentId?: string;
   lead?: string;
+  memberIds?: string[];
+  icon?: string;
+  resources?: InitiativeResource[];
   targetDate?: string;
 }
 
@@ -85,6 +93,9 @@ export class InitiativeService {
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       ...(input.lead !== undefined ? { lead: input.lead } : {}),
+      ...(input.memberIds !== undefined ? { memberIds: input.memberIds } : {}),
+      ...(input.icon !== undefined ? { icon: input.icon } : {}),
+      ...(input.resources !== undefined ? { resources: input.resources } : {}),
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
       createdBy: input.createdBy,
       now: this.now(),

@@ -20,8 +20,10 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
       description:
         "Create an initiative — a GOAL several projects work toward, the level at which 'where does this stand' " +
         "is asked. Use it for an outcome that several projects feed (a quality bar, a cost target, a migration); " +
-        "a single project needs no initiative. It starts `active`. Projects join it from the project side " +
-        "(create_project/update_project with initiativeIds), and an initiative may itself sit under another one.",
+        "a single project needs no initiative. It starts `planned` — moving it to `active` is the moment work " +
+        "under it begins, and both that and completion go through set_initiative_status. Projects join it from " +
+        "the project side (create_project/update_project with initiativeIds), and an initiative may itself sit " +
+        "under another one.",
       inputSchema: {
         name: z.string().min(1).max(300),
         description: z.string().max(50_000).optional(),
@@ -30,6 +32,12 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
           .optional()
           .describe("roll this initiative up into another one — the parent's progress then covers it too"),
         lead: z.string().optional().describe("the subject answerable for the goal"),
+        memberIds: z.array(z.string()).optional().describe("who else is on it"),
+        icon: z.string().max(8).optional().describe("one emoji — how the goal is recognized in a list"),
+        resources: z
+          .array(z.object({ label: z.string(), url: z.string() }))
+          .optional()
+          .describe("where the goal is written down, measured or argued"),
         targetDate: CalendarDate.optional().describe("YYYY-MM-DD — when the goal is meant to be reached"),
       },
     },
@@ -43,6 +51,9 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
             ...(a.description !== undefined ? { description: a.description } : {}),
             ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
             ...(a.lead !== undefined ? { lead: a.lead } : {}),
+            ...(a.memberIds !== undefined ? { memberIds: a.memberIds } : {}),
+            ...(a.icon !== undefined ? { icon: a.icon } : {}),
+            ...(a.resources !== undefined ? { resources: a.resources } : {}),
             ...(a.targetDate !== undefined ? { targetDate: a.targetDate } : {}),
           }),
         ),
@@ -95,7 +106,8 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
     "update_initiative",
     {
       description:
-        "Edit an initiative's content (name, description, parent, lead, target date). Status moves use " +
+        "Edit an initiative's content (name, description, parent, lead, members, icon, resources, target " +
+        "date). Status moves use " +
         "set_initiative_status instead, and projects are attached from the project side. Pass null to clear " +
         "description/lead/targetDate/parentId (detaching it back to the top level). Re-parenting under one of " +
         "its own descendants is refused — that would make the progress roll-up circular.",
@@ -105,6 +117,9 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
         description: z.string().max(50_000).nullable().optional(),
         parentId: z.string().nullable().optional(),
         lead: z.string().nullable().optional(),
+        memberIds: z.array(z.string()).optional(),
+        icon: z.string().max(8).nullable().optional(),
+        resources: z.array(z.object({ label: z.string(), url: z.string() })).optional(),
         targetDate: CalendarDate.nullable().optional(),
       },
     },
@@ -151,7 +166,8 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
     "set_initiative_status",
     {
       description:
-        "Move an initiative through its lifecycle. Completing it is a GATE: it reads live progress and is " +
+        "Move an initiative through its lifecycle (planned → active → completed, or cancelled). Completing " +
+        "it is a GATE: it reads live progress and is " +
         "refused while any issue under any of its projects is still open, with the count in the error. Pass " +
         "force:true to complete despite that — the override is recorded, so the history says the goal was " +
         "closed with known gaps instead of reached. Call get_initiative first and report what is left rather " +

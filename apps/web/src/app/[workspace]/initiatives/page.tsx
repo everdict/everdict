@@ -113,7 +113,11 @@ export default async function InitiativesPage({
       ) : (
         <div className="space-y-2">
           {initiatives.map((i) => {
-            const overdue = i.status === 'active' && isPastDue(i.targetDate, timeZone)
+            // 아직 끝나지도 접히지도 않은 목표라면 기한은 지날 수 있다 — 계획 단계라고 안 늦는 건 아니다.
+            const overdue =
+              i.status !== 'completed' &&
+              i.status !== 'cancelled' &&
+              isPastDue(i.targetDate, timeZone)
             return (
               <Link
                 key={i.id}
@@ -121,7 +125,10 @@ export default async function InitiativesPage({
                 className="group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-[510] text-foreground">{i.name}</p>
+                  <p className="flex min-w-0 items-center gap-1.5 truncate text-[13px] font-[510] text-foreground">
+                    {i.icon && <span aria-hidden>{i.icon}</span>}
+                    <span className="truncate">{i.name}</span>
+                  </p>
                   {i.description && (
                     // 설명은 마크다운이다 — 한 줄 미리보기에는 문법을 벗겨 낸 텍스트만 넣는다.
                     <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">

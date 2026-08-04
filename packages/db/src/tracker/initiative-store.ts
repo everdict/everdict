@@ -62,18 +62,21 @@ export class InMemoryInitiativeStore implements InitiativeStore {
 interface InitiativeRow extends TrackerRow {
   name: string;
   description: string | null;
+  icon: string | null;
   status: string;
   parent_id: string | null;
   lead: string | null;
+  member_ids: unknown;
+  resources: unknown;
   health: string | null;
   target_date: string | null;
   completed_at: string | Date | null;
 }
 
 const INITIATIVE_COLUMNS =
-  "(id, tenant, name, description, status, parent_id, lead, health, target_date, completed_at, history, created_by, created_at, updated_at)";
+  "(id, tenant, name, description, icon, status, parent_id, lead, member_ids, resources, health, target_date, completed_at, history, created_by, created_at, updated_at)";
 const INITIATIVE_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,$11::jsonb,$12,$13::timestamptz,$14::timestamptz)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::timestamptz,$14::jsonb,$15,$16::timestamptz,$17::timestamptz)";
 
 function insertParams(record: InitiativeRecord): unknown[] {
   return [
@@ -81,9 +84,12 @@ function insertParams(record: InitiativeRecord): unknown[] {
     record.tenant,
     record.name,
     record.description ?? null,
+    record.icon ?? null,
     record.status,
     record.parentId ?? null,
     record.lead ?? null,
+    JSON.stringify(record.memberIds),
+    JSON.stringify(record.resources),
     record.health ?? null,
     record.targetDate ?? null,
     record.completedAt ?? null,
@@ -100,9 +106,12 @@ function rowToRecord(row: InitiativeRow): InitiativeRecord {
     tenant: row.tenant,
     name: row.name,
     ...(row.description !== null ? { description: row.description } : {}),
+    ...(row.icon !== null ? { icon: row.icon } : {}),
     status: row.status,
     ...(row.parent_id !== null ? { parentId: row.parent_id } : {}),
     ...(row.lead !== null ? { lead: row.lead } : {}),
+    memberIds: Array.isArray(row.member_ids) ? row.member_ids : [],
+    resources: Array.isArray(row.resources) ? row.resources : [],
     ...(row.health !== null ? { health: row.health } : {}),
     ...(row.target_date !== null ? { targetDate: row.target_date } : {}),
     ...(row.completed_at !== null ? { completedAt: iso(row.completed_at) } : {}),
@@ -166,16 +175,20 @@ export class PgInitiativeStore implements InitiativeStore {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
     const next: InitiativeRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
-    const sets = `name=$3, description=$4, status=$5, parent_id=$6, lead=$7, health=$8,
-       target_date=$9, completed_at=$10::timestamptz, history=$11::jsonb, updated_at=$12::timestamptz`;
+    const sets = `name=$3, description=$4, icon=$5, status=$6, parent_id=$7, lead=$8,
+       member_ids=$9::jsonb, resources=$10::jsonb, health=$11,
+       target_date=$12, completed_at=$13::timestamptz, history=$14::jsonb, updated_at=$15::timestamptz`;
     const params: unknown[] = [
       tenant,
       id,
       next.name,
       next.description ?? null,
+      next.icon ?? null,
       next.status,
       next.parentId ?? null,
       next.lead ?? null,
+      JSON.stringify(next.memberIds),
+      JSON.stringify(next.resources),
       next.health ?? null,
       next.targetDate ?? null,
       next.completedAt ?? null,

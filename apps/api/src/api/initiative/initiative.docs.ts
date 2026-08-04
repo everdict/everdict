@@ -21,9 +21,9 @@ export const initiativeDocs: Record<
   create: {
     summary: "Create an initiative on the eval tracker",
     description:
-      "A goal several projects work toward. It starts `active`; completion goes through " +
-      "POST /initiatives/:id/status, which refuses while work underneath is open. Emits initiative.created. " +
-      "Requires issues:write.",
+      "A goal several projects work toward. It starts `planned` — moving it to `active` is the moment work " +
+      "under it begins, and both that and completion go through POST /initiatives/:id/status (completion " +
+      "refuses while work underneath is open). Emits initiative.created. Requires issues:write.",
     tags: ["initiative"],
     body: toJsonSchema(CreateInitiativeBodySchema),
     response: {
@@ -67,7 +67,7 @@ export const initiativeDocs: Record<
   update: {
     summary: "Edit an initiative's content",
     description:
-      "Name, description, lead, target date, parent. Status moves go through POST /initiatives/:id/status so " +
+      "Name, description, lead, members, icon, resources, target date, parent. Status moves go through POST /initiatives/:id/status so " +
       "the completion gate is never crossed by a rename; projects join from the project side " +
       "(PATCH /projects/:id). null clears an optional field. Requires issues:write.",
     tags: ["initiative"],
@@ -104,7 +104,7 @@ export const initiativeDocs: Record<
   setStatus: {
     summary: "Move an initiative through its lifecycle (completing is a gate)",
     description:
-      "active / completed / cancelled. Completing reads live progress first and is refused with a 409 naming " +
+      "planned / active / completed / cancelled. Completing reads live progress first and is refused with a 409 naming " +
       "the count while any issue under any of the initiative's projects is still open — a goal with unfinished " +
       "work under it has not been reached. Pass force:true to complete anyway; the override is stamped on the " +
       "fact and the history, so a forced completion never later reads as a clean one. Requires issues:write.",

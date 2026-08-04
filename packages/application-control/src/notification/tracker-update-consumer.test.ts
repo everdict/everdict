@@ -25,6 +25,8 @@ function initiative(over: Partial<InitiativeRecord> = {}): InitiativeRecord {
     tenant: "acme",
     name: "agents people trust",
     status: "active",
+    memberIds: [],
+    resources: [],
     history: [],
     createdBy: "erin",
     createdAt: NOW,

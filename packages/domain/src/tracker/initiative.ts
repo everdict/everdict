@@ -1,5 +1,6 @@
 import type {
   InitiativeRecord,
+  InitiativeResource,
   InitiativeStatus,
   InitiativeUpdateRecord,
   PlatformFact,
@@ -26,6 +27,9 @@ export interface NewInitiativeInput {
   // descendant's projects too — the service validates existence + acyclicity before the link is written.
   parentId?: string;
   lead?: string;
+  memberIds?: string[];
+  icon?: string;
+  resources?: InitiativeResource[];
   targetDate?: string;
   createdBy: string;
   now: string;
@@ -38,6 +42,11 @@ export interface InitiativeEditInput {
   parentId?: string | null;
   // `null` clears the lead — nobody is answerable for the goal yet, which is a real state and not an error.
   lead?: string | null;
+  // A list REPLACES what is there: an editor sends the resulting set, and a patch that merged would make
+  // removal unexpressible (the same rule a project's member list follows).
+  memberIds?: string[];
+  icon?: string | null;
+  resources?: InitiativeResource[];
   targetDate?: string | null;
 }
 
@@ -46,6 +55,11 @@ export interface InitiativeStatusChangeInput {
   // Open issues across every non-cancelled project under this initiative (the progress read's count).
   openIssues: number;
   force?: boolean;
+}
+
+// Deduped, order preserved — the caller's order is the display order, and a repeat would show one person twice.
+function normalizeIds(ids: readonly string[]): string[] {
+  return [...new Set(ids)];
 }
 
 function completedOnTime(targetDate: string | undefined, now: string): boolean | undefined {
@@ -66,16 +80,21 @@ export class Initiative {
       tenant: input.tenant,
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
-      status: "active",
+      ...(input.icon !== undefined ? { icon: input.icon } : {}),
+      // A goal starts PLANNED: what it means and which projects serve it is still being decided, and calling
+      // that active made every idea look like work in flight.
+      status: "planned",
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       ...(input.lead !== undefined ? { lead: input.lead } : {}),
+      memberIds: normalizeIds(input.memberIds ?? []),
+      resources: input.resources ?? [],
       ...(input.targetDate !== undefined ? { targetDate: input.targetDate } : {}),
       history: [
         {
           at: input.now,
           by: input.createdBy,
           event: "created",
-          detail: { status: "active", ...(input.parentId !== undefined ? { parentId: input.parentId } : {}) },
+          detail: { status: "planned", ...(input.parentId !== undefined ? { parentId: input.parentId } : {}) },
         },
       ],
       createdBy: input.createdBy,
@@ -135,6 +154,32 @@ export class Initiative {
       if (next !== this.record.lead) {
         patch.lead = next;
         changed.push("lead");
+      }
+    }
+    if (fields.icon !== undefined) {
+      const next = fields.icon === null ? undefined : fields.icon;
+      if (next !== this.record.icon) {
+        patch.icon = next;
+        changed.push("icon");
+      }
+    }
+    if (fields.memberIds !== undefined) {
+      const next = normalizeIds(fields.memberIds);
+      if (next.join("\u0000") !== this.record.memberIds.join("\u0000")) {
+        patch.memberIds = next;
+        changed.push("members");
+      }
+    }
+    if (fields.resources !== undefined) {
+      const same =
+        fields.resources.length === this.record.resources.length &&
+        fields.resources.every(
+          (resource, i) =>
+            resource.url === this.record.resources[i]?.url && resource.label === this.record.resources[i]?.label,
+        );
+      if (!same) {
+        patch.resources = fields.resources;
+        changed.push("resources");
       }
     }
     if (fields.targetDate !== undefined) {

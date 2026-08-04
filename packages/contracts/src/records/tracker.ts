@@ -495,15 +495,34 @@ export const ProjectRecordSchema = z.object({
 export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 
 // --- Initiative: the goal several projects work toward ---
-export const INITIATIVE_STATUSES = ["active", "completed", "cancelled"] as const;
+// `planned` is where a goal starts: somebody is still deciding what it means and which projects serve it, and
+// calling that "active" made every idea look like work in flight. Moving to `active` is the moment the work
+// under it begins — a transition somebody makes, not a side effect of creating the record.
+export const INITIATIVE_STATUSES = ["planned", "active", "completed", "cancelled"] as const;
 export const InitiativeStatusSchema = z.enum(INITIATIVE_STATUSES);
 export type InitiativeStatus = z.infer<typeof InitiativeStatusSchema>;
+
+// A link out of the goal — the design doc, the dashboard, the thread where it was argued. Kept ON the record
+// rather than in the description because a reader scanning a goal wants these as targets, not as prose they
+// have to find; the same reason an issue's linked capabilities are a list and not a paragraph.
+export const InitiativeResourceSchema = z.object({
+  label: z.string().min(1).max(200),
+  url: z.string().url().max(2000),
+});
+export type InitiativeResource = z.infer<typeof InitiativeResourceSchema>;
+
+export const INITIATIVE_RESOURCE_LIMIT = 20;
 
 export const InitiativeRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   name: z.string().min(1),
   description: z.string().optional(),
+  // One emoji, so a goal is recognizable in a list before its name is read. Emoji rather than an icon set
+  // because the vocabulary is then the platform's, not a table we have to keep extending — and rather than a
+  // colour, because a colour needs a closed theme-mapped vocabulary (the LabelDot rule) and a goal picked from
+  // a nine-swatch palette says less than 🎯 does.
+  icon: z.string().max(8).optional(),
   status: InitiativeStatusSchema,
   // An initiative may sit under another one, so a big bet decomposes instead of flattening into a wall of
   // projects. Progress rolls UP: a parent counts its own projects plus every descendant's, which is the only
@@ -513,6 +532,12 @@ export const InitiativeRecordSchema = z.object({
   // Who is answerable for the goal. Same shape as a project's lead and for the same reason: a goal nobody is
   // named on is one nobody reports on, and the update timeline below is what they report through.
   lead: z.string().optional(),
+  // Who else is on it. A statement about THIS goal, not a second workspace directory — the same reading a
+  // project's member list has. Derivable-looking (the leads of its projects) but not the same claim: somebody
+  // can be on the goal without owning any one project under it.
+  memberIds: z.array(z.string()).default([]),
+  // Where the goal is written down, measured, or argued.
+  resources: z.array(InitiativeResourceSchema).default([]),
   // The health of the LATEST posted update, denormalized so a list row shows it without reading the timeline
   // per row. Absent = nobody has posted an update, which is NOT the same claim as "on track".
   health: TrackerHealthSchema.optional(),

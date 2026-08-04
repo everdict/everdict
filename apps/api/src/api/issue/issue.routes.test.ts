@@ -355,6 +355,50 @@ describe("project + initiative routes — the completion gate", () => {
     await app.close();
   });
 
+  it("a goal starts planned and carries its face, its people and where it is written down", async () => {
+    const { app } = build();
+    const created = await app.inject({
+      method: "POST",
+      url: "/initiatives",
+      headers: H,
+      payload: {
+        name: "agents people trust",
+        icon: "🎯",
+        lead: "dana",
+        memberIds: ["dana", "erin"],
+        resources: [{ label: "design doc", url: "https://example.com/doc" }],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    // Planned, not active: what the goal means is still being decided, and calling that active made every
+    // idea look like work in flight.
+    expect(created.json()).toMatchObject({
+      status: "planned",
+      icon: "🎯",
+      memberIds: ["dana", "erin"],
+      resources: [{ label: "design doc", url: "https://example.com/doc" }],
+    });
+
+    // A resource without a real URL is not a link.
+    const bad = await app.inject({
+      method: "PATCH",
+      url: `/initiatives/${created.json().id}`,
+      headers: H,
+      payload: { resources: [{ label: "broken", url: "not-a-url" }] },
+    });
+    expect(bad.statusCode).toBe(400);
+
+    const moved = await app.inject({
+      method: "POST",
+      url: `/initiatives/${created.json().id}/status`,
+      headers: H,
+      payload: { status: "active" },
+    });
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json().status).toBe("active");
+    await app.close();
+  });
+
   it("the initiative LIST carries each goal's progress, so a row answers 'how far along' without a second read", async () => {
     const { app } = build();
     const initiativeId = (

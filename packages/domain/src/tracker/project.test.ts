@@ -94,8 +94,29 @@ describe("Initiative — the completion gate", () => {
     return Initiative.newInitiative({ id: "ini-1", tenant: "acme", name: "v1 deploy", createdBy: "dana", now: NOW });
   }
 
-  it("starts active", () => {
-    expect(newInitiative().status).toBe("active");
+  it("starts planned — a goal being shaped is not work in flight", () => {
+    expect(newInitiative().status).toBe("planned");
+  });
+
+  it("carries its face, its people and where it is written down", () => {
+    const edited = Initiative.from(newInitiative()).update(
+      {
+        icon: "🎯",
+        memberIds: ["dana", "erin", "dana"],
+        resources: [{ label: "design doc", url: "https://example.com/doc" }],
+      },
+      "dana",
+      LATER,
+    );
+    // Deduped, order preserved — a repeat would show the same person twice in every list that walks it.
+    expect(edited.patch).toMatchObject({
+      icon: "🎯",
+      memberIds: ["dana", "erin"],
+      resources: [{ label: "design doc", url: "https://example.com/doc" }],
+    });
+    expect(edited.patch.history?.at(-1)?.detail).toMatchObject({
+      changed: ["icon", "members", "resources"],
+    });
   });
 
   it("refuses completion while any issue under it is open", () => {

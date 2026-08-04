@@ -4637,6 +4637,7 @@
       "paused": "Paused"
     },
     "initiativeStatus": {
+      "planned": "Planned",
       "active": "Active",
       "completed": "Completed",
       "cancelled": "Cancelled"
@@ -5078,7 +5079,20 @@
     "addProjectsDone": "{count, plural, one {# project added} other {# projects added}}",
     "addProjectsError": "Could not add the projects.",
     "removeProject": "Remove {name} from this goal",
-    "removeProjectError": "Could not remove the project."
+    "removeProjectError": "Could not remove the project.",
+    "fieldIcon": "Icon",
+    "fieldIconPlaceholder": "One emoji (e.g. 🎯)",
+    "fieldMembers": "Members",
+    "fieldMembersPlaceholder": "Add a member",
+    "fieldMembersEmpty": "No members to choose from",
+    "fieldMembersRemove": "Remove {name}",
+    "resourcesTitle": "Resources",
+    "fieldResources": "Resources",
+    "fieldResourceLabel": "Label",
+    "fieldResourceUrl": "URL",
+    "resourceAdd": "Add resource",
+    "resourceRemove": "Remove {label}",
+    "resourceHint": "The design doc, the dashboard, the thread it was argued in — what you open to understand this goal."
   },
   "importGithubIssues": {
     "open": "Import from GitHub",

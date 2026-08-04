@@ -39,6 +39,7 @@ export async function createInitiativeAction(input: {
   // 상위 이니셔티브 — 진척은 하위까지 훑어 올라오므로, 쪼개도 답은 하나로 남는다.
   parentId?: string
   lead?: string
+  icon?: string
   targetDate?: string
 }): Promise<InitiativeActionResult> {
   const ctx = await authContext()
@@ -113,6 +114,10 @@ export async function updateInitiativeAction(
     parentId?: string | null
     // null 은 책임자를 비운다 — 아직 아무도 맡지 않았다는 건 실제 상태다.
     lead?: string | null
+    // 목록은 통째로 대체된다 — 편집기가 결과 집합을 보내므로, 병합하면 제거를 표현할 수 없다.
+    memberIds?: string[]
+    icon?: string | null
+    resources?: { label: string; url: string }[]
     targetDate?: string | null
   }
 ): Promise<InitiativeActionResult> {

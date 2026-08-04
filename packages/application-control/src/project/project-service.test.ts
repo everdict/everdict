@@ -85,6 +85,8 @@ function initiative(id: string): InitiativeRecord {
     tenant: TENANT,
     name: id,
     status: "active",
+    memberIds: [],
+    resources: [],
     history: [],
     createdBy: "u",
     createdAt: AT,

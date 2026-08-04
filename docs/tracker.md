@@ -89,7 +89,7 @@ land in — that is workspace administration, not the collaborative eval *conten
 ### The key is the address, and what a team owns lives under it
 
 The key does for the team what the identifier does for the issue: `GET /teams/ENG`, `PATCH /teams/eng`,
-`/{workspace}/teams/ENG/issues` in the web. Resolution happens ONCE, in `TeamService.get` — the method every
+`/{workspace}/team/ENG/issues` in the web. Resolution happens ONCE, in `TeamService.get` — the method every
 mutation already routes through — so a key-shaped ref (`TEAM_KEY_REF_PATTERN` in `@everdict/contracts`) is
 uppercased, read off the key index, **then falls back to the id**; a uuid costs one lookup, as before. Every
 method that resolves then writes uses the RESOLVED id, never the ref it was handed. The id keeps working
@@ -100,13 +100,13 @@ harnesses · datasets · judges, via `resolveTeamRef` at the route and `resolveT
 ref answers **404 rather than an empty list** — a list filtered to nothing reads as "this team has nothing",
 which is a different and wrong answer to "no such team".
 
-**In the web, a team's resources are PATHS, not a query parameter**: `/{workspace}/teams/ENG/{issues, triage,
-cycles, projects, scorecards}`, with the team home at `/{workspace}/teams/ENG`. `?team=<uuid>` said "the same
+**In the web, a team's resources are PATHS, not a query parameter**: `/{workspace}/team/ENG/{issues, triage,
+cycles, projects, scorecards}`, with the team home at `/{workspace}/team/ENG`. `?team=<uuid>` said "the same
 list, filtered", and that is not what it is — each team holds different things, its triage inbox exists only if
 it turned one on, and its cycles are numbered in its own sequence. The workspace-wide `/issues`, `/projects` and
 `/scorecards` stay (they answer a real question: every team's), and one component renders both addresses;
 `/cycles` is a redirect to a team's, because "Cycle 3" has no meaning without whose third it is — and so is
-`/cycles/<id>`, which now lands on `…/teams/ENG/cycles/7`. Old `?team=` links redirect to the new path, so
+`/cycle/<id>`, which now lands on `…/team/ENG/cycle/7`. Old `?team=` links redirect to the new path, so
 nothing pasted before this change breaks.
 
 ## Issue
@@ -142,7 +142,7 @@ emptied field never reads as data going missing on its own.
 ### The identifier is the address
 
 `ENG-12` is not decoration — it is how an issue is **addressed** everywhere a human can see the reference:
-`/{workspace}/issues/ENG-12` in the web, `GET /issues/ENG-12` on the control plane, `get_issue({id: "ENG-12"})`
+`/{workspace}/issue/ENG-12` in the web, `GET /issues/ENG-12` on the control plane, `get_issue({id: "ENG-12"})`
 over MCP. A link pasted into a pull request or a chat message therefore reads as the issue people already name in
 conversation, instead of an opaque uuid nobody can match to the thing being discussed.
 
@@ -456,7 +456,7 @@ date"), and the two axes never merge.
   a record, not somewhere to put new work. The bulk move fans the ordinary per-issue edit out rather than adding
   a batch endpoint: the "is this the issue's own team's cycle" judgement must not exist in two places, and
   partial failure is a normal result the screen reports as such.
-- **The web's cycle screens** are Linear-shaped. `/{workspace}/teams/ENG/cycles` is not a list: it opens the
+- **The web's cycle screens** are Linear-shaped. `/{workspace}/team/ENG/cycles` is not a list: it opens the
   iteration the team is IN (falling back to the next one, then the most recent), because everyone who clicks
   "Cycles" is asking about this fortnight and a list answers that only after another click. The title itself is
   the switcher; `…/cycles/7` addresses one iteration by the number people cite, `…/cycles/all` is the full index
@@ -583,6 +583,14 @@ it, so a dangling id would hide real work rather than merely render a dead chip.
 descendant's, so decomposing a big goal can never hide work from it. Each project in the progress summary
 carries `viaInitiativeId` when it came up through a descendant, so remaining work points at where it actually
 sits. Cycles are refused (`409`) and an initiative with sub-initiatives cannot be deleted.
+
+**A goal starts `planned`**, not active: what it means and which projects serve it is still being decided, and
+calling that active made every idea look like work in flight. Moving to `active` is a transition somebody makes
+(`POST /initiatives/:id/status`), like completing is. It also carries the rest of what a goal has — an `icon`
+(one emoji, so it is recognizable in a list before its name is read; emoji rather than a colour, because a
+colour needs a closed theme-mapped vocabulary and a nine-swatch palette says less than 🎯 does), `memberIds`
+(who is on it, a statement about THIS goal rather than a second directory) and `resources` ({label, url}, the
+design doc / dashboard / thread you open to understand it) — mig `0122`.
 
 **Both carry the human half too**: a `lead` (who is answerable) and a `health` — the flag on the LATEST posted
 update (`on_track | at_risk | off_track`), denormalized onto the record so a list row draws it without reading

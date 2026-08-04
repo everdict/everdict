@@ -3,6 +3,7 @@ import type {
   InitiativeProjectSummary as WireInitiativeProjectSummary,
   InitiativeReadiness as WireInitiativeReadiness,
   InitiativeRecord as WireInitiativeRecord,
+  InitiativeResource as WireInitiativeResource,
   InitiativeStatus as WireInitiativeStatus,
   InitiativeUpdateRecord as WireInitiativeUpdateRecord,
 } from '@everdict/contracts'
@@ -22,22 +23,35 @@ import { trackerHealthSchema } from '@/entities/tracker-health'
 // 하나뿐이다. Runtime boundary validation stays here (zod v4); the EXPORTED types come from
 // @everdict/contracts (`import type` only).
 
-export const INITIATIVE_STATUSES = ['active', 'completed', 'cancelled'] as const
+// `planned` 는 목표가 시작하는 자리 — 무엇을 뜻하는지, 어떤 프로젝트가 그걸 섬기는지 아직 정하는 중이다.
+// 그걸 active 라 부르면 모든 구상이 진행 중인 일처럼 보인다.
+export const INITIATIVE_STATUSES = ['planned', 'active', 'completed', 'cancelled'] as const
 export const initiativeStatusSchema = z.enum(INITIATIVE_STATUSES)
 
 const calendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+
+// 목표가 적히고, 측정되고, 논쟁되는 곳으로 나가는 링크.
+export const initiativeResourceSchema = z.object({
+  label: z.string(),
+  url: z.string(),
+})
 
 export const initiativeSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   name: z.string(),
   description: z.string().optional(),
+  // 이모지 하나 — 목록에서 이름을 읽기 전에 목표를 알아보게 한다.
+  icon: z.string().optional(),
   status: initiativeStatusSchema,
   // 상위 이니셔티브 — 진척은 하위까지 훑어 올라오므로, 큰 목표를 쪼개도 답은 하나로 남는다.
   parentId: z.string().optional(),
   // 이 목표를 책임지는 사람과, 그 사람이 마지막으로 올린 판정(health). 없음 = 아직 아무도 보고하지 않았다는
   // 뜻이고, 그건 "정상"과 다른 주장이다.
   lead: z.string().optional(),
+  // 이 목표에 함께 있는 사람들, 그리고 목표가 적힌 곳들.
+  memberIds: z.array(z.string()).default([]),
+  resources: z.array(initiativeResourceSchema).default([]),
   health: trackerHealthSchema.optional(),
   targetDate: calendarDateSchema.optional(),
   completedAt: z.string().optional(),
@@ -147,6 +161,14 @@ type _listItemBack = AssertAssignable<
   WireInitiativeListItem,
   z.infer<typeof initiativeListItemSchema>
 >
+type _resourceFwd = AssertAssignable<
+  z.infer<typeof initiativeResourceSchema>,
+  WireInitiativeResource
+>
+type _resourceBack = AssertAssignable<
+  WireInitiativeResource,
+  z.infer<typeof initiativeResourceSchema>
+>
 type _progressFwd = AssertAssignable<
   z.infer<typeof initiativeProgressSchema>,
   WireInitiativeProgress
@@ -167,6 +189,7 @@ type _updateBack = AssertAssignable<
 export type Initiative = WireInitiativeRecord
 export type InitiativeListItem = WireInitiativeListItem
 export type InitiativeProgress = WireInitiativeProgress
+export type InitiativeResource = WireInitiativeResource
 export type InitiativeUpdate = WireInitiativeUpdateRecord
 export type InitiativeStatus = WireInitiativeStatus
 export type InitiativeReadiness = WireInitiativeReadiness
@@ -193,4 +216,6 @@ export type __initiativeDriftGuard = [
   _listItemBack,
   _progressFwd,
   _progressBack,
+  _resourceFwd,
+  _resourceBack,
 ]

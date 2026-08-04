@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { InitiativeResourcesSchema } from "./initiative-resource.js";
 
 const CalendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.");
 
@@ -12,6 +13,9 @@ export const UpdateInitiativeBodySchema = z
     description: z.string().max(50_000).nullable().optional(),
     parentId: z.string().min(1).max(200).nullable().optional(),
     lead: z.string().min(1).max(200).nullable().optional(),
+    memberIds: z.array(z.string().min(1).max(200)).max(200).optional(),
+    icon: z.string().min(1).max(8).nullable().optional(),
+    resources: InitiativeResourcesSchema.optional(),
     targetDate: CalendarDateSchema.nullable().optional(),
   })
   .refine((body) => Object.keys(body).length > 0, "Nothing to update.");

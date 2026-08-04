@@ -35,6 +35,7 @@ export function CreateInitiativeButton({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [parentId, setParentId] = useState('')
+  const [icon, setIcon] = useState('')
   const [targetDate, setTargetDate] = useState('')
   const [pending, startTransition] = useTransition()
 
@@ -50,6 +51,7 @@ export function CreateInitiativeButton({
         name: trimmed,
         ...(description.trim() ? { description: description.trim() } : {}),
         ...(parentId ? { parentId } : {}),
+        ...(icon.trim() ? { icon: icon.trim() } : {}),
         ...(targetDate ? { targetDate } : {}),
       })
       if (!r.ok || !r.initiative) {
@@ -60,8 +62,9 @@ export function CreateInitiativeButton({
       setName('')
       setDescription('')
       setParentId('')
+      setIcon('')
       setTargetDate('')
-      router.push(`/${workspace}/initiatives/${encodeURIComponent(r.initiative.id)}`)
+      router.push(`/${workspace}/initiative/${encodeURIComponent(r.initiative.id)}`)
     })
   }
 
@@ -104,6 +107,16 @@ export function CreateInitiativeButton({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t('fieldDescriptionPlaceholder')}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${formId}-icon`}>{t('fieldIcon')}</Label>
+            <Input
+              id={`${formId}-icon`}
+              value={icon}
+              onChange={(e) => setIcon(e.target.value)}
+              placeholder={t('fieldIconPlaceholder')}
+              className="w-24"
             />
           </div>
           <div className="space-y-1.5">

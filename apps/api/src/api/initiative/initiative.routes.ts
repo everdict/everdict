@@ -40,6 +40,9 @@ export function registerInitiativeRoutes(app: FastifyInstance, deps: ServerDeps)
           ...(body.description !== undefined ? { description: body.description } : {}),
           ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
           ...(body.lead !== undefined ? { lead: body.lead } : {}),
+          ...(body.memberIds !== undefined ? { memberIds: body.memberIds } : {}),
+          ...(body.icon !== undefined ? { icon: body.icon } : {}),
+          ...(body.resources !== undefined ? { resources: body.resources } : {}),
           ...(body.targetDate !== undefined ? { targetDate: body.targetDate } : {}),
         }),
       );
