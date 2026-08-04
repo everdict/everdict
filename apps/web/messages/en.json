@@ -533,7 +533,9 @@
     "tabInstance": "Instance (swap pins)",
     "tabTemplate": "Template (structure)",
     "instanceHint": "Change only the slot values (image, model) and register a new instance version. The template structure stays the same.",
-    "templateHint": "Change the structure to create a new template version. Then create an instance from this version."
+    "templateHint": "Change the structure to create a new template version. Then create an instance from this version.",
+    "newVariant": "New harness on this shape",
+    "shapesLink": "Shape catalog"
   },
   "harnessList": {
     "statusSucceeded": "Succeeded",
@@ -563,7 +565,8 @@
     "versions": "Versions",
     "noBenchmark": "No datasets run",
     "latestResult": "Latest result",
-    "lastRunAt": "Last run {at}"
+    "lastRunAt": "Last run {at}",
+    "variantCount": "{n} variants"
   },
   "deleteDataset": {
     "triggerButton": "Delete",
@@ -1935,7 +1938,26 @@
     "versionRawLabel": "version (bump only when structure changes)",
     "volumesOverridePlaceholder": "volumes (newline — cache:/cache · /host:/c:ro)",
     "workDirLabel": "workDir (optional)",
-    "workDirTip": "Working directory to run the command in. e.g. /tmp."
+    "workDirTip": "Working directory to run the command in. e.g. /tmp.",
+    "settingsTitle": "Settings (env · resources)",
+    "settingsSubtitle": "Inherited from the template · only changes are saved",
+    "svcSettingsTitle": "Per-service settings",
+    "cmdSettingsTitle": "Command settings",
+    "badgeInherited": "inherited",
+    "badgeOverridden": "overridden",
+    "revertToInherited": "Revert to the template value",
+    "harnessIdLabel": "Harness name (id)",
+    "harnessIdTip": "What this harness is called. One template can carry several harnesses under different names — a variation that differs only by env or model belongs under its own name, not as another version, so the list can tell them apart.",
+    "harnessIdHint": "Left empty, the template id is used.",
+    "templatePickLabel": "Shape (template)",
+    "templatePickPlaceholder": "Pick a template",
+    "templateVersionPickLabel": "Shape version",
+    "templateVersionPickPlaceholder": "Pick a version",
+    "svcDefaultImageLabel": "image (default)",
+    "svcDefaultImageTip": "The slot's default image. Set it and a harness pins only the slots it actually changes; leave it empty and every harness must pin this slot. A host-exec service runs no container, so it takes no image.",
+    "svcModelOverrideLabel": "model (agent model)",
+    "svcModelOverrideTip": "The registered model id this service uses. For a variation that changes only the model while the shape stays put — the connection (baseUrl, key) is injected just before execution.",
+    "removeInheritedTitle": "Drop from this variation (the template value stops applying too)"
   },
   "pickEnvironment": {
     "envPickerButton": "From store",
@@ -5406,5 +5428,20 @@
     "uploading": "Uploading {name}…",
     "tooLarge": "Over the 5 MB attachment limit — {name}",
     "failed": "Could not attach the file — {reason}"
+  },
+  "harnessTemplatesPage": {
+    "title": "Shapes (templates)",
+    "description": "Service structure, dependencies, target, front door and trace source — the skeleton several harnesses ride on.",
+    "backToHarnesses": "Harnesses",
+    "connectError": "Could not load the shapes: {error}",
+    "emptyTitle": "No shapes yet",
+    "emptyHint": "Define a shape first when registering a harness, and you can put several variations on top of it.",
+    "statShapes": "Shapes",
+    "statHarnesses": "Harnesses riding them",
+    "statUnused": "Unused shapes",
+    "serviceCount": "{n} services",
+    "versions": "Versions",
+    "newHarness": "New harness on this shape",
+    "noHarness": "No harness rides this yet"
   }
 }

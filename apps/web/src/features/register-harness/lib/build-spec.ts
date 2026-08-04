@@ -20,6 +20,8 @@ export interface WiringRow {
 export interface ServiceRow {
   name: string
   slot: string // slot name the instance pins (if left empty, name)
+  // 이 슬롯의 기본 이미지. 비우면 인스턴스가 반드시 핀해야 한다(종전 동작). 채워 두면 변형은 바꿀 것만 핀한다.
+  image: string
   port: string
   needs: string // comma-separated
   perRun: string // comma-separated
@@ -211,7 +213,7 @@ const mappingSlots = (m: SpanAttrMapping | undefined): SpanMappingSlots => {
 // comma-text record + preserved slots → SpanAttrMapping; undefined when nothing is mapped (GenAI-convention harness).
 const recordToMapping = (
   rec: Record<string, string>,
-  slots: SpanMappingSlots,
+  slots: SpanMappingSlots
 ): SpanAttrMapping | undefined => {
   const out: Partial<Record<SpanMappingField, string[]>> = {}
   for (const f of SPAN_MAPPING_FIELDS) {
@@ -349,6 +351,8 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
       return {
         name: sv.name,
         ...(sv.slot.trim() ? { slot: sv.slot } : {}), // if left empty, the control plane uses name as the slot
+        // host-exec 서비스는 컨테이너가 없으므로 이미지를 싣지 않는다(계약이 거절한다).
+        ...(sv.image.trim() ? { image: sv.image.trim() } : {}),
         ...(sv.port.trim() ? { port: Number(sv.port) } : {}),
         needs: csv(sv.needs),
         perRun: csv(sv.perRun),
@@ -426,6 +430,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
     services: (t.services ?? []).map((s) => ({
       name: s.name,
       slot: s.slot ?? '',
+      image: s.image ?? '',
       port: s.port !== undefined ? String(s.port) : '',
       needs: (s.needs ?? []).join(', '),
       perRun: (s.perRun ?? []).join(', '),
@@ -497,6 +502,7 @@ export interface PinRow {
 export interface ServiceOverrideRow {
   service: string // target service name (must exist in the template)
   env: EnvRow[] // service env overlay — literal or secret reference
+  model: string // agent-server model binding (registered Model id); empty = the template's
   replicas: string // number or empty
   cpu: string // resources.cpu (millicores, 1000=1 core)
   memoryMb: string // resources.memoryMb
@@ -508,6 +514,9 @@ export interface ServiceOverrideRow {
 export interface InstanceState {
   templateId: string
   templateVersion: string
+  // 이 하네스의 이름. 한 템플릿(형상) 위에 이름이 다른 하네스를 여러 개 둘 수 있다 — env·모델만 다른 변형을
+  // "같은 id의 새 버전"으로 밀어넣으면 버전 목록이 *새것*과 *다른 것*의 뒤범벅이 되기 때문. 비우면 templateId.
+  id: string
   version: string // instance tag (e.g. pr-123-sha-abc)
   description: string // this version's changelog (free text) — entered at deploy time, shown in detail
   pins: PinRow[]
@@ -519,17 +528,172 @@ export interface InstanceState {
   targetExtensionRef: string // service: browser target extension ref pin
   cmdEnvRows: EnvRow[] // command: env overlay — literal or secret reference
   cmdParams: string // command: {{var}} values (KEY=VALUE, newline-separated)
+  cmdCpu: string // command: job resources.cpu
+  cmdMemoryMb: string // command: job resources.memoryMb
 }
 
 const EMPTY_SERVICE_OVERRIDE: ServiceOverrideRow = {
   service: '',
   env: [],
+  model: '',
   replicas: '',
   cpu: '',
   memoryMb: '',
   volumes: '',
   readinessTimeout: '',
   readinessInterval: '',
+}
+
+// --- 유효 설정(effective) 편집의 기준선 ---
+// 인스턴스 폼은 델타 편집기가 아니라 **유효 설정 편집기**다: 템플릿이 정한 값을 그대로 보여주고(상속),
+// 사용자가 바꾼 것만 overrides 로 내보낸다. 유효값이 화면에 없으면 사람은 값이 보이는 템플릿을 고치러 가고,
+// env 한 줄 바꾸자고 형상 버전이 새로 생긴다 — 이 기준선이 그 경로를 끊는다.
+// known=false 는 템플릿을 아직 모르는 자유 입력 경로(기존 동작 그대로: 순수 델타 편집).
+// 기준선의 서비스 행은 편집 행과 같은 모양이다 — 그래야 "상속값을 깔고 그 위에서 고친다"가 한 자료형으로 성립하고,
+// 둘을 나란히 놓고 델타를 뜰 수 있다.
+export type ServiceOverrideBaseline = ServiceOverrideRow
+
+export interface OverrideBaseline {
+  known: boolean
+  services: ServiceOverrideBaseline[]
+  bodyTemplate: string
+  completionTimeout: string
+  completionInterval: string
+  targetExtensionRef: string
+  cmdEnvRows: EnvRow[]
+  cmdParams: string
+  cmdCpu: string
+  cmdMemoryMb: string
+}
+
+export const EMPTY_BASELINE: OverrideBaseline = {
+  known: false,
+  services: [],
+  bodyTemplate: '',
+  completionTimeout: '',
+  completionInterval: '',
+  targetExtensionRef: '',
+  cmdEnvRows: [],
+  cmdParams: '',
+  cmdCpu: '',
+  cmdMemoryMb: '',
+}
+
+// 템플릿 스펙 → 기준선. 인스턴스가 덮어쓸 수 있는 칸만 담는다(형상 자체는 여기 없다).
+export function baselineFromTemplate(t: HarnessTemplateSpec): OverrideBaseline {
+  const completion = t.frontDoor?.completion
+  return {
+    known: true,
+    services: (t.services ?? []).map((s) => ({
+      service: s.name,
+      env: envRowsFromSpec(s.env),
+      model: typeof s.model === 'string' ? s.model : '', // bare-id bindings round-trip; object ModelRefs stay API-only
+      replicas: s.replicas !== undefined ? String(s.replicas) : '',
+      cpu: s.resources?.cpu !== undefined ? String(s.resources.cpu) : '',
+      memoryMb: s.resources?.memoryMb !== undefined ? String(s.resources.memoryMb) : '',
+      volumes: (s.volumes ?? []).join('\n'),
+      readinessTimeout: s.readiness?.timeoutMs !== undefined ? String(s.readiness.timeoutMs) : '',
+      readinessInterval:
+        s.readiness?.intervalMs !== undefined ? String(s.readiness.intervalMs) : '',
+    })),
+    bodyTemplate: t.frontDoor?.request?.bodyTemplate
+      ? JSON.stringify(t.frontDoor.request.bodyTemplate, null, 2)
+      : '',
+    completionTimeout:
+      typeof completion?.timeoutMs === 'number' ? String(completion.timeoutMs) : '',
+    completionInterval:
+      typeof completion?.intervalMs === 'number' ? String(completion.intervalMs) : '',
+    targetExtensionRef: t.target?.extension?.ref ?? '',
+    cmdEnvRows: envRowsFromSpec(t.env),
+    cmdParams: Object.entries(t.params ?? {})
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n'),
+    cmdCpu: t.resources?.cpu !== undefined ? String(t.resources.cpu) : '',
+    cmdMemoryMb: t.resources?.memoryMb !== undefined ? String(t.resources.memoryMb) : '',
+  }
+}
+
+// 기준선의 서비스 행(없으면 빈 기준선) — 템플릿을 모르는 경로에서 diff 가 곧 "전부 델타"가 되게 한다.
+export function serviceBaselineFor(
+  baseline: OverrideBaseline,
+  service: string
+): ServiceOverrideBaseline {
+  return (
+    baseline.services.find((b) => b.service === service) ?? { ...EMPTY_SERVICE_OVERRIDE, service }
+  )
+}
+
+// 스칼라 델타 — 기준선과 같으면 내보내지 않는다(머지 결과가 같아 스펙만 부푼다). 비었으면 "상속".
+const scalarDelta = (effective: string, base: string): string =>
+  effective.trim() === base.trim() ? '' : effective.trim()
+
+// env 값 동등 비교. envRowsToSpec 이 키 순서를 고정해 내보내므로 직렬화 비교가 안정적이다.
+const sameEnvValue = (a: EnvValue | undefined, b: EnvValue): boolean =>
+  a !== undefined && JSON.stringify(a) === JSON.stringify(b)
+
+// 유효 env 행 → 델타(값이 기준선과 다른 키만).
+export function envDelta(effective: EnvRow[], base: EnvRow[]): Record<string, EnvValue> {
+  const baseSpec = envRowsToSpec(base)
+  const out: Record<string, EnvValue> = {}
+  for (const [k, v] of Object.entries(envRowsToSpec(effective))) {
+    if (sameEnvValue(baseSpec[k], v)) continue
+    out[k] = v
+  }
+  return out
+}
+
+// 화면에서 지운 상속 키 → unsetEnv. 유효 설정 편집기이므로 "행을 지웠다"는 곧 "이 변형에는 없다"이고,
+// 오버라이드는 머지라서 그 뜻을 담을 칸이 따로 필요하다(계약 unsetEnv).
+export function envUnset(effective: EnvRow[], base: EnvRow[]): string[] {
+  if (base.length === 0) return []
+  const kept = new Set(effective.map((r) => r.key.trim()).filter(Boolean))
+  return base.map((b) => b.key).filter((k) => k !== '' && !kept.has(k))
+}
+
+// KEY=VALUE 텍스트의 키 단위 델타(command params).
+function kvDelta(effective: string, base: string): Record<string, string> {
+  const baseMap = kvLines(base)
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(kvLines(effective))) {
+    if (baseMap[k] === v) continue
+    out[k] = v
+  }
+  return out
+}
+
+// JSON 오브젝트의 키 단위 델타(front-door 제출 바디). 제어 평면이 얕은 머지를 하므로 키 단위로 충분하다.
+function objectDelta(
+  effective: Record<string, unknown>,
+  base: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(effective)) {
+    if (k in base && JSON.stringify(base[k]) === JSON.stringify(v)) continue
+    out[k] = v
+  }
+  return out
+}
+
+// env 기준선 ⊕ 델타 − unset → 유효 행(기준선 순서 먼저, 그 뒤 델타에만 있는 키). 편집기가 보여줄 값이며,
+// 화면에 없는 키는 실행에도 없다(그래서 unset 은 여기서 빠져야 한다 — 안 그러면 지운 키가 되살아난다).
+export function mergeEnvRows(base: EnvRow[], delta: EnvRow[], unset: string[] = []): EnvRow[] {
+  const byKey = new Map(delta.map((r) => [r.key, r]))
+  const dropped = new Set(unset)
+  const merged = base.filter((b) => !dropped.has(b.key)).map((b) => byKey.get(b.key) ?? b)
+  const baseKeys = new Set(base.map((b) => b.key))
+  return [...merged, ...delta.filter((r) => !baseKeys.has(r.key) && !dropped.has(r.key))]
+}
+
+// overrides 의 문자열 배열(unsetEnv) 안전 추출 — 느슨한 JSON 이므로 문자열이 아닌 항목은 버린다.
+const asStrArray = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+
+// KEY=VALUE 텍스트 병합(기준선 순서 유지).
+function mergeKvLines(base: string, delta: string): string {
+  const merged = { ...kvLines(base), ...kvLines(delta) }
+  return Object.entries(merged)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n')
 }
 
 // Parse JSON object text (for the front-door body) — empty=unset (ok). Not an object / JSON error → error (the form blocks registration).
@@ -551,28 +715,50 @@ export function parseJsonObject(
   return { ok: true, value: parsed as Record<string, unknown> }
 }
 
-// Structured override form state → overrides object (empty knobs omitted). bodyTemplate parse errors are blocked by the form (ignored here).
-export function buildOverrides(s: InstanceState): Record<string, unknown> | undefined {
+// 폼의 **유효 설정** → overrides(기준선과 다른 것만). 기준선을 모르면(EMPTY_BASELINE) 입력값 전체가 델타가 되어
+// 기존 동작과 같다. bodyTemplate 파싱 오류는 폼이 막으므로 여기서는 무시한다.
+export function buildOverrides(
+  s: InstanceState,
+  baseline: OverrideBaseline = EMPTY_BASELINE
+): Record<string, unknown> | undefined {
   const overrides: Record<string, unknown> = {}
   // per-service overrides
   const services: Record<string, unknown> = {}
   for (const r of s.serviceOverrides) {
     const name = r.service.trim()
     if (!name) continue
+    const b = serviceBaselineFor(baseline, name)
     const o: Record<string, unknown> = {}
-    const env = envRowsToSpec(r.env)
+    const env = envDelta(r.env, b.env)
     if (Object.keys(env).length) o.env = env
-    if (r.replicas.trim()) o.replicas = Number(r.replicas)
+    const unsetEnv = envUnset(r.env, b.env)
+    if (unsetEnv.length) o.unsetEnv = unsetEnv
+    const model = scalarDelta(r.model, b.model)
+    if (model) o.model = model
+    const replicas = scalarDelta(r.replicas, b.replicas)
+    if (replicas) o.replicas = Number(replicas)
+    // resources is a scalar REPLACE at resolve, so changing one half must re-state the inherited other half —
+    // emitting {memoryMb} alone would silently drop the template's cpu.
     const resources: Record<string, number> = {}
-    if (r.cpu.trim()) resources.cpu = Number(r.cpu)
-    if (r.memoryMb.trim()) resources.memoryMb = Number(r.memoryMb)
+    if (scalarDelta(r.cpu, b.cpu) || scalarDelta(r.memoryMb, b.memoryMb)) {
+      const cpu = r.cpu.trim() || b.cpu.trim()
+      const memoryMb = r.memoryMb.trim() || b.memoryMb.trim()
+      if (cpu) resources.cpu = Number(cpu)
+      if (memoryMb) resources.memoryMb = Number(memoryMb)
+    }
     if (Object.keys(resources).length) o.resources = resources
-    const vols = lines(r.volumes)
-    if (vols.length) o.volumes = vols
-    if (r.readinessTimeout.trim() || r.readinessInterval.trim()) {
+    // volumes/readiness 는 스칼라 교체라 한 칸이라도 다르면 통째로 다시 낸다.
+    if (r.volumes.trim() !== b.volumes.trim()) {
+      const vols = lines(r.volumes)
+      if (vols.length) o.volumes = vols
+    }
+    const readinessChanged =
+      r.readinessTimeout.trim() !== b.readinessTimeout.trim() ||
+      r.readinessInterval.trim() !== b.readinessInterval.trim()
+    if (readinessChanged && (r.readinessTimeout.trim() || r.readinessInterval.trim())) {
       o.readiness = {
-        timeoutMs: Number(r.readinessTimeout.trim() || 60000),
-        intervalMs: Number(r.readinessInterval.trim() || 1000),
+        timeoutMs: Number(r.readinessTimeout.trim() || b.readinessTimeout.trim() || 60000),
+        intervalMs: Number(r.readinessInterval.trim() || b.readinessInterval.trim() || 1000),
       }
     }
     if (Object.keys(o).length) services[name] = o
@@ -581,25 +767,48 @@ export function buildOverrides(s: InstanceState): Record<string, unknown> | unde
   // front-door: body value + completion timing
   const frontDoor: Record<string, unknown> = {}
   const body = parseJsonObject(s.bodyTemplate)
-  if (body.ok && body.value) frontDoor.request = { bodyTemplate: body.value }
+  const baseBody = parseJsonObject(baseline.bodyTemplate)
+  if (body.ok && body.value) {
+    const delta = objectDelta(body.value, (baseBody.ok && baseBody.value) || {})
+    if (Object.keys(delta).length) frontDoor.request = { bodyTemplate: delta }
+  }
   const completion: Record<string, number> = {}
-  if (s.completionTimeout.trim()) completion.timeoutMs = Number(s.completionTimeout)
-  if (s.completionInterval.trim()) completion.intervalMs = Number(s.completionInterval)
+  const timeout = scalarDelta(s.completionTimeout, baseline.completionTimeout)
+  const interval = scalarDelta(s.completionInterval, baseline.completionInterval)
+  if (timeout) completion.timeoutMs = Number(timeout)
+  if (interval) completion.intervalMs = Number(interval)
   if (Object.keys(completion).length) frontDoor.completion = completion
   if (Object.keys(frontDoor).length) overrides.frontDoor = frontDoor
   // target extension ref
-  if (s.targetExtensionRef.trim())
-    overrides.target = { extension: { ref: s.targetExtensionRef.trim() } }
-  // command env/params
-  const cmdEnv = envRowsToSpec(s.cmdEnvRows)
+  const ext = scalarDelta(s.targetExtensionRef, baseline.targetExtensionRef)
+  if (ext) overrides.target = { extension: { ref: ext } }
+  // command env/params/resources
+  const cmdEnv = envDelta(s.cmdEnvRows, baseline.cmdEnvRows)
   if (Object.keys(cmdEnv).length) overrides.env = cmdEnv
-  const cmdParams = kvLines(s.cmdParams)
+  const cmdUnsetEnv = envUnset(s.cmdEnvRows, baseline.cmdEnvRows)
+  if (cmdUnsetEnv.length) overrides.unsetEnv = cmdUnsetEnv
+  const cmdParams = kvDelta(s.cmdParams, baseline.cmdParams)
   if (Object.keys(cmdParams).length) overrides.params = cmdParams
+  const cmdResources: Record<string, number> = {}
+  const cmdCpu = scalarDelta(s.cmdCpu, baseline.cmdCpu)
+  const cmdMemoryMb = scalarDelta(s.cmdMemoryMb, baseline.cmdMemoryMb)
+  // resources is a scalar REPLACE, so a changed half must carry the inherited other half or it silently unsets it.
+  if (cmdCpu || cmdMemoryMb) {
+    const cpu = s.cmdCpu.trim() || baseline.cmdCpu.trim()
+    const memoryMb = s.cmdMemoryMb.trim() || baseline.cmdMemoryMb.trim()
+    if (cpu) cmdResources.cpu = Number(cpu)
+    if (memoryMb) cmdResources.memoryMb = Number(memoryMb)
+  }
+  if (Object.keys(cmdResources).length) overrides.resources = cmdResources
   return Object.keys(overrides).length ? overrides : undefined
 }
 
 // Assemble the instance spec (template reference + pins + overrides). overrides is included only when non-empty.
-export function buildInstance(s: InstanceState): Record<string, unknown> {
+// id 는 하네스의 이름이다 — 비어 있을 때만 templateId 로 떨어진다(한 형상 위의 첫 하네스라는 관례).
+export function buildInstance(
+  s: InstanceState,
+  baseline: OverrideBaseline = EMPTY_BASELINE
+): Record<string, unknown> {
   const pins: Record<string, string> = {}
   const pinSources: Record<string, { source: string; id: string; version: string }> = {}
   for (const p of s.pins) {
@@ -607,10 +816,10 @@ export function buildInstance(s: InstanceState): Record<string, unknown> {
     pins[p.slot.trim()] = p.value.trim()
     if (p.source) pinSources[p.slot.trim()] = p.source
   }
-  const overrides = buildOverrides(s)
+  const overrides = buildOverrides(s, baseline)
   return {
     template: { id: s.templateId, version: s.templateVersion },
-    id: s.templateId, // instance id = template id (convention)
+    id: s.id.trim() || s.templateId,
     version: s.version,
     ...(s.description.trim() ? { description: s.description.trim() } : {}),
     pins,
@@ -628,6 +837,7 @@ export const INITIAL_TEMPLATE: TemplateState = {
     {
       name: 'agent-server',
       slot: 'agent-server',
+      image: '',
       port: '8080',
       needs: '',
       perRun: '',
@@ -671,6 +881,7 @@ export const INITIAL_TEMPLATE: TemplateState = {
 export const INITIAL_INSTANCE: InstanceState = {
   templateId: '',
   templateVersion: '1.0.0',
+  id: '',
   version: '',
   description: '',
   pins: [{ slot: 'image', value: '' }],
@@ -681,6 +892,8 @@ export const INITIAL_INSTANCE: InstanceState = {
   targetExtensionRef: '',
   cmdEnvRows: [],
   cmdParams: '',
+  cmdCpu: '',
+  cmdMemoryMb: '',
 }
 
 // raw instance spec → instance form state (prefill for editing a new version). version is left empty to force a new tag
@@ -703,7 +916,10 @@ const kvToLines = (v: unknown): string => {
 }
 
 // existing overrides → structured form state (starting point for editing a new version). Inverse of buildOverrides.
-function serviceOverridesFromSpec(ov: Record<string, unknown>): ServiceOverrideRow[] {
+// unsetEnv 는 행이 아니라 "빠져야 할 키"라 따로 들고 다니다가 병합 시점에 적용한다.
+function serviceOverridesFromSpec(
+  ov: Record<string, unknown>
+): { row: ServiceOverrideRow; unsetEnv: string[] }[] {
   const services = asObj(ov.services)
   if (!services) return []
   return Object.entries(services).map(([service, raw]) => {
@@ -711,14 +927,18 @@ function serviceOverridesFromSpec(ov: Record<string, unknown>): ServiceOverrideR
     const res = asObj(o.resources) ?? {}
     const rd = asObj(o.readiness) ?? {}
     return {
-      service,
-      env: envRowsFromSpec(o.env),
-      replicas: numStr(o.replicas),
-      cpu: numStr(res.cpu),
-      memoryMb: numStr(res.memoryMb),
-      volumes: Array.isArray(o.volumes) ? o.volumes.map(asStr).filter(Boolean).join('\n') : '',
-      readinessTimeout: numStr(rd.timeoutMs),
-      readinessInterval: numStr(rd.intervalMs),
+      unsetEnv: asStrArray(o.unsetEnv),
+      row: {
+        service,
+        env: envRowsFromSpec(o.env),
+        model: typeof o.model === 'string' ? o.model : '',
+        replicas: numStr(o.replicas),
+        cpu: numStr(res.cpu),
+        memoryMb: numStr(res.memoryMb),
+        volumes: Array.isArray(o.volumes) ? o.volumes.map(asStr).filter(Boolean).join('\n') : '',
+        readinessTimeout: numStr(rd.timeoutMs),
+        readinessInterval: numStr(rd.intervalMs),
+      },
     }
   })
 }
@@ -811,7 +1031,10 @@ export function instanceStateFromSpec(
     pinSources?: Record<string, { source: string; id: string; version: string }>
     overrides?: Record<string, unknown>
   },
-  slots?: string[]
+  slots?: string[],
+  // 템플릿 기준선. 주면 폼이 **유효 설정**(상속 ⊕ 델타)으로 채워진다 — 이게 없으면 env 칸이 비어 보여서
+  // "환경변수는 템플릿에만 있다"고 읽히고, 사람은 형상을 고치러 간다.
+  baseline: OverrideBaseline = EMPTY_BASELINE
 ): InstanceState {
   const rowOf = (slot: string, value: string): PinRow => {
     const source = inst.pinSources?.[slot]
@@ -826,20 +1049,65 @@ export function instanceStateFromSpec(
   const body = asObj(asObj(fd?.request)?.bodyTemplate)
   const completion = asObj(fd?.completion)
   const ext = asObj(asObj(ov.target)?.extension)
+  const baseBody = parseJsonObject(baseline.bodyTemplate)
+  const effectiveBody = { ...((baseBody.ok && baseBody.value) || {}), ...(body ?? {}) }
   return {
     templateId: inst.template.id,
     templateVersion: inst.template.version,
+    id: inst.id, // 이름은 그대로 이어받는다 — 새 버전이 다른 하네스로 등록되면 안 된다
     version: '',
     description: '', // a new version gets a new changelog — it does not inherit the previous version's description (same spirit as version tags)
     pins: rows.length > 0 ? rows : [{ slot: '', value: '' }],
-    serviceOverrides: serviceOverridesFromSpec(ov),
-    bodyTemplate: body ? JSON.stringify(body, null, 2) : '',
-    completionTimeout: numStr(completion?.timeoutMs),
-    completionInterval: numStr(completion?.intervalMs),
-    targetExtensionRef: asStr(ext?.ref),
-    cmdEnvRows: envRowsFromSpec(ov.env),
-    cmdParams: kvToLines(ov.params),
+    serviceOverrides: effectiveServiceRows(baseline, serviceOverridesFromSpec(ov)),
+    bodyTemplate: Object.keys(effectiveBody).length ? JSON.stringify(effectiveBody, null, 2) : '',
+    completionTimeout: numStr(completion?.timeoutMs) || baseline.completionTimeout,
+    completionInterval: numStr(completion?.intervalMs) || baseline.completionInterval,
+    targetExtensionRef: asStr(ext?.ref) || baseline.targetExtensionRef,
+    cmdEnvRows: mergeEnvRows(baseline.cmdEnvRows, envRowsFromSpec(ov.env), asStrArray(ov.unsetEnv)),
+    cmdParams: mergeKvLines(baseline.cmdParams, kvToLines(ov.params)),
+    cmdCpu: numStr(asObj(ov.resources)?.cpu) || baseline.cmdCpu,
+    cmdMemoryMb: numStr(asObj(ov.resources)?.memoryMb) || baseline.cmdMemoryMb,
   }
+}
+
+// 템플릿의 서비스마다 한 행 — 상속값을 깔고 그 위에 이 인스턴스의 델타를 얹는다. 템플릿에 없는 서비스를 가리키는
+// 기존 델타는 버리지 않고 뒤에 붙인다: 조용히 지우면 제어 평면이 거절하던 오타가 화면에서 사라진다.
+export function effectiveServiceRows(
+  baseline: OverrideBaseline,
+  deltas: { row: ServiceOverrideRow; unsetEnv: string[] }[]
+): ServiceOverrideRow[] {
+  if (!baseline.known) return deltas.map((d) => d.row)
+  const byName = new Map(deltas.map((d) => [d.row.service.trim(), d]))
+  const rows = baseline.services.map((b) => {
+    const d = byName.get(b.service)
+    if (!d) return { ...b }
+    return {
+      service: b.service,
+      env: mergeEnvRows(b.env, d.row.env, d.unsetEnv),
+      model: d.row.model || b.model,
+      replicas: d.row.replicas || b.replicas,
+      cpu: d.row.cpu || b.cpu,
+      memoryMb: d.row.memoryMb || b.memoryMb,
+      volumes: d.row.volumes || b.volumes,
+      readinessTimeout: d.row.readinessTimeout || b.readinessTimeout,
+      readinessInterval: d.row.readinessInterval || b.readinessInterval,
+    }
+  })
+  const known = new Set(baseline.services.map((b) => b.service))
+  return [...rows, ...deltas.filter((d) => !known.has(d.row.service.trim())).map((d) => d.row)]
+}
+
+// 템플릿만으로 만드는 새 인스턴스의 초기 상태 — 모든 슬롯 행 + 유효 설정 프리필.
+export function instanceStateFromTemplate(
+  t: HarnessTemplateSpec,
+  slots: string[],
+  baseline: OverrideBaseline
+): InstanceState {
+  return instanceStateFromSpec(
+    { template: { id: t.id, version: t.version }, id: '', version: '', pins: {} },
+    slots,
+    baseline
+  )
 }
 
 export { EMPTY_SERVICE_OVERRIDE }

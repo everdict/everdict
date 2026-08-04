@@ -8,6 +8,7 @@ import {
   InstanceForm,
   TemplateForm,
   type InstanceState,
+  type OverrideBaseline,
   type ScopedSecretNames,
   type TemplateState,
 } from '@/features/register-harness'
@@ -23,6 +24,7 @@ export function NewHarnessVersionForm({
   id,
   initialInstance,
   initialTemplate,
+  baseline,
   startTab,
   notice,
   secrets,
@@ -31,6 +33,7 @@ export function NewHarnessVersionForm({
   id: string
   initialInstance: InstanceState
   initialTemplate: TemplateState
+  baseline: OverrideBaseline
   startTab: Tab
   notice?: string
   secrets: ScopedSecretNames
@@ -64,6 +67,7 @@ export function NewHarnessVersionForm({
           redirectDetailId={id}
           secrets={secrets}
           kind={initialTemplate.kind}
+          baseline={baseline}
         />
       ) : (
         <TemplateForm

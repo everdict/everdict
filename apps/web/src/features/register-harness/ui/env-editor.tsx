@@ -1,11 +1,12 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Building2, Lock, Plus, Trash2, User } from 'lucide-react'
+import { Building2, Lock, Plus, Trash2, Undo2, User } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
 import { cn } from '@/shared/lib/utils'
+import { Badge } from '@/shared/ui/badge'
 import { Input } from '@/shared/ui/input'
 import { InfoTip } from '@/shared/ui/tooltip'
 
@@ -25,12 +26,17 @@ export function EnvEditor({
   secrets,
   label,
   tip,
+  baseRows,
 }: {
   rows: EnvRow[]
   onChange: (rows: EnvRow[]) => void
   secrets: ScopedSecretNames
   label: string
   tip: React.ReactNode
+  // 템플릿이 정한 env(상속). 주면 각 행이 상속/재정의로 표시되고, 상속 키는 이름만 잠긴다(키를 바꾸면 그건
+  // 다른 변수다). 지우기는 열려 있다 — 유효 설정 편집기이므로 "행을 지웠다"는 곧 "이 변형에는 없다"이고,
+  // 저장할 때 unsetEnv 로 나간다.
+  baseRows?: EnvRow[]
 }) {
   const t = useTranslations('registerHarness')
   // Inline-created secrets are added per scope so they're immediately selectable (server preload + new).
@@ -74,54 +80,87 @@ export function EnvEditor({
         <p className="text-[12px] text-faint">{t('envEmpty')}</p>
       ) : (
         <div className="space-y-2">
-          {rows.map((r, i) => (
-            <div key={i} className="space-y-2 rounded-lg border bg-card p-2.5">
-              <div className="flex items-center gap-2">
-                <Input
-                  aria-label={t('name')}
-                  value={r.key}
-                  onChange={(e) => set(i, { key: e.target.value })}
-                  placeholder="NAME"
-                  spellCheck={false}
-                  className="min-w-0 flex-1 font-mono text-[12px]"
-                />
-                <SourceToggle
-                  secret={r.secret}
-                  // Changing the source resets the value (literal ↔ secret name mean different things). Default secret scope=workspace.
-                  onChange={(secret) => set(i, { secret, value: '', scope: 'workspace' })}
-                />
-                <button
-                  type="button"
-                  aria-label={t('remove')}
-                  onClick={() => onChange(rows.filter((_, j) => j !== i))}
-                  className="text-muted-foreground transition-colors hover:text-destructive"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
+          {rows.map((r, i) => {
+            const base = baseRows?.find((b) => b.key === r.key && r.key !== '')
+            const overridden =
+              base !== undefined && (base.value !== r.value || base.secret !== r.secret)
+            return (
+              <div key={i} className="space-y-2 rounded-lg border bg-card p-2.5">
+                <div className="flex items-center gap-2">
+                  <Input
+                    aria-label={t('name')}
+                    value={r.key}
+                    onChange={(e) => set(i, { key: e.target.value })}
+                    placeholder="NAME"
+                    spellCheck={false}
+                    readOnly={base !== undefined}
+                    className={cn(
+                      'min-w-0 flex-1 font-mono text-[12px]',
+                      base !== undefined && 'opacity-70'
+                    )}
+                  />
+                  {base !== undefined && (
+                    <Badge tone={overridden ? 'info' : 'outline'}>
+                      {overridden ? t('badgeOverridden') : t('badgeInherited')}
+                    </Badge>
+                  )}
+                  <SourceToggle
+                    secret={r.secret}
+                    // Changing the source resets the value (literal ↔ secret name mean different things). Default secret scope=workspace.
+                    onChange={(secret) => set(i, { secret, value: '', scope: 'workspace' })}
+                  />
+                  {overridden && base !== undefined && (
+                    // 되돌리기 — 값을 바꾼 뒤에는 템플릿 값이 화면에서 사라지므로, 되찾는 길이 있어야 한다.
+                    <button
+                      type="button"
+                      aria-label={t('revertToInherited')}
+                      title={t('revertToInherited')}
+                      onClick={() =>
+                        set(i, {
+                          secret: base.secret,
+                          value: base.value,
+                          ...(base.scope ? { scope: base.scope } : {}),
+                        })
+                      }
+                      className="text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <Undo2 className="size-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label={t('remove')}
+                    title={base !== undefined ? t('removeInheritedTitle') : t('remove')}
+                    onClick={() => onChange(rows.filter((_, j) => j !== i))}
+                    className="text-muted-foreground transition-colors hover:text-destructive"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+                {r.secret ? (
+                  <SecretValue
+                    scope={r.scope ?? 'workspace'}
+                    names={names}
+                    value={r.value}
+                    onScopeChange={(scope) => set(i, { scope, value: '' })}
+                    onChange={(v) => set(i, { value: v })}
+                    onCreated={(name, scope) => {
+                      setCreated((c) => [...c, { name, scope }])
+                      set(i, { value: name, scope })
+                    }}
+                  />
+                ) : (
+                  <Input
+                    aria-label={t('sourceValue')}
+                    value={r.value}
+                    onChange={(e) => set(i, { value: e.target.value })}
+                    placeholder={t('valuePlaceholder')}
+                    className="text-[12px]"
+                  />
+                )}
               </div>
-              {r.secret ? (
-                <SecretValue
-                  scope={r.scope ?? 'workspace'}
-                  names={names}
-                  value={r.value}
-                  onScopeChange={(scope) => set(i, { scope, value: '' })}
-                  onChange={(v) => set(i, { value: v })}
-                  onCreated={(name, scope) => {
-                    setCreated((c) => [...c, { name, scope }])
-                    set(i, { value: name, scope })
-                  }}
-                />
-              ) : (
-                <Input
-                  aria-label={t('sourceValue')}
-                  value={r.value}
-                  onChange={(e) => set(i, { value: e.target.value })}
-                  placeholder={t('valuePlaceholder')}
-                  className="text-[12px]"
-                />
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

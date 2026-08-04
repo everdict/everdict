@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
-import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock } from 'lucide-react'
+import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock, Shapes } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import {
@@ -289,6 +289,19 @@ export default async function HarnessDetailPage({
                 <GitBranchPlus className="size-3.5" />
                 {t('newVersion')}
               </Link>
+              {config && (
+                // 같은 형상 위의 **다른 하네스**. 이 길이 없으면 env 만 다른 변형이 같은 id 의 새 버전으로
+                // 들어가고, 버전 목록이 "새것"과 "다른 것"의 뒤범벅이 된다.
+                <Link
+                  href={`/${workspace}/harnesses/new?tab=instance&template=${encodeURIComponent(
+                    config.template.id
+                  )}&tplVersion=${encodeURIComponent(config.template.version)}`}
+                  className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                >
+                  <Shapes className="size-3.5" />
+                  {t('newVariant')}
+                </Link>
+              )}
               {canDeleteHarness && (
                 <DeleteHarnessButton
                   id={id}

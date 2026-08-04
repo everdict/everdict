@@ -533,7 +533,9 @@
     "tabInstance": "인스턴스 (핀 교체)",
     "tabTemplate": "템플릿 (구조)",
     "instanceHint": "슬롯 값(이미지·모델)만 바꿔 새 인스턴스 버전으로 등록해요. 템플릿 구조는 그대로예요.",
-    "templateHint": "구조를 바꿔 새 템플릿 버전을 만들어요. 그다음 이 버전으로 인스턴스를 만들면 돼요."
+    "templateHint": "구조를 바꿔 새 템플릿 버전을 만들어요. 그다음 이 버전으로 인스턴스를 만들면 돼요.",
+    "newVariant": "이 형상으로 새 하네스",
+    "shapesLink": "형상 카탈로그"
   },
   "harnessList": {
     "statusSucceeded": "성공",
@@ -563,7 +565,8 @@
     "versions": "버전",
     "noBenchmark": "실행 데이터셋 없음",
     "latestResult": "최근 결과",
-    "lastRunAt": "최근 실행 {at}"
+    "lastRunAt": "최근 실행 {at}",
+    "variantCount": "변형 {n}개"
   },
   "deleteDataset": {
     "triggerButton": "삭제",
@@ -1935,7 +1938,26 @@
     "versionRawLabel": "version (구조가 바뀔 때만 올려요)",
     "volumesOverridePlaceholder": "volumes (줄바꿈 — cache:/cache · /host:/c:ro)",
     "workDirLabel": "workDir (선택)",
-    "workDirTip": "명령을 실행할 작업 디렉터리예요. 예: /tmp."
+    "workDirTip": "명령을 실행할 작업 디렉터리예요. 예: /tmp.",
+    "settingsTitle": "설정 (환경변수 · 리소스)",
+    "settingsSubtitle": "템플릿 값을 물려받아요 · 바꾼 것만 저장돼요",
+    "svcSettingsTitle": "서비스별 설정",
+    "cmdSettingsTitle": "Command 설정",
+    "badgeInherited": "상속",
+    "badgeOverridden": "재정의",
+    "revertToInherited": "템플릿 값으로 되돌리기",
+    "harnessIdLabel": "하네스 이름 (id)",
+    "harnessIdTip": "이 하네스를 부를 이름이에요. 같은 템플릿 위에 이름이 다른 하네스를 여러 개 둘 수 있어요 — 환경변수나 모델만 다른 변형은 새 버전이 아니라 새 이름으로 두면 목록에서 구분돼요.",
+    "harnessIdHint": "비우면 템플릿 id 를 그대로 써요.",
+    "templatePickLabel": "형상 (템플릿)",
+    "templatePickPlaceholder": "템플릿 고르기",
+    "templateVersionPickLabel": "형상 버전",
+    "templateVersionPickPlaceholder": "버전 고르기",
+    "svcDefaultImageLabel": "image (기본값)",
+    "svcDefaultImageTip": "이 슬롯의 기본 이미지예요. 채워 두면 하네스는 바꿀 슬롯만 핀하면 되고, 비워 두면 하네스마다 반드시 핀해야 해요. host 실행 서비스는 컨테이너가 없어서 이미지를 넣지 않아요.",
+    "svcModelOverrideLabel": "model (에이전트 모델)",
+    "svcModelOverrideTip": "이 서비스가 쓸 등록된 모델 id 예요. 형상은 그대로 두고 모델만 바꾸는 변형에 써요 — 연결 정보(baseUrl·키)는 실행 직전에 주입돼요.",
+    "removeInheritedTitle": "이 변형에서 빼기 (템플릿 값도 적용 안 됨)"
   },
   "pickEnvironment": {
     "envPickerButton": "스토어에서",
@@ -5406,5 +5428,20 @@
     "uploading": "{name} 올리는 중…",
     "tooLarge": "첨부 한도 5MB 를 넘습니다 — {name}",
     "failed": "첨부하지 못했습니다 — {reason}"
+  },
+  "harnessTemplatesPage": {
+    "title": "형상 (템플릿)",
+    "description": "서비스 구조·의존성·타겟·프론트도어·트레이스 소스 — 여러 하네스가 함께 올라타는 뼈대예요.",
+    "backToHarnesses": "하네스 목록",
+    "connectError": "형상을 불러오지 못했어요: {error}",
+    "emptyTitle": "아직 형상이 없어요",
+    "emptyHint": "하네스를 등록할 때 형상을 먼저 만들면, 그 위에 변형을 여러 개 올릴 수 있어요.",
+    "statShapes": "형상",
+    "statHarnesses": "올라탄 하네스",
+    "statUnused": "아직 안 쓰는 형상",
+    "serviceCount": "서비스 {n}개",
+    "versions": "버전",
+    "newHarness": "이 형상으로 새 하네스",
+    "noHarness": "올라탄 하네스 없음"
   }
 }

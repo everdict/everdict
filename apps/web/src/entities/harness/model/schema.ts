@@ -2,6 +2,7 @@ import type { SpanAttrMapping } from '@everdict/contracts'
 import type {
   HarnessListEntry,
   HarnessSpecDiffResponse,
+  HarnessTemplateListEntry,
   HarnessVersionsResponse,
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
@@ -23,6 +24,13 @@ export const harnessSchema = z.object({
   latestVersion: z.string().optional(),
   versionCount: z.number().optional(),
   category: z.string().optional(), // template category of the latest instance (cli-agent, etc.)
+  // 최신 인스턴스가 올라탄 형상(템플릿). 같은 템플릿의 변형끼리 목록에서 묶는 근거 — 이게 없으면
+  // env 하나만 다른 변형도 서로 무관한 하네스로 읽힌다.
+  templateId: z.string().optional(),
+  templateVersion: z.string().optional(),
+  // 최신 인스턴스가 그 형상에서 무엇을 바꿨는가 — 한 템플릿에 하네스가 여럿일 때 "이건 어느 쪽인가"에 답한다.
+  // 제어 평면이 델타에서 파생하므로 손으로 쓴 설명처럼 낡지 않는다.
+  variation: z.array(z.object({ scope: z.string().optional(), label: z.string() })).optional(),
   kind: z.string().optional(), // command | service | process
   subtitle: z.string().optional(), // model/command/service summary (a harness has no free-text description, so used as a subtitle)
   private: z.boolean().optional(), // references a personal (user) secret → only createdBy can view (private)
@@ -37,6 +45,20 @@ export const harnessSchema = z.object({
 })
 
 export const harnessesSchema = z.array(harnessSchema)
+
+// GET /harness-templates: 이 워크스페이스가 고를 수 있는 형상 목록(+ _shared). 인스턴스 폼의 템플릿 피커와
+// 형상 카탈로그가 읽는다. 아직 아무 하네스도 올라타지 않은 형상은 이 목록에만 나오므로, 무엇인지도 여기 실려야 한다.
+export const harnessTemplateSchema = z.object({
+  id: z.string(),
+  versions: z.array(z.string()),
+  owner: z.string(),
+  latestVersion: z.string().optional(),
+  kind: z.string().optional(),
+  category: z.string().optional(),
+  serviceCount: z.number().optional(),
+})
+export const harnessTemplatesSchema = z.array(harnessTemplateSchema)
+export type HarnessTemplate = z.infer<typeof harnessTemplateSchema>
 
 // GET /harnesses/:id response: one harness's instance version list (registration order/semver) + per-version tags (only versions that have them).
 export const harnessVersionsSchema = z.object({
@@ -84,6 +106,10 @@ type _versionsBack = AssertAssignable<HarnessVersionsResponse, WebHarnessVersion
 // HarnessSpecDiff is identical-shape to the wire diff DTO — guarded bidirectionally.
 type _diffFwd = AssertAssignable<WebHarnessSpecDiff, HarnessSpecDiffResponse>
 type _diffBack = AssertAssignable<HarnessSpecDiffResponse, WebHarnessSpecDiff>
+// 템플릿 목록 엔트리는 동일 형태 — 양방향으로 묶는다.
+type WebHarnessTemplate = z.infer<typeof harnessTemplateSchema>
+type _tplFwd = AssertAssignable<WebHarnessTemplate, HarnessTemplateListEntry>
+type _tplBack = AssertAssignable<HarnessTemplateListEntry, WebHarnessTemplate>
 
 // Harness keeps the web's narrower shape (anchored by the Pick-reverse guard); HarnessVersions/HarnessSpecDiff alias the wire.
 export type Harness = WebHarness
@@ -96,6 +122,8 @@ export type __harnessSummaryDriftGuard = [
   _versionsBack,
   _diffFwd,
   _diffBack,
+  _tplFwd,
+  _tplBack,
 ]
 
 // --- client mirror of the resolved HarnessSpec (GET /harnesses/:id/:version) ---
@@ -166,6 +194,15 @@ export const serviceReadinessSchema = z.object({
 })
 export type ServiceReadiness = z.infer<typeof serviceReadinessSchema>
 
+// service resource request — cpu (1000 = 1 vCPU, k8s millicore convention) · memoryMb · gpu. 인스턴스가 덮어쓸 수 있는
+// 값이라 템플릿 쪽에서도 읽어야 한다(상속값 표시의 근거) — 미러에서 빠져 있으면 "상속됨"이 빈칸으로 보인다.
+export const serviceResourcesSchema = z.object({
+  cpu: z.number().optional(),
+  memoryMb: z.number().optional(),
+  gpu: z.number().optional(),
+})
+export type ServiceResources = z.infer<typeof serviceResourcesSchema>
+
 // intrinsic execution requirement — WHAT the service's image needs, never WHERE (not a node label). os = the OS the
 // image genuinely requires (a Windows Playwright server needs Windows on ANY infra); it derives to an os-<x> capability
 // so the placement gate excludes runtimes without such a node and each runtime realizes it natively (k8s nodeSelector /
@@ -212,6 +249,7 @@ export const topologyServiceSchema = z.object({
   env: z.record(z.string(), envValueSchema).default({}),
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),
+  resources: serviceResourcesSchema.optional(),
   wiring: z.array(serviceWiringSchema).optional(),
   requires: serviceRequiresSchema.optional(), // intrinsic OS need → node placement (windows/macos; linux = default, no gate)
   exec: serviceExecSchema.optional(), // host-exec realization (no container) — display passthrough
@@ -255,12 +293,27 @@ export const topologyTargetSchema = z.object({
 })
 export type TopologyTarget = z.infer<typeof topologyTargetSchema>
 
-// front door — the entry point where the eval driver submits a case.
-export const frontDoorSchema = z.object({
-  service: z.string(),
-  submit: z.string(),
-  trace: z.string().optional(),
-})
+// front door — the entry point where the eval driver submits a case. 제출 바디와 완료 대기 시간은 인스턴스가
+// 덮어쓰는 칸이라 상속값 표시에 필요하다(나머지 필드는 passthrough — 표시용 느슨한 미러).
+export const frontDoorSchema = z
+  .object({
+    service: z.string(),
+    submit: z.string(),
+    trace: z.string().optional(),
+    request: z
+      .object({ bodyTemplate: z.record(z.string(), z.unknown()).optional() })
+      .passthrough()
+      .optional(),
+    completion: z
+      .object({
+        mode: z.string().optional(),
+        timeoutMs: z.number().optional(),
+        intervalMs: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough()
 export type FrontDoor = z.infer<typeof frontDoorSchema>
 
 // trace extraction for a command harness: none (result only) | OTel/MLflow pull.
@@ -330,10 +383,12 @@ export const harnessInstanceSpecSchema = z.object({
 })
 export type HarnessInstanceSpec = z.infer<typeof harnessInstanceSpecSchema>
 
-// template service — an image-less slot (if slot is unset, name is the slot). env/volumes/readiness are part of the structure (not pin targets).
+// template service — a slot (if slot is unset, name is the slot). env/volumes/readiness are part of the structure
+// (not pin targets). image = the slot's DEFAULT, so an instance pins only the services it actually changes.
 export const templateServiceSchema = z.object({
   name: z.string(),
   slot: z.string().optional(),
+  image: z.string().optional(),
   port: z.number().optional(),
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
@@ -342,6 +397,7 @@ export const templateServiceSchema = z.object({
   env: z.record(z.string(), envValueSchema).default({}),
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),
+  resources: serviceResourcesSchema.optional(),
   wiring: z.array(serviceWiringSchema).optional(),
   requires: serviceRequiresSchema.optional(), // intrinsic OS need (structure, not a pin target)
   exec: serviceExecSchema.optional(), // host-exec realization (no container, no image pin) — display passthrough
@@ -368,6 +424,9 @@ export const harnessTemplateSpecSchema = z
     command: z.string().optional(),
     env: z.record(z.string(), envValueSchema).optional(),
     model: z.string().optional(),
+    // command 의 {{var}} 기본값 — 인스턴스가 덮어쓰는 칸이라 상속값 표시에 필요하다.
+    params: z.record(z.string(), z.string()).optional(),
+    resources: serviceResourcesSchema.optional(), // job 단위 자원 요청(command)
     trace: commandTraceSchema.optional(),
   })
   .passthrough()

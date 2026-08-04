@@ -32,17 +32,20 @@ import {
   buildInstance,
   buildTemplate,
   CONVENTIONAL_CONN_KEY,
+  EMPTY_BASELINE,
   EMPTY_SERVICE_OVERRIDE,
   INITIAL_INSTANCE,
   INITIAL_TEMPLATE,
   isolateByForManagement,
   parseJsonObject,
   SERVICE_OS_OPTIONS,
+  serviceBaselineFor,
   type DepInjectRow,
   type DepManagement,
   type DepRow,
   type InstanceState,
   type Kind,
+  type OverrideBaseline,
   type PinRow,
   type ServiceOverrideRow,
   type ServiceRow,
@@ -178,22 +181,35 @@ type Tab = 'template' | 'instance'
 export function RegisterHarnessWizard({
   secrets = EMPTY_SECRETS,
   modelIds = [],
+  templates = [],
+  instanceInitial,
+  baseline = EMPTY_BASELINE,
+  templateKind,
+  startTab = 'template',
 }: {
   secrets?: ScopedSecretNames
   modelIds?: string[] // registered Model ids — offered as options for a command/service model binding
+  // 이 워크스페이스의 형상 목록 — 인스턴스 탭의 피커. 기존 형상 위에 하네스를 하나 더 얹는 길이 열려야
+  // env 변형이 새 템플릿으로 새지 않는다.
+  templates?: { id: string; versions: string[] }[]
+  instanceInitial?: InstanceState // 고른 템플릿의 유효값으로 미리 채운 상태(서버가 만든다)
+  baseline?: OverrideBaseline
+  templateKind?: Kind
+  startTab?: Tab
 }) {
   const { workspace } = useParams<{ workspace: string }>()
+  const router = useRouter()
   const t = useTranslations('registerHarness')
-  const [tab, setTab] = useState<Tab>('template')
+  const [tab, setTab] = useState<Tab>(startTab)
 
   return (
     <div className="space-y-5">
       <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
-        <TabBtn active={tab === 'template'} onClick={() => setTab('template')}>
-          {t('tabTemplate')}
-        </TabBtn>
         <TabBtn active={tab === 'instance'} onClick={() => setTab('instance')}>
           {t('tabInstance')}
+        </TabBtn>
+        <TabBtn active={tab === 'template'} onClick={() => setTab('template')}>
+          {t('tabTemplate')}
         </TabBtn>
       </div>
       <p className="text-[12px] text-muted-foreground">
@@ -207,7 +223,26 @@ export function RegisterHarnessWizard({
           modelIds={modelIds}
         />
       ) : (
-        <InstanceForm workspace={workspace} existingVersions={[]} secrets={secrets} />
+        <InstanceForm
+          // 템플릿이 바뀌면 슬롯도 상속값도 통째로 달라지므로 폼을 새로 세운다(key).
+          key={`${instanceInitial?.templateId ?? ''}@${instanceInitial?.templateVersion ?? ''}`}
+          workspace={workspace}
+          existingVersions={[]}
+          secrets={secrets}
+          templates={templates}
+          baseline={baseline}
+          {...(instanceInitial ? { initial: instanceInitial } : {})}
+          {...(templateKind ? { kind: templateKind } : {})}
+          // 고른 형상은 URL 이 들고 있는다 — 서버가 그 템플릿의 유효값을 만들어 폼에 내려주므로,
+          // 상속값을 클라이언트에서 다시 받아올 필요가 없다.
+          onPickTemplate={(id, version) =>
+            router.replace(
+              `/${workspace}/harnesses/new?tab=instance&template=${encodeURIComponent(id)}${
+                version ? `&tplVersion=${encodeURIComponent(version)}` : ''
+              }`
+            )
+          }
+        />
       )}
     </div>
   )
@@ -360,6 +395,7 @@ export function TemplateForm({
                   {
                     name: '',
                     slot: '',
+                    image: '',
                     port: '',
                     needs: '',
                     perRun: '',
@@ -401,6 +437,13 @@ export function TemplateForm({
                     value={sv.slot}
                     onChange={(v) => setService(i, { slot: v })}
                     placeholder={t('svcSlotPlaceholder')}
+                  />
+                  <LabeledInput
+                    label={t('svcDefaultImageLabel')}
+                    tip={t('svcDefaultImageTip')}
+                    value={sv.image}
+                    onChange={(v) => setService(i, { image: v })}
+                    placeholder="ghcr.io/acme/agent:1"
                   />
                   <LabeledInput
                     label="port"
@@ -797,6 +840,9 @@ export function InstanceForm({
   existingVersions,
   secrets = EMPTY_SECRETS,
   kind,
+  baseline = EMPTY_BASELINE,
+  templates,
+  onPickTemplate,
 }: {
   workspace: string
   initial?: InstanceState
@@ -807,6 +853,11 @@ export function InstanceForm({
   // The kind of the template this instance rides on — if known, only the overrides block matching that kind is exposed (edit screen).
   // If the kind is unknown (like the new-instance wizard), undefined → all blocks exposed (backward compatible).
   kind?: Kind
+  // 템플릿이 정한 유효값. 있으면 폼이 상속값을 그려주고 저장 시 바뀐 것만 델타로 내보낸다.
+  baseline?: OverrideBaseline
+  // 고를 수 있는 형상 목록(신규 등록 화면). 주면 template id/version 이 자유 입력 대신 피커가 된다.
+  templates?: { id: string; versions: string[] }[]
+  onPickTemplate?: (id: string, version: string) => void
 }) {
   const router = useRouter()
   const t = useTranslations('registerHarness')
@@ -838,20 +889,20 @@ export function InstanceForm({
     if (bodyError) return setRegError(t('bodyJsonError', { error: bodyError }))
     setBusy(true)
     setRegError(undefined)
-    setResult(await validateHarnessAction(buildInstance(s)))
+    setResult(await validateHarnessAction(buildInstance(s, baseline)))
     setBusy(false)
   }
   async function onRegister() {
     if (bodyError) return setRegError(t('bodyJsonError', { error: bodyError }))
     setBusy(true)
     setRegError(undefined)
-    const res = await registerHarnessAction(buildInstance(s))
+    const res = await registerHarnessAction(buildInstance(s, baseline))
     setBusy(false)
     if (res.ok) {
       // If a new version (redirectDetailId), go to that version's detail; otherwise the list.
       router.push(
         redirectDetailId
-          ? `/${workspace}/harnesses/${encodeURIComponent(redirectDetailId)}?v=${encodeURIComponent(res.version ?? s.version)}`
+          ? `/${workspace}/harness/${encodeURIComponent(redirectDetailId)}?v=${encodeURIComponent(res.version ?? s.version)}`
           : `/${workspace}/harnesses`
       )
     } else setRegError(res.error ?? t('registerFailed'))
@@ -860,32 +911,58 @@ export function InstanceForm({
   return (
     // @container — TemplateForm 과 같은 이유(폼 자신의 폭이 기준축).
     <div className="@container space-y-5">
-      <div className="grid gap-3 @sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <FieldLabel htmlFor="itid" tip={t('templateIdTip')}>
-            template id
-          </FieldLabel>
-          <Input
-            id="itid"
-            value={s.templateId}
-            onChange={(e) => set({ templateId: e.target.value })}
-            placeholder="bu"
-            readOnly={lockId}
-            className={cn(lockId && 'opacity-60')}
-          />
+      {templates ? (
+        // 형상을 고른다 — id/버전을 외워서 치게 두면 "인스턴스 추가"가 템플릿 편집보다 비싸진다.
+        <TemplatePicker
+          templates={templates}
+          templateId={s.templateId}
+          templateVersion={s.templateVersion}
+          onPick={(id, version) => onPickTemplate?.(id, version)}
+        />
+      ) : (
+        <div className="grid gap-3 @sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <FieldLabel htmlFor="itid" tip={t('templateIdTip')}>
+              template id
+            </FieldLabel>
+            <Input
+              id="itid"
+              value={s.templateId}
+              onChange={(e) => set({ templateId: e.target.value })}
+              placeholder="bu"
+              readOnly={lockId}
+              className={cn(lockId && 'opacity-60')}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <FieldLabel htmlFor="itver" tip={t('templateVersionTip')}>
+              template version
+            </FieldLabel>
+            <Input
+              id="itver"
+              value={s.templateVersion}
+              onChange={(e) => set({ templateVersion: e.target.value })}
+              placeholder="1"
+            />
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <FieldLabel htmlFor="itver" tip={t('templateVersionTip')}>
-            template version
-          </FieldLabel>
-          <Input
-            id="itver"
-            value={s.templateVersion}
-            onChange={(e) => set({ templateVersion: e.target.value })}
-            placeholder="1"
-          />
-        </div>
+      )}
+
+      <div className="space-y-1.5">
+        <FieldLabel htmlFor="iid" tip={t('harnessIdTip')}>
+          {t('harnessIdLabel')}
+        </FieldLabel>
+        <Input
+          id="iid"
+          value={s.id}
+          onChange={(e) => set({ id: e.target.value })}
+          placeholder={s.templateId || 'bu-opus'}
+          readOnly={lockId}
+          className={cn(lockId && 'opacity-60')}
+        />
+        {!lockId && <p className="text-[11.5px] text-faint">{t('harnessIdHint')}</p>}
       </div>
+
       <VersionRow
         existing={existingVersions}
         value={s.version}
@@ -996,9 +1073,10 @@ export function InstanceForm({
         bodyError={bodyError}
         secrets={secrets}
         kind={kind}
+        baseline={baseline}
       />
 
-      <JsonPreview value={buildInstance(s)} />
+      <JsonPreview value={buildInstance(s, baseline)} />
       {result && <ValidateBanner result={result} />}
       {regError && <Callout tone="danger">{regError}</Callout>}
       <p className="text-[12px] text-muted-foreground">{t('instanceHint')}</p>
@@ -1012,8 +1090,8 @@ export function InstanceForm({
   )
 }
 
-// overrides structured editor — a delta that changes only behavior on top of the same template. It's optional, so it's hidden in a disclosure
-// to keep the default form (image pin) clean; only those who need it expand it. If existing overrides are present (editing a new version), auto-expand.
+// 설정(환경변수·리소스) 편집기 — 템플릿의 유효값을 깔고 그 위에서 고친다. 저장되는 것은 바뀐 것뿐(델타).
+// 기준선을 아는 화면에서는 처음부터 펼쳐 둔다: 접어 두면 "여기엔 아무것도 없다"로 읽혀서 사람이 템플릿을 고치러 간다.
 function hasOverrides(s: InstanceState): boolean {
   return (
     s.serviceOverrides.length > 0 ||
@@ -1022,7 +1100,9 @@ function hasOverrides(s: InstanceState): boolean {
     s.completionInterval.trim() !== '' ||
     s.targetExtensionRef.trim() !== '' ||
     s.cmdEnvRows.length > 0 ||
-    s.cmdParams.trim() !== ''
+    s.cmdParams.trim() !== '' ||
+    s.cmdCpu.trim() !== '' ||
+    s.cmdMemoryMb.trim() !== ''
   )
 }
 
@@ -1033,6 +1113,7 @@ function OverridesEditor({
   bodyError,
   secrets,
   kind,
+  baseline,
 }: {
   s: InstanceState
   set: (patch: Partial<InstanceState>) => void
@@ -1040,9 +1121,10 @@ function OverridesEditor({
   bodyError?: string
   secrets: ScopedSecretNames
   kind?: Kind
+  baseline: OverrideBaseline
 }) {
   const t = useTranslations('registerHarness')
-  const [open, setOpen] = useState(hasOverrides(s))
+  const [open, setOpen] = useState(baseline.known || hasOverrides(s))
   // If the kind is known, expose only that kind's overrides: command→Command block only, service→service/front-door/target only.
   // If unknown (undefined, e.g. the new-instance wizard), expose all (backward compatible).
   const showService = kind !== 'command'
@@ -1056,9 +1138,9 @@ function OverridesEditor({
       >
         <span className="flex items-center gap-2 text-[13px] font-[560] text-foreground">
           <SlidersHorizontal className="size-3.5 text-muted-foreground" />
-          {t('overridesTitle')}
+          {baseline.known ? t('settingsTitle') : t('overridesTitle')}
           <span className="font-normal text-[12px] text-muted-foreground">
-            {t('overridesSubtitle')}
+            {baseline.known ? t('settingsSubtitle') : t('overridesSubtitle')}
           </span>
         </span>
         <ChevronDown
@@ -1071,79 +1153,110 @@ function OverridesEditor({
           {showService && (
             <>
               <Section
-                title={t('svcOverrideTitle')}
-                onAdd={() =>
-                  set({ serviceOverrides: [...s.serviceOverrides, { ...EMPTY_SERVICE_OVERRIDE }] })
-                }
+                title={baseline.known ? t('svcSettingsTitle') : t('svcOverrideTitle')}
+                // 템플릿을 아는 화면에서는 행이 형상으로 고정된다 — 서비스 이름을 손으로 치게 두면 오타 하나가 400 이 된다.
+                {...(baseline.known
+                  ? {}
+                  : {
+                      onAdd: () =>
+                        set({
+                          serviceOverrides: [...s.serviceOverrides, { ...EMPTY_SERVICE_OVERRIDE }],
+                        }),
+                    })}
               >
                 {s.serviceOverrides.length === 0 ? (
                   <p className="text-[12px] text-muted-foreground">{t('svcOverrideEmpty')}</p>
                 ) : (
-                  s.serviceOverrides.map((r, i) => (
-                    <div key={i} className="space-y-2.5 rounded-lg border bg-card p-3">
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={r.service}
-                          onChange={(e) => setSvcOv(i, { service: e.target.value })}
-                          placeholder={t('svcNamePlaceholder')}
-                          className="min-w-0 flex-1"
+                  s.serviceOverrides.map((r, i) => {
+                    const b = serviceBaselineFor(baseline, r.service.trim())
+                    return (
+                      <div key={i} className="space-y-2.5 rounded-lg border bg-card p-3">
+                        <div className="flex items-center gap-2">
+                          {baseline.known ? (
+                            <span className="flex min-w-0 flex-1 items-center gap-2">
+                              <span className="truncate font-mono text-[13px] font-[560] text-foreground">
+                                {r.service}
+                              </span>
+                              <InheritTag base={b} row={r} />
+                            </span>
+                          ) : (
+                            <>
+                              <Input
+                                value={r.service}
+                                onChange={(e) => setSvcOv(i, { service: e.target.value })}
+                                placeholder={t('svcNamePlaceholder')}
+                                className="min-w-0 flex-1"
+                              />
+                              <RemoveBtn
+                                onClick={() =>
+                                  set({
+                                    serviceOverrides: s.serviceOverrides.filter((_, j) => j !== i),
+                                  })
+                                }
+                              />
+                            </>
+                          )}
+                        </div>
+                        {/* 같은 토폴로지에 모델만 바꾸는 변형 — 가장 흔한 변형이면서 예전엔 템플릿 편집이었다. */}
+                        <LabeledInput
+                          label={t('svcModelOverrideLabel')}
+                          tip={t('svcModelOverrideTip')}
+                          value={r.model}
+                          onChange={(v) => setSvcOv(i, { model: v })}
+                          placeholder={b.model || 'claude-opus-4-8'}
                         />
-                        <RemoveBtn
-                          onClick={() =>
-                            set({ serviceOverrides: s.serviceOverrides.filter((_, j) => j !== i) })
-                          }
+                        <div className="grid gap-2 @md:grid-cols-3">
+                          <NumField
+                            label="replicas"
+                            value={r.replicas}
+                            onChange={(v) => setSvcOv(i, { replicas: v })}
+                            placeholder={b.replicas || '2'}
+                          />
+                          <NumField
+                            label={t('cpuLabel')}
+                            value={r.cpu}
+                            onChange={(v) => setSvcOv(i, { cpu: v })}
+                            placeholder={b.cpu || '2000'}
+                          />
+                          <NumField
+                            label="memory (MB)"
+                            value={r.memoryMb}
+                            onChange={(v) => setSvcOv(i, { memoryMb: v })}
+                            placeholder={b.memoryMb || '4096'}
+                          />
+                        </div>
+                        <EnvEditor
+                          label="env"
+                          tip={t.rich('svcOverrideEnvTip', { b: (c) => <b>{c}</b> })}
+                          rows={r.env}
+                          onChange={(env) => setSvcOv(i, { env })}
+                          secrets={secrets}
+                          {...(baseline.known ? { baseRows: b.env } : {})}
                         />
+                        <Textarea
+                          value={r.volumes}
+                          onChange={(e) => setSvcOv(i, { volumes: e.target.value })}
+                          placeholder={t('volumesOverridePlaceholder')}
+                          rows={2}
+                          className="font-mono text-[12px]"
+                        />
+                        <div className="grid gap-2 @sm:grid-cols-2">
+                          <NumField
+                            label="readiness timeout (ms)"
+                            value={r.readinessTimeout}
+                            onChange={(v) => setSvcOv(i, { readinessTimeout: v })}
+                            placeholder={b.readinessTimeout || '60000'}
+                          />
+                          <NumField
+                            label="readiness interval (ms)"
+                            value={r.readinessInterval}
+                            onChange={(v) => setSvcOv(i, { readinessInterval: v })}
+                            placeholder={b.readinessInterval || '1000'}
+                          />
+                        </div>
                       </div>
-                      <div className="grid gap-2 @md:grid-cols-3">
-                        <NumField
-                          label="replicas"
-                          value={r.replicas}
-                          onChange={(v) => setSvcOv(i, { replicas: v })}
-                          placeholder="2"
-                        />
-                        <NumField
-                          label={t('cpuLabel')}
-                          value={r.cpu}
-                          onChange={(v) => setSvcOv(i, { cpu: v })}
-                          placeholder="2000"
-                        />
-                        <NumField
-                          label="memory (MB)"
-                          value={r.memoryMb}
-                          onChange={(v) => setSvcOv(i, { memoryMb: v })}
-                          placeholder="4096"
-                        />
-                      </div>
-                      <EnvEditor
-                        label="env"
-                        tip={t.rich('svcOverrideEnvTip', { b: (c) => <b>{c}</b> })}
-                        rows={r.env}
-                        onChange={(env) => setSvcOv(i, { env })}
-                        secrets={secrets}
-                      />
-                      <Textarea
-                        value={r.volumes}
-                        onChange={(e) => setSvcOv(i, { volumes: e.target.value })}
-                        placeholder={t('volumesOverridePlaceholder')}
-                        rows={2}
-                        className="font-mono text-[12px]"
-                      />
-                      <div className="grid gap-2 @sm:grid-cols-2">
-                        <NumField
-                          label="readiness timeout (ms)"
-                          value={r.readinessTimeout}
-                          onChange={(v) => setSvcOv(i, { readinessTimeout: v })}
-                          placeholder="60000"
-                        />
-                        <NumField
-                          label="readiness interval (ms)"
-                          value={r.readinessInterval}
-                          onChange={(v) => setSvcOv(i, { readinessInterval: v })}
-                          placeholder="1000"
-                        />
-                      </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </Section>
 
@@ -1193,13 +1306,14 @@ function OverridesEditor({
           )}
 
           {showCommand && (
-            <OvBlock title={t('cmdOverrideTitle')}>
+            <OvBlock title={baseline.known ? t('cmdSettingsTitle') : t('cmdOverrideTitle')}>
               <EnvEditor
                 label="env"
                 tip={t.rich('cmdOverrideEnvTip', { b: (c) => <b>{c}</b> })}
                 rows={s.cmdEnvRows}
                 onChange={(cmdEnvRows) => set({ cmdEnvRows })}
                 secrets={secrets}
+                {...(baseline.known ? { baseRows: baseline.cmdEnvRows } : {})}
               />
               <div className="space-y-1.5">
                 <Label htmlFor="ovcmdparams">
@@ -1215,10 +1329,91 @@ function OverridesEditor({
                   className="font-mono text-[12px]"
                 />
               </div>
+              {/* 더 큰 상자를 쓰는 변형 — 이것도 예전엔 템플릿을 고쳐야 했고, 그래서 실행마다 형상이 갈라졌다. */}
+              <div className="grid gap-2 @sm:grid-cols-2">
+                <NumField
+                  label={t('cpuLabel')}
+                  value={s.cmdCpu}
+                  onChange={(v) => set({ cmdCpu: v })}
+                  placeholder={baseline.cmdCpu || '2000'}
+                />
+                <NumField
+                  label="memory (MB)"
+                  value={s.cmdMemoryMb}
+                  onChange={(v) => set({ cmdMemoryMb: v })}
+                  placeholder={baseline.cmdMemoryMb || '4096'}
+                />
+              </div>
             </OvBlock>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// 이 서비스 행이 템플릿과 달라졌는지 — 달라진 것만 저장되므로, 무엇이 델타인지 화면에서 바로 보여야 한다.
+function InheritTag({ base, row }: { base: ServiceOverrideRow; row: ServiceOverrideRow }) {
+  const t = useTranslations('registerHarness')
+  const envChanged =
+    row.env.length !== base.env.length ||
+    row.env.some((r) => {
+      const b = base.env.find((x) => x.key === r.key)
+      return !b || b.value !== r.value || b.secret !== r.secret
+    })
+  const changed =
+    envChanged ||
+    row.replicas.trim() !== base.replicas.trim() ||
+    row.cpu.trim() !== base.cpu.trim() ||
+    row.memoryMb.trim() !== base.memoryMb.trim() ||
+    row.volumes.trim() !== base.volumes.trim() ||
+    row.readinessTimeout.trim() !== base.readinessTimeout.trim() ||
+    row.readinessInterval.trim() !== base.readinessInterval.trim()
+  return (
+    <Badge tone={changed ? 'info' : 'outline'}>
+      {changed ? t('badgeOverridden') : t('badgeInherited')}
+    </Badge>
+  )
+}
+
+// 형상 피커 — 템플릿 id 와 그 안의 버전. 고르면 상위가 그 템플릿의 유효값으로 폼을 다시 세운다.
+function TemplatePicker({
+  templates,
+  templateId,
+  templateVersion,
+  onPick,
+}: {
+  templates: { id: string; versions: string[] }[]
+  templateId: string
+  templateVersion: string
+  onPick: (id: string, version: string) => void
+}) {
+  const t = useTranslations('registerHarness')
+  const versions = templates.find((x) => x.id === templateId)?.versions ?? []
+  return (
+    <div className="grid gap-3 @sm:grid-cols-2">
+      <div className="space-y-1.5">
+        <FieldLabel tip={t('templateIdTip')}>{t('templatePickLabel')}</FieldLabel>
+        <Combobox
+          options={templates.map((x) => ({ value: x.id, label: x.id }))}
+          value={templateId}
+          onChange={(id) => {
+            const next = templates.find((x) => x.id === id)?.versions ?? []
+            onPick(id, next[next.length - 1] ?? '')
+          }}
+          placeholder={t('templatePickPlaceholder')}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <FieldLabel tip={t('templateVersionTip')}>{t('templateVersionPickLabel')}</FieldLabel>
+        <Combobox
+          options={versions.map((v) => ({ value: v, label: v }))}
+          value={templateVersion}
+          onChange={(v) => onPick(templateId, v)}
+          placeholder={t('templateVersionPickPlaceholder')}
+          align="end"
+        />
+      </div>
     </div>
   )
 }

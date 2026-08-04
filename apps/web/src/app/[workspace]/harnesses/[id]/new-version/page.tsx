@@ -3,9 +3,11 @@ import { ChevronLeft, Lock } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import {
+  baselineFromTemplate,
   instanceStateFromSpec,
   templateStateFromSpec,
   type InstanceState,
+  type OverrideBaseline,
   type TemplateState,
 } from '@/features/register-harness'
 import {
@@ -59,6 +61,8 @@ export default async function NewHarnessVersionPage({
 
   let initialInstance: InstanceState | undefined
   let initialTemplate: TemplateState | undefined
+  // 템플릿이 정한 유효값 — 폼이 상속값을 그리고 저장 시 바뀐 것만 델타로 내보내는 근거.
+  let baseline: OverrideBaseline | undefined
   let startTab: 'instance' | 'template' = tab === 'template' ? 'template' : 'instance'
   let notice: string | undefined
   let loadError: string | undefined
@@ -75,15 +79,19 @@ export default async function NewHarnessVersionPage({
     if (typeof tplVersion === 'string' && tplVersion) {
       // Right after registering a new template version — return to the instance tab to create an instance referencing that version.
       const newTemplate = harnessTemplateSpecSchema.parse(
-        await controlPlane.getHarnessTemplateSpec(ctx, id, tplVersion)
+        await controlPlane.getHarnessTemplateSpec(ctx, instance.template.id, tplVersion)
       )
+      baseline = baselineFromTemplate(newTemplate)
       initialInstance = instanceStateFromSpec(
-        { ...instance, template: { id, version: tplVersion } },
-        templateSlotNames(newTemplate)
+        { ...instance, template: { id: instance.template.id, version: tplVersion } },
+        templateSlotNames(newTemplate),
+        baseline
       )
       initialTemplate = templateStateFromSpec(newTemplate)
       startTab = 'instance'
-      notice = t('templateRegisteredNotice', { template: `${id}@${tplVersion}` })
+      notice = t('templateRegisteredNotice', {
+        template: `${instance.template.id}@${tplVersion}`,
+      })
     } else {
       const template = harnessTemplateSpecSchema.parse(
         await controlPlane.getHarnessTemplateSpec(
@@ -92,7 +100,8 @@ export default async function NewHarnessVersionPage({
           instance.template.version
         )
       )
-      initialInstance = instanceStateFromSpec(instance, templateSlotNames(template))
+      baseline = baselineFromTemplate(template)
+      initialInstance = instanceStateFromSpec(instance, templateSlotNames(template), baseline)
       initialTemplate = templateStateFromSpec(template)
     }
   } catch (e) {
@@ -111,7 +120,7 @@ export default async function NewHarnessVersionPage({
       <PageHeader title={t('newVersion')} description={t('newVersionDescription', { id })} />
       {!allowed ? (
         <EmptyState icon={<Lock />} title={t('noPermTitle')} hint={t('adminRequired')} />
-      ) : loadError || !initialInstance || !initialTemplate ? (
+      ) : loadError || !initialInstance || !initialTemplate || !baseline ? (
         <Callout tone="danger">
           {t('configLoadError', { error: loadError ?? t('unknownError') })}
         </Callout>
@@ -122,6 +131,7 @@ export default async function NewHarnessVersionPage({
             id={id}
             initialInstance={initialInstance}
             initialTemplate={initialTemplate}
+            baseline={baseline}
             startTab={startTab}
             secrets={secrets}
             {...(notice !== undefined ? { notice } : {})}
