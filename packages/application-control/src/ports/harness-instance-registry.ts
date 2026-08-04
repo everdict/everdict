@@ -26,6 +26,14 @@ export interface VersionMeta {
 // GET /harnesses and MCP list_harnesses produce this shape. Same grain as the dataset DatasetListEntry.
 export interface HarnessListEntry extends VersionMeta {
   category?: string; // template category of the latest instance (cli-agent, etc.)
+  // The shape (template) the latest instance rides on. Two harnesses that differ only by env/pins are siblings on
+  // ONE template — without this the list cannot say so, and every variation reads as an unrelated harness.
+  templateId?: string;
+  templateVersion?: string;
+  // What the latest instance changes relative to that shape (`summarizeInstanceVariation`) — the display answer to
+  // "which of these is this one?" when several harnesses share a template. Derived, never authored, so it cannot
+  // drift from what the resolver applies. Absent when the instance is the template unchanged.
+  variation?: { scope?: string; label: string }[];
   kind?: string; // command | service | process (resolved)
   subtitle?: string; // model/command/service summary (a harness has no free-text description, so this serves as the subtitle)
   // true if the latest instance references a user-scoped secret — this harness is visible to createdBy only (private).

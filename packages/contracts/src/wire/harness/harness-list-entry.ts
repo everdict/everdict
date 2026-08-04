@@ -22,6 +22,16 @@ export const HarnessListEntrySchema = z.object({
     .optional()
     .describe("version → where that version came from (stamped versions only)"),
   category: z.string().optional().describe("Template category of the latest instance"),
+  // The shape the latest instance rides on. Two harnesses that vary only by env/pins are two entries under ONE
+  // template — without this the list cannot say so, and every variation reads as an unrelated harness.
+  templateId: z.string().optional().describe("Template (shape) id of the latest instance"),
+  templateVersion: z.string().optional().describe("Template (shape) version of the latest instance"),
+  // Derived from the latest instance's own delta — what makes THIS harness different from its shape. Never
+  // authored, so it cannot go stale; absent when the instance is the template unchanged.
+  variation: z
+    .array(z.object({ scope: z.string().optional(), label: z.string() }))
+    .optional()
+    .describe("How the latest instance differs from its template (display chips)"),
   kind: z.string().optional().describe("command | service | process (resolved)"),
   subtitle: z.string().optional().describe("Model/command/service summary for list display"),
   private: z.boolean().optional().describe("True when the latest instance references a personal secret"),

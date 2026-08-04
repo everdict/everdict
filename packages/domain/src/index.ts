@@ -197,6 +197,13 @@ export {
 // harness — resolved-spec version diff (base ↔ candidate)
 export { diffHarnessSpecs } from "./harness/harness-diff.js";
 
+// harness — what makes ONE instance different from its template (the display answer to "which one is this?")
+export {
+  summarizeInstanceVariation,
+  VARIATION_CHIP_DISPLAY_LIMIT,
+  type VariationChip,
+} from "./harness/instance-variation.js";
+
 // secret — reverse-usage index (which registry specs / settings integrations reference a workspace secret by name)
 export { collectSecretUsages, type SecretUsage, type SecretUsageInputs } from "./secret/secret-usage.js";
 

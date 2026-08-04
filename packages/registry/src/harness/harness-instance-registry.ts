@@ -7,7 +7,7 @@ import {
   type ServiceHarnessSpec,
   resolveHarnessInstance,
 } from "@everdict/contracts";
-import { assertPortable, modelBindingLabel, referencesUserSecret } from "@everdict/domain";
+import { assertPortable, modelBindingLabel, referencesUserSecret, summarizeInstanceVariation } from "@everdict/domain";
 import { asService } from "../registry.js";
 import { VersionedStore } from "../versioned-store.js";
 
@@ -36,17 +36,30 @@ export async function enrichHarnessList(
 ): Promise<HarnessListEntry[]> {
   const out: HarnessListEntry[] = [];
   for (const meta of metas) {
-    let extra: Partial<Pick<HarnessListEntry, "category" | "kind" | "subtitle" | "private">> = {};
+    let extra: Partial<
+      Pick<
+        HarnessListEntry,
+        "category" | "kind" | "subtitle" | "private" | "templateId" | "templateVersion" | "variation"
+      >
+    > = {};
     try {
       const instance = await getInstance(meta.id, meta.latestVersion);
       const template = await getTemplate(instance.template.id, instance.template.version);
       const resolved = resolveHarnessInstance(template, instance);
       const sub = harnessSubtitle(resolved);
+      // What makes THIS one different from the shape — the answer to "which harness is this?" when several ride
+      // one template. Derived from the instance's own delta, so it can never go stale the way prose would.
+      const variation = summarizeInstanceVariation(instance, template);
       extra = {
         category: template.category,
+        // The shape this harness rides on — what lets the list group variations of one template together
+        // instead of showing each as an unrelated harness.
+        templateId: instance.template.id,
+        templateVersion: instance.template.version,
         kind: resolved.kind,
         private: referencesUserSecret(resolved),
         ...(sub !== undefined ? { subtitle: sub } : {}),
+        ...(variation.length > 0 ? { variation } : {}),
       };
     } catch {
       // Missing template / resolution failure — skip derived fields (expose meta only)
