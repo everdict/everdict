@@ -212,6 +212,8 @@ describe("InitiativeService — the completion gate", () => {
     const svc = service();
     const goal = await svc.create({ tenant: "acme", createdBy: "dana", name: "agents people trust" });
     const sub = await svc.create({ tenant: "acme", createdBy: "dana", name: "cheaper cases", parentId: goal.id });
+    // A goal is created `planned`; this one has started, and its sub-goal was abandoned.
+    await svc.setStatus("acme", goal.id, { status: "active" }, actor);
     await svc.setStatus("acme", sub.id, { status: "cancelled" }, actor);
     await projects.create(project("p1", sub.id, "in_progress"));
     await issues.create(issue("a", "p1", "todo"));
