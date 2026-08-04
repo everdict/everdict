@@ -56,8 +56,8 @@ const RESOURCE_PATH: Record<string, (id: string) => string> = {
 }
 
 function hrefOf(workspace: string, n: NotificationItem): string {
-  if (n.link?.runId) return `/${workspace}/runs/${n.link.runId}`
-  if (n.link?.scorecardId) return `/${workspace}/scorecards/${n.link.scorecardId}`
+  if (n.link?.runId) return `/${workspace}/run/${n.link.runId}`
+  if (n.link?.scorecardId) return `/${workspace}/scorecard/${n.link.scorecardId}`
   // Resource comment mention — resourceType→path mapping, with a commentId anchor to scroll to that comment.
   if (n.link?.resourceType && n.link?.resourceId) {
     const seg = RESOURCE_PATH[n.link.resourceType]?.(encodeURIComponent(n.link.resourceId))

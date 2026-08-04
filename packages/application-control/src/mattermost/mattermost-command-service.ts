@@ -84,7 +84,7 @@ export class MattermostCommandService {
         submittedBy: `mattermost:${input.userName ?? "user"}`,
       });
       const link = this.deps.webBaseUrl
-        ? ` — ${trimSlash(this.deps.webBaseUrl)}/${encodeURIComponent(workspace)}/scorecards/${sc.id}`
+        ? ` — ${trimSlash(this.deps.webBaseUrl)}/${encodeURIComponent(workspace)}/scorecard/${sc.id}`
         : "";
       return {
         response_type: "in_channel",
