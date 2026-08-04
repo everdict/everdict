@@ -8,11 +8,19 @@ import {
 } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assertTeamVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 // MCP twin of the issue routes (BFF↔MCP parity). This is the surface an agent uses to triage its own
 // regressions: find the issue that watches a harness, read how it was closed last time, and move it.
 // ctx.agent rides into the service so an agent's transitions stamp causedBy — the trigger loop guard.
+// The team narrowing every issue READ shares — `TeamService.visibleTeamIds` is the one place privacy is decided,
+// and `undefined` from it means nothing is hidden (so the filter key stays absent rather than becoming "none").
+async function teamNarrow(ctx: McpToolContext): Promise<{ teamIds?: string[] }> {
+  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
+  return seen === undefined ? {} : { teamIds: seen };
+}
+
 export function registerIssueTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
   if (!deps.issueService) return;
@@ -118,6 +126,9 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         ok(
           await issues.listSummaries(ws, {
             ...issueFilterOfArgs(a),
+            // A private team's issues are not the workspace's — the same narrowing the HTTP list applies. An
+            // agent reading through this tool must not see what the person it acts for cannot.
+            ...(await teamNarrow(ctx)),
             ...(a.order !== undefined ? { order: a.order } : {}),
             ...(a.limit !== undefined ? { limit: a.limit } : {}),
             ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),
@@ -150,7 +161,10 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
     },
     (a) =>
       run(principal, "issues:read", async () => {
-        const groups = await issues.countByGroup(ws, a.groupBy, issueFilterOfArgs(a));
+        const groups = await issues.countByGroup(ws, a.groupBy, {
+          ...issueFilterOfArgs(a),
+          ...(await teamNarrow(ctx)),
+        });
         return ok({ groupBy: a.groupBy, groups, total: groups.reduce((sum, group) => sum + group.count, 0) });
       }),
   );
@@ -164,7 +178,13 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         "team already closed.",
       inputSchema: { id: z.string().describe("issue id, or the identifier a member would name it by (ENG-12)") },
     },
-    (a) => run(principal, "issues:read", async () => ok(await issues.get(ws, a.id))),
+    (a) =>
+      run(principal, "issues:read", async () => {
+        const issue = await issues.get(ws, a.id);
+        // Same answer the HTTP read gives: an issue you may not see is ABSENT, not forbidden.
+        await assertTeamVisible(ctx.deps, principal, issue.teamId, `issue '${a.id}'`);
+        return ok(issue);
+      }),
   );
 
   server.registerTool(

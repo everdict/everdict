@@ -208,7 +208,9 @@ export class PgRunStore implements RunStore {
     // `origin.actor` falling back to `created_by`, and an ownerless one stays the workspace's. This restates
     // `runAudience` (@everdict/domain, the SSOT) because the filter must run BEFORE LIMIT — filtering the page
     // afterwards would let one member's chat history push everyone else's runs off the reader's screen. The
-    // store tests assert this clause and the in-memory `canReadRun` path agree.
+    // store tests assert this clause and the in-memory `canReadRun` path agree. visibleTeams ($9, NULL = nothing
+    // is hidden) is the second, orthogonal ceiling: a PRIVATE team's runs are that team's work, and an unowned
+    // run is the workspace's. Both narrow before LIMIT for the same reason.
     const res = await this.client.query<RunRow>(
       `SELECT * FROM everdict_runs
        WHERE ($1::text IS NULL OR tenant = $1)
@@ -223,6 +225,7 @@ export class PgRunStore implements RunStore {
            OR COALESCE(origin->>'actor', created_by) IS NULL
            OR COALESCE(origin->>'actor', created_by) = $7
          )
+         AND ($9::text[] IS NULL OR team_id IS NULL OR team_id = ANY($9::text[]))
        ORDER BY created_at DESC, id DESC
        LIMIT $5 OFFSET $6`,
       [
@@ -234,6 +237,7 @@ export class PgRunStore implements RunStore {
         opts?.offset ?? 0,
         opts?.viewer ?? null,
         [...PERSONAL_RUN_KINDS],
+        opts?.visibleTeams ?? null,
       ],
     );
     return res.rows.map(rowToRecord);

@@ -1,9 +1,17 @@
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { assertTeamVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, ok, resolveTeam, run } from "../mcp-context.js";
 
 // MCP twin of the cycle routes (BFF↔MCP parity). An agent uses these to answer "what is this team working on
 // right now" and to write the iteration summary when a cycle closes.
+// A cycle IS a team's ("Cycle 3" is that team's third), so it follows the team's own visibility.
+async function visibleCycles<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
+  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
+  return rows.filter((row) => ownedByVisibleTeam(row, seen));
+}
+
 export function registerCycleTools(server: McpServer, ctx: McpToolContext): void {
   const cycles = ctx.deps.cycleService;
   if (!cycles) return;
@@ -58,11 +66,14 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
     (a) =>
       run(principal, "issues:read", async () =>
         ok(
-          await cycles.list(ws, {
-            ...(a.team !== undefined ? { teamId: await resolveTeam(ctx, a.team) } : {}),
-            ...(a.open === true ? { open: true } : {}),
-            ...(a.limit !== undefined ? { limit: a.limit } : {}),
-          }),
+          await visibleCycles(
+            ctx,
+            await cycles.list(ws, {
+              ...(a.team !== undefined ? { teamId: await resolveTeam(ctx, a.team) } : {}),
+              ...(a.open === true ? { open: true } : {}),
+              ...(a.limit !== undefined ? { limit: a.limit } : {}),
+            }),
+          ),
         ),
       ),
   );
@@ -76,7 +87,13 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
         "unestimated issue is real work worth zero points. This is the read behind 'how is the sprint going'.",
       inputSchema: { id: z.string() },
     },
-    (a) => run(principal, "issues:read", async () => ok(await cycles.detail(ws, a.id))),
+    (a) =>
+      run(principal, "issues:read", async () => {
+        const cycle = await cycles.detail(ws, a.id);
+        // A cycle is its team's, so a private team's iteration is ABSENT rather than forbidden.
+        await assertTeamVisible(ctx.deps, principal, cycle.teamId, `cycle '${a.id}'`);
+        return ok(cycle);
+      }),
   );
 
   server.registerTool(

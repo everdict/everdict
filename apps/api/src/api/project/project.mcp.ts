@@ -1,12 +1,21 @@
 import { ProjectStatusSchema, TrackerHealthSchema } from "@everdict/contracts";
+import { ownedByAnyVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { type McpToolContext, ok, resolveTeam, run } from "../mcp-context.js";
+import { visibleTeamsFor } from "../../common/team-scope.js";
+import { type McpToolContext, fail, ok, resolveTeam, run } from "../mcp-context.js";
 
 const CalendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.");
 
 // MCP twin of the project routes (BFF↔MCP parity). This is how an agent answers "is this batch of work
 // finishable by its date" without reading every issue: the detail read returns the rollup already counted.
+// A project is the workspace's to read; the one narrowing is a team choosing to be PRIVATE, and a project is
+// visible when ANY of the teams working on it is.
+async function visibleProjects<T extends { teamIds?: string[] }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
+  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
+  return rows.filter((row) => ownedByAnyVisibleTeam(row, seen));
+}
+
 export function registerProjectTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
   if (!deps.projectService) return;
@@ -74,12 +83,15 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
     (a) =>
       run(principal, "issues:read", async () =>
         ok(
-          await projects.list(ws, {
-            ...(a.status !== undefined ? { status: a.status } : {}),
-            ...(a.initiative !== undefined ? { initiativeId: a.initiative } : {}),
-            ...(a.team !== undefined ? { teamId: await resolveTeam(ctx, a.team) } : {}),
-            ...(a.limit !== undefined ? { limit: a.limit } : {}),
-          }),
+          await visibleProjects(
+            ctx,
+            await projects.list(ws, {
+              ...(a.status !== undefined ? { status: a.status } : {}),
+              ...(a.initiative !== undefined ? { initiativeId: a.initiative } : {}),
+              ...(a.team !== undefined ? { teamId: await resolveTeam(ctx, a.team) } : {}),
+              ...(a.limit !== undefined ? { limit: a.limit } : {}),
+            }),
+          ),
         ),
       ),
   );
@@ -93,7 +105,14 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
         "`ready` is true when nothing is open, which is exactly what completing the project requires.",
       inputSchema: { id: z.string() },
     },
-    (a) => run(principal, "issues:read", async () => ok(await projects.detail(ws, a.id))),
+    (a) =>
+      run(principal, "issues:read", async () => {
+        const project = await projects.detail(ws, a.id);
+        // A private team's project is ABSENT, not forbidden — the same answer the HTTP read gives.
+        if (!ownedByAnyVisibleTeam(project, await visibleTeamsFor(ctx.deps, principal)))
+          return fail(`NOT_FOUND: project '${a.id}' not found.`);
+        return ok(project);
+      }),
   );
 
   server.registerTool(

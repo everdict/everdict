@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
+import { teamCeiling } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew } from "../route-context.js";
 import { SubmitBodySchema } from "./request/submit.js";
 import { runDocs } from "./run.docs.js";
@@ -92,7 +93,14 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
           : scope === "all"
             ? { includeChildren: true }
             : undefined;
-      return reply.send(await deps.service.list(principal.workspace, { ...opts, viewer: principal.subject }));
+      return reply.send(
+        await deps.service.list(principal.workspace, {
+          ...opts,
+          viewer: principal.subject,
+          // Second ceiling, orthogonal to the audience one above: a private team's runs are that team's work.
+          ...(await teamCeiling(deps, principal)),
+        }),
+      );
     } catch (err) {
       return sendError(reply, err);
     }

@@ -1,5 +1,7 @@
+import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { assertTeamVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, resolveTeamRef, sendError } from "../route-context.js";
 import { cycleDocs } from "./cycle.docs.js";
 import { CompleteCycleBodySchema, CreateCycleBodySchema, UpdateCycleBodySchema } from "./request/create-cycle.js";
@@ -60,13 +62,14 @@ export function registerCycleRoutes(app: FastifyInstance, deps: ServerDeps): voi
     try {
       // Named by id or by key (`?team=ENG`) — the same ref the team-scoped URL carries.
       const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
-      return reply.send(
-        await deps.cycleService.list(principal.workspace, {
-          ...(teamId !== undefined ? { teamId } : {}),
-          ...(open === "true" ? { open: true } : {}),
-          ...(limit !== undefined ? { limit } : {}),
-        }),
-      );
+      const seen = await visibleTeamsFor(deps, principal);
+      const cycles = await deps.cycleService.list(principal.workspace, {
+        ...(teamId !== undefined ? { teamId } : {}),
+        ...(open === "true" ? { open: true } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      });
+      // A cycle IS a team's — "Cycle 3" is that team's third — so it follows the team's own visibility.
+      return reply.send(cycles.filter((cycle) => ownedByVisibleTeam(cycle, seen)));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -80,7 +83,9 @@ export function registerCycleRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!principal) return reply;
     try {
       gate(principal, "issues:read");
-      return reply.send(await deps.cycleService.detail(principal.workspace, req.params.id));
+      const cycle = await deps.cycleService.detail(principal.workspace, req.params.id);
+      await assertTeamVisible(deps, principal, cycle.teamId, `cycle '${req.params.id}'`);
+      return reply.send(cycle);
     } catch (err) {
       return sendError(reply, err); // another workspace's id → 404 (tenant-scoped store, no existence leak)
     }

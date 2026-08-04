@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { assertTeamVisible } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, resolveTeamRef, sendError, zodIssues } from "../route-context.js";
 import { AddTeamMemberBodySchema, CreateTeamBodySchema, UpdateTeamBodySchema } from "./request/create-team.js";
 import { CreateWorkflowStateBodySchema, UpdateWorkflowStateBodySchema } from "./request/workflow-state.js";
@@ -173,6 +174,8 @@ export function registerTeamRoutes(app: FastifyInstance, deps: ServerDeps): void
       gate(principal, "teams:read");
       // The board hangs off the team's own address, so it takes the same ref the team does (id or key).
       const teamId = await resolveTeamRef(deps, principal.workspace, req.params.id);
+      // The board is the team's own — a private team's columns are not the workspace's to read.
+      await assertTeamVisible(deps, principal, teamId, `team '${req.params.id}'`);
       return reply.send(await deps.workflowStateService.list(principal.workspace, teamId));
     } catch (err) {
       return sendError(reply, err);

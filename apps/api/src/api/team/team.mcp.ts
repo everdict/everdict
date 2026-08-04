@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 // MCP twin of the team routes (BFF↔MCP parity). An agent triaging the tracker needs to know which team owns
@@ -23,12 +24,15 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
       run(principal, "teams:read", async () => {
         await teams.ensureDefault(ws, principal.subject);
         const rows = await teams.list(ws, { ...(a.mine === true ? { member: principal.subject } : {}) });
+        // A private team is not on the workspace's list for people outside it — same as the HTTP read.
+        const seen = await visibleTeamsFor(ctx.deps, principal);
+        const visible = seen === undefined ? rows : rows.filter((team) => seen.includes(team.id));
         // Batched exactly like the HTTP twin — the counts come from two workspace aggregates, not a read per row.
         const summaries = await teams.summaries(
           ws,
-          rows.map((team) => team.id),
+          visible.map((team) => team.id),
         );
-        return ok(rows.map((team) => ({ ...team, summary: summaries.get(team.id) })));
+        return ok(visible.map((team) => ({ ...team, summary: summaries.get(team.id) })));
       }),
   );
 

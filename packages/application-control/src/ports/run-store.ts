@@ -22,6 +22,11 @@ export interface RunListOptions {
   // runs off the reader's screen. Unset = an internal read (recovery, reapers, the usage meter) that is not
   // serving a person — never pass it through from a transport.
   viewer?: string;
+  // The teams whose runs this caller may see — `TeamService.visibleTeamIds`, the one place team privacy is
+  // decided. A run of a PRIVATE team is that team's work; an unowned one (no `teamId`) is the workspace's and is
+  // always kept. `undefined` = nothing is hidden, never "no teams". Orthogonal to `viewer` above: that hides one
+  // MEMBER's personal executions, this hides one TEAM's work, and both narrow the same page.
+  visibleTeams?: string[];
 }
 
 // A platform event stamped with identity but not yet sequenced — what the same-tx outbox persists alongside

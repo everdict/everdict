@@ -260,20 +260,21 @@ describe("PgRunStore", () => {
     const store = new PgRunStore(client);
     // params: [tenant, scorecardId, includeChildren, runnerId, limit, offset, viewer, personalKinds]
     const PERSONAL = ["agent", "sandbox"]; // the audience filter's kind list ($8) — unset viewer ($7) disables it
+    const SEEN = null; // the team ceiling ($9) — NULL = nothing is hidden
     await store.list("acme");
-    expect(calls[0]?.params).toEqual(["acme", null, false, null, null, 0, null, PERSONAL]);
+    expect(calls[0]?.params).toEqual(["acme", null, false, null, null, 0, null, PERSONAL, SEEN]);
     await store.list("acme", { includeChildren: true });
-    expect(calls[1]?.params).toEqual(["acme", null, true, null, null, 0, null, PERSONAL]);
+    expect(calls[1]?.params).toEqual(["acme", null, true, null, null, 0, null, PERSONAL, SEEN]);
     await store.list("acme", { scorecardId: "sc1" });
-    expect(calls[2]?.params).toEqual(["acme", "sc1", false, null, null, 0, null, PERSONAL]);
+    expect(calls[2]?.params).toEqual(["acme", "sc1", false, null, null, 0, null, PERSONAL, SEEN]);
     // runner activity feed — jsonb provenance filter + capped
     await store.list("acme", { runnerId: "r1", limit: 20 });
-    expect(calls[3]?.params).toEqual(["acme", null, false, "r1", 20, 0, null, PERSONAL]);
+    expect(calls[3]?.params).toEqual(["acme", null, false, "r1", 20, 0, null, PERSONAL, SEEN]);
     expect(calls[3]?.text).toMatch(/result->'provenance'->>'runner' = \$4/);
     expect(calls[3]?.text).toMatch(/LIMIT \$5 OFFSET \$6/);
     // offset pagination — the runner feed's next page skips the first N ($6)
     await store.list("acme", { runnerId: "r1", limit: 20, offset: 40 });
-    expect(calls[4]?.params).toEqual(["acme", null, false, "r1", 20, 40, null, PERSONAL]);
+    expect(calls[4]?.params).toEqual(["acme", null, false, "r1", 20, 40, null, PERSONAL, SEEN]);
   });
 
   it("deleteByScorecard → parameterized DELETE on parent_scorecard_id; RETURNING rows = removed count", async () => {
@@ -450,6 +451,23 @@ describe("RunStore — the audience filter (personal executions are their owner'
     ]);
     // No viewer = an internal read (recovery, reapers) — unfiltered, as before.
     expect(await store.list("acme")).toHaveLength(5);
+  });
+
+  it("hides a PRIVATE team's runs — a second ceiling beside the audience one, both above the LIMIT", async () => {
+    const store = new InMemoryRunStore();
+    await store.create(mk("ours", { teamId: "team-web" }));
+    await store.create(mk("theirs", { teamId: "team-secret" }));
+    await store.create(mk("unowned", {})); // no team = the workspace's
+    expect((await store.list("acme", { visibleTeams: ["team-web"] })).map((r) => r.id).sort()) //
+      .toEqual(["ours", "unowned"]);
+    // undefined = nothing is hidden, never "no teams".
+    expect(await store.list("acme")).toHaveLength(3);
+
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgRunStore(client).list("acme", { visibleTeams: ["team-web"] });
+    expect(calls[0]?.text).toMatch(/team_id IS NULL OR team_id = ANY\(\$9::text\[\]\)/);
+    expect(calls[0]?.params?.[8]).toEqual(["team-web"]);
+    expect(calls[0]?.text.indexOf("team_id = ANY")).toBeLessThan(calls[0]?.text.indexOf("LIMIT $5") ?? 0);
   });
 
   it("Pg impl asks the same question IN the query, so a limited page stays full for the reader", async () => {
