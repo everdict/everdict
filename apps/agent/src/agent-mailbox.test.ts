@@ -31,6 +31,22 @@ describe("AgentMailbox", () => {
     expect(renderEnvelope({ from: "agent", content: "hi" }).content).toContain("[Message from teammate another agent]");
   });
 
+  it("clear takes the undrained envelopes so a stopped turn cannot leak them into a later one", () => {
+    // Given: a redirect queued into a turn the member then stops before the loop reaches its next boundary.
+    const m = new AgentMailbox();
+    m.enqueueUser("acme", "s1", "actually, check the other dataset");
+    m.enqueue("acme", "s1", { from: "event", sender: "scorecard sc_1", content: "completed" });
+
+    // When: the stop clears the mailbox.
+    const dropped = m.clear("acme", "s1");
+
+    // Then: the caller gets the envelopes back (so the member's own words can return to the composer) and the
+    // NEXT turn drains nothing — an undrained message would otherwise prepend itself to an unrelated answer.
+    expect(dropped.map((e) => e.content)).toEqual(["actually, check the other dataset", "completed"]);
+    expect(dropped[0]?.from).toBe("user");
+    expect(m.drain("acme", "s1")).toEqual([]);
+  });
+
   it("isolates mailboxes by workspace and session", () => {
     const m = new AgentMailbox();
     m.enqueueUser("acme", "s1", "acme-s1");

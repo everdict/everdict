@@ -1,6 +1,7 @@
 import type { PermissionHook } from "@everdict/agent-runtime";
+import type { TurnOutcome } from "./agent-activation.js";
 import type { AgentMailbox } from "./agent-mailbox.js";
-import { type ChatDeps, type ChatResult, contentToString, runChat } from "./chat.js";
+import { type ChatDeps, contentToString, runChat } from "./chat.js";
 import type { Authenticate } from "./principal.js";
 
 // A3 (docs/architecture/agent-execution-auth.md + agent-teams.md S3): run ONE request-less turn for a teammate. Unlike
@@ -17,9 +18,10 @@ export async function runTeammateTurn(
   agentToken: string,
   signal?: AbortSignal,
   permit?: PermissionHook,
-  // Returns what the turn spent on the model, so the caller can put it in the run's sealed evidence (O2).
-  // undefined = nothing ran (drained empty) or the turn died before its first model call.
-): Promise<ChatResult["usage"]> {
+  // Returns what the turn spent on the model AND the spans it recorded live, so the caller can put both in the
+  // run's sealed evidence (O2 + N6). undefined = nothing ran (drained empty) or the turn died before its first
+  // model call.
+): Promise<TurnOutcome | undefined> {
   const headers = { authorization: `Bearer ${agentToken}` };
   try {
     // The agt_ token resolves to the agent principal (workspace + the creator it acts as). The SAME token is forwarded
@@ -48,7 +50,10 @@ export async function runTeammateTurn(
         ...(permit ? { permit } : {}),
       },
     );
-    return result.usage;
+    return {
+      ...(result.usage ? { usage: result.usage } : {}),
+      ...(result.spans && result.spans.length > 0 ? { spans: result.spans } : {}),
+    };
   } catch (err) {
     console.error(`[agent] teammate turn failed for ${sessionId}:`, err instanceof Error ? err.message : err);
     return undefined;

@@ -3,6 +3,7 @@ import { UnauthenticatedError } from "@everdict/contracts";
 import { InMemoryAgentSessionStore, InMemoryAnalysisArtifactStore, InMemoryTenantKeyStore } from "@everdict/db";
 import type { LlmTransport } from "@everdict/llm";
 import { describe, expect, it, vi } from "vitest";
+import { INTERRUPTED_BY_USER } from "./chat.js";
 import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelResolver } from "./model.js";
 import { type AgentServerDeps, buildServer } from "./server.js";
@@ -1209,6 +1210,102 @@ describe("agent server", () => {
         (await app.inject({ method: "POST", url: `/agent/sessions/${session.id}/stop`, headers: auth, payload: {} }))
           .statusCode,
       ).toBe(404);
+      await app.close();
+    });
+
+    it("POST /stop hands back the queued message it cancelled instead of leaving it for a later turn", async () => {
+      // Given: a live turn with a steering message queued behind it — the shape of a redirect the member sends
+      // while an answer is streaming.
+      const gated = gatedTransport("mid-answer");
+      const app = buildServer(makeDeps({ resolveModel: async () => ({ transport: gated.transport, model: "m" }) }));
+      const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const first = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "go" },
+      });
+      await gated.started;
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: `/agent/sessions/${session.id}/input`,
+            headers: auth,
+            payload: { message: "actually, check the other dataset" },
+          })
+        ).statusCode,
+      ).toBe(202);
+
+      // When: the member stops the turn before the loop ever reaches the boundary that would absorb it.
+      const stopped = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/stop`,
+        headers: auth,
+        payload: {},
+      });
+      await first;
+
+      // Then: the cancelled message comes back to the caller (it goes into the composer, not into thin air)…
+      expect(stopped.statusCode).toBe(200);
+      expect(stopped.json().dropped).toEqual(["actually, check the other dataset"]);
+
+      // …and it is GONE from the mailbox, so the next turn answers what was actually asked. Before this, an
+      // undrained redirect silently prepended itself to a later, unrelated turn.
+      gated.release();
+      const next = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/chat`,
+        headers: auth,
+        payload: { message: "unrelated question" },
+      });
+      expect(next.statusCode).toBe(200);
+      const contents = (next.json().messages as { content: string }[]).map((m) => m.content);
+      expect(contents).not.toContain("actually, check the other dataset");
+      await app.close();
+    });
+
+    it("a stopped turn keeps its partial answer and says it was interrupted", async () => {
+      // Given: a live turn that has streamed the opening of an answer. Unlike gatedTransport this one THROWS on
+      // abort — what a real provider stream does when the socket is cut, which is the path a stop actually takes.
+      let started!: () => void;
+      const startedPromise = new Promise<void>((r) => {
+        started = r;
+      });
+      const transport: LlmTransport = {
+        provider: "fake",
+        stream: (req) =>
+          new Promise((_resolve, reject) => {
+            req.onContentDelta?.("half an answer");
+            started();
+            req.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          }),
+      };
+      const app = buildServer(makeDeps({ resolveModel: async () => ({ transport, model: "m" }) }));
+      const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const first = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "go" },
+      });
+      await startedPromise;
+
+      // When: they stop it.
+      await app.inject({ method: "POST", url: `/agent/sessions/${session.id}/stop`, headers: auth, payload: {} });
+      await first;
+
+      // Then: the transcript is [what they asked, what they READ, why it stopped]. A cancelled turn used to
+      // leave neither of the last two — the history ended on an unanswered user turn, so the panel showed a
+      // hole and the next turn stacked a second user message straight onto the first.
+      const listed = (
+        await app.inject({ method: "GET", url: `/agent/sessions/${session.id}/messages`, headers: auth })
+      ).json().messages as { role: string; content: string }[];
+      expect(listed.map((m) => [m.role, m.content])).toEqual([
+        ["user", "go"],
+        ["assistant", "half an answer"],
+        ["assistant", INTERRUPTED_BY_USER],
+      ]);
       await app.close();
     });
   });

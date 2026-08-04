@@ -21,6 +21,7 @@ export {
   AGENT_PERMISSION_MODES,
   AGENT_SESSION_ORIGIN_TYPES,
   AGENT_RUN_STATUSES,
+  startsFreshConversation,
   type AgentSession,
   type AgentMessage,
   type AgentPermissionMode,

@@ -1225,6 +1225,90 @@ describe("runAgentLoop", () => {
     expect(calls).toBe(1); // no blind re-call after the cut
   });
 
+  it("a cancelled turn keeps the text it had already streamed as a real assistant turn", async () => {
+    // Given: a stream that emits an answer's opening words, then hangs — the shape of a turn the member stops.
+    const controller = new AbortController();
+    const produced: ChatMessage[] = [];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: (req) =>
+        new Promise((_resolve, reject) => {
+          req.onContentDelta?.("Here is what I found so f");
+          req.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        }),
+    };
+    const run = runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      onMessage: (m) => {
+        produced.push(m);
+      },
+      signal: controller.signal,
+    });
+    await new Promise((r) => setTimeout(r, 10)); // let the deltas land before the stop
+
+    // When: the member stops the whole turn.
+    controller.abort();
+    const result = await run;
+
+    // Then: what they had already READ is a persisted assistant turn — the transcript has no hole where the
+    // answer was, and the next turn does not append a user message straight after a user message.
+    expect(result.stopReason).toBe("aborted");
+    expect(produced).toEqual([{ role: "assistant", content: "Here is what I found so f" }]);
+    expect(result.produced).toEqual(produced);
+  });
+
+  it("a redirected turn keeps the partial answer, so the model sees what it had already said", async () => {
+    // Given: a first stream that says something, then hangs until interrupted.
+    let interrupt: (() => void) | undefined;
+    const queue: ChatMessage[] = [];
+    const requests: StreamRequest[] = [];
+    let calls = 0;
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: (req) => {
+        calls += 1;
+        requests.push(req);
+        if (calls === 1)
+          return new Promise((_resolve, reject) => {
+            req.onContentDelta?.("I'll start by reading the harness spec");
+            req.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          });
+        return Promise.resolve({ content: "doing B instead", toolCalls: [], finishReason: "stop", usage: usage7 });
+      },
+    };
+    const run = runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      onInterruptReady: (i) => {
+        interrupt = i;
+      },
+      drainInput: () => queue.splice(0),
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // When: the member redirects mid-answer.
+    queue.push({ role: "user", content: "actually, do B instead" });
+    interrupt?.();
+    await run;
+
+    // Then: the redirected call replays the cut-off answer before the new instruction — the model is told what
+    // it was in the middle of, instead of the transcript jumping from one user turn to the next.
+    const second = requests[1]?.messages ?? [];
+    const partial = second.findIndex(
+      (m) => m.role === "assistant" && m.content === "I'll start by reading the harness spec",
+    );
+    const redirect = second.findIndex((m) => m.role === "user" && m.content === "actually, do B instead");
+    expect(partial).toBeGreaterThanOrEqual(0);
+    expect(redirect).toBeGreaterThan(partial);
+  });
+
   it("soft interrupt mid tool batch closes the pairing with synthetic results and continues redirected", async () => {
     let interrupt: (() => void) | undefined;
     const queue: ChatMessage[] = [];

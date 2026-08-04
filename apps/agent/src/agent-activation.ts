@@ -1,6 +1,6 @@
 import type { PermissionDecision, PermissionHook, PermissionRequest } from "@everdict/agent-runtime";
 import type { AgentRegistry, AgentSessionStore, TenantKeyStore } from "@everdict/application-control";
-import type { AgentSpec, AgentTrigger, SubscriptionRecord, TraceEvent } from "@everdict/contracts";
+import type { AgentSpec, AgentTrigger, SubscriptionRecord, TraceEvent, TraceSpan } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import { eventSelectorMatches } from "@everdict/domain";
 import { isGuardedAction } from "./action-policy.js";
@@ -12,6 +12,12 @@ import type { AgentRunEventReport } from "./usage.js";
 // crafted agent's declarative triggers → one headless run (a trigger-origin session) executes under an agt_
 // token minted as the agent's creator. Durable by construction — subscriptions live in the registry and the
 // activation dedup lives on the session record, so an agent-service restart loses nothing.
+
+// What one headless turn reports back to the activation.
+export interface TurnOutcome {
+  usage?: AgentTurnUsage;
+  spans?: TraceSpan[];
+}
 
 export interface ActivationEvent {
   workspace: string;
@@ -40,14 +46,16 @@ export interface AgentActivatorDeps {
   mailbox: AgentMailbox;
   // One request-less turn over the run's session (the teammate-turn machinery) — injected so tests own it.
   // permit is the run's mode-derived approval hook (undefined = bypass: no gate).
-  // Resolves with what the turn spent on the model (undefined = nothing ran / died before its first call) —
-  // the activation seals it into the run's trajectory, so a headless run reports its own cost like a chat turn.
+  // Resolves with what the turn spent on the model (undefined = nothing ran / died before its first call) and
+  // the SPANS it recorded live (N6) — the activation seals both into the run's trajectory, so a headless run
+  // reports its own cost AND its own shape exactly like a chat turn. A runner that records no spans (an older
+  // wiring, a turn with no run to hang under) falls back to the transcript projection.
   runTurn: (
     sessionId: string,
     agentToken: string,
     signal: AbortSignal,
     permit?: PermissionHook,
-  ) => Promise<AgentTurnUsage | undefined>;
+  ) => Promise<TurnOutcome | undefined>;
   // Park a mutation for member approval (agent-automation A6): the shared PermissionRegistry the fleet view
   // discovers via GET /pending and answers via POST /permission. Absent → headless mutations are DENIED under
   // default/auto (never silently allowed — fail closed when there is no one to ask).
@@ -327,7 +335,7 @@ export class AgentActivator {
             return base(request);
           }
         : undefined;
-      const spent = await this.deps.runTurn(sessionId, token, controller.signal, permit);
+      const outcome = await this.deps.runTurn(sessionId, token, controller.signal, permit);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
       await this.deps.sessions.setSessionStatus(workspace, sessionId, settled, this.deps.now());
       void this.report(
@@ -337,7 +345,7 @@ export class AgentActivator {
         sessionId,
         `Agent ${agentId} run ${settled} (resumed after approval).`,
         runRef,
-        await this.turnTrace(workspace, sessionId, baseSeq, spent),
+        ...(await this.turnEvidence(workspace, sessionId, baseSeq, outcome)),
       );
     } catch (err) {
       const settled = this.stopped.has(sessionId) ? "cancelled" : "failed";
@@ -349,7 +357,7 @@ export class AgentActivator {
         sessionId,
         `Agent ${agentId} run ${settled} (resumed after approval)${err instanceof Error ? `: ${err.message}` : ""}.`,
         runRef,
-        await this.turnTrace(workspace, sessionId, baseSeq),
+        ...(await this.turnEvidence(workspace, sessionId, baseSeq)),
       );
     } finally {
       this.controllers.delete(sessionId);
@@ -517,7 +525,7 @@ export class AgentActivator {
         });
       }
       const permit = this.buildPermit(event, agentId, sessionId, spec, controller.signal, runRef);
-      const spent = await this.deps.runTurn(sessionId, token, controller.signal, permit);
+      const outcome = await this.deps.runTurn(sessionId, token, controller.signal, permit);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
       await this.deps.sessions.setSessionStatus(event.workspace, sessionId, settled, this.deps.now());
       void this.report(
@@ -527,7 +535,7 @@ export class AgentActivator {
         sessionId,
         `Agent ${agentId} run ${settled} (${event.kind}).`,
         runRef,
-        await this.turnTrace(event.workspace, sessionId, undefined, spent), // fresh session — the whole transcript is this run's
+        ...(await this.turnEvidence(event.workspace, sessionId, undefined, outcome)), // fresh session — the whole transcript is this run's
       );
     } catch (err) {
       const settled = this.stopped.has(sessionId) ? "cancelled" : "failed";
@@ -539,7 +547,7 @@ export class AgentActivator {
         sessionId,
         `Agent ${agentId} run ${settled} (${event.kind})${err instanceof Error ? `: ${err.message}` : ""}.`,
         runRef,
-        await this.turnTrace(event.workspace, sessionId), // what it did before dying is the evidence that matters
+        ...(await this.turnEvidence(event.workspace, sessionId)), // what it did before dying is the evidence that matters
       );
       if (settled === "failed") throw err;
     } finally {
@@ -604,7 +612,7 @@ export class AgentActivator {
     sessionId: string,
     message: string,
     run?: { runId: string; creator?: string; agentVersion?: string; eventId?: string; budgetUsd?: number },
-    trace?: TraceEvent[],
+    evidence?: { trace?: TraceEvent[]; spans?: TraceSpan[] },
   ): Promise<void> {
     return (
       this.deps.reportRunEvent?.({
@@ -615,26 +623,29 @@ export class AgentActivator {
         eventKind: event.kind,
         message,
         ...(run !== undefined ? run : {}),
-        ...(trace !== undefined ? { trace } : {}),
+        ...(evidence?.trace !== undefined ? { trace: evidence.trace } : {}),
+        ...(evidence?.spans !== undefined ? { spans: evidence.spans } : {}),
       }) ?? Promise.resolve()
     ).catch(() => {});
   }
 
-  // O2: the turn's transcript slice (rows after sinceSeq), projected to TraceEvent — attached to the terminal
-  // report so the CP seals it as the run's trajectory. Best-effort: a session-store hiccup must never turn a
-  // settled run into a lost report (the report just goes without a trace).
-  private async turnTrace(
+  // What the terminal report carries as evidence. The turn's OWN spans when it recorded them (N6 — they hold
+  // the model latency, retries and subagents a transcript row cannot); otherwise O2's transcript slice (rows
+  // after sinceSeq) projected to TraceEvent, which the CP assembles. Best-effort either way: a session-store
+  // hiccup must never turn a settled run into a lost report (the report just goes without evidence).
+  private async turnEvidence(
     workspace: string,
     sessionId: string,
     sinceSeq?: number,
-    usage?: AgentTurnUsage,
-  ): Promise<TraceEvent[] | undefined> {
+    outcome?: TurnOutcome,
+  ): Promise<[{ trace?: TraceEvent[]; spans?: TraceSpan[] }] | []> {
+    if (outcome?.spans && outcome.spans.length > 0) return [{ spans: outcome.spans }];
     try {
       const messages = await this.deps.sessions.listMessages(workspace, sessionId, sinceSeq);
-      const trace = transcriptToTrace(messages, usage);
-      return trace.length > 0 ? trace : undefined;
+      const trace = transcriptToTrace(messages, outcome?.usage);
+      return trace.length > 0 ? [{ trace }] : [];
     } catch {
-      return undefined;
+      return [];
     }
   }
 

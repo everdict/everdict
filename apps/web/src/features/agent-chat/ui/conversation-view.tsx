@@ -149,6 +149,32 @@ const ArtifactRow = memo(function ArtifactRow({ artifact }: { artifact: Analysis
   )
 })
 
+// 보냈지만 아직 서버 레코드로 돌아오지 않은 내 메시지. `queued` = 실행 중인 턴에 끼워 넣은 것(리다이렉트)이라
+// 진행 중인 답변보다 뒤에 놓인다 — 자기보다 앞선 답변 위에 뜨면 대화 순서가 거짓이 된다.
+export interface PendingUserMessage {
+  text: string
+  queued: boolean
+}
+
+const PendingUserRow = memo(function PendingUserRow({
+  text,
+  user,
+}: {
+  text: string
+  user?: ChatUser
+}) {
+  return (
+    <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
+      <div className="flex gap-2.5">
+        <UserBadge user={user} />
+        <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground/70">
+          {text}
+        </p>
+      </div>
+    </div>
+  )
+})
+
 export function ConversationView({
   title,
   user,
@@ -168,7 +194,7 @@ export function ConversationView({
   onStopTeammate,
   messages,
   artifacts,
-  pendingUser,
+  pendingUsers,
   sending,
   streamingText,
   streamingReasoning,
@@ -207,7 +233,7 @@ export function ConversationView({
   onStopTeammate: (id: string) => void
   messages: AgentMessage[]
   artifacts?: AnalysisArtifact[]
-  pendingUser: string | null
+  pendingUsers: PendingUserMessage[]
   sending: boolean
   streamingText: string
   streamingReasoning: string
@@ -255,7 +281,7 @@ export function ConversationView({
   // Only follow new content when the reader is already at the bottom — never yank them back while they scroll up.
   useLayoutEffect(() => {
     if (atBottom) scrollToBottom('auto')
-  }, [messages, sending, pendingUser, streamingText, atBottom, scrollToBottom])
+  }, [messages, sending, pendingUsers, streamingText, atBottom, scrollToBottom])
 
   useEffect(() => {
     scrollToBottom('auto')
@@ -266,7 +292,7 @@ export function ConversationView({
   // new object identity would push a re-render straight through the memoized rows into their markdown parsers.
   const items = useMemo(() => buildTranscript(messages, artifacts), [messages, artifacts])
 
-  const isEmpty = messages.length === 0 && !pendingUser && !sending
+  const isEmpty = messages.length === 0 && pendingUsers.length === 0 && !sending
   // 임무로 진입했으면 그 임무의 카탈로그 블록(agentChat.missions.<kind>)이 빈 화면의 제목·설명·제안을 대신한다 —
   // 구조는 그대로, 라이팅만 그 작업의 것으로. 임무가 없으면 기존 범용 문구.
   const emptyTitle = mission ? t(`missions.${mission.kind}.title`) : t('emptyMessagesTitle')
@@ -354,16 +380,11 @@ export function ConversationView({
                   return <ArtifactRow key={item.id} artifact={item.artifact} />
                 return <MessageRow key={item.message.id} message={item.message} user={user} />
               })}
-              {pendingUser && (
-                <div className="animate-in fade-in-0 px-3 py-2.5 duration-200">
-                  <div className="flex gap-2.5">
-                    <UserBadge user={user} />
-                    <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground/70">
-                      {pendingUser}
-                    </p>
-                  </div>
-                </div>
-              )}
+              {pendingUsers
+                .filter((p) => !p.queued)
+                .map((p, i) => (
+                  <PendingUserRow key={`pending:${i}:${p.text}`} text={p.text} user={user} />
+                ))}
               {streamingReasoning.length > 0 && (
                 <ReasoningBlock text={streamingReasoning} streaming />
               )}
@@ -400,6 +421,12 @@ export function ConversationView({
                   </span>
                 </div>
               ) : null}
+              {/* 리다이렉트로 끼워 넣은 메시지는 지금 흐르는 답변 아래에 — 그 답변을 끊으려고 보낸 것이니까. */}
+              {pendingUsers
+                .filter((p) => p.queued)
+                .map((p, i) => (
+                  <PendingUserRow key={`queued:${i}:${p.text}`} text={p.text} user={user} />
+                ))}
             </>
           )}
         </div>

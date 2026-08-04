@@ -9,7 +9,7 @@ import type {
   TraceEvent,
 } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type ActivationEvent, AgentActivator, triggerMatches } from "./agent-activation.js";
+import { type ActivationEvent, AgentActivator, type TurnOutcome, triggerMatches } from "./agent-activation.js";
 import { AgentMailbox } from "./agent-mailbox.js";
 import type { AgentTurnUsage } from "./run-trace.js";
 
@@ -138,7 +138,7 @@ function activator(opts: {
     token: string,
     signal?: AbortSignal,
     permit?: PermissionHook,
-  ) => Promise<AgentTurnUsage | undefined>;
+  ) => Promise<TurnOutcome | undefined>;
   sessions?: ReturnType<typeof sessionsStub>;
   keyStore?: ReturnType<typeof keyStoreStub>;
   cooldownMs?: number;
@@ -289,8 +289,9 @@ describe("AgentActivator", () => {
           },
         ]);
         // What the turn spent — the loop's counters, handed back so the projection can close the stream
-        // with the model call the transcript itself never records.
-        return { model: "claude-sonnet-5", inputTokens: 120, outputTokens: 40 };
+        // with the model call the transcript itself never records. (This turn recorded no spans, so the
+        // report falls back to the transcript projection — the N6 path is covered separately below.)
+        return { usage: { model: "claude-sonnet-5", inputTokens: 120, outputTokens: 40 } };
       },
     });
 

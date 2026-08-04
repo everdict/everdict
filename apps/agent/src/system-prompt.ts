@@ -58,7 +58,7 @@ export function buildEnvironmentSection(env: {
   if (env.webBaseUrl !== undefined) {
     const web = env.webBaseUrl.replace(/\/$/, "");
     lines.push(
-      `- Web app: ${web} — deep-link entities for the member as ${web}/${env.workspace}/<resource>/<id> (resources: scorecards · runs · harnesses · datasets · judges · runtimes · views · schedules; settings live under ${web}/${env.workspace}/settings).`,
+      `- Web app: ${web} — deep-link ONE entity for the member as ${web}/${env.workspace}/<resource>/<id>, where <resource> is SINGULAR (scorecard · run · harness · dataset · judge · runtime · view · schedule · issue · project · initiative); the plural is that resource's list page (${web}/${env.workspace}/scorecards). An issue is addressed by its identifier: ${web}/${env.workspace}/issue/ENG-12. Settings live under ${web}/${env.workspace}/settings.`,
       `- Desktop app (pairs a personal self-hosted runner): download page ${web}/${env.workspace}/download${env.desktopDownloadUrl !== undefined ? ` · direct ${env.desktopDownloadUrl}` : ""} — give this link when the member needs the desktop app or asks to run evals on their own machine.`,
     );
   }

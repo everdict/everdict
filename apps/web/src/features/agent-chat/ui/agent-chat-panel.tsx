@@ -6,12 +6,12 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import {
-  AGENT_CHAT_MISSION_INTENTS,
   agentMessageListSchema,
   agentMessageSchema,
   agentSessionListSchema,
   agentSessionSchema,
   agentTeammateListSchema,
+  startsFreshConversation,
   type AgentAttachmentInput,
   type AgentChatMission,
   type AgentMessage,
@@ -27,7 +27,8 @@ import {
 } from '@/entities/analysis-artifact'
 import { modelsSchema } from '@/entities/model'
 
-import { ConversationView } from './conversation-view'
+import { pushPromptHistory } from '../lib/prompt-history'
+import { ConversationView, type PendingUserMessage } from './conversation-view'
 import type { ChatUser } from './message-row'
 import type { PendingPermission } from './permission-prompt'
 import type { TeammateSpawnInput } from './team-menu'
@@ -116,7 +117,10 @@ export function AgentChatPanel({
   const [messages, setMessages] = useState<AgentMessage[]>([])
   // Emitted analysis artifacts (charts/tables/reports) — hydrated per session, appended live via SSE `artifact`.
   const [artifacts, setArtifacts] = useState<AnalysisArtifact[]>([])
-  const [pendingUser, setPendingUser] = useState<string | null>(null)
+  // 보냈지만 아직 서버 레코드로 되돌아오지 않은 내 메시지들. `queued` 는 실행 중인 턴에 끼워 넣은(리다이렉트)
+  // 것이라 진행 중인 답변 "아래"에 놓여야 한다 — 첫 전송은 답변보다 앞이다. 하나가 아니라 목록인 이유는
+  // 연속 리다이렉트가 실제로 가능하기 때문(단일 슬롯이면 앞의 것이 화면에서 사라진다).
+  const [pendingUsers, setPendingUsers] = useState<PendingUserMessage[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [references, setReferences] = useState<AgentReference[]>([])
@@ -143,6 +147,12 @@ export function AgentChatPanel({
   // events and wake to react. Loaded on mount and refreshed after each turn (the agent can self-spawn via a tool).
   const [teammates, setTeammates] = useState<AgentTeammate[]>([])
   const abortRef = useRef<AbortController | null>(null)
+  // 스트림이 정착할 때 어느 대화의 트랜스크립트를 다시 맞출지 판정하는 기준 — 그 사이 대화를 옮겼다면
+  // 남의 트랜스크립트를 섞지 않는다.
+  const activeIdRef = useRef<string | null>(null)
+  activeIdRef.current = activeId
+  // 명시적으로 멈춘 직후의 재접속 한 번을 건너뛴다(stop 참고).
+  const suppressAttachRef = useRef(false)
   // Watch mode (a discussion session opened from a comment thread): a background turn streams SSE to nobody, so
   // while this session is active the panel polls its persisted transcript + parked approvals instead.
   const [watchId, setWatchId] = useState<string | null>(null)
@@ -295,8 +305,10 @@ export function AgentChatPanel({
   // 서버에서 계속 돌고, 되돌아오면 재접속 효과가 라이브 스트림에 다시 붙는다.
   const switchTo = useCallback((id: string | null) => {
     abortRef.current?.abort()
+    suppressAttachRef.current = false // 중단 억제는 그 대화에만 한정 — 새 대화는 정상 재접속한다
     setActiveId(id)
     setMessages([])
+    setPendingUsers([])
     setArtifacts([])
     setWatchId(null) // 워치 모드는 열어 준 그 세션에만 한정 — 다른 대화로 가면 폴링 중단
     setPendingPermissions([])
@@ -405,110 +417,121 @@ export function AgentChatPanel({
     [activeId, loadSessions, t]
   )
 
+  // 낙관적 버블 하나를 걷는다(같은 내용이 여러 개면 하나만) — 연속 리다이렉트가 같은 문장을 두 번 담을 수 있다.
+  const dropPending = useCallback((text: string) => {
+    setPendingUsers((prev) => {
+      const i = prev.findIndex((p) => p.text === text)
+      return i < 0 ? prev : prev.filter((_, j) => j !== i)
+    })
+  }, [])
+
   // Apply one SSE event: a text delta grows the live assistant bubble; a persisted record merges into the
   // transcript (and, for the finalized assistant text, retires the live bubble); a `permission` event parks a
   // write-tool approval the member must decide, and `permission_resolved` dismisses it (e.g. server timeout).
   // Shared verbatim by the send stream and the re-attach stream — one event vocabulary, one reducer.
-  const applyStreamEvent = useCallback((event: string, data: unknown) => {
-    if (event === 'delta') {
-      const delta =
-        data !== null && typeof data === 'object' && 'text' in data
-          ? (data as { text?: unknown }).text
-          : undefined
-      if (typeof delta === 'string' && delta.length > 0) setStreamingText((prev) => prev + delta)
-      setStreamNotice(null) // progress — the retry wait is over
-    } else if (event === 'reasoning') {
-      // Live extended-thinking tokens — grow the in-flight reasoning block until this turn's record lands.
-      const delta =
-        data !== null && typeof data === 'object' && 'text' in data
-          ? (data as { text?: unknown }).text
-          : undefined
-      if (typeof delta === 'string' && delta.length > 0)
-        setStreamingReasoning((prev) => prev + delta)
-      setStreamNotice(null)
-    } else if (event === 'message') {
-      const parsed = agentMessageSchema.safeParse(data)
-      if (!parsed.success) return
-      setMessages((prev) => mergeMessages(prev, [parsed.data]))
-      setStreamNotice(null)
-      if (parsed.data.role === 'user') setPendingUser(null)
-      // Each assistant record carries this turn's finalized reasoning + text, so retire the live buffers when it lands.
-      if (parsed.data.role === 'assistant') {
-        setStreamingReasoning('')
-        if (parsed.data.content.trim().length > 0) setStreamingText('')
-      }
-    } else if (event === 'retry') {
-      // 루프가 일시 장애를 대기 중 — 조용한 턴의 이유를 배너로. 최신 시도가 이전 배너를 대체한다.
-      if (data !== null && typeof data === 'object' && 'attempt' in data && 'delayMs' in data) {
-        const d = data as { attempt?: unknown; delayMs?: unknown; persistent?: unknown }
-        if (typeof d.attempt === 'number' && typeof d.delayMs === 'number')
-          setStreamNotice({
-            kind: 'retry',
-            attempt: d.attempt,
-            delayMs: d.delayMs,
-            ...(d.persistent === true ? { persistent: true } : {}),
+  const applyStreamEvent = useCallback(
+    (event: string, data: unknown) => {
+      if (event === 'delta') {
+        const delta =
+          data !== null && typeof data === 'object' && 'text' in data
+            ? (data as { text?: unknown }).text
+            : undefined
+        if (typeof delta === 'string' && delta.length > 0) setStreamingText((prev) => prev + delta)
+        setStreamNotice(null) // progress — the retry wait is over
+      } else if (event === 'reasoning') {
+        // Live extended-thinking tokens — grow the in-flight reasoning block until this turn's record lands.
+        const delta =
+          data !== null && typeof data === 'object' && 'text' in data
+            ? (data as { text?: unknown }).text
+            : undefined
+        if (typeof delta === 'string' && delta.length > 0)
+          setStreamingReasoning((prev) => prev + delta)
+        setStreamNotice(null)
+      } else if (event === 'message') {
+        const parsed = agentMessageSchema.safeParse(data)
+        if (!parsed.success) return
+        setMessages((prev) => mergeMessages(prev, [parsed.data]))
+        setStreamNotice(null)
+        // 낙관적 버블은 그 내용의 레코드가 도착했을 때만 걷는다 — 팀원 메시지·플랫폼 이벤트도 user 역할로
+        // 들어오므로, 아무 user 레코드에나 걷으면 내가 보낸 것이 화면에서 사라진다.
+        if (parsed.data.role === 'user') dropPending(parsed.data.content)
+        // Each assistant record carries this turn's finalized reasoning + text, so retire the live buffers when it lands.
+        if (parsed.data.role === 'assistant') {
+          setStreamingReasoning('')
+          if (parsed.data.content.trim().length > 0) setStreamingText('')
+        }
+      } else if (event === 'retry') {
+        // 루프가 일시 장애를 대기 중 — 조용한 턴의 이유를 배너로. 최신 시도가 이전 배너를 대체한다.
+        if (data !== null && typeof data === 'object' && 'attempt' in data && 'delayMs' in data) {
+          const d = data as { attempt?: unknown; delayMs?: unknown; persistent?: unknown }
+          if (typeof d.attempt === 'number' && typeof d.delayMs === 'number')
+            setStreamNotice({
+              kind: 'retry',
+              attempt: d.attempt,
+              delayMs: d.delayMs,
+              ...(d.persistent === true ? { persistent: true } : {}),
+            })
+        }
+      } else if (event === 'fallback') {
+        // 예비 모델로 전환 — 한 줄 안내(다음 진행 이벤트가 지운다).
+        const to =
+          data !== null && typeof data === 'object' && 'to' in data
+            ? (data as { to?: unknown }).to
+            : undefined
+        if (typeof to === 'string' && to.length > 0) setStreamNotice({ kind: 'fallback', to })
+      } else if (event === 'view_config') {
+        // The agent drove the analysis canvas (apply_view_config) — same-window broadcast; the analyze
+        // dashboard / open View listens and applies the stored-form config live.
+        if (data !== null && typeof data === 'object')
+          window.dispatchEvent(new CustomEvent('everdict:view-config', { detail: data }))
+      } else if (event === 'agent_draft') {
+        // 에이전트가 크래프팅 캔버스를 빚었다(craft_agent) — 같은 창 브로드캐스트; 스튜디오가 적용한다.
+        if (data !== null && typeof data === 'object')
+          window.dispatchEvent(new CustomEvent('everdict:agent-draft', { detail: data }))
+      } else if (event === 'artifact') {
+        // A chart/table/report the agent just emitted — render it live in place.
+        const parsed = analysisArtifactSchema.safeParse(data)
+        if (parsed.success)
+          setArtifacts((prev) =>
+            prev.some((a) => a.id === parsed.data.id) ? prev : [...prev, parsed.data]
+          )
+      } else if (event === 'permission') {
+        if (data !== null && typeof data === 'object' && 'requestId' in data && 'name' in data) {
+          const d = data as { requestId?: unknown; name?: unknown; input?: unknown }
+          const requestId = d.requestId
+          const name = d.name
+          // 재접속 스트림은 대기 중 승인을 replay 하므로 requestId 로 중복을 걸러 프롬프트가 두 번 뜨지 않게 한다.
+          if (typeof requestId === 'string' && typeof name === 'string')
+            setPendingPermissions((prev) =>
+              prev.some((p) => p.requestId === requestId)
+                ? prev
+                : [...prev, { requestId, name, input: d.input }]
+            )
+        }
+      } else if (event === 'error') {
+        // 턴이 실패했다. 보통은 실패 사유가 어시스턴트 레코드로도 남지만(그건 트랜스크립트의 몫), 루프에 닿기
+        // 전에 죽은 턴(모델 해석 실패·툴 세션 실패)은 레코드가 없다 — 그때 이 토스트가 유일한 신호다.
+        const detail =
+          data !== null && typeof data === 'object' && 'message' in data
+            ? (data as { message?: unknown }).message
+            : undefined
+        setStreamNotice(null)
+        toast.error(typeof detail === 'string' && detail.length > 0 ? detail : t('errorTurn'))
+      } else if (event === 'permission_resolved') {
+        // The server decided it (a timeout/disconnect default, not a click) — drop the first prompt for that tool.
+        const name =
+          data !== null && typeof data === 'object' && 'name' in data
+            ? (data as { name?: unknown }).name
+            : undefined
+        if (typeof name === 'string')
+          setPendingPermissions((prev) => {
+            const i = prev.findIndex((p) => p.name === name)
+            return i < 0 ? prev : prev.filter((_, j) => j !== i)
           })
       }
-    } else if (event === 'fallback') {
-      // 예비 모델로 전환 — 한 줄 안내(다음 진행 이벤트가 지운다).
-      const to =
-        data !== null && typeof data === 'object' && 'to' in data
-          ? (data as { to?: unknown }).to
-          : undefined
-      if (typeof to === 'string' && to.length > 0) setStreamNotice({ kind: 'fallback', to })
-    } else if (event === 'view_config') {
-      // The agent drove the analysis canvas (apply_view_config) — same-window broadcast; the analyze
-      // dashboard / open View listens and applies the stored-form config live.
-      if (data !== null && typeof data === 'object')
-        window.dispatchEvent(new CustomEvent('everdict:view-config', { detail: data }))
-    } else if (event === 'agent_draft') {
-      // 에이전트가 크래프팅 캔버스를 빚었다(craft_agent) — 같은 창 브로드캐스트; 스튜디오가 적용한다.
-      if (data !== null && typeof data === 'object')
-        window.dispatchEvent(new CustomEvent('everdict:agent-draft', { detail: data }))
-    } else if (event === 'artifact') {
-      // A chart/table/report the agent just emitted — render it live in place.
-      const parsed = analysisArtifactSchema.safeParse(data)
-      if (parsed.success)
-        setArtifacts((prev) =>
-          prev.some((a) => a.id === parsed.data.id) ? prev : [...prev, parsed.data]
-        )
-    } else if (event === 'permission') {
-      if (data !== null && typeof data === 'object' && 'requestId' in data && 'name' in data) {
-        const d = data as { requestId?: unknown; name?: unknown; input?: unknown }
-        const requestId = d.requestId
-        const name = d.name
-        // 재접속 스트림은 대기 중 승인을 replay 하므로 requestId 로 중복을 걸러 프롬프트가 두 번 뜨지 않게 한다.
-        if (typeof requestId === 'string' && typeof name === 'string')
-          setPendingPermissions((prev) =>
-            prev.some((p) => p.requestId === requestId)
-              ? prev
-              : [...prev, { requestId, name, input: d.input }]
-          )
-      }
-    } else if (event === 'error') {
-      // 턴이 실패했다. 보통은 실패 사유가 어시스턴트 레코드로도 남지만(그건 트랜스크립트의 몫), 루프에 닿기
-      // 전에 죽은 턴(모델 해석 실패·툴 세션 실패)은 레코드가 없다 — 그때 이 토스트가 유일한 신호다.
-      const detail =
-        data !== null && typeof data === 'object' && 'message' in data
-          ? (data as { message?: unknown }).message
-          : undefined
-      setStreamNotice(null)
-      toast.error(
-        typeof detail === 'string' && detail.length > 0 ? detail : t('errorTurn')
-      )
-    } else if (event === 'permission_resolved') {
-      // The server decided it (a timeout/disconnect default, not a click) — drop the first prompt for that tool.
-      const name =
-        data !== null && typeof data === 'object' && 'name' in data
-          ? (data as { name?: unknown }).name
-          : undefined
-      if (typeof name === 'string')
-        setPendingPermissions((prev) => {
-          const i = prev.findIndex((p) => p.name === name)
-          return i < 0 ? prev : prev.filter((_, j) => j !== i)
-        })
-    }
-  }, [t])
+    },
+    [t]
+  )
 
   // 스트림 소유권 토큰: 전송/재접속 리더가 시작될 때마다 증가. 끝난(또는 끊긴) 리더의 뒷정리는 자신이 아직
   // 최신 소유자일 때만 상태를 건드린다 — 낡은 finally 가 새 스트림의 sending 표시를 지우는 사고 방지.
@@ -516,30 +539,51 @@ export function AgentChatPanel({
   // 스트림이 하나 정리될 때마다 증가 — 재접속 효과의 재실행 트리거(턴 종료 후 204 확인, 네트워크 단절 복구).
   const [attachEpoch, setAttachEpoch] = useState(0)
 
+  // 서버가 이 대화에 대해 실제로 가진 트랜스크립트로 화면을 다시 맞춘다. 스트림은 취소·네트워크 단절로
+  // 언제든 끊길 수 있고, 그 순간 서버가 이미 영속했지만 우리에게 닿지 못한 레코드가 남는다 — 다시 맞추지
+  // 않으면 그 기록은 화면에서 영구히 사라졌다가 다음에 대화를 열 때 중간에서 되살아난다(리스트 훼손).
+  const reconcileMessages = useCallback(async (sessionId: string) => {
+    try {
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        cache: 'no-store',
+      })
+      if (!res.ok) return
+      const parsed = agentMessageListSchema.safeParse(await res.json())
+      if (parsed.success && activeIdRef.current === sessionId)
+        setMessages((prev) => mergeMessages(prev, parsed.data.messages))
+    } catch {
+      // silent — 다음 정착에서 다시 맞춘다
+    }
+  }, [])
+
   // 스트림(전송/재접속) 하나가 끝났을 때의 공통 정리. 턴이 만든 엔티티(View/스케줄/팀원)까지 새로고침한다.
   const settleStream = useCallback(
-    (seq: number) => {
+    (seq: number, sessionId: string | null) => {
       if (streamSeqRef.current !== seq) return
       abortRef.current = null
       setStreamingText('')
       setStreamingReasoning('')
       setStreamNotice(null)
-      setPendingUser(null)
+      setPendingUsers([])
       setSending(false)
       // The turn is over; any approval still parked was denied server-side (timeout/stop), so clear the strip.
       setPendingPermissions([])
+      if (sessionId !== null) void reconcileMessages(sessionId)
       void loadSessions()
       void loadTeammates()
       router.refresh()
       setAttachEpoch((e) => e + 1)
     },
-    [loadSessions, loadTeammates, router]
+    [loadSessions, loadTeammates, reconcileMessages, router]
   )
 
   const send = useCallback(
     async (textArg?: string, refsArg?: AgentReference[]) => {
       const text = (textArg ?? input).trim()
       if (text.length === 0) return
+      // 보낸 프롬프트는 컴포저의 ↑ 히스토리로 들어간다(Claude Code 의 전역 history). 전송이 실패해도 남겨
+      // 두는 편이 낫다 — 실패한 프롬프트야말로 다시 꺼내 쓰게 된다.
+      pushPromptHistory(text)
       // 진행 중인 턴으로의 전송 = REDIRECT (queue-then-interrupt — Claude Code 의 ESC 재해석): 메시지를 러닝
       // 턴의 메일박스에 큐잉하고 현재 스텝만 끊는다 — 루프는 살아서 다음 경계에서 메시지를 흡수하고 방향을
       // 튼다. 칩(레퍼런스/첨부)은 전체 챗 파이프라인이 필요하므로 리다이렉트에 실을 수 없다 — Stop 후 재전송.
@@ -551,7 +595,7 @@ export function AgentChatPanel({
         }
         const target = activeId
         setInput('')
-        setPendingUser(text)
+        setPendingUsers((prev) => [...prev, { text, queued: true }])
         try {
           // 원자적 리다이렉트: 서버가 라이브니스 확인 후 큐+절단을 한 번에 — 턴 종료와 레이스하면 아무것도
           // 큐하지 않고 404(고아 메일박스 메시지 방지) → 입력 복원 + 재전송 안내.
@@ -562,14 +606,14 @@ export function AgentChatPanel({
           })
           if (r.status === 404) {
             setInput(text)
-            setPendingUser(null)
+            dropPending(text)
             toast.error(t('redirectMissed'))
             return
           }
           if (!r.ok) throw new Error('interrupt failed')
         } catch {
           setInput(text)
-          setPendingUser(null)
+          dropPending(text)
           toast.error(t('errorSend'))
         }
         return
@@ -617,7 +661,7 @@ export function AgentChatPanel({
       const seq = ++streamSeqRef.current
 
       setSending(true)
-      setPendingUser(text)
+      setPendingUsers((prev) => [...prev, { text, queued: false }])
       setStreamingText('')
       setStreamingReasoning('')
 
@@ -692,7 +736,7 @@ export function AgentChatPanel({
           toast.error(t('errorSend'))
         }
       } finally {
-        settleStream(seq)
+        settleStream(seq, sessionId)
       }
     },
     [
@@ -704,6 +748,7 @@ export function AgentChatPanel({
       draftModel,
       draftPermissionMode,
       applyStreamEvent,
+      dropPending,
       settleStream,
       t,
     ]
@@ -719,20 +764,13 @@ export function AgentChatPanel({
   // the draft prompt, then clear the buffer so a later tab re-mount (the agent tab unmounts when another infra
   // tab is shown) does not re-inject the same prefill. A prompt overwrites only an empty composer — never a
   // member's in-progress draft.
-  // An EDIT-intent mission additionally lands on a fresh draft when a persisted conversation is open: the task
-  // framing only shows on an empty chat, and an editing mission has no business continuing someone else's thread.
-  // Analyze/ask missions keep the open thread — comparing two scorecards in one conversation must stay possible —
-  // and their framing simply applies whenever the chat is (or next becomes) empty. An entry that CREATES the
-  // thing it talks about ("새 분석" → the blank analysis canvas) asks for the same fresh start explicitly.
+  // 새 대화에서 시작할지는 진입이 정한다(startsFreshConversation): edit 임무는 언제나, analyze/ask 는 진입이
+  // `fresh` 를 선언했을 때만 — 스코어카드 둘을 한 대화에서 비교하는 흐름은 기본으로 지키고, 대화의 주제가 그
+  // 레코드 하나인 진입(이슈 상세, 빈 분석 캔버스)만 예외를 고른다. 임무 프레이밍은 빈 화면에서만 뜨므로 이
+  // 판정이 곧 "진입할 때마다 그 작업에 맞는 패널을 보게 되는가"다.
   useEffect(() => {
     if (!pendingMention) return
-    if (
-      (pendingMention.fresh ||
-        (pendingMention.mission &&
-          AGENT_CHAT_MISSION_INTENTS[pendingMention.mission] === 'edit')) &&
-      activeId !== null
-    )
-      newConversation()
+    if (startsFreshConversation(pendingMention) && activeId !== null) newConversation()
     if (pendingMention.ref) addReference(pendingMention.ref)
     if (pendingMention.prompt)
       setInput((prev) => (prev.trim().length > 0 ? prev : (pendingMention.prompt ?? '')))
@@ -835,6 +873,13 @@ export function AgentChatPanel({
   useEffect(() => {
     void attachEpoch // 재실행 트리거로만 쓰인다(값 자체는 의미 없음)
     if (!activeId || abortRef.current) return
+    // 방금 명시적으로 멈춘 턴에는 붙지 않는다: 서버는 루프가 풀린 뒤에야 턴 슬롯을 닫으므로 그 사이의
+    // GET /stream 은 아직 200 + 방금 취소한 부분 답변을 replay 한다 — 취소한 내용이 되살아났다 사라지는
+    // 깜빡임의 정체다. 한 번만 건너뛴다(대화를 옮기면 switchTo 가 초기화한다).
+    if (suppressAttachRef.current) {
+      suppressAttachRef.current = false
+      return
+    }
     const id = activeId
     const controller = new AbortController()
     void (async () => {
@@ -866,7 +911,7 @@ export function AgentChatPanel({
       } catch {
         // aborted(세션 전환·전송 시작·언마운트) 또는 네트워크 — 다음 재실행에서 다시 시도한다
       } finally {
-        if (seq !== null) settleStream(seq)
+        if (seq !== null) settleStream(seq, id)
       }
     })()
     return () => controller.abort()
@@ -881,7 +926,20 @@ export function AgentChatPanel({
       abortRef.current?.abort()
       return
     }
+    suppressAttachRef.current = true
     void fetch(`/api/agent/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' })
+      .then(async (res) => {
+        if (!res.ok) return
+        // 리다이렉트로 큐에 넣었지만 루프가 끝내 흡수하지 못한 메시지를 서버가 돌려준다 — 입력창에 되돌려
+        // 놓는다(Claude Code 의 "Esc 가 큐를 입력으로 되돌린다"). 그러지 않으면 그 문장은 트랜스크립트에도
+        // 입력창에도 없이 사라진다. 이미 뭔가 타이핑 중이면 덮지 않는다.
+        const data = (await res.json()) as { dropped?: unknown }
+        const dropped = Array.isArray(data.dropped)
+          ? data.dropped.filter((d): d is string => typeof d === 'string' && d.length > 0)
+          : []
+        if (dropped.length > 0)
+          setInput((prev) => (prev.trim().length > 0 ? prev : dropped.join('\n\n')))
+      })
       .catch(() => {
         // silent — the local abort below still frees the UI
       })
@@ -927,7 +985,7 @@ export function AgentChatPanel({
       onStopTeammate={(id) => void stopTeammate(id)}
       messages={messages}
       artifacts={artifacts}
-      pendingUser={pendingUser}
+      pendingUsers={pendingUsers}
       sending={sending}
       streamingText={streamingText}
       streamingReasoning={streamingReasoning}

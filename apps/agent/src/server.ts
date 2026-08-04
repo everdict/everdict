@@ -13,7 +13,7 @@ import { issueAgentToken } from "@everdict/db";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { isGuardedAction } from "./action-policy.js";
-import { AgentActivator } from "./agent-activation.js";
+import { AgentActivator, type TurnOutcome } from "./agent-activation.js";
 import { type AgentDraft, AgentDraftSchema } from "./agent-draft-tool.js";
 import { AgentMailbox } from "./agent-mailbox.js";
 import type { AgentTryEvent } from "./agent-try.js";
@@ -51,11 +51,7 @@ export interface AgentServerDeps extends ChatDeps {
   // §5.1 activation admission — the CP tenant-budget ask every launch path passes (absent = unadmitted dev).
   admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
   // Test seam: the activation run executor. Default = the teammate-turn machinery (one request-less loop turn).
-  activationRunTurn?: (
-    sessionId: string,
-    agentToken: string,
-    signal: AbortSignal,
-  ) => Promise<AgentTurnUsage | undefined>;
+  activationRunTurn?: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<TurnOutcome | undefined>;
   // agent.run.* lifecycle facts + the P3 ledger correlation → the control plane (fleet observability,
   // agent-automation A5). The report shape has ONE definition (usage.ts) — a hand-copied twin here silently
   // dropped `trace` from the declared surface once already.
@@ -791,7 +787,15 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
     if (!liveTurns.stop(principal.workspace, id))
       return reply.code(404).send({ code: "NOT_FOUND", message: "No live turn for that conversation." });
-    return reply.send({ ok: true });
+    // A redirect (POST /interrupt with a message) queues into the mailbox and the loop absorbs it at its next
+    // boundary — a stop that lands first means that boundary never comes. Drop what is still queued and hand the
+    // member's own messages back: undrained, they would silently prepend themselves to some LATER turn, and
+    // dropped silently they would exist nowhere at all. The caller puts them back in the composer.
+    const dropped = mailbox
+      .clear(principal.workspace, id)
+      .filter((envelope) => envelope.from === "user")
+      .map((envelope) => envelope.content);
+    return reply.send({ ok: true, dropped });
   });
 
   // Soft-interrupt the session's live turn (Claude Code's ESC): abort only the IN-FLIGHT step — the loop

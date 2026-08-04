@@ -18,6 +18,8 @@ import {
   type AgentWakeIntent,
   type AnalysisArtifactRecord,
   NotFoundError,
+  type TraceSpan,
+  traceIdForRun,
 } from "@everdict/contracts";
 import type { ReasoningCarrier } from "@everdict/llm";
 import { type AgentDraft, buildAgentDraftTools } from "./agent-draft-tool.js";
@@ -31,6 +33,7 @@ import type { ForwardHeaders, Principal } from "./principal.js";
 import type { ProfileResolver } from "./profile.js";
 import type { AgentTurnUsage } from "./run-trace.js";
 import { buildEnvironmentSection } from "./system-prompt.js";
+import { TurnSpanRecorder } from "./turn-spans.js";
 import { buildViewConfigTool } from "./view-config-tool.js";
 
 // An @-reference resolves to the workspace read tool that fetches that entity's full record. `trace` is the exception:
@@ -373,6 +376,11 @@ export interface ChatDeps {
 
 export interface ChatResult {
   messages: AgentMessageRecord[]; // the newly produced tail (user echo + assistant/tool turns), seq-ordered
+  // The turn's OWN spans, recorded live off the kernel's event stream (turn-spans.ts). This is the record the
+  // control plane seals — the transcript projection stays as the fallback for a turn with no run to hang
+  // under. It carries what the transcript never could: a model call's latency, the retries and fallbacks and
+  // compactions around it, and a subagent as real nested work.
+  spans?: TraceSpan[];
   // What the turn spent on the model, summed across the loop's calls. It already goes to the meter (billing);
   // this hands the SAME numbers to the ledger, so the turn's own run detail can state its cost instead of
   // leaving it to the invoice. Absent when the turn consumed nothing (an aborted turn before the first call).
@@ -425,6 +433,11 @@ export interface ChatHooks {
 }
 
 export const DEFAULT_SESSION_TITLE = "New conversation";
+
+// The transcript's record of a turn the member stopped. Claude Code's exact wording, deliberately: it is the
+// established marker for this, and the next turn replays it verbatim so the model reads why its answer stops
+// mid-thought. Exported so a reader (and a test) can recognise it rather than matching the string by hand.
+export const INTERRUPTED_BY_USER = "[Request interrupted by user]";
 
 // Built-in specialized sub-agent types the model can pick via spawn_agent(subagent_type). Instruction-only (their tools
 // stay read-only; they inherit the workspace's sub-agent model tier if one is configured). A role prompt is the main
@@ -734,6 +747,9 @@ export async function runChat(
   // Declared out here because the model and its token counters live inside the turn block, while the result
   // this function returns is assembled after it.
   let turnUsage: ChatResult["usage"];
+  // Declared at TURN scope: the recorder is built once the model is resolved (inside the block below) and
+  // sealed after the loop returns, so both halves need to see the same binding.
+  let spanRecorder: TurnSpanRecorder | undefined;
   try {
     // Fold any @-referenced entity context into the user turn the model sees (the persisted record keeps the
     // clean text + the reference metadata separately).
@@ -765,6 +781,7 @@ export async function runChat(
     ];
     // Which registered model powers this turn, in priority order: the conversation's own pick (session.model, set in
     // the chat) → the workspace AgentSpec's model (Settings › Agent) → the agent server's default model.
+    // (`spanRecorder` is declared at turn scope below the loop's block so the seal can reach it.)
     const modelRef = session.model ?? profile?.model;
     const model =
       modelRef && deps.resolveModelById
@@ -810,6 +827,18 @@ export async function runChat(
 
     // Meter the loop's resilience events into Prometheus series (fired before the host hook, so a throwing SSE
     // writer can never skip a count). Cheap no-op without a Metrics instance (dev).
+    // The turn's span recorder — live, not reconstructed. Needs a run to belong to; a turn with none (a
+    // dry-run/preview path) simply records nothing and falls back to the transcript projection.
+    spanRecorder =
+      session.runId !== undefined
+        ? new TurnSpanRecorder({
+            traceId: traceIdForRun(session.runId),
+            agentName: session.origin?.agentId ?? "agent",
+            conversationId: sessionId,
+            model: model.model,
+          })
+        : undefined;
+
     const meter = (e: AgentEvent): void => {
       const m = deps.metrics;
       if (!m) return;
@@ -854,6 +883,7 @@ export async function runChat(
         ...(deps.thinkingBudgetTokens !== undefined ? { thinking: { budgetTokens: deps.thinkingBudgetTokens } } : {}),
         onEvent: (e) => {
           meter(e);
+          spanRecorder?.observe(e);
           hooks?.onEvent?.(e);
         },
         ...(hooks?.permit ? { permit: hooks.permit } : {}),
@@ -871,6 +901,17 @@ export async function runChat(
         ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
         ...(signal ? { signal } : {}),
       });
+      // An interruption is a conversation CITIZEN too (Claude Code parity, same rule as the failure record
+      // below): a turn the member stopped — whole-turn abort or a bare soft interrupt — says so in the
+      // transcript. Without it the history ends on a user turn nobody answered, so the next turn appends a
+      // second user message straight after the first and neither the member nor the model can tell what
+      // happened. The partial answer itself was already committed by the kernel; this is the line after it.
+      // Best-effort: a store write must not turn a clean cancellation into a failure.
+      if (loopResult.stopReason === "aborted" || loopResult.stopReason === "interrupted") {
+        try {
+          await persist({ role: "assistant", content: INTERRUPTED_BY_USER });
+        } catch {}
+      }
       // Arm (or disarm) the conversation's wake intent — the durable half of "waiting". The host owns the clock:
       // the kernel says WHAT to wait for, we stamp WHEN it expires. Rearmed every turn, so an agent that waits
       // again after a resume simply replaces its own intent, and a turn that ends normally clears it (the agent
@@ -957,5 +998,10 @@ export async function runChat(
   const nextTitle = session.title === DEFAULT_SESSION_TITLE ? deriveTitle(userText) : undefined;
   await deps.sessions.touchSession(workspace, sessionId, deps.now(), nextTitle);
 
-  return { messages: [userRecord, ...producedRecords], ...(turnUsage ? { usage: turnUsage } : {}) };
+  const spans = spanRecorder?.seal(turnUsage);
+  return {
+    messages: [userRecord, ...producedRecords],
+    ...(turnUsage ? { usage: turnUsage } : {}),
+    ...(spans && spans.length > 0 ? { spans } : {}),
+  };
 }

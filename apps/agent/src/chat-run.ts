@@ -65,8 +65,11 @@ export async function withChatTurnRun(
     message: string,
     messages?: ChatResult["messages"],
     usage?: ChatResult["usage"],
+    spans?: ChatResult["spans"],
   ): void => {
-    const trace = messages ? transcriptToTrace(messages, usage) : [];
+    // Prefer the RECORD the turn kept for itself; the transcript projection is the fallback for a turn that
+    // ran without one (no run id to hang spans under).
+    const trace = spans === undefined && messages ? transcriptToTrace(messages, usage) : [];
     void report({
       workspace,
       kind,
@@ -79,12 +82,19 @@ export async function withChatTurnRun(
       creator: subject,
       cause: "chat",
       ...(trace.length > 0 ? { trace } : {}),
+      ...(spans && spans.length > 0 ? { spans } : {}),
     }).catch(() => {});
   };
 
   try {
     const result = await turn();
-    settle("agent.run.completed", `Chat turn completed in conversation ${sessionId}.`, result.messages, result.usage);
+    settle(
+      "agent.run.completed",
+      `Chat turn completed in conversation ${sessionId}.`,
+      result.messages,
+      result.usage,
+      result.spans,
+    );
     return result;
   } catch (err) {
     // A stopped turn is cancelled, not failed — the transcript is evidence either way, but the ledger must not

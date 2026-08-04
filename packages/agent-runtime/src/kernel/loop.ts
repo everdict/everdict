@@ -53,8 +53,10 @@ export type AgentEvent =
   | { type: "text_delta"; delta: string }
   | { type: "reasoning_delta"; delta: string } // extended-thinking / reasoning token (streamed before the answer)
   | { type: "assistant_message"; content: string }
-  | { type: "tool_call"; name: string; args: string }
-  | { type: "tool_result"; name: string; isError: boolean }
+  // `id` is the model's own call id — it PAIRS a result with its call. Without it an observer has to guess
+  // by name, which mis-pairs the moment two calls to the same tool run in parallel.
+  | { type: "tool_call"; name: string; args: string; id?: string }
+  | { type: "tool_result"; name: string; isError: boolean; id?: string }
   | { type: "permission"; name: string; decision: PermissionDecision }
   | { type: "plan"; plan: string }
   | { type: "input"; messages: number } // user messages injected mid-run via drainInput (steering)
@@ -613,6 +615,18 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     };
   };
 
+  // Commit text the model had already streamed when its step was cut short (a stop, a soft interrupt) as a real
+  // assistant turn — the member read it, so it is part of the conversation whether or not the turn finished.
+  // A text-only assistant message needs no tool result, so the transcript stays balanced for the next call.
+  const commitStreamedText = async (text: string): Promise<void> => {
+    if (text.trim().length === 0) return;
+    const partial: ChatMessage = { role: "assistant", content: text };
+    messages = [...messages, partial];
+    produced.push(partial);
+    finalText = text;
+    await opts.onMessage?.(partial);
+  };
+
   // Fold any completed background sub-agent results into the conversation as a follow-up user turn (labelled). Same
   // seam discipline as drainInput: only called at a balanced turn boundary. Returns whether anything was injected.
   const injectBackgroundResults = async (): Promise<boolean> => {
@@ -672,6 +686,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     // `messages` is always balanced at the top of a turn (never a dangling assistant tool_call), so a retry re-sends a
     // valid transcript. On a context-overflow (413), callModel compacts `messages` in place and retries — recovery,
     // not a crash. Returns undefined when the caller aborts.
+    // What the CURRENT attempt has streamed so far. An interrupted step returns no result, but the member has
+    // already READ this text — commitStreamedText below turns it into a real turn instead of a hole.
+    let streamedText = "";
     const callModel = async (): Promise<StreamResult | undefined> => {
       // Persistent capacity waits count separately: the backoff keeps growing to its 5-min cap while the regular
       // transient budget (attempt) is never consumed by them.
@@ -679,6 +696,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       for (let attempt = 0; ; attempt++) {
         const turnMessages: ChatMessage[] =
           reminder.length > 0 ? [...messages, { role: "user", content: reminder }] : messages;
+        // A retry re-streams from scratch — only the LAST attempt's text is the one the member is looking at.
+        streamedText = "";
         try {
           // Each attempt is its own STEP: a soft interrupt cancels the in-flight stream (the run signal still
           // cancels it too, via the step link) and surfaces below as a non-error exit.
@@ -695,7 +714,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
               ...(opts.outputTokens !== undefined ? { maxTokens: opts.outputTokens } : {}),
               ...(opts.thinking ? { thinking: opts.thinking } : {}),
               signal: stepSignal,
-              onContentDelta: (delta) => emit({ type: "text_delta", delta }),
+              onContentDelta: (delta) => {
+                streamedText += delta;
+                emit({ type: "text_delta", delta });
+              },
               onReasoningDelta: (delta) => emit({ type: "reasoning_delta", delta }),
             }),
           );
@@ -771,9 +793,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     };
     const result = await callModel();
     if (!result) {
+      // An interrupted step still produced text the member READ. Commit it as a real assistant turn before the
+      // run ends or redirects: dropping it leaves a hole where the answer was, and the next turn would then
+      // append a user message straight after a user message with nothing in between to explain the gap.
+      await commitStreamedText(streamedText);
       if (opts.signal?.aborted || !stepInterrupted) return finish("aborted", turn - 1);
-      // Soft interrupt mid model call: nothing was appended (the transcript is balanced) — absorb the queued
-      // redirect and continue, or end the run waiting for the user (a bare interrupt).
+      // Soft interrupt mid model call: only that partial text was appended (still balanced — a text-only
+      // assistant turn pairs with nothing) — absorb the queued redirect and continue, or end the run waiting
+      // for the user (a bare interrupt).
       stepInterrupted = false;
       if ((await drainQueuedInput()) > 0) continue;
       return finish("interrupted", turn - 1);
@@ -858,7 +885,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const signature = toolCallSignature(result.toolCalls);
 
     const turnImages: ToolResultImage[] = []; // images returned by this turn's tools → one follow-up multimodal turn
-    for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments });
+    for (const tc of result.toolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments, id: tc.id });
 
     const dispatchOne = async (
       tc: { name: string; arguments: string },
@@ -964,7 +991,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       produced.push(toolMessage);
       toolCalls.push({ name: tc.name, ok: !output.isError });
       if (output.images && output.images.length > 0) turnImages.push(...output.images);
-      emit({ type: "tool_result", name: tc.name, isError: output.isError });
+      emit({ type: "tool_result", name: tc.name, isError: output.isError, id: tc.id });
       await opts.onMessage?.(toolMessage);
     }
 

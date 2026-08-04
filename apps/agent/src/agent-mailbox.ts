@@ -58,4 +58,16 @@ export class AgentMailbox {
     this.boxes.delete(key);
     return queued.map(renderEnvelope);
   }
+
+  // Take and clear whatever is still queued WITHOUT rendering it — the turn being stopped will never absorb these,
+  // and leaving them would silently prepend them to some future turn (a message the member cancelled, reappearing
+  // inside an unrelated answer). The caller hands the user's own messages back so they land in the composer
+  // instead of vanishing.
+  clear(workspace: string, sessionId: string): MailboxEnvelope[] {
+    const key = this.keyOf(workspace, sessionId);
+    const queued = this.boxes.get(key);
+    if (!queued || queued.length === 0) return [];
+    this.boxes.delete(key);
+    return queued;
+  }
 }

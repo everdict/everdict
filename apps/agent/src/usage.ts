@@ -1,4 +1,4 @@
-import type { TraceEvent } from "@everdict/contracts";
+import type { TraceEvent, TraceSpan } from "@everdict/contracts";
 
 // Report a conversation's LLM token usage to the control plane's internal meter bridge (POST /internal/usage,
 // x-internal-token). The control plane prices the tokens and records + settles them as source "agent", so agent
@@ -55,6 +55,10 @@ export interface AgentRunEventReport {
   // O2 (transcripts are traces): a terminal report's transcript projection — the CP seals it as the run's
   // own trajectory (source "run", first write wins).
   trace?: TraceEvent[];
+  // The turn's own SPANS, recorded live off the kernel's events (N6, otel-trace-model.md). When present the
+  // CP seals THESE as the record and the transcript projection is not used: the recorder saw the model call's
+  // latency, the retries, the compactions and the subagents, none of which a transcript row can hold.
+  spans?: TraceSpan[];
 }
 
 export function runEventReporter(

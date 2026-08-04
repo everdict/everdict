@@ -115,6 +115,7 @@ export const AGENT_CHAT_MISSIONS = [
   'viewAnalyze',
   'scorecardAnalyze',
   'runAnalyze',
+  'issueAnalyze',
   'knowledgeAsk',
 ] as const
 export const agentChatMissionSchema = z.enum(AGENT_CHAT_MISSIONS)
@@ -135,9 +136,23 @@ export const AGENT_CHAT_MISSION_INTENTS = {
   viewAnalyze: 'analyze',
   scorecardAnalyze: 'analyze',
   runAnalyze: 'analyze',
+  issueAnalyze: 'analyze',
   knowledgeAsk: 'ask',
 } as const satisfies Record<AgentChatMission, 'edit' | 'analyze' | 'ask'>
 export type AgentChatMissionIntent = (typeof AGENT_CHAT_MISSION_INTENTS)[AgentChatMission]
+
+// 이 진입이 새 대화에서 시작하는가. 임무 프레이밍(제목·설명·제안)은 빈 화면에서만 뜨므로, 이 판정이 곧
+// "진입할 때마다 그 작업에 맞는 패널을 실제로 보게 되는가"이기도 하다. `edit` 임무는 언제나 — 저작물을
+// 고치는 일이 남의 스레드를 이어받을 이유가 없다. `analyze`/`ask` 는 진입이 `fresh` 를 명시했을 때만:
+// 기본값은 열린 스레드 유지(스코어카드 둘을 한 대화에서 비교하는 흐름)이고, 대화의 주제가 열려 있던 것이
+// 아니라 이 레코드 하나인 진입(이슈 상세, 빈 분석 캔버스)이 그 예외를 스스로 선언한다.
+export function startsFreshConversation(entry: {
+  mission?: AgentChatMission
+  fresh?: boolean
+}): boolean {
+  if (entry.fresh === true) return true
+  return entry.mission !== undefined && AGENT_CHAT_MISSION_INTENTS[entry.mission] === 'edit'
+}
 
 export const agentAttachmentSchema = z.object({
   name: z.string(),
