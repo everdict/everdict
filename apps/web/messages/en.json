@@ -3604,6 +3604,8 @@
     "permissionAllow": "Allow",
     "permissionDeny": "Deny",
     "newline": "new line",
+    "escAgainToClear": "Press esc again to clear",
+    "historyPrev": "previous message",
     "reasoning": "Reasoning",
     "reasoningLive": "Reasoning…",
     "todoTitle": "Task list",
@@ -3754,6 +3756,16 @@
           "Compare it with a passing run of the same case"
         ]
       },
+      "issueAnalyze": {
+        "title": "Dig into this issue",
+        "body": "Ask anything about this issue. The agent reads the harnesses, datasets and judges it links plus its evaluation history, and works out what is still unproven and what could close it.",
+        "suggestions": [
+          "Summarize what this issue asks for and what has been verified so far",
+          "Propose an evaluation that would prove it",
+          "Check whether the linked evidence is enough to close it",
+          "If it regressed, pinpoint the scorecard where it fell"
+        ]
+      },
       "knowledgeAsk": {
         "title": "Ask about this entry",
         "body": "Ask anything about this knowledge entry. The agent answers from the workspace knowledge graph — what it says, where it came from, and what links to it.",
@@ -3792,7 +3804,8 @@
       "environment": "Environment",
       "trace": "Trace",
       "knowledge": "Knowledge",
-      "tool": "Tool"
+      "tool": "Tool",
+      "issue": "Issue"
     },
     "retryNotice": "Provider hiccup — retrying in {seconds}s (attempt {attempt})",
     "retryNoticePersistent": "Waiting out a capacity limit — retrying in {seconds}s (attempt {attempt})",
@@ -5107,14 +5120,14 @@
     "fieldMembers": "Members",
     "fieldMembersPlaceholder": "Add a member",
     "fieldMembersEmpty": "No members to choose from",
-    "fieldMembersRemove": "Remove {name}",
     "resourcesTitle": "Resources",
     "fieldResources": "Resources",
     "fieldResourceLabel": "Label",
     "fieldResourceUrl": "URL",
     "resourceAdd": "Add resource",
     "resourceRemove": "Remove {label}",
-    "resourceHint": "The design doc, the dashboard, the thread it was argued in — what you open to understand this goal."
+    "resourceHint": "The design doc, the dashboard, the thread it was argued in — what you open to understand this goal.",
+    "fieldMembersRemove": "Remove {name}"
   },
   "importGithubIssues": {
     "open": "Import from GitHub",

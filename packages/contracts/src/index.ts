@@ -4,6 +4,8 @@ export * from "./errors.js";
 export * from "./version.js";
 export * from "./job-result-wire.js";
 export * from "./execution/trace.js";
+export * from "./execution/span.js";
+export * from "./execution/semconv.js";
 export * from "./execution/trace-sink.js";
 export * from "./execution/trace-source.js";
 export * from "./execution/image-registry-probe.js";

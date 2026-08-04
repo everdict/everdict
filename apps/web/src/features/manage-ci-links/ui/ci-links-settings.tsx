@@ -107,7 +107,7 @@ export function CiLinksSettings({
                 }
               >
                 <Link
-                  href={`/${encodeURIComponent(workspace)}/harnesses/${encodeURIComponent(l.harness)}`}
+                  href={`/${encodeURIComponent(workspace)}/harness/${encodeURIComponent(l.harness)}`}
                   className="text-[12px] font-[510] text-link hover:text-foreground"
                 >
                   {t('harnessLink')}

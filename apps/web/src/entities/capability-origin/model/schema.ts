@@ -84,15 +84,16 @@ export function pickOrigin(
 
 // 출처가 가리키는 대상의 상세 경로. 이슈는 identifier 로도 열리므로 id 를 그대로 쓴다.
 // 링크를 만들 수 없는 종류(trace 등)는 undefined — 칩은 텍스트로 남는다.
+// Each entry addresses ONE thing, so each is the singular segment — the plural is that resource's list page.
 const ORIGIN_ROUTES: Partial<Record<CapabilityOriginRef['type'], string>> = {
-  issue: 'issues',
-  project: 'projects',
-  initiative: 'initiatives',
-  scorecard: 'scorecards',
-  run: 'runs',
-  harness: 'harnesses',
-  dataset: 'datasets',
-  judge: 'judges',
+  issue: 'issue',
+  project: 'project',
+  initiative: 'initiative',
+  scorecard: 'scorecard',
+  run: 'run',
+  harness: 'harness',
+  dataset: 'dataset',
+  judge: 'judge',
 }
 
 export function originRefHref(workspace: string, ref: CapabilityOriginRef): string | undefined {

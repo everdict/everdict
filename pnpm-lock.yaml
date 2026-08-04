@@ -651,6 +651,9 @@ importers:
       '@everdict/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@everdict/domain':
+        specifier: workspace:*
+        version: link:../domain
 
 packages:
 

@@ -3604,6 +3604,8 @@
     "permissionAllow": "허용",
     "permissionDeny": "거부",
     "newline": "줄바꿈",
+    "escAgainToClear": "esc 한 번 더 → 입력 비우기",
+    "historyPrev": "이전 메시지",
     "reasoning": "사고 과정",
     "reasoningLive": "추론 중…",
     "todoTitle": "작업 목록",
@@ -3754,6 +3756,16 @@
           "같은 케이스의 통과한 실행과 비교해 줘"
         ]
       },
+      "issueAnalyze": {
+        "title": "이 이슈 파고들기",
+        "body": "이 이슈에 대해 무엇이든 물어보세요. 에이전트가 이슈가 링크한 하네스·데이터셋·평가자와 지금까지의 평가 이력을 읽고, 무엇이 아직 증명되지 않았고 무엇으로 닫을 수 있는지 함께 정리합니다.",
+        "suggestions": [
+          "이 이슈가 무엇을 요구하는지, 지금까지 무엇이 검증됐는지 정리해 줘",
+          "이걸 증명할 평가를 어떻게 짤지 제안해 줘",
+          "지금 링크된 증거로 이 이슈를 닫을 수 있는지 봐 줘",
+          "회귀했다면 어느 스코어카드에서 어긋났는지 짚어 줘"
+        ]
+      },
       "knowledgeAsk": {
         "title": "이 항목에 대해 물어보기",
         "body": "이 지식 항목에 대해 무엇이든 물어보세요. 에이전트가 워크스페이스 지식 그래프에서 답합니다 — 내용, 출처, 그리고 무엇과 이어져 있는지.",
@@ -3792,7 +3804,8 @@
       "environment": "환경",
       "trace": "트레이스",
       "knowledge": "지식",
-      "tool": "도구"
+      "tool": "도구",
+      "issue": "이슈"
     },
     "retryNotice": "모델 응답 오류 — {seconds}초 후 재시도합니다 (시도 {attempt}회)",
     "retryNoticePersistent": "용량 제한 대기 중 — {seconds}초 후 재시도합니다 (시도 {attempt}회)",
@@ -5107,14 +5120,14 @@
     "fieldMembers": "참여자",
     "fieldMembersPlaceholder": "참여자 고르기",
     "fieldMembersEmpty": "고를 멤버가 없어요",
-    "fieldMembersRemove": "{name} 빼기",
     "resourcesTitle": "리소스",
     "fieldResources": "리소스",
     "fieldResourceLabel": "이름",
     "fieldResourceUrl": "주소",
     "resourceAdd": "리소스 추가",
     "resourceRemove": "{label} 빼기",
-    "resourceHint": "설계 문서·대시보드·논의 스레드 — 이 목표를 이해하려면 열어 봐야 하는 것들."
+    "resourceHint": "설계 문서·대시보드·논의 스레드 — 이 목표를 이해하려면 열어 봐야 하는 것들.",
+    "fieldMembersRemove": "{name} 빼기"
   },
   "importGithubIssues": {
     "open": "GitHub에서 가져오기",

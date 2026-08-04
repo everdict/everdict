@@ -61,9 +61,14 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType): Promise<un
       // 평가 트래커의 이슈 — normalize 가 `title` 을 라벨로 집는다(이슈엔 name 이 없음).
       // 열려 있는 것부터 보이도록 최근 활동순 슬라이스만 가져온다(닫힌 이슈까지 @-피커에 쏟지 않는다).
       // 목록은 한 PAGE(`{ items, nextCursor? }`)로 오고, @-피커는 첫 장이면 충분하다.
-      return controlPlane
-        .listIssues<{ items: Row[] }>(ctx, { limit: 50 })
-        .then((page) => (Array.isArray(page.items) ? page.items : []))
+      // 참조 키는 UUID 가 아니라 식별자(ENG-12) — get_issue 가 둘 다 받고, 이슈를 부르는 이름은 식별자다.
+      // 이슈 상세의 "대화에서 분석" 진입도 같은 키를 쓰므로 두 경로가 같은 참조를 만든다.
+      return controlPlane.listIssues<{ items: Row[] }>(ctx, { limit: 50 }).then((page) =>
+        (Array.isArray(page.items) ? page.items : []).map((row) => ({
+          ...row,
+          id: str(row.identifier) ?? row.id,
+        }))
+      )
     case 'trace':
       // trace references are attached from the observability browser (keyed by source+traceId), not @-picked here.
       return []

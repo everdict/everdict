@@ -59,11 +59,24 @@ no default-to-first**. Discriminated unions carry the shape variants:
   throwing `BadRequestError` on a missing/mismatched slot.
 - `EvalCase` (`eval-case.ts`) — case bundle (env, task, graders, image?); also `CaseResult`/`Scorecard`.
 - `CaseJob` (`case-job.ts`) — one dispatched unit; `tenant`/`submittedBy` key the SaaS machinery.
-- `TraceEvent` (`trace.ts`) — union on `kind` (message/llm_call/tool_call/…); cost comes from here. Every
-  non-trivial kind also carries the optional **STRUCTURE** block — `spanId`/`parentId`/`durationMs`/`at` — so a
-  normalized stream keeps the span TREE and real time of whatever produced it (a normalizer that drops them
-  turns a waterfall into a list; that is exactly what the internal trace viewer used to render). All four are
-  optional and additive: a source reporting none produces the same stream it always did.
+- **`TraceSpan` (`span.ts`) — THE trace record** (N6, `docs/architecture/otel-trace-model.md`). OTLP-shaped
+  field for field: hex `traceId`/`spanId`/`parentSpanId`, `kind`, `status`, absolute `startedAt`/`endedAt`,
+  `attributes`, `events[]`, `links[]`, `resource` (kept SEPARATE from attributes), `scope`. OTel's model is two
+  layers and we long had only the lower one: a **span is an interval**, a **span event is a point inside it** —
+  which is why the placement plane could only ever be two instants for a 23-second job. Also here: `newTraceId`/
+  `newSpanId` (injectable entropy), `traceIdForRun` (DERIVED per run, so planes sealed by different processes
+  agree on one trace without coordinating), and W3C `formatTraceparent`/`parseTraceparent` + `TRACEPARENT_ENV`.
+- `semconv.ts` — the attribute vocabulary. **The standard first, `everdict.*` only for what has none**:
+  `GEN_AI.*` for models/tokens/tools, `OTEL_RESOURCE.*` (`service.name`/`k8s.node.name`/`container.id`) for the
+  placement plane's identity, `EVERDICT_ATTR.*` for the plane axis, cost (no GenAI key exists), and the
+  round-trip keys the union needs (`message.role`/`log.stream`/`env_action`). `GENAI_SEMCONV_VERSION` is stamped
+  on every span we mint — the GenAI conventions are still `development` and have moved before.
+- `TraceEvent` (`trace.ts`) — union on `kind` (message/llm_call/tool_call/…); cost comes from here. **Now a
+  read-time PROJECTION of spans** (`spansToEvents`, @everdict/domain), not the record — which is why N6 cost
+  graders and judges nothing. Every non-trivial kind carries the optional **STRUCTURE** block —
+  `spanId`/`parentId`/`durationMs`/`at` — so a stream that arrives as events still keeps the tree and real time
+  of whatever produced it. All four are optional and additive. `stamp(now)` (same file) is the one way to mint
+  `{t, at}` — every emitter uses it instead of `t: Date.now()`.
 - `RuntimeSpec` (`runtime-spec.ts`) — `local | nomad | k8s` execution infra; **never store secrets**
   (only SecretStore key *names* like `authSecret`).
 - `CaseRecording` (`recording.ts`) — replay capture: track lanes on one `t0` wall-clock (`TrackEntry` union
