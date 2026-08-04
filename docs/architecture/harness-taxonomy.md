@@ -326,6 +326,80 @@ isolation.
   assembles the spec, `instanceStateFromSpec` round-trips existing overrides back into the fields for
   edit→new-version; the Config panel renders the resolved overrides. MCP/HTTP parity is automatic (schema-driven JSON).
 
+---
+
+# The instance form edits EFFECTIVE config, and a variation is a NAMED harness
+
+> **Status: implemented (web only — no contract/API change beyond two derived list fields).** Two authoring
+> defects made the override channel above unreachable in practice, so authors changed the TEMPLATE to change an
+> env var — exactly what templates/instances were built to avoid.
+
+## Defect 1 — a delta editor cannot be operated without seeing the effective value
+
+`instanceStateFromSpec` prefilled the **delta only**, so opening "new version" showed an EMPTY env editor,
+collapsed inside a "variations (overrides)" disclosure, while the template tab showed the same env **filled
+in**. The screen that showed values was the one that required a new shape version, so that is the one people
+used. The fix inverts the direction: the form is seeded with a **baseline** derived from the template
+(`baselineFromTemplate` → `OverrideBaseline`), renders inherited values with an `inherited`/`overridden` badge,
+and `buildOverrides(state, baseline)` **diffs** — only what differs from the template is stored. Rules:
+
+- Per-service rows come from the template's service list; the name is not typed (a typo was a 400).
+- An inherited env key is **not deletable** — overrides merge, so removal cannot be expressed. The key is
+  locked and offers "revert to the template value" instead of a trash can. Never render an affordance whose
+  promise the merge cannot keep; a delete channel is a contract change (`unsetEnv`), not a UI decision.
+- With no baseline (`EMPTY_BASELINE`, the free-form path) every entered value is a delta — the previous
+  behavior, unchanged.
+
+## Defect 2 — variation and version shared one axis
+
+The web hardcoded `id: templateId`, so a second harness on the same shape was impossible: "same template,
+different env" could only become **another version of the same id**, mixing *newer* and *different* in one
+version list (and a new-version save on an API-registered `id != template.id` instance silently re-registered
+it under the template id). `HarnessInstanceSpec.id` was always free — only the web was not. Now:
+
+- The instance form takes a **harness name** (empty = the template id, the old convention).
+- The template is **picked**, not typed: `?template=&tplVersion=` on `/{ws}/harnesses/new` carries the choice
+  and the SERVER builds that template's baseline, so no client-side control-plane call is needed.
+- The harness detail offers "new harness on this shape" beside "new version" — the two axes, side by side.
+- `HarnessListEntry` gained derived `templateId`/`templateVersion` (from the latest instance, in
+  `enrichHarnessList`) so the list **groups variations under their shape** instead of showing siblings as
+  unrelated harnesses.
+
+## The remaining override holes (contract additions)
+
+Four knobs still forced a template edit even though the shape never changed. Each is now an instance delta:
+
+| Knob | Where | Note |
+|---|---|---|
+| per-service `model` | `InstanceServiceOverride.model` | "same topology, different model" is the single most common variation there is |
+| command `resources` | `InstanceOverrides.resources` | a heavier run of the same CLI agent no longer forks the shape |
+| env **removal** | `unsetEnv: string[]` (per-service and command) | applied AFTER the merge; naming a key the template never set is a no-op, not an error |
+| service default `image` | `TemplateService.image` | the slot's default, so an instance pins only the services it actually changes (a pin still wins) |
+
+Two traps the merge semantics set, both now covered by tests:
+
+- **`resources` is a scalar REPLACE**, so a form that emits only the changed half silently unsets the other.
+  The editor re-states the inherited half whenever either changes.
+- **Deleting an env row means `unsetEnv`, not "no override"** — and the prefill must drop the unset key again, or
+  a key the user removed reappears on the next edit.
+
+## "Which harness is this?" is answered by the delta, not by prose
+
+`summarizeInstanceVariation` (`@everdict/domain`) projects an instance's own delta into display chips
+(`model=claude-opus-4-8` · `−OPENAI_BASE_URL` · `cpu 4000`), carried on `HarnessListEntry.variation`. A
+hand-written description answers the question only until someone re-pins and forgets the prose; the delta **is**
+what the resolver applies, so it cannot drift. A pin equal to the template's default is not a difference and is
+dropped; a secret-backed env shows the secret NAME (the spec holds no value).
+
+## The shape catalog is a separate screen
+
+`/{ws}/harness-templates` lists shapes — kind · category · service count · versions · which harnesses ride each ·
+"new harness on this shape". It exists for two things the harness list structurally cannot do: show a shape
+**nothing rides yet** (no instance carries it, so it appears nowhere else), and answer "what shapes do we have"
+without the eval-time harnesses mixed in. `HarnessTemplateListEntry` therefore carries the shape's own identity
+(`latestVersion`/`kind`/`category`/`serviceCount`, derived in `enrichTemplateList`); the rider count is a join of
+two reads the page already makes, not a new endpoint.
+
 > Blast radius: `@everdict/contracts` (`harness-spec` `params`/`ServiceResources`/`TopologyService.resources`,
 > `harness-template` `overrides` + resolve), `@everdict/harnesses` (`CommandHarness` `{{var}}`), `@everdict/topology`
 > (nomad/k8s/docker resources + volumes + readiness honoring), `apps/web` (structured override editor), + tests.
