@@ -61,7 +61,11 @@ export default async function InitiativeDetailLayout({
   const { readiness } = current
   const canWrite = can(roles, 'issues:write')
   const parent = current.parentId ? initiatives.find((i) => i.id === current.parentId) : undefined
-  const overdue = current.status === 'active' && isPastDue(current.targetDate, timeZone)
+  // 계획 단계라고 안 늦는 건 아니다 — 끝났거나 접힌 목표만 기한 판정에서 빠진다.
+  const overdue =
+    current.status !== 'completed' &&
+    current.status !== 'cancelled' &&
+    isPastDue(current.targetDate, timeZone)
   const actors = memberDirectoryOf(members)
   // 이룬 만큼 — 취소된 일은 분모에서 빠진다(하지 않기로 한 일은 미룬 일이 아니다).
   const scope = readiness.totalIssues
@@ -109,8 +113,10 @@ export default async function InitiativeDetailLayout({
       </div>
 
       {/* ② 이름은 사람이 지은 자유 텍스트다 — 자르지 않고 줄바꿈한다. */}
-      <h1 className="break-words pt-5 text-[22px] font-[560] leading-[1.3] tracking-[-0.01em] text-foreground">
-        {current.name}
+      <h1 className="flex items-start gap-2 break-words pt-5 text-[22px] font-[560] leading-[1.3] tracking-[-0.01em] text-foreground">
+        {/* 아이콘은 이름의 일부가 아니라 표식이다 — 읽히는 건 이름이므로 스크린리더에서는 감춘다. */}
+        {current.icon && <span aria-hidden>{current.icon}</span>}
+        <span className="min-w-0">{current.name}</span>
       </h1>
 
       {/* ③ 같은 목표의 세 가지 물음 — 무엇이고 어디쯤인가 / 그 아래 일들은 어느 단계인가 / 책임자는 뭐라 했나. */}
@@ -137,6 +143,17 @@ export default async function InitiativeDetailLayout({
             {current.lead !== undefined && (
               <PropertyRow label={t('fieldLead')}>
                 <span className="truncate">{memberNameOf(actors, current.lead)}</span>
+              </PropertyRow>
+            )}
+            {current.memberIds.length > 0 && (
+              <PropertyRow label={t('fieldMembers')}>
+                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  {current.memberIds.map((subject) => (
+                    <span key={subject} className="truncate">
+                      {memberNameOf(actors, subject)}
+                    </span>
+                  ))}
+                </span>
               </PropertyRow>
             )}
             {parent && (

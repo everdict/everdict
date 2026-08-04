@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ExternalLink } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
@@ -117,7 +118,7 @@ export default async function InitiativeOverviewPage({
             {readiness.blockers.map((blocker) => (
               <Link
                 key={blocker.issueId}
-                href={issueHref(workspace, blocker.identifier)}
+                href={issueHref(workspace, blocker.identifier, blocker.title)}
                 className={cn(
                   'flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated',
                   blocker.status === 'regressed' && 'border-destructive/40 bg-destructive/5'
@@ -131,6 +132,32 @@ export default async function InitiativeOverviewPage({
                   {tracker(`issueStatus.${blocker.status}`)}
                 </span>
               </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 리소스 — 목표가 적히고, 측정되고, 논쟁된 곳. 빈 섹션은 내지 않는다(하우스 규칙). */}
+      {current.resources.length > 0 && (
+        <section className="space-y-3">
+          <SectionHeader title={t('resourcesTitle')} />
+          <div className="space-y-2">
+            {current.resources.map((resource) => (
+              <a
+                key={resource.url}
+                href={resource.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+              >
+                <ExternalLink className="size-3.5 shrink-0 text-faint" />
+                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                  {resource.label}
+                </span>
+                <span className="hidden shrink-0 truncate text-[11.5px] text-muted-foreground @md:block">
+                  {new URL(resource.url).hostname}
+                </span>
+              </a>
             ))}
           </div>
         </section>

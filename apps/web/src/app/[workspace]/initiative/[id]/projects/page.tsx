@@ -97,7 +97,7 @@ export default async function InitiativeProjectsPage({
                 className="flex items-center gap-1 rounded-lg border bg-card pr-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
                 <Link
-                  href={`/${workspace}/projects/${encodeURIComponent(project.id)}`}
+                  href={`/${workspace}/project/${encodeURIComponent(project.id)}`}
                   className="flex min-w-0 flex-1 flex-wrap items-center gap-3 px-3.5 py-2.5"
                 >
                   <span className="min-w-0 flex-1 truncate text-[13px] font-[510] text-foreground">
