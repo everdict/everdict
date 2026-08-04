@@ -1,0 +1,12 @@
+-- AUTO-CLOSING ITERATIONS (docs/tracker.md) — an opt-in, on purpose.
+--
+-- everdict's rule is that a cycle whose dates have passed but which NOBODY closed is a cycle somebody forgot,
+-- and every list keeps showing it rather than tidying it away. That is the right default for a team still
+-- learning its own pace: the forgotten cycle is the signal.
+--
+-- A team that has settled into a rhythm wants the opposite — the iteration simply ends and what is left rolls
+-- forward, which is what Linear does. Making it a per-team switch keeps both true without either team having to
+-- argue with the product. OFF preserves the existing behaviour for every team that already exists.
+--
+-- Like the rest of the cadence (0118), this is enforced on the READ that provisions the pipeline — no timer.
+ALTER TABLE everdict_teams ADD COLUMN IF NOT EXISTS cycle_auto_close boolean NOT NULL DEFAULT false;

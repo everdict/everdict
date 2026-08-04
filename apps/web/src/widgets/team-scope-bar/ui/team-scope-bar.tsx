@@ -27,11 +27,13 @@ export async function TeamScopeBar({ scope }: { scope: TeamScope }) {
   const directory = await getTranslations('teamsDirectory')
   const { workspace, team, section } = scope
 
-  // 팀이 가진 자원만. 트리아지는 그 팀이 켰을 때만 존재한다.
+  // 팀이 가진 자원만. 트리아지도 사이클도 그 팀이 켰을 때만 존재한다 — 열어 봐야 "쓰지 않는다"고 답할
+  // 탭을 미리 내밀지 않는다. 다만 사이클 화면에 이미 서 있다면 탭은 남는다(주소로 들어온 사람이 자기가 어디
+  // 있는지 못 읽는 편이 더 나쁘다).
   const sections: { key: TeamSection; label: string }[] = [
     { key: 'issues', label: t('issues') },
     ...(team.triageEnabled ? [{ key: 'triage' as const, label: t('triage') }] : []),
-    { key: 'cycles', label: t('cycles') },
+    ...(team.cyclesEnabled || section === 'cycles' ? [{ key: 'cycles' as const, label: t('cycles') }] : []),
     { key: 'projects', label: t('projects') },
     { key: 'scorecards', label: t('scorecards') },
   ]

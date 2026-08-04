@@ -6,15 +6,17 @@ import { getTimeZone, getTranslations } from 'next-intl/server'
 import { TeamScopeBar, type TeamScope } from '@/widgets/team-scope-bar'
 import {
   IssueBoard,
+  IssueBulkBar,
   IssueDisplayMenu,
   IssueFilterMenu,
   IssueGroup,
   IssueRow,
+  IssueSelectionProvider,
   type IssueBoardColumn,
   type IssueDirectories,
   type IssuePageQuery,
 } from '@/features/browse-issues'
-import { cycleLabel, cyclesSchema, type Cycle } from '@/entities/cycle'
+import { cycleLabel, cyclesSchema, cycleStateOf, todayIso, type Cycle } from '@/entities/cycle'
 import {
   issueGroupCountsSchema,
   issueGroupsToRender,
@@ -65,6 +67,7 @@ export async function IssueListView({
   workspace,
   team,
   triage,
+  cycle,
   filters,
 }: {
   workspace: string
@@ -72,6 +75,9 @@ export async function IssueListView({
   team?: TeamWithSummary
   // 팀의 트리아지 인박스 — 워크플로 앞에 앉은 큐. 팀 아래에서만 존재한다.
   triage?: boolean
+  // 한 이터레이션의 보드. 사이클 화면은 자기 헤더(진행도·번다운·닫기)를 이미 그렸으므로 여기서는 툴바부터
+  // 시작하고, 필터·표시 링크도 사이클 주소를 기준으로 만든다 — 목록을 두 벌 만들지 않기 위한 네 번째 주소다.
+  cycle?: { id: string; basePath: string }
   filters: IssueListFilters
 }) {
   const t = await getTranslations('issuesPage')
@@ -88,10 +94,13 @@ export async function IssueListView({
   const canReadIntegrations = can(principal?.roles ?? [], 'settings:read')
 
   // 이 목록의 좁히기. 행과 그룹 개수가 **같은** 필터를 쓰도록 한 번만 만든다.
+  // 사이클 스코프는 URL 의 사이클 필터를 덮어쓴다 — 이 화면은 "그 이터레이션의 보드"이지 "사이클로 좁힌
+  // 이슈 목록"이 아니라서, 주소가 이미 답한 것을 필터가 다시 뒤집을 수 있으면 안 된다.
   const scope: IssuePageQuery = {
     ...issueQueryFilters(view),
     ...(team ? { team: team.id } : {}),
     ...(triage ? { triage: true } : {}),
+    ...(cycle ? { cycle: [cycle.id] } : {}),
   }
 
   // 팀 목록은 두 소비자가 있다 — 워크스페이스 전체 목록의 팀 칩(임계 경로)과 「이슈 만들기」의 팀 선택
@@ -194,44 +203,60 @@ export async function IssueListView({
         ? t('countsUnavailable')
         : undefined
 
-  // 이 목록의 주소. 팀 스코프면 팀 아래의 경로 자원이고, 아니면 워크스페이스 전체 목록이다.
-  const basePath = team
-    ? teamSectionHref(workspace, team.key, triage ? 'triage' : 'issues')
-    : `/${workspace}/issues`
+  // 이 목록의 주소. 사이클 보드면 그 사이클의 주소, 팀 스코프면 팀 아래의 경로 자원, 아니면 워크스페이스
+  // 전체 목록이다.
+  const basePath = cycle
+    ? cycle.basePath
+    : team
+      ? teamSectionHref(workspace, team.key, triage ? 'triage' : 'issues')
+      : `/${workspace}/issues`
 
-  const teamScope: TeamScope | undefined = team
-    ? { workspace, team, section: triage ? 'triage' : 'issues' }
-    : undefined
+  // 사이클 보드는 위치도 제목도 이미 그렸다 — 여기서 한 번 더 그리면 한 화면에 헤더가 둘이 된다.
+  const teamScope: TeamScope | undefined =
+    team && !cycle ? { workspace, team, section: triage ? 'triage' : 'issues' } : undefined
 
   const empty =
     view.grouping === 'none'
       ? (flatPage?.items.length ?? 0) === 0
       : (counts?.total ?? 0) === 0
 
-  return (
+  // 일괄 편집이 있는 곳은 팀 스코프뿐이다 — 이슈는 자기 팀의 사이클에만 들어가므로(제어 평면이 거절한다),
+  // 여러 팀이 섞인 워크스페이스 목록에서는 "이 사이클로"가 성립하지 않는다. 고를 수 있는 것은 열린 사이클뿐.
+  const today = todayIso()
+  const bulkCycles =
+    team && canWrite
+      ? cycles
+          .filter((c) => c.completedAt === undefined)
+          .map((c) => ({ id: c.id, label: cycleLabel(c), state: cycleStateOf(c, today) }))
+      : []
+
+  const body = (
     <div className="@container space-y-4">
       {teamScope && <TeamScopeBar scope={teamScope} />}
-      <PageHeader
-        title={triage ? t('triageTitle') : team ? team.name : t('title')}
-        description={
-          triage ? t('triageDescription') : team ? (team.description ?? undefined) : t('description')
-        }
-        actions={
-          canWrite ? (
-            // 버튼 세 개가 GitHub App 설치 상태와 동기화 저장소 목록을 기다린다 — 그 대기를 목록의 임계
-            // 경로에서 떼어 자기 경계 뒤로 보낸다.
-            <Suspense fallback={<IssueListActionsSkeleton />}>
-              <IssueListActions
-                workspace={workspace}
-                teams={teamsPromise}
-                projects={projects.map((p) => ({ id: p.id, name: p.name }))}
-                {...(team ? { defaultTeamId: team.id, team } : {})}
-                canReadIntegrations={canReadIntegrations}
-              />
-            </Suspense>
-          ) : null
-        }
-      />
+      {!cycle && (
+        <PageHeader
+          title={triage ? t('triageTitle') : team ? team.name : t('title')}
+          description={
+            triage ? t('triageDescription') : team ? (team.description ?? undefined) : t('description')
+          }
+          actions={
+            canWrite ? (
+              // 버튼 세 개가 GitHub App 설치 상태와 동기화 저장소 목록을 기다린다 — 그 대기를 목록의 임계
+              // 경로에서 떼어 자기 경계 뒤로 보낸다.
+              <Suspense fallback={<IssueListActionsSkeleton />}>
+                <IssueListActions
+                  workspace={workspace}
+                  teams={teamsPromise}
+                  projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+                  cycles={bulkCycles.map((c) => ({ id: c.id, name: c.label }))}
+                  {...(team ? { defaultTeamId: team.id, team } : {})}
+                  canReadIntegrations={canReadIntegrations}
+                />
+              </Suspense>
+            ) : null
+          }
+        />
+      )}
 
       {/* 툴바 — 무엇을 볼 것인가(필터)와 어떻게 볼 것인가(표시). 팀 칩은 워크스페이스 전체 목록에서만, 그리고
           팀이 둘 이상일 때만: 필터가 아니라 그 팀의 목록으로 가는 링크다. */}
@@ -271,8 +296,8 @@ export async function IssueListView({
       ) : empty ? (
         <EmptyState
           icon={<CircleDot strokeWidth={1.75} />}
-          title={triage ? t('triageEmptyTitle') : t('emptyTitle')}
-          hint={triage ? t('triageEmptyHint') : t('emptyHint')}
+          title={cycle ? t('cycleEmptyTitle') : triage ? t('triageEmptyTitle') : t('emptyTitle')}
+          hint={cycle ? t('cycleEmptyHint') : triage ? t('triageEmptyHint') : t('emptyHint')}
         />
       ) : view.grouping === 'none' ? (
         <div className="space-y-1.5">
@@ -341,8 +366,13 @@ export async function IssueListView({
       {dropped > 0 && (
         <p className="text-[11.5px] text-muted-foreground">{t('groupsTruncated', { count: dropped })}</p>
       )}
+      {bulkCycles.length > 0 && <IssueBulkBar cycles={bulkCycles} />}
     </div>
   )
+
+  // 고를 대상이 없는 목록(워크스페이스 전체, 읽기 전용)에는 프로바이더를 씌우지 않는다 — 행이 체크박스 자리를
+  // 내주지 않고 예전 그대로 그려진다.
+  return bulkCycles.length > 0 ? <IssueSelectionProvider>{body}</IssueSelectionProvider> : body
 }
 
 // 한 그룹만 고르는 질의 — 목록 전체의 좁히기에 그 그룹의 값을 하나 더 얹는다. 미지정 버킷은 빈 문자열이다

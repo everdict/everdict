@@ -28,8 +28,18 @@ export const teamSchema = z.object({
   // 상위 팀 — 조직 표현일 뿐이다. 하위 팀도 자기 이슈를 소유하고 자기 식별자를 발번한다.
   parentId: z.string().optional(),
   isDefault: z.boolean(),
-  // 팀의 이터레이션 주기(주). 스케줄이 아니라 다음 사이클을 제안할 때 쓰는 기본 폭이다.
+  // 이 팀이 이터레이션으로 스스로를 재는가. 기본은 꺼짐 — 아무도 요청하지 않은 리듬은 아무도 읽지 않는
+  // 사이드바 한 줄이다. 켜는 순간부터 사이클 목록 읽기가 파이프라인을 세운다.
+  cyclesEnabled: z.boolean().default(false),
+  // 팀의 이터레이션 주기(주). 스케줄이 아니라 모든 창을 잘라내는 폭이다.
   cycleDurationWeeks: z.number().default(2),
+  // 사이클이 시작하는 요일(0=일 … 6=토). 없으면 팀마다 "처음 만든 날"이 그대로 굳는다.
+  cycleStartDay: z.number().default(1),
+  // 활성 사이클 앞에 미리 세워 두는 예정 사이클 수. 힌트가 아니라 실제로 만들어지는 수다.
+  upcomingCycleCount: z.number().default(2),
+  // 종료일이 지나면 스스로 닫히는가. 기본은 꺼짐 — "아무도 안 닫은 사이클은 잊힌 사이클"이라는 기존 규칙을
+  // 그대로 두고, 리듬이 잡힌 팀만 리니어식 동작을 고른다.
+  cycleAutoClose: z.boolean().default(false),
   // 들어오는 일이 워크플로 앞의 인박스에 먼저 앉는가. 기본은 꺼짐.
   triageEnabled: z.boolean().default(false),
   // 비공개 팀의 일은 로스터(그리고 워크스페이스 관리자)에게만 보인다. 권한 축이 아니라 가시성 필터다.

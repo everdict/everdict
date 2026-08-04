@@ -17,7 +17,11 @@ export interface NewTeamInput {
   name: string;
   description?: string;
   isDefault: boolean;
+  cyclesEnabled?: boolean;
   cycleDurationWeeks?: number;
+  cycleStartDay?: number;
+  upcomingCycleCount?: number;
+  cycleAutoClose?: boolean;
   triageEnabled?: boolean;
   isPrivate?: boolean;
   // The team this one sits under. Organisational only — a sub-team still mints its own identifiers and owns its
@@ -31,7 +35,11 @@ export interface NewTeamInput {
 export interface TeamEditInput {
   name?: string;
   description?: string | null;
+  cyclesEnabled?: boolean;
   cycleDurationWeeks?: number;
+  cycleStartDay?: number;
+  upcomingCycleCount?: number;
+  cycleAutoClose?: boolean;
   triageEnabled?: boolean;
   isPrivate?: boolean;
   // `null` detaches the team from its parent (it becomes top-level again).
@@ -75,9 +83,14 @@ export class Team {
       isDefault: input.isDefault,
       issueCounter: 0,
       cycleCounter: 0,
-      // The team's own pace and whether work queues before its workflow — both editable afterwards, both with
-      // the defaults a team that never thinks about either would want.
+      // The team's own pace and whether work queues before its workflow — all editable afterwards, all with the
+      // defaults a team that never thinks about any of them would want. Cycles start OFF: a rhythm nobody asked
+      // for is a sidebar row nobody reads.
+      cyclesEnabled: input.cyclesEnabled ?? false,
       cycleDurationWeeks: input.cycleDurationWeeks ?? 2,
+      cycleStartDay: input.cycleStartDay ?? 1,
+      upcomingCycleCount: input.upcomingCycleCount ?? 2,
+      cycleAutoClose: input.cycleAutoClose ?? false,
       triageEnabled: input.triageEnabled ?? false,
       isPrivate: input.isPrivate ?? false,
       history: [
@@ -139,9 +152,25 @@ export class Team {
         changed.push("description");
       }
     }
+    if (fields.cyclesEnabled !== undefined && fields.cyclesEnabled !== this.record.cyclesEnabled) {
+      patch.cyclesEnabled = fields.cyclesEnabled;
+      changed.push("cycles");
+    }
     if (fields.cycleDurationWeeks !== undefined && fields.cycleDurationWeeks !== this.record.cycleDurationWeeks) {
       patch.cycleDurationWeeks = fields.cycleDurationWeeks;
       changed.push("cycleDuration");
+    }
+    if (fields.cycleStartDay !== undefined && fields.cycleStartDay !== this.record.cycleStartDay) {
+      patch.cycleStartDay = fields.cycleStartDay;
+      changed.push("cycleStartDay");
+    }
+    if (fields.upcomingCycleCount !== undefined && fields.upcomingCycleCount !== this.record.upcomingCycleCount) {
+      patch.upcomingCycleCount = fields.upcomingCycleCount;
+      changed.push("upcomingCycles");
+    }
+    if (fields.cycleAutoClose !== undefined && fields.cycleAutoClose !== this.record.cycleAutoClose) {
+      patch.cycleAutoClose = fields.cycleAutoClose;
+      changed.push("cycleAutoClose");
     }
     if (fields.triageEnabled !== undefined && fields.triageEnabled !== this.record.triageEnabled) {
       patch.triageEnabled = fields.triageEnabled;

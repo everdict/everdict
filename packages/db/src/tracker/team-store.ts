@@ -128,6 +128,13 @@ interface TeamRow extends TrackerRow {
   is_private: boolean;
   is_default: boolean;
   issue_counter: number;
+  cycles_enabled: boolean;
+  cycle_duration_weeks: number;
+  cycle_start_day: number;
+  upcoming_cycle_count: number;
+  cycle_auto_close: boolean;
+  cycle_counter: number;
+  triage_enabled: boolean;
 }
 
 interface TeamMemberRow {
@@ -138,9 +145,15 @@ interface TeamMemberRow {
   added_at: string | Date;
 }
 
+// The team's cadence and counters ride here with everything else. They used to be absent from all three of
+// these — the columns existed (0110) but nothing selected or wrote them, so on Postgres a team's cycle
+// settings read back as the schema defaults and `cycle_counter` never left 0, which made its second cycle
+// collide with its first. Adding a team column means touching all three lists; a row read that skips one is
+// silent, because `TeamRecordSchema` will happily default the field it never received.
 const TEAM_COLUMNS =
-  "(id, tenant, key, name, description, parent_id, is_private, is_default, issue_counter, history, created_by, created_at, updated_at)";
-const TEAM_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12::timestamptz,$13::timestamptz)";
+  "(id, tenant, key, name, description, parent_id, is_private, is_default, issue_counter, cycles_enabled, cycle_duration_weeks, cycle_start_day, upcoming_cycle_count, cycle_auto_close, cycle_counter, triage_enabled, history, created_by, created_at, updated_at)";
+const TEAM_VALUES =
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19::timestamptz,$20::timestamptz)";
 
 function insertParams(record: TeamRecord): unknown[] {
   return [
@@ -153,6 +166,13 @@ function insertParams(record: TeamRecord): unknown[] {
     record.isPrivate,
     record.isDefault,
     record.issueCounter,
+    record.cyclesEnabled,
+    record.cycleDurationWeeks,
+    record.cycleStartDay,
+    record.upcomingCycleCount,
+    record.cycleAutoClose,
+    record.cycleCounter,
+    record.triageEnabled,
     JSON.stringify(record.history),
     record.createdBy,
     record.createdAt,
@@ -171,6 +191,13 @@ function rowToRecord(row: TeamRow): TeamRecord {
     isPrivate: row.is_private,
     isDefault: row.is_default,
     issueCounter: row.issue_counter,
+    cyclesEnabled: row.cycles_enabled,
+    cycleDurationWeeks: row.cycle_duration_weeks,
+    cycleStartDay: row.cycle_start_day,
+    upcomingCycleCount: row.upcoming_cycle_count,
+    cycleAutoClose: row.cycle_auto_close,
+    cycleCounter: row.cycle_counter,
+    triageEnabled: row.triage_enabled,
     history: trackerHistory(row.history),
     createdBy: row.created_by,
     createdAt: iso(row.created_at),
@@ -196,6 +223,13 @@ const PATCH_COLUMNS: Record<string, string> = {
   isPrivate: "is_private",
   isDefault: "is_default",
   issueCounter: "issue_counter",
+  cyclesEnabled: "cycles_enabled",
+  cycleDurationWeeks: "cycle_duration_weeks",
+  cycleStartDay: "cycle_start_day",
+  upcomingCycleCount: "upcoming_cycle_count",
+  cycleAutoClose: "cycle_auto_close",
+  cycleCounter: "cycle_counter",
+  triageEnabled: "triage_enabled",
   history: "history",
   updatedAt: "updated_at",
 };

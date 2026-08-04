@@ -26,6 +26,8 @@ export interface SidebarTeam {
   isDefault: boolean
   // 트리아지를 켠 팀만 인박스 줄을 갖는다.
   triageEnabled: boolean
+  // 사이클도 마찬가지 — 이터레이션으로 일하지 않는 팀에게는 사이클 줄이 없다.
+  cyclesEnabled: boolean
 }
 
 export interface SidebarProps {
@@ -297,12 +299,17 @@ function TeamsNav({
             labelKey: 'issues',
             page: 'issues',
           },
-          // 사이클은 팀의 것이다 — 팀 밖에 두면 "Cycle 3"이 누구의 세 번째인지 알 수 없다.
-          {
-            href: teamSectionHref(workspace, team.key, 'cycles'),
-            labelKey: 'cycles',
-            page: 'cycles',
-          },
+          // 사이클은 팀의 것이다 — 팀 밖에 두면 "Cycle 3"이 누구의 세 번째인지 알 수 없다. 그리고 그 팀이
+          // 켰을 때만 — 트리아지와 같은 이유로, 이터레이션으로 일하지 않는 팀에게 빈 화면 한 줄을 내밀지 않는다.
+          ...(team.cyclesEnabled
+            ? [
+                {
+                  href: teamSectionHref(workspace, team.key, 'cycles'),
+                  labelKey: 'cycles',
+                  page: 'cycles',
+                },
+              ]
+            : []),
           // 트리아지는 그 팀이 켰을 때만 — 큐를 요청하지 않은 팀에게 빈 인박스를 보여줄 이유가 없다.
           ...(team.triageEnabled
             ? [

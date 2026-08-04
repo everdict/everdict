@@ -131,13 +131,7 @@ export {
   type InitiativeTransition,
   type NewInitiativeInput,
 } from "./tracker/initiative.js";
-export {
-  initiativeProgress,
-  initiativeReadiness,
-  projectRollup,
-  type ProjectIssueCount,
-} from "./tracker/readiness.js";
-export { excerptOf, TRACKER_UPDATE_EXCERPT_LIMIT } from "./tracker/update-excerpt.js";
+export { initiativeReadiness, projectRollup } from "./tracker/readiness.js";
 export {
   addCalendarDays,
   alignToStartDay,
@@ -269,14 +263,6 @@ export { validateImageRef } from "./image/display-image.js";
 
 // trace — trace-derived usage summary (from @everdict/core; shapes stay in contracts)
 export { usageFromTrace } from "./trace/usage-from-trace.js";
-// trace model (otel-trace-model.md N6) — spans are the record, events are the projection
-export {
-  DEFAULT_SPAN_ATTR_KEYS,
-  SPANS_TO_EVENTS_VERSION,
-  type SpansToEventsOptions,
-  spansToEvents,
-} from "./trace/spans-to-events.js";
-export { type EventsToSpansContext, eventsToSpans } from "./trace/events-to-spans.js";
 export {
   trajectoryMetrics,
   trajectoryMetricValue,

@@ -31,6 +31,7 @@ export async function IssueListActions({
   workspace,
   teams,
   projects,
+  cycles = [],
   defaultTeamId,
   canReadIntegrations,
   team,
@@ -38,6 +39,8 @@ export async function IssueListActions({
   workspace: string
   teams: Promise<TeamWithSummary[]>
   projects: { id: string; name: string }[]
+  // 이 팀의 열린 이터레이션 — 접수하면서 바로 주기에 넣기 위해. 팀 스코프에서만 채워진다.
+  cycles?: { id: string; name: string }[]
   defaultTeamId?: string
   // 가져오기 픽커는 워크스페이스 App 의 저장소 목록을 읽어야 하고 그건 settings:read(관리자)다 — 끝까지
   // 진행할 수 있는 사람에게만 입구를 내민다.
@@ -107,6 +110,7 @@ export async function IssueListActions({
       <CreateIssueButton
         workspace={workspace}
         projects={projects}
+        cycles={cycles}
         teams={resolvedTeams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
         {...(initialTeamId !== undefined ? { defaultTeamId: initialTeamId } : {})}
       />

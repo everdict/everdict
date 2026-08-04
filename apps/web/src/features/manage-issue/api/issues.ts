@@ -36,6 +36,8 @@ export async function createIssueAction(input: {
   dueDate?: string
   // 하위 이슈로 접수 — 부모는 이 워크스페이스에 있어야 한다(제어 평면이 404 로 거절).
   parentId?: string
+  // 바로 이터레이션에 넣기. 자기 팀의 사이클이어야 한다(제어 평면이 거절).
+  cycleId?: string
   projectId?: string
   assignee?: string
   labelIds?: string[]
@@ -62,6 +64,9 @@ export async function updateIssueAction(
     assignee?: string | null
     projectId?: string | null
     priority?: IssuePriority
+    // 이터레이션에 넣고 빼기. 일을 주기로 끌어오는 것은 워크플로 전이가 아니라 계획 변경이라 평범한 편집이다
+    // (제어 평면도 그렇게 본다). 자기 팀의 사이클만 받는다 — 다른 팀 것은 거절된다.
+    cycleId?: string | null
     // null 은 비운다: 추정치 없음·기한 없음·부모에서 떼기.
     estimate?: number | null
     dueDate?: string | null
@@ -75,6 +80,34 @@ export async function updateIssueAction(
     return { ok: true, issue }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 여러 이슈를 한 이터레이션으로 옮기기 — 리니어의 일괄 편집. `null` 은 사이클에서 뺀다.
+//
+// 제어 평면에 일괄 엔드포인트를 새로 내지 않고 건별 편집을 펼친다: 이슈마다 "자기 팀의 사이클인가"를 서버가
+// 그대로 판정해야 하고(일괄 경로를 따로 두면 그 판정이 두 벌이 된다), 부분 실패가 정상적인 결과이기 때문이다.
+// 그래서 결과도 부분 실패를 그대로 말한다 — 열아홉 건이 옮겨졌는데 "실패"라고만 하면 다시 누르게 된다.
+export async function moveIssuesToCycleAction(
+  ids: string[],
+  cycleId: string | null
+): Promise<{ moved: number; failed: number; error?: string }> {
+  const ctx = await authContext()
+  const results = await Promise.all(
+    ids.map((id) =>
+      controlPlane
+        .updateIssue(ctx, id, { cycleId })
+        .then(() => ({ ok: true }) as const)
+        .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }) as const)
+    )
+  )
+  const failures = results.filter((r) => !r.ok)
+  if (results.some((r) => r.ok)) revalidateIssues()
+  const first = failures[0]
+  return {
+    moved: results.length - failures.length,
+    failed: failures.length,
+    ...(first !== undefined && !first.ok && first.error !== undefined ? { error: first.error } : {}),
   }
 }
 

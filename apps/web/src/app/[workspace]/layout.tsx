@@ -53,7 +53,14 @@ export default async function WorkspaceLayout({
   // 사이드바의 팀 섹션(Linear 의 "Your teams") — 내가 속한 팀만. 팀 목록 조회가 곧 불변식 복구 지점이라
   // (기본팀이 없으면 서버가 만든다) 새 워크스페이스도 첫 렌더에서 팀 하나를 갖는다. 셸이 팀 때문에 죽으면
   // 안 되므로 실패는 빈 목록으로 흡수한다 — 섹션이 사라질 뿐 나머지 내비게이션은 그대로다.
-  let teams: { id: string; key: string; name: string; isDefault: boolean; triageEnabled: boolean }[] = []
+  let teams: {
+    id: string
+    key: string
+    name: string
+    isDefault: boolean
+    triageEnabled: boolean
+    cyclesEnabled: boolean
+  }[] = []
   try {
     const pick = (team: {
       id: string
@@ -61,6 +68,7 @@ export default async function WorkspaceLayout({
       name: string
       isDefault: boolean
       triageEnabled: boolean
+      cyclesEnabled: boolean
     }) => ({
       id: team.id,
       key: team.key,
@@ -68,6 +76,8 @@ export default async function WorkspaceLayout({
       isDefault: team.isDefault,
       // 사이드바가 이 팀에 트리아지 인박스 줄을 낼지 결정한다.
       triageEnabled: team.triageEnabled,
+      // 사이클도 같은 규칙 — 이터레이션으로 일하지 않는 팀에게 빈 화면 한 줄을 내밀지 않는다.
+      cyclesEnabled: team.cyclesEnabled,
     })
     teams = teamsWithSummarySchema
       .parse(await controlPlane.listTeams(ctx, { mine: true }))

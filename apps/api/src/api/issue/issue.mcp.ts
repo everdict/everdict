@@ -50,6 +50,10 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         estimate: z.number().int().nonnegative().max(1000).optional().describe("points on the team's scale"),
         dueDate: z.string().optional().describe("YYYY-MM-DD — when this issue is due"),
         parentId: z.string().optional().describe("file it as a sub-issue of this issue (id or identifier)"),
+        cycleId: z
+          .string()
+          .optional()
+          .describe("file it straight into an iteration — one of the issue team's cycles (list_cycles?team=)"),
         projectId: z
           .string()
           .optional()
@@ -83,6 +87,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
             ...(a.estimate !== undefined ? { estimate: a.estimate } : {}),
             ...(a.dueDate !== undefined ? { dueDate: a.dueDate } : {}),
             ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
+            ...(a.cycleId !== undefined ? { cycleId: a.cycleId } : {}),
             ...(a.projectId !== undefined ? { projectId: a.projectId } : {}),
             ...(a.assignee !== undefined ? { assignee: a.assignee } : {}),
             ...(a.labelIds !== undefined ? { labelIds: a.labelIds } : {}),

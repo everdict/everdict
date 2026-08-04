@@ -86,14 +86,31 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
     "update_team",
     {
       description:
-        "Rename a team, edit its description, or re-parent it. The key cannot change — it is baked into every " +
-        "identifier the team has already minted. Pass parentId null to detach it back to the top level; " +
-        "nesting it under one of its own sub-teams is refused. Requires admin.",
+        "Rename a team, edit its description, re-parent it, or set how it paces itself. The key cannot change " +
+        "— it is baked into every identifier the team has already minted. Pass parentId null to detach it back " +
+        "to the top level; nesting it under one of its own sub-teams is refused. Turning cyclesEnabled on is " +
+        "what makes the team's iterations exist: the next read of its cycle list stands up the one it is in " +
+        "plus upcomingCycleCount more. Requires admin.",
       inputSchema: {
         id: z.string(),
         name: z.string().min(1).max(200).optional(),
         description: z.string().max(2000).nullable().optional(),
         parentId: z.string().nullable().optional(),
+        cyclesEnabled: z.boolean().optional().describe("whether this team paces itself in iterations at all"),
+        cycleDurationWeeks: z.number().int().min(1).max(12).optional().describe("how long one iteration runs"),
+        cycleStartDay: z.number().int().min(0).max(6).optional().describe("weekday a cycle starts — 0 = Sunday"),
+        upcomingCycleCount: z
+          .number()
+          .int()
+          .min(0)
+          .max(6)
+          .optional()
+          .describe("how many future iterations stay provisioned in front of the active one"),
+        cycleAutoClose: z
+          .boolean()
+          .optional()
+          .describe("close an iteration when its dates run out, carrying unfinished work into the next one"),
+        triageEnabled: z.boolean().optional().describe("queue incoming work in front of the team's workflow"),
       },
     },
     (a) =>
@@ -106,6 +123,12 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
               ...(a.name !== undefined ? { name: a.name } : {}),
               ...(a.description !== undefined ? { description: a.description } : {}),
               ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
+              ...(a.cyclesEnabled !== undefined ? { cyclesEnabled: a.cyclesEnabled } : {}),
+              ...(a.cycleDurationWeeks !== undefined ? { cycleDurationWeeks: a.cycleDurationWeeks } : {}),
+              ...(a.cycleStartDay !== undefined ? { cycleStartDay: a.cycleStartDay } : {}),
+              ...(a.upcomingCycleCount !== undefined ? { upcomingCycleCount: a.upcomingCycleCount } : {}),
+              ...(a.cycleAutoClose !== undefined ? { cycleAutoClose: a.cycleAutoClose } : {}),
+              ...(a.triageEnabled !== undefined ? { triageEnabled: a.triageEnabled } : {}),
             },
             actor,
           ),

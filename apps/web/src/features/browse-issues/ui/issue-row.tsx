@@ -13,6 +13,7 @@ import { fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 
 import type { IssueDirectories } from '../model/directories'
+import { ISSUE_ROW_ATTR, useIssueSelection } from '../model/issue-selection'
 import { IssueAssigneeControl } from './issue-assignee-control'
 
 // 목록 한 줄. 예전 행과 다른 점은 하나뿐이지만 그게 리니어의 핵심 속도다: 상태·우선순위·담당자를 **여기서**
@@ -33,15 +34,42 @@ export const IssueRow = memo(function IssueRow({
 }) {
   const t = useTranslations('issuesPage')
   const locale = useLocale()
+  // 고르기가 있는 목록(팀 스코프)에서만 컨텍스트가 있다 — 없으면 예전 그대로의 행이다.
+  const selection = useIssueSelection()
+  const picked = selection?.selected.has(issue.id) ?? false
+  const picking = selection?.selectionMode ?? false
 
   return (
     <div
+      {...{ [ISSUE_ROW_ATTR]: issue.id }}
       className={cn(
         'group flex items-center gap-2 rounded-lg border bg-card px-2.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated',
         // A regression is the one row that has to catch the eye across the whole list.
-        issue.status === 'regressed' && 'border-destructive/40 bg-destructive/5'
+        issue.status === 'regressed' && 'border-destructive/40 bg-destructive/5',
+        picked && 'border-[var(--color-link)]/50 bg-[var(--color-link)]/5'
       )}
     >
+      {/* 체크박스는 호버(또는 고르는 중)에만 드러난다 — 평소의 목록에 상시 체크박스 열이 서면 훑는 화면이
+          작업 화면처럼 무거워진다. 자리는 늘 차지하므로 드러날 때 행이 밀리지 않는다. */}
+      {selection && (
+        <label
+          className={cn(
+            'flex size-4 shrink-0 cursor-pointer items-center justify-center transition-opacity',
+            picking || picked ? 'opacity-100' : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100'
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={picked}
+            aria-label={t('selectRow', { identifier: issue.identifier })}
+            onChange={(e) =>
+              selection.toggle(issue.id, 'nativeEvent' in e ? (e.nativeEvent as MouseEvent).shiftKey : false)
+            }
+            onClick={(e) => e.stopPropagation()}
+            className="size-3.5 accent-[var(--color-link)]"
+          />
+        </label>
+      )}
       <IssueStatusControl
         id={issue.id}
         status={issue.status}
@@ -55,7 +83,17 @@ export const IssueRow = memo(function IssueRow({
         canWrite={canWrite}
         variant="icon"
       />
-      <Link href={issueHref(workspace, issue.identifier)} className="min-w-0 flex-1">
+      {/* 고르는 중에는 제목 클릭이 이슈를 열지 않고 토글한다 — 스무 건을 고르는 도중 한 번의 오클릭으로
+          화면이 통째로 바뀌면 고른 것이 전부 사라진다(스코어카드 목록과 같은 규칙). */}
+      <Link
+        href={issueHref(workspace, issue.identifier)}
+        className="min-w-0 flex-1"
+        onClick={(e) => {
+          if (!picking || !selection) return
+          e.preventDefault()
+          selection.toggle(issue.id, e.shiftKey)
+        }}
+      >
         <p className="flex min-w-0 items-baseline gap-2">
           {/* 사람이 부르는 이름 — `ENG-12`. 팀이 찍어 이슈에 저장된 값이라 팀을 다시 읽지 않는다. */}
           <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">

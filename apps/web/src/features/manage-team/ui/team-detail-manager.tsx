@@ -21,6 +21,9 @@ import {
   updateTeamAction,
 } from '../api/manage-team'
 
+// 사이클이 시작하는 요일. 0 = 일요일 … 6 = 토요일 — 제어 평면과 `Date#getUTCDay` 가 쓰는 것과 같은 번호다.
+const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const
+
 // Settings › Teams › {team} — 한 팀의 일반 설정 + 로스터. Linear 의 팀 설정과 같은 두 덩어리다.
 export function TeamDetailManager({
   team,
@@ -48,7 +51,11 @@ export function TeamDetailManager({
   const [name, setName] = useState(team.name)
   const [description, setDescription] = useState(team.description ?? '')
   const [parentId, setParentId] = useState(team.parentId ?? '')
+  const [cyclesOn, setCyclesOn] = useState(team.cyclesEnabled)
   const [cycleWeeks, setCycleWeeks] = useState(String(team.cycleDurationWeeks))
+  const [cycleStartDay, setCycleStartDay] = useState(String(team.cycleStartDay))
+  const [upcomingCycles, setUpcomingCycles] = useState(String(team.upcomingCycleCount))
+  const [autoClose, setAutoClose] = useState(team.cycleAutoClose)
   const [triage, setTriage] = useState(team.triageEnabled)
   const [isPrivate, setIsPrivate] = useState(team.isPrivate)
   const [addSubject, setAddSubject] = useState('')
@@ -71,7 +78,11 @@ export function TeamDetailManager({
     name.trim() !== team.name ||
     description.trim() !== (team.description ?? '') ||
     parentId !== (team.parentId ?? '') ||
+    cyclesOn !== team.cyclesEnabled ||
     cycleWeeks !== String(team.cycleDurationWeeks) ||
+    cycleStartDay !== String(team.cycleStartDay) ||
+    upcomingCycles !== String(team.upcomingCycleCount) ||
+    autoClose !== team.cycleAutoClose ||
     triage !== team.triageEnabled ||
     isPrivate !== team.isPrivate
   const onRoster = new Set(members.map((m) => m.subject))
@@ -116,18 +127,76 @@ export function TeamDetailManager({
               options={[{ value: '', label: t('parentNone') }, ...parents]}
             />
           </SettingsRow>
-          <SettingsRow label={t('cycleWeeksLabel')} htmlFor="team-cycle-weeks" hint={t('cycleWeeksHint')}>
-            <Input
-              id="team-cycle-weeks"
-              type="number"
-              min={1}
-              max={12}
-              value={cycleWeeks}
-              onChange={(e) => setCycleWeeks(e.target.value)}
+          {/* 사이클 — 켜는 순간부터 사이클 목록을 읽을 때마다 "지금 있는 하나 + 예정 N개"가 세워진다.
+              아래 세 줄은 그때 세워질 창의 모양이라, 켜지 않은 팀에게는 답할 것이 없는 질문이다. */}
+          <SettingsRow label={t('cyclesLabel')} hint={t('cyclesHint')}>
+            <Button
+              size="sm"
+              variant={cyclesOn ? 'primary' : 'secondary'}
               disabled={!canWrite}
-              className="w-24"
-            />
+              onClick={() => setCyclesOn((on) => !on)}
+            >
+              {cyclesOn ? t('cyclesOn') : t('cyclesOff')}
+            </Button>
           </SettingsRow>
+          {cyclesOn && (
+            <>
+              <SettingsRow label={t('cycleWeeksLabel')} htmlFor="team-cycle-weeks" hint={t('cycleWeeksHint')}>
+                <Input
+                  id="team-cycle-weeks"
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={cycleWeeks}
+                  onChange={(e) => setCycleWeeks(e.target.value)}
+                  disabled={!canWrite}
+                  className="w-24"
+                />
+              </SettingsRow>
+              <SettingsRow
+                label={t('cycleStartDayLabel')}
+                htmlFor="team-cycle-start-day"
+                hint={t('cycleStartDayHint')}
+              >
+                <Combobox
+                  id="team-cycle-start-day"
+                  value={cycleStartDay}
+                  onChange={setCycleStartDay}
+                  disabled={!canWrite}
+                  className="w-40"
+                  options={WEEKDAYS.map((day) => ({ value: String(day), label: t(`weekday.${day}`) }))}
+                />
+              </SettingsRow>
+              <SettingsRow
+                label={t('upcomingCyclesLabel')}
+                htmlFor="team-upcoming-cycles"
+                hint={t('upcomingCyclesHint')}
+              >
+                <Input
+                  id="team-upcoming-cycles"
+                  type="number"
+                  min={0}
+                  max={6}
+                  value={upcomingCycles}
+                  onChange={(e) => setUpcomingCycles(e.target.value)}
+                  disabled={!canWrite}
+                  className="w-24"
+                />
+              </SettingsRow>
+              <SettingsRow label={t('autoCloseLabel')} hint={t('autoCloseHint')}>
+                {/* 기본이 꺼짐인 것이 요점이다 — 아무도 안 닫은 사이클이 계속 보이는 것은 결함이 아니라
+                    신호다. 리듬이 잡힌 팀만 리니어식으로 "그냥 끝나게" 바꾼다. */}
+                <Button
+                  size="sm"
+                  variant={autoClose ? 'primary' : 'secondary'}
+                  disabled={!canWrite}
+                  onClick={() => setAutoClose((on) => !on)}
+                >
+                  {autoClose ? t('autoCloseOn') : t('autoCloseOff')}
+                </Button>
+              </SettingsRow>
+            </>
+          )}
           <SettingsRow label={t('triageLabel')} hint={t('triageHint')}>
             {/* 큐를 요청하지 않은 팀에게 빈 인박스를 보여주지 않도록, 켠 팀만 사이드바에 트리아지 줄을 갖는다. */}
             <Button
@@ -175,7 +244,11 @@ export function TeamDetailManager({
                   name: name.trim(),
                   description: description.trim() === '' ? null : description.trim(),
                   parentId: parentId === '' ? null : parentId,
+                  cyclesEnabled: cyclesOn,
                   cycleDurationWeeks: Number(cycleWeeks),
+                  cycleStartDay: Number(cycleStartDay),
+                  upcomingCycleCount: Number(upcomingCycles),
+                  cycleAutoClose: autoClose,
                   triageEnabled: triage,
                   isPrivate,
                 })

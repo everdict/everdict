@@ -4,6 +4,7 @@ export {
   declineTriageAction,
   deleteIssueAction,
   moveIssueAction,
+  moveIssuesToCycleAction,
   setIssueStatusAction,
   updateIssueAction,
   type IssueActionResult,
@@ -11,6 +12,7 @@ export {
 export { CreateIssueButton } from './ui/create-issue-button'
 export { EditIssueDialog } from './ui/edit-issue-dialog'
 export { IssueActions } from './ui/issue-actions'
+export { IssueCycleControl, type IssueCycleOption } from './ui/issue-cycle-control'
 export { IssueLabelControl } from './ui/issue-label-control'
 export { IssuePriorityControl } from './ui/issue-priority-control'
 export { IssueProjectControl, type IssueProjectOption } from './ui/issue-project-control'

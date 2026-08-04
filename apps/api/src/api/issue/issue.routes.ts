@@ -52,6 +52,7 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
           ...(body.estimate !== undefined ? { estimate: body.estimate } : {}),
           ...(body.dueDate !== undefined ? { dueDate: body.dueDate } : {}),
           ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
+          ...(body.cycleId !== undefined ? { cycleId: body.cycleId } : {}),
           ...(body.projectId !== undefined ? { projectId: body.projectId } : {}),
           ...(body.assignee !== undefined ? { assignee: body.assignee } : {}),
           ...(body.labelIds !== undefined ? { labelIds: body.labelIds } : {}),

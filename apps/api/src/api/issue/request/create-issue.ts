@@ -29,6 +29,10 @@ export const CreateIssueBodySchema = z.object({
   // File this as a sub-issue of another. Accepts the id OR the identifier (`ENG-12`), like every other issue
   // reference; the parent must exist in this workspace.
   parentId: z.string().min(1).max(200).optional(),
+  // File it straight into an iteration. The service already validated this on create (it may only be one of the
+  // owning team's cycles) — the body simply never offered it, so the only way to put a NEW issue in the current
+  // cycle was to create it and then edit it.
+  cycleId: z.string().min(1).max(200).optional(),
   projectId: z.string().min(1).max(200).optional(),
   assignee: z.string().min(1).max(200).optional(),
   // Registry ids (GET /issue-labels), not names — a label is a record now, so an issue points at one.

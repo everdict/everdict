@@ -506,11 +506,19 @@ export class Issue {
         changed.push("dueDate");
       }
     }
+    // The cycle move is the one edit whose VALUES go into the history, not just the field name. Everything else
+    // can be answered by reading the issue as it stands; "which iteration was this in on the 9th" cannot, and
+    // that is exactly what a burn-down replays. Without it an issue pulled in halfway through counts against the
+    // whole window, and every cycle graph quietly lies about the days before the work existed.
+    let cycleMove: { cycleFrom: string | null; cycleTo: string | null } | undefined;
     if (fields.cycleId !== undefined) {
       const next = fields.cycleId === null ? undefined : fields.cycleId;
       if (next !== this.record.cycleId) {
         patch.cycleId = next;
         changed.push("cycle");
+        // Both ends, always, with `null` for "no cycle" — an absent key would be indistinguishable from an
+        // edit made before this was recorded, which is the one case the replay has to treat differently.
+        cycleMove = { cycleFrom: this.record.cycleId ?? null, cycleTo: next ?? null };
       }
     }
     if (fields.milestoneId !== undefined) {
@@ -532,7 +540,12 @@ export class Issue {
       }
     }
     if (changed.length === 0) throw new BadRequestError("BAD_REQUEST", { issue: this.record.id }, "Nothing to update.");
-    patch.history = appendHistory(this.record.history, { at: now, by, event: "updated", detail: { changed } });
+    patch.history = appendHistory(this.record.history, {
+      at: now,
+      by,
+      event: "updated",
+      detail: { changed, ...(cycleMove !== undefined ? cycleMove : {}) },
+    });
     patch.updatedAt = now;
     return { patch, facts: [] };
   }

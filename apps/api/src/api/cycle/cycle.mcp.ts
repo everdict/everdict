@@ -56,7 +56,9 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
       description:
         "A workspace's cycles, newest iteration first. `team` narrows to one team's; `open: true` returns the " +
         "ones nobody has closed — which is the absence of an explicit close, NOT a passed end date, so a cycle " +
-        "somebody forgot still appears. Rows carry no progress; call get_cycle for that.",
+        "somebody forgot still appears. Naming ONE team also tops that team's pipeline up to its cadence (the " +
+        "iteration it is in plus upcomingCycleCount more) when it has cycles enabled. Rows carry no progress; " +
+        "call get_cycle for that.",
       inputSchema: {
         team: z.string().optional(),
         open: z.boolean().optional(),
@@ -84,7 +86,10 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
       description:
         "One cycle plus its derived state (upcoming | active | completed) and what it holds: issue counts and " +
         "POINTS (scope / completedScope from the estimates). Counts count issues, points count estimates — an " +
-        "unestimated issue is real work worth zero points. This is the read behind 'how is the sprint going'.",
+        "unestimated issue is real work worth zero points. `burndown` is one point per ELAPSED day, replayed " +
+        "from the issues' own status history; an issue that joined late counts for the whole window, so it " +
+        "reads as 'how did this work burn down', not 'how did the plan change'. This is the read behind 'how " +
+        "is the sprint going'.",
       inputSchema: { id: z.string() },
     },
     (a) =>

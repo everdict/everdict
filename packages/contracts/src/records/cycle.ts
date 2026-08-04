@@ -51,3 +51,31 @@ export const CycleProgressSchema = z.object({
   estimated: z.number().int().nonnegative(), // how many issues carry an estimate at all
 });
 export type CycleProgress = z.infer<typeof CycleProgressSchema>;
+
+// One day of the iteration, replayed from the issues' own history — the burn-down a team draws in a stand-up.
+// There is no daily snapshot table behind this and deliberately so: a stored series is a second truth to
+// reconcile, while replaying the history the issues already carry can only ever agree with them.
+//
+// TWO histories are replayed, which is what makes the curve honest. `status_changed` says when work was
+// finished; the cycle move recorded on an issue's `updated` entry says when it was in THIS iteration at all. An
+// issue pulled in halfway through therefore raises `scope` on the day it arrived instead of pretending it was
+// always committed — the distinction between "we did less than planned" and "we were given more".
+//
+// The one remaining limit is historical: issues moved before cycle moves were recorded carry no such entry, and
+// are counted from the start of the window (the honest fallback — they were in the cycle, we just cannot say
+// since when).
+export const CycleBurndownPointSchema = z.object({
+  date: CalendarDateSchema,
+  // Everything committed to the cycle as of that day — the line that RISES when work is added mid-iteration.
+  scope: z.number().int().nonnegative(),
+  // Points still open at the END of that day. Points, not issues, because that is what a team plans against —
+  // `remainingIssues` rides along for the teams that never estimate.
+  remaining: z.number().int().nonnegative(),
+  remainingIssues: z.number().int().nonnegative(),
+});
+export type CycleBurndownPoint = z.infer<typeof CycleBurndownPointSchema>;
+
+// Elapsed days only — the series stops at today rather than drawing a flat line into the future, which would
+// read as "nothing got done" for days that have not happened.
+export const CycleBurndownSchema = z.array(CycleBurndownPointSchema);
+export type CycleBurndown = z.infer<typeof CycleBurndownSchema>;

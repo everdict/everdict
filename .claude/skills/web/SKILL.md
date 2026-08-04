@@ -69,6 +69,17 @@ The team's SHORT address is the issue list itself (`/{workspace}/teams/ENG` rend
 **A list that has two addresses is ONE component**, not two pages: the fetch-and-render body lives in a widget
 (`widgets/{issue,project,cycle,scorecard}-list` — `<Resource>ListView`, a server component taking an optional
 `team`), and both route files are thin adapters. Duplicating a list to scope it is how the two copies drift.
+The rule holds when a screen EMBEDS the list too: the cycle board (`widgets/cycle-board`) draws its own header,
+progress and burn-down and then renders `IssueListView` with a `cycle` scope — the widget suppresses its own
+header, pins the facet and re-bases its filter links, rather than a second issue list growing under `cycles/`.
+
+**A section's landing answers the question people came with.** `…/teams/ENG/cycles` opens the iteration the team
+is IN (then the next, then the most recent) — not a list of iterations, because everyone who clicks "Cycles" is
+asking about this fortnight. The index gets its own address (`…/cycles/all`) and a specific one is addressed by
+the number people cite (`…/cycles/7`, built by `entities/cycle/lib/cycle-view.ts` — one href builder, same rule
+the team slug follows). A team-owned section that the team has switched OFF (`cyclesEnabled`, `triageEnabled`)
+shows neither a sidebar row nor a scope-bar tab: an entry whose only content is "we don't use this" is worse
+than no entry. The one exception is the tab for the screen you are standing on.
 Gating on those screens is `canInTeam(principal, action, team?.id)` (`shared/auth/can.ts`, mirroring the domain's
 `canReachTeam`): a create button on a team you are not on is a guaranteed 403, and a link into its assets is a
 guaranteed 403. **Reads are NOT gated on the roster** — a workspace whose teams cannot see each other's work has
@@ -274,7 +285,14 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   priority) are still stood up — a board needs somewhere to drop a card — while open vocabularies (assignee,
   project, cycle) show only groups that hold issues, so a 200-member workspace does not get 200 empty columns.
   Rows carry the mutations inline (status · priority · assignee dropdowns), which is why a row is NOT a
-  `<Link>`: the title zone is the link and the controls are its siblings. Beyond a group cap the screen SAYS how
+  `<Link>`: the title zone is the link and the controls are its siblings. **Bulk editing is the same grammar as
+  the scorecard list** (`features/browse-issues` `IssueSelectionProvider` + `IssueBulkBar`): hover-revealed
+  checkbox, shift-click range, click-toggles-instead-of-opening while selecting, Esc clears, action bar portaled
+  to `<body>` and measured against the enclosing `<main>`. Two deltas from the scorecard list, both deliberate —
+  the selection is NOT persisted (the whole view lives in the URL, so one back navigation makes a restored
+  selection unanswerable), and shift-ranges resolve against **DOM order** (`[data-issue-id]`) because groups
+  append rows client-side and the server's ordering can no longer describe what is on screen. The provider is
+  only mounted where an action exists (a team scope); elsewhere rows render exactly as before. Beyond a group cap the screen SAYS how
   many groups it did not stand up (`groupsTruncated`) — silent truncation reads as "that's all of them".
 - **State toggles** = a status icon + click dropdown (`shared/ui/dropdown-menu.tsx`; e.g.
   `widgets/notification-bell/`), not text links.

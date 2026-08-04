@@ -26,6 +26,19 @@ export const UpdateTeamBodySchema = z.object({
   // null detaches the team back to the top level. Re-parenting under one of its own sub-teams is refused.
   parentId: z.string().min(1).max(200).nullable().optional(),
   isPrivate: z.boolean().optional(),
+  // The team's own pace (records/cycle.ts). These were editable on the record and on the settings screen long
+  // before they were accepted here, so the form saved and nothing changed — a cadence the API drops is a
+  // setting that does not exist. Bounds mirror the record's.
+  cyclesEnabled: z.boolean().optional(),
+  cycleDurationWeeks: z.number().int().min(1).max(12).optional(),
+  cycleStartDay: z.number().int().min(0).max(6).optional(),
+  upcomingCycleCount: z.number().int().min(0).max(6).optional(),
+  // Close an iteration when its dates run out, carrying what is left forward. OFF by default: everdict's rule
+  // is that a cycle nobody closed is a cycle somebody FORGOT and every list keeps showing it — a team that has
+  // settled into a rhythm opts into Linear's behaviour instead.
+  cycleAutoClose: z.boolean().optional(),
+  // Whether incoming work queues in front of the team's workflow. Same story as the cadence above.
+  triageEnabled: z.boolean().optional(),
 });
 
 export const AddTeamMemberBodySchema = z.object({

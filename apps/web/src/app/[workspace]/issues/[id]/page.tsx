@@ -1,14 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import {
-  CalendarClock,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  Github,
-  Link2,
-} from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Github, Link2 } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
@@ -18,6 +10,7 @@ import { IssueLinks } from '@/features/issue-links'
 import {
   CreateIssueButton,
   IssueActions,
+  IssueCycleControl,
   IssueLabelControl,
   IssuePriorityControl,
   IssueProjectControl,
@@ -25,7 +18,14 @@ import {
   IssueTeamControl,
   IssueTriageActions,
 } from '@/features/manage-issue'
-import { cycleLabel, cycleSchema, type Cycle } from '@/entities/cycle'
+import {
+  cycleHref,
+  cycleLabel,
+  cyclesSchema,
+  cycleStateOf,
+  todayIso,
+  type Cycle,
+} from '@/entities/cycle'
 import {
   isOpenIssueStatus,
   ISSUE_CAPABILITY_LINK_TYPES,
@@ -175,7 +175,7 @@ export default async function IssueDetailPage({
     siblings,
     labels,
     children,
-    cycle,
+    cycles,
     parent,
   ] = await Promise.all([
     controlPlane
@@ -220,12 +220,12 @@ export default async function IssueDetailPage({
       .listIssues(ctx, { parent: current.id })
       .then((r) => issuePageSchema.parse(r).items)
       .catch((): IssueSummary[] => []),
-    current.cycleId === undefined
-      ? Promise.resolve(undefined)
-      : controlPlane
-          .getCycle(ctx, current.cycleId)
-          .then((r) => cycleSchema.parse(r))
-          .catch((): Cycle | undefined => undefined),
+    // 이 이슈가 들어갈 수 있는 이터레이션 — 자기 팀의 것뿐이다(제어 평면이 거절한다). 이미 붙어 있는
+    // 사이클도 이 목록 안에 있으므로 읽기는 하나면 된다. 사이클을 쓰지 않는 팀에서는 빈 목록이 온다.
+    controlPlane
+      .listCycles(ctx, { team: current.teamId })
+      .then((r) => cyclesSchema.parse(r))
+      .catch((): Cycle[] => []),
     current.parentId === undefined
       ? Promise.resolve(undefined)
       : controlPlane
@@ -244,6 +244,21 @@ export default async function IssueDetailPage({
     current.status !== 'cancelled' &&
     isPastDue(current.dueDate, timeZone)
   const project = current.projectId ? projects.find((p) => p.id === current.projectId) : undefined
+  // 이터레이션. 주소는 팀 아래의 번호(`…/teams/ENG/cycles/7`)이고, 팀을 못 읽었을 때만 예전 주소로 보낸다
+  // (그 주소가 팀을 찾아 정식 주소로 넘겨 준다) — 링크가 죽는 경우는 만들지 않는다.
+  const today = todayIso()
+  const cycleHrefOf = (c: Cycle): string =>
+    team ? cycleHref(workspace, team.key, c.number) : `/${workspace}/cycles/${encodeURIComponent(c.id)}`
+  const cycleOptionOf = (c: Cycle) => ({
+    id: c.id,
+    label: cycleLabel(c),
+    state: cycleStateOf(c, today),
+    href: cycleHrefOf(c),
+  })
+  const cycle = current.cycleId ? cycles.find((c) => c.id === current.cycleId) : undefined
+  // 고를 수 있는 것은 열려 있는 이터레이션뿐이다 — 닫힌 주기는 계획이 아니라 기록이고, 거기에 새 일을 넣는 것은
+  // 어느 팀도 하려는 일이 아니다.
+  const cycleOptions = cycles.filter((c) => c.completedAt === undefined).map(cycleOptionOf)
   // 이력·담당자·해결 기록이 같은 이름·같은 얼굴을 쓰도록 subject → 프로필을 한 번만 만든다.
   const actors = memberDirectoryOf(members)
   const displayName = (subject: string): string => memberNameOf(actors, subject)
@@ -423,15 +438,17 @@ export default async function IssueDetailPage({
                 />
               </PropertyRow>
             )}
-            {cycle && (
+            {/* 사이클도 이 열에서 바로 넣고 뺀다 — 예전에는 붙어 있을 때만 링크 한 줄로 보였고, "이 이슈를
+                이번 주기에 넣자"에 답할 자리가 화면 어디에도 없었다(사이클을 만들 수는 있는데 이슈를 넣을
+                길이 없었다). 사이클을 쓰지 않는 팀에서는 빈 행을 내지 않는다(빈 섹션 숨김). */}
+            {(cycle !== undefined || (canWrite && cycleOptions.length > 0)) && (
               <PropertyRow label={t('fieldCycle')}>
-                <Link
-                  href={`/${workspace}/cycles/${encodeURIComponent(cycle.id)}`}
-                  className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
-                >
-                  <CalendarClock className="size-3.5 shrink-0 text-faint" />
-                  <span className="truncate">{cycleLabel(cycle)}</span>
-                </Link>
+                <IssueCycleControl
+                  id={current.id}
+                  cycle={cycle ? cycleOptionOf(cycle) : undefined}
+                  cycles={cycleOptions}
+                  canWrite={canWrite}
+                />
               </PropertyRow>
             )}
             {current.estimate !== undefined && (

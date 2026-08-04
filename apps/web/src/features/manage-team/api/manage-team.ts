@@ -48,7 +48,12 @@ export async function updateTeamAction(
     name?: string
     description?: string | null
     parentId?: string | null
+    // 팀이 스스로를 재는 리듬. 켜는 순간부터 사이클 목록 읽기가 파이프라인을 세운다.
+    cyclesEnabled?: boolean
     cycleDurationWeeks?: number
+    cycleStartDay?: number
+    upcomingCycleCount?: number
+    cycleAutoClose?: boolean
     triageEnabled?: boolean
     isPrivate?: boolean
   }

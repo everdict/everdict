@@ -36,9 +36,29 @@ export const TeamRecordSchema = z.object({
   // where an issue lands when the caller names no team, which is what keeps `teamId` required on an issue
   // without making every caller think about teams.
   isDefault: z.boolean(),
+  // Whether this team paces itself in iterations at all. OFF by default, the same reasoning triage has: a team
+  // that never asked for a fortnightly rhythm should not find one in its sidebar. Turning it on is what makes
+  // the cycle pipeline exist — every field below is meaningless until it is true.
+  cyclesEnabled: z.boolean().default(false),
   // How long this team's iterations run, in weeks. Not a schedule — nothing creates cycles on a timer — but
-  // the default span the next cycle is proposed with, so planning one is a click instead of two dates.
+  // the span every proposed and provisioned window is cut to.
   cycleDurationWeeks: z.number().int().min(1).max(12).default(2),
+  // The weekday a cycle starts on, 0 = Sunday … 6 = Saturday (Monday by default). A team's first cycle would
+  // otherwise start on whichever day somebody happened to plan it, and every cycle after it would inherit that
+  // accident — two teams on the same fortnight would be offset by a Wednesday forever.
+  cycleStartDay: z.number().int().min(0).max(6).default(1),
+  // How many FUTURE iterations are kept standing in front of the active one. Not a hint: the list read
+  // provisions up to this many, which is what lets a member drop next fortnight's work into a cycle that
+  // already exists instead of planning it first. 0 turns provisioning off without turning cycles off.
+  upcomingCycleCount: z.number().int().min(0).max(6).default(2),
+  // Close an iteration when its end date passes, carrying whatever is still open into the next standing one.
+  //
+  // OFF by default, and that default is the deliberate half: everdict's rule is that a cycle whose dates have
+  // passed but which nobody closed is a cycle somebody FORGOT, and every list keeps showing it rather than
+  // tidying it away. That is the right default for a team still learning its own pace. A team that has settled
+  // into a rhythm wants the opposite — Linear's behaviour, where the iteration simply ends — so this is a
+  // choice the team makes rather than one the product makes for it.
+  cycleAutoClose: z.boolean().default(false),
   // A private team's work is visible only to its roster (and to workspace admins — see below). This is a
   // VISIBILITY filter, never a second authorization axis: the trust zone stays `workspace = tenant`, roles stay
   // the only thing `can()` reads, and every private-team read that is refused answers 404 rather than 403, the

@@ -1,4 +1,4 @@
-import { CycleProgressSchema, CycleRecordSchema, CycleStateSchema } from "@everdict/contracts";
+import { CycleBurndownSchema, CycleProgressSchema, CycleRecordSchema, CycleStateSchema } from "@everdict/contracts";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -8,7 +8,11 @@ import { CompleteCycleBodySchema, CreateCycleBodySchema, UpdateCycleBodySchema }
 // AuthZ: read = issues:read (viewer+), write = issues:write (member+); delete additionally creator-or-admin.
 // Facts cycle.created / cycle.completed feed the event log; the latter is trigger-matchable and carries
 // `carriedOver`, which is the number a retro asks for.
-const CycleDetailSchema = CycleRecordSchema.extend({ state: CycleStateSchema, progress: CycleProgressSchema });
+const CycleDetailSchema = CycleRecordSchema.extend({
+  state: CycleStateSchema,
+  progress: CycleProgressSchema,
+  burndown: CycleBurndownSchema,
+});
 
 export const cycleDocs: Record<"create" | "list" | "get" | "update" | "complete" | "delete", FastifySchema> = {
   create: {
@@ -31,7 +35,9 @@ export const cycleDocs: Record<"create" | "list" | "get" | "update" | "complete"
       "A workspace's cycles, newest iteration first. Filter by team, or by `open=true` for the ones nobody has " +
       "closed — 'open' is the absence of an explicit close, never a passed end date, so a cycle somebody forgot " +
       "to close still shows up. Rows carry no progress: that fans out over the cycle's issues, so call " +
-      "GET /cycles/:id. Requires issues:read.",
+      "GET /cycles/:id. Asking for ONE team's cycles also tops that team's pipeline up to its cadence (the " +
+      "iteration it is in plus `upcomingCycleCount` more) when the team has cycles enabled — provisioning " +
+      "happens on this read, not on a timer. Requires issues:read.",
     tags: ["cycle"],
     querystring: toJsonSchema(
       z.object({
@@ -46,15 +52,18 @@ export const cycleDocs: Record<"create" | "list" | "get" | "update" | "complete"
     },
   },
   get: {
-    summary: "Get a cycle with its progress",
+    summary: "Get a cycle with its progress and burn-down",
     description:
       "One cycle plus its derived state (upcoming | active | completed) and what it holds: issue counts and " +
       "POINTS (`scope` / `completedScope` from the estimates). The counts count issues and the points count " +
       "estimates — an unestimated issue is real work worth zero points, and counting it as one would inflate " +
-      "every burn-down. Requires issues:read.",
+      "every burn-down. `burndown` is that curve: one point per ELAPSED day of the window, replayed from the " +
+      "issues' own status history rather than a daily snapshot, so it can only ever agree with them. An issue " +
+      "that joined the cycle late is counted for the whole window (nothing records when it joined), so the " +
+      "curve answers 'how did this work burn down', not 'how did the plan change'. Requires issues:read.",
     tags: ["cycle"],
     response: {
-      200: { description: "The cycle, its state and its progress", ...toJsonSchema(CycleDetailSchema) },
+      200: { description: "The cycle, its state, its progress and its burn-down", ...toJsonSchema(CycleDetailSchema) },
       ...errorResponses(401, 403, 404),
     },
   },

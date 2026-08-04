@@ -1,4 +1,5 @@
 import type {
+  CycleBurndown as WireCycleBurndown,
   CycleProgress as WireCycleProgress,
   CycleRecord as WireCycleRecord,
   CycleState as WireCycleState,
@@ -44,9 +45,22 @@ export const cycleProgressSchema = z.object({
   estimated: z.number(),
 })
 
+// 번다운 — 저장된 시계열이 아니라 이슈들의 이력을 되감아 만든 곡선이라 이슈와 어긋날 수가 없다. 두 가지
+// 이력을 되감는다: 상태 변경(언제 끝났나)과 사이클 이동(언제 이 주기에 들어왔나). 그래서 중간에 끌어온 일은
+// 도착한 날 스코프를 올린다 — "계획보다 덜 했다"와 "일이 더 들어왔다"는 다른 이야기다.
+// 지나간 날만 그린다 — 오지 않은 날을 평평하게 이으면 "아무것도 안 했다"로 읽힌다.
+export const cycleBurndownPointSchema = z.object({
+  date: calendarDateSchema,
+  scope: z.number(),
+  remaining: z.number(),
+  remainingIssues: z.number(),
+})
+export const cycleBurndownSchema = z.array(cycleBurndownPointSchema)
+
 export const cycleDetailSchema = cycleSchema.extend({
   state: cycleStateSchema,
   progress: cycleProgressSchema,
+  burndown: cycleBurndownSchema.default([]),
 })
 
 // 드리프트 가드 — 로컬 스키마와 와이어 계약이 상호 대입 가능해야 한다.
@@ -58,13 +72,25 @@ type _stateFwd = AssertAssignable<z.infer<typeof cycleStateSchema>, WireCycleSta
 type _stateBack = AssertAssignable<WireCycleState, z.infer<typeof cycleStateSchema>>
 type _progressFwd = AssertAssignable<z.infer<typeof cycleProgressSchema>, WireCycleProgress>
 type _progressBack = AssertAssignable<WireCycleProgress, z.infer<typeof cycleProgressSchema>>
+type _burndownFwd = AssertAssignable<z.infer<typeof cycleBurndownSchema>, WireCycleBurndown>
+type _burndownBack = AssertAssignable<WireCycleBurndown, z.infer<typeof cycleBurndownSchema>>
 
 export type Cycle = WireCycleRecord
 export type CycleState = WireCycleState
 export type CycleProgress = WireCycleProgress
+export type CycleBurndown = WireCycleBurndown
 export type CycleDetail = z.infer<typeof cycleDetailSchema>
 
-export type __cycleDriftGuard = [_cycleFwd, _cycleBack, _stateFwd, _stateBack, _progressFwd, _progressBack]
+export type __cycleDriftGuard = [
+  _cycleFwd,
+  _cycleBack,
+  _stateFwd,
+  _stateBack,
+  _progressFwd,
+  _progressBack,
+  _burndownFwd,
+  _burndownBack,
+]
 
 // 사이클을 부르는 이름 — 대부분은 번호가 전부이고, 이름은 주제를 실은 것만 갖는다.
 export function cycleLabel(cycle: { number: number; name?: string }): string {
