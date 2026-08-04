@@ -9,6 +9,7 @@ import {
   type TraceSource,
   type TraceSourceConfig,
   UpstreamError,
+  stamp,
 } from "@everdict/contracts";
 import { classifyFailure } from "@everdict/domain";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
@@ -98,7 +99,7 @@ export async function collectDeferredTrace(
       gotEvents = events.length > 0;
       if (!gotEvents) {
         trace.push({
-          t: Date.now(),
+          ...stamp(Date.now),
           kind: "error",
           message: `collected 0 traces (${COLLECT_ATTEMPTS} attempts, ${ref.kind} ${ref.endpoint}) — check the correlation key (${ref.runId}) / flush latency`,
         });
@@ -106,11 +107,11 @@ export async function collectDeferredTrace(
       trace.push(...events);
     } catch (err) {
       pullFailed = `trace collection failed (${ref.kind} ${ref.endpoint}): ${err instanceof Error ? err.message : String(err)}`;
-      trace.push({ t: Date.now(), kind: "error", message: pullFailed });
+      trace.push({ ...stamp(Date.now), kind: "error", message: pullFailed });
     }
   } else {
     pullFailed = "cannot collect traces — buildTraceSource not configured";
-    trace.push({ t: Date.now(), kind: "error", message: pullFailed });
+    trace.push({ ...stamp(Date.now), kind: "error", message: pullFailed });
   }
 
   // Collection is still incomplete → keep the case classified and DON'T score deferred observations against a

@@ -157,22 +157,27 @@ describe("spansToTraceEvents — the span TREE survives normalization", () => {
       },
     ];
     const events = spansToTraceEvents(spans);
-    // The structural span keeps its own identity + length.
+    // The structural span keeps its own identity + length. The id is REWRITTEN to the W3C shape the record
+    // requires (a platform's "a" is not an OTLP span id) — derived, so the same input always yields the same
+    // id and the parentage below still resolves.
     expect(events[0]).toMatchObject({
       kind: "span",
       name: "agent",
-      spanId: "a",
       durationMs: 2_000,
       at: new Date(1_000).toISOString(),
     });
+    expect(events[0]?.spanId).toMatch(/^[0-9a-f]{16}$/);
     // The tool call hangs under it, and its RESULT hangs under the call — the tree, not a sequence.
-    expect(events[1]).toMatchObject({ kind: "tool_call", spanId: "b", parentId: "a", durationMs: 500 });
-    expect(events[2]).toMatchObject({ kind: "tool_result", parentId: "b" });
+    expect(events[1]).toMatchObject({ kind: "tool_call", parentId: events[0]?.spanId, durationMs: 500 });
+    expect(events[2]).toMatchObject({ kind: "tool_result", parentId: events[1]?.spanId });
   });
 
-  it("a span with no platform id still gets a stable node id (name-index), so a partial tree draws", () => {
-    const events = spansToTraceEvents([{ name: "chain", startMs: 0, endMs: 10, attrs: {} }]);
-    expect(events[0]).toMatchObject({ kind: "span", spanId: "chain-0" });
+  it("a span with no platform id still gets a stable node id, so a partial tree draws", () => {
+    const once = spansToTraceEvents([{ name: "chain", startMs: 0, endMs: 10, attrs: {} }]);
+    const again = spansToTraceEvents([{ name: "chain", startMs: 0, endMs: 10, attrs: {} }]);
+    expect(once[0]).toMatchObject({ kind: "span" });
+    expect(once[0]?.spanId).toMatch(/^[0-9a-f]{16}$/);
+    expect(again[0]?.spanId).toBe(once[0]?.spanId); // stable across calls — a node id you can point at
   });
 });
 

@@ -120,6 +120,14 @@ export interface TrajectorySpans {
 export function trajectorySpans(placed: PlacedEvent[], axisStart?: number): TrajectorySpans {
   const eventOf = new Map<string, PlacedEvent>()
   const nodes: TraceSpanNode[] = []
+  // The unanchored fallback's own zero. `t` is the EMITTER's scalar — a harness stamping wall-clock puts an
+  // epoch in it, and using that raw made every bar pile up at the far right of a 57-year axis. Rebasing on the
+  // smallest one restores what the fallback always meant: positions relative to the first step.
+  const fallbackBase = placed.reduce(
+    (min, item) =>
+      item.startMs === undefined && Number.isFinite(item.event.t) ? Math.min(min, item.event.t) : min,
+    Number.POSITIVE_INFINITY
+  )
   // Two events may claim the same node id only if an emitter repeats a span id; keep the first and let the
   // rest stand on their own key, so the tree never silently loses a step.
   const claimed = new Set<string>()
@@ -128,7 +136,11 @@ export function trajectorySpans(placed: PlacedEvent[], axisStart?: number): Traj
     claimed.add(id)
     const event = item.event
     const startOffsetMs =
-      item.startMs !== undefined && axisStart !== undefined ? item.startMs - axisStart : event.t
+      item.startMs !== undefined && axisStart !== undefined
+        ? item.startMs - axisStart
+        : Number.isFinite(fallbackBase)
+          ? event.t - fallbackBase
+          : event.t
     const cost = event.kind === 'llm_call' ? event.cost : undefined
     nodes.push({
       id,

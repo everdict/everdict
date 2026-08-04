@@ -46,11 +46,11 @@ function fakeTrajectories() {
         runId: input.runId,
         tenant: input.tenant,
         source: input.source,
-        eventCount: input.events.length,
+        eventCount: input.events?.length ?? input.spans?.length ?? 0,
         sealedAt: "t",
       };
       const created = !sealed.has(input.runId);
-      if (created) sealed.set(input.runId, { meta, events: input.events });
+      if (created) sealed.set(input.runId, { meta, events: input.events ?? [] });
       const kept = sealed.get(input.runId);
       if (kept === undefined) throw new Error("unreachable");
       return { ...kept.meta, created };
@@ -66,6 +66,7 @@ function fakeTrajectories() {
             source: hit.meta.source,
             eventCount: hit.events.length,
             sealedAt: hit.meta.sealedAt,
+            format: "events" as const,
             events: hit.events,
           },
         ],

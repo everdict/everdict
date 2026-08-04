@@ -1,13 +1,17 @@
 import {
   type BrowsableTraceSource,
+  EVERDICT_SEMCONV,
   type FetchedTrace,
   type ListTracesOptions,
+  OTEL_SERVICE_NAME_ATTR,
   type SpanAttrMapping,
   type TraceEvent,
   type TraceInspectResult,
   type TraceListPage,
+  type TraceSpan,
   type TraceSummary,
   UpstreamError,
+  traceIdForRun,
 } from "@everdict/contracts";
 import { extractEvidence } from "./evidence-resolve.js";
 import {
@@ -50,21 +54,12 @@ function nanoToMs(v: string | number | undefined): number {
   return Math.floor(n / 1e6);
 }
 
-// The published everdict.* semantic conventions (native-observability N0): instrumentation is standard OTel;
-// these attribute keys are the CONTRACT — everdict.run_id correlates spans to the run ledger (resource-level
-// via the injected OTEL_RESOURCE_ATTRIBUTES, span-level override wins), the rest carry execution identity.
-// Scores/verdicts stay platform-layer records referencing trace ids — never span data.
-export const EVERDICT_SEMCONV = {
-  runId: "everdict.run_id",
-  kind: "everdict.kind",
-  caseId: "everdict.case_id",
-  groupId: "everdict.group_id",
-} as const;
-
-// OTel's OWN identity attribute for the emitting process. It is the plane key of a multi-service
-// trajectory (maintainer's decision: the standard attribute, never an everdict-specific one — a service
-// joins a run's trajectory by setting OTEL_SERVICE_NAME and the run-id correlation, nothing else).
-export const OTEL_SERVICE_NAME_ATTR = "service.name";
+// The published everdict.* semantic conventions (native-observability N0) and OTel's own service identity.
+// Both now live in `@everdict/contracts/execution/semconv` — the vocabulary is a CONTRACT, and it had
+// outgrown this adapter the moment our own emitters started speaking it (otel-trace-model.md N6). Re-exported
+// here so every existing importer (and the `@everdict/otel` drift guard, which compares the user-facing copy
+// against this module) keeps its import path.
+export { EVERDICT_SEMCONV, OTEL_SERVICE_NAME_ATTR };
 
 // One run's spans split by the SERVICE that emitted them — the door's plane grouping. `undefined` keys the
 // spans that declare no service.name: they stay the run's own record instead of inventing a service for
@@ -115,6 +110,164 @@ export function groupOtlpExportByRun(body: unknown): { groups: Map<string, Span[
     }
   }
   return { groups, missingRunId };
+}
+
+// --- The DOOR's parser: OTLP → the RECORD (otel-trace-model.md N6) ------------------------------------
+//
+// `parseOtlpSpans` above exists for the PULL adapters, which normalize a foreign platform's dialect into the
+// flat intermediate their SpanAttrMapping machinery works on. It drops what a pull never needed: the trace
+// id, the span kind, the status, the span events, and the resource/scope separation.
+//
+// Our own door needs all of it. A tenant sends us a valid OTLP trace; storing a lossy flattening of it and
+// then guessing the tree back in the viewer was the defect N6 removes. So the door parses ONCE, into
+// `TraceSpan`, and what we hold is what we were sent.
+
+// OTLP JSON carries these as fields the pull path never reads.
+interface OtlpRichSpan extends OtlpSpan {
+  traceId?: string;
+  kind?: number | string;
+  status?: { code?: number | string; message?: string };
+  events?: Array<{ timeUnixNano?: string | number; name?: string; attributes?: OtlpAttr[] }>;
+  links?: Array<{ traceId?: string; spanId?: string; attributes?: OtlpAttr[] }>;
+}
+
+// OTel SpanKind is an enum over the wire (0 UNSPECIFIED … 5 CONSUMER); some exporters send the name.
+const SPAN_KINDS = ["internal", "internal", "server", "client", "producer", "consumer"] as const;
+function spanKindOf(value: number | string | undefined): TraceSpan["kind"] {
+  if (typeof value === "string") {
+    const name = value.toLowerCase().replace("span_kind_", "");
+    return (SPAN_KINDS as readonly string[]).includes(name) ? (name as TraceSpan["kind"]) : "internal";
+  }
+  return SPAN_KINDS[typeof value === "number" ? value : 0] ?? "internal";
+}
+
+function statusOf(status: OtlpRichSpan["status"]): TraceSpan["status"] | undefined {
+  if (!status) return undefined;
+  const raw = status.code;
+  const code =
+    raw === 2 || raw === "STATUS_CODE_ERROR" ? "error" : raw === 1 || raw === "STATUS_CODE_OK" ? "ok" : "unset";
+  return { code, ...(status.message ? { message: status.message } : {}) };
+}
+
+// A sender's id, kept when it is already W3C-shaped and DERIVED when it is not. Deriving (rather than
+// minting) keeps a parent link intact: the same input always yields the same id, so a tree whose ids we had
+// to rewrite is still the tree we were sent.
+function hexId(value: string | undefined, width: 16 | 32): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  const lower = value.toLowerCase();
+  if (new RegExp(`^[0-9a-f]{${width}}$`).test(lower)) return lower;
+  const derived = traceIdForRun(value);
+  return width === 32 ? derived : derived.slice(0, 16);
+}
+
+export function parseOtlpTraceSpans(
+  spans: OtlpRichSpan[],
+  ctx: { runId: string; resource?: Record<string, unknown>; scope?: { name: string; version?: string } },
+): TraceSpan[] {
+  const out: TraceSpan[] = [];
+  for (const s of spans) {
+    const attributes: Record<string, unknown> = {};
+    for (const at of s.attributes ?? []) attributes[at.key] = attrValue(at.value);
+    // A span with no id of its own cannot be a node in anyone's tree; deriving one from its name+start keeps
+    // it in the picture rather than dropping evidence.
+    const spanId = hexId(s.spanId, 16) ?? hexId(`${s.name ?? ""}-${s.startTimeUnixNano ?? ""}`, 16);
+    if (spanId === undefined) continue;
+    const parentSpanId = hexId(s.parentSpanId, 16);
+    const startMs = nanoToMs(s.startTimeUnixNano);
+    const endMs = nanoToMs(s.endTimeUnixNano);
+    out.push({
+      // The run correlates the trace: every plane of one run shares an id whether or not the sender knew it.
+      traceId: hexId(s.traceId, 32) ?? traceIdForRun(ctx.runId),
+      spanId,
+      ...(parentSpanId !== undefined ? { parentSpanId } : {}),
+      name: s.name ?? "",
+      kind: spanKindOf(s.kind),
+      startedAt: new Date(startMs).toISOString(),
+      endedAt: new Date(endMs >= startMs ? endMs : startMs).toISOString(),
+      attributes,
+      ...(s.events && s.events.length > 0
+        ? {
+            events: s.events.map((e) => {
+              const eventAttrs: Record<string, unknown> = {};
+              for (const at of e.attributes ?? []) eventAttrs[at.key] = attrValue(at.value);
+              return {
+                name: e.name ?? "",
+                at: new Date(nanoToMs(e.timeUnixNano)).toISOString(),
+                ...(Object.keys(eventAttrs).length > 0 ? { attributes: eventAttrs } : {}),
+              };
+            }),
+          }
+        : {}),
+      ...(s.links && s.links.length > 0
+        ? {
+            links: s.links.flatMap((l) => {
+              const traceId = hexId(l.traceId, 32);
+              const linkSpanId = hexId(l.spanId, 16);
+              return traceId !== undefined && linkSpanId !== undefined ? [{ traceId, spanId: linkSpanId }] : [];
+            }),
+          }
+        : {}),
+      ...(statusOf(s.status) !== undefined ? { status: statusOf(s.status) } : {}),
+      // Resource stays SEPARATE from the span's own attributes. Merging them (which the pull path does, and
+      // must) loses which described the process and which the operation — and an export cannot be rebuilt
+      // from the merged bag.
+      ...(ctx.resource && Object.keys(ctx.resource).length > 0 ? { resource: ctx.resource } : {}),
+      ...(ctx.scope ? { scope: ctx.scope } : {}),
+    });
+  }
+  return out;
+}
+
+// The door's grouping, on the record instead of the flattening. Same correlation rule as
+// `groupOtlpExportByRun` (everdict.run_id, resource-level or span-level), same honest count of what could not
+// join the ledger.
+export function groupOtlpTraceSpansByRun(body: unknown): {
+  groups: Map<string, TraceSpan[]>;
+  missingRunId: number;
+} {
+  const groups = new Map<string, TraceSpan[]>();
+  let missingRunId = 0;
+  const resourceSpans = (body as { resourceSpans?: OtlpResourceSpans[] })?.resourceSpans ?? [];
+  for (const rs of resourceSpans) {
+    const resourceAttrs: Record<string, unknown> = {};
+    for (const at of rs.resource?.attributes ?? []) resourceAttrs[at.key] = attrValue(at.value);
+    const scopes = [...(rs.scopeSpans ?? []), ...(rs.instrumentationLibrarySpans ?? [])];
+    for (const scopeSpans of scopes) {
+      const scope = (scopeSpans as { scope?: { name?: string; version?: string } }).scope;
+      for (const raw of (scopeSpans.spans ?? []) as OtlpRichSpan[]) {
+        const spanAttrs: Record<string, unknown> = {};
+        for (const at of raw.attributes ?? []) spanAttrs[at.key] = attrValue(at.value);
+        const runId = spanAttrs[EVERDICT_SEMCONV.runId] ?? resourceAttrs[EVERDICT_SEMCONV.runId];
+        if (typeof runId !== "string" || runId === "") {
+          missingRunId++;
+          continue;
+        }
+        const parsed = parseOtlpTraceSpans([raw], {
+          runId,
+          resource: resourceAttrs,
+          ...(scope?.name ? { scope: { name: scope.name, ...(scope.version ? { version: scope.version } : {}) } } : {}),
+        });
+        const bucket = groups.get(runId) ?? [];
+        bucket.push(...parsed);
+        groups.set(runId, bucket);
+      }
+    }
+  }
+  return { groups, missingRunId };
+}
+
+// One run's SPANS split by the service that emitted them — the record twin of `partitionSpansByService`.
+// The key is OTel's own `service.name`, read from the resource where it belongs.
+export function partitionTraceSpansByService(spans: TraceSpan[]): Map<string | undefined, TraceSpan[]> {
+  const out = new Map<string | undefined, TraceSpan[]>();
+  for (const span of spans) {
+    const name = span.resource?.[OTEL_SERVICE_NAME_ATTR] ?? span.attributes[OTEL_SERVICE_NAME_ATTR];
+    const key = typeof name === "string" && name !== "" ? name : undefined;
+    const bucket = out.get(key) ?? [];
+    bucket.push(span);
+    out.set(key, bucket);
+  }
+  return out;
 }
 
 export function parseOtlpSpans(spans: OtlpSpan[]): Span[] {

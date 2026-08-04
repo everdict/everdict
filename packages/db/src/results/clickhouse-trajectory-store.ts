@@ -1,4 +1,5 @@
 import {
+  type SealInput,
   type SealedTrajectory,
   type TrajectoryListResult,
   type TrajectoryMeta,
@@ -6,11 +7,10 @@ import {
   type TrajectoryStore,
   defaultEmitter,
   executionSegment,
+  sealBody,
 } from "@everdict/application-control";
-import { type TraceEvent, TraceEventSchema, UpstreamError } from "@everdict/contracts";
-import { z } from "zod";
-
-const EventsSchema = z.array(TraceEventSchema);
+import { UpstreamError } from "@everdict/contracts";
+import { bodyOf, formatOf } from "./trajectory-body.js";
 
 // The ops-scale trajectory store (native-observability N-O1 rung 2): the SAME TrajectoryStore port over
 // ClickHouse — the swap is a composition-root env var (EVERDICT_CLICKHOUSE_URL), invisible to every
@@ -37,6 +37,7 @@ const SCHEMA_SQL = `CREATE TABLE IF NOT EXISTS everdict_trajectories (
   t0 String DEFAULT '',
   sealed_at String,
   owner String DEFAULT '',
+  body_format String DEFAULT '',
   INDEX idx_run run_id TYPE bloom_filter GRANULARITY 4
 ) ENGINE = MergeTree ORDER BY (tenant, sealed_at, run_id)`;
 
@@ -46,6 +47,9 @@ const ADD_T0_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS t
 // Whose evidence a trajectory is (mig 0116's rung-2 twin). '' = the workspace's. No backfill here: unlike
 // Postgres this store has no run ledger beside it to read an owner from, and it is opt-in + new.
 const ADD_OWNER_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS owner String DEFAULT ''";
+// What the body holds (N6's rung-2 twin of mig 0118). '' reads as 'events' — which is what every row written
+// before spans became the record actually is. No backfill: sealed evidence is not rewritten.
+const ADD_BODY_FORMAT_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS body_format String DEFAULT ''";
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
@@ -98,25 +102,20 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     await this.command(ADD_EMITTER_SQL, {});
     await this.command(ADD_T0_SQL, {});
     await this.command(ADD_OWNER_SQL, {});
+    await this.command(ADD_BODY_FORMAT_SQL, {});
   }
 
-  async seal(input: {
-    runId: string;
-    tenant: string;
-    source: TrajectoryMeta["source"];
-    events: TraceEvent[];
-    emitter?: string;
-    t0?: string;
-    owner?: string;
-  }): Promise<TrajectoryMeta & { created: boolean }> {
+  async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
     const emitter = input.emitter ?? defaultEmitter(input.source);
     const sealedAt = new Date().toISOString();
+    const body = sealBody(input);
+    const count = body.spans?.length ?? body.events.length;
     const existing = await this.get(input.tenant, input.runId);
     const fallback = {
       runId: input.runId,
       tenant: input.tenant,
       source: input.source,
-      eventCount: input.events.length,
+      eventCount: count,
       sealedAt,
       ...(input.owner !== undefined ? { owner: input.owner } : {}),
     };
@@ -137,8 +136,9 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       tenant: input.tenant,
       source: input.source,
       emitter,
-      event_count: input.events.length,
-      body: JSON.stringify(input.events),
+      event_count: count,
+      body: JSON.stringify(body.spans ?? body.events),
+      body_format: body.format,
       t0: input.t0 ?? "",
       sealed_at: sealedAt,
       owner: input.owner ?? "",
@@ -147,7 +147,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     if (!existing) return { ...fallback, created: true };
     return {
       ...existing.meta,
-      eventCount: existing.meta.eventCount + input.events.length,
+      eventCount: existing.meta.eventCount + count,
       created: true,
     };
   }
@@ -160,6 +160,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       source_first: string;
       event_count_first: number | string;
       body_first: string;
+      body_format_first: string;
       t0_first: string;
       sealed_at_first: string;
       owner_first: string;
@@ -169,6 +170,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(source, sealed_at) AS source_first,
               argMin(event_count, sealed_at) AS event_count_first,
               argMin(body, sealed_at) AS body_first,
+              argMin(body_format, sealed_at) AS body_format_first,
               argMin(t0, sealed_at) AS t0_first,
               argMin(owner, sealed_at) AS owner_first,
               min(sealed_at) AS sealed_at_first
@@ -187,7 +189,8 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       eventCount: Number(row.event_count_first),
       ...(row.t0_first !== "" ? { t0: row.t0_first } : {}),
       sealedAt: row.sealed_at_first,
-      events: EventsSchema.parse(JSON.parse(row.body_first)),
+      format: formatOf(row.body_format_first),
+      ...bodyOf(formatOf(row.body_format_first), JSON.parse(row.body_first)),
     }));
     const execution = executionSegment(segments);
     return {

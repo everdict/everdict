@@ -57,6 +57,10 @@ const trajectorySegmentSchema = z.object({
   // Omitted on exactly one segment — the execution's, whose stream is the response's top-level `events`
   // (the wire never ships the same trace twice). Rehydrated below so callers see a uniform list.
   events: z.array(traceEventSchema).optional(),
+  // What the ledger actually holds for this plane: the OTel span RECORD, or the older point-event stream a
+  // black-box harness gave us. The events read the same either way — this is how a reader can say which it
+  // is looking at. Absent on a control plane that predates N6 (otel-trace-model.md).
+  format: z.enum(['events', 'spans']).optional(),
 })
 export type TrajectorySegment = Omit<z.infer<typeof trajectorySegmentSchema>, 'events'> & {
   events: TraceEvent[]

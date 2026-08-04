@@ -47,7 +47,7 @@ collector and the store**.
 | `everdict.run_id` correlation tag | stamped at execution (`application-execution/run-case.ts`) | lets pull find our runs | native correlation on arrival |
 | `TraceProvenance` extraction | `sources/trace-source.ts` | uniform "Everdict origin" across kinds | ingest-time provenance |
 | Span waterfall + browse/inspect | `spans-to-nodes`, Settings › Traces | renders *their* store | renders *our* store first |
-| `TraceEvent` vocabulary (+ raw `span` passthrough, artifacts) | contracts | the normalization target | unchanged — the internal contract (+ `span.durationMs` at N5) |
+| `TraceEvent` vocabulary (+ raw `span` passthrough, artifacts) | contracts | the normalization target | ~~unchanged — the internal contract~~ → **demoted to a read-time projection at N6** ([otel-trace-model.md](./otel-trace-model.md)): `TraceSpan` becomes the record, `TraceEvent[]` stays exactly what graders and judges read |
 | TrajectoryStore (design) | execution-model §6 | the owned store for run trajectories | the same store, fed by the collector |
 
 ## The design
@@ -183,7 +183,21 @@ collector and the store**.
   `span.durationMs` (new, optional) keeps a service's spans from arriving as instants. Remaining:
   W3C `traceparent`/`baggage` propagation helpers, and per-plane retention/sampling policy.
 - **N4 — Mirror consolidation.** Collector-level exporters subsume raw-trace mirroring; score-attach
-  sinks remain API-side.
+  sinks remain API-side. **Blocked on N6 until now**: a record with no trace id, no span kind/status, no
+  span events and non-hex ids cannot be handed to an exporter as a valid OTLP trace.
+- **N6 — One model: spans are the record.** See [otel-trace-model.md](./otel-trace-model.md). The N0–N5
+  rungs kept `TraceEvent` as both the storage record and the judge contract, which left two models for one
+  thing and a lossy flatten at our OWN door (`otlp-ingest-service` parsed real OTLP spans and then called
+  `spansToTraceEvents` before sealing). N6 restores OTel's upper layer: `TraceSpan` (OTLP-shaped, hex ids,
+  kind/status/events/links, resource+scope) is the record; `TraceEvent[]` becomes a **versioned read-time
+  projection** so graders/judges move not at all; `kind:"infra"` becomes a placement SPAN carrying the
+  standard resource attributes (`k8s.node.name`/`container.id`) plus `everdict.plane`, so infra is an
+  extension of the vocabulary rather than a second one; W3C `traceparent` propagation puts the whole system
+  under one trace id, which demotes planes from a storage concept to a read-time group-by. Sealed
+  `TraceEvent[]` bodies are never rewritten — the ledger records its body format per row. The agent RECORDS
+  rather than reconstructs (`TurnSpanRecorder` off the kernel's `onEvent`), so a turn's latency, retries,
+  fallbacks, compactions and subagents finally reach the evidence; the pull adapters' projection is folded
+  into the one `spansToEvents`; and a scorecard stores the projection version its verdicts were read under.
 
 ## Open decisions
 

@@ -1,7 +1,7 @@
-import type { TraceEvent, TraceThreshold } from "@everdict/contracts";
-import { trajectoryMetricValue, trajectoryMetrics } from "@everdict/domain";
+import type { TraceThreshold } from "@everdict/contracts";
+import { spansToEvents, trajectoryMetricValue, trajectoryMetrics } from "@everdict/domain";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
-import type { TrajectoryMeta, TrajectoryStore } from "../ports/trajectory-store.js";
+import { type SealInput, type TrajectoryStore, sealBody } from "../ports/trajectory-store.js";
 
 // E4 perception (event-plumbing.md §3 wave 4 / native-observability): the owned store PERCEIVES, the log
 // ANNOUNCES. Every trajectory passes through seal — run settles, the OTLP door, materialized imports,
@@ -32,12 +32,15 @@ export function withTracePerception(
 }
 
 async function perceive(
-  input: { runId: string; tenant: string; source: TrajectoryMeta["source"]; events: TraceEvent[] },
+  input: SealInput,
   deps: { thresholdsFor: (tenant: string) => Promise<TraceThreshold[]>; events: PlatformEventEmitter },
 ): Promise<void> {
   const thresholds = await deps.thresholdsFor(input.tenant);
   if (thresholds.length === 0) return;
-  const metrics = trajectoryMetrics(input.events);
+  // Perception reads the same events a judge does — the projection when the body is the record, so a
+  // threshold means the same thing whichever form the emitter sealed in.
+  const body = sealBody(input);
+  const metrics = trajectoryMetrics(body.spans !== undefined ? spansToEvents(body.spans) : body.events);
   for (const threshold of thresholds) {
     const value = trajectoryMetricValue(metrics, threshold.metric);
     if (value === undefined || value <= threshold.value) continue;

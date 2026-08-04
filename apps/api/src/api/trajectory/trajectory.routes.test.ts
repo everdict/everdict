@@ -106,6 +106,9 @@ describe("GET /trajectories/:id — opening one sealed trajectory", () => {
       source: "run",
       eventCount: 1,
       sealedAt: expect.any(String),
+      // What this plane's body actually holds. Both of these were sealed as point-event streams; a reader
+      // that wants to say "this is the OTel record" is told so here rather than inferring it (N6).
+      format: "events",
     });
     expect(body.segments[1]).toMatchObject({
       emitter: "service:checkout",

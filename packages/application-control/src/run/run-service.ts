@@ -13,6 +13,7 @@ import {
   type TraceEvent,
   type TraceSource,
   type TraceSourceConfig,
+  type TraceSpan,
   isPulledCommandTrace,
 } from "@everdict/contracts";
 // Type-only wire reuse (same package's DTO subpath): the placement/topology read models the backends produce.
@@ -739,6 +740,9 @@ export class RunService {
     outcome: "completed" | "failed" | "cancelled",
     message: string,
     trace?: TraceEvent[],
+    // The turn's own spans, when the agent recorded them live (N6). Preferred over `trace`: the recorder saw
+    // the model call's latency, the retries and the subagents, none of which a transcript projection holds.
+    spans?: TraceSpan[],
   ): Promise<void> {
     const current = await this.deps.store.get(id);
     if (!current || current.kind !== "agent") return; // never settle an eval run through the agent bridge
@@ -749,7 +753,8 @@ export class RunService {
     // The turn's evidence inherits the turn's audience (a member's transcript stays that member's), and its
     // relative clock is anchored at the run's own start — the turn opened when the record was created, so the
     // trajectory can be laid on a wall-clock axis without the agent service having to ship one.
-    if (trace && trace.length > 0)
+    if (spans && spans.length > 0) void this.sealRecordedSpans(id, current.tenant, spans, current);
+    else if (trace && trace.length > 0)
       void this.sealPlanes(id, current.tenant, pricedTrace(trace), { record: current, t0: current.createdAt });
     const run = Run.from(current);
     if (run.isTerminal()) return; // first terminal write wins (a retried terminal report)
@@ -797,6 +802,8 @@ export class RunService {
             source: "run",
             eventCount: record.result.trace.length,
             sealedAt: record.updatedAt,
+            // The pre-ledger embed is a point-event stream by construction — it predates the record.
+            format: "events",
           },
         ],
       };
@@ -811,6 +818,23 @@ export class RunService {
   // private as the turn. Passing the RECORD rather than a subject keeps the rule in one place — a caller
   // cannot seal personal evidence as the workspace's by forgetting a field. `t0` anchors the plane in
   // absolute time when the caller knows where its relative clock starts.
+  // Spans the agent RECORDED — sealed as the record, no assembly. The audience rule is the same one the
+  // projection path applies: a member's turn stays that member's evidence.
+  private async sealRecordedSpans(runId: string, tenant: string, spans: TraceSpan[], record: RunRecord): Promise<void> {
+    const store = this.deps.trajectories;
+    if (!store) return;
+    const audience = runAudience(record);
+    await store
+      .seal({
+        runId,
+        tenant,
+        source: "run",
+        spans,
+        ...(audience.scope === "member" ? { owner: audience.subject } : {}),
+      })
+      .catch(() => {});
+  }
+
   private async sealPlanes(
     runId: string,
     tenant: string,

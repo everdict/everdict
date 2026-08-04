@@ -1,4 +1,5 @@
 import {
+  type SealInput,
   type SealedTrajectory,
   type TrajectoryListResult,
   type TrajectoryMeta,
@@ -6,12 +7,11 @@ import {
   type TrajectoryStore,
   defaultEmitter,
   executionSegment,
+  sealBody,
 } from "@everdict/application-control";
-import { type TraceEvent, TraceEventSchema } from "@everdict/contracts";
-import { z } from "zod";
+import { spansToEvents } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
-
-const EventsSchema = z.array(TraceEventSchema);
+import { bodyOf, formatOf } from "./trajectory-body.js";
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
@@ -50,24 +50,22 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     }
   >();
 
-  async seal(input: {
-    runId: string;
-    tenant: string;
-    source: TrajectoryMeta["source"];
-    events: TraceEvent[];
-    emitter?: string;
-    t0?: string;
-    owner?: string;
-  }): Promise<TrajectoryMeta & { created: boolean }> {
+  async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
     const emitter = input.emitter ?? defaultEmitter(input.source);
     const sealedAt = new Date().toISOString();
+    const body = sealBody(input);
+    // A `spans` body counts SPANS: that is what arrived, and the ingestion meter bills what arrives.
+    const count = body.spans?.length ?? body.events.length;
     const segment: TrajectorySegment = {
       emitter,
       source: input.source,
-      eventCount: input.events.length,
+      eventCount: count,
       ...(input.t0 !== undefined ? { t0: input.t0 } : {}),
       sealedAt,
-      events: input.events,
+      format: body.format,
+      // Held as sealed; the projection is recomputed on read so it can never drift from the record.
+      events: body.spans !== undefined ? spansToEvents(body.spans) : body.events,
+      ...(body.spans !== undefined ? { spans: body.spans } : {}),
     };
     const existing = this.rows.get(input.runId);
     if (!existing) {
@@ -86,7 +84,7 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
         runId: input.runId,
         tenant: input.tenant,
         source: input.source,
-        eventCount: input.events.length,
+        eventCount: count,
         sealedAt,
         created: false,
       };
@@ -187,6 +185,7 @@ interface PrimaryRow {
   t0: string | Date | null;
   sealed_at: string | Date;
   owner: string | null; // mig 0116 — whose evidence this is; NULL = the workspace's
+  body_format?: string | null; // mig 0118 — what the body holds; NULL = an event body sealed before N6
 }
 
 // Postgres-backed trajectory store (mig 0098 + 0104) — the header row carries the FIRST emitter's body;
@@ -195,21 +194,16 @@ interface PrimaryRow {
 export class PgTrajectoryStore implements TrajectoryStore {
   constructor(private readonly client: SqlClient) {}
 
-  async seal(input: {
-    runId: string;
-    tenant: string;
-    source: TrajectoryMeta["source"];
-    events: TraceEvent[];
-    emitter?: string;
-    t0?: string;
-    owner?: string;
-  }): Promise<TrajectoryMeta & { created: boolean }> {
+  async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
     const emitter = input.emitter ?? defaultEmitter(input.source);
     const sealedAt = new Date().toISOString();
+    const body = sealBody(input);
+    const count = body.spans?.length ?? body.events.length;
+    const bytes = JSON.stringify(body.spans ?? body.events);
     // RETURNING under ON CONFLICT DO NOTHING yields a row ONLY when this call inserted — `created` for free.
     const inserted = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, t0, sealed_at, owner)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9)
+      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, body_format, t0, sealed_at, owner)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10)
        ON CONFLICT (run_id) DO NOTHING
        RETURNING run_id`,
       [
@@ -217,8 +211,9 @@ export class PgTrajectoryStore implements TrajectoryStore {
         input.tenant,
         input.source,
         emitter,
-        input.events.length,
-        JSON.stringify(input.events),
+        count,
+        bytes,
+        body.format,
         input.t0 ?? null,
         sealedAt,
         input.owner ?? null,
@@ -229,7 +224,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         runId: input.runId,
         tenant: input.tenant,
         source: input.source,
-        eventCount: input.events.length,
+        eventCount: count,
         sealedAt,
         ...(input.owner !== undefined ? { owner: input.owner } : {}),
         created: true,
@@ -243,33 +238,24 @@ export class PgTrajectoryStore implements TrajectoryStore {
         runId: input.runId,
         tenant: input.tenant,
         source: input.source,
-        eventCount: input.events.length,
+        eventCount: count,
         sealedAt,
         created: false,
       };
     }
     if ((primary.emitter ?? primary.source) === emitter) return { ...metaOf(primary), created: false };
     const appended = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, t0, sealed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8)
+      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, body_format, t0, sealed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9)
        ON CONFLICT (run_id, emitter) DO NOTHING
        RETURNING run_id`,
-      [
-        input.runId,
-        emitter,
-        input.tenant,
-        input.source,
-        input.events.length,
-        JSON.stringify(input.events),
-        input.t0 ?? null,
-        sealedAt,
-      ],
+      [input.runId, emitter, input.tenant, input.source, count, bytes, body.format, input.t0 ?? null, sealedAt],
     );
     const created = appended.rows.length > 0;
     if (created) {
       await this.client.query(
         "UPDATE everdict_trajectories SET segment_event_count = segment_event_count + $1 WHERE run_id = $2",
-        [input.events.length, input.runId],
+        [count, input.runId],
       );
     }
     const refreshed = await this.primary(input.runId);
@@ -278,7 +264,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
 
   async get(tenant: string, runId: string): Promise<SealedTrajectory | undefined> {
     const res = await this.client.query<PrimaryRow & { body: unknown }>(
-      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, body, t0, sealed_at, owner
+      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, body, body_format, t0, sealed_at, owner
        FROM everdict_trajectories WHERE run_id = $1`,
       [runId],
     );
@@ -289,10 +275,11 @@ export class PgTrajectoryStore implements TrajectoryStore {
       source: string;
       event_count: number;
       body: unknown;
+      body_format: string | null;
       t0: string | Date | null;
       sealed_at: string | Date;
     }>(
-      `SELECT emitter, source, event_count, body, t0, sealed_at FROM everdict_trajectory_segments
+      `SELECT emitter, source, event_count, body, body_format, t0, sealed_at FROM everdict_trajectory_segments
        WHERE run_id = $1 ORDER BY sealed_at ASC, emitter ASC`,
       [runId],
     );
@@ -303,7 +290,8 @@ export class PgTrajectoryStore implements TrajectoryStore {
         eventCount: Number(row.event_count),
         ...(row.t0 !== null ? { t0: isoOf(row.t0) } : {}),
         sealedAt: isoOf(row.sealed_at),
-        events: EventsSchema.parse(row.body),
+        format: formatOf(row.body_format),
+        ...bodyOf(formatOf(row.body_format), row.body),
       },
       ...sides.rows.map((side) => ({
         emitter: side.emitter,
@@ -311,7 +299,8 @@ export class PgTrajectoryStore implements TrajectoryStore {
         eventCount: Number(side.event_count),
         ...(side.t0 !== null ? { t0: isoOf(side.t0) } : {}),
         sealedAt: isoOf(side.sealed_at),
-        events: EventsSchema.parse(side.body),
+        format: formatOf(side.body_format),
+        ...bodyOf(formatOf(side.body_format), side.body),
       })),
     ];
     const execution = executionSegment(segments);

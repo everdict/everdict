@@ -61,7 +61,13 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({}); // OTLP-spec full success
     const sealed = await trajectories.get("acme", "run-otlp-1");
-    expect(sealed?.meta).toMatchObject({ source: "otlp", eventCount: 3 }); // llm_call + tool_call/tool_result pair
+    // The ledger counts SPANS now — that is the unit an OTLP door receives (N6). The export carried two.
+    expect(sealed?.meta).toMatchObject({ source: "otlp", eventCount: 2 });
+    // What a judge reads is unchanged: the two spans project to llm_call + the tool_call/tool_result pair.
+    expect(sealed?.events).toHaveLength(3);
+    // And the RECORD is what the tenant actually sent — the tree, not a flattening of it.
+    expect(sealed?.segments[0]?.format).toBe("spans");
+    expect(sealed?.segments[0]?.spans).toHaveLength(2);
     expect(sealed?.events.some((e) => e.kind === "llm_call" && "model" in e && e.model === "claude-fable-5")).toBe(
       true,
     );
@@ -103,7 +109,7 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
     const app = buildServer({
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
       otlpIngest: new OtlpIngestService(trajectories, {
-        defaultMaxEventsPerHour: 3,
+        defaultMaxEventsPerHour: 2,
         events: {
           async emit(input) {
             emitted.push(input.kind);
@@ -113,14 +119,14 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
       }),
     });
 
-    // First export: 3 events (llm_call + tool pair) — exactly at the bound, admitted.
+    // First export: 2 spans — exactly at the bound, admitted.
     expect(
       (await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-q1") })).statusCode,
     ).toBe(200);
     // Second export would cross the bound → 429 with the arithmetic, sealed nothing.
     const refused = await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-q2") });
     expect(refused.statusCode).toBe(429);
-    expect(refused.json()).toMatchObject({ code: "RATE_LIMITED", data: { usedLastHour: 3, limit: 3 } });
+    expect(refused.json()).toMatchObject({ code: "RATE_LIMITED", data: { usedLastHour: 2, limit: 2 } });
     expect(await trajectories.get("acme", "run-q2")).toBeUndefined();
     // The retrying exporter keeps getting 429s but the LOG hears about it once (cooldown).
     await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-q3") });

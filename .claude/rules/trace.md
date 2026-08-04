@@ -3,6 +3,16 @@ paths: "packages/trace/**"
 ---
 # Trace rules (push)
 
+- **Spans are the RECORD; `TraceEvent[]` is a read-time projection** (N6 — `docs/architecture/otel-trace-model.md`).
+  `TraceSpan` + the semconv live in `@everdict/contracts`; `spansToEvents` (the versioned projection judges read)
+  and `eventsToSpans` (assembly of a black-box harness's point stream) live in `@everdict/domain`. The OTLP door
+  seals SPANS — it must never flatten on the way in. The ledger records its body format per row and never
+  rewrites an already-sealed `events` body. The standard vocabulary comes first: `everdict.*` only where OTel
+  names nothing (the plane axis, cost, the union's round-trip fields). `spansToTraceEvents` here is a
+  promotion + delegation to that one projection — never a second copy of the mapping. Emitters that KNOW
+  their spans record them (the agent's `TurnSpanRecorder`, the dispatcher's placement span); only a
+  black-box harness's stream is assembled, and assembly marks itself `everdict.assembled`.
+
 Pull a harness's trace from OTel/MLflow and normalize to `TraceEvent` (`TraceSource`), and export judged
 results back out to the team's observability platform (`TraceSink` — the outbound mirror). See
 docs/service-harness.md + docs/architecture/trace-sink.md.

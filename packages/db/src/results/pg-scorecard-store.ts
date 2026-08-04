@@ -23,6 +23,7 @@ interface ScorecardRow {
   subset: unknown;
   scorecard: unknown;
   analysis_ref: string | null;
+  trace_projection_version: number | string | null;
   sink_export: unknown;
   error: unknown;
   steps: unknown;
@@ -54,6 +55,11 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     orchestration: row.orchestration ?? undefined, // resume/retry inputs (mig 0049) — lightweight
     scorecard: hasDetail ? (row.scorecard ?? undefined) : undefined,
     analysisRef: hasDetail ? (row.analysis_ref ?? undefined) : undefined, // detail-only download ref (get only, like steps)
+    // Which projection the verdicts were read under (N6) — lightweight, so it rides the list too: a
+    // comparison across batches judged under different projections is a comparison worth flagging.
+    ...(row.trace_projection_version !== null && row.trace_projection_version !== undefined
+      ? { traceProjectionVersion: Number(row.trace_projection_version) }
+      : {}),
     export: hasDetail ? (row.sink_export ?? undefined) : undefined, // for detail (get only, like steps). Column name is sink_export (reserved-word avoidance)
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
@@ -168,6 +174,10 @@ export class PgScorecardStore implements ScorecardStore {
       sets.push(`analysis_ref = $${i++}`);
       vals.push(patch.analysisRef);
     }
+    if (patch.traceProjectionVersion !== undefined) {
+      sets.push(`trace_projection_version = $${i++}`);
+      vals.push(patch.traceProjectionVersion);
+    }
     if (patch.export !== undefined) {
       sets.push(`sink_export = $${i++}`);
       vals.push(JSON.stringify(patch.export));
@@ -271,7 +281,7 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(filter.kind === "experiment" ? "kind = 'experiment'" : "(kind IS NULL OR kind <> 'experiment')");
     }
     const res = await this.client.query<ScorecardRow>(
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

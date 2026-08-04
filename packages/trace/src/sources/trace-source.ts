@@ -1,14 +1,17 @@
-import type {
-  EvidenceSelector,
-  EvidenceSlot,
-  SpanAttrMapping,
-  SpanAttrSample,
-  TraceEvent,
-  TraceEvidence,
-  TraceProvenance,
-  TraceSpanNode,
-  TraceSummary,
+import {
+  type EvidenceSelector,
+  type EvidenceSlot,
+  type SpanAttrMapping,
+  type SpanAttrSample,
+  type TraceEvent,
+  type TraceEvidence,
+  type TraceProvenance,
+  type TraceSpan,
+  type TraceSpanNode,
+  type TraceSummary,
+  traceIdForRun,
 } from "@everdict/contracts";
+import { spansToEvents } from "@everdict/domain";
 
 // The shared intermediate-representation span for OTel/MLflow.
 export interface Span {
@@ -197,137 +200,38 @@ function firstDefined(a: Record<string, unknown>, keys: readonly string[]): unkn
   for (const k of keys) if (a[k] !== undefined) return a[k];
   return undefined;
 }
+// Span → TraceEvent, via the RECORD.
+//
+// This used to be a second implementation of the same attribute-dialect mapping that `spansToEvents`
+// (@everdict/domain) performs — one over the pull adapters' flat intermediate, one over `TraceSpan`. Two
+// copies of one rule is exactly the shape N6 removes, so this is now a PROMOTION plus a delegation: the
+// adapter's `Span` becomes a real `TraceSpan` and the single projection does the rest.
+//
+// The promotion has to mint ids the record's schema accepts (the adapters carry a platform's arbitrary span
+// id, or none at all). They are DERIVED from what the platform gave us — the same input always yields the
+// same id — so a parent link the platform reported still resolves after the rewrite.
+export function toTraceSpans(spans: Span[], traceId: string): TraceSpan[] {
+  const spanIdOf = (raw: string): string => traceIdForRun(raw).slice(0, 16);
+  return spans.map((s, i) => ({
+    traceId,
+    spanId: spanIdOf(s.spanId ?? `${s.name}-${i}`),
+    ...(s.parentId !== undefined ? { parentSpanId: spanIdOf(s.parentId) } : {}),
+    name: s.name,
+    kind: "internal" as const,
+    startedAt: new Date(s.startMs).toISOString(),
+    endedAt: new Date(s.endMs >= s.startMs ? s.endMs : s.startMs).toISOString(),
+    // A pulled span has already had its resource merged into its attributes by the adapter (that is what the
+    // per-platform parsers produce); keeping the merge here is honest about what we actually received.
+    attributes: s.attrs,
+  }));
+}
 
-// Span → TraceEvent. Defaults to the OTel GenAI semantic conventions; a per-harness SpanAttrMapping overrides the
-// attribute keys (tried first, then the defaults) so a harness with non-standard instrumentation still normalizes.
 export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): TraceEvent[] {
-  const keys = {
-    model: [...(mapping?.model ?? []), ...DEFAULT_KEYS.model],
-    inputTokens: [...(mapping?.inputTokens ?? []), ...DEFAULT_KEYS.inputTokens],
-    outputTokens: [...(mapping?.outputTokens ?? []), ...DEFAULT_KEYS.outputTokens],
-    costUsd: [...(mapping?.costUsd ?? []), ...DEFAULT_KEYS.costUsd],
-    toolName: [...(mapping?.toolName ?? []), ...DEFAULT_KEYS.toolName],
-    toolCallId: [...(mapping?.toolCallId ?? []), ...DEFAULT_KEYS.toolCallId],
-    toolArgs: [...(mapping?.toolArgs ?? []), ...DEFAULT_KEYS.toolArgs],
-    toolResult: [...(mapping?.toolResult ?? []), ...DEFAULT_KEYS.toolResult],
-    messageText: [...(mapping?.messageText ?? []), ...DEFAULT_KEYS.messageText],
-  };
-  const sorted = [...spans].sort((a, b) => a.startMs - b.startMs);
-  const base = sorted[0]?.startMs ?? 0;
-  const out: TraceEvent[] = [];
-  for (let i = 0; i < sorted.length; i++) {
-    const s = sorted[i];
-    if (!s) continue;
-    const t = s.startMs - base;
-    const a = s.attrs;
-    // STRUCTURE (contracts): the span's own identity travels with the events it becomes, so our ledger keeps
-    // the TREE the platform sent instead of flattening it — the reason a trace read from the platform's UI used
-    // to be a waterfall while the same trace read from our store was a list. One event per span may claim the
-    // id (the span's primary classification); companions point at it as their parent.
-    const spanId = s.spanId ?? `${s.name}-${i}`;
-    const structure = {
-      spanId,
-      ...(s.parentId !== undefined ? { parentId: s.parentId } : {}),
-      durationMs: Math.max(0, s.endMs - s.startMs),
-      ...(Number.isFinite(s.startMs) ? { at: new Date(s.startMs).toISOString() } : {}),
-    };
-    // MLflow 3.x native token/cost live in nested objects (mlflow.chat.tokenUsage/mlflow.llm.cost) — kept as a fallback
-    // after the mapping+GenAI keys, since real MLflow 3.11 autolog traces carry them there even without gen_ai.* (live-verified).
-    const tu = (a["mlflow.chat.tokenUsage"] ?? {}) as Record<string, unknown>;
-    const llmCost = (a["mlflow.llm.cost"] ?? {}) as Record<string, unknown>;
-    const model = pickStr(a, keys.model);
-    const inTok = pickNum(a, keys.inputTokens) ?? num(tu.input_tokens);
-    const outTok = pickNum(a, keys.outputTokens) ?? num(tu.output_tokens);
-    const toolName = pickStr(a, keys.toolName);
-
-    // Artifact channel — a span that references a produced artifact surfaces it as its own event (a fetchable ref,
-    // not the bytes), regardless of how the span classifies below. Conventional keys (artifact.* / mlflow.artifact.uri).
-    const artifactRef = pickStr(a, ARTIFACT_KEYS.ref);
-    if (artifactRef !== undefined) {
-      const mediaType = pickStr(a, ARTIFACT_KEYS.mediaType);
-      const role = pickStr(a, ARTIFACT_KEYS.role);
-      out.push({
-        t,
-        kind: "artifact",
-        name: pickStr(a, ARTIFACT_KEYS.name) ?? s.name,
-        ref: artifactRef,
-        ...(mediaType ? { mediaType } : {}),
-        ...(role ? { role } : {}),
-        // A product OF the span — it hangs under it rather than claiming its id (one node per span).
-        parentId: spanId,
-        ...(structure.at !== undefined ? { at: structure.at } : {}),
-      });
-    }
-
-    if (model !== undefined || inTok !== undefined || outTok !== undefined) {
-      out.push({
-        t,
-        kind: "llm_call",
-        model: model ?? "",
-        cost: {
-          inputTokens: inTok ?? 0,
-          outputTokens: outTok ?? 0,
-          usd: pickNum(a, keys.costUsd) ?? num(llmCost.total_cost) ?? 0,
-        },
-        latencyMs: s.endMs - s.startMs,
-        ...structure,
-      });
-    } else if (toolName !== undefined) {
-      const id = pickStr(a, keys.toolCallId) ?? `${s.name}-${i}`;
-      out.push({ t, kind: "tool_call", id, name: toolName, args: firstDefined(a, keys.toolArgs), ...structure });
-      const ok = a["tool.error"] === undefined && a.error === undefined;
-      // The result is the call's own outcome — nested under it, with no id of its own (the call IS the span).
-      out.push({
-        t: s.endMs - base,
-        kind: "tool_result",
-        id,
-        ok,
-        output: pickStr(a, keys.toolResult) ?? "",
-        parentId: spanId,
-      });
-    } else if (declaredKindIsTool(a)) {
-      // TOOL-kind spans WITHOUT gen_ai/tool.* attrs (mlflow.spanType=TOOL, openinference TOOL/FUNCTION, …): the
-      // platform DECLARES the span a tool step even when no attribute carries a tool name. These used to demote to
-      // a generic `span` event — the inspect waterfall showed "tool" while the judge-facing TraceEvents said
-      // "span", so the judge saw NO tool actions at all for such harnesses. Name = the span itself; args/result
-      // fall back to the platform's generic I/O channels.
-      const id = pickStr(a, keys.toolCallId) ?? `${s.name}-${i}`;
-      out.push({
-        t,
-        kind: "tool_call",
-        id,
-        name: s.name,
-        args: firstDefined(a, [...keys.toolArgs, ...IO_INPUT_KEYS]),
-        ...structure,
-      });
-      const ok = a["tool.error"] === undefined && a.error === undefined;
-      out.push({
-        t: s.endMs - base,
-        kind: "tool_result",
-        id,
-        ok,
-        output: pickStr(a, keys.toolResult) ?? pickIo(a, IO_OUTPUT_KEYS) ?? "",
-        parentId: spanId,
-      });
-    } else {
-      const text = pickStr(a, keys.messageText);
-      if (text !== undefined) out.push({ t, kind: "message", role: "assistant", text, ...structure });
-      // Structural span (chain/agent/retriever etc.) — preserved instead of dropped, so a `span` judge requirement is
-      // satisfiable and non-LLM steps aren't silently lost. Skip a bare artifact-only span (already emitted above).
-      else if (artifactRef === undefined) {
-        // Carry the span's own length through: a service under test emits mostly structural spans, and a
-        // cross-plane timeline needs their duration, not just their start.
-        out.push({
-          t,
-          kind: "span",
-          name: s.name,
-          attributes: a,
-          ...structure,
-        });
-      }
-    }
-  }
-  return out;
+  if (spans.length === 0) return [];
+  // A pulled trace has no everdict run id of its own at this point; the id only has to be stable across the
+  // spans of ONE call, which is what the projection reads it for.
+  const traceId = traceIdForRun(spans[0]?.spanId ?? spans[0]?.name ?? "pulled");
+  return spansToEvents(toTraceSpans(spans, traceId), mapping ? { mapping } : {});
 }
 
 // --- Evidence slots (finalAnswer / dom / screenshot) — judge evidence extracted from the trace itself. ---

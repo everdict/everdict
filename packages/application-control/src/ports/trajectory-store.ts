@@ -1,4 +1,14 @@
-import type { TraceEvent } from "@everdict/contracts";
+import {
+  BadRequestError,
+  EVERDICT_ATTR,
+  OTEL_RESOURCE,
+  TRACE_PLANE,
+  type TraceEvent,
+  type TraceSpan,
+  newSpanId,
+  traceIdForRun,
+} from "@everdict/contracts";
+import { eventsToSpans } from "@everdict/domain";
 
 // The OWNED trajectory record (execution-model §6 / P5, native-observability rung 1): what happened, kept by
 // US — the copy every judgment stands on ("never judge what you don't retain"). Rung 1 collapses live-append
@@ -29,6 +39,12 @@ export interface TrajectoryMeta {
 // orchestrator's account of where it ran, a service under test emitting its own OTel. Segments are how a
 // system-level trajectory stays true to "evidence is never rewritten" — a late plane is added BESIDE the
 // others, never merged into their bytes, and each keeps its own provenance.
+// What a segment's body holds. EXPLICIT, never sniffed from the bytes: sealed evidence is never rewritten,
+// so both forms live in the ledger forever and a row has to say which it is (otel-trace-model.md N6).
+// `spans` is the record; `events` is the older form — and still the honest one for a black-box harness whose
+// point stream could not be dated well enough to assemble.
+export type TrajectoryBodyFormat = "events" | "spans";
+
 export interface TrajectorySegment {
   // Who produced these events: `run` | `otlp` | `import` (the execution's own record, by arrival channel)
   // or `service:<service.name>` for a service under test that pushed its own spans through the door.
@@ -40,7 +56,13 @@ export interface TrajectorySegment {
   // rather than inventing an offset.
   t0?: string;
   sealedAt: string;
+  // ALWAYS present, whatever the body format — this is what makes spans-as-the-record cost judges nothing.
+  // For a `spans` body it is the versioned projection (`spansToEvents`), computed by the store on read.
   events: TraceEvent[];
+  format: TrajectoryBodyFormat;
+  // The record itself, when this segment holds one. Absent for an `events` body — a tree we never had is
+  // not a tree we reconstruct at read time.
+  spans?: TraceSpan[];
 }
 
 // What a trajectory read returns. `events` is the EXECUTION's own evidence (unchanged semantics — the
@@ -87,26 +109,54 @@ export const INFRA_EMITTER = "infra";
 //
 // Best-effort by contract, like every seal call site it replaces: evidence, never lifecycle. Callers keep
 // their `void`/catch discipline.
+// It is also where a run's stream becomes the RECORD. The planes are assembled into spans here rather than
+// at each emitter because this is the one place every path passes through — managed dispatch, the
+// self-hosted runner, a sandbox session — so one assembly serves all of them and no emitter can forget.
+// Assembly is refused (and the events sealed as they are) whenever the stream cannot be dated; see
+// `eventsToSpans`. The trace id is DERIVED from the run id, so the two planes agree on it without speaking.
 export async function sealExecutionPlanes(
   store: Pick<TrajectoryStore, "seal">,
-  input: { runId: string; tenant: string; events: TraceEvent[]; owner?: string; t0?: string },
+  input: {
+    runId: string;
+    tenant: string;
+    events: TraceEvent[];
+    owner?: string;
+    t0?: string;
+    // What ran — the root span's name. Defaults to the run itself when the caller has nothing better.
+    agentName?: string;
+    newSpanId?: () => string;
+  },
 ): Promise<void> {
   const agent: TraceEvent[] = [];
   const infra: TraceEvent[] = [];
   for (const event of input.events) (event.kind === "infra" ? infra : agent).push(event);
   const owner = input.owner !== undefined ? { owner: input.owner } : {};
+  const traceId = traceIdForRun(input.runId);
+  const mintSpanId = input.newSpanId ?? (() => newSpanId());
+  // The placement span, when there is one, is the parent the agent's root hangs under: the job really did
+  // run inside the placed unit, and one trace is only one trace if that is written down.
+  const placement = placementSpan(infra, { traceId, newSpanId: mintSpanId });
+
   // The execution's plane seals first so `SealedTrajectory.events` resolves to it even if the second write loses.
-  if (agent.length > 0)
+  if (agent.length > 0) {
+    const spans = eventsToSpans(agent, {
+      traceId,
+      ...(placement !== undefined ? { parentSpanId: placement.spanId } : {}),
+      agentName: input.agentName ?? "run",
+      plane: TRACE_PLANE.agent,
+      newSpanId: mintSpanId,
+    });
     await store.seal({
       runId: input.runId,
       tenant: input.tenant,
       source: "run",
-      events: agent,
+      ...(spans !== undefined ? { spans } : { events: agent }),
       // The execution's own anchor when the caller knows it (an agent turn: the run's start). Without one a
       // relative `t` cannot be laid on a shared axis and the reader keeps this plane on its own.
       ...(input.t0 !== undefined ? { t0: input.t0 } : {}),
       ...owner,
     });
+  }
   if (infra.length > 0) {
     // The plane's own anchor: the earliest absolute stamp its emitter reported. Without one the reader keeps
     // this segment on its own axis rather than inventing an offset onto the agent's.
@@ -119,11 +169,60 @@ export async function sealExecutionPlanes(
       tenant: input.tenant,
       source: "run",
       emitter: INFRA_EMITTER,
-      events: infra,
+      ...(placement !== undefined ? { spans: [placement] } : { events: infra }),
       ...(t0 !== undefined ? { t0 } : {}),
       ...owner,
     });
   }
+}
+
+// The orchestrator's account of a run, as ONE span instead of a scatter of instants.
+//
+// This is the shape the old model could not hold: a self-hosted run's placement was `leased` at t=0 and
+// `finished` at t=23262 — two points for a 23-second interval, because `kind:"infra"` was a member of a union
+// whose every member is a point. Here the interval is the span and the points are its span EVENTS, which is
+// what OTel has always called them. Undefined when the plane carries no absolute time to build one from.
+export function placementSpan(
+  infra: TraceEvent[],
+  ctx: { traceId: string; newSpanId: () => string },
+): TraceSpan | undefined {
+  const stamps = infra
+    .map((e) => (e.kind === "infra" && e.at !== undefined ? Date.parse(e.at) : Number.NaN))
+    .filter((ms) => Number.isFinite(ms));
+  if (stamps.length === 0) return undefined;
+  const startMs = Math.min(...stamps);
+  const endMs = Math.max(...stamps);
+  const failed = infra.some((e) => e.kind === "infra" && /fail|error|oom|kill/i.test(`${e.event ?? ""} ${e.message}`));
+  const first = infra.find((e) => e.kind === "infra");
+  const node = infra.find((e) => e.kind === "infra" && e.node !== undefined);
+  const unit = infra.find((e) => e.kind === "infra" && e.unit !== undefined);
+  return {
+    traceId: ctx.traceId,
+    spanId: ctx.newSpanId(),
+    name: "placement",
+    // We are the CLIENT of the orchestrator: the span records our call to it, not its own work.
+    kind: "client",
+    startedAt: new Date(startMs).toISOString(),
+    endedAt: new Date(endMs).toISOString(),
+    attributes: {
+      [EVERDICT_ATTR.plane]: TRACE_PLANE.placement,
+      ...(first?.kind === "infra" && first.service !== undefined ? { [OTEL_RESOURCE.serviceName]: first.service } : {}),
+    },
+    // The node and the unit are OTel's own resource attributes — naming them ourselves would have been a
+    // private key for a public concept.
+    resource: {
+      ...(node?.kind === "infra" && node.node !== undefined ? { [OTEL_RESOURCE.k8sNodeName]: node.node } : {}),
+      ...(unit?.kind === "infra" && unit.unit !== undefined ? { [OTEL_RESOURCE.k8sPodName]: unit.unit } : {}),
+    },
+    events: infra
+      .filter((e): e is Extract<TraceEvent, { kind: "infra" }> => e.kind === "infra" && e.at !== undefined)
+      .map((e) => ({
+        name: e.event ?? "infra",
+        at: e.at ?? new Date(startMs).toISOString(),
+        attributes: { message: e.message },
+      })),
+    status: { code: failed ? "error" : "ok" },
+  };
 }
 
 // One emitter's contribution as it goes over the wire. The EXECUTION segment omits `events` — its stream
@@ -136,6 +235,9 @@ export interface TrajectorySegmentWire {
   t0?: string;
   sealedAt: string;
   events?: TraceEvent[];
+  // What this segment's body actually holds. A reader that wants to say "this is the record, not a
+  // reconstruction of one" needs to be told; it cannot tell from the events, which look the same either way.
+  format: TrajectoryBodyFormat;
 }
 
 // Shared by every surface that serves a trajectory — GET /trajectories/:id, GET /runs/:id/trajectory and
@@ -147,6 +249,7 @@ export function trajectorySegmentsWire(sealed: SealedTrajectory): TrajectorySegm
     eventCount: segment.eventCount,
     ...(segment.t0 !== undefined ? { t0: segment.t0 } : {}),
     sealedAt: segment.sealedAt,
+    format: segment.format,
     ...(segment.emitter === sealed.executionEmitter ? {} : { events: segment.events }),
   }));
 }
@@ -165,6 +268,39 @@ export interface TrajectoryListResult {
   nextCursor?: string;
 }
 
+// What a caller offers the ledger. EXACTLY ONE of `events`/`spans` — a body that claims both has two
+// sources of truth and the second one is a copy waiting to drift, which is the whole defect N6 removes.
+export interface SealInput {
+  runId: string;
+  tenant: string;
+  source: TrajectoryMeta["source"];
+  events?: TraceEvent[];
+  spans?: TraceSpan[];
+  emitter?: string;
+  t0?: string;
+  // The member this evidence belongs to (see TrajectoryMeta.owner). Set by the FIRST seal — later planes
+  // join evidence that already has an owner, so they never need to restate it.
+  owner?: string;
+}
+
+// The one place the body rule is enforced, so every store impl agrees on what it was handed. Throws rather
+// than picking a winner: a caller that offers both has a bug the ledger must not paper over.
+export function sealBody(input: SealInput): {
+  format: TrajectoryBodyFormat;
+  events: TraceEvent[];
+  spans?: TraceSpan[];
+} {
+  if (input.spans !== undefined && input.events !== undefined)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { runId: input.runId },
+      "a trajectory seal carries events or spans, never both",
+    );
+  if (input.spans !== undefined) return { format: "spans", events: [], spans: input.spans };
+  if (input.events !== undefined) return { format: "events", events: input.events };
+  throw new BadRequestError("BAD_REQUEST", { runId: input.runId }, "a trajectory seal carries a body");
+}
+
 export interface TrajectoryStore {
   // Seal one emitter's contribution to a run's trajectory. IDEMPOTENT by (runId, emitter) — the first seal
   // for an emitter wins: a retried settle or a judged write-back never rewrites evidence. A seal from a
@@ -172,17 +308,7 @@ export interface TrajectoryStore {
   // dropped — that is how a topology run whose services push spans before the agent settles keeps both.
   // `created` says whether THIS call wrote something (false = a re-offer that lost to an earlier seal) —
   // the perception decorator announces only on true, so at-least-once callers never double-emit a fact.
-  seal(input: {
-    runId: string;
-    tenant: string;
-    source: TrajectoryMeta["source"];
-    events: TraceEvent[];
-    emitter?: string;
-    t0?: string;
-    // The member this evidence belongs to (see TrajectoryMeta.owner). Set by the FIRST seal — later planes
-    // join evidence that already has an owner, so they never need to restate it.
-    owner?: string;
-  }): Promise<TrajectoryMeta & { created: boolean }>;
+  seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }>;
   get(tenant: string, runId: string): Promise<SealedTrajectory | undefined>;
   // Browse the workspace's sealed evidence, newest first (N1 "look inward" — Settings › Traces reads OUR
   // store). Metas only: a page never hauls bodies. `viewer` (the member asking) drops evidence owned by

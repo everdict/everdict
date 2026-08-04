@@ -120,6 +120,27 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
 ]);
 export type TraceEvent = z.infer<typeof TraceEventSchema>;
 
+// When an event happened, stamped BOTH ways — what every emitter of this stream owes a reader.
+//
+// `t` stays exactly what it always was: the emitter's own scalar, whose unit only that emitter knows (a step
+// index here, ms since dispatch there, epoch ms in a harness that reads the wall clock). Graders read its
+// SPAN, which is unit-agnostic. `at` is the addition, and the only field a reader can lay on a shared axis.
+//
+// Why it is not optional in practice: without `at`, a reader has to guess `t`'s unit, and guessing "milliseconds
+// from whatever anchor is nearby" is how a self-reported trace numbered 1,2,3… once drew fifteen agent steps
+// inside the first fifteen MILLISECONDS of a twenty-three second run. An event that carries `at` cannot be
+// misread that way, whatever its `t` counts.
+export function stamp(now: () => number): { t: number; at?: string } {
+  const ms = now();
+  if (!Number.isFinite(ms)) return { t: ms };
+  try {
+    return { t: ms, at: new Date(ms).toISOString() };
+  } catch {
+    // A clock outside the Date range is still a usable ordinal — the event keeps `t` and stays off the axis.
+    return { t: ms };
+  }
+}
+
 // Usage summary for one run — the sum of the trace's llm_call costs (exposed explicitly so the client doesn't parse the trace).
 export const RunUsageSummarySchema = z.object({
   promptTokens: z.number().int().nonnegative(),

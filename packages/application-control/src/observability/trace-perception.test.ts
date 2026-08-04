@@ -15,10 +15,10 @@ function fakeStore(): TrajectoryStore {
         runId: input.runId,
         tenant: input.tenant,
         source: input.source,
-        eventCount: input.events.length,
+        eventCount: input.events?.length ?? input.spans?.length ?? 0,
         sealedAt: "t",
       };
-      sealed.set(input.runId, { meta, events: input.events });
+      sealed.set(input.runId, { meta, events: input.events ?? [] });
       return { ...meta, created: true };
     },
     async get(tenant, runId) {
@@ -32,6 +32,7 @@ function fakeStore(): TrajectoryStore {
             source: hit.meta.source,
             eventCount: hit.events.length,
             sealedAt: hit.meta.sealedAt,
+            format: "events" as const,
             events: hit.events,
           },
         ],

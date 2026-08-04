@@ -1,6 +1,7 @@
 import type { PlatformEventEmitter, TrajectoryStore } from "@everdict/application-control";
 import { RateLimitError } from "@everdict/contracts";
-import { groupOtlpExportByRun, partitionSpansByService, spansToTraceEvents } from "@everdict/trace";
+import type { TraceSpan } from "@everdict/contracts";
+import { groupOtlpTraceSpansByRun, partitionTraceSpansByService } from "@everdict/trace";
 
 // How often a throttled tenant is ANNOUNCED (the fact), independent of how often it is refused (every
 // request). A retrying firehose reads as one signal on the log, not a flood.
@@ -8,14 +9,18 @@ const THROTTLE_FACT_COOLDOWN_MS = 15 * 60_000;
 
 // A plane's absolute anchor: when its earliest span started. Undefined when no span carries a usable
 // start — a reader keeps that plane on its own axis rather than aligning it against a guess.
-function isoOfEarliestStart(spans: { startMs: number }[]): string | undefined {
-  const starts = spans.map((span) => span.startMs).filter((ms) => Number.isFinite(ms) && ms > 0);
+function isoOfEarliestStart(spans: TraceSpan[]): string | undefined {
+  const starts = spans.map((span) => Date.parse(span.startedAt)).filter((ms) => Number.isFinite(ms) && ms > 0);
   return starts.length > 0 ? new Date(Math.min(...starts)).toISOString() : undefined;
 }
 
 // The OTLP/HTTP door's core (native-observability N0, receiver embedded in the api per N-O2): group the
-// export's spans by everdict.run_id, normalize through the SAME span→TraceEvent path the pull sources use,
-// and seal each run's trajectory in the OWNED store.
+// export's spans by everdict.run_id and seal each run's trajectory in the OWNED store.
+//
+// N6: the door no longer FLATTENS. It used to parse real OTLP spans and then call `spansToTraceEvents`
+// before sealing — a tenant sent us a tree and we stored a list, which the viewer then guessed back into a
+// tree. Now the spans ARE the record (trace id, kind, status, span events, resource kept separate from
+// attributes), and the events a judge reads are projected from them on the way out.
 //
 // The MULTI-PLANE rung: a run is a system, not one process. Spans are grouped a second time by OTel's own
 // `service.name`, and each service seals as its OWN segment (`service:<name>`) — so the agent under test,
@@ -43,22 +48,23 @@ export class OtlpIngestService {
   ) {}
 
   async ingest(tenant: string, body: unknown): Promise<{ sealedRuns: number; rejectedSpans: number }> {
-    const { groups, missingRunId } = groupOtlpExportByRun(body);
+    const { groups, missingRunId } = groupOtlpTraceSpansByRun(body);
     const normalized = [...groups].map(([runId, spans]) => ({
       runId,
-      // One plane per emitting service. `spansToTraceEvents` re-bases `t` per call, so each plane's
-      // offsets already count from ITS OWN first span — t0 is that instant, the anchor a cross-plane
-      // reader aligns the planes on.
-      planes: [...partitionSpansByService(spans)].map(([service, planeSpans]) => ({
+      // One plane per emitting service — OTel's own `service.name`, read from the resource where it belongs.
+      // t0 is the plane's earliest span start, the anchor a cross-plane reader aligns the planes on.
+      planes: [...partitionTraceSpansByService(spans)].map(([service, planeSpans]) => ({
         emitter: service !== undefined ? `service:${service}` : "otlp",
         spanCount: planeSpans.length,
         t0: isoOfEarliestStart(planeSpans),
-        events: spansToTraceEvents(planeSpans),
+        spans: planeSpans,
       })),
     }));
+    // The meter counts SPANS now: that is the unit that arrives at an OTLP door, and it is the unit every
+    // other OTel-speaking system quotas on.
     await this.admit(
       tenant,
-      normalized.reduce((sum, group) => sum + group.planes.reduce((n, plane) => n + plane.events.length, 0), 0),
+      normalized.reduce((sum, group) => sum + group.planes.reduce((n, plane) => n + plane.spanCount, 0), 0),
     );
     let sealedRuns = 0;
     let rejectedSpans = missingRunId;
@@ -70,7 +76,7 @@ export class OtlpIngestService {
           tenant,
           source: "otlp",
           emitter: plane.emitter,
-          events: plane.events,
+          spans: plane.spans,
           ...(plane.t0 !== undefined ? { t0: plane.t0 } : {}),
         });
         // This emitter already sealed — evidence is never rewritten (first write wins, per plane).

@@ -15,7 +15,7 @@ import type {
   Score,
   TraceEvent,
 } from "@everdict/contracts";
-import { UpstreamError } from "@everdict/contracts";
+import { UpstreamError, stamp } from "@everdict/contracts";
 import { classifyFailure } from "@everdict/domain";
 import { safeGrade } from "./safe-grade.js";
 
@@ -248,7 +248,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
             new UpstreamError("TRACE_COLLECT_FAILED", { runId }, `trace collection failed: ${message}`),
             "collect",
           );
-          trace.push({ t: Date.now(), kind: "error", message: collectFailure.message });
+          trace.push({ ...stamp(Date.now), kind: "error", message: collectFailure.message });
         }
       }
       if (!collectFailure) {

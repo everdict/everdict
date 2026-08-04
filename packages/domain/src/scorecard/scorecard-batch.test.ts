@@ -1,6 +1,7 @@
 import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contracts";
 import { RunRecordSchema, type ScorecardRecord, ScorecardRecordSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
 import { ScorecardBatch } from "./scorecard-batch.js";
 
 const NOW = "2026-07-10T00:00:00.000Z";
@@ -244,16 +245,20 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
   it("succeed and fail stamp the terminal status plus the outcome extras verbatim", () => {
     const summary = [{ metric: "tests-pass", count: 1, mean: 1, passRate: 1 }];
     const live = ScorecardBatch.from({ ...queued(), status: "running" });
+    // A terminal patch also DATES its own interpretation: which span→event projection the verdicts were
+    // computed under (N6). Stamped here rather than by a caller, so no settle path can omit it.
     expect(live.succeed({ summary, runIds: ["r1"] }, "t2").patch).toEqual({
       status: "succeeded",
       summary,
       runIds: ["r1"],
+      traceProjectionVersion: SPANS_TO_EVENTS_VERSION,
       updatedAt: "t2",
     });
     expect(live.fail({ code: "INTERNAL", message: "boom", phase: "judges" }, { steps: [] }, "t2").patch).toEqual({
       status: "failed",
       error: { code: "INTERNAL", message: "boom", phase: "judges" },
       steps: [],
+      traceProjectionVersion: SPANS_TO_EVENTS_VERSION,
       updatedAt: "t2",
     });
   });

@@ -347,13 +347,14 @@ describe("RunService", () => {
             runId: input.runId,
             source: input.source,
             ...(input.emitter !== undefined ? { emitter: input.emitter } : {}),
-            events: [...input.events],
+            events: [...(input.events ?? [])],
+            ...(input.spans !== undefined ? { spans: input.spans } : {}),
           });
           return {
             runId: input.runId,
             tenant: input.tenant,
             source: input.source,
-            eventCount: input.events.length,
+            eventCount: input.events?.length ?? input.spans?.length ?? 0,
             sealedAt: "2026-01-01T00:00:00Z",
             created: true,
           };

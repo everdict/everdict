@@ -61,20 +61,35 @@ function laneOf(segment: TrajectorySegment, event: TraceEvent): string {
   return event.service !== undefined ? `${SERVICE_PREFIX}${event.service}` : `${SERVICE_PREFIX}`
 }
 
-// The absolute instant a segment's relative `t` counts from. The store's own `t0` is authoritative; an
-// older segment without one can still be anchored by any event carrying an absolute `at` (the infra plane
-// stamps them exactly for this). Neither → unanchored, and we say so rather than guessing an offset.
-export function anchorOf(segment: TrajectorySegment): number | undefined {
+// The absolute instant a segment's relative `t` counts from — and, just as importantly, for WHOM it counts.
+//
+// TWO clocks live in one segment (see the contracts trace `STRUCTURE` note): an agent event's `t` counts from
+// the in-job t0, an infra event's from dispatch. So an anchor DERIVED from the infra plane may place infra
+// events and nothing else. Letting it place the agent's steps is exactly how a self-reported trace that
+// numbered its steps 1,2,3… drew fifteen of them inside the first fifteen milliseconds of a twenty-three
+// second run. Only the store's DECLARED `t0` — the sealer asserting "this plane's `t` is milliseconds from
+// here" — is authoritative for every event in the segment. Neither → unanchored, and we say so rather than
+// guessing an offset.
+export interface SegmentAnchors {
+  declared?: number
+  infra?: number
+}
+
+export function anchorsOf(segment: TrajectorySegment): SegmentAnchors {
+  const out: SegmentAnchors = {}
   if (segment.t0 !== undefined) {
     const parsed = Date.parse(segment.t0)
-    if (Number.isFinite(parsed)) return parsed
+    if (Number.isFinite(parsed)) out.declared = parsed
   }
   for (const event of segment.events) {
     if (event.kind !== 'infra' || event.at === undefined) continue
     const parsed = Date.parse(event.at)
-    if (Number.isFinite(parsed)) return parsed - event.t
+    if (Number.isFinite(parsed)) {
+      out.infra = parsed - event.t
+      break
+    }
   }
-  return undefined
+  return out
 }
 
 // How long an event occupied its lane. An instant (0) is drawn as a tick, not a zero-width bar.
@@ -109,7 +124,7 @@ export function placeTrajectory(segments: TrajectorySegment[]): PlacedTrajectory
   let endMs: number | undefined
 
   for (const segment of segments) {
-    const anchor = anchorOf(segment)
+    const anchors = anchorsOf(segment)
     const resultAt = new Map<string, number>()
     for (const event of segment.events)
       if (event.kind === 'tool_result') resultAt.set(event.id, event.t)
@@ -118,14 +133,18 @@ export function placeTrajectory(segments: TrajectorySegment[]): PlacedTrajectory
       const laneId = laneOf(segment, event)
       counts.set(laneId, (counts.get(laneId) ?? 0) + 1)
       const durationMs = durationOf(event, resultAt)
-      // An infra event's own `at` beats the segment anchor: it is the emitter's absolute stamp, while the
-      // anchor is an offset applied to a relative clock.
-      const absolute =
-        event.kind === 'infra' && event.at !== undefined && Number.isFinite(Date.parse(event.at))
-          ? Date.parse(event.at)
-          : anchor !== undefined
-            ? anchor + event.t
-            : undefined
+      // An event's own `at` beats every anchor — for EVERY kind, not just infra. `at` is the emitter's
+      // absolute stamp; an anchor is an offset applied to `t`, and `t` is only a millisecond offset when
+      // someone says so (the sealer, via `t0`) or when the plane's own clock defines it (infra). A stamped
+      // event lands where it actually happened; an unstamped one with no anchor that speaks for it stays off
+      // the axis rather than being placed by arithmetic on an unknown unit.
+      const stamped = event.at !== undefined ? Date.parse(event.at) : Number.NaN
+      const anchor = anchors.declared ?? (event.kind === 'infra' ? anchors.infra : undefined)
+      const absolute = Number.isFinite(stamped)
+        ? stamped
+        : anchor !== undefined
+          ? anchor + event.t
+          : undefined
       if (absolute === undefined) unanchored += 1
       else {
         startMs = startMs === undefined ? absolute : Math.min(startMs, absolute)

@@ -89,7 +89,7 @@ export function TrajectoryDetailDialog({
           {/* run 소스만 run 레코드를 갖는다 — 없는 페이지로 보내는 링크는 아예 걸지 않는다. */}
           {meta.source === 'run' && workspace && (
             <Link
-              href={`/${workspace}/runs/${encodeURIComponent(meta.runId)}`}
+              href={`/${workspace}/run/${encodeURIComponent(meta.runId)}`}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               <ExternalLink className="size-4" />

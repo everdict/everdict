@@ -216,6 +216,12 @@ export const ScorecardRecordSchema = z.object({
   // absent when no ArtifactStore is configured or the offload failed.
   analysisRef: z.string().optional(),
   export: ScorecardExportSchema.optional(), // trace-sink export result (for detail — get only, like steps)
+  // Which version of the span→event PROJECTION this batch was judged under (N6,
+  // docs/architecture/otel-trace-model.md). Spans are immutable once ended, so the record is stable — but the
+  // projection is code, and a verdict nobody can re-derive is a verdict nobody can defend. Storing the version
+  // rather than a second copy of the events keeps ONE copy of the truth and still dates the interpretation.
+  // Absent on batches judged before N6 (they were scored against events that WERE the record).
+  traceProjectionVersion: z.number().int().positive().optional(),
   error: ScorecardRunErrorSchema.optional(),
   steps: z.array(ScorecardStepSchema).optional(), // execution timeline (appended even while in progress)
   // The ids of the child runs this batch fanned out (if any). scorecard = run × N expressed as references — a per-case addressable run drill-down.
