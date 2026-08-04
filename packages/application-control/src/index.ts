@@ -31,8 +31,12 @@ export {
   EXECUTION_EMITTERS,
   executionSegment,
   INFRA_EMITTER,
+  placementSpan,
+  sealBody,
   sealExecutionPlanes,
   type SealedTrajectory,
+  type SealInput,
+  type TrajectoryBodyFormat,
   type TrajectoryListResult,
   type TrajectoryMeta,
   trajectoryReadableBy,
@@ -73,6 +77,7 @@ export {
 } from "./team/workflow-state-service.js";
 export {
   type CreateCycleInput,
+  CYCLE_CADENCE_ACTOR,
   type CycleActor,
   type CycleDetail,
   CycleService,
