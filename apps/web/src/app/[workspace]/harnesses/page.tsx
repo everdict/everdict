@@ -66,11 +66,20 @@ export default async function HarnessesPage({
         title={t('title')}
         description={t('description')}
         actions={
-          can(principal?.roles, 'harnesses:register') ? (
-            <Link href={`/${workspace}/harnesses/new`} className={buttonVariants({ size: 'sm' })}>
-              {t('register')}
+          <div className="flex items-center gap-3">
+            {/* 형상 카탈로그로 — "무엇으로 평가하는가"(여기)와 "어떤 형상이 있는가"는 다른 질문이다. */}
+            <Link
+              href={`/${workspace}/harness-templates`}
+              className="text-[12px] font-[510] text-link transition-colors hover:text-foreground"
+            >
+              {t('shapesLink')}
             </Link>
-          ) : null
+            {can(principal?.roles, 'harnesses:register') ? (
+              <Link href={`/${workspace}/harnesses/new`} className={buttonVariants({ size: 'sm' })}>
+                {t('register')}
+              </Link>
+            ) : null}
+          </div>
         }
       />
       {error ? (
