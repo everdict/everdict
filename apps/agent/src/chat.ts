@@ -8,6 +8,7 @@ import {
   type WaitRequest,
   buildSummarizer,
   runAgentLoop,
+  wellFormedArguments,
 } from "@everdict/agent-runtime";
 import type { AgentSessionStore, AnalysisArtifactStore, Metrics } from "@everdict/application-control";
 import {
@@ -509,6 +510,9 @@ export function contentToString(content: ChatMessage["content"]): string {
 }
 
 // Replay stored records into the OpenAI message shape the loop expects (assistant tool_calls ↔ tool results).
+// Stored arguments pass through wellFormedArguments: records persisted before the kernel normalized at creation
+// carry raw malformed fragments, and replaying one verbatim makes the provider reject every call — this is the
+// read-time guard that heals an already-poisoned conversation on its next turn instead of requiring deletion.
 function recordsToHistory(records: AgentMessageRecord[]): ChatMessage[] {
   return records.map((r): ChatMessage => {
     if (r.role === "assistant") {
@@ -520,7 +524,7 @@ function recordsToHistory(records: AgentMessageRecord[]): ChatMessage[] {
           tool_calls: r.toolCalls.map((tc) => ({
             id: tc.id,
             type: "function",
-            function: { name: tc.name, arguments: tc.arguments },
+            function: { name: tc.name, arguments: wellFormedArguments(tc.arguments) },
           })),
         };
       }

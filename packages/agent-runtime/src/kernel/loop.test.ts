@@ -162,6 +162,46 @@ describe("runAgentLoop", () => {
     expect(first.tool_calls).toHaveLength(1);
   });
 
+  it("persists a malformed tool-call arguments string as {} while still feeding the model the JSON error", async () => {
+    // Given a model turn whose tool-call arguments were cut mid-JSON (e.g. the output-token cap)
+    const call = vi.fn(async () => ({ content: "never", isError: false }));
+    const echo: ToolDefinition = {
+      name: "echo",
+      description: "echo the input",
+      parametersJsonSchema: { type: "object", properties: {} },
+      isReadOnly: true,
+      call,
+    };
+    const { transport, requests } = fakeTransport([
+      toolCallResult("call_1", "echo", '{"x": "cut-of'),
+      textResult("recovered"),
+    ]);
+    const seen: ChatMessage[] = [];
+    const result = await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([echo]),
+      onMessage: (m) => {
+        seen.push(m);
+      },
+    });
+    // Then the persisted/replayed assistant message carries normalized arguments — the raw fragment would be
+    // re-sent verbatim by the OpenAI wire on every later request and brick the conversation with a provider 400
+    const assistant = seen[0] as { tool_calls?: { function: { arguments: string } }[] };
+    expect(assistant.tool_calls?.[0]?.function.arguments).toBe("{}");
+    const replayed = requests[1]?.messages.find((m) => m.role === "assistant") as {
+      tool_calls?: { function: { arguments: string } }[];
+    };
+    expect(replayed.tool_calls?.[0]?.function.arguments).toBe("{}");
+    // …while THIS turn's dispatch still saw the raw fragment: the tool never ran and the model got the error
+    expect(call).not.toHaveBeenCalled();
+    const toolResult = requests[1]?.messages.find((m) => m.role === "tool") as { content: string };
+    expect(toolResult.content).toContain("Invalid JSON arguments");
+    expect(result.stopReason).toBe("end_turn");
+  });
+
   it("records a failed tool call without breaking the loop", async () => {
     const { transport } = fakeTransport([toolCallResult("call_1", "missing_tool", "{}"), textResult("recovered")]);
     const result = await runAgentLoop({

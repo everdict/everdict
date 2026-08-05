@@ -13,6 +13,16 @@ describe("offloadResult + ResultStore", () => {
     // The reference carries only a bounded preview, not the whole payload.
     expect(ref.length).toBeLessThan(3_000);
   });
+
+  it("repairs a surrogate pair split by the preview cut — the persisted preview must never carry a lone half", () => {
+    const store = new ResultStore();
+    // An emoji straddling the 2000-char preview boundary: the code-unit slice keeps only its high surrogate.
+    const full = `${"x".repeat(1_999)}😀${"y".repeat(100)}`;
+    const ref = offloadResult(store, "result-1-0", full);
+    expect(ref).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    expect(ref).toContain("x�"); // the cut half became U+FFFD, the rest of the preview is intact
+    expect(store.get("result-1-0")).toBe(full); // the stored full content is untouched
+  });
 });
 
 describe("buildReadResultTool", () => {
@@ -40,5 +50,17 @@ describe("buildReadResultTool", () => {
     const r = await tool.call({ id: "nope" }, {});
     expect(r.isError).toBe(true);
     expect(r.content).toContain('No stored result with id "nope"');
+  });
+
+  it("repairs both window edges when a model-supplied offset lands mid-surrogate-pair", async () => {
+    const s = new ResultStore();
+    s.put("r2", "a😀b"); // 4 code units: a, high, low, b
+    const t = buildReadResultTool(s);
+    // The window ends between the emoji's halves…
+    const head = await t.call({ id: "r2", offset: 0, limit: 2 }, {});
+    expect(head.content.startsWith("a�")).toBe(true);
+    // …and the next window starts between them: neither response carries a lone surrogate.
+    const tail = await t.call({ id: "r2", offset: 2, limit: 2 }, {});
+    expect(tail.content).toBe("�b");
   });
 });

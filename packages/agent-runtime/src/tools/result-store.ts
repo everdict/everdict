@@ -1,3 +1,4 @@
+import { toWellFormedText } from "../kernel/normalize.js";
 import type { ToolDefinition } from "./definition.js";
 
 // A per-run store for large tool results. Instead of truncating a big payload (losing the tail forever), the loop
@@ -20,11 +21,13 @@ const DEFAULT_READ_LIMIT = 8_000;
 export const READ_RESULT_TOOL_NAME = "read_tool_result";
 
 // Store the full content and return the preview + reference the model sees in place of the oversized result.
+// Slices are code-unit cuts, so an edge can split a surrogate pair; the preview is PERSISTED as the tool message
+// and replayed to the provider every turn, so a lone half must never leave here (toWellFormedText repairs it).
 export function offloadResult(store: ResultStore, id: string, content: string): string {
   store.put(id, content);
   return [
     `[Large tool result stored as "${id}" — ${content.length} chars total. Preview (first ${PREVIEW_CHARS}):`,
-    content.slice(0, PREVIEW_CHARS),
+    toWellFormedText(content.slice(0, PREVIEW_CHARS)),
     `… Call ${READ_RESULT_TOOL_NAME} with id "${id}" (and offset/limit) to read more.]`,
   ].join("\n");
 }
@@ -54,7 +57,9 @@ export function buildReadResultTool(store: ResultStore): ToolDefinition {
       if (full === undefined) return { content: `No stored result with id "${id}".`, isError: true };
       const offset = typeof o.offset === "number" && o.offset >= 0 ? Math.floor(o.offset) : 0;
       const limit = typeof o.limit === "number" && o.limit > 0 ? Math.floor(o.limit) : DEFAULT_READ_LIMIT;
-      const window = full.slice(offset, offset + limit);
+      // The offset is model-supplied, so either window edge can land mid-surrogate-pair — repair before it
+      // becomes a persisted tool message.
+      const window = toWellFormedText(full.slice(offset, offset + limit));
       const remaining = full.length - offset - window.length;
       const more = remaining > 0 ? `\n… (${remaining} more chars — increase offset to continue)` : "";
       return { content: `${window}${more}`, isError: false };

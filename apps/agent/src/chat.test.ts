@@ -155,6 +155,44 @@ describe("session running memory", () => {
     expect(texts.some((t) => t.includes("recent question"))).toBe(true);
     expect(texts.some((t) => t.includes("ancient question"))).toBe(false);
   });
+
+  it("heals a stored malformed tool-call arguments string on replay instead of re-sending the poison every turn", async () => {
+    // Given a conversation poisoned before creation-time normalization existed: the persisted assistant record
+    // carries a tool call whose arguments were cut mid-JSON. Replaying that fragment verbatim makes the provider
+    // reject EVERY subsequent request (the reported "OpenAIException … unexpected character" permanent failure).
+    const requests: StreamRequest[] = [];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: async (req) => {
+        requests.push(req);
+        return {
+          content: "ok",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      },
+    };
+    const { deps, sessions } = await seededDeps(transport);
+    await sessions.appendMessages([
+      record(0, "user", "look at run r-1"),
+      {
+        ...record(1, "assistant", ""),
+        toolCalls: [{ id: "t1", name: "get_run", arguments: '{"id": "r-' }],
+      },
+      { ...record(2, "user", "…"), role: "tool", toolCallId: "t1", content: "Invalid JSON arguments" },
+    ]);
+    // When the next turn runs
+    await runChat(deps, PRINCIPAL, {}, "s-1", "continue");
+    // Then the wire carries normalized {} arguments — the stored record is untouched, the conversation recovers
+    const sent = requests[0]?.messages ?? [];
+    const assistant = sent.find((m) => m.role === "assistant" && "tool_calls" in m) as {
+      tool_calls?: { function: { arguments: string } }[];
+    };
+    expect(assistant?.tool_calls?.[0]?.function.arguments).toBe("{}");
+    const stored = await sessions.listMessages("acme", "s-1");
+    expect(stored[1]?.toolCalls?.[0]?.arguments).toBe('{"id": "r-');
+  });
 });
 
 describe("agent-plane metrics", () => {

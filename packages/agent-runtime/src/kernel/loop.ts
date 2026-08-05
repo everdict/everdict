@@ -24,7 +24,7 @@ import { buildSpawnTeammateTool } from "../tools/spawn-teammate-tool.js";
 import { buildSpawnAgentTool } from "../tools/spawn-tool.js";
 import { type TodoItem, buildTodoTool, extractTodosFromHistory, renderTodoReminder } from "../tools/todo-tool.js";
 import { type WaitRequest, buildWaitForTool } from "../tools/wait-for-tool.js";
-import { normalizeHistory } from "./normalize.js";
+import { normalizeHistory, wellFormedArguments } from "./normalize.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 
 // How a run ended. "waiting" is deliberately distinct from "end_turn": end_turn means the agent is DONE and the ball
@@ -823,7 +823,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
     // content is null (not "") when the turn is tool-calls-only — an empty string alongside tool_calls is rejected by
     // some providers. Map the transport's neutral tool calls into the canonical (OpenAI-shaped) message for storage +
-    // tool pairing; the transport translates them back to its own wire format on the next turn.
+    // tool pairing; the transport translates them back to its own wire format on the next turn. Arguments are
+    // normalized to well-formed JSON HERE, before the message is stored or re-sent: the OpenAI wire replays the raw
+    // string verbatim, so persisting a malformed fragment bricks every later call. Tool dispatch below still reads
+    // the raw result.toolCalls, so the model keeps getting the "Invalid JSON arguments" error it can react to.
     const assistant: ChatMessage = {
       role: "assistant",
       content: result.content && result.content.length > 0 ? result.content : null,
@@ -832,7 +835,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             tool_calls: result.toolCalls.map((tc) => ({
               id: tc.id,
               type: "function" as const,
-              function: { name: tc.name, arguments: tc.arguments },
+              function: { name: tc.name, arguments: wellFormedArguments(tc.arguments) },
             })),
           }
         : {}),
