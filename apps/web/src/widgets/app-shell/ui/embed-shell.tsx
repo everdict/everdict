@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, type ReactNode } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 
 import { useRefresh } from '@/shared/lib/use-refresh'
 
@@ -17,6 +17,7 @@ const INFRA_SEGMENTS = new Set(['runs', 'runtimes', 'schedules'])
 
 export function EmbedShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const refresh = useRefresh()
 
   // Cookie-backed per-device preference (locale / timezone) changed in the parent. The parent's switcher sets the

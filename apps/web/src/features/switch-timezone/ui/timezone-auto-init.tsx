@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 
 import { detectTimeZone, TIMEZONE_COOKIE } from '@/shared/i18n/timezone'
 import { useRefresh } from '@/shared/lib/use-refresh'
@@ -11,6 +12,7 @@ import { setTimezone } from '../api/set-timezone'
 // timestamps render in the viewer's local time instead of the UTC/server default. Runs once; the explicit picker
 // in Preferences overrides it thereafter. Renders nothing.
 export function TimezoneAutoInit() {
+  const router = useRouter()
   const refresh = useRefresh()
   const done = useRef(false)
   useEffect(() => {

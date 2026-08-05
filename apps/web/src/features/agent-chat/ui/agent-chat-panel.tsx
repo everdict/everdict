@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
@@ -111,6 +112,7 @@ export function AgentChatPanel({
   user?: ChatUser
 } = {}) {
   const t = useTranslations('agentChat')
+  const router = useRouter()
   const refresh = useRefresh()
   const [sessions, setSessions] = useState<AgentSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
