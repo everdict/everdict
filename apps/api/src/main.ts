@@ -841,33 +841,6 @@ async function main(): Promise<void> {
       })
     : undefined;
   if (browserSessionService) setInterval(() => browserSessionService.sweep(), 60_000).unref(); // TTL teardown
-  // Sandbox session runs (execution-model P6) — opt-in where the api can reach a container runtime
-  // (EVERDICT_SANDBOX_DRIVER=docker). Facts + trajectory ride the same stores as every run; the interval is
-  // the in-process TTL reaper half (the durable reaper rung survives a process death).
-  const sandboxSessions = buildSandboxSessions({
-    store,
-    trajectories: trajectoryStore,
-    events: lateEvents,
-    capabilities: capabilityStore,
-    // The playground (harness-target sessions): registry + secrets + model binding + budget/usage — the
-    // same resolution and billing lanes a dispatched run uses, applied to the driver lane.
-    harnesses: harnessInstanceRegistry,
-    models: modelRegistry,
-    scopedSecretsFor,
-    budget,
-    usage: usageMeter,
-    // T-b: the durable reaper rides the same Temporal driver as approvals — a CP dying with the live
-    // handle no longer leaks the container or the row.
-    ...(approvalTemporal
-      ? {
-          reaper: {
-            start: (input: { runId: string; tenant: string; expiresAt: string }) => approvalTemporal.startReaper(input),
-            signalClosed: (runId: string) => approvalTemporal.signalReaperClosed(runId),
-          },
-        }
-      : {}),
-  });
-  if (sandboxSessions) setInterval(() => sandboxSessions.sweep(), 30_000).unref();
   // N3 retention: operator-configured TTL over the owned trajectory store (unset = keep forever). Hourly
   // sweep, logged — evidence never leaves silently.
   const retentionDays = positiveIntEnv(process.env.EVERDICT_TRAJECTORY_RETENTION_DAYS);
@@ -942,6 +915,41 @@ async function main(): Promise<void> {
   // Close the cycle: a ref in another workspace's namespace is pullable exactly when this workspace has adopted an
   // environment that declares it AND that capability is still consumable (re-checked on every read).
   imageReach.resolve = adoptedImageReach({ list: (ws, subject) => environmentAdoptionService.list(ws, subject) });
+
+  // Sandbox session runs (execution-model P6) — opt-in where the api can reach a container runtime
+  // (EVERDICT_SANDBOX_DRIVER=docker). Facts + trajectory ride the same stores as every run; the interval is
+  // the in-process TTL reaper half (the durable reaper rung survives a process death). Sits BELOW the
+  // capability service because agent worlds (W1) publish snapshots through it.
+  const sandboxSessions = buildSandboxSessions({
+    store,
+    trajectories: trajectoryStore,
+    events: lateEvents,
+    capabilities: capabilityStore,
+    // The playground (harness-target sessions): registry + secrets + model binding + budget/usage — the
+    // same resolution and billing lanes a dispatched run uses, applied to the driver lane.
+    harnesses: harnessInstanceRegistry,
+    models: modelRegistry,
+    scopedSecretsFor,
+    budget,
+    usage: usageMeter,
+    // Agent worlds (W1): snapshots publish into the managed store and register as environment-capability
+    // versions — absent managed store = world sessions 400, everything else keeps working.
+    ...(workspaceImages ? { images: workspaceImages } : {}),
+    capabilityService,
+    // T-b: the durable reaper rides the same Temporal driver as approvals — a CP dying with the live
+    // handle no longer leaks the container or the row. extend re-arms the deadline on touch (W1).
+    ...(approvalTemporal
+      ? {
+          reaper: {
+            start: (input: { runId: string; tenant: string; expiresAt: string }) => approvalTemporal.startReaper(input),
+            signalClosed: (runId: string) => approvalTemporal.signalReaperClosed(runId),
+            extend: (input: { runId: string; tenant: string; expiresAt: string }) =>
+              approvalTemporal.extendReaper(input),
+          },
+        }
+      : {}),
+  });
+  if (sandboxSessions) setInterval(() => sandboxSessions.sweep(), 30_000).unref();
 
   const app = buildServer({
     terminalTickets,

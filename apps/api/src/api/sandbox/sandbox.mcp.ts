@@ -15,11 +15,14 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
     "create_sandbox",
     {
       description:
-        "Open a sandbox session: boot an environment image as a long-lived container (shell in), or boot a " +
+        "Open a sandbox session: boot an environment image as a long-lived container (shell in), boot a " +
         "registered HARNESS for interactive test cases (the playground — warm-installed once, then " +
-        "submit_sandbox_task drives it). Recorded as a Run (kind sandbox, lifetime session) with a hard TTL; " +
-        "every exec lands on its trajectory, sealed at close. Exactly one of image (ad-hoc pullable ref), " +
-        "environment (an adopted environment capability), or harness is required.",
+        "submit_sandbox_task drives it), or open a WORLD — a persistent environment whose versions are " +
+        "filesystem snapshots: world:{id} boots its latest snapshot (or founds it from `image` when it has " +
+        "none yet), and snapshot_sandbox / hibernate-at-teardown publish the next version, so work survives " +
+        "the container. Recorded as a Run (kind sandbox, lifetime session) with a hard TTL (touch_sandbox " +
+        "extends it); every exec lands on its trajectory, sealed at close. Provide exactly one of image, " +
+        "environment, or harness — or world (optionally with image as its genesis base).",
       inputSchema: {
         image: z.string().optional().describe("Ad-hoc container image ref (must be pullable)"),
         environment: z
@@ -40,6 +43,17 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
           .describe(
             "A registered harness to boot for test cases; image is required when the spec declares none (process kind)",
           ),
+        world: z
+          .object({ id: z.string() })
+          .optional()
+          .describe(
+            "Open as a world: boot the world's latest snapshot, or found it from `image`. The id doubles as " +
+              "the snapshot repository name (lowercase letters, digits, '.', '_', '-')",
+          ),
+        hibernate: z
+          .boolean()
+          .optional()
+          .describe("Auto-snapshot at teardown (default true for world sessions; ignored without world)"),
         ttlSec: z.number().int().positive().max(14400).optional().describe("Session TTL (default 900s)"),
       },
     },
@@ -47,11 +61,15 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       image,
       environment,
       harness,
+      world,
+      hibernate,
       ttlSec,
     }: {
       image?: string;
       environment?: { source?: string; id: string; version?: string };
       harness?: { id: string; version?: string; image?: string };
+      world?: { id: string };
+      hibernate?: boolean;
       ttlSec?: number;
     }) =>
       run(principal, "runs:submit", async () =>
@@ -62,9 +80,64 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
             ...(image !== undefined ? { image } : {}),
             ...(environment !== undefined ? { environment } : {}),
             ...(harness !== undefined ? { harness } : {}),
+            ...(world !== undefined ? { world } : {}),
+            ...(hibernate !== undefined ? { hibernate } : {}),
             ...(ttlSec !== undefined ? { ttlSec } : {}),
           }),
         ),
+      ),
+  );
+
+  server.registerTool(
+    "snapshot_sandbox",
+    {
+      description:
+        "Publish a world session's filesystem as the world's next snapshot: commit the live container, push " +
+        "it into the workspace's managed image namespace (next v<n> tag), and register a new " +
+        "environment-capability version pinned to the pushed digest — the next create_sandbox world:{id} " +
+        "boots from it. Prose (name/description/instructions) carries forward from the latest version when " +
+        "omitted. Creator-or-admin; 409 while a playground task runs; 400 on a session with no world.",
+      inputSchema: {
+        id: z.string().describe("The sandbox session's run id"),
+        name: z.string().optional().describe("World display name (default: carried forward)"),
+        description: z.string().optional().describe("World description (default: carried forward)"),
+        instructions: z
+          .string()
+          .optional()
+          .describe("How the world is composed, for its next consumer (default: carried forward)"),
+      },
+    },
+    ({
+      id,
+      name,
+      description,
+      instructions,
+    }: { id: string; name?: string; description?: string; instructions?: string }) =>
+      run(principal, "images:push", async () =>
+        ok(
+          await sessions.snapshot(actor(), id, {
+            ...(name !== undefined ? { name } : {}),
+            ...(description !== undefined ? { description } : {}),
+            ...(instructions !== undefined ? { instructions } : {}),
+          }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "touch_sandbox",
+    {
+      description:
+        "Extend a live sandbox session's hard deadline to now+ttl (keep-alive; clamped to the max, never " +
+        "shortens). Extends process memory, the run record, and the durable reaper's timer. Creator-or-admin.",
+      inputSchema: {
+        id: z.string().describe("The sandbox session's run id"),
+        ttlSec: z.number().int().positive().max(14400).optional().describe("New TTL from now (default 900s)"),
+      },
+    },
+    ({ id, ttlSec }: { id: string; ttlSec?: number }) =>
+      run(principal, "runs:read", async () =>
+        ok(await sessions.touch(actor(), id, { ...(ttlSec !== undefined ? { ttlSec } : {}) })),
       ),
   );
 
@@ -150,9 +223,19 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
     {
       description:
         "Close a sandbox session: tears the container down, seals the session trajectory, settles the run as " +
-        "succeeded with session.closedReason. Idempotent over an already-settled session.",
-      inputSchema: { id: z.string().describe("The sandbox session's run id") },
+        "succeeded with session.closedReason. A world session with hibernate on snapshots BEFORE the container " +
+        "dies; `snapshot` overrides that default for this one close. Idempotent over an already-settled session.",
+      inputSchema: {
+        id: z.string().describe("The sandbox session's run id"),
+        snapshot: z
+          .boolean()
+          .optional()
+          .describe("Override the session's hibernate default: false = close without saving, true = force one"),
+      },
     },
-    ({ id }: { id: string }) => run(principal, "runs:read", async () => ok(await sessions.close(actor(), id))),
+    ({ id, snapshot }: { id: string; snapshot?: boolean }) =>
+      run(principal, "runs:read", async () =>
+        ok(await sessions.close(actor(), id, { ...(snapshot !== undefined ? { snapshot } : {}) })),
+      ),
   );
 }

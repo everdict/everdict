@@ -34,6 +34,9 @@ spine contracts MUST be interfaces — many impls live in adapter packages, the 
   `EnvSnapshot` are **discriminated unions on `kind`** — add a variant, don't rewrite core.
 - **Driver/Compute** — `packages/contracts/src/execution/compute.ts`: `Driver`, `ComputeHandle`, `ComputeSpec`,
   `ExecResult`, `Capability` (`shell|browser|desktop`). Isolation is the Backend's job, not the Driver's.
+  `Driver.reap?`/`Driver.snapshot?` are optional (docker-only today): remove / image-capture a compute by its
+  recorded id — the session reaper's crash path and the agent-worlds snapshot (`RunSession.world`/`hibernate`/
+  `snapshots` on `records/run.ts` are their record half).
 - **Grader** — `packages/contracts/src/execution/grader.ts`: `Score{graderId,metric,value,pass?}` + `GradeContext`.
 
 ## Error model (`packages/contracts/src/errors.ts`)

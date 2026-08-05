@@ -1,9 +1,12 @@
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { CloseSandboxBodySchema } from "./request/close-sandbox.js";
 import { CreateSandboxBodySchema } from "./request/create-sandbox.js";
 import { ExecSandboxBodySchema } from "./request/exec-sandbox.js";
 import { ReadSandboxTaskTraceQuerySchema } from "./request/read-sandbox-task-trace.js";
+import { SnapshotSandboxBodySchema } from "./request/snapshot-sandbox.js";
 import { SubmitSandboxTaskBodySchema } from "./request/submit-sandbox-task.js";
+import { TouchSandboxBodySchema } from "./request/touch-sandbox.js";
 
 const idParams = { type: "object", properties: { id: { type: "string" } }, required: ["id"] } as const;
 const taskParams = {
@@ -87,6 +90,36 @@ export const sandboxDocs: Record<string, FastifySchema> = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
+  snapshot: {
+    summary: "Snapshot a world session (publish its filesystem as the world's next version)",
+    description:
+      "Agent worlds: commits the live container's filesystem, pushes it into the workspace's managed image " +
+      "namespace as the world's next v<n> tag, and registers it as a new environment-capability version pinned " +
+      "to the pushed digest — the next session boots the world from it (create with world:{id}). The commit and " +
+      "push run host-side; no credential ever enters the container. Prose (name/description/instructions) " +
+      "carries forward from the world's latest version when omitted. Creator-or-admin; 409 while a playground " +
+      "task runs; 400 on a session with no world or a deployment with no managed image store.",
+    tags: ["sandboxes"],
+    params: idParams,
+    body: toJsonSchema(SnapshotSandboxBodySchema),
+    response: {
+      200: { description: "{ world, version, image } — the published capability version and its pinned ref" },
+      ...errorResponses(400, 401, 403, 404, 409, 502),
+    },
+  },
+  touch: {
+    summary: "Extend a live sandbox session's deadline (keep-alive)",
+    description:
+      "Pushes the session's hard deadline out to now+ttl (clamped to the max; a touch never PULLS a deadline " +
+      "in) — in process memory, on the run record, and on the durable reaper's timer. Creator-or-admin.",
+    tags: ["sandboxes"],
+    params: idParams,
+    body: toJsonSchema(TouchSandboxBodySchema),
+    response: {
+      200: { description: "{ expiresAt } — the session's new hard deadline" },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
   exec: {
     summary: "Run one shell command inside a live sandbox session",
     description:
@@ -119,13 +152,15 @@ export const sandboxDocs: Record<string, FastifySchema> = {
     summary: "Close a sandbox session",
     description:
       "Tears the container down (the reaper is the finally), seals the session's trajectory, and settles the run " +
-      "as succeeded with session.closedReason. Idempotent over an already-settled session; a running record " +
-      "whose live handle was lost to a control-plane restart settles as orphaned.",
+      "as succeeded with session.closedReason. A world session with hibernate on snapshots BEFORE the container " +
+      "dies; body.snapshot overrides that default for this one close. Idempotent over an already-settled " +
+      "session; a running record whose live handle was lost to a control-plane restart settles as orphaned.",
     tags: ["sandboxes"],
     params: idParams,
+    body: toJsonSchema(CloseSandboxBodySchema),
     response: {
       200: { description: "The settled RunRecord" },
-      ...errorResponses(401, 403, 404),
+      ...errorResponses(400, 401, 403, 404),
     },
   },
 };

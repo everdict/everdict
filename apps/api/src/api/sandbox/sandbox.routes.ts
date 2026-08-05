@@ -1,10 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type ServerDeps, constantTimeEq, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { CloseSandboxBodySchema } from "./request/close-sandbox.js";
 import { CreateSandboxBodySchema } from "./request/create-sandbox.js";
 import { ExecSandboxBodySchema } from "./request/exec-sandbox.js";
 import { ReadSandboxTaskTraceQuerySchema } from "./request/read-sandbox-task-trace.js";
+import { SnapshotSandboxBodySchema } from "./request/snapshot-sandbox.js";
 import { SubmitSandboxTaskBodySchema } from "./request/submit-sandbox-task.js";
+import { TouchSandboxBodySchema } from "./request/touch-sandbox.js";
 import { sandboxDocs } from "./sandbox.docs.js";
 
 // Sandbox session runs (execution-model P6) — "run this environment image and shell in", on the universal
@@ -129,6 +132,58 @@ export function registerSandboxRoutes(app: FastifyInstance, deps: ServerDeps): v
     },
   );
 
+  // Agent worlds (W1): publish the session's filesystem as the world's next snapshot — an image in the
+  // managed store plus an environment-capability version. Gated images:push (the bytes land in the
+  // workspace's registry namespace); the capability owner rule holds inside the publish.
+  app.post<{ Params: { id: string } }>(
+    "/sandboxes/:id/snapshot",
+    { schema: sandboxDocs.snapshot },
+    async (req, reply) => {
+      if (!deps.sandboxSessions)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "sandbox sessions not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "images:push");
+        const parsed = SnapshotSandboxBodySchema.safeParse(req.body ?? {});
+        if (!parsed.success)
+          return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+        return reply.send(
+          await deps.sandboxSessions.snapshot(
+            { tenant: principal.workspace, subject: principal.subject, isAdmin: principal.roles.includes("admin") },
+            req.params.id,
+            parsed.data,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Keep-alive: push the session's hard deadline out to now+ttl (never in). Creator-or-admin in the service.
+  app.post<{ Params: { id: string } }>("/sandboxes/:id/touch", { schema: sandboxDocs.touch }, async (req, reply) => {
+    if (!deps.sandboxSessions)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "sandbox sessions not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runs:read");
+      const parsed = TouchSandboxBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+      return reply.send(
+        await deps.sandboxSessions.touch(
+          { tenant: principal.workspace, subject: principal.subject, isAdmin: principal.roles.includes("admin") },
+          req.params.id,
+          parsed.data,
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.post<{ Params: { id: string } }>("/sandboxes/:id/exec", { schema: sandboxDocs.exec }, async (req, reply) => {
     if (!deps.sandboxSessions)
       return reply.code(404).send({ code: "NOT_FOUND", message: "sandbox sessions not configured" });
@@ -180,10 +235,14 @@ export function registerSandboxRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!principal) return reply;
     try {
       gate(principal, "runs:read");
+      const parsed = CloseSandboxBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
       return reply.send(
         await deps.sandboxSessions.close(
           { tenant: principal.workspace, subject: principal.subject, isAdmin: principal.roles.includes("admin") },
           req.params.id,
+          parsed.data,
         ),
       );
     } catch (err) {

@@ -1,10 +1,12 @@
 import type {
+  CapabilityService,
   CapabilityStore,
   PlatformEventEmitter,
   ResolvedSessionHarness,
   RunStore,
   SandboxSessionServiceDeps,
   TrajectoryStore,
+  WorkspaceImages,
 } from "@everdict/application-control";
 import { SandboxSessionService } from "@everdict/application-control";
 import type { BudgetTracker, UsageMeter } from "@everdict/domain";
@@ -35,6 +37,10 @@ export function buildSandboxSessions(opts: {
   // The durable reaper (T-b) — main wires it to the Temporal driver when EVERDICT_TEMPORAL_ADDRESS is set;
   // absent = the in-process sweep is the only expiry (a process death can leak until a reaper exists).
   reaper?: SandboxSessionServiceDeps["reaper"];
+  // Agent worlds (W1): the managed image store snapshots publish into, and the capability service that
+  // registers each snapshot as an environment-capability version. Either absent = world sessions 400.
+  images?: WorkspaceImages;
+  capabilityService?: CapabilityService;
 }): SandboxSessionService | undefined {
   const driver = process.env.EVERDICT_SANDBOX_DRIVER;
   if (driver === undefined || driver === "") return undefined;
@@ -83,12 +89,50 @@ export function buildSandboxSessions(opts: {
           };
         }
       : undefined;
+  // Agent worlds (W1): a snapshot bumps the world's IMAGE, not its identity — name/description/instructions
+  // carry forward from the latest version unless this snapshot restates them, so an auto-hibernate can never
+  // blank out prose the author wrote. Genesis (no prior version) gets honest provenance defaults.
+  const { capabilityService } = opts;
+  const publishWorldVersion =
+    capabilityService !== undefined
+      ? async (
+          tenant: string,
+          actor: { subject: string; isAdmin: boolean },
+          world: string,
+          input: { image: string; sessionRunId: string; name?: string; description?: string; instructions?: string },
+        ): Promise<{ version: string }> => {
+          const latest = capabilities
+            ? await capabilities.get(tenant, world, "latest").catch(() => undefined)
+            : undefined;
+          const prior = latest?.spec.type === "environment" ? latest.spec : undefined;
+          const saved = await capabilityService.save(tenant, actor, world, {
+            name: input.name ?? latest?.name ?? world,
+            description:
+              input.description ??
+              latest?.description ??
+              `Agent world '${world}' — filesystem snapshots of its sandbox sessions.`,
+            spec: {
+              type: "environment",
+              image: input.image,
+              ...(prior?.contents !== undefined ? { contents: prior.contents } : {}),
+              ...(prior?.preset !== undefined ? { preset: prior.preset } : {}),
+              instructions:
+                input.instructions ??
+                prior?.instructions ??
+                `Snapshot of sandbox session ${input.sessionRunId}. Boot it with create_sandbox world:{id:"${world}"} to continue from this state.`,
+            },
+          });
+          return { version: saved.version };
+        }
+      : undefined;
   return new SandboxSessionService({
     store: opts.store,
     driver: new DockerDriver(),
     ...(opts.trajectories ? { trajectories: opts.trajectories } : {}),
     ...(opts.events ? { events: opts.events } : {}),
     ...(opts.reaper ? { reaper: opts.reaper } : {}),
+    ...(opts.images ? { images: opts.images } : {}),
+    ...(publishWorldVersion ? { publishWorldVersion } : {}),
     ...(resolveSessionHarness ? { resolveSessionHarness } : {}),
     ...(opts.budget ? { budget: opts.budget } : {}),
     ...(opts.usage ? { usage: opts.usage } : {}),

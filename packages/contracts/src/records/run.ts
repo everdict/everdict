@@ -99,6 +99,13 @@ export const RunSessionSchema = z.object({
   expiresAt: z.string(), // hard deadline — extended by touch, never removed
   computeId: z.string().optional(), // driver-level compute id (container id) — the reaper's teardown key after a crash
   closedReason: z.enum(["closed", "expired", "orphaned"]).optional(), // stamped at teardown
+  // Agent worlds (W1): a WORLD session belongs to an environment capability whose versions are image
+  // snapshots of this session's filesystem — the durable half of the compute (the container may die; the
+  // world persists and the next session boots from its latest snapshot). On the ROW (not just process
+  // memory) so the crash-path reaper can still hibernate an orphan through its computeId.
+  world: z.string().optional(), // the environment capability id this session snapshots into
+  hibernate: z.boolean().optional(), // auto-snapshot at teardown (close/expiry) instead of losing the state
+  snapshots: z.array(z.object({ version: z.string(), image: z.string(), at: z.string() })).optional(), // what this session published (capability version + digest-pinned ref), append-only
 });
 export type RunSession = z.infer<typeof RunSessionSchema>;
 

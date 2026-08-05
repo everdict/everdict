@@ -312,3 +312,69 @@ describe("runAudience — one rule for who may read an execution", () => {
     expect(runAudience({ createdBy: "alice" })).toEqual({ scope: "workspace" });
   });
 });
+
+describe("Run — agent worlds (W1): session snapshots and touch", () => {
+  const world = () =>
+    Run.newSandboxSession({
+      id: "w1",
+      tenant: "acme",
+      harness: { id: "proj", version: "genesis" },
+      image: "debian:stable",
+      ttlSec: 900,
+      createdBy: "alice",
+      world: "proj",
+      hibernate: true,
+      now: "2026-08-03T00:00:00.000Z",
+    });
+
+  it("a world session carries world + hibernate on its session half (the crash-path reaper reads the row alone)", () => {
+    const record = world();
+    expect(record.session).toMatchObject({ world: "proj", hibernate: true });
+    expect(RunRecordSchema.parse(record)).toBeTruthy(); // the wire schema knows the new fields
+  });
+
+  it("recordSnapshot appends to session.snapshots and announces run.snapshotted (subject run, actor = creator)", () => {
+    const record = world();
+    const transition = Run.from(record).recordSnapshot({
+      world: "proj",
+      version: "1.0.0",
+      image: "reg.local/acme-ns/proj:v1@sha256:abc",
+      now: "2026-08-03T01:00:00.000Z",
+    });
+    expect(transition.patch.session?.snapshots).toEqual([
+      { version: "1.0.0", image: "reg.local/acme-ns/proj:v1@sha256:abc", at: "2026-08-03T01:00:00.000Z" },
+    ]);
+    expect(transition.facts).toHaveLength(1);
+    expect(transition.facts[0]).toMatchObject({
+      kind: "run.snapshotted",
+      subject: { type: "run", id: "w1" },
+      actor: "alice",
+      payload: { world: "proj", version: "1.0.0" },
+    });
+    // A second snapshot appends — the session half is the session's own snapshot history.
+    const twice = Run.from({ ...record, ...transition.patch }).recordSnapshot({
+      world: "proj",
+      version: "1.0.1",
+      image: "reg.local/acme-ns/proj:v2@sha256:def",
+      now: "2026-08-03T02:00:00.000Z",
+    });
+    expect(twice.patch.session?.snapshots).toHaveLength(2);
+  });
+
+  it("extendSession pushes the deadline OUT and never pulls it in; both refuse a non-session or terminal run", () => {
+    const record = world(); // expires 00:15
+    const extended = Run.from(record).extendSession(1800, "2026-08-03T00:05:00.000Z");
+    expect(extended.patch.session?.expiresAt).toBe("2026-08-03T00:35:00.000Z");
+    expect(extended.facts).toEqual([]); // upkeep is not news
+
+    const shorter = Run.from(record).extendSession(60, "2026-08-03T00:05:00.000Z"); // proposed 00:06 < 00:15
+    expect(shorter.patch.session?.expiresAt).toBe("2026-08-03T00:15:00.000Z");
+
+    expect(() => Run.from(queued()).recordSnapshot({ world: "w", version: "1", image: "i", now: "t" })).toThrow(
+      ConflictError,
+    );
+    expect(() => Run.from(queued()).extendSession(60, "t")).toThrow(ConflictError);
+    const closed = { ...record, ...Run.from(record).closeSession("closed", "2026-08-03T00:10:00.000Z").patch };
+    expect(() => Run.from(closed).extendSession(60, "t")).toThrow(ConflictError);
+  });
+});

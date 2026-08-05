@@ -55,6 +55,7 @@ const ACTIVITY_AXIS_BY_KIND = {
   "run.submitted": "evaluation",
   "run.completed": "evaluation",
   "run.failed": "evaluation",
+  "run.snapshotted": "evaluation",
   "run.placement_blocked": "evaluation",
   "scorecard.submitted": "evaluation",
   "scorecard.case.completed": "evaluation",

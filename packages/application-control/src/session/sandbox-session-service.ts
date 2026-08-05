@@ -6,6 +6,7 @@ import {
   type EvaluableHarness,
   ForbiddenError,
   type HarnessSpec,
+  IMAGE_GRANT_USERNAME,
   NotFoundError,
   RateLimitError,
   type RunRecord,
@@ -13,11 +14,12 @@ import {
   type TraceEvent,
   UpstreamError,
 } from "@everdict/contracts";
-import { type BudgetTracker, Run, type UsageMeter } from "@everdict/domain";
+import { type BudgetTracker, IMAGE_REPOSITORY_NAME, Run, type UsageMeter, pinDigest } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
+import type { WorkspaceImages } from "../ports/workspace-images.js";
 import { scopedComputeHandle } from "./scoped-compute.js";
 import { SessionTaskRunner } from "./session-task-runner.js";
 
@@ -53,6 +55,13 @@ export interface CreateSandboxInput {
   environment?: { source?: string; id: string; version?: string };
   image?: string;
   harness?: { id: string; version?: string; image?: string };
+  // Agent worlds (W1): open the session AS a world — boot the world's latest snapshot (its environment
+  // capability), or found the world from `image` when it has no versions yet (the genesis base). The world
+  // id doubles as the snapshot repository name, so it must be a valid single-segment repository.
+  world?: { id: string };
+  // Auto-snapshot at teardown (close and expiry both) — defaults ON for world sessions: an expiring world
+  // session HIBERNATES instead of losing its filesystem. Meaningless without `world`.
+  hibernate?: boolean;
   ttlSec?: number;
 }
 
@@ -97,6 +106,8 @@ interface LiveSession {
   trace: TraceEvent[];
   t: number; // monotonic trajectory step
   execCount: number;
+  world?: string; // agent worlds (W1): the environment capability this session snapshots into
+  hibernate: boolean; // auto-snapshot at teardown (world sessions default true)
   playground?: PlaygroundState; // present only for harness-target sessions
 }
 
@@ -154,10 +165,22 @@ export interface SandboxSessionServiceDeps {
   // The durable reaper (orchestration.md T-b): start reaper:<runId> at create (a deadline timer that
   // survives every process), signal it on close (prompt completion — correctness never depends on it,
   // reap skips a settled record). Absent = the in-process sweep is the only expiry (rung-1 behavior).
+  // `extend` re-arms the deadline on touch (W1) — optional and best-effort like the other two.
   reaper?: {
     start(input: { runId: string; tenant: string; expiresAt: string }): Promise<void>;
     signalClosed(runId: string): Promise<void>;
+    extend?(input: { runId: string; tenant: string; expiresAt: string }): Promise<void>;
   };
+  // Agent worlds (W1): the managed image store the snapshots publish into, and the closure that registers a
+  // pushed snapshot as an environment-capability version (apps/api wires CapabilityService behind it — the
+  // same injected-closure seam as resolveEnvironmentImage). Either absent = world sessions 400 at create.
+  images?: Pick<WorkspaceImages, "endpoint" | "namespaceFor" | "listTags" | "inspect" | "mintPushGrant">;
+  publishWorldVersion?: (
+    tenant: string,
+    actor: { subject: string; isAdmin: boolean },
+    world: string,
+    input: { image: string; sessionRunId: string; name?: string; description?: string; instructions?: string },
+  ) => Promise<{ version: string }>;
   defaultTtlSec?: number;
   maxTtlSec?: number;
   maxPerTenant?: number; // undefined = unlimited (dev); production sets both
@@ -219,6 +242,7 @@ export class SandboxSessionService {
           );
         }
       }
+      const hibernate = resolved.world !== undefined ? (input.hibernate ?? true) : false;
       const record = Run.newSandboxSession({
         id: this.newId(),
         tenant: input.tenant,
@@ -227,6 +251,7 @@ export class SandboxSessionService {
         ttlSec,
         createdBy: input.createdBy,
         ...(handle.id !== undefined ? { computeId: handle.id } : {}),
+        ...(resolved.world !== undefined ? { world: resolved.world, hibernate } : {}),
         ...(resolved.playground ? { attach: ["exec" as const, "tasks" as const] } : {}),
         now: this.now(),
       });
@@ -241,6 +266,8 @@ export class SandboxSessionService {
         tenant: input.tenant,
         createdBy: input.createdBy,
         label: record.harness.id,
+        ...(resolved.world !== undefined ? { world: resolved.world } : {}),
+        hibernate,
         expiresAtMs: new Date(this.now()).getTime() + ttlSec * 1000,
         trace: [
           // M3 — the sandbox's infra-plane record: the driver container identity, so the sealed trajectory says
@@ -261,6 +288,7 @@ export class SandboxSessionService {
             detail: {
               image: resolved.image,
               ttlSec,
+              ...(resolved.world !== undefined ? { world: resolved.world } : {}),
               ...(resolved.playground ? { harness: `${resolved.harness.id}@${resolved.harness.version}` } : {}),
             },
           },
@@ -318,6 +346,56 @@ export class SandboxSessionService {
       output: clamp(`${result.stdout}${result.stderr === "" ? "" : `\n${result.stderr}`}`),
     });
     return result;
+  }
+
+  // Agent worlds (W1): publish this session's filesystem as the world's next snapshot — an image in the
+  // managed store plus a new environment-capability version pinned to its digest. Creator-or-admin; refused
+  // while a playground task runs (a mid-task capture is a half-written world, a foot-gun not a feature).
+  async snapshot(
+    actor: SandboxActor,
+    runId: string,
+    input: { name?: string; description?: string; instructions?: string } = {},
+  ): Promise<{ world: string; version: string; image: string }> {
+    this.sweep();
+    const live = this.sessions.get(runId);
+    if (!live || live.tenant !== actor.tenant)
+      throw new NotFoundError("NOT_FOUND", { run: runId }, "No live sandbox session with that id.");
+    if (live.createdBy !== actor.subject && !actor.isAdmin)
+      throw new ForbiddenError("FORBIDDEN", { run: runId }, "Only the session's creator or an admin can snapshot.");
+    if (live.playground?.active)
+      throw new ConflictError(
+        "CONFLICT",
+        { run: runId, activeRun: live.playground.active.runId },
+        "A test case is running in this session — snapshot after it finishes.",
+      );
+    return this.snapshotLive(runId, live, { subject: actor.subject, isAdmin: actor.isAdmin }, input);
+  }
+
+  // Keep-alive (touch): push the session's hard deadline out to now+ttl (never in — extendSession's max
+  // rule), in all three places it lives: process memory, the row, and the durable reaper's timer.
+  async touch(actor: SandboxActor, runId: string, input: { ttlSec?: number } = {}): Promise<{ expiresAt: string }> {
+    this.sweep();
+    const live = this.sessions.get(runId);
+    if (!live || live.tenant !== actor.tenant)
+      throw new NotFoundError("NOT_FOUND", { run: runId }, "No live sandbox session with that id.");
+    if (live.createdBy !== actor.subject && !actor.isAdmin)
+      throw new ForbiddenError("FORBIDDEN", { run: runId }, "Only the session's creator or an admin can touch it.");
+    const ttlSec = Math.min(input.ttlSec ?? this.deps.defaultTtlSec ?? DEFAULT_TTL_SEC, this.maxTtl());
+    live.expiresAtMs = Math.max(live.expiresAtMs, new Date(this.now()).getTime() + ttlSec * 1000);
+    let expiresAt = new Date(live.expiresAtMs).toISOString();
+    const current = await this.deps.store.get(runId);
+    if (current) {
+      const transition = Run.from(current).extendSession(ttlSec, this.now());
+      await this.deps.store.update(runId, transition.patch, []);
+      const patched = transition.patch.session;
+      if (patched?.expiresAt !== undefined) expiresAt = patched.expiresAt;
+    }
+    // Re-arm the durable deadline — best-effort like start/signalClosed. A missed extend leaves the OLD
+    // timer armed; reap() guards against exactly that by re-checking the authoritative deadline before
+    // tearing anything down, so a stale timer fires a no-op, never an early teardown.
+    void this.deps.reaper?.extend?.({ runId, tenant: live.tenant, expiresAt }).catch(() => {});
+    live.trace.push({ t: live.t++, kind: "env_action", action: "session.touch", detail: { ttlSec, expiresAt } });
+    return { expiresAt };
   }
 
   // Submit a test case into a live harness session (the playground). One task at a time per session: one
@@ -499,8 +577,9 @@ export class SandboxSessionService {
 
   // Member close. Idempotent over an already-settled record; a running record with NO live handle here
   // (a control-plane restart) is adopted as "orphaned" — the row settles even though the container is gone
-  // from our reach (the durable reaper rung makes that teardown crash-proof).
-  async close(actor: SandboxActor, runId: string): Promise<RunRecord | undefined> {
+  // from our reach (the durable reaper rung makes that teardown crash-proof). `snapshot` overrides the
+  // session's hibernate default for THIS teardown (close-without-saving, or save-a-non-hibernate-session).
+  async close(actor: SandboxActor, runId: string, input: { snapshot?: boolean } = {}): Promise<RunRecord | undefined> {
     const record = await this.deps.store.get(runId);
     if (!record || record.tenant !== actor.tenant || record.kind !== "sandbox")
       throw new NotFoundError("NOT_FOUND", { run: runId }, "Sandbox session not found.");
@@ -511,7 +590,7 @@ export class SandboxSessionService {
       if (Run.from(record).isTerminal()) return record;
       return this.settle(runId, record.tenant, "orphaned");
     }
-    return this.teardown(runId, live, "closed");
+    return this.teardown(runId, live, "closed", input);
   }
 
   // The durable reaper's teardown (T-b, called over the internal bridge when reaper:<runId> fires). Three
@@ -520,15 +599,39 @@ export class SandboxSessionService {
   // ledger settles as orphaned (the in-memory trajectory died with the old process — that loss is the
   // documented rung-1 cost); an already-settled row → the timer fired a no-op (close won the race).
   async reap(tenant: string, runId: string): Promise<{ reaped: boolean }> {
+    const nowMs = new Date(this.now()).getTime();
     const live = this.sessions.get(runId);
     if (live && live.tenant === tenant) {
+      // A touched session outlives the timer armed before the touch (extend is best-effort) — the deadline
+      // HERE is authoritative, so a stale timer fires a no-op instead of tearing down live work.
+      if (live.expiresAtMs > nowMs) return { reaped: false };
       await this.teardown(runId, live, "expired");
       return { reaped: true };
     }
     const record = await this.deps.store.get(runId);
     if (!record || record.tenant !== tenant || record.kind !== "sandbox") return { reaped: false };
     if (Run.from(record).isTerminal()) return { reaped: false };
+    // Same stale-timer guard for the crash case — the row's deadline was touched too (extendSession).
+    const rowExpiry = record.session?.expiresAt;
+    if (rowExpiry !== undefined && new Date(rowExpiry).getTime() > nowMs) return { reaped: false };
     const computeId = record.session?.computeId;
+    // Crash-path hibernate (W1): the row remembers enough (world + hibernate + computeId + creator) to
+    // capture the orphan's filesystem BEFORE removing it — a control plane dying with the live handle no
+    // longer costs the world its state. Best-effort: a snapshot failure still reaps (the leak would be worse).
+    if (
+      computeId !== undefined &&
+      record.createdBy !== undefined &&
+      record.session?.world !== undefined &&
+      record.session.hibernate === true
+    ) {
+      await this.publishSnapshot({
+        tenant,
+        runId,
+        world: record.session.world,
+        computeId,
+        actor: { subject: record.createdBy, isAdmin: false },
+      }).catch(() => undefined);
+    }
     if (computeId !== undefined && this.deps.driver.reap) await this.deps.driver.reap(computeId).catch(() => undefined);
     await this.settle(runId, tenant, "orphaned");
     return { reaped: true };
@@ -547,10 +650,104 @@ export class SandboxSessionService {
     return this.sessions.size;
   }
 
+  // The live-session snapshot path: the core publisher plus the trajectory record (the sealed evidence of
+  // what this shell published).
+  private async snapshotLive(
+    runId: string,
+    live: LiveSession,
+    actor: { subject: string; isAdmin: boolean },
+    input: { name?: string; description?: string; instructions?: string },
+  ): Promise<{ world: string; version: string; image: string }> {
+    const world = live.world;
+    if (world === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId },
+        "This session has no world — create it with world:{id} to snapshot.",
+      );
+    const computeId = live.handle.id;
+    if (computeId === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId },
+        "This session's driver exposes no compute identity — snapshots need one.",
+      );
+    const result = await this.publishSnapshot({ tenant: live.tenant, runId, world, computeId, actor, ...input });
+    live.trace.push({ t: live.t++, kind: "env_action", action: "session.snapshot", detail: { ...result } });
+    return result;
+  }
+
+  // The snapshot core (live and crash paths share it): mint the next v<n> tag → commit+push HOST-side with
+  // a transient grant (the credential never enters the container, so it can never be captured INTO the
+  // snapshot) → read the digest back from the registry (authoritative — what it actually stored) → publish
+  // the environment-capability version → append the snapshot to the session row with its fact.
+  private async publishSnapshot(input: {
+    tenant: string;
+    runId: string;
+    world: string;
+    computeId: string;
+    actor: { subject: string; isAdmin: boolean };
+    name?: string;
+    description?: string;
+    instructions?: string;
+  }): Promise<{ world: string; version: string; image: string }> {
+    const images = this.deps.images;
+    const publish = this.deps.publishWorldVersion;
+    const snapshot = this.deps.driver.snapshot?.bind(this.deps.driver);
+    if (!images || !publish || !snapshot)
+      throw new BadRequestError("BAD_REQUEST", {}, "World snapshots are not configured.");
+    const tags = await images.listTags(input.tenant, input.world).catch(() => [] as string[]);
+    let next = 1;
+    for (const tag of tags) {
+      const m = /^v(\d+)$/.exec(tag);
+      if (m) next = Math.max(next, Number(m[1]) + 1);
+    }
+    const tag = `v${next}`;
+    const ref = `${images.endpoint}/${images.namespaceFor(input.tenant)}/${input.world}:${tag}`;
+    const grant = await images.mintPushGrant(input.tenant, input.world);
+    await snapshot(input.computeId, ref, {
+      host: grant.endpoint,
+      username: IMAGE_GRANT_USERNAME,
+      password: grant.token,
+    });
+    // Pin the digest WITH the tag (pinDigest) so a human still reads a version off the ref. No digest →
+    // the tag ref stands and the capability publish itself warns mutable-tag.
+    const digest = await images
+      .inspect(input.tenant, input.world, tag)
+      .then((i) => i.digest)
+      .catch(() => undefined);
+    const image = digest !== undefined ? pinDigest(ref, digest) : ref;
+    const published = await publish(input.tenant, input.actor, input.world, {
+      image,
+      sessionRunId: input.runId,
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+    });
+    const current = await this.deps.store.get(input.runId);
+    if (current && !Run.from(current).isTerminal()) {
+      const transition = Run.from(current).recordSnapshot({
+        world: input.world,
+        version: published.version,
+        image,
+        now: this.now(),
+      });
+      const stamped = stampFacts(input.tenant, transition.facts, { newId: this.newId, now: this.now });
+      await this.deps.store.update(
+        input.runId,
+        transition.patch,
+        stamped.map((f) => f.record),
+      );
+      if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    }
+    return { world: input.world, version: published.version, image };
+  }
+
   private async teardown(
     runId: string,
     live: LiveSession,
     reason: "closed" | "expired",
+    opts?: { snapshot?: boolean },
   ): Promise<RunRecord | undefined> {
     this.sessions.delete(runId); // delete first — a concurrent close finds no handle and stays idempotent
     try {
@@ -562,6 +759,20 @@ export class SandboxSessionService {
       if (active) {
         active.abort.abort();
         await Promise.race([active.done, new Promise((r) => setTimeout(r, TEARDOWN_TASK_GRACE_MS))]);
+      }
+      // Hibernate (agent worlds W1): a world session's teardown captures the filesystem BEFORE the container
+      // dies — expiry stops meaning loss. A failure never blocks teardown (the trajectory records it; the
+      // world simply gains no new version this time).
+      const wantSnapshot = live.world !== undefined && (opts?.snapshot ?? live.hibernate);
+      if (wantSnapshot) {
+        await this.snapshotLive(runId, live, { subject: live.createdBy, isAdmin: false }, {}).catch((err) => {
+          live.trace.push({
+            t: live.t++,
+            kind: "env_action",
+            action: "session.snapshot_failed",
+            detail: { message: err instanceof Error ? err.message : String(err) },
+          });
+        });
       }
       live.trace.push({ t: live.t++, kind: "env_action", action: "session.close", detail: { reason } });
       // Seal the session's trajectory (P5 discipline: evidence before anything reads it; first write wins).
@@ -610,7 +821,41 @@ export class SandboxSessionService {
     image: string;
     harness: { id: string; version: string };
     playground?: ResolvedSessionHarness;
+    world?: string;
   }> {
+    if (input.world) {
+      // A world session is snapshot-bound by definition — refuse at CREATE when the deployment cannot
+      // snapshot, not at the first snapshot hours of work later.
+      if (input.harness)
+        throw new BadRequestError("BAD_REQUEST", {}, "world and harness are mutually exclusive on one session.");
+      if (!this.deps.images || !this.deps.publishWorldVersion || this.deps.driver.snapshot === undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          {},
+          "World sessions are not configured (a managed image store and a snapshot-capable driver are required).",
+        );
+      const world = input.world.id;
+      // The world id doubles as its snapshot repository — the managed store's single-segment rule applies.
+      if (!IMAGE_REPOSITORY_NAME.test(world))
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { world },
+          `world '${world}' is not a usable repository name — lowercase letters, digits, '.', '_', '-'.`,
+        );
+      // Boot the world's latest snapshot when it exists; otherwise `image` is the genesis base it is
+      // founded from. The environment resolver goes through the same consume gate as any capability boot.
+      if (this.deps.resolveEnvironmentImage) {
+        const resolved = await this.deps.resolveEnvironmentImage(input.tenant, input.createdBy, { id: world });
+        if (resolved) return { image: resolved.image, harness: { id: world, version: resolved.version }, world };
+      }
+      if (input.image !== undefined && input.image.trim() !== "")
+        return { image: input.image, harness: { id: world, version: "genesis" }, world };
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { world },
+        "World not found — provide image to found it (the genesis base this session starts from).",
+      );
+    }
     if (input.harness) {
       if (!this.deps.resolveSessionHarness)
         throw new BadRequestError("BAD_REQUEST", {}, "Harness sandboxes are not configured.");

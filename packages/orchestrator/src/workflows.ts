@@ -207,6 +207,10 @@ export async function approvalWorkflow(input: {
 // activity retries until a control plane is back to serve it). The close path signals for a prompt
 // completion; correctness never depends on it — reap skips an already-settled record.
 export const reaperClosedSignal = defineSignal("closed");
+// Touch (agent worlds W1): the CP pushed the session's deadline out. The signal carries the NEW remaining
+// time, computed control-plane-side at send — the workflow re-arms its timer without ever reading a clock
+// (determinism holds). Several touches racing one sleep keep the largest extension.
+export const reaperExtendSignal = defineSignal<[number]>("extend");
 
 export async function sessionReaperWorkflow(input: {
   runId: string;
@@ -214,11 +218,25 @@ export async function sessionReaperWorkflow(input: {
   timeoutMs: number;
 }): Promise<void> {
   let closed = false;
+  let extendedMs = 0;
   setHandler(reaperClosedSignal, () => {
     closed = true;
   });
-  const closedInTime = await condition(() => closed, Math.max(1, input.timeoutMs));
-  if (!closedInTime) await reaperActivities.reapSession({ runId: input.runId, tenant: input.tenant });
+  setHandler(reaperExtendSignal, (remainingMs: number) => {
+    extendedMs = Math.max(extendedMs, remainingMs);
+  });
+  let remaining = input.timeoutMs;
+  for (;;) {
+    await condition(() => closed || extendedMs > 0, Math.max(1, remaining));
+    if (closed) return;
+    if (extendedMs > 0) {
+      remaining = extendedMs;
+      extendedMs = 0;
+      continue;
+    }
+    break; // the deadline fired with no extension pending — reap
+  }
+  await reaperActivities.reapSession({ runId: input.runId, tenant: input.tenant });
 }
 
 // Reaction activities: the step START must not give up while the control plane or the agent service is

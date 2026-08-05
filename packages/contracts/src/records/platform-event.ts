@@ -15,6 +15,10 @@ export const PLATFORM_EVENT_KINDS = [
   "run.submitted",
   "run.completed",
   "run.failed",
+  // A world session published an environment-capability snapshot of its filesystem (agent worlds W1) — a new
+  // world version exists and the next session can boot from it. Deliberately NOT trigger-matchable in v1:
+  // agents snapshotting on a trigger and waking on their own snapshot is loop guard #1's textbook vector.
+  "run.snapshotted",
   "scorecard.submitted",
   "scorecard.case.completed", // one case of a streaming batch finished — payload carries caseId + verdict
   "scorecard.completed",

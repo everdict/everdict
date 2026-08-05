@@ -4,7 +4,9 @@ import { z } from "zod";
 // control-plane's container runtime), `environment` (an adopted environment capability — resolved to its
 // image through the consume gate), or `harness` (a registered harness booted for interactive test cases —
 // the playground; harness.image overrides/supplies the container image for specs that declare none).
-// ttlSec bounds the session's life; the service clamps it to its max.
+// Agent worlds (W1): `world` opens the session as a WORLD — boot its latest snapshot, or found it from
+// `image` when it has no versions yet; `hibernate` (default true for world sessions) auto-snapshots at
+// teardown. ttlSec bounds the session's life; the service clamps it to its max.
 export const CreateSandboxBodySchema = z
   .object({
     image: z.string().min(1).max(400).optional(),
@@ -22,6 +24,8 @@ export const CreateSandboxBodySchema = z
         image: z.string().min(1).max(400).optional(), // required when the spec declares no image (process kind)
       })
       .optional(),
+    world: z.object({ id: z.string().min(1).max(128) }).optional(),
+    hibernate: z.boolean().optional(),
     ttlSec: z
       .number()
       .int()
@@ -29,7 +33,19 @@ export const CreateSandboxBodySchema = z
       .max(4 * 3600)
       .optional(),
   })
-  .refine((body) => [body.image, body.environment, body.harness].filter((x) => x !== undefined).length === 1, {
-    message: "Provide exactly one of image, environment, or harness.",
+  .superRefine((body, ctx) => {
+    if (body.world !== undefined) {
+      if (body.environment !== undefined || body.harness !== undefined)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "world combines only with image (its genesis base) — not with environment or harness.",
+        });
+      return;
+    }
+    if ([body.image, body.environment, body.harness].filter((x) => x !== undefined).length !== 1)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide exactly one of image, environment, or harness.",
+      });
   });
 export type CreateSandboxBody = z.infer<typeof CreateSandboxBodySchema>;

@@ -43,19 +43,24 @@ function build() {
   const trajectories = new InMemoryTrajectoryStore();
   const { driver, disposed } = fakeDriver();
   let n = 0;
+  let nowIso = "2026-07-30T00:00:00.000Z";
   const sandboxSessions = new SandboxSessionService({
     store,
     driver,
     trajectories,
     maxPerTenant: 1,
     newId: () => `sbx-${++n}`,
+    now: () => nowIso,
   });
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store, trajectories }),
     sandboxSessions,
     internalToken: "itok",
   });
-  return { app, disposed };
+  const setNow = (iso: string): void => {
+    nowIso = iso;
+  };
+  return { app, disposed, setNow };
 }
 
 describe("sandbox session routes — run an environment image and shell in (P6)", () => {
@@ -143,8 +148,8 @@ describe("sandbox session routes — run an environment image and shell in (P6)"
     ).toBe(429);
   });
 
-  it("the reaper's internal teardown: token-guarded; expires a live session and no-ops a settled one (T-b)", async () => {
-    const { app, disposed } = build();
+  it("the reaper's internal teardown: token-guarded; a PRE-deadline fire is a no-op; expires an overdue session (T-b)", async () => {
+    const { app, disposed, setNow } = build();
     const created = await app.inject({ method: "POST", url: "/sandboxes", headers: H, payload: { image: "img" } });
     const id = created.json().id;
 
@@ -156,6 +161,17 @@ describe("sandbox session routes — run an environment image and shell in (P6)"
     });
     expect(unauthenticated.statusCode).toBe(403);
 
+    // A stale timer (armed before a touch — extend is best-effort) fires before the authoritative deadline:
+    // the session stays alive.
+    const early = await app.inject({
+      method: "POST",
+      url: `/internal/sandboxes/${id}/reap`,
+      headers: { "content-type": "application/json", "x-internal-token": "itok" },
+      payload: { tenant: "acme" },
+    });
+    expect(early.json()).toEqual({ reaped: false });
+
+    setNow("2026-07-30T00:16:00.000Z"); // past the 900s deadline
     const reap = await app.inject({
       method: "POST",
       url: `/internal/sandboxes/${id}/reap`,
@@ -359,6 +375,174 @@ describe("sandbox playground routes — a harness in the session, test cases thr
           url: `/sandboxes/${plain.json().id}/tasks`,
           headers: H,
           payload: { task: "x" },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+});
+
+describe("sandbox world routes — agent worlds (W1): snapshot, touch, close-without-saving", () => {
+  function buildWorldApp() {
+    const store = new InMemoryRunStore();
+    const trajectories = new InMemoryTrajectoryStore();
+    const pushed: Array<{ id: string; ref: string }> = [];
+    let seq = 0;
+    const driver: Driver = {
+      id: "fake",
+      async provision() {
+        const cid = `c-${++seq}`;
+        const handle: ComputeHandle = {
+          id: cid,
+          async exec(command) {
+            return { stdout: `ran:${command}`, stderr: "", exitCode: 0 };
+          },
+          async writeFile() {},
+          async readFile() {
+            return "";
+          },
+          async dispose() {},
+        };
+        return handle;
+      },
+      async snapshot(id, ref) {
+        pushed.push({ id, ref });
+      },
+    };
+    const tags = new Map<string, string[]>();
+    let version = 0;
+    let n = 0;
+    let nowIso = "2026-07-30T00:00:00.000Z";
+    const sandboxSessions = new SandboxSessionService({
+      store,
+      driver,
+      trajectories,
+      newId: () => `sbx-${++n}`,
+      now: () => nowIso,
+      images: {
+        endpoint: "reg.local:5000",
+        namespaceFor: (tenant) => `${tenant}-ns`,
+        listTags: async (_t, repo) => tags.get(repo) ?? [],
+        inspect: async (_t, repo, reference) => ({ reference, digest: `sha256:${repo}.${reference}` }),
+        mintPushGrant: async (_t, repo) => ({
+          endpoint: "reg.local:5000",
+          repositories: [repo],
+          actions: ["push" as const],
+          token: "grant-token",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }),
+      },
+      publishWorldVersion: async () => ({ version: `1.0.${version++}` }),
+    });
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store, trajectories }),
+      sandboxSessions,
+      internalToken: "itok",
+    });
+    const setNow = (iso: string): void => {
+      nowIso = iso;
+    };
+    return { app, pushed, setNow };
+  }
+
+  it("found a world from a genesis image → snapshot publishes {world, version, image} → touch extends the deadline", async () => {
+    const { app, pushed } = buildWorldApp();
+    const created = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { world: { id: "proj" }, image: "debian:stable" },
+    });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    expect(session).toMatchObject({
+      kind: "sandbox",
+      harness: { id: "proj", version: "genesis" },
+      session: { image: "debian:stable", world: "proj", hibernate: true },
+    });
+
+    const snapshot = await app.inject({
+      method: "POST",
+      url: `/sandboxes/${session.id}/snapshot`,
+      headers: H,
+      payload: { name: "My project" },
+    });
+    expect(snapshot.statusCode).toBe(200);
+    expect(snapshot.json()).toEqual({
+      world: "proj",
+      version: "1.0.0",
+      image: "reg.local:5000/acme-ns/proj:v1@sha256:proj.v1",
+    });
+    expect(pushed).toEqual([{ id: "c-1", ref: "reg.local:5000/acme-ns/proj:v1" }]);
+
+    const touched = await app.inject({
+      method: "POST",
+      url: `/sandboxes/${session.id}/touch`,
+      headers: H,
+      payload: { ttlSec: 1800 },
+    });
+    expect(touched.statusCode).toBe(200);
+    expect(touched.json()).toEqual({ expiresAt: "2026-07-30T00:30:00.000Z" });
+  });
+
+  it("close with snapshot:false skips hibernation; a snapshot on a non-world session is 400; foreign reads 404", async () => {
+    const { app, pushed } = buildWorldApp();
+    const world = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { world: { id: "proj" }, image: "img" },
+    });
+    const closed = await app.inject({
+      method: "POST",
+      url: `/sandboxes/${world.json().id}/close`,
+      headers: H,
+      payload: { snapshot: false },
+    });
+    expect(closed.statusCode).toBe(200);
+    expect(pushed).toEqual([]); // close-without-saving captured nothing
+
+    const plain = await app.inject({ method: "POST", url: "/sandboxes", headers: H, payload: { image: "img" } });
+    expect(
+      (await app.inject({ method: "POST", url: `/sandboxes/${plain.json().id}/snapshot`, headers: H, payload: {} }))
+        .statusCode,
+    ).toBe(400);
+
+    const rival = { ...H, "x-everdict-tenant": "rival" };
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/sandboxes/${plain.json().id}/snapshot`,
+          headers: rival,
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (await app.inject({ method: "POST", url: `/sandboxes/${plain.json().id}/touch`, headers: rival, payload: {} }))
+        .statusCode,
+    ).toBe(404);
+  });
+
+  it("create validation: world excludes environment/harness; a bad world id (not a repository name) is 400", async () => {
+    const { app } = buildWorldApp();
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/sandboxes",
+          headers: H,
+          payload: { world: { id: "proj" }, harness: { id: "cc" } },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/sandboxes",
+          headers: H,
+          payload: { world: { id: "Bad Name" }, image: "img" },
         })
       ).statusCode,
     ).toBe(400);

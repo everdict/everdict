@@ -146,6 +146,31 @@ export async function pullWithRegistryAuth(image: string, auth: RegistryAuth): P
   }
 }
 
+// Publish an image with a transient credential — the push twin of pullWithRegistryAuth: credentials go into a
+// temporary DOCKER_CONFIG directory (0600) and are deleted afterward, the host ~/.docker/config.json untouched.
+// No auth → a plain push (a dev registry with no token server).
+async function pushWithRegistryAuth(ref: string, auth?: RegistryAuth): Promise<void> {
+  const remap = (err: unknown): never => {
+    const e = err as { stderr?: string; message?: string };
+    throw new InternalError(
+      "DRIVER_SNAPSHOT_FAILED",
+      { ref, ...(auth !== undefined ? { registry: auth.host } : {}) },
+      e.stderr || e.message,
+    );
+  };
+  if (!auth) {
+    await pexecFile("docker", ["push", ref], { maxBuffer: MAX_BUFFER }).catch(remap);
+    return;
+  }
+  const configDir = await mkdtemp(join(tmpdir(), "everdict-push-"));
+  try {
+    await writeFile(join(configDir, "config.json"), dockerAuthConfigJson(auth), { mode: 0o600 });
+    await pexecFile("docker", ["--config", configDir, "push", ref], { maxBuffer: MAX_BUFFER }).catch(remap);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+}
+
 // A Driver that launches a container from an env image. Isolation is docker (the container) — for local/simple execution, separate from the strong isolation of a Backend (Nomad/K8s).
 export class DockerDriver implements Driver {
   readonly id = "docker";
@@ -210,5 +235,22 @@ export class DockerDriver implements Driver {
   // a crash). Same force-remove as dispose(); a container already gone is a no-op, not an error.
   async reap(id: string): Promise<void> {
     await pexecFile("docker", ["rm", "-f", id], { maxBuffer: MAX_BUFFER }).catch(() => undefined);
+  }
+
+  // Agent worlds (W1): capture a live container's filesystem as an image and publish it. HOST-side by
+  // design — commit and push talk to the daemon, so the push credential never enters the container and can
+  // never be baked into the snapshot. `docker commit` briefly pauses the container (a consistent capture);
+  // the local tag is removed after the push — the registry holds the bytes, the host must not accumulate a
+  // copy per snapshot.
+  async snapshot(id: string, ref: string, auth?: RegistryAuth): Promise<void> {
+    await pexecFile("docker", ["commit", id, ref], { maxBuffer: MAX_BUFFER }).catch((err) => {
+      const e = err as { stderr?: string; message?: string };
+      throw new InternalError("DRIVER_SNAPSHOT_FAILED", { compute: id, ref }, e.stderr || e.message);
+    });
+    try {
+      await pushWithRegistryAuth(ref, auth);
+    } finally {
+      await pexecFile("docker", ["rmi", ref], { maxBuffer: MAX_BUFFER }).catch(() => undefined);
+    }
   }
 }

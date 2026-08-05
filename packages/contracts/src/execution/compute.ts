@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { RegistryAuth } from "../infra/image-ref.js";
 
 export const CapabilitySchema = z.enum(["shell", "browser", "desktop"]);
 export type Capability = z.infer<typeof CapabilitySchema>;
@@ -55,4 +56,9 @@ export interface Driver {
   // reaper after a crash — the row remembers the compute id, the driver knows how to remove it). Optional:
   // only drivers whose computes can outlive the process (docker) implement it.
   reap?(id: string): Promise<void>;
+  // Capture a live compute's filesystem as an image and publish it to `ref` (agent worlds W1: the session
+  // hibernate/snapshot primitive). Runs HOST-side — the credential never enters the compute, so it can never
+  // end up inside the captured image. Optional: only drivers whose runtime can commit a container implement
+  // it; callers detect support (absent = snapshots not available on this driver, a 400 not a crash).
+  snapshot?(id: string, ref: string, auth?: RegistryAuth): Promise<void>;
 }

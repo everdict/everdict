@@ -248,6 +248,8 @@ export class Run {
     ttlSec: number;
     createdBy: string;
     computeId?: string; // driver-level compute id (container id) — the reaper's teardown key after a crash
+    world?: string; // agent worlds (W1): the environment capability this session snapshots into
+    hibernate?: boolean; // auto-snapshot at teardown instead of losing the filesystem
     origin?: RunOrigin;
     envelope?: RunEnvelope;
     attach?: RunAttachChannel[]; // default ["exec"]; a harness session adds "tasks" (test-case submissions)
@@ -273,6 +275,8 @@ export class Run {
         ttlSec: input.ttlSec,
         expiresAt: new Date(new Date(input.now).getTime() + input.ttlSec * 1000).toISOString(),
         ...(input.computeId !== undefined ? { computeId: input.computeId } : {}),
+        ...(input.world !== undefined ? { world: input.world } : {}),
+        ...(input.hibernate !== undefined ? { hibernate: input.hibernate } : {}),
       },
       createdAt: input.now,
       updatedAt: input.now,
@@ -336,6 +340,45 @@ export class Run {
       },
       facts: terminalFact(this.record, "succeeded"),
     };
+  }
+
+  // Agent worlds (W1): the session published a snapshot — an environment-capability version whose image IS
+  // this session's filesystem now exists, and the next session can boot from it. Append-only on the session
+  // half (one session may snapshot many times). The fact is deliberately NOT trigger-matchable in v1: an
+  // agent snapshotting on a trigger and waking on its own snapshot is loop guard #1's textbook vector.
+  recordSnapshot(input: { world: string; version: string; image: string; now: string }): RunTransition {
+    this.assertNotTerminal("recordSnapshot");
+    const session = this.assertSession("recordSnapshot");
+    return {
+      patch: {
+        session: {
+          ...session,
+          snapshots: [...(session.snapshots ?? []), { version: input.version, image: input.image, at: input.now }],
+        },
+        updatedAt: input.now,
+      },
+      facts: [
+        {
+          kind: "run.snapshotted",
+          subject: { type: "run", id: this.record.id },
+          ...(this.record.createdBy !== undefined
+            ? { actor: this.record.createdBy, recipient: this.record.createdBy }
+            : {}),
+          payload: { world: input.world, version: input.version, image: input.image },
+          message: `Session ${this.record.id} snapshotted world ${input.world}@${input.version}`,
+        },
+      ],
+    };
+  }
+
+  // Keep-alive (touch): push the hard deadline OUT to now+ttl — never pull it in (a touch that could shorten
+  // a long-remaining session would make a small ttl a foot-gun), and never announce (upkeep is not news).
+  extendSession(ttlSec: number, now: string): RunTransition {
+    this.assertNotTerminal("extendSession");
+    const session = this.assertSession("extendSession");
+    const proposed = new Date(now).getTime() + ttlSec * 1000;
+    const expiresAt = new Date(Math.max(new Date(session.expiresAt).getTime(), proposed)).toISOString();
+    return { patch: { session: { ...session, ttlSec, expiresAt }, updatedAt: now }, facts: [] };
   }
 
   // Settle an agent run (reported by the agent service). Facts stay DELIBERATELY empty in this slice: the
@@ -450,5 +493,18 @@ export class Run {
         { run: this.record.id, status: this.record.status, transition },
         `run is already terminal (${this.record.status}) — ${transition} rejected`,
       );
+  }
+
+  // Session-only transitions guard on the session half existing — a task-lifetime run reaching one is a
+  // caller bug, reported as a conflict with the transition named (never a silent no-op).
+  private assertSession(transition: string): NonNullable<RunRecord["session"]> {
+    const session = this.record.session;
+    if (session === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { run: this.record.id, transition },
+        `run is not a session — ${transition} rejected`,
+      );
+    return session;
   }
 }

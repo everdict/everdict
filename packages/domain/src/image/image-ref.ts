@@ -164,6 +164,11 @@ export function dockerAuthConfigJson(auth: RegistryAuth | RegistryAuth[]): strin
   return JSON.stringify({ auths });
 }
 
+// A single-segment repository name INSIDE a workspace namespace — the rule the managed store enforces at
+// resolve() and the rule a sandbox world id must satisfy to BE a repository (agent worlds W1: the world id
+// doubles as its snapshot repository). One authority so the two can never drift.
+export const IMAGE_REPOSITORY_NAME = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+
 // A workspace's repository namespace in the MANAGED image store — the image analog of `fsBucketFor`, and deliberately
 // the same collision rule: OCI repository paths are lowercase `[a-z0-9]` plus separators while tenant slugs are not,
 // so a sanitization collision ("Acme" vs "acme", "a.b" vs "a-b") would put two workspaces in one namespace, which IS

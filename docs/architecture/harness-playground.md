@@ -90,3 +90,10 @@ MCP twins: `create_sandbox` (harness branch) · `submit_sandbox_task` · `read_s
   container, not the harness's memory. A harness-contract extension if ever wanted.
 - No envelope admission on session create (no `causedByRunId` input today); tenant budget only.
 - `CommandHarness` events arrive at settle (buffered); `ClaudeCodeHarness` streams.
+
+## Agent worlds (W1) ride the same session
+
+A sandbox session opened with `world:{id}` becomes a PERSISTENT environment: its filesystem is
+snapshotted (host-side `docker commit` + push) into the managed image store and registered as an
+environment-capability version, and the next `world` session boots from the latest snapshot —
+expiry hibernates instead of losing state. See `docs/architecture/agent-worlds.md`.

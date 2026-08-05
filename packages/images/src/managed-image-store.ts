@@ -1,6 +1,6 @@
 import type { ImageManifestInfo, WorkspaceImages } from "@everdict/application-control";
 import { BadRequestError, IMAGE_GRANT_USERNAME, type ImageGrant, type ImageRepo } from "@everdict/contracts";
-import { imageRepoFor, parseImageRef } from "@everdict/domain";
+import { IMAGE_REPOSITORY_NAME, imageRepoFor, parseImageRef } from "@everdict/domain";
 import type { ManagedRegistryApi } from "./registry-api.js";
 import type { RegistryAccess, RegistryTokenIssuer } from "./token-issuer.js";
 
@@ -34,7 +34,8 @@ const PULL_DELETE: Array<"pull" | "push" | "delete"> = ["pull", "delete"];
 // A repository name a workspace may create: one path segment, the OCI grammar's lowercase alphanumerics with
 // single separators. Deliberately stricter than the spec's multi-segment form — a nested path would let a caller
 // smuggle a `/` and reason about someone else's namespace, and a flat name is all an environment image needs.
-const REPO_NAME = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+// The rule lives in @everdict/domain (IMAGE_REPOSITORY_NAME) because a sandbox WORLD id must satisfy it too.
+const REPO_NAME = IMAGE_REPOSITORY_NAME;
 
 export class ManagedImageStore implements WorkspaceImages {
   readonly endpoint: string;

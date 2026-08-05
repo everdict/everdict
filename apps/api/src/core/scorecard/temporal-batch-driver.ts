@@ -155,6 +155,28 @@ export class TemporalBatchDriver {
     }
   }
 
+  // Touch (agent worlds W1): re-arm the reaper's deadline. The signal carries the new REMAINING time computed
+  // here (the workflow never reads a clock); a reaper that already fired and completed gets a fresh start —
+  // the row's new deadline must always have a durable timer behind it.
+  async extendReaper(input: { runId: string; tenant: string; expiresAt: string }): Promise<void> {
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      const remainingMs = Math.max(1000, new Date(input.expiresAt).getTime() - Date.now());
+      try {
+        await client.workflow.getHandle(this.reaperWorkflowIdFor(input.runId)).signal("extend", remainingMs);
+      } catch {
+        await client.workflow.start("sessionReaperWorkflow", {
+          taskQueue: this.opts.taskQueue ?? TASK_QUEUE,
+          workflowId: this.reaperWorkflowIdFor(input.runId),
+          args: [{ runId: input.runId, tenant: input.tenant, timeoutMs: remainingMs }],
+        });
+      }
+    } finally {
+      await connection.close();
+    }
+  }
+
   // Durable multi-step reaction (orchestration.md T-d): one reaction:<eventId>:<subscriptionId> workflow per
   // (fact, rule). The deterministic id IS the dedup — the E1 consumer redelivers at-least-once, and a second
   // start maps to AlreadyStarted, swallowed here (an idempotent no-op, unlike score's client-visible 409:

@@ -10,8 +10,12 @@ A Driver = *compute inside an already-isolated unit*, NOT placement. It `provisi
 Isolation/placement is the Backend's job (see skill `backends`) — this is the other half of that split (the Backend places, the Driver computes).
 
 ## Checklist
-1. Implement `Driver` (`packages/core/src/execution/compute.ts`): `readonly id` + `provision(spec) → ComputeHandle`.
-2. `ComputeHandle` exposes `exec` / `writeFile` / `readFile` / `dispose` — nothing more.
+1. Implement `Driver` (`packages/contracts/src/execution/compute.ts`): `readonly id` + `provision(spec) → ComputeHandle`,
+   plus two OPTIONAL methods for drivers whose computes outlive the process: `reap?(id)` (remove a stray compute by its
+   recorded id — the durable session reaper after a crash) and `snapshot?(id, ref, auth?)` (commit a live compute's
+   filesystem as an image and push it to `ref` — agent worlds; HOST-side, so the credential never enters the compute).
+   Callers detect support; absent = that capability 400s, never crashes.
+2. `ComputeHandle` exposes `exec` / `execStream?` / `writeFile` / `readFile` / `dispose` — nothing more.
 3. The caller releases in a `finally` — `runCase` provisions once, `await compute.dispose()` always (`packages/run-case/src/run-case.ts`).
 4. A non-zero exit is a *result* `{exitCode, stdout, stderr}`, never a throw; only infra faults throw.
 5. Remap OS/SDK faults to an `AppError` — `COMPUTE_EXEC_FAILED` / `DRIVER_PROVISION_FAILED`; never leak raw.

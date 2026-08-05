@@ -1,4 +1,5 @@
-import type { ComputeHandle, ComputeSpec, Driver, RunRecord, TraceEvent } from "@everdict/contracts";
+import type { ComputeHandle, ComputeSpec, Driver, RegistryAuth, RunRecord, TraceEvent } from "@everdict/contracts";
+import { NotFoundError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { OutboxEvent, RunStore } from "../ports/run-store.js";
 import type { TrajectoryMeta, TrajectoryStore } from "../ports/trajectory-store.js";
@@ -85,17 +86,27 @@ function fakeTrajectories() {
   return { store, sealed };
 }
 
-function fakeDriver(opts: { failProvision?: boolean } = {}) {
+function fakeDriver(
+  opts: { failProvision?: boolean; snapshot?: (id: string, ref: string, auth?: RegistryAuth) => void } = {},
+) {
   const provisioned: ComputeSpec[] = [];
   const disposed: string[] = [];
   const reaped: string[] = [];
   const execs: string[] = [];
   let seq = 0;
+  const snapshotFn = opts.snapshot;
   const driver: Driver = {
     id: "fake",
     async reap(id) {
       reaped.push(id);
     },
+    ...(snapshotFn !== undefined
+      ? {
+          async snapshot(id: string, ref: string, auth?: RegistryAuth) {
+            snapshotFn(id, ref, auth);
+          },
+        }
+      : {}),
     async provision(spec) {
       if (opts.failProvision) throw new Error("docker daemon unreachable");
       provisioned.push(spec);
@@ -299,9 +310,13 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
   });
 
   it("reap(): a live handle tears down as expired; a crash-orphaned row reaps the stray container by computeId; a settled row is a no-op", async () => {
-    // Live handle — the reaper fired while this process still holds the session.
+    // Live handle — the reaper fired while this process still holds the session. A PRE-deadline fire (a
+    // timer made stale by touch — extend is best-effort) is a no-op: the deadline here is authoritative.
     const live = build();
     const first = await live.service.create({ tenant: "acme", createdBy: "alice", image: "img" });
+    await expect(live.service.reap("acme", first.id)).resolves.toEqual({ reaped: false });
+    expect(live.driver.disposed).toEqual([]);
+    live.setNow("2026-07-30T00:16:00.000Z"); // past the 900s deadline — now the timer is honest
     await expect(live.service.reap("acme", first.id)).resolves.toEqual({ reaped: true });
     expect(live.driver.disposed).toEqual(["c-1"]);
     expect((await live.runStore.store.get(first.id))?.session?.closedReason).toBe("expired");
@@ -564,5 +579,267 @@ describe("SandboxSessionService — the harness playground (test cases in a live
     expect(mine[0]?.live?.tasks[0]?.taskPreview.length).toBeLessThanOrEqual(201);
     const other = await service.listSessions({ tenant: "zeta", subject: "bob", isAdmin: false });
     expect(other).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Agent worlds (W1): world sessions, snapshots, hibernate, touch.
+// ---------------------------------------------------------------------------------------------------
+
+function buildWorld(over: Partial<SandboxSessionServiceDeps> = {}) {
+  const tagsByRepo = new Map<string, string[]>();
+  const pushed: Array<{ id: string; ref: string; host?: string; user?: string; password?: string }> = [];
+  const minted: string[] = [];
+  const published: Array<{ tenant: string; actor: string; world: string; image: string; name?: string }> = [];
+  const extended: Array<{ runId: string; expiresAt: string }> = [];
+  const worldDriver = fakeDriver({
+    snapshot: (id, ref, auth) => {
+      pushed.push({
+        id,
+        ref,
+        ...(auth !== undefined ? { host: auth.host, password: auth.password } : {}),
+        ...(auth?.username !== undefined ? { user: auth.username } : {}),
+      });
+      // The push makes the tag exist — mirror it so the NEXT snapshot mints v<n+1>.
+      const name = ref.slice(ref.lastIndexOf("/") + 1);
+      const [repo, tag] = name.split(":");
+      if (repo && tag) tagsByRepo.set(repo, [...(tagsByRepo.get(repo) ?? []), tag]);
+    },
+  });
+  const images: NonNullable<SandboxSessionServiceDeps["images"]> = {
+    endpoint: "reg.local:5000",
+    namespaceFor: (tenant) => `${tenant}-ns`,
+    listTags: async (_tenant, repo) => {
+      const tags = tagsByRepo.get(repo);
+      if (!tags) throw new NotFoundError("NOT_FOUND", { repo }, "no such repository");
+      return tags;
+    },
+    inspect: async (_tenant, repo, reference) => ({ reference, digest: `sha256:${repo}.${reference}` }),
+    mintPushGrant: async (_tenant, repo) => {
+      minted.push(repo);
+      return {
+        endpoint: "reg.local:5000",
+        repositories: [repo],
+        actions: ["push" as const],
+        token: "grant-token",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      };
+    },
+  };
+  let versionSeq = 0;
+  const publishWorldVersion: NonNullable<SandboxSessionServiceDeps["publishWorldVersion"]> = async (
+    tenant,
+    actor,
+    world,
+    input,
+  ) => {
+    published.push({
+      tenant,
+      actor: actor.subject,
+      world,
+      image: input.image,
+      ...(input.name !== undefined ? { name: input.name } : {}),
+    });
+    versionSeq += 1;
+    return { version: `1.0.${versionSeq - 1}` };
+  };
+  const reaper = {
+    start: async () => {},
+    signalClosed: async () => {},
+    extend: async (input: { runId: string; tenant: string; expiresAt: string }) => {
+      extended.push({ runId: input.runId, expiresAt: input.expiresAt });
+    },
+  };
+  const ctx = build({ driver: worldDriver.driver, images, publishWorldVersion, reaper, ...over });
+  return { ...ctx, worldDriver, images, publishWorldVersion, pushed, minted, published, extended, tagsByRepo };
+}
+
+describe("SandboxSessionService — agent worlds (W1: snapshot, hibernate, touch)", () => {
+  it("a world session boots its latest snapshot when the world exists, or is founded from the genesis image", async () => {
+    const existing = buildWorld({
+      resolveEnvironmentImage: async (_t, _s, ref) =>
+        ref.id === "proj" ? { image: "reg.local:5000/acme-ns/proj:v3@sha256:x", version: "1.0.2" } : undefined,
+    });
+    const fromWorld = await existing.service.create({ tenant: "acme", createdBy: "alice", world: { id: "proj" } });
+    expect(fromWorld.harness).toEqual({ id: "proj", version: "1.0.2" });
+    expect(fromWorld.session).toMatchObject({
+      image: "reg.local:5000/acme-ns/proj:v3@sha256:x",
+      world: "proj",
+      hibernate: true, // world sessions hibernate by default
+    });
+
+    const genesis = await existing.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "fresh" },
+      image: "debian:stable",
+      hibernate: false,
+    });
+    expect(genesis.harness).toEqual({ id: "fresh", version: "genesis" });
+    expect(genesis.session).toMatchObject({ image: "debian:stable", world: "fresh", hibernate: false });
+
+    await expect(
+      existing.service.create({ tenant: "acme", createdBy: "alice", world: { id: "ghost" } }),
+    ).rejects.toMatchObject({ status: 404 }); // no version, no genesis image — nothing to boot
+
+    await expect(
+      existing.service.create({ tenant: "acme", createdBy: "alice", world: { id: "Bad Name" }, image: "img" }),
+    ).rejects.toMatchObject({ status: 400 }); // the id doubles as a repository name
+
+    await expect(
+      existing.service.create({ tenant: "acme", createdBy: "alice", world: { id: "proj" }, harness: { id: "cc" } }),
+    ).rejects.toMatchObject({ status: 400 }); // world and harness never combine
+  });
+
+  it("world sessions refuse at CREATE when the deployment cannot snapshot (no store to hibernate into)", async () => {
+    const bare = build(); // no images / publish closure / snapshot-capable driver
+    await expect(
+      bare.service.create({ tenant: "acme", createdBy: "alice", world: { id: "proj" }, image: "img" }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("snapshot publishes v<n> host-side with a transient grant, pins the digest, and records run.snapshotted", async () => {
+    const ctx = buildWorld();
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "debian:stable",
+    });
+
+    const first = await ctx.service.snapshot(creator, record.id, { name: "My project" });
+    expect(first).toEqual({
+      world: "proj",
+      version: "1.0.0",
+      image: "reg.local:5000/acme-ns/proj:v1@sha256:proj.v1", // digest pinned WITH the tag
+    });
+    expect(ctx.minted).toEqual(["proj"]); // one grant, one repository
+    expect(ctx.pushed[0]).toEqual({
+      id: "c-1", // the live container, committed host-side
+      ref: "reg.local:5000/acme-ns/proj:v1",
+      host: "reg.local:5000",
+      user: "everdict",
+      password: "grant-token",
+    });
+    expect(ctx.published[0]).toMatchObject({ tenant: "acme", actor: "alice", world: "proj", name: "My project" });
+    expect(ctx.runStore.events.at(-1)).toEqual({ op: "update", kinds: ["run.snapshotted"] });
+    expect((await ctx.runStore.store.get(record.id))?.session?.snapshots).toHaveLength(1);
+
+    // The next snapshot sees v1 in the registry and mints v2.
+    const second = await ctx.service.snapshot(creator, record.id, {});
+    expect(second.image).toContain("proj:v2@");
+    expect((await ctx.runStore.store.get(record.id))?.session?.snapshots).toHaveLength(2);
+  });
+
+  it("snapshot is creator-or-admin and refuses a session with no world", async () => {
+    const ctx = buildWorld();
+    const world = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    await expect(
+      ctx.service.snapshot({ tenant: "acme", subject: "mallory", isAdmin: false }, world.id, {}),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(ctx.pushed).toEqual([]); // the refused snapshot never touched the daemon
+
+    const plain = await ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img" });
+    await expect(ctx.service.snapshot(creator, plain.id, {})).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("close hibernates a world session by default; snapshot:false skips it; expiry hibernates too", async () => {
+    const ctx = buildWorld();
+    const first = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    const closed = await ctx.service.close(creator, first.id);
+    expect(ctx.published).toHaveLength(1); // the teardown captured the filesystem BEFORE the container died
+    expect(closed).toMatchObject({ status: "succeeded", session: { closedReason: "closed" } });
+    expect((await ctx.runStore.store.get(first.id))?.session?.snapshots).toHaveLength(1);
+
+    const second = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    await ctx.service.close(creator, second.id, { snapshot: false }); // close-without-saving
+    expect(ctx.published).toHaveLength(1);
+
+    const third = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    ctx.setNow("2026-07-30T01:00:00.000Z"); // past the deadline
+    ctx.service.sweep();
+    await until(() => ctx.published.length === 2); // expiry = hibernation, not loss
+    expect((await ctx.runStore.store.get(third.id))?.session?.closedReason).toBe("expired");
+  });
+
+  it("a snapshot failure never blocks teardown — the session still settles and the container still dies", async () => {
+    const ctx = buildWorld({
+      publishWorldVersion: async () => {
+        throw new Error("registry down");
+      },
+    });
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    const closed = await ctx.service.close(creator, record.id);
+    expect(closed).toMatchObject({ status: "succeeded", session: { closedReason: "closed" } });
+    const sealed = await ctx.trajectories.store.get("acme", record.id);
+    expect(sealed?.events.some((e) => e.kind === "env_action" && e.action === "session.snapshot_failed")).toBe(true);
+  });
+
+  it("touch extends the deadline in memory, on the row, and on the durable reaper — and never shortens", async () => {
+    const ctx = buildWorld();
+    const record = await ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img" }); // ttl 900 → 00:15
+    ctx.setNow("2026-07-30T00:05:00.000Z");
+    const touched = await ctx.service.touch(creator, record.id, {});
+    expect(touched.expiresAt).toBe("2026-07-30T00:20:00.000Z"); // now + 900s
+    expect((await ctx.runStore.store.get(record.id))?.session?.expiresAt).toBe("2026-07-30T00:20:00.000Z");
+    expect(ctx.extended).toEqual([{ runId: record.id, expiresAt: "2026-07-30T00:20:00.000Z" }]);
+
+    const shorter = await ctx.service.touch(creator, record.id, { ttlSec: 60 }); // proposed 00:06 < current 00:20
+    expect(shorter.expiresAt).toBe("2026-07-30T00:20:00.000Z"); // a touch never PULLS a deadline in
+
+    await expect(
+      ctx.service.touch({ tenant: "acme", subject: "mallory", isAdmin: false }, record.id, {}),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("crash-path reap hibernates from the row alone (world + hibernate + computeId + creator), then reaps", async () => {
+    const before = buildWorld();
+    const record = await before.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    // A NEW process: fresh service + fresh driver double, sharing only the store and the world plumbing.
+    const rebornPushed: Array<{ id: string; ref: string }> = [];
+    const rebornDriver = fakeDriver({ snapshot: (id, ref) => rebornPushed.push({ id, ref }) });
+    const reborn = new SandboxSessionService({
+      store: before.runStore.store,
+      driver: rebornDriver.driver,
+      images: before.images,
+      publishWorldVersion: before.publishWorldVersion,
+    });
+    await expect(reborn.reap("acme", record.id)).resolves.toEqual({ reaped: true });
+    expect(rebornPushed[0]).toMatchObject({ id: "c-1" }); // the orphan's filesystem captured BEFORE removal
+    expect(rebornDriver.reaped).toEqual(["c-1"]);
+    const row = await before.runStore.store.get(record.id);
+    expect(row?.session?.closedReason).toBe("orphaned");
+    expect(row?.session?.snapshots).toHaveLength(1);
+    expect(before.published.at(-1)).toMatchObject({ actor: "alice" }); // attributed to the row's creator
   });
 });
