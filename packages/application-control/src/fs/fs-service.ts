@@ -114,6 +114,20 @@ export class FsService {
   // whose data is the FULL resolution kit (live content + attempted three-way merge), so both resolvers — the web
   // merge dialog and an agent reading the tool error — can finish in one more round trip instead of re-reading.
   async writeFile(tenant: string, input: WriteFsFileInput, actor?: FsActor): Promise<FsEntry> {
+    // Memory is workspace-shared prose that gets REPLAYED into future agent contexts — a credential written there
+    // once would be re-surfaced forever. Scoped to memory/ on purpose: elsewhere on the tree a token-looking
+    // string can be legitimate data; in a memory file it is always a mistake. One choke point covers every
+    // surface (HTTP, MCP, web) instead of per-route checks.
+    if (input.encoding !== "base64" && isMemoryPath(input.path)) {
+      const leak = findSecretLikeToken(input.content);
+      if (leak !== undefined) {
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { path: input.path, match: leak },
+          `memory files are shared with the whole workspace and replayed into future conversations — never store credentials in them (found a ${leak}). Reference the secret by NAME (Settings › Secrets) instead.`,
+        );
+      }
+    }
     const data =
       input.encoding === "base64" ? decodeBase64(input.path, input.content) : new TextEncoder().encode(input.content);
     try {
@@ -432,6 +446,28 @@ function shapeContent(entry: FsEntry, data: Uint8Array): FsFileContent {
 
 function resolveEntry(entry: FsEntry, stored: string | undefined, contentType: string): FsEntry {
   return contentType === stored ? entry : { ...entry, contentType };
+}
+
+// The agents' cross-conversation memory area (see the agent host's Memory section + workspaceMemoryPreamble).
+function isMemoryPath(path: string): boolean {
+  const normalized = path.replace(/^\/+/, "");
+  return normalized === "memory" || normalized.startsWith("memory/");
+}
+
+// Conservative, named credential shapes — precision over recall (a missed exotic token is the prompt discipline's
+// job; a false positive here blocks a legitimate memory). Each entry names what the error reports.
+const SECRET_PATTERNS: readonly { name: string; pattern: RegExp }[] = [
+  { name: "workspace API key (ak_…)", pattern: /\bak_[A-Za-z0-9]{16,}\b/ },
+  { name: "runner token (rnr_…)", pattern: /\brnr_[A-Za-z0-9]{16,}\b/ },
+  { name: "provider API key (sk-…)", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/ },
+  { name: "GitHub token", pattern: /\b(?:ghp_|gho_|ghs_|github_pat_)[A-Za-z0-9_]{20,}\b/ },
+  { name: "AWS access key id", pattern: /\bAKIA[0-9A-Z]{16}\b/ },
+  { name: "Slack token", pattern: /\bxox[bap]-[A-Za-z0-9-]{10,}\b/ },
+  { name: "private key block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+];
+
+function findSecretLikeToken(content: string): string | undefined {
+  return SECRET_PATTERNS.find((p) => p.pattern.test(content))?.name;
 }
 
 // Translate a path glob into an anchored RegExp over the tenant-relative path. `**` crosses segment boundaries,

@@ -95,7 +95,10 @@ cross-conversation memory (one file per fact + the `memory/MEMORY.md` index the 
 into every turn — see the agent system prompt's Memory section and `workspaceMemoryPreamble` in
 `apps/agent`). Deliberately ON the workspace filesystem, never the agent host's local disk:
 multi-tenant isolation is the bucket, and memory writes get the same attributed revisions
-(member or agent + conversation) as every other file.
+(member or agent + conversation) as every other file. Because memory is workspace-shared
+prose replayed into future agent contexts, `FsService.writeFile` refuses credential-shaped
+tokens under `memory/` (a conservative named-pattern guard at the one choke point every
+surface shares) — reference secrets by NAME, never by value.
 
 ## Revisions — who published what, and safe concurrent editing
 
