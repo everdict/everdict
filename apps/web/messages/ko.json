@@ -2441,6 +2441,10 @@
     "colUpdated": "업데이트",
     "batchGroup": "스코어카드",
     "batchCount": "케이스 {n}개",
+    "sessionGroup": "대화 세션",
+    "sessionTurns": "턴 {n}개",
+    "sessionOpenTitle": "대화 열기",
+    "turnCell": "턴 · {cause}",
     "caseCell": "케이스 {id}"
   },
   "runtimesPage": {

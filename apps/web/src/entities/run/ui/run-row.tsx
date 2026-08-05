@@ -41,14 +41,18 @@ export type RunRowData = Pick<
 
 // One run row (self-contained: pulls its own i18n/locale). isChild = a scorecard case row (indented under its batch
 // header, caseId in place of the source badge). Shared by the dashboard runs-table and the activity console.
+// childKind: 같은 들여쓰기 자식이라도 컬럼의 의미가 다르다 — 스코어카드 자식의 caseId 는 케이스지만, 대화 턴의
+// caseId 는 깨어난 원인(chat / 이벤트 kind)이라 "케이스 chat" 으로 읽히면 거짓말이 된다(run 상세와 같은 규칙).
 export function RunRow({
   run,
   workspace,
   isChild,
+  childKind = 'case',
 }: {
   run: RunRowData
   workspace: string
   isChild?: boolean
+  childKind?: 'case' | 'turn'
 }) {
   const t = useTranslations('runsTable')
   const locale = useLocale()
@@ -71,7 +75,7 @@ export function RunRow({
       <TD>
         {isChild ? (
           <span className="font-mono text-[12px] text-muted-foreground">
-            {t('caseCell', { id: run.caseId })}
+            {childKind === 'turn' ? t('turnCell', { cause: run.caseId }) : t('caseCell', { id: run.caseId })}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5">

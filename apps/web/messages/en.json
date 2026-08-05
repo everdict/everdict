@@ -2441,6 +2441,10 @@
     "colUpdated": "Updated",
     "batchGroup": "Scorecard",
     "batchCount": "{n, plural, one {# case} other {# cases}}",
+    "sessionGroup": "Conversation",
+    "sessionTurns": "{n, plural, one {# turn} other {# turns}}",
+    "sessionOpenTitle": "Open the conversation",
+    "turnCell": "turn · {cause}",
     "caseCell": "case {id}"
   },
   "runtimesPage": {

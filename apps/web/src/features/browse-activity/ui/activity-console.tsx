@@ -1,7 +1,14 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Layers, RefreshCw } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
+  MessagesSquare,
+  RefreshCw,
+} from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { RunRow, type RunRowData } from '@/entities/run'
@@ -24,6 +31,17 @@ import {
 const PAGE_SIZE = 20
 // Keep the newest page fresh while the tab is open — one lightweight feed fetch (no child runs), not the old flood.
 const REFRESH_MS = 12_000
+
+// postMessage `type` that opens a conversation in the shell's agent chat — pairs with widgets/infra-panel
+// (OPEN_AGENT_SESSION_MESSAGE; a feature cannot import the widget, keep in sync — same idiom as features/discuss).
+// Posted to the parent when this page renders inside the panel's iframe, else to our own window (same listener).
+const OPEN_AGENT_SESSION = 'everdict:open-agent-session'
+
+function openAgentSessionInShell(sessionId: string): void {
+  if (typeof window === 'undefined') return
+  const target = window.self !== window.top ? window.parent : window
+  target.postMessage({ type: OPEN_AGENT_SESSION, sessionId }, window.location.origin)
+}
 
 type CaseState = RunRowData[] | 'loading' | 'error'
 
@@ -67,22 +85,31 @@ export function ActivityConsole({ workspace }: { workspace: string }) {
     return () => clearInterval(timer)
   }, [load, page])
 
-  // Expand/collapse a batch; on first expand, lazy-load its cases (cached thereafter).
-  const toggle = useCallback((scorecardId: string) => {
+  // Expand/collapse a group header (batch or conversation) — the pure set flip, shared by both group kinds.
+  const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
-      if (next.has(scorecardId)) next.delete(scorecardId)
-      else next.add(scorecardId)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
-    setCases((prev) => {
-      if (prev[scorecardId] && prev[scorecardId] !== 'error') return prev // already loaded / loading
-      void listBatchCasesAction(scorecardId).then((r) =>
-        setCases((c) => ({ ...c, [scorecardId]: r.ok ? r.runs : 'error' }))
-      )
-      return { ...prev, [scorecardId]: 'loading' }
-    })
   }, [])
+
+  // Expand/collapse a batch; on first expand, lazy-load its cases (cached thereafter). A conversation's turns
+  // arrive with the feed itself, so only the batch path fetches on expand.
+  const toggle = useCallback(
+    (scorecardId: string) => {
+      toggleExpand(scorecardId)
+      setCases((prev) => {
+        if (prev[scorecardId] && prev[scorecardId] !== 'error') return prev // already loaded / loading
+        void listBatchCasesAction(scorecardId).then((r) =>
+          setCases((c) => ({ ...c, [scorecardId]: r.ok ? r.runs : 'error' }))
+        )
+        return { ...prev, [scorecardId]: 'loading' }
+      })
+    },
+    [toggleExpand]
+  )
 
   if (error) return <Callout tone="danger">{t('loadError', { error })}</Callout>
   if (loading && blocks.length === 0) {
@@ -116,6 +143,58 @@ export function ActivityConsole({ workspace }: { workspace: string }) {
           {pageBlocks.map((block) =>
             block.kind === 'run' ? (
               <RunRow key={block.run.id} run={block.run} workspace={workspace} />
+            ) : block.kind === 'session' ? (
+              // 대화 세션 — 스코어카드 배치와 같은 문법의 접힌 헤더. 턴들은 피드와 함께 이미 도착해 있어
+              // 지연 로드가 없고, 펼치면 시간순(턴 1→n)으로 읽힌다. 세션 id 클릭 = 셸의 에이전트 챗에서
+              // 그 대화 열기(iframe 안에서도 postMessage 로 탈출).
+              <Fragment key={block.session.id}>
+                <TR
+                  className="cursor-pointer bg-muted/40 hover:bg-muted/60"
+                  onClick={() => toggleExpand(block.session.id)}
+                >
+                  <td colSpan={6} className="px-3 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <ChevronDown
+                        className={cn(
+                          'size-3.5 text-muted-foreground transition-transform',
+                          !expanded.has(block.session.id) && '-rotate-90'
+                        )}
+                      />
+                      <MessagesSquare className="size-3.5 text-muted-foreground" />
+                      <span className="text-[12px] font-[510] text-muted-foreground">
+                        {tr('sessionGroup')}
+                      </span>
+                      <button
+                        type="button"
+                        title={tr('sessionOpenTitle')}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openAgentSessionInShell(block.session.id)
+                        }}
+                        className="font-mono text-[12px] text-link transition-colors hover:text-foreground"
+                      >
+                        {block.session.id.slice(0, 8)}
+                      </button>
+                      <span className="font-[510]">{block.session.agent.id}</span>
+                      <Badge tone="outline">{tr('sessionTurns', { n: block.session.count })}</Badge>
+                      <StatusPill status={block.session.status} />
+                      <span className="ml-auto text-[12px] text-muted-foreground">
+                        {fmtTimeAgo(block.session.updatedAt, locale, timeZone)}
+                      </span>
+                    </div>
+                  </td>
+                </TR>
+                {expanded.has(block.session.id) &&
+                  block.session.turns.map((turn) => (
+                    <RunRow
+                      key={turn.id}
+                      run={turn}
+                      workspace={workspace}
+                      isChild
+                      childKind="turn"
+                    />
+                  ))}
+              </Fragment>
             ) : (
               <Fragment key={block.batch.id}>
                 <TR
