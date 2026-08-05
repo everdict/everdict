@@ -113,6 +113,37 @@ async function recallKnowledge(call: McpInvoke, references: AgentReference[]): P
   }
 }
 
+// Workspace auto-memory recall (Claude Code's MEMORY.md index reinterpreted over the workspace filesystem): the
+// agents' own cross-conversation memory lives at memory/ on the TENANT's workspace filesystem — one file per fact,
+// memory/MEMORY.md as the index — written with the ordinary attributed fs tools (write_file), never the
+// control plane's local disk (multi-tenant: the per-workspace bucket IS the isolation boundary). The index is
+// injected every turn so the agent knows what past conversations learned; bodies stay out of context until the
+// agent get_file's one it judges relevant (index + body split — only the index pays rent in every window).
+export const MEMORY_DIRECTORY = "memory";
+export const MEMORY_INDEX_PATH = "memory/MEMORY.md";
+const MAX_MEMORY_INDEX_CHARS = 12_000;
+
+export async function workspaceMemoryPreamble(call: McpInvoke): Promise<string | undefined> {
+  try {
+    const r = await call("get_file", { path: MEMORY_INDEX_PATH });
+    if (r.isError) return undefined; // no memory yet (NOT_FOUND) or an unreachable fs — recall nothing
+    const file = JSON.parse(r.content) as { content?: unknown; encoding?: unknown };
+    if (typeof file.content !== "string" || file.content.trim().length === 0 || file.encoding === "base64")
+      return undefined;
+    const index =
+      file.content.length > MAX_MEMORY_INDEX_CHARS
+        ? `${file.content.slice(0, MAX_MEMORY_INDEX_CHARS)}\n… [index truncated — read ${MEMORY_INDEX_PATH} in full, and shorten its entries]`
+        : file.content;
+    const discipline =
+      `Read a listed memory's body with get_file (${MEMORY_DIRECTORY}/<file>) when it bears on THIS task. ` +
+      "A memory reflects when it was written: before recommending from one that names a file, resource, or version, verify it against the live workspace. " +
+      "If the user asks you to ignore memory, proceed as if this index were empty.";
+    return `Workspace memory index (${MEMORY_INDEX_PATH} — what agents learned in PAST conversations; persists across conversations):\n\n${index}\n\n${discipline}`;
+  } catch {
+    return undefined; // best-effort — memory must never fail a turn
+  }
+}
+
 // Stale-file reminders (Claude Code's edited_text_file attachment reinterpreted over the revision ledger): the
 // mid-conversation counterpart of the write path's 409 + three-way merge. Files THIS conversation touched
 // (get_file/write_file calls in the replayed transcript) are checked against the ledger's newest revision at the
@@ -798,6 +829,12 @@ export async function runChat(
       const attPreamble = buildAttachmentPreamble(attachments);
       if (attPreamble) preambles.push(attPreamble);
     }
+    // Workspace auto-memory: the memory/ index rides EVERY turn (one best-effort fs read) — unlike knowledge
+    // recall it is not gated on references, because memory is exactly the context a plain question can't anchor.
+    if (tools.call) {
+      const memory = await workspaceMemoryPreamble(tools.call);
+      if (memory) preambles.push(memory);
+    }
     if (references && references.length > 0 && tools.call) {
       preambles.push(await resolveReferences(tools.call, references));
       // Auto-recall: what the workspace already knows about those anchors rides along (best-effort, one call).
@@ -915,6 +952,19 @@ export async function runChat(
           outputTokens += u.outputTokens;
           cacheReadTokens += u.cacheReadTokens ?? 0;
           cacheWriteTokens += u.cacheWriteTokens ?? 0;
+          // Cache effectiveness as a measured distribution, not just a billing line: how much of each call's
+          // prompt footprint was served from / written to the provider's prompt cache vs paid at full price.
+          // A cache_read share near zero under load is the "silent invalidator at work" alarm.
+          const m = deps.metrics;
+          if (m) {
+            const read = u.cacheReadTokens ?? 0;
+            const write = u.cacheWriteTokens ?? 0;
+            const help = "Agent prompt tokens by cache outcome";
+            const uncached = Math.max(u.inputTokens - read - write, 0);
+            if (uncached > 0) m.counter("everdict_agent_prompt_tokens_total", help, { kind: "uncached" }, uncached);
+            if (read > 0) m.counter("everdict_agent_prompt_tokens_total", help, { kind: "cache_read" }, read);
+            if (write > 0) m.counter("everdict_agent_prompt_tokens_total", help, { kind: "cache_write" }, write);
+          }
         },
         ...(summarize ? { summarize } : {}),
         ...(fallback ? { fallback } : {}),

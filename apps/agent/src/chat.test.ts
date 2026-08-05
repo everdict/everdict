@@ -4,7 +4,7 @@ import type { AgentMessageRecord } from "@everdict/contracts";
 import { InMemoryAgentSessionStore } from "@everdict/db";
 import type { LlmTransport, StreamRequest } from "@everdict/llm";
 import { describe, expect, it } from "vitest";
-import { type ChatDeps, maintainSessionMemory, runChat, staleFileReminder } from "./chat.js";
+import { type ChatDeps, maintainSessionMemory, runChat, staleFileReminder, workspaceMemoryPreamble } from "./chat.js";
 
 const PRINCIPAL = { subject: "u-1", workspace: "acme", roles: ["member"] };
 
@@ -293,6 +293,79 @@ describe("agent-plane metrics", () => {
     deps.metrics = metrics;
     await runChat(deps, PRINCIPAL, {}, "s-1", "hello");
     expect(metrics.render()).toContain('everdict_agent_retry_total{persistent="false"} 1');
+  });
+});
+
+describe("workspace memory recall", () => {
+  const indexFile = (content: string, over: Record<string, unknown> = {}) => ({
+    content: JSON.stringify({ path: "memory/MEMORY.md", content, encoding: "utf8", revision: 3, ...over }),
+    isError: false,
+  });
+
+  it("builds the index preamble with the read-side discipline (verify, ignore-on-request)", async () => {
+    const call = async (name: string, args: Record<string, unknown>) => {
+      expect(name).toBe("get_file");
+      expect(args.path).toBe("memory/MEMORY.md");
+      return indexFile("- [Billing quirk](billing-quirk.md) — cache reads bill at 0.1x");
+    };
+    const preamble = await workspaceMemoryPreamble(call);
+    expect(preamble).toContain("Workspace memory index");
+    expect(preamble).toContain("Billing quirk");
+    expect(preamble).toContain("verify it against the live workspace");
+    expect(preamble).toContain("ignore memory");
+  });
+
+  it("recalls nothing when the workspace has no memory yet, an fs error, or a binary index", async () => {
+    expect(await workspaceMemoryPreamble(async () => ({ content: "NOT_FOUND", isError: true }))).toBeUndefined();
+    expect(
+      await workspaceMemoryPreamble(async () => {
+        throw new Error("fs unreachable");
+      }),
+    ).toBeUndefined();
+    expect(await workspaceMemoryPreamble(async () => indexFile("QkFE", { encoding: "base64" }))).toBeUndefined();
+  });
+
+  it("truncates an oversized index and tells the agent to shorten it", async () => {
+    const preamble = await workspaceMemoryPreamble(async () => indexFile("x".repeat(20_000)));
+    expect(preamble).toContain("[index truncated");
+    expect(preamble?.length).toBeLessThan(14_000);
+  });
+
+  it("injects the memory index into the model's user turn while the persisted record stays clean", async () => {
+    // Given a workspace whose filesystem has a memory index
+    const requests: StreamRequest[] = [];
+    const transport: LlmTransport = {
+      provider: "fake",
+      stream: async (req) => {
+        requests.push(req);
+        return {
+          content: "ok",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      },
+    };
+    const { deps, sessions } = await seededDeps(transport);
+    const call = async (name: string, args: Record<string, unknown>) =>
+      name === "get_file" && args.path === "memory/MEMORY.md"
+        ? indexFile("- [Billing quirk](billing-quirk.md) — cache reads bill at 0.1x")
+        : { content: "NOT_FOUND", isError: true };
+    const withFs: ChatDeps = {
+      ...deps,
+      toolProvider: async () => ({ registry: new ToolRegistry([]), call, close: async () => {} }),
+    };
+    // When a plain turn (no references) runs
+    await runChat(withFs, PRINCIPAL, {}, "s-1", "what do we know about billing?");
+    // Then the model read the index ahead of the member's words — memory recall is NOT gated on @-references
+    const user = requests[0]?.messages.find((m) => m.role === "user");
+    const text = typeof user?.content === "string" ? user.content : "";
+    expect(text).toContain("Workspace memory index");
+    expect(text).toContain("Billing quirk");
+    expect(text).toContain("what do we know about billing?");
+    // …while the persisted record keeps only the member's words (preambles are per-turn, never stored)
+    const stored = await sessions.listMessages("acme", "s-1");
+    expect(stored[0]?.content).toBe("what do we know about billing?");
   });
 });
 

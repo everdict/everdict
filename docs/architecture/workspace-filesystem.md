@@ -90,7 +90,12 @@ file's history is a read (`files:read`); restoring a revision is a write (`files
 Separation, layered: **tenant = bucket** (storage-level, inescapable) → **task = directory**
 (`tasks/<conversation-id>/` — convention carried by the agent's environment block, so parallel
 tasks never trample each other's files) → shared library dirs (`reports/` `data/` `artifacts/`
-`skills/` `knowledge/`) for what outlives a single task.
+`skills/` `knowledge/`) for what outlives a single task → **`memory/`**, the agents' own
+cross-conversation memory (one file per fact + the `memory/MEMORY.md` index the chat host injects
+into every turn — see the agent system prompt's Memory section and `workspaceMemoryPreamble` in
+`apps/agent`). Deliberately ON the workspace filesystem, never the agent host's local disk:
+multi-tenant isolation is the bucket, and memory writes get the same attributed revisions
+(member or agent + conversation) as every other file.
 
 ## Revisions — who published what, and safe concurrent editing
 
