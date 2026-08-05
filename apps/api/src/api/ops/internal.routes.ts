@@ -65,11 +65,23 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
         model: z.string(),
         inputTokens: z.number().int().nonnegative(),
         outputTokens: z.number().int().nonnegative(),
+        // Prompt-cache subsets of inputTokens — priced at the cache rates (read 0.1x / write 1.25x on Anthropic)
+        // instead of the full input price. Optional: an older agent build simply bills cache tokens at input rate.
+        cacheReadTokens: z.number().int().nonnegative().optional(),
+        cacheWriteTokens: z.number().int().nonnegative().optional(),
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    const { tenant, source, model, inputTokens, outputTokens } = body.data;
-    const cost = { usd: priceUsd(model, { inputTokens, outputTokens }), tokens: inputTokens + outputTokens };
+    const { tenant, source, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = body.data;
+    const cost = {
+      usd: priceUsd(model, {
+        inputTokens,
+        outputTokens,
+        ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+        ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+      }),
+      tokens: inputTokens + outputTokens,
+    };
     deps.usageMeter.record(tenant, source, model, cost, 0); // an agent turn is not a metered evaluation (0)
     deps.settleBudget?.(tenant, cost); // reflect it in the enforcement budget too (settle only — never blocks)
     return reply.send({ ok: true });

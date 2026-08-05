@@ -9,6 +9,10 @@ export interface UsageReport {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  // Prompt-cache subsets of inputTokens (the transport folds them in) — forwarded so the meter prices cached
+  // tokens at their own rates (Anthropic read = 0.1x input, write = 1.25x) instead of the full input price.
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 }
 
 export function usageReporter(controlPlaneUrl: string, internalToken: string): (usage: UsageReport) => Promise<void> {
@@ -23,6 +27,8 @@ export function usageReporter(controlPlaneUrl: string, internalToken: string): (
         model: usage.model,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
+        ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+        ...(usage.cacheWriteTokens !== undefined ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
       }),
     });
     if (!res.ok) throw new Error(`usage report failed: ${res.status}`);

@@ -3012,6 +3012,30 @@ describe("API — internal usage bridge (agent-conversation cost)", () => {
     await app.close();
   });
 
+  it("prices reported prompt-cache tokens at the cache rates instead of the full input price", async () => {
+    // Regression: the agent's transports fold cache tokens into inputTokens, so before the cache split was
+    // forwarded here an all-cache-read prompt billed at the full $15/1M instead of the $1.5/1M cache-read rate.
+    const { app, usageMeter } = server({ internalToken: "itok" });
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/usage",
+      headers: { "x-internal-token": "itok" },
+      payload: {
+        tenant: "acme",
+        source: "agent",
+        model: "claude-opus-4-8",
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        cacheReadTokens: 1_000_000,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const u = usageMeter.usage("acme");
+    expect(u.bySource.agent.usd).toBeCloseTo(1.5, 6); // opus cache read = 0.1x input
+    expect(u.bySource.agent.tokens).toBe(1_000_000); // token count itself is unchanged
+    await app.close();
+  });
+
   it("rejects a wrong or absent x-internal-token", async () => {
     const { app } = server({ internalToken: "itok" });
     const payload = { tenant: "acme", source: "agent", model: "m", inputTokens: 1, outputTokens: 1 };

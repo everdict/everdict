@@ -52,17 +52,20 @@ made durable by a **write-through** to a `UsageStore`:
 A harness reports its own `total_cost_usd` in its trace; the **agent loop yields TOKENS only**. So agent cost is
 metered over a small bridge:
 - The kernel fires `onUsage(LlmUsage)` per model turn (`@everdict/agent-runtime` `loop.ts`); `apps/agent` `runChat`
-  accumulates the conversation's input/output tokens.
+  accumulates the conversation's input/output tokens plus the prompt-cache split (`cacheReadTokens` /
+  `cacheWriteTokens` — subsets of `inputTokens`, which the transports report as the full prompt footprint).
 - After the turn, **only when the model was workspace-billed** (the API key came from the workspace secret tier —
   `ResolvedModel.billed`, the same rule as the harness), the agent server POSTs `{tenant, source:"agent", model,
-  inputTokens, outputTokens}` to `POST {CONTROL_PLANE_URL}/internal/usage` (`x-internal-token` =
-  `CONTROL_PLANE_INTERNAL_TOKEN`). Own-pays / personal-key / dev conversations are not metered. Best-effort — a
-  failed report never breaks the chat.
+  inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?}` to `POST {CONTROL_PLANE_URL}/internal/usage`
+  (`x-internal-token` = `CONTROL_PLANE_INTERNAL_TOKEN`). Own-pays / personal-key / dev conversations are not
+  metered. Best-effort — a failed report never breaks the chat.
 - The control plane **prices** the tokens (`priceUsd`, `@everdict/domain` `billing/pricing.ts` — approximate public
   list prices, `$0` for an unknown model; tokens are exact) and `record`s + `settle`s them against the workspace, so
-  agent cost lands in the SAME meter + enforcement budget as evals, itemized under model × `agent`.
-- **Known limits**: pricing is approximate (operator-adjustable); cache-token pricing is folded into input/output;
-  a mid-run `fallback`/`subagent` model tier is attributed to the main model (its usage still flows through `onUsage`).
+  agent cost lands in the SAME meter + enforcement budget as evals, itemized under model × `agent`. Cache tokens
+  price at their own rates (Anthropic: read = 0.1x input, write = 1.25x; OpenAI cached input at half rate) — without
+  the split every cached read would bill at the full input price.
+- **Known limits**: pricing is approximate (operator-adjustable); a mid-run `fallback`/`subagent` model tier is
+  attributed to the main model (its usage still flows through `onUsage`).
 
 ### Deliberate limits
 - **Single-process read model**: reads come from the process's in-memory accumulator (hydrated at boot). With

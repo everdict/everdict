@@ -27,6 +27,28 @@ describe("usageReporter", () => {
     vi.unstubAllGlobals();
   });
 
+  it("forwards the prompt-cache token split so the meter can price cached tokens at cache rates", async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        bodies.push(JSON.parse(init.body as string));
+        return new Response(null, { status: 200 });
+      }),
+    );
+    const report = usageReporter("https://cp", "t");
+    await report({
+      workspace: "acme",
+      model: "claude-opus-4-8",
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 60,
+      cacheWriteTokens: 15,
+    });
+    expect(bodies[0]).toMatchObject({ cacheReadTokens: 60, cacheWriteTokens: 15 });
+    vi.unstubAllGlobals();
+  });
+
   it("throws on a non-2xx response so the best-effort caller can swallow it", async () => {
     vi.stubGlobal(
       "fetch",

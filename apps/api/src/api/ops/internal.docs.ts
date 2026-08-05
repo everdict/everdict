@@ -80,6 +80,9 @@ const internal = {
         model: z.string(),
         inputTokens: z.number().int().nonnegative(),
         outputTokens: z.number().int().nonnegative(),
+        // Prompt-cache subsets of inputTokens — priced at the provider's cache rates instead of the input price.
+        cacheReadTokens: z.number().int().nonnegative().optional(),
+        cacheWriteTokens: z.number().int().nonnegative().optional(),
       }),
     ),
     response: {
