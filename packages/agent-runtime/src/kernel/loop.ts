@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { UpstreamError } from "@everdict/contracts";
-import type { LlmTransport, LlmUsage, ReasoningCarrier, ReasoningRequest, StreamResult } from "@everdict/llm";
+import type {
+  LlmTransport,
+  LlmUsage,
+  ReasoningCarrier,
+  ReasoningRequest,
+  StreamResult,
+  TransientCarrier,
+} from "@everdict/llm";
 import { compactStep } from "../context/compaction.js";
 import { type TokenBudget, effectiveBudget, estimateTokens, thresholdReached } from "../context/token-budget.js";
 import { buildSummarizer } from "../llm/summarize.js";
@@ -681,7 +688,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const tools = toLlmTools(registry, discovered);
     const system = buildSystemPrompt(opts.systemPrompt, registry, discovered);
     // Inject the current todos as a transient reminder (this turn only — never persisted, no history bloat).
+    // Marked transient so the transport's rolling prompt-cache breakpoint stays on durable history: this message
+    // is re-rendered per call and won't exist at this position next request, so a breakpoint on it is never read.
     const reminder = renderTodoReminder(todos);
+    const reminderMessage: ChatMessage | undefined =
+      reminder.length > 0 ? { role: "user", content: reminder } : undefined;
+    if (reminderMessage) (reminderMessage as TransientCarrier).transient = true;
 
     // `messages` is always balanced at the top of a turn (never a dangling assistant tool_call), so a retry re-sends a
     // valid transcript. On a context-overflow (413), callModel compacts `messages` in place and retries — recovery,
@@ -694,8 +706,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       // transient budget (attempt) is never consumed by them.
       let persistentAttempt = 0;
       for (let attempt = 0; ; attempt++) {
-        const turnMessages: ChatMessage[] =
-          reminder.length > 0 ? [...messages, { role: "user", content: reminder }] : messages;
+        const turnMessages: ChatMessage[] = reminderMessage ? [...messages, reminderMessage] : messages;
         // A retry re-streams from scratch — only the LAST attempt's text is the one the member is looking at.
         streamedText = "";
         try {

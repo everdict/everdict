@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AnthropicTransport, retryAfterMsOf } from "./anthropic-transport.js";
-import type { StreamRequest } from "./transport.js";
+import type { LlmMessage, StreamRequest, TransientCarrier } from "./transport.js";
 
 function sseStream(frames: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -111,6 +111,29 @@ describe("AnthropicTransport", () => {
     expect(tools[1]?.cache_control).toEqual({ type: "ephemeral" });
     const msgs = b.messages as { content: { cache_control?: unknown }[] }[];
     expect(msgs[0]?.content[0]?.cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("keeps the rolling cache breakpoint off a transient per-request reminder", async () => {
+    // Given a history whose LAST message is a transient reminder (re-rendered each call, absent next request)
+    const { fetchImpl, body } = fakeFetch([
+      frame({ type: "message_delta", delta: { stop_reason: "end_turn" } }),
+      frame({ type: "message_stop" }),
+    ]);
+    const transport = new AnthropicTransport({ apiKey: "k", fetchImpl });
+    const reminder: LlmMessage = { role: "user", content: "<system-reminder>todo list</system-reminder>" };
+    (reminder as TransientCarrier).transient = true;
+    // When the request is built with caching on
+    await transport.stream({
+      ...base,
+      messages: [{ role: "user", content: "question" }, { role: "assistant", content: "answer" }, reminder],
+      cache: { system: true, tools: true },
+    });
+    // Then the breakpoint lands on the last STABLE block (the assistant answer) — a breakpoint on the reminder
+    // would key the cache entry to a prefix that never recurs, so it would be written every turn and never read.
+    const msgs = body().messages as { role: string; content: { text?: string; cache_control?: unknown }[] }[];
+    expect(msgs[1]?.content[0]?.cache_control).toEqual({ type: "ephemeral" });
+    const lastContent = msgs[2]?.content ?? [];
+    expect(lastContent[lastContent.length - 1]?.cache_control).toBeUndefined();
   });
 
   it("captures streamed thinking as reasoning text + replayable blocks (with signature)", async () => {

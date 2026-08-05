@@ -91,6 +91,14 @@ export interface ReasoningCarrier {
   reasoning?: ReasoningTrace;
 }
 
+// Marks a message the caller injects for THIS request only (a per-call reminder it re-renders every turn — e.g. the
+// agent loop's todo reminder). Such a message is absent from the next request's history, so a transport must never
+// end its rolling prompt-cache breakpoint on it: the cache entry would be keyed to a prefix that never recurs and is
+// never read back. Same side-channel pattern as ReasoningCarrier — attached via a cast, invisible on the wire.
+export interface TransientCarrier {
+  transient?: true;
+}
+
 // A provider-native transport: translate the canonical request to the provider's API (message protocol, tool format,
 // prompt caching), and normalize the reply. `stream` powers the agent loop (live token deltas). `complete` is the
 // one-shot, non-streaming variant for callers that only want the final text (model judges, connection probes, the

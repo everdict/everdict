@@ -8,6 +8,7 @@ import type {
   ReasoningCarrier,
   StreamRequest,
   StreamResult,
+  TransientCarrier,
 } from "./transport.js";
 
 export interface AnthropicTransportConfig {
@@ -159,9 +160,15 @@ function parseInput(raw: string): unknown {
 // Fold the canonical (OpenAI-shaped) message list into Anthropic's system param + messages. Anthropic differs from
 // OpenAI in three ways this handles: (1) system is a top-level param, not a message; (2) tool results live in a USER
 // turn as tool_result blocks (not a "tool" role); (3) consecutive same-role turns must be merged into one message.
-function foldMessages(system: string, messages: LlmMessage[]): { system: string; out: OutMessage[] } {
+// `lastStable` is the last cacheable block that came from a NON-transient message — the rolling prompt-cache
+// breakpoint must land there, never on a per-request reminder that won't recur in the next request's history.
+function foldMessages(
+  system: string,
+  messages: LlmMessage[],
+): { system: string; out: OutMessage[]; lastStable?: TextBlock | ToolResultBlock } {
   const systemParts: string[] = system.length > 0 ? [system] : [];
   const out: OutMessage[] = [];
+  let lastStable: TextBlock | ToolResultBlock | undefined;
   const push = (role: "user" | "assistant", blocks: OutBlock[]): void => {
     if (blocks.length === 0) return;
     const last = out[out.length - 1];
@@ -169,13 +176,17 @@ function foldMessages(system: string, messages: LlmMessage[]): { system: string;
     else out.push({ role, content: [...blocks] });
   };
   for (const m of messages) {
+    let blocks: OutBlock[] = [];
     if (m.role === "system") {
       if (typeof m.content === "string" && m.content.length > 0) systemParts.push(m.content);
-    } else if (m.role === "user") {
-      push("user", contentToBlocks(m.content));
+      continue;
+    }
+    if (m.role === "user") {
+      blocks = contentToBlocks(m.content);
+      push("user", blocks);
     } else if (m.role === "assistant") {
       // Thinking blocks must LEAD the assistant turn (Anthropic rejects a tool_use turn whose thinking isn't first).
-      const blocks: OutBlock[] = [...reasoningBlocksOf(m)];
+      blocks = [...reasoningBlocksOf(m)];
       const text = contentToString(m.content);
       if (text.length > 0) blocks.push({ type: "text", text });
       const toolCalls = m.tool_calls ?? [];
@@ -186,10 +197,19 @@ function foldMessages(system: string, messages: LlmMessage[]): { system: string;
       push("assistant", blocks);
     } else if (m.role === "tool") {
       const id = "tool_call_id" in m && typeof m.tool_call_id === "string" ? m.tool_call_id : "";
-      push("user", [{ type: "tool_result", tool_use_id: id, content: contentToString(m.content) }]);
+      blocks = [{ type: "tool_result", tool_use_id: id, content: contentToString(m.content) }];
+      push("user", blocks);
+    }
+    if ((m as TransientCarrier).transient === true) continue;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b && (b.type === "text" || b.type === "tool_result")) {
+        lastStable = b;
+        break;
+      }
     }
   }
-  return { system: systemParts.join("\n\n"), out };
+  return { system: systemParts.join("\n\n"), out, ...(lastStable ? { lastStable } : {}) };
 }
 
 function toAnthropicTools(tools: LlmTool[], cache: boolean): AnthropicTool[] {
@@ -220,14 +240,10 @@ export class AnthropicTransport implements LlmTransport {
   private buildBody(req: StreamRequest): Record<string, unknown> {
     const cacheSystem = req.cache?.system === true;
     const cacheTools = req.cache?.tools === true;
-    const { system, out } = foldMessages(req.system, req.messages);
-    if ((cacheSystem || cacheTools) && out.length > 0) {
-      const lastMsg = out[out.length - 1];
-      const lastBlock = lastMsg?.content[lastMsg.content.length - 1];
-      if (lastBlock && (lastBlock.type === "text" || lastBlock.type === "tool_result")) {
-        lastBlock.cache_control = EPHEMERAL;
-      }
-    }
+    const { system, out, lastStable } = foldMessages(req.system, req.messages);
+    // Rolling breakpoint on the last STABLE block (never a transient per-request reminder — a breakpoint there keys
+    // the cache entry to a prefix that never recurs, so every turn would pay a cache write that is never read).
+    if ((cacheSystem || cacheTools) && lastStable) lastStable.cache_control = EPHEMERAL;
     const systemField =
       cacheSystem && system.length > 0 ? [{ type: "text", text: system, cache_control: EPHEMERAL }] : system;
     // Extended thinking: max_tokens must exceed the thinking budget (it caps thinking + visible output), and temperature

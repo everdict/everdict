@@ -32,6 +32,21 @@ describe("buildEnvironmentSection", () => {
     expect(section).not.toContain("download");
   });
 
+  it("renders the date at day precision so the system prompt stays byte-identical across a day's turns", () => {
+    // Regression: the caller hands in a millisecond ISO timestamp (deps.now()); rendering it verbatim made every
+    // turn's system prompt unique, invalidating the provider's prompt-cache prefix on every single call.
+    const at = buildEnvironmentSection({ workspace: "acme", model: "m1", date: "2026-08-06T01:23:45.678Z" });
+    expect(at).toContain("- Date: 2026-08-06");
+    expect(at).not.toContain("01:23:45");
+    // Two turns on the same day produce the same block
+    const later = buildEnvironmentSection({ workspace: "acme", model: "m1", date: "2026-08-06T09:00:00.000Z" });
+    expect(later).toBe(at);
+    // A date-only value passes through untouched
+    expect(buildEnvironmentSection({ workspace: "acme", model: "m1", date: "2026-07-27" })).toContain(
+      "- Date: 2026-07-27",
+    );
+  });
+
   it("names the conversation's task directory so each task's files stay separated on the filesystem", () => {
     const section = buildEnvironmentSection({
       workspace: "acme",

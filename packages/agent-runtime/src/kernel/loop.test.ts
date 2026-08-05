@@ -1,4 +1,4 @@
-import type { LlmTransport, StreamRequest, StreamResult } from "@everdict/llm";
+import type { LlmTransport, StreamRequest, StreamResult, TransientCarrier } from "@everdict/llm";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../messages.js";
 import type { PermissionDecision, PermissionRequest, ToolDefinition } from "../tools/definition.js";
@@ -58,6 +58,25 @@ describe("runAgentLoop", () => {
     expect(result.content).toBe("Hi there");
     expect(result.turns).toBe(1);
     expect(result.toolCalls).toHaveLength(0);
+  });
+
+  it("marks the per-turn todo reminder transient so a transport never ends its cache prefix on it", async () => {
+    // Given a first turn that writes a todo list, then a follow-up turn (the reminder rides the second request)
+    const { transport, requests } = fakeTransport([
+      toolCallResult(
+        "t1",
+        "write_todos",
+        JSON.stringify({ todos: [{ content: "Step one", activeForm: "Stepping", status: "pending" }] }),
+      ),
+      textResult("done"),
+    ]);
+    await runAgentLoop({ transport, model: "m", systemPrompt: "s", history, registry: new ToolRegistry([]) });
+    // Then the reminder is the LAST message of the second request and carries the transient marker — without it
+    // the Anthropic transport ends its rolling cache breakpoint on a message that never recurs (pure cache churn).
+    const second = requests[1];
+    const last = second?.messages[second.messages.length - 1];
+    expect(typeof last?.content === "string" && last.content.includes("<system-reminder>")).toBe(true);
+    expect((last as TransientCarrier | undefined)?.transient).toBe(true);
   });
 
   it("fires onUsage with each turn's token usage (the host meters LLM cost from it)", async () => {

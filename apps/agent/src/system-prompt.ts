@@ -49,7 +49,16 @@ export function buildEnvironmentSection(env: {
   webBaseUrl?: string;
   desktopDownloadUrl?: string;
 }): string {
-  const lines = ["## Environment", `- Workspace: ${env.workspace}`, `- Model: ${env.model}`, `- Date: ${env.date}`];
+  // Date renders DAY precision only (an ISO timestamp is sliced): the environment block sits in the system prompt,
+  // and a millisecond timestamp makes every turn's system prompt byte-different — invalidating the provider's
+  // prompt-cache prefix (system + everything after it) on every single call. Day granularity is what the agent
+  // actually needs, and the cache then survives until midnight instead of never.
+  const lines = [
+    "## Environment",
+    `- Workspace: ${env.workspace}`,
+    `- Model: ${env.model}`,
+    `- Date: ${env.date.slice(0, 10)}`,
+  ];
   if (env.taskDirectory !== undefined) {
     lines.push(
       `- Task directory: ${env.taskDirectory} — this conversation's own area on the workspace filesystem. Write this task's outputs there; promote finished deliverables to the shared library (reports/ · data/ · artifacts/).`,
