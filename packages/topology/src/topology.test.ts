@@ -1636,10 +1636,12 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
 
     // dispatch completes without throwing.
     expect(result.scores.find((s) => s.graderId === "url-ok")?.pass).toBe(true);
-    // The trace is surfaced as an error event instead of being lost silently.
-    expect(result.trace).toHaveLength(1);
-    expect(result.trace[0]?.kind).toBe("error");
-    expect((result.trace[0] as { message?: string }).message).toContain("MLflow 401");
+    // The trace is surfaced as an error event instead of being lost silently. The dispatch also seals its own
+    // infra-plane events into the trace — this assertion is about the PULLED half, so filter them out.
+    const pulled = result.trace.filter((e) => e.kind !== "infra");
+    expect(pulled).toHaveLength(1);
+    expect(pulled[0]?.kind).toBe("error");
+    expect((pulled[0] as { message?: string }).message).toContain("MLflow 401");
   });
 
   it("multi-tenant: separates the warm topology per tenant with a different trust-zone (no sharing)", async () => {
@@ -2381,7 +2383,8 @@ describe("ServiceTopologyBackend — trace completion", () => {
 
     const result = await backend.dispatch(job);
 
-    expect(result.trace).toEqual(events);
+    // The pulled events land verbatim; the dispatch's own infra-plane seal rides alongside them.
+    expect(result.trace.filter((e) => e.kind !== "infra")).toEqual(events);
     expect(statusCalls.length).toBeGreaterThanOrEqual(2); // running → ok
     expect(statusCalls[0]).toBe("fixed"); // probed by the injected runId (injected correlation)
   });
@@ -2404,7 +2407,7 @@ describe("ServiceTopologyBackend — trace completion", () => {
 
     const result = await backend.dispatch(job);
 
-    expect(result.trace).toHaveLength(1);
+    expect(result.trace.filter((e) => e.kind !== "infra")).toHaveLength(1);
     expect(fetches).toBeGreaterThanOrEqual(3); // 2 probe fetches (empty → present) + the final pull
   });
 });
