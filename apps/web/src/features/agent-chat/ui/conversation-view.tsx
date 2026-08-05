@@ -292,6 +292,16 @@ export function ConversationView({
   // new object identity would push a re-render straight through the memoized rows into their markdown parsers.
   const items = useMemo(() => buildTranscript(messages, artifacts), [messages, artifacts])
 
+  // The checklist spinner must track reality, not the persisted snapshot: only the LATEST todos item may animate,
+  // and only while a turn is actually running (`sending` covers both a fresh send and a reattached live turn).
+  const lastTodosId = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i]
+      if (item?.kind === 'todos') return item.id
+    }
+    return null
+  }, [items])
+
   const isEmpty = messages.length === 0 && pendingUsers.length === 0 && !sending
   // 임무로 진입했으면 그 임무의 카탈로그 블록(agentChat.missions.<kind>)이 빈 화면의 제목·설명·제안을 대신한다 —
   // 구조는 그대로, 라이팅만 그 작업의 것으로. 임무가 없으면 기존 범용 문구.
@@ -373,7 +383,14 @@ export function ConversationView({
                       text={item.text}
                     />
                   )
-                if (item.kind === 'todos') return <TodoList key={item.id} todos={item.todos} />
+                if (item.kind === 'todos')
+                  return (
+                    <TodoList
+                      key={item.id}
+                      todos={item.todos}
+                      active={sending && item.id === lastTodosId}
+                    />
+                  )
                 if (item.kind === 'agents')
                   return <SubagentList key={item.id} agents={item.agents} />
                 if (item.kind === 'artifact')

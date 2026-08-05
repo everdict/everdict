@@ -1,7 +1,7 @@
 'use client'
 
 import { memo } from 'react'
-import { CircleCheck, CircleDashed, ListTodo, LoaderCircle } from 'lucide-react'
+import { CircleCheck, CircleDashed, CirclePause, ListTodo, LoaderCircle } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
@@ -9,12 +9,19 @@ import { cn } from '@/shared/lib/utils'
 import type { TodoItemView } from '../lib/transcript'
 
 // A `write_todos` snapshot rendered as a first-class task checklist (not a raw tool card) — the agent's plan for a
-// multi-step request. The in_progress item shows its present-continuous form ("Summarizing…") and a spinner; done
-// items are checked and struck through; pending items are dashed. Gives the user a legible "here's my plan / here's
-// where I am" at a glance instead of a JSON blob.
+// multi-step request. Done items are checked and struck through; pending items are dashed. The in_progress item only
+// animates (spinner + present-continuous "Summarizing…") while the turn is actually running (`active`) — the snapshot
+// is persisted transcript state, so after a stop/interruption it would otherwise keep spinning forever and read as
+// live work; halted, the step shows a static pause mark and its imperative form instead.
 // Memoized like every transcript item — a keystroke in the composer must not re-render the conversation above it
 // (the `todos` array identity holds because ConversationView memoizes buildTranscript).
-export const TodoList = memo(function TodoList({ todos }: { todos: TodoItemView[] }) {
+export const TodoList = memo(function TodoList({
+  todos,
+  active,
+}: {
+  todos: TodoItemView[]
+  active: boolean
+}) {
   const t = useTranslations('agentChat')
   if (todos.length === 0) return null
   const done = todos.filter((td) => td.status === 'completed').length
@@ -38,10 +45,17 @@ export const TodoList = memo(function TodoList({ todos }: { todos: TodoItemView[
                   strokeWidth={2}
                 />
               ) : td.status === 'in_progress' ? (
-                <LoaderCircle
-                  className="mt-0.5 size-3.5 shrink-0 animate-spin text-primary"
-                  strokeWidth={2}
-                />
+                active ? (
+                  <LoaderCircle
+                    className="mt-0.5 size-3.5 shrink-0 animate-spin text-primary"
+                    strokeWidth={2}
+                  />
+                ) : (
+                  <CirclePause
+                    className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                    strokeWidth={2}
+                  />
+                )
               ) : (
                 <CircleDashed
                   className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50"
@@ -56,7 +70,9 @@ export const TodoList = memo(function TodoList({ todos }: { todos: TodoItemView[
                   td.status === 'pending' && 'text-foreground/80'
                 )}
               >
-                {td.status === 'in_progress' && td.activeForm ? td.activeForm : td.content}
+                {td.status === 'in_progress' && active && td.activeForm
+                  ? td.activeForm
+                  : td.content}
               </span>
             </li>
           ))}
