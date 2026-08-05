@@ -2,6 +2,7 @@ import type { NextConfig } from 'next'
 import createNextIntlPlugin from 'next-intl/plugin'
 
 // A relative import, not the `@/` alias: this module is read while Next is still booting its config.
+import { RESERVED_TOP_LEVEL } from './src/shared/auth/workspace-scope'
 import { DETAIL_ROUTES } from './src/shared/lib/resource-routes'
 
 // i18n request config (cookie-based locale — no URL routing). Catalogs are messages/{ko,en}.json.
@@ -27,12 +28,20 @@ const DETAIL_MOVES = DETAIL_ROUTES.filter((route) => route.plural !== 'teams')
 // rewrite `/teams/ENG/harnesses` into a team path that no longer exists.
 const FORMER_TEAM_EVAL_SECTIONS = ['scorecards', 'harnesses', 'datasets', 'judges'] as const
 
+// 첫 세그먼트가 워크스페이스인 주소만 이 규칙들의 대상이다 — `api` 같은 예약어는 워크스페이스가 아니다
+// (`RESERVED_TOP_LEVEL`, 미들웨어가 읽는 그 목록). 가드가 없으면 우리 BFF 라우트가 통째로 걸린다:
+// `/api/issues/:id/attachment` 가 `/api/issue/:id/attachment`(없는 주소)로 307 되어, 이슈 본문의 GitHub
+// 첨부 이미지와 런 녹화 다운로드가 조용히 죽는다 — 라우트는 멀쩡한데 요청이 도달하지 못한다.
+// ⚠️ 세그먼트의 끝은 `$` 가 아니라 `(?:/|$)` 다: path-to-regexp 가 만든 정규식에서 `$` 는 **경로 전체**의
+// 끝을 뜻하므로, 뒤에 무언가 더 붙는 첫 세그먼트에는 영원히 걸리지 않는다(가드가 통째로 무력해진다).
+const WORKSPACE = `:workspace((?!(?:${[...RESERVED_TOP_LEVEL].join('|')})(?:/|$))[^/]+)`
+
 async function movedDetailRoutes() {
   return [
     ...FORMER_TEAM_EVAL_SECTIONS.flatMap((section) =>
       // Both spellings of the team segment, and anything under them (`…/scorecards/new` included).
       ['team', 'teams'].map((segment) => ({
-        source: `/:workspace/${segment}/:key/${section}/:rest*`,
+        source: `/${WORKSPACE}/${segment}/:key/${section}/:rest*`,
         destination: `/:workspace/${section}`,
         permanent: false,
       }))
@@ -40,27 +49,27 @@ async function movedDetailRoutes() {
     // A team's cycle is addressed by its number under the team — more specific than the generic team rule
     // below, so it has to be matched first. Digits only, because `…/cycles/all` is the index and stays put.
     {
-      source: '/:workspace/teams/:key/cycles/:number(\\d+)',
+      source: `/${WORKSPACE}/teams/:key/cycles/:number(\\d+)`,
       destination: '/:workspace/team/:key/cycle/:number',
       permanent: false,
     },
     // The same address after the team segment was already singularised, for a link built in between.
     {
-      source: '/:workspace/team/:key/cycles/:number(\\d+)',
+      source: `/${WORKSPACE}/team/:key/cycles/:number(\\d+)`,
       destination: '/:workspace/team/:key/cycle/:number',
       permanent: false,
     },
     // One team and everything under it. `/teams` alone is the directory of teams and keeps its plural, which is
     // why `:key` is required rather than optional.
     {
-      source: '/:workspace/teams/:key/:rest*',
+      source: `/${WORKSPACE}/teams/:key/:rest*`,
       destination: '/:workspace/team/:key/:rest*',
       permanent: false,
     },
     ...DETAIL_MOVES.map(({ plural, singular, reserved }) => {
       const guard = reserved.length === 0 ? '' : `(?!(?:${reserved.join('|')})$)`
       return {
-        source: `/:workspace/${plural}/:id(${guard}[^/]+)/:rest*`,
+        source: `/${WORKSPACE}/${plural}/:id(${guard}[^/]+)/:rest*`,
         destination: `/:workspace/${singular}/:id/:rest*`,
         permanent: false,
       }
