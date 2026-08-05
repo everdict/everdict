@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Check, ChevronDown, ChevronRight, Copy, Loader2, Trash2 } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
@@ -13,6 +12,7 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { Link } from '@/shared/ui/link'
 import { Markdown } from '@/shared/ui/markdown'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
@@ -75,7 +75,7 @@ export function WorkspaceImageDetail({
     initialReference ? { [initialReference]: initialInspect } : {}
   )
   const [error, setError] = useState<string | null>(null)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [removing, startRemoving] = useTransition()
 
   const inspect = selected ? (details[selected] ?? null) : null
@@ -84,12 +84,17 @@ export function WorkspaceImageDetail({
   const select = (tag: string) => {
     setSelected(tag)
     if (tag in details) return
-    startTransition(async () => {
-      const res = await inspectWorkspaceImageAction(name, tag)
-      // 실패해도 행은 남는다 — null 캐시로 "요약을 못 읽었다"를 표시하고 다시 고르면 재시도하지 않는다.
-      setDetails((prev) => ({ ...prev, [tag]: res.ok ? res.inspect : null }))
-      if (!res.ok) setError(res.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await inspectWorkspaceImageAction(name, tag)
+        // 실패해도 행은 남는다 — null 캐시로 "요약을 못 읽었다"를 표시하고 다시 고르면 재시도하지 않는다.
+        setDetails((prev) => ({ ...prev, [tag]: res.ok ? res.inspect : null }))
+        if (!res.ok) setError(res.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   const unpublish = () => {

@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Loader2, TriangleAlert, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EntityRef } from '@/shared/ui/chip'
@@ -34,8 +34,8 @@ export function DeleteScorecardsDialog({
   onDeleted: (ids: string[]) => void
 }) {
   const t = useTranslations('deleteScorecard')
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   // Shrinks as batches are deleted, so a partial failure leaves only the still-present ones actionable for retry.
   const [remaining, setRemaining] = useState<Target[]>(targets)
   const [failed, setFailed] = useState<{ id: string; error: string }[]>([])
@@ -43,22 +43,27 @@ export function DeleteScorecardsDialog({
 
   function onConfirm() {
     if (pending || remaining.length === 0) return
-    startTransition(async () => {
-      const res = await deleteScorecardsAction({ ids: remaining.map((r) => r.id) })
-      if (res.deleted.length > 0) {
-        toast.success(t('deletedMany', { count: res.deleted.length }))
-        onDeleted(res.deleted)
-        router.refresh()
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await deleteScorecardsAction({ ids: remaining.map((r) => r.id) })
+        if (res.deleted.length > 0) {
+          toast.success(t('deletedMany', { count: res.deleted.length }))
+          onDeleted(res.deleted)
+          refresh()
+        }
+        if (res.failed.length === 0) {
+          onClose()
+          return
+        }
+        // Keep the dialog open on partial failure — drop the deleted rows, keep the failed ones, show why.
+        const failedIds = new Set(res.failed.map((f) => f.id))
+        setRemaining(remaining.filter((r) => failedIds.has(r.id)))
+        setFailed(res.failed)
+      } finally {
+        setPending(false)
       }
-      if (res.failed.length === 0) {
-        onClose()
-        return
-      }
-      // Keep the dialog open on partial failure — drop the deleted rows, keep the failed ones, show why.
-      const failedIds = new Set(res.failed.map((f) => f.id))
-      setRemaining(remaining.filter((r) => failedIds.has(r.id)))
-      setFailed(res.failed)
-    })
+    })()
   }
 
   return (

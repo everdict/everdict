@@ -1,12 +1,17 @@
 'use client'
 
-import { useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import { ISSUE_PRIORITIES, issuePriorityIcon, IssuePriorityIcon, type IssuePriority } from '@/entities/issue'
+import {
+  ISSUE_PRIORITIES,
+  issuePriorityIcon,
+  IssuePriorityIcon,
+  type IssuePriority,
+} from '@/entities/issue'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
 import { updateIssueAction } from '../api/issues'
@@ -27,18 +32,23 @@ export function IssuePriorityControl({
 }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
 
   function set(next: IssuePriority) {
-    startTransition(async () => {
-      const r = await updateIssueAction(id, { priority: next })
-      if (!r.ok) {
-        toast.error(r.error ?? t('priorityError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await updateIssueAction(id, { priority: next })
+        if (!r.ok) {
+          toast.error(r.error ?? t('priorityError'))
+          return
+        }
+        refresh()
+      } finally {
+        setPending(false)
       }
-      router.refresh()
-    })
+    })()
   }
 
   const label = (
@@ -50,7 +60,10 @@ export function IssuePriorityControl({
 
   if (!canWrite)
     return variant === 'icon' ? (
-      <span className="inline-flex shrink-0 items-center" title={tracker(`issuePriority.${priority}`)}>
+      <span
+        className="inline-flex shrink-0 items-center"
+        title={tracker(`issuePriority.${priority}`)}
+      >
         <IssuePriorityIcon priority={priority} className="[&_svg]:size-3.5" />
       </span>
     ) : (
@@ -89,7 +102,11 @@ export function IssuePriorityControl({
       {ISSUE_PRIORITIES.filter((option) => option !== priority).map((option) => {
         const Icon = issuePriorityIcon(option)
         return (
-          <DropdownItem key={option} icon={<Icon className="size-3.5" />} onSelect={() => set(option)}>
+          <DropdownItem
+            key={option}
+            icon={<Icon className="size-3.5" />}
+            onSelect={() => set(option)}
+          >
             {tracker(`issuePriority.${option}`)}
           </DropdownItem>
         )

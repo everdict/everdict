@@ -1,16 +1,16 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Check, ChevronDown, Loader2, Plus, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { projectStatusIcon, type ProjectStatus } from '@/entities/project'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 
 import { updateIssueAction } from '../api/issues'
 
@@ -57,29 +57,41 @@ export function IssueProjectControl({
   canWrite: boolean
 }) {
   const t = useTranslations('issuesPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [query, setQuery] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [saving, setSaving] = useState(false)
+
+  // 서버가 받아들인 값이 곧 이 줄의 새 진실이다. 페이지 새로고침이 커밋될 때까지 기다리지 않는 이유는
+  // 그 시점을 아무도 약속해 주지 않기 때문이다 — 서버 액션의 라우터 작업은 관계없는 다른 업데이트가
+  // 일어날 때 함께 커밋되어서, 같은 클릭이 어떤 때는 26ms, 어떤 때는 14.8초 뒤에 반영됐다(`use-refresh`).
+  // `undefined` 는 "서버 값을 그대로 따른다"이고, 서버가 따라잡으면 그 상태로 돌아간다.
+  const serverId = project?.id ?? null
+  const [chosenId, setChosenId] = useState<string | null | undefined>(undefined)
+  if (chosenId !== undefined && chosenId === serverId) setChosenId(undefined)
+  const shownId = chosenId === undefined ? serverId : chosenId
+  const shown = shownId === null ? undefined : (projects.find((p) => p.id === shownId) ?? project)
 
   // `null` 은 비운다 — 프로젝트에서 뺀다는 뜻이고, `undefined`(손대지 않음)와 절대 섞이면 안 된다.
-  function assign(projectId: string | null): void {
-    if (projectId === (project?.id ?? null)) return
-    startTransition(async () => {
-      const r = await updateIssueAction(id, { projectId })
-      if (!r.ok) {
-        toast.error(r.error ?? t('projectError'))
-        return
-      }
-      router.refresh()
-    })
+  async function assign(projectId: string | null): Promise<void> {
+    if (projectId === shownId) return
+    setSaving(true)
+    const r = await updateIssueAction(id, { projectId })
+    setSaving(false)
+    if (!r.ok) {
+      toast.error(r.error ?? t('projectError'))
+      return
+    }
+    setChosenId(projectId)
+    // 나머지 화면(이력·롤업)은 뒤따라 온다. 이 줄은 그걸 기다리지 않는다.
+    refresh()
   }
 
-  const chip = project ? (
+  const chip = shown ? (
     <Link
-      href={`/${workspace}/project/${encodeURIComponent(project.id)}`}
+      href={`/${workspace}/project/${encodeURIComponent(shown.id)}`}
       className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
     >
-      <ProjectName project={project} />
+      <ProjectName project={shown} />
     </Link>
   ) : null
 
@@ -103,18 +115,18 @@ export function IssueProjectControl({
             onClick={toggle}
             aria-expanded={open}
             aria-label={t('projectControlLabel')}
-            disabled={pending}
+            disabled={saving}
             className={cn(
               'shrink-0 transition-colors disabled:opacity-50',
-              project
+              shown
                 ? 'inline-flex size-5 items-center justify-center rounded text-faint hover:bg-accent hover:text-foreground'
                 : // 아직 아무 프로젝트에도 없는 이슈에서는 이 버튼이 유일한 안내다 — 그때만 글자를 단다.
                   'inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[11.5px] text-muted-foreground hover:border-border-strong hover:bg-accent hover:text-foreground'
             )}
           >
-            {pending ? (
+            {saving ? (
               <Loader2 className="size-3 animate-spin" />
-            ) : project ? (
+            ) : shown ? (
               <ChevronDown className="size-3.5" />
             ) : (
               <>
@@ -146,7 +158,7 @@ export function IssueProjectControl({
               <DropdownItem
                 key={option.id}
                 icon={<Icon />}
-                {...(option.id === project?.id ? { trailing: <Check className="size-3.5" /> } : {})}
+                {...(option.id === shownId ? { trailing: <Check className="size-3.5" /> } : {})}
                 onSelect={() => assign(option.id)}
               >
                 {option.name}
@@ -157,7 +169,7 @@ export function IssueProjectControl({
             <p className="px-2 py-1.5 text-[12px] text-faint">{t('projectNoMatch')}</p>
           )}
         </div>
-        {project && (
+        {shown && (
           <>
             <DropdownSeparator />
             <DropdownItem icon={<X className="size-3.5" />} onSelect={() => assign(null)}>

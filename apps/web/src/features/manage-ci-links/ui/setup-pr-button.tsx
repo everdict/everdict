@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { ExternalLink, GitPullRequest } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -24,17 +24,22 @@ export function SetupPrButton({
   onError?: (message: string) => void
 }) {
   const t = useTranslations('manageCiLinks')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [opened, setOpened] = useState<string>() // the PR url just opened
 
   function onClick() {
-    startTransition(async () => {
-      const r = await openSetupPrAction(repository, host)
-      if (r.ok && r.prUrl) {
-        setOpened(r.prUrl)
-        window.open(r.prUrl, '_blank', 'noopener,noreferrer')
-      } else onError?.(r.error ?? t('setupPrFailed'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await openSetupPrAction(repository, host)
+        if (r.ok && r.prUrl) {
+          setOpened(r.prUrl)
+          window.open(r.prUrl, '_blank', 'noopener,noreferrer')
+        } else onError?.(r.error ?? t('setupPrFailed'))
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   if (opened) {

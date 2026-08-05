@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { Shapes } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -8,6 +7,7 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 import { HarnessTemplateList } from './harness-template-list'

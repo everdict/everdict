@@ -1,16 +1,16 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { FileChartColumn, Globe, Lock, MoreHorizontal, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { View } from '@/entities/view'
 import { fmtTimeAgo } from '@/shared/lib/format'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
+import { Link } from '@/shared/ui/link'
 import { Tooltip } from '@/shared/ui/tooltip'
 
 import { deleteViewAction, updateViewAction } from '../api/view-actions'
@@ -38,7 +38,7 @@ export function ViewList({
   const t = useTranslations('analyzeScorecards')
   const locale = useLocale()
   const timeZone = useTimeZone()
-  const router = useRouter()
+  const refresh = useRefresh()
   const [pending, start] = useTransition()
   const [error, setError] = useState<string | undefined>()
 
@@ -51,7 +51,7 @@ export function ViewList({
       const next = v.visibility === 'workspace' ? 'private' : 'workspace'
       const r = await updateViewAction(v.id, { visibility: next })
       if (!r.ok) return setError(r.error ?? t('changeFailed'))
-      router.refresh()
+      refresh()
     })
 
   const remove = (v: View) =>
@@ -59,7 +59,7 @@ export function ViewList({
       setError(undefined)
       const r = await deleteViewAction(v.id)
       if (!r.ok) return setError(r.error ?? t('deleteFailed'))
-      router.refresh()
+      refresh()
     })
 
   return (

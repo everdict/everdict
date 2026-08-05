@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { VersionTagChip } from '@/shared/ui/chip'
 
@@ -26,30 +26,35 @@ export function VersionTagsEditor({
   version: string
   tags: string[]
   canEdit: boolean
-  // Optional: fired after a successful save, IN ADDITION to router.refresh() — for a client drill-in (the store) whose
+  // Optional: fired after a successful save, IN ADDITION to refresh() — for a client drill-in (the store) whose
   // version data is client-fetched (not page props), so it can re-load. Server-rendered callers omit it.
   onSaved?: () => void
 }) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const tr = useTranslations('versionTags')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
 
   const apply = (next: string[]) =>
-    startTransition(async () => {
-      const res = await setVersionTagsAction({ entity, id, version, tags: next })
-      if (!res.ok) {
-        setError(res.error ?? tr('saveFailed'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await setVersionTagsAction({ entity, id, version, tags: next })
+        if (!res.ok) {
+          setError(res.error ?? tr('saveFailed'))
+          return
+        }
+        setError(undefined)
+        setAdding(false)
+        setDraft('')
+        refresh()
+        onSaved?.()
+      } finally {
+        setPending(false)
       }
-      setError(undefined)
-      setAdding(false)
-      setDraft('')
-      router.refresh()
-      onSaved?.()
-    })
+    })()
 
   const addDraft = () => {
     const tag = draft.trim()

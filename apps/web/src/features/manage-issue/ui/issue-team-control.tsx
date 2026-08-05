@@ -1,6 +1,6 @@
 'use client'
 
-import { useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 
 import { issueHref } from '@/entities/issue'
 import { TeamKeyBadge } from '@/entities/team'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
 import { moveIssueAction } from '../api/issues'
@@ -21,7 +22,7 @@ export interface IssueTeamOption {
 // 이슈의 팀 — 상태와 함께, 속성 열 안에 컨트롤이 사는 둘뿐인 속성이다(팀을 바꾸는 것이 곧 그 속성을 바꾸는 것).
 // 상태 컨트롤과 같은 문법: 배지 + 드롭다운, 텍스트 링크 줄이 아니다.
 //
-// 이동은 식별자를 다시 찍으므로 이 페이지의 주소 자체가 바뀐다 — router.refresh() 로는 예전 슬러그에 머물러
+// 이동은 식별자를 다시 찍으므로 이 페이지의 주소 자체가 바뀐다 — refresh() 로는 예전 슬러그에 머물러
 // (예전 이름도 해석되니 화면은 멀쩡하다) 주소창만 낡는다. 그래서 성공하면 새 식별자로 replace 한다.
 export function IssueTeamControl({
   workspace,
@@ -38,19 +39,25 @@ export function IssueTeamControl({
 }) {
   const t = useTranslations('issuesPage')
   const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
 
   function move(teamId: string) {
-    startTransition(async () => {
-      const r = await moveIssueAction(id, teamId)
-      if (!r.ok || !r.issue) {
-        // 이미 그 팀이면 제어 평면의 409 — 도메인의 거절을 그대로 보여 준다.
-        toast.error(r.error ?? t('moveError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await moveIssueAction(id, teamId)
+        if (!r.ok || !r.issue) {
+          // 이미 그 팀이면 제어 평면의 409 — 도메인의 거절을 그대로 보여 준다.
+          toast.error(r.error ?? t('moveError'))
+          return
+        }
+        router.replace(issueHref(workspace, r.issue.identifier, r.issue.title))
+        refresh()
+      } finally {
+        setPending(false)
       }
-      router.replace(issueHref(workspace, r.issue.identifier, r.issue.title))
-      router.refresh()
-    })
+    })()
   }
 
   const label = team ? (

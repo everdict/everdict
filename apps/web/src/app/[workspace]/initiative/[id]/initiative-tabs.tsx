@@ -1,11 +1,11 @@
 'use client'
 
-import Link from 'next/link'
 import { useSelectedLayoutSegment } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 
 import { INITIATIVE_SECTIONS, initiativeHref, type InitiativeSection } from '@/entities/initiative'
 import { cn } from '@/shared/lib/utils'
+import { Link } from '@/shared/ui/link'
 
 // 목표 상세의 탭. 리니어처럼 개요 / 프로젝트 / 업데이트 세 자리로 나뉘고, 헤더와 속성 열은 레이아웃이
 // 이고 있으므로 탭을 옮겨도 "어느 목표를 보고 있는지"는 화면에서 사라지지 않는다.

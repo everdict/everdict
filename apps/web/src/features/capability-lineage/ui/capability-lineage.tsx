@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import Link from 'next/link'
 import { Bot, GitBranch, UserRound } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -7,6 +6,7 @@ import { hasLineage, originRefHref, type CapabilityOrigin } from '@/entities/cap
 import { issueHref, IssueStatusIcon, type IssueSummary } from '@/entities/issue'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
+import { Link } from '@/shared/ui/link'
 import { SectionHeader } from '@/shared/ui/section-header'
 
 // 능력의 리니지 — "이건 왜 있나, 어디서 나왔나". 이슈에서 태어난 저지·데이터셋·하네스가 자기 출처를 말하고,

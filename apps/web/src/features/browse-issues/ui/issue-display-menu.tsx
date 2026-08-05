@@ -1,7 +1,6 @@
 'use client'
 
-import { useOptimistic, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useOptimistic, useState } from 'react'
 import { Check, Columns3, List, SlidersHorizontal } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -12,6 +11,7 @@ import {
   type IssueDisplay,
   type IssueLayout,
 } from '@/entities/issue'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import {
   DropdownItem,
@@ -28,21 +28,26 @@ import { setIssueDisplay } from '../api/set-issue-display'
 // (`viewKey`), so the cycle board and the team's list can be read differently by the same person.
 //
 // The write is a server action rather than local state because the list is a server component — it needs the
-// grouping to ask for group counts at all. `router.refresh()` re-runs it with the new cookie, and the optimistic
+// grouping to ask for group counts at all. `refresh()` re-runs it with the new cookie, and the optimistic
 // value keeps the checkmark from lagging behind the click.
 export function IssueDisplayMenu({ viewKey, display }: { viewKey: string; display: IssueDisplay }) {
   const t = useTranslations('issuesPage')
-  const router = useRouter()
-  const [, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [, set_pending] = useState(false)
   const [view, showOptimistically] = useOptimistic(display)
 
   function apply(next: Partial<IssueDisplay>) {
     const merged = normalizeIssueDisplay({ ...view, ...next })
-    startTransition(async () => {
-      showOptimistically(merged)
-      await setIssueDisplay(viewKey, merged)
-      router.refresh()
-    })
+    void (async () => {
+      set_pending(true)
+      try {
+        showOptimistically(merged)
+        await setIssueDisplay(viewKey, merged)
+        refresh()
+      } finally {
+        set_pending(false)
+      }
+    })()
   }
 
   const layouts: { key: IssueLayout; icon: typeof List }[] = [

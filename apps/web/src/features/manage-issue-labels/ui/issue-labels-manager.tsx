@@ -1,7 +1,6 @@
 'use client'
 
-import { useId, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useId, useState } from 'react'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -12,6 +11,7 @@ import {
   type IssueLabel,
   type IssueLabelColor,
 } from '@/entities/issue-label'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
@@ -38,7 +38,7 @@ export function IssueLabelsManager({
   canWrite: boolean
 }) {
   const t = useTranslations('labelsPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const formId = useId()
   const [error, setError] = useState<string>()
   // 편집 중인 라벨(undefined = 새로 만들기). 다이얼로그 하나가 두 흐름을 다 맡는다 — 필드가 같기 때문이다.
@@ -48,7 +48,7 @@ export function IssueLabelsManager({
   const [color, setColor] = useState<IssueLabelColor>('gray')
   const [description, setDescription] = useState('')
   const [removing, setRemoving] = useState<{ label: IssueLabel; issues: number | undefined }>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function openCreate(): void {
     setEditing(undefined)
@@ -71,52 +71,67 @@ export function IssueLabelsManager({
   function submit(): void {
     const trimmed = name.trim()
     if (trimmed.length === 0) return
-    startTransition(async () => {
-      const current = editing
-      const r = current
-        ? await updateIssueLabelAction(current.id, {
-            ...(trimmed !== current.name ? { name: trimmed } : {}),
-            ...(color !== current.color ? { color } : {}),
-            // PATCH semantics: 비운 설명은 명시적 null 로 가야 지워진다.
-            ...(description.trim() !== (current.description ?? '')
-              ? { description: description.trim() === '' ? null : description.trim() }
-              : {}),
-          })
-        : await createIssueLabelAction({
-            name: trimmed,
-            color,
-            ...(description.trim() ? { description: description.trim() } : {}),
-          })
-      if (!r.ok) {
-        setError(r.error ?? t('saveError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const current = editing
+        const r = current
+          ? await updateIssueLabelAction(current.id, {
+              ...(trimmed !== current.name ? { name: trimmed } : {}),
+              ...(color !== current.color ? { color } : {}),
+              // PATCH semantics: 비운 설명은 명시적 null 로 가야 지워진다.
+              ...(description.trim() !== (current.description ?? '')
+                ? { description: description.trim() === '' ? null : description.trim() }
+                : {}),
+            })
+          : await createIssueLabelAction({
+              name: trimmed,
+              color,
+              ...(description.trim() ? { description: description.trim() } : {}),
+            })
+        if (!r.ok) {
+          setError(r.error ?? t('saveError'))
+          return
+        }
+        setOpen(false)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setOpen(false)
-      router.refresh()
-    })
+    })()
   }
 
   // 삭제는 되돌릴 수 없고 이슈에서 라벨을 떼어낸다 — 몇 개인지 먼저 읽어 보여준 다음 확인받는다.
   function askRemove(label: IssueLabel): void {
     setRemoving({ label, issues: undefined })
-    startTransition(async () => {
-      const usage = await issueLabelUsageAction(label.id)
-      setRemoving({ label, issues: usage?.issues })
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const usage = await issueLabelUsageAction(label.id)
+        setRemoving({ label, issues: usage?.issues })
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   function confirmRemove(): void {
     const target = removing?.label
     if (!target) return
-    startTransition(async () => {
-      const r = await deleteIssueLabelAction(target.id)
-      if (!r.ok) {
-        toast.error(r.error ?? t('deleteError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteIssueLabelAction(target.id)
+        if (!r.ok) {
+          toast.error(r.error ?? t('deleteError'))
+          return
+        }
+        setRemoving(undefined)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setRemoving(undefined)
-      router.refresh()
-    })
+    })()
   }
 
   return (

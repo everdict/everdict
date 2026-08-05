@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 
@@ -23,21 +24,27 @@ export function AcceptInviteCard({
 }) {
   const t = useTranslations('acceptInvite')
   const router = useRouter()
+  const refresh = useRefresh()
   const [error, setError] = useState<string>()
   const [done, setDone] = useState<{ workspace: string; role: string }>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const accept = useCallback(() => {
     setError(undefined)
-    startTransition(async () => {
-      const r = await acceptInviteAction(token)
-      if (r.ok && r.workspace && r.role) {
-        setDone({ workspace: r.workspace, role: r.role })
-        router.refresh()
-      } else {
-        setError(r.error ?? t('acceptFailed'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await acceptInviteAction(token)
+        if (r.ok && r.workspace && r.role) {
+          setDone({ workspace: r.workspace, role: r.role })
+          refresh()
+        } else {
+          setError(r.error ?? t('acceptFailed'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
   }, [token, router, t])
 
   // Post-login landing: the sign-in callbackUrl carried `autoAccept=1`, so redeem once, automatically.

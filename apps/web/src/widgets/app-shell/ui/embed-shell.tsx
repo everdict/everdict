@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, type ReactNode } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
+
+import { useRefresh } from '@/shared/lib/use-refresh'
 
 // Chrome-less shell for pages rendered INSIDE the infra panel's iframe (the [workspace] layout switches to this
 // when the document was requested as an iframe — sec-fetch-dest). The real routed pages render at full fidelity
@@ -15,7 +17,7 @@ const INFRA_SEGMENTS = new Set(['runs', 'runtimes', 'schedules'])
 
 export function EmbedShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
-  const router = useRouter()
+  const refresh = useRefresh()
 
   // Cookie-backed per-device preference (locale / timezone) changed in the parent. The parent's switcher sets the
   // cookie then signals us here (everdict:refresh); soft-refresh so the server re-renders this framed page with the
@@ -23,7 +25,7 @@ export function EmbedShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return
-      if ((e.data as { type?: string } | null)?.type === 'everdict:refresh') router.refresh()
+      if ((e.data as { type?: string } | null)?.type === 'everdict:refresh') refresh()
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)

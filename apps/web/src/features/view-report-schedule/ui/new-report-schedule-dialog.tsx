@@ -1,10 +1,10 @@
 'use client'
 
-import { useId, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useId, useState } from 'react'
 import { CalendarPlus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input } from '@/shared/ui/input'
@@ -23,7 +23,7 @@ type PresetKey = (typeof PRESETS)[number]['key']
 
 export function NewReportScheduleDialog({ viewId }: { viewId: string }) {
   const t = useTranslations('viewReportSchedule')
-  const router = useRouter()
+  const refresh = useRefresh()
   const titleId = useId()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -32,30 +32,35 @@ export function NewReportScheduleDialog({ viewId }: { viewId: string }) {
   const [instructions, setInstructions] = useState('')
   const [compare, setCompare] = useState(true)
   const [error, setError] = useState<string | undefined>(undefined)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const cron = preset === 'custom' ? customCron : PRESETS.find((p) => p.key === preset)?.cron || ''
 
   const submit = () =>
-    startTransition(async () => {
-      setError(undefined)
-      const res = await createViewReportScheduleAction({
-        viewId,
-        name: name.trim(),
-        cron,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
-        ...(compare ? { compare: true } : {}),
-      })
-      if (!res.ok) {
-        setError(res.error ?? t('actionFailed'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        setError(undefined)
+        const res = await createViewReportScheduleAction({
+          viewId,
+          name: name.trim(),
+          cron,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
+          ...(compare ? { compare: true } : {}),
+        })
+        if (!res.ok) {
+          setError(res.error ?? t('actionFailed'))
+          return
+        }
+        setOpen(false)
+        setName('')
+        setInstructions('')
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setOpen(false)
-      setName('')
-      setInstructions('')
-      router.refresh()
-    })
+    })()
 
   return (
     <>

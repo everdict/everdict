@@ -1,7 +1,6 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import { ChevronDown, ChevronLeft, ChevronRight, Layers, RefreshCw } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
@@ -12,6 +11,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { Table, TBody, TH, THead, TR } from '@/shared/ui/table'
 

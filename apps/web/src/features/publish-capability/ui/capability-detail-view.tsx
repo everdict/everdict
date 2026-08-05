@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
 import { ArrowRight, CircleCheck, GitCompare, History, Loader2, Plus, Sparkles } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -15,6 +14,7 @@ import {
 } from '@/entities/capability'
 import type { AdoptedEnvironment } from '@/entities/environment-adoption'
 import { fmtDateTime } from '@/shared/lib/format'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Avatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -83,8 +83,8 @@ export function CapabilityDetailView({
   secretNames: string[]
 }) {
   const t = useTranslations('capabilityStore')
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   // 필요 시크릿/쓰기 옵션이 있을 때만 뜨는 바인딩 다이얼로그(없으면 바로 추가).
   const [adopting, setAdopting] = useState(false)
   // 상세에 표시할 레코드 — 최신(라우트가 실어 온 것) 또는 버전 스위처로 고른 과거 버전.
@@ -113,83 +113,113 @@ export function CapabilityDetailView({
     else adopt({}, false)
   }
   const adopt = (secretBindings: Record<string, string>, enableWrite: boolean) =>
-    startTransition(async () => {
-      const r = await adoptCapabilityAction({
-        source: capability.tenant,
-        id: capability.id,
-        version: capability.version,
-        secretBindings,
-        enableWrite,
-      })
-      if (r.ok) {
-        toast.success(t('added', { name: capability.name }))
-        router.refresh()
-      } else {
-        toast.error(r.error ?? t('addError'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await adoptCapabilityAction({
+          source: capability.tenant,
+          id: capability.id,
+          version: capability.version,
+          secretBindings,
+          enableWrite,
+        })
+        if (r.ok) {
+          toast.success(t('added', { name: capability.name }))
+          refresh()
+        } else {
+          toast.error(r.error ?? t('addError'))
+        }
+        setAdopting(false)
+      } finally {
+        setPending(false)
       }
-      setAdopting(false)
-    })
+    })()
   const unadopt = () =>
-    startTransition(async () => {
-      const r = await unadoptCapabilityAction(capability.tenant, capability.id)
-      if (r.ok) {
-        toast.success(t('removedFromWorkspace', { name: capability.name }))
-        router.refresh()
-      } else toast.error(r.error ?? t('addError'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await unadoptCapabilityAction(capability.tenant, capability.id)
+        if (r.ok) {
+          toast.success(t('removedFromWorkspace', { name: capability.name }))
+          refresh()
+        } else toast.error(r.error ?? t('addError'))
+      } finally {
+        setPending(false)
+      }
+    })()
 
   // 스킬 추가 — 참조를 pin 하는 게 아니라 **사본**을 만든다. 그 순간부터 Settings › Agent › Skills 의 워크스페이스
   // 스킬이고, 편집도 버전 찍기도 거기서 한다(everdict 매니지드 스킬이 워크스페이스에 들어오는 유일한 경로).
   const importSkill = () =>
-    startTransition(async () => {
-      const r = await importSkillAction({
-        source: capability.tenant,
-        id: capability.id,
-        version: capability.version,
-      })
-      if (r.ok) {
-        toast.success(t('skillCopied', { name: capability.name }))
-        router.refresh()
-      } else toast.error(r.error ?? t('addError'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await importSkillAction({
+          source: capability.tenant,
+          id: capability.id,
+          version: capability.version,
+        })
+        if (r.ok) {
+          toast.success(t('skillCopied', { name: capability.name }))
+          refresh()
+        } else toast.error(r.error ?? t('addError'))
+      } finally {
+        setPending(false)
+      }
+    })()
 
   // environment 추가/제거 — 워크스페이스 인벤토리에 넣고, 넣을 때 pull 가능성을 검증한다(warn-not-block).
   const importEnv = () =>
-    startTransition(async () => {
-      const r = await adoptEnvironmentAction({
-        source: capability.tenant,
-        id: capability.id,
-        version: capability.version,
-      })
-      if (!r.ok) {
-        toast.error(r.error ?? t('importError'))
-        return
-      }
-      if (r.environment.verify?.pullable === false)
-        toast.warning(t('importedNotPullable', { name: capability.name }))
-      else toast.success(t('imported', { name: capability.name }))
-      router.refresh()
-    })
-  const removeEnv = () =>
-    startTransition(async () => {
-      const r = await unadoptEnvironmentAction(capability.tenant, capability.id)
-      if (!r.ok) toast.error(r.error ?? t('unimportError'))
-      else {
-        toast.success(t('unimported', { name: capability.name }))
-        router.refresh()
-      }
-    })
-  const reverifyEnv = (e: AdoptedEnvironment) =>
-    startTransition(async () => {
-      const r = await verifyAdoptedEnvironmentAction(e.source, e.id)
-      if (!r.ok) toast.error(r.error ?? t('reverifyError'))
-      else {
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await adoptEnvironmentAction({
+          source: capability.tenant,
+          id: capability.id,
+          version: capability.version,
+        })
+        if (!r.ok) {
+          toast.error(r.error ?? t('importError'))
+          return
+        }
         if (r.environment.verify?.pullable === false)
-          toast.warning(t('importedNotPullable', { name: e.name ?? e.id }))
-        else toast.success(t('reverified'))
-        router.refresh()
+          toast.warning(t('importedNotPullable', { name: capability.name }))
+        else toast.success(t('imported', { name: capability.name }))
+        refresh()
+      } finally {
+        setPending(false)
       }
-    })
+    })()
+  const removeEnv = () =>
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await unadoptEnvironmentAction(capability.tenant, capability.id)
+        if (!r.ok) toast.error(r.error ?? t('unimportError'))
+        else {
+          toast.success(t('unimported', { name: capability.name }))
+          refresh()
+        }
+      } finally {
+        setPending(false)
+      }
+    })()
+  const reverifyEnv = (e: AdoptedEnvironment) =>
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await verifyAdoptedEnvironmentAction(e.source, e.id)
+        if (!r.ok) toast.error(r.error ?? t('reverifyError'))
+        else {
+          if (r.environment.verify?.pullable === false)
+            toast.warning(t('importedNotPullable', { name: e.name ?? e.id }))
+          else toast.success(t('reverified'))
+          refresh()
+        }
+      } finally {
+        setPending(false)
+      }
+    })()
 
   return (
     <div className="space-y-6">

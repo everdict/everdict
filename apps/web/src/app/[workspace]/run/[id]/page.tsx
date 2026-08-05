@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { ChevronLeft, Download } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
@@ -27,6 +26,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { RuntimeChip } from '@/shared/ui/chip'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatusPill } from '@/shared/ui/status-pill'

@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
@@ -17,6 +16,7 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { imageRepositoryOf } from '@/shared/lib/image-ref'
 import { isSemver, sortSemverDesc } from '@/shared/lib/semver'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'

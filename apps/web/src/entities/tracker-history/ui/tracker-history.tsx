@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import Link from 'next/link'
 import {
   AlertTriangle,
   ArrowRight,
@@ -55,6 +54,7 @@ import {
 } from '@/shared/ui/activity-feed'
 import { Badge } from '@/shared/ui/badge'
 import { EntityRef } from '@/shared/ui/chip'
+import { Link } from '@/shared/ui/link'
 
 import { detailFlag, detailNumber, detailString, detailStrings } from '../lib/history-detail'
 

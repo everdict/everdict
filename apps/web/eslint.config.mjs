@@ -19,6 +19,23 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
       'prefer-const': 'error',
       'no-console': ['warn', { allow: ['warn', 'error'] }],
+      // Links go through the app's own wrapper, which turns prefetch OFF by default. On a force-dynamic
+      // route a prefetch only warms the shell the screen already renders, while every mounted link
+      // re-prefetches on each router-cache invalidation and holds the in-flight mutation's transition
+      // behind that queue. See src/shared/ui/link.tsx.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'next/link',
+              message: "Import { Link } from '@/shared/ui/link' — it defaults prefetch to false.",
+            },
+          ],
+        },
+      ],
     },
   },
+  // The one module allowed to reach for next/link: the wrapper that sets the default.
+  { files: ['src/shared/ui/link.tsx'], rules: { 'no-restricted-imports': 'off' } },
 ]

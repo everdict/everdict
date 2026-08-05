@@ -1,7 +1,6 @@
 'use client'
 
 import { memo } from 'react'
-import Link from 'next/link'
 import { MessageSquare } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
@@ -15,6 +14,7 @@ import { IssueLabelChips } from '@/entities/issue-label'
 import { isPastDue } from '@/entities/project'
 import { fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
+import { Link } from '@/shared/ui/link'
 
 import type { IssueDirectories } from '../model/directories'
 import { ISSUE_ROW_ATTR, useIssueSelection } from '../model/issue-selection'
@@ -58,7 +58,9 @@ export const IssueRow = memo(function IssueRow({
         <label
           className={cn(
             'flex size-4 shrink-0 cursor-pointer items-center justify-center transition-opacity',
-            picking || picked ? 'opacity-100' : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100'
+            picking || picked
+              ? 'opacity-100'
+              : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100'
           )}
         >
           <input
@@ -66,7 +68,10 @@ export const IssueRow = memo(function IssueRow({
             checked={picked}
             aria-label={t('selectRow', { identifier: issue.identifier })}
             onChange={(e) =>
-              selection.toggle(issue.id, 'nativeEvent' in e ? (e.nativeEvent as MouseEvent).shiftKey : false)
+              selection.toggle(
+                issue.id,
+                'nativeEvent' in e ? (e.nativeEvent as MouseEvent).shiftKey : false
+              )
             }
             onClick={(e) => e.stopPropagation()}
             className="size-3.5 accent-[var(--color-link)]"
@@ -132,7 +137,9 @@ export const IssueRow = memo(function IssueRow({
           dateTime={issue.dueDate}
           className={cn(
             'hidden shrink-0 font-mono text-[11px] text-muted-foreground @md:block',
-            isOpenIssueStatus(issue.status) && isPastDue(issue.dueDate, timeZone) && 'text-destructive'
+            isOpenIssueStatus(issue.status) &&
+              isPastDue(issue.dueDate, timeZone) &&
+              'text-destructive'
           )}
         >
           {issue.dueDate}

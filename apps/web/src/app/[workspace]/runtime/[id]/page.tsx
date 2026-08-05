@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ChevronLeft, Pencil } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
@@ -19,6 +18,7 @@ import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 import { RuntimeClusterStatus } from './runtime-cluster-status'
@@ -162,7 +162,10 @@ export default async function RuntimeDetailPage({
         description={t('detailDescription')}
         actions={
           <div className="flex items-center gap-2">
-            <MentionInChatButton reference={{ type: 'runtime', id, label: id }} mission="runtimeEdit" />
+            <MentionInChatButton
+              reference={{ type: 'runtime', id, label: id }}
+              mission="runtimeEdit"
+            />
             {editable && (
               <Link
                 href={`/${workspace}/runtime/${encodeURIComponent(id)}/edit`}

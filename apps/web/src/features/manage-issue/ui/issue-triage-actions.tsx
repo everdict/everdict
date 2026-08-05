@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Check, Loader2, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { issueStatusIcon, type IssueStatus } from '@/entities/issue'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -21,32 +21,42 @@ const ACCEPTABLE: IssueStatus[] = ['todo', 'backlog', 'in_progress', 'in_review'
 export function IssueTriageActions({ id }: { id: string }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [declining, setDeclining] = useState(false)
   const [note, setNote] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function accept(status: IssueStatus) {
-    startTransition(async () => {
-      const r = await acceptTriageAction(id, status)
-      if (!r.ok) {
-        toast.error(r.error ?? t('triageAcceptError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await acceptTriageAction(id, status)
+        if (!r.ok) {
+          toast.error(r.error ?? t('triageAcceptError'))
+          return
+        }
+        refresh()
+      } finally {
+        setPending(false)
       }
-      router.refresh()
-    })
+    })()
   }
 
   function decline() {
-    startTransition(async () => {
-      const r = await declineTriageAction(id, note.trim() || undefined)
-      if (!r.ok) {
-        toast.error(r.error ?? t('triageDeclineError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await declineTriageAction(id, note.trim() || undefined)
+        if (!r.ok) {
+          toast.error(r.error ?? t('triageDeclineError'))
+          return
+        }
+        setDeclining(false)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setDeclining(false)
-      router.refresh()
-    })
+    })()
   }
 
   return (
@@ -62,7 +72,12 @@ export function IssueTriageActions({ id }: { id: string }) {
               className="min-w-0 flex-1"
             />
             <div className="flex shrink-0 gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setDeclining(false)} disabled={pending}>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setDeclining(false)}
+                disabled={pending}
+              >
                 {t('cancel')}
               </Button>
               <Button size="sm" onClick={decline} disabled={pending}>
@@ -76,7 +91,11 @@ export function IssueTriageActions({ id }: { id: string }) {
               align="start"
               trigger={({ toggle, open }) => (
                 <Button size="sm" onClick={toggle} aria-expanded={open} disabled={pending}>
-                  {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                  {pending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Check className="size-3.5" />
+                  )}
                   {t('triageAccept')}
                 </Button>
               )}
@@ -95,7 +114,12 @@ export function IssueTriageActions({ id }: { id: string }) {
                 )
               })}
             </DropdownMenu>
-            <Button size="sm" variant="secondary" onClick={() => setDeclining(true)} disabled={pending}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setDeclining(true)}
+              disabled={pending}
+            >
               <X className="size-3.5" />
               {t('triageDecline')}
             </Button>

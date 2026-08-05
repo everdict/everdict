@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
 import { Check, Copy, KeyRound, Plus, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
@@ -29,15 +29,20 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
   const [createOpen, setCreateOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function onRevoke(id: string) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await revokeKeyAction(id)
-      setConfirmId(undefined)
-      if (!r.ok) setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await revokeKeyAction(id)
+        setConfirmId(undefined)
+        if (!r.ok) setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (
@@ -156,7 +161,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
   const [issued, setIssued] = useState<string>() // the plaintext just issued (revealed once)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // Reset the form each time it opens (clear leftover state from a previous issue/input).
   useEffect(() => {
@@ -183,11 +188,16 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
         return
       }
     }
-    startTransition(async () => {
-      const r = await createKeyAction(label, scopes)
-      if (r.ok) setIssued(r.apiKey)
-      else setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createKeyAction(label, scopes)
+        if (r.ok) setIssued(r.apiKey)
+        else setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

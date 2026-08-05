@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
@@ -17,10 +18,11 @@ import { deleteWorkspaceAction } from '../api/delete-workspace'
 export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }) {
   const t = useTranslations('deleteWorkspace')
   const router = useRouter()
+  const refresh = useRefresh()
   const [open, setOpen] = useState(false)
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | undefined>(undefined)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const match = confirm.trim() === workspaceName
 
   function close() {
@@ -33,15 +35,20 @@ export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }
   function onDelete() {
     if (!match) return
     setError(undefined)
-    startTransition(async () => {
-      const r = await deleteWorkspaceAction()
-      if (r.ok) {
-        router.push('/')
-        router.refresh()
-      } else {
-        setError(r.error ?? t('deleteFailed'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteWorkspaceAction()
+        if (r.ok) {
+          router.push('/')
+          refresh()
+        } else {
+          setError(r.error ?? t('deleteFailed'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
   }
 
   return (

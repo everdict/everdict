@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { ChevronLeft, ChevronRight, Flag } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
@@ -42,6 +41,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { CopyLinkButton } from '@/shared/ui/copy-link-button'
 import { DistributionBar } from '@/shared/ui/distribution-bar'
+import { Link } from '@/shared/ui/link'
 import { Markdown } from '@/shared/ui/markdown'
 import { PageHeader } from '@/shared/ui/page-header'
 import { PropertyList, PropertyRow } from '@/shared/ui/property-list'

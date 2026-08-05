@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Check, ChevronDown, Loader2, UserRound } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { memberNameOf, type MemberDirectory } from '@/entities/member'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import {
@@ -49,21 +49,26 @@ export function IssueAssigneeControl({
   className?: string
 }) {
   const t = useTranslations('issuesPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [query, setQuery] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // `null` 은 비운다 — 담당자를 뗀다는 뜻이고, `undefined`(손대지 않음)와 절대 섞이면 안 된다.
   function set(next: string | null): void {
     if (next === (assignee ?? null)) return
-    startTransition(async () => {
-      const r = await updateIssueAction(id, { assignee: next })
-      if (!r.ok) {
-        toast.error(r.error ?? t('assigneeError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await updateIssueAction(id, { assignee: next })
+        if (!r.ok) {
+          toast.error(r.error ?? t('assigneeError'))
+          return
+        }
+        refresh()
+      } finally {
+        setPending(false)
       }
-      router.refresh()
-    })
+    })()
   }
 
   const name = assignee === undefined ? t('fieldAssigneeNone') : memberNameOf(actors, assignee)

@@ -1,14 +1,15 @@
 'use client'
 
+import { useState } from 'react'
 import { BookOpen, FlaskConical, Play, Wrench } from 'lucide-react'
 import { useTranslations } from 'next-intl'
-import { useState, useTransition } from 'react'
 
 import type { SkillFile, SkillTryMessage } from '@/entities/skill'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Textarea } from '@/shared/ui/input'
 import { Markdown } from '@/shared/ui/markdown'
+
 import { trySkillAction } from '../api/manage-skills'
 
 // 스킬 테스트 드라이브 패널 — (미저장) 스킬 + 샘플 요청으로 에이전트를 실제 1턴 실행하고 트랜스크립트를 보여준다. 저장 전에
@@ -22,22 +23,32 @@ export function TestSkillPanel({
   const [prompt, setPrompt] = useState('')
   const [messages, setMessages] = useState<SkillTryMessage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const run = () =>
-    startTransition(async () => {
-      setError(null)
-      setMessages(null)
-      const r = await trySkillAction(skill, prompt)
-      if (r.ok && r.result) setMessages(r.result.messages)
-      else setError(r.error ?? t('testError'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        setError(null)
+        setMessages(null)
+        const r = await trySkillAction(skill, prompt)
+        if (r.ok && r.result) setMessages(r.result.messages)
+        else setError(r.error ?? t('testError'))
+      } finally {
+        setPending(false)
+      }
+    })()
 
   const canRun =
-    skill.name.trim().length > 0 && skill.instructions.trim().length > 0 && prompt.trim().length > 0 && !pending
+    skill.name.trim().length > 0 &&
+    skill.instructions.trim().length > 0 &&
+    prompt.trim().length > 0 &&
+    !pending
 
   // Only the agent's own turns (content + tool calls); tool-result messages are intermediate and hidden.
-  const turns = (messages ?? []).filter((m) => m.role === 'assistant' && (m.content.length > 0 || m.toolCalls?.length))
+  const turns = (messages ?? []).filter(
+    (m) => m.role === 'assistant' && (m.content.length > 0 || m.toolCalls?.length)
+  )
 
   return (
     <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-4">
@@ -72,14 +83,19 @@ export function TestSkillPanel({
               <div key={i} className="space-y-1.5">
                 {m.toolCalls?.map((c, j) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: tool calls are positional within a turn
-                  <div key={j} className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                  <div
+                    key={j}
+                    className="flex items-center gap-1.5 text-[12px] text-muted-foreground"
+                  >
                     {c.name === 'use_skill' ? (
                       <BookOpen className="size-3.5 text-primary" />
                     ) : (
                       <Wrench className="size-3.5" />
                     )}
                     <span className="font-mono">
-                      {c.name === 'use_skill' ? t('usedSkill', { skill: skillArg(c.arguments) }) : c.name}
+                      {c.name === 'use_skill'
+                        ? t('usedSkill', { skill: skillArg(c.arguments) })
+                        : c.name}
                     </span>
                   </div>
                 ))}

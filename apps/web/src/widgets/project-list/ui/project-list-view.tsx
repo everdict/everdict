@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { CalendarClock, FolderKanban } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
@@ -20,6 +19,7 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 // 새 프로젝트가 기본으로 올라갈 팀 — 워크스페이스의 기본 팀 하나, 없으면 첫 팀. 팀이 아예 없는 워크스페이스

@@ -1,7 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useMemo, useState } from 'react'
 import { CalendarClock, Search } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
@@ -9,6 +8,7 @@ import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
 import { fmtDateTimeFull } from '@/shared/lib/format'
 import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import { Callout } from '@/shared/ui/callout'
@@ -66,7 +66,7 @@ export function ScheduleList({
   isAdmin: boolean // workspace admin — can edit others' schedules too
   initialView?: View // initial view from ?view= (deep link). Later switches are local state.
 }) {
-  const router = useRouter()
+  const refresh = useRefresh()
   const t = useTranslations('manageSchedules')
   const locale = useLocale()
   const timeZone = useTimeZone()
@@ -75,7 +75,7 @@ export function ScheduleList({
     { value: 'enabled', label: t('active') },
     { value: 'paused', label: t('paused') },
   ]
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const [view, setView] = useState<View>(initialView)
   // Filter/search state is remembered per workspace (persists across navigation) — show the reset button when dirty.
@@ -87,11 +87,16 @@ export function ScheduleList({
 
   function act(fn: () => Promise<{ ok: boolean; error?: string }>): void {
     setError(undefined)
-    startTransition(async () => {
-      const res = await fn()
-      if (res.ok) router.refresh()
-      else setError(res.error ?? t('actionFailed'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await fn()
+        if (res.ok) refresh()
+        else setError(res.error ?? t('actionFailed'))
+      } finally {
+        setPending(false)
+      }
+    })()
   }
   const onToggle = (s: Schedule) => act(() => setScheduleEnabledAction(s.id, !s.enabled))
   const onDelete = (s: Schedule) => act(() => deleteScheduleAction(s.id))

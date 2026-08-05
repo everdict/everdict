@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import {
@@ -14,6 +13,7 @@ import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
 import { Input } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { SettingsList } from '@/shared/ui/settings-list'
 
 import { createTeamAction } from '../api/manage-team'
@@ -35,28 +35,33 @@ export function TeamsManager({
   const [key, setKey] = useState('')
   const [name, setName] = useState('')
   const [parentId, setParentId] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const normalizedKey = key.trim().toUpperCase()
   const keyValid = TEAM_KEY_PATTERN.test(normalizedKey)
 
   function onCreate() {
     setError(undefined)
-    startTransition(async () => {
-      const r = await createTeamAction({
-        key: normalizedKey,
-        name: name.trim(),
-        ...(parentId ? { parentId } : {}),
-      })
-      if (!r.ok) {
-        setError(r.error)
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createTeamAction({
+          key: normalizedKey,
+          name: name.trim(),
+          ...(parentId ? { parentId } : {}),
+        })
+        if (!r.ok) {
+          setError(r.error)
+          return
+        }
+        setCreating(false)
+        setKey('')
+        setName('')
+        setParentId('')
+      } finally {
+        setPending(false)
       }
-      setCreating(false)
-      setKey('')
-      setName('')
-      setParentId('')
-    })
+    })()
   }
 
   return (

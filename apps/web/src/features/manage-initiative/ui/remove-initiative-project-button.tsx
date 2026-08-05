@@ -1,10 +1,11 @@
 'use client'
 
-import { useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
+
+import { useRefresh } from '@/shared/lib/use-refresh'
 
 import { removeProjectFromInitiativeAction } from '../api/initiatives'
 
@@ -21,8 +22,8 @@ export function RemoveInitiativeProjectButton({
   projectName: string
 }) {
   const t = useTranslations('initiativesPage')
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
 
   return (
     <button
@@ -32,14 +33,19 @@ export function RemoveInitiativeProjectButton({
       disabled={pending}
       className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
       onClick={() =>
-        startTransition(async () => {
-          const r = await removeProjectFromInitiativeAction(initiativeId, projectId)
-          if (!r.ok) {
-            toast.error(r.error ?? t('removeProjectError'))
-            return
+        void (async () => {
+          setPending(true)
+          try {
+            const r = await removeProjectFromInitiativeAction(initiativeId, projectId)
+            if (!r.ok) {
+              toast.error(r.error ?? t('removeProjectError'))
+              return
+            }
+            refresh()
+          } finally {
+            setPending(false)
           }
-          router.refresh()
-        })
+        })()
       }
     >
       {pending ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}

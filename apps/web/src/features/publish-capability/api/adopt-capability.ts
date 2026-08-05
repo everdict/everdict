@@ -1,7 +1,5 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
-
 import { agentSpecSchema, type AgentSpec, type CapabilityRef } from '@/entities/agent-spec'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane, type AuthContext } from '@/shared/lib/control-plane'
@@ -29,20 +27,9 @@ function toSaveBody(agent: AgentSpec | undefined, capabilities: CapabilityRef[])
   }
 }
 
-// 채택 상태를 렌더하는 표면 — 스토어(카탈로그·내 발행·상세)와 설정(에이전트의 채택 목록 + 관리 페이지들).
-function revalidateAdoptionPages(): void {
-  for (const path of [
-    '/[workspace]/store',
-    '/[workspace]/store/mine',
-    '/[workspace]/settings',
-    '/[workspace]/settings/agent',
-    '/[workspace]/tools',
-  ])
-    revalidatePath(path)
-  // 추가/제거를 실제로 누르는 자리 — 동적 세그먼트라 'page' 타입으로 지정해야 매칭된다.
-  revalidatePath('/[workspace]/store/[source]/[id]', 'page')
-}
-
+// 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
+// (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
+// 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export interface AdoptActionResult {
   ok: boolean
   error?: string
@@ -57,7 +44,6 @@ export async function adoptCapabilityAction(ref: CapabilityRef): Promise<AdoptAc
     const existing = agent?.capabilities ?? []
     const next = [...existing.filter((c) => !(c.source === ref.source && c.id === ref.id)), ref]
     await controlPlane.saveAgent(ctx, AGENT_CONFIG_ID, toSaveBody(agent, next))
-    revalidateAdoptionPages()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -74,7 +60,6 @@ export async function unadoptCapabilityAction(
     const agent = await loadAgent(ctx)
     const next = (agent?.capabilities ?? []).filter((c) => !(c.source === source && c.id === id))
     await controlPlane.saveAgent(ctx, AGENT_CONFIG_ID, toSaveBody(agent, next))
-    revalidateAdoptionPages()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

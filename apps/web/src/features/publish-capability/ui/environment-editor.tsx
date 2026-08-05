@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useMemo, useState } from 'react'
 import { Boxes, ChevronDown, ChevronRight, Loader2, ShieldCheck } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -85,7 +85,7 @@ export function EnvironmentEditor({
   // 이건 레지스트리에 실제로 매니페스트를 물어본다(방금 push 한 내 이미지를 정말 당길 수 있는가 + digest).
   const [verify, setVerify] = useState<ImageVerify | null>(null)
   const [verifying, setVerifying] = useState(false)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // ref 가 바뀌면 이전 검증 결과는 거짓말이 된다 — 즉시 폐기한다(digest 핀 적용은 예외: 검증된 그 이미지 그대로다).
   const changeImage = (next: string) => {
@@ -166,35 +166,40 @@ export function EnvironmentEditor({
   }
 
   const save = () =>
-    startTransition(async () => {
-      const spec = buildSpec()
-      if ('error' in spec) {
-        toast.error(spec.error)
-        return
-      }
-      const r = await saveCapabilityAction(isNew ? id.trim() : capability.id, {
-        name: name.trim(),
-        description: description.trim(),
-        spec,
-        ...(isNew ? { visibility, sharedWith: visibility === 'subset' ? sharedWith : [] } : {}),
-        tags: splitCsv(tags),
-      })
-      if (r.ok) {
-        toast.success(
-          isNew ? t('published', { name: name.trim() }) : t('saved', { name: name.trim() })
-        )
-        // 이미지 분류 경고(warn-not-block) — 등록은 성공, 풀 보장/재현성만 주의 환기.
-        for (const w of r.result?.imageWarnings ?? [])
-          toast.warning(
-            t(`imageWarning_${w.class === 'mutable-tag' ? 'mutableTag' : 'noPull'}`, {
-              image: w.image,
-            })
+    void (async () => {
+      setPending(true)
+      try {
+        const spec = buildSpec()
+        if ('error' in spec) {
+          toast.error(spec.error)
+          return
+        }
+        const r = await saveCapabilityAction(isNew ? id.trim() : capability.id, {
+          name: name.trim(),
+          description: description.trim(),
+          spec,
+          ...(isNew ? { visibility, sharedWith: visibility === 'subset' ? sharedWith : [] } : {}),
+          tags: splitCsv(tags),
+        })
+        if (r.ok) {
+          toast.success(
+            isNew ? t('published', { name: name.trim() }) : t('saved', { name: name.trim() })
           )
-        onClose()
-      } else {
-        toast.error(r.error ?? t('saveError'))
+          // 이미지 분류 경고(warn-not-block) — 등록은 성공, 풀 보장/재현성만 주의 환기.
+          for (const w of r.result?.imageWarnings ?? [])
+            toast.warning(
+              t(`imageWarning_${w.class === 'mutable-tag' ? 'mutableTag' : 'noPull'}`, {
+                image: w.image,
+              })
+            )
+          onClose()
+        } else {
+          toast.error(r.error ?? t('saveError'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
 
   const canSave =
     name.trim().length > 0 &&

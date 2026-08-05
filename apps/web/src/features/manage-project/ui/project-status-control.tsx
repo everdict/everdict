@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { PROJECT_STATUSES, projectStatusIcon, type ProjectStatus } from '@/entities/project'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
@@ -28,25 +28,30 @@ export function ProjectStatusControl({
 }) {
   const t = useTranslations('projectsPage')
   const tracker = useTranslations('tracker')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [blocked, setBlocked] = useState<number | undefined>(undefined)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const Icon = projectStatusIcon(status)
 
   function move(to: ProjectStatus, force?: boolean) {
-    startTransition(async () => {
-      const r = await setProjectStatusAction(id, to, force)
-      if (!r.ok) {
-        if (r.blockedBy !== undefined) {
-          setBlocked(r.blockedBy)
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await setProjectStatusAction(id, to, force)
+        if (!r.ok) {
+          if (r.blockedBy !== undefined) {
+            setBlocked(r.blockedBy)
+            return
+          }
+          toast.error(r.error ?? t('statusError'))
           return
         }
-        toast.error(r.error ?? t('statusError'))
-        return
+        setBlocked(undefined)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setBlocked(undefined)
-      router.refresh()
-    })
+    })()
   }
 
   if (!canWrite) {

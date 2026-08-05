@@ -1,7 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Copy, RefreshCw, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
@@ -15,11 +14,13 @@ import {
   type EverdictDesktopBridge,
 } from '@/shared/lib/desktop-bridge'
 import { fmtDateTime, fmtTimeAgo } from '@/shared/lib/format'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { Link } from '@/shared/ui/link'
 
 import { revokeRunnerFromDetailAction } from '../api/runner-detail'
 import { RunnerActivity } from './runner-activity'
@@ -50,12 +51,13 @@ export function RunnerDetail({
   const locale = useLocale()
   const timeZone = useTimeZone()
   const router = useRouter()
+  const refresh = useRefresh()
   const [bridge, setBridge] = useState<EverdictDesktopBridge | null>(null)
   const [desktop, setDesktop] = useState<DesktopRunnersStatus | null>(null)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string>()
   const [confirmRevoke, setConfirmRevoke] = useState(false)
-  const [busy, startTransition] = useTransition()
+  const [busy, setBusy] = useState(false)
 
   // Detect the desktop shell (after mount → no SSR mismatch) + subscribe to this device's live runner status.
   useEffect(() => {
@@ -79,7 +81,7 @@ export function RunnerDetail({
   // Live-ish: re-fetch the server component while the tab is visible so the online dot / self-status / activity update.
   useEffect(() => {
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') router.refresh()
+      if (document.visibilityState === 'visible') refresh()
     }, REFRESH_MS)
     return () => clearInterval(timer)
   }, [router])
@@ -103,28 +105,38 @@ export function RunnerDetail({
     const reconnect = bridge?.reconnectRunner
     if (!bridge || typeof reconnect !== 'function') return
     setError(undefined)
-    startTransition(async () => {
+    void (async () => {
+      setBusy(true)
       try {
-        await reconnect(runner.id)
-        setDesktop(normalizeRunnersStatus(await bridge.runnerStatus()))
-        router.refresh()
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+        try {
+          await reconnect(runner.id)
+          setDesktop(normalizeRunnersStatus(await bridge.runnerStatus()))
+          refresh()
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+        }
+      } finally {
+        setBusy(false)
       }
-    })
+    })()
   }
 
   function onRevoke() {
     setError(undefined)
-    startTransition(async () => {
-      const r = await revokeRunnerFromDetailAction(runner.id, scope)
-      if (!r.ok) {
-        setError(r.error)
-        return
+    void (async () => {
+      setBusy(true)
+      try {
+        const r = await revokeRunnerFromDetailAction(runner.id, scope)
+        if (!r.ok) {
+          setError(r.error)
+          return
+        }
+        if (bridge && onThisDevice) await bridge.unpairRunner(runner.id).catch(() => {})
+        router.push(`/${workspace}/runtimes`)
+      } finally {
+        setBusy(false)
       }
-      if (bridge && onThisDevice) await bridge.unpairRunner(runner.id).catch(() => {})
-      router.push(`/${workspace}/runtimes`)
-    })
+    })()
   }
 
   const meta: { label: string; value: React.ReactNode }[] = [

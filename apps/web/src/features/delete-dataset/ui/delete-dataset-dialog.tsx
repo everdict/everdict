@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Loader2, TriangleAlert, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -53,7 +54,8 @@ export function DeleteDatasetDialog({
 }) {
   const t = useTranslations('deleteDataset')
   const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [error, setError] = useState<string>()
 
@@ -77,26 +79,31 @@ export function DeleteDatasetDialog({
   function onConfirm() {
     if (selectedList.length === 0 || pending) return
     setError(undefined)
-    startTransition(async () => {
-      // Whole-dataset delete = every live version selected → omit `versions` for the clean "delete all" path.
-      const res = await deleteDatasetVersionsAction({
-        id,
-        ...(deletesEntire ? {} : { versions: selectedList }),
-      })
-      if (!res.ok) {
-        setError(res.error ?? t('deleteFailed'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        // Whole-dataset delete = every live version selected → omit `versions` for the clean "delete all" path.
+        const res = await deleteDatasetVersionsAction({
+          id,
+          ...(deletesEntire ? {} : { versions: selectedList }),
+        })
+        if (!res.ok) {
+          setError(res.error ?? t('deleteFailed'))
+          return
+        }
+        if (deletesEntire) {
+          toast.success(t('deletedDataset', { id }))
+          router.push(`/${workspace}/datasets`)
+        } else {
+          toast.success(t('deletedVersions', { count: res.deleted.length, id }))
+          // Land on the dataset (latest remaining version) rather than a possibly-deleted ?version= URL.
+          router.push(`/${workspace}/dataset/${encodeURIComponent(id)}`)
+        }
+        refresh()
+      } finally {
+        setPending(false)
       }
-      if (deletesEntire) {
-        toast.success(t('deletedDataset', { id }))
-        router.push(`/${workspace}/datasets`)
-      } else {
-        toast.success(t('deletedVersions', { count: res.deleted.length, id }))
-        // Land on the dataset (latest remaining version) rather than a possibly-deleted ?version= URL.
-        router.push(`/${workspace}/dataset/${encodeURIComponent(id)}`)
-      }
-      router.refresh()
-    })
+    })()
   }
 
   return (

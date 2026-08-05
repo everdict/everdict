@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -37,31 +37,36 @@ export function CreateProjectButton({
   const [initiativeIds, setInitiativeIds] = useState<string[]>([])
   const [teamIds, setTeamIds] = useState<string[]>(defaultTeamIds ?? [])
   const [targetDate, setTargetDate] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function submit() {
     const trimmed = name.trim()
     if (trimmed.length === 0) return
-    startTransition(async () => {
-      const r = await createProjectAction({
-        name: trimmed,
-        ...(description.trim() ? { description: description.trim() } : {}),
-        ...(initiativeIds.length > 0 ? { initiativeIds } : {}),
-        ...(teamIds.length > 0 ? { teamIds } : {}),
-        ...(targetDate ? { targetDate } : {}),
-      })
-      if (!r.ok || !r.project) {
-        toast.error(r.error ?? t('createError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createProjectAction({
+          name: trimmed,
+          ...(description.trim() ? { description: description.trim() } : {}),
+          ...(initiativeIds.length > 0 ? { initiativeIds } : {}),
+          ...(teamIds.length > 0 ? { teamIds } : {}),
+          ...(targetDate ? { targetDate } : {}),
+        })
+        if (!r.ok || !r.project) {
+          toast.error(r.error ?? t('createError'))
+          return
+        }
+        setOpen(false)
+        setName('')
+        setDescription('')
+        setInitiativeIds([])
+        setTeamIds(defaultTeamIds ?? [])
+        setTargetDate('')
+        router.push(`/${workspace}/project/${encodeURIComponent(r.project.id)}`)
+      } finally {
+        setPending(false)
       }
-      setOpen(false)
-      setName('')
-      setDescription('')
-      setInitiativeIds([])
-      setTeamIds(defaultTeamIds ?? [])
-      setTargetDate('')
-      router.push(`/${workspace}/project/${encodeURIComponent(r.project.id)}`)
-    })
+    })()
   }
 
   return (

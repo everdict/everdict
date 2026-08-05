@@ -1,10 +1,10 @@
 'use client'
 
-import Link from 'next/link'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { fmtTimeAgo, fmtTokens, fmtUsd } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
+import { Link } from '@/shared/ui/link'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { TD, TR } from '@/shared/ui/table'
 

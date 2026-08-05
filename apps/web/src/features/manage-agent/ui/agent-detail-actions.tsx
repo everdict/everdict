@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Check, Copy, Power } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { AgentSpec } from '@/entities/agent-spec'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
@@ -31,7 +31,7 @@ export function AgentDetailActions({
   canWrite: boolean
 }) {
   const t = useTranslations('agentSettings')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   if (!canWrite) return null
@@ -42,7 +42,7 @@ export function AgentDetailActions({
     const r = await saveAgentAction(id, bodyFrom(spec, enabled))
     setBusy(false)
     if (!r.ok) setError(r.error ?? 'failed')
-    else router.refresh()
+    else refresh()
   }
 
   if (isTemplate) {

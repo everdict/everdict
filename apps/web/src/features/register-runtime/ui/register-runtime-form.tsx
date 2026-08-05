@@ -10,9 +10,10 @@ import type { RuntimeSpec } from '@/entities/runtime'
 import {
   EMPTY_TRACE_SOURCE,
   TraceSourceFields,
-  type TraceSourceValue,
   traceSourceToSpec,
+  type TraceSourceValue,
 } from '@/entities/trace-source'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
@@ -201,7 +202,8 @@ function parseConstraints(s: string): Constraint[] {
     const parts = trimmed.split(/\s+/)
     if (parts.length < 2) continue
     if (parts.length === 2) out.push({ attribute: parts[0] ?? '', value: parts[1] ?? '' })
-    else out.push({ attribute: parts[0] ?? '', operator: parts[1], value: parts.slice(2).join(' ') })
+    else
+      out.push({ attribute: parts[0] ?? '', operator: parts[1], value: parts.slice(2).join(' ') })
   }
   return out
 }
@@ -315,6 +317,7 @@ export function RegisterRuntimeForm({
   submitVersion?: string
 }) {
   const router = useRouter()
+  const refresh = useRefresh()
   const t = useTranslations('registerRuntime')
   const editing = initial !== undefined
   const [f, setF] = useState<Fields>(initial ? fieldsFromSpec(initial) : INITIAL)
@@ -403,7 +406,7 @@ export function RegisterRuntimeForm({
           toast.success(t('registered', { id: r.id ?? '', version: r.version ?? '' }))
           router.push(`/${workspace}/runtimes`)
         }
-        router.refresh()
+        refresh()
       } else {
         setError(r.error ?? t('errorGeneric'))
       }
@@ -749,9 +752,7 @@ export function RegisterRuntimeForm({
       )}
 
       {/* Gate hint — saving stays disabled until a connection test or dry run passes (enforced, not advisory). */}
-      {!gatePassed && (
-        <p className="text-[12px] text-muted-foreground">{t('gateHint')}</p>
-      )}
+      {!gatePassed && <p className="text-[12px] text-muted-foreground">{t('gateHint')}</p>}
 
       <div className="flex items-center gap-2.5 border-t border-border pt-5">
         <Button onClick={onSubmit} disabled={saving || !gatePassed} className="gap-1.5">

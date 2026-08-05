@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { TraceSourceConfig } from '@/entities/trace-source'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -138,6 +139,7 @@ export function RegisterJudgeForm({
   assignments?: Record<string, string>
 }) {
   const router = useRouter()
+  const refresh = useRefresh()
   const t = useTranslations('registerJudge')
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
@@ -209,7 +211,7 @@ export function RegisterJudgeForm({
       if (r.ok) {
         toast.success(t('registered', { id: r.id ?? '', version: r.version ?? '' }))
         router.push(`/${workspace}/judges`)
-        router.refresh()
+        refresh()
       } else {
         setError(r.error ?? t('errorGeneric'))
       }

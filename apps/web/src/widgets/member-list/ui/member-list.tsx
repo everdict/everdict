@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo } from 'react'
-import Link from 'next/link'
 import { KeyRound, Search, Users } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
@@ -14,6 +13,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { Tooltip } from '@/shared/ui/tooltip'
 

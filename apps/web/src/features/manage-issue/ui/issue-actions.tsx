@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -38,18 +38,23 @@ export function IssueActions({
   const router = useRouter()
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function remove() {
-    startTransition(async () => {
-      const r = await deleteIssueAction(issue.id)
-      if (!r.ok) {
-        toast.error(r.error ?? t('deleteError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteIssueAction(issue.id)
+        if (!r.ok) {
+          toast.error(r.error ?? t('deleteError'))
+          return
+        }
+        setConfirming(false)
+        router.push(`/${workspace}/issues`)
+      } finally {
+        setPending(false)
       }
-      setConfirming(false)
-      router.push(`/${workspace}/issues`)
-    })
+    })()
   }
 
   return (

@@ -1,16 +1,16 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Check, ChevronDown, Loader2, Plus, Target } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { initiativeHref } from '@/entities/initiative'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 
 import { updateProjectAction } from '../api/projects'
 
@@ -43,9 +43,9 @@ export function ProjectInitiativeControl({
   canWrite: boolean
 }) {
   const t = useTranslations('projectsPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [query, setQuery] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const linked = initiativeIds
     .map((initiativeId) => initiatives.find((i) => i.id === initiativeId))
@@ -55,14 +55,19 @@ export function ProjectInitiativeControl({
     const next = initiativeIds.includes(initiativeId)
       ? initiativeIds.filter((existing) => existing !== initiativeId)
       : [...initiativeIds, initiativeId]
-    startTransition(async () => {
-      const r = await updateProjectAction(id, { initiativeIds: next })
-      if (!r.ok) {
-        toast.error(r.error ?? t('initiativeError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await updateProjectAction(id, { initiativeIds: next })
+        if (!r.ok) {
+          toast.error(r.error ?? t('initiativeError'))
+          return
+        }
+        refresh()
+      } finally {
+        setPending(false)
       }
-      router.refresh()
-    })
+    })()
   }
 
   const chips =

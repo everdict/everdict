@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { ExternalLink } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -15,6 +14,7 @@ import { TrackerHistory } from '@/entities/tracker-history'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/ui/callout'
 import { DistributionBar } from '@/shared/ui/distribution-bar'
+import { Link } from '@/shared/ui/link'
 import { Markdown } from '@/shared/ui/markdown'
 import { SectionHeader } from '@/shared/ui/section-header'
 

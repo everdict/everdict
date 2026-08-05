@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import Link from 'next/link'
 import { ChevronRight, Target } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
@@ -14,6 +13,7 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { CopyLinkButton } from '@/shared/ui/copy-link-button'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 import { PropertyList, PropertyRow } from '@/shared/ui/property-list'
 import { InfoTip } from '@/shared/ui/tooltip'

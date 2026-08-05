@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useMemo, useState } from 'react'
 import { Check, Plus, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -77,7 +77,7 @@ export function IssueLabelOptions({
   // 고른 색이 없으면 이름에서 제안한 색을 쓴다 — 고르지 않은 것과 회색을 고른 것은 다르다(전자는 이름을
   // 고쳐 쓰는 동안 색도 따라 바뀌고, 후자는 그대로 있어야 한다).
   const [picked, setPicked] = useState<IssueLabelColor | undefined>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const needle = query.trim().toLocaleLowerCase()
   const choices = labels.filter(
@@ -92,16 +92,21 @@ export function IssueLabelOptions({
   function create(): void {
     const name = query.trim()
     if (name.length === 0) return
-    startTransition(async () => {
-      const r = await createIssueLabelAction({ name, color })
-      if (!r.ok || !r.label) {
-        toast.error(r.error ?? t('labelCreateError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createIssueLabelAction({ name, color })
+        if (!r.ok || !r.label) {
+          toast.error(r.error ?? t('labelCreateError'))
+          return
+        }
+        onCreated(r.label)
+        setQuery('')
+        setPicked(undefined)
+      } finally {
+        setPending(false)
       }
-      onCreated(r.label)
-      setQuery('')
-      setPicked(undefined)
-    })
+    })()
   }
 
   return (

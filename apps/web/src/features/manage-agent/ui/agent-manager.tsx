@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { Boxes, Plus, Sparkles, Wrench, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -59,7 +59,7 @@ export function AgentManager({
     setDisabledDefaults((ids) =>
       enabled ? ids.filter((x) => x !== id) : [...new Set([...ids, id])]
     )
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const patchServer = (index: number, patch: Partial<ServerRow>) =>
     setServers((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
@@ -94,16 +94,21 @@ export function AgentManager({
       toolSecretBindings: agent?.toolSecretBindings ?? {},
       tags: agent?.tags ?? [],
     }
-    startTransition(async () => {
-      const r = await saveAgentAction(configId, body)
-      if (r.ok) {
-        toast.success(
-          r.created ? t('savedVersion', { version: r.version ?? '' }) : t('savedNoChange')
-        )
-      } else {
-        toast.error(r.error ?? t('saveError'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await saveAgentAction(configId, body)
+        if (r.ok) {
+          toast.success(
+            r.created ? t('savedVersion', { version: r.version ?? '' }) : t('savedNoChange')
+          )
+        } else {
+          toast.error(r.error ?? t('saveError'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
   }
 
   return (

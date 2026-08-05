@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import type { BudgetLimit, BudgetUsage } from '@/entities/budget'
@@ -34,7 +34,7 @@ export function BudgetManager({
   canWrite: boolean
 }) {
   const t = useTranslations('manageBudget')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const [saved, setSaved] = useState(false)
   const [usd, setUsd] = useState(fromNum(limit?.usd))
@@ -51,16 +51,21 @@ export function BudgetManager({
   function onSave() {
     setError(undefined)
     setSaved(false)
-    startTransition(async () => {
-      // A PUT replaces the whole limit — only send the dimensions the user left set.
-      const r = await setBudgetLimitAction({
-        ...(toNum(usd) !== undefined ? { usd: toNum(usd) } : {}),
-        ...(toNum(tokens) !== undefined ? { tokens: toNum(tokens) } : {}),
-        ...(toNum(runs) !== undefined ? { runs: toNum(runs) } : {}),
-      })
-      if (r.ok) setSaved(true)
-      else setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        // A PUT replaces the whole limit — only send the dimensions the user left set.
+        const r = await setBudgetLimitAction({
+          ...(toNum(usd) !== undefined ? { usd: toNum(usd) } : {}),
+          ...(toNum(tokens) !== undefined ? { tokens: toNum(tokens) } : {}),
+          ...(toNum(runs) !== undefined ? { runs: toNum(runs) } : {}),
+        })
+        if (r.ok) setSaved(true)
+        else setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

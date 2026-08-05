@@ -1,8 +1,8 @@
-import Link from 'next/link'
 import { getFormatter } from 'next-intl/server'
 
 import { issueHref, type IssueSummary } from '@/entities/issue'
 import { Card } from '@/shared/ui/card'
+import { Link } from '@/shared/ui/link'
 
 // 회귀 경보 — 닫아둔 이슈의 평가가 무너진 것들. 아무도 안 보고 있는 이슈라서 홈이 대신 들이민다.
 // 비어 있으면 섹션째 렌더하지 않는다(빈 섹션 숨김 규칙) — "회귀 없음" 카드는 매일 보면 노이즈가 된다.

@@ -1,5 +1,4 @@
 import { Fragment } from 'react'
-import Link from 'next/link'
 import { Layers } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
@@ -7,6 +6,7 @@ import { RunRow, type Run, type RunStatus } from '@/entities/run'
 import { fmtTimeAgo } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { Table, TBody, TH, THead, TR } from '@/shared/ui/table'
 

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useTransition, type ReactNode } from 'react'
-import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
   FileText,
@@ -29,6 +28,7 @@ import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 import {
@@ -73,7 +73,7 @@ export function SkillsManager({
   // null = 닫힘, 'new' = 새 스킬(생성 위저드 포함), Skill = 편집.
   const [editing, setEditing] = useState<Skill | 'new' | null>(null)
   const [confirming, setConfirming] = useState<Skill | null>(null)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   // 내 스킬셋(서버가 해석해 준 최종 상태) — 토글은 낙관적으로 반영하고 실패 시 되돌린다.
   const [mySkills, setMySkills] = useState(agentSkills)
   const [switching, setSwitching] = useState<string | undefined>(undefined)
@@ -83,14 +83,19 @@ export function SkillsManager({
     const next = enabled === null ? entry.baseline : enabled
     setMySkills((rows) => rows.map((r) => (r.key === entry.key ? { ...r, enabled: next } : r)))
     setSwitching(entry.key)
-    startTransition(async () => {
-      const r = await setAgentSkillAction(entry.key, enabled)
-      setSwitching(undefined)
-      if (!r.ok) {
-        setMySkills(previous)
-        toast.error(r.error ?? t('useSkillError'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await setAgentSkillAction(entry.key, enabled)
+        setSwitching(undefined)
+        if (!r.ok) {
+          setMySkills(previous)
+          toast.error(r.error ?? t('useSkillError'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
   }
 
   const canManage = (s: Skill) => s.createdBy === currentSubject || isAdmin
@@ -104,24 +109,34 @@ export function SkillsManager({
   }
 
   const del = (s: Skill) =>
-    startTransition(async () => {
-      const r = await deleteSkillAction(s.id)
-      if (r.ok) toast.success(t('deleted', { name: s.name }))
-      else toast.error(r.error ?? t('deleteError'))
-      setConfirming(null)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteSkillAction(s.id)
+        if (r.ok) toast.success(t('deleted', { name: s.name }))
+        else toast.error(r.error ?? t('deleteError'))
+        setConfirming(null)
+      } finally {
+        setPending(false)
+      }
+    })()
 
   const share = (s: Skill, visibility: SkillVisibility) =>
-    startTransition(async () => {
-      const r = await updateSkillAction(s.id, { visibility })
-      if (r.ok)
-        toast.success(
-          visibility === 'workspace'
-            ? t('shared', { name: s.name })
-            : t('unshared', { name: s.name })
-        )
-      else toast.error(r.error ?? t('saveError'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await updateSkillAction(s.id, { visibility })
+        if (r.ok)
+          toast.success(
+            visibility === 'workspace'
+              ? t('shared', { name: s.name })
+              : t('unshared', { name: s.name })
+          )
+        else toast.error(r.error ?? t('saveError'))
+      } finally {
+        setPending(false)
+      }
+    })()
 
   const newSkillButton = canWrite ? (
     <Button size="sm" onClick={() => setEditing('new')}>
@@ -392,7 +407,7 @@ export function SkillEditorDialog({
   // 부속 파일 — 다이얼로그에선 목록/제거만(내용 저작은 상세 페이지의 에이전트 편집 흐름). AI 초안이 파일을 내면 여기 실린다.
   const [files, setFiles] = useState<SkillFile[]>(skill?.files ?? [])
   const [visibility, setVisibility] = useState<SkillVisibility>(skill?.visibility ?? 'private')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // 생성 위저드 상태(새 스킬만).
   const [genPrompt, setGenPrompt] = useState('')
@@ -414,17 +429,28 @@ export function SkillEditorDialog({
     })
 
   const save = () =>
-    startTransition(async () => {
-      const r = isNew
-        ? await createSkillAction({ name, description, instructions, files, visibility })
-        : await updateSkillAction(skill.id, { name, description, instructions, files, visibility })
-      if (r.ok) {
-        toast.success(isNew ? t('created', { name }) : t('saved', { name }))
-        onClose()
-      } else {
-        toast.error(r.error ?? t('saveError'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = isNew
+          ? await createSkillAction({ name, description, instructions, files, visibility })
+          : await updateSkillAction(skill.id, {
+              name,
+              description,
+              instructions,
+              files,
+              visibility,
+            })
+        if (r.ok) {
+          toast.success(isNew ? t('created', { name }) : t('saved', { name }))
+          onClose()
+        } else {
+          toast.error(r.error ?? t('saveError'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
 
   const canSave =
     name.trim().length > 0 && description.trim().length > 0 && instructions.trim().length > 0

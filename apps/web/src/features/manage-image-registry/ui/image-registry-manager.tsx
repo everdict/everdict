@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
@@ -42,7 +42,7 @@ export function ImageRegistryManager({
   secretNames: string[]
 }) {
   const t = useTranslations('manageImageRegistry')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const [missingSecrets, setMissingSecrets] = useState<string[]>()
   // Edit target name — a row click prefills the form (save is an upsert keyed by name). undefined = add a new registry.
@@ -96,26 +96,31 @@ export function ImageRegistryManager({
     }
     const key = probeKey
     setProbe({ status: 'testing', key })
-    startTransition(async () => {
-      const r = await probeImageRegistryAction({
-        host: host.trim(),
-        ...(namespace.trim() ? { namespace: namespace.trim() } : {}),
-        ...(username.trim() ? { username: username.trim() } : {}),
-        ...(pullName.trim() ? { pullSecretName: pullName.trim() } : {}),
-        ...(pushName.trim() ? { pushSecretName: pushName.trim() } : {}),
-      })
-      if (!r.ok) {
-        setProbe({ status: 'fail', key, reason: 'error', detail: r.error })
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await probeImageRegistryAction({
+          host: host.trim(),
+          ...(namespace.trim() ? { namespace: namespace.trim() } : {}),
+          ...(username.trim() ? { username: username.trim() } : {}),
+          ...(pullName.trim() ? { pullSecretName: pullName.trim() } : {}),
+          ...(pushName.trim() ? { pushSecretName: pushName.trim() } : {}),
+        })
+        if (!r.ok) {
+          setProbe({ status: 'fail', key, reason: 'error', detail: r.error })
+          return
+        }
+        setProbe({
+          status: r.result.reachable ? 'ok' : 'fail',
+          key,
+          detail: r.result.detail,
+          reason: r.result.reason,
+          credential: r.result.credential,
+        })
+      } finally {
+        setPending(false)
       }
-      setProbe({
-        status: r.result.reachable ? 'ok' : 'fail',
-        key,
-        detail: r.result.detail,
-        reason: r.result.reason,
-        credential: r.result.credential,
-      })
-    })
+    })()
   }
 
   function onSave() {
@@ -129,31 +134,41 @@ export function ImageRegistryManager({
       setError(t('validationHost'))
       return
     }
-    startTransition(async () => {
-      const r = await upsertImageRegistryAction({
-        name: name.trim(),
-        host: host.trim(),
-        ...(namespace.trim() ? { namespace: namespace.trim() } : {}),
-        ...(username.trim() ? { username: username.trim() } : {}),
-        ...(pullName.trim() ? { pullSecretName: pullName.trim() } : {}),
-        ...(pushName.trim() ? { pushSecretName: pushName.trim() } : {}),
-      })
-      if (!r.ok) setError(r.error)
-      else {
-        setMissingSecrets(r.missingSecrets)
-        resetForm()
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await upsertImageRegistryAction({
+          name: name.trim(),
+          host: host.trim(),
+          ...(namespace.trim() ? { namespace: namespace.trim() } : {}),
+          ...(username.trim() ? { username: username.trim() } : {}),
+          ...(pullName.trim() ? { pullSecretName: pullName.trim() } : {}),
+          ...(pushName.trim() ? { pushSecretName: pushName.trim() } : {}),
+        })
+        if (!r.ok) setError(r.error)
+        else {
+          setMissingSecrets(r.missingSecrets)
+          resetForm()
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
   }
 
   function onRemove(target: string) {
     setError(undefined)
     setMissingSecrets(undefined)
-    startTransition(async () => {
-      const r = await removeImageRegistryAction(target)
-      if (!r.ok) setError(r.error)
-      else if (editing === target) resetForm()
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await removeImageRegistryAction(target)
+        if (!r.ok) setError(r.error)
+        else if (editing === target) resetForm()
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

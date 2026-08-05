@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { getTranslations } from 'next-intl/server'
@@ -16,6 +15,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 
@@ -142,7 +142,9 @@ function DiffBody({ diff }: { diff: HarnessSpecDiff }) {
 function FieldChangeRow({ change }: { change: HarnessFieldChange }) {
   return (
     <div className="grid grid-cols-[minmax(140px,220px)_1fr] gap-3 px-3 py-2.5 text-[12px]">
-      <div className="min-w-0 break-words font-mono font-[510] text-muted-foreground">{change.path}</div>
+      <div className="min-w-0 break-words font-mono font-[510] text-muted-foreground">
+        {change.path}
+      </div>
       <div className="min-w-0 space-y-1">
         <div className="break-words font-mono text-destructive">
           <span className="select-none text-faint">- </span>

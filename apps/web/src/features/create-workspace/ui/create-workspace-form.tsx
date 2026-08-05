@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowRight, Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { FieldError, Input, Label } from '@/shared/ui/input'
@@ -22,6 +23,7 @@ function previewSlug(name: string): string {
 export function CreateWorkspaceForm() {
   const t = useTranslations('createWorkspace')
   const router = useRouter()
+  const refresh = useRefresh()
   const [name, setName] = useState('')
   const [id, setId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -42,7 +44,7 @@ export function CreateWorkspaceForm() {
     if (result.ok && result.id) {
       // Enter the newly created workspace (/{id}) (Linear-style). The middleware syncs the active workspace.
       router.push(`/${result.id}`)
-      router.refresh()
+      refresh()
       return
     }
     setError(result.error)

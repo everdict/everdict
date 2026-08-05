@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import type { Member } from '@/entities/member'
@@ -22,23 +22,33 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
   const t = useTranslations('manageMembers')
   const [error, setError] = useState<string>()
   const [confirmSubject, setConfirmSubject] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function onRole(subject: string, role: string) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await setMemberRoleAction(subject, role)
-      if (!r.ok) setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await setMemberRoleAction(subject, role)
+        if (!r.ok) setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   function onRemove(subject: string) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await removeMemberAction(subject)
-      setConfirmSubject(undefined)
-      if (!r.ok) setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await removeMemberAction(subject)
+        setConfirmSubject(undefined)
+        if (!r.ok) setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

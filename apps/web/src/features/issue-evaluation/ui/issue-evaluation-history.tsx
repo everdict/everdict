@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
 import { Flag, Pin } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -9,6 +8,7 @@ import type { ScorecardStatus } from '@/entities/scorecard'
 import { fmtDateTime, fmtDateTimeFull, fmtPct } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { EntityRef } from '@/shared/ui/chip'
+import { Link } from '@/shared/ui/link'
 import { StatusIcon } from '@/shared/ui/status-pill'
 import { Tooltip } from '@/shared/ui/tooltip'
 

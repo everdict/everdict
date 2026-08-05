@@ -1,12 +1,13 @@
 'use client'
 
-import { useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Languages } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import { LOCALES, type Locale } from '@/shared/i18n/config'
 import { reloadInfraFrames } from '@/shared/lib/reload-infra-frames'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
@@ -26,16 +27,22 @@ export function LocaleSwitcher({
   const t = useTranslations('locale')
   const locale = useLocale()
   const router = useRouter()
-  const [, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [, set_pending] = useState(false)
 
   function choose(next: Locale) {
-    startTransition(async () => {
-      await setLocale(next)
-      router.refresh()
-      // Re-render the infra panel's mounted iframes too — they resolve the locale server-side off the cookie
-      // and router.refresh() does not reach their separate browsing context.
-      reloadInfraFrames()
-    })
+    void (async () => {
+      set_pending(true)
+      try {
+        await setLocale(next)
+        refresh()
+        // Re-render the infra panel's mounted iframes too — they resolve the locale server-side off the cookie
+        // and refresh() does not reach their separate browsing context.
+        reloadInfraFrames()
+      } finally {
+        set_pending(false)
+      }
+    })()
   }
 
   if (variant === 'compact') {

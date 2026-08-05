@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { GithubAppInstallation, GithubAppView } from '@/entities/github-app'
@@ -41,7 +41,7 @@ export function GithubAppManager({
   notice?: GithubAppNotice
 }) {
   const t = useTranslations('manageGithubApp')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const noticeErrorKey = notice?.error ? INSTALL_ERROR_KEYS[notice.error] : undefined
   const { githubCom, enterprise } = view.providers
@@ -49,19 +49,29 @@ export function GithubAppManager({
 
   function onInstall(host?: string) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await startGithubAppInstallAction(host)
-      // Install in a new tab — proceed through the GitHub install flow without leaving the settings screen.
-      if (r.ok && r.installUrl) window.open(r.installUrl, '_blank', 'noopener,noreferrer')
-      else setError(r.error ?? t('installStartFailed'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await startGithubAppInstallAction(host)
+        // Install in a new tab — proceed through the GitHub install flow without leaving the settings screen.
+        if (r.ok && r.installUrl) window.open(r.installUrl, '_blank', 'noopener,noreferrer')
+        else setError(r.error ?? t('installStartFailed'))
+      } finally {
+        setPending(false)
+      }
+    })()
   }
   function onUnlink(installationId: number) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await unlinkGithubAppInstallationAction(installationId)
-      if (!r.ok) setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await unlinkGithubAppInstallationAction(installationId)
+        if (!r.ok) setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

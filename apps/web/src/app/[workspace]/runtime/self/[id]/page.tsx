@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
@@ -7,6 +6,7 @@ import { RunnerDetail } from '@/features/runner-detail'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'

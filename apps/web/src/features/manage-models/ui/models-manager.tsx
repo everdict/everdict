@@ -1,14 +1,23 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
-
-import { CheckCircle2, Loader2, Pencil, Plug, Plus, Trash2, TriangleAlert, X, XCircle } from 'lucide-react'
+import {
+  CheckCircle2,
+  Loader2,
+  Pencil,
+  Plug,
+  Plus,
+  Trash2,
+  TriangleAlert,
+  X,
+  XCircle,
+} from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import type { ModelSpec } from '@/entities/model'
 import { SecretPicker } from '@/features/pick-secret'
+import type { ModelSpec } from '@/entities/model'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
@@ -129,7 +138,8 @@ export function ModelsManager({
                   )}
                   {/* 삭제는 워크스페이스 소유 모델만(_shared 는 불가) + admin 또는 등록자 본인일 때만 노출. 최종 강제는 컨트롤플레인. */}
                   {owned &&
-                    (canDelete || (currentSubject !== undefined && m.createdBy === currentSubject)) && (
+                    (canDelete ||
+                      (currentSubject !== undefined && m.createdBy === currentSubject)) && (
                       <DeleteModelControl id={m.id} />
                     )}
                 </span>
@@ -210,24 +220,29 @@ function DeleteModelControl({ id }: { id: string }) {
 // 모델 삭제 확인 다이얼로그 — 툼스톤(과거 스코어카드는 재현 보존, 이후 참조 실행은 해석 실패). 컨트롤플레인이 등록자-or-admin 을 강제.
 function DeleteModelDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const t = useTranslations('manageModels')
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const titleId = `delete-model-${id}`
 
   function onConfirm() {
     if (pending) return
     setError(undefined)
-    startTransition(async () => {
-      const res = await deleteModelAction(id)
-      if (!res.ok) {
-        setError(res.error ?? t('deleteFailed'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await deleteModelAction(id)
+        if (!res.ok) {
+          setError(res.error ?? t('deleteFailed'))
+          return
+        }
+        toast.success(t('deletedModel', { id }))
+        onClose()
+        refresh()
+      } finally {
+        setPending(false)
       }
-      toast.success(t('deletedModel', { id }))
-      onClose()
-      router.refresh()
-    })
+    })()
   }
 
   return (
@@ -335,7 +350,7 @@ function ModelForm({
   onCancel: () => void
 }) {
   const t = useTranslations('manageModels')
-  const router = useRouter()
+  const refresh = useRefresh()
   const editing = mode === 'edit'
   const [provider, setProvider] = useState<string>(initial?.provider ?? 'openai')
   const [id, setId] = useState(initialId ?? '')
@@ -389,7 +404,7 @@ function ModelForm({
       }
       toast.success(editing ? t('savedEdit', { id: id.trim() }) : t('savedNew', { id: id.trim() }))
       onDone()
-      router.refresh()
+      refresh()
     })
   }
 
@@ -481,7 +496,13 @@ function ModelForm({
 
       <div className="flex flex-wrap items-center gap-2">
         {/* 저장은 연결 테스트 통과 후에만 활성화(강제 — 버튼 비활성은 UX, 최종 강제는 컨트롤플레인). */}
-        <Button type="button" size="sm" disabled={!tested || saving} onClick={onSave} className="gap-1.5">
+        <Button
+          type="button"
+          size="sm"
+          disabled={!tested || saving}
+          onClick={onSave}
+          className="gap-1.5"
+        >
           {saving ? (
             <Loader2 className="size-3.5 animate-spin" />
           ) : (

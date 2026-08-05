@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { CheckCircle2, FlaskConical, Play, ShieldAlert, XCircle } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { CapabilitySpec, CodeToolTryResult } from '@/entities/capability'
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Label, Textarea } from '@/shared/ui/input'
-import { cn } from '@/shared/lib/utils'
 
 import { tryCodeToolAction } from '../api/wizard-tools'
 
@@ -31,7 +31,7 @@ export function CodeTryPanel({
   const [input, setInput] = useState(initialInput ?? '{}')
   const [result, setResult] = useState<CodeToolTryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const fire = (mode: 'check' | 'run') => {
     setError(null)
@@ -45,18 +45,28 @@ export function CodeTryPanel({
     if (mode === 'run') {
       try {
         const raw = input.trim().length > 0 ? (JSON.parse(input) as unknown) : {}
-        if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('object required')
+        if (raw === null || typeof raw !== 'object' || Array.isArray(raw))
+          throw new Error('object required')
         parsedInput = raw as Record<string, unknown>
       } catch (e) {
         setError(t('tryInvalidJson', { error: e instanceof Error ? e.message : String(e) }))
         return
       }
     }
-    startTransition(async () => {
-      const r = await tryCodeToolAction({ mode, ...target, ...(mode === 'run' ? { input: parsedInput } : {}) })
-      if (r.ok && r.result) setResult(r.result)
-      else setError(r.error ?? t('tryError'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await tryCodeToolAction({
+          mode,
+          ...target,
+          ...(mode === 'run' ? { input: parsedInput } : {}),
+        })
+        if (r.ok && r.result) setResult(r.result)
+        else setError(r.error ?? t('tryError'))
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

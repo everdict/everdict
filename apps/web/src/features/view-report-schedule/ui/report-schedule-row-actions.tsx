@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Pause, Play, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 
 import {
@@ -21,17 +21,22 @@ export function ReportScheduleRowActions({
   schedule: { id: string; enabled: boolean }
 }) {
   const t = useTranslations('viewReportSchedule')
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
 
   const act = (fn: () => Promise<{ ok: boolean; error?: string }>) =>
-    startTransition(async () => {
-      setError(undefined)
-      const res = await fn()
-      if (!res.ok) setError(res.error ?? t('actionFailed'))
-      else router.refresh()
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        setError(undefined)
+        const res = await fn()
+        if (!res.ok) setError(res.error ?? t('actionFailed'))
+        else refresh()
+      } finally {
+        setPending(false)
+      }
+    })()
 
   return (
     <div className="flex shrink-0 flex-col items-end gap-1">

@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -10,6 +9,7 @@ import type { WorkspaceImageCatalog } from '@/entities/workspace-image'
 import { fmtBytes, fmtDateTime } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
+import { Link } from '@/shared/ui/link'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
@@ -31,7 +31,7 @@ export function WorkspaceImagesManager({
   const t = useTranslations('workspaceImages')
   const workspace = String(useParams().workspace ?? '')
   const [error, setError] = useState<string | null>(null)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // 관리형 스토어를 안 돌리는 배포 — 라우트가 404를 준다. 빈 목록으로 위장하지 않고 그렇게 말한다.
   if (unavailable || !catalog) {
@@ -40,10 +40,15 @@ export function WorkspaceImagesManager({
 
   const remove = (repository: string) => {
     setError(null)
-    startTransition(async () => {
-      const res = await removeWorkspaceImageAction(repository)
-      if (!res.ok) setError(res.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await removeWorkspaceImageAction(repository)
+        if (!res.ok) setError(res.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { ChevronRight, FlaskConical } from 'lucide-react'
 import { useTimeZone, useTranslations } from 'next-intl'
 
@@ -6,6 +5,7 @@ import type { MetricSummary, ScorecardRecord } from '@/entities/scorecard'
 import { fmtDateTime, fmtPct } from '@/shared/lib/format'
 import { EntityRef, ModelChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { Score } from '@/shared/ui/score'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'

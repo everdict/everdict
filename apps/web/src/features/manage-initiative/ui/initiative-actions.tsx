@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, MoreHorizontal, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { Initiative, InitiativeResource } from '@/entities/initiative'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
@@ -57,6 +58,7 @@ export function InitiativeActions({
 }) {
   const t = useTranslations('initiativesPage')
   const router = useRouter()
+  const refresh = useRefresh()
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [name, setName] = useState(initiative.name)
@@ -68,7 +70,7 @@ export function InitiativeActions({
   // 빈 줄 하나를 항상 남겨 두지 않는다 — 추가 버튼이 줄을 만든다. 저장할 때 라벨/주소가 빈 줄은 버린다.
   const [resources, setResources] = useState<InitiativeResource[]>(initiative.resources)
   const [targetDate, setTargetDate] = useState(initiative.targetDate ?? '')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function save() {
     const patch = {
@@ -95,27 +97,37 @@ export function InitiativeActions({
       setEditing(false)
       return
     }
-    startTransition(async () => {
-      const r = await updateInitiativeAction(initiative.id, patch)
-      if (!r.ok) {
-        toast.error(r.error ?? t('editError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await updateInitiativeAction(initiative.id, patch)
+        if (!r.ok) {
+          toast.error(r.error ?? t('editError'))
+          return
+        }
+        setEditing(false)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setEditing(false)
-      router.refresh()
-    })
+    })()
   }
 
   function remove() {
-    startTransition(async () => {
-      const r = await deleteInitiativeAction(initiative.id)
-      if (!r.ok) {
-        toast.error(r.error ?? t('deleteError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteInitiativeAction(initiative.id)
+        if (!r.ok) {
+          toast.error(r.error ?? t('deleteError'))
+          return
+        }
+        setConfirming(false)
+        router.push(`/${workspace}/initiatives`)
+      } finally {
+        setPending(false)
       }
-      setConfirming(false)
-      router.push(`/${workspace}/initiatives`)
-    })
+    })()
   }
 
   return (

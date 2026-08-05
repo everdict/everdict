@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { CirclePause, CirclePlay, Pause, Pencil, Play, Telescope, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
@@ -11,6 +10,7 @@ import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { EntityRef, RuntimeChip } from '@/shared/ui/chip'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
+import { Link } from '@/shared/ui/link'
 import { Tooltip } from '@/shared/ui/tooltip'
 
 export type Author = { name: string; avatarUrl?: string }

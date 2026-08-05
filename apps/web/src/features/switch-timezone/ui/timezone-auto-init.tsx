@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
 
 import { detectTimeZone, TIMEZONE_COOKIE } from '@/shared/i18n/timezone'
+import { useRefresh } from '@/shared/lib/use-refresh'
 
 import { setTimezone } from '../api/set-timezone'
 
@@ -11,7 +11,7 @@ import { setTimezone } from '../api/set-timezone'
 // timestamps render in the viewer's local time instead of the UTC/server default. Runs once; the explicit picker
 // in Preferences overrides it thereafter. Renders nothing.
 export function TimezoneAutoInit() {
-  const router = useRouter()
+  const refresh = useRefresh()
   const done = useRef(false)
   useEffect(() => {
     if (done.current) return
@@ -20,7 +20,7 @@ export function TimezoneAutoInit() {
     if (hasCookie) return
     const tz = detectTimeZone()
     if (tz === 'UTC') return // nothing to correct — the SSR default already matches
-    void setTimezone(tz).then(() => router.refresh())
+    void setTimezone(tz).then(() => refresh())
   }, [router])
   return null
 }

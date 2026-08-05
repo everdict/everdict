@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -14,6 +13,7 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'

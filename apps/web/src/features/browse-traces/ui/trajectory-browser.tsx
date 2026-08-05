@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState, useTransition } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
@@ -29,20 +29,28 @@ export function TrajectoryBrowser() {
   const [nextCursor, setNextCursor] = useState<string | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [loaded, setLoaded] = useState(false)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const load = useCallback((cursor?: string) => {
-    startTransition(async () => {
-      const page = await listTrajectoriesAction({ limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) })
-      if (!page.ok) {
-        setError(page.error)
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const page = await listTrajectoriesAction({
+          limit: PAGE_SIZE,
+          ...(cursor ? { cursor } : {}),
+        })
+        if (!page.ok) {
+          setError(page.error)
+          return
+        }
+        setError(undefined)
+        setItems((prev) => (cursor ? [...prev, ...page.items] : page.items))
+        setNextCursor(page.nextCursor)
+        setLoaded(true)
+      } finally {
+        setPending(false)
       }
-      setError(undefined)
-      setItems((prev) => (cursor ? [...prev, ...page.items] : page.items))
-      setNextCursor(page.nextCursor)
-      setLoaded(true)
-    })
+    })()
   }, [])
 
   useEffect(() => {

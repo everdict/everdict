@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import type { Invite } from '@/entities/member'
@@ -30,30 +30,40 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string>()
   const [confirmId, setConfirmId] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function onCreate() {
     setError(undefined)
     setLink(undefined)
     setCopied(false)
-    startTransition(async () => {
-      const r = await createInviteAction(role)
-      if (r.ok && r.token) {
-        setLink(inviteLink(r.token))
-        setOpen(false) // collapse the form again after creating — the link is shown in the callout above.
-      } else {
-        setError(r.error ?? t('createFailed'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createInviteAction(role)
+        if (r.ok && r.token) {
+          setLink(inviteLink(r.token))
+          setOpen(false) // collapse the form again after creating — the link is shown in the callout above.
+        } else {
+          setError(r.error ?? t('createFailed'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
   }
 
   function onRevoke(id: string) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await revokeInviteAction(id)
-      setConfirmId(undefined)
-      if (!r.ok) setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await revokeInviteAction(id)
+        setConfirmId(undefined)
+        if (!r.ok) setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   // A reusable link stays listed until it's revoked (there's no "accepted" terminal state).

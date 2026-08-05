@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
@@ -12,6 +11,7 @@ import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { ModelChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Score } from '@/shared/ui/score'
 import { SectionHeader } from '@/shared/ui/section-header'

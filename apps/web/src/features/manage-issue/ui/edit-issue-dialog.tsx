@@ -1,7 +1,6 @@
 'use client'
 
-import { useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -9,6 +8,7 @@ import { toast } from 'sonner'
 import { MediaDropZone, withBlockInsertion } from '@/features/attach-media'
 import type { Issue } from '@/entities/issue'
 import type { IssueLabel } from '@/entities/issue-label'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
@@ -44,7 +44,7 @@ export function EditIssueDialog({
   canAttach?: boolean
 }) {
   const t = useTranslations('issuesPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [title, setTitle] = useState(issue.title)
   const [description, setDescription] = useState(issue.description ?? '')
   const [assignee, setAssignee] = useState(issue.assignee ?? '')
@@ -54,7 +54,7 @@ export function EditIssueDialog({
     issue.estimate === undefined ? '' : String(issue.estimate)
   )
   const [dueDate, setDueDate] = useState(issue.dueDate ?? '')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
 
   // 올라간 첨부는 커서 자리에 들어간다. 현재 값은 상태가 아니라 텍스트영역에서 읽는다 — 파일을 여러 개 놓으면
@@ -97,15 +97,20 @@ export function EditIssueDialog({
       onClose()
       return
     }
-    startTransition(async () => {
-      const r = await updateIssueAction(issue.id, patch)
-      if (!r.ok) {
-        toast.error(r.error ?? t('editError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await updateIssueAction(issue.id, patch)
+        if (!r.ok) {
+          toast.error(r.error ?? t('editError'))
+          return
+        }
+        onClose()
+        refresh()
+      } finally {
+        setPending(false)
       }
-      onClose()
-      router.refresh()
-    })
+    })()
   }
 
   return (

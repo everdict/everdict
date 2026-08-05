@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Loader2, TriangleAlert, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -54,7 +55,8 @@ export function DeleteJudgeDialog({
 }) {
   const t = useTranslations('deleteJudge')
   const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   // Shrinks as versions are deleted (so a partial failure leaves the still-present ones actionable).
   const [remaining, setRemaining] = useState<string[]>(versions)
   const [selected, setSelected] = useState<Set<string>>(
@@ -82,31 +84,36 @@ export function DeleteJudgeDialog({
   function onConfirm() {
     const targets = remaining.filter((v) => selected.has(v))
     if (targets.length === 0 || pending) return
-    startTransition(async () => {
-      const res = await deleteJudgeVersionsAction({ id, versions: targets })
-      const stillHere = remaining.filter((v) => !res.deleted.includes(v))
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await deleteJudgeVersionsAction({ id, versions: targets })
+        const stillHere = remaining.filter((v) => !res.deleted.includes(v))
 
-      if (res.deleted.length > 0) {
-        // The judge is gone once no live versions remain → return to the list; otherwise refresh in place.
-        if (stillHere.length === 0) {
-          toast.success(t('deletedJudge', { id }))
-          router.push(`/${workspace}/judges`)
-          router.refresh()
+        if (res.deleted.length > 0) {
+          // The judge is gone once no live versions remain → return to the list; otherwise refresh in place.
+          if (stillHere.length === 0) {
+            toast.success(t('deletedJudge', { id }))
+            router.push(`/${workspace}/judges`)
+            refresh()
+            return
+          }
+          toast.success(t('deletedVersions', { count: res.deleted.length, id }))
+          refresh()
+        }
+
+        if (res.failed.length === 0) {
+          onClose()
           return
         }
-        toast.success(t('deletedVersions', { count: res.deleted.length, id }))
-        router.refresh()
+        // Keep the dialog open on partial failure — drop the deleted rows, keep the failed ones selected for retry, show why.
+        setRemaining(stillHere)
+        setSelected(new Set(res.failed.map((f) => f.version)))
+        setFailed(res.failed)
+      } finally {
+        setPending(false)
       }
-
-      if (res.failed.length === 0) {
-        onClose()
-        return
-      }
-      // Keep the dialog open on partial failure — drop the deleted rows, keep the failed ones selected for retry, show why.
-      setRemaining(stillHere)
-      setSelected(new Set(res.failed.map((f) => f.version)))
-      setFailed(res.failed)
-    })
+    })()
   }
 
   return (

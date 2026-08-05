@@ -1,7 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { ChevronRight } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -11,6 +10,7 @@ import type { AgentToolEntry, AgentToolScope } from '@/entities/agent-tool'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
@@ -29,7 +29,7 @@ export function AgentToolsManager({ tools }: { tools: AgentToolEntry[] }) {
   const workspace = String(useParams().workspace ?? '')
   const [state, setState] = useState(tools)
   const [pendingKey, setPendingKey] = useState<string | undefined>(undefined)
-  const [, startTransition] = useTransition()
+  const [, set_pending] = useState(false)
 
   const sections = useMemo(
     () =>
@@ -43,14 +43,19 @@ export function AgentToolsManager({ tools }: { tools: AgentToolEntry[] }) {
     const next = enabled === null ? tool.baseline : enabled
     setState((rows) => rows.map((row) => (row.key === tool.key ? { ...row, enabled: next } : row)))
     setPendingKey(tool.key)
-    startTransition(async () => {
-      const result = await setAgentToolAction(tool.key, enabled)
-      setPendingKey(undefined)
-      if (!result.ok) {
-        setState(previous)
-        toast.error(result.error ?? t('saveFailed'))
+    void (async () => {
+      set_pending(true)
+      try {
+        const result = await setAgentToolAction(tool.key, enabled)
+        setPendingKey(undefined)
+        if (!result.ok) {
+          setState(previous)
+          toast.error(result.error ?? t('saveFailed'))
+        }
+      } finally {
+        set_pending(false)
       }
-    })
+    })()
   }
 
   if (state.length === 0) return <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />

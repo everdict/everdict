@@ -1,17 +1,18 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { ChevronRight, Eye, Heart, Loader2, Lock, Search, Settings2, Sparkles } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { versionsForId } from '@/shared/lib/semver'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { InfoTip } from '@/shared/ui/tooltip'
 import { VersionField } from '@/shared/ui/version-field'
 
@@ -169,6 +170,7 @@ export function BuildFromSourceWizard({
 }) {
   const t = useTranslations('importBenchmark')
   const router = useRouter()
+  const refresh = useRefresh()
   const { workspace } = useParams<{ workspace: string }>()
   const [sourceKind, setSourceKind] = useState<SourceKind>('huggingface')
 
@@ -340,7 +342,7 @@ export function BuildFromSourceWizard({
     setCreateResult(r)
     if (r.ok) {
       router.push(`/${workspace}/datasets`)
-      router.refresh()
+      refresh()
     }
   }
 

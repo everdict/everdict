@@ -1,7 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useMemo, useState } from 'react'
 import {
   ArrowUpRight,
   ChevronRight,
@@ -30,6 +29,7 @@ import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { Markdown } from '@/shared/ui/markdown'
 import { Tooltip } from '@/shared/ui/tooltip'
 
@@ -89,7 +89,7 @@ export function EnvironmentWorkbench({
   const [editing, setEditing] = useState<Capability | 'new' | null>(null)
   const [reaching, setReaching] = useState<Capability | null>(null)
   const [confirming, setConfirming] = useState<Capability | null>(null)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const rows = useMemo<EnvironmentRow[]>(() => {
     const inventoryByKey = new Map(imported.map((e) => [`${e.source}/${e.id}`, e]))
@@ -127,26 +127,41 @@ export function EnvironmentWorkbench({
   const canManage = (c: Capability) => canWrite && (c.createdBy === currentSubject || isAdmin)
 
   const reverify = (e: AdoptedEnvironment) =>
-    startTransition(async () => {
-      const r = await verifyAdoptedEnvironmentAction(e.source, e.id)
-      if (!r.ok) toast.error(r.error ?? t('reverifyError'))
-      else if (r.environment.verify?.pullable === false)
-        toast.warning(t('importedNotPullable', { name: e.name ?? e.id }))
-      else toast.success(t('reverified'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await verifyAdoptedEnvironmentAction(e.source, e.id)
+        if (!r.ok) toast.error(r.error ?? t('reverifyError'))
+        else if (r.environment.verify?.pullable === false)
+          toast.warning(t('importedNotPullable', { name: e.name ?? e.id }))
+        else toast.success(t('reverified'))
+      } finally {
+        setPending(false)
+      }
+    })()
   const removeFromInventory = (e: AdoptedEnvironment) =>
-    startTransition(async () => {
-      const r = await unadoptEnvironmentAction(e.source, e.id)
-      if (r.ok) toast.success(t('unimported', { name: e.name ?? e.id }))
-      else toast.error(r.error ?? t('unimportError'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await unadoptEnvironmentAction(e.source, e.id)
+        if (r.ok) toast.success(t('unimported', { name: e.name ?? e.id }))
+        else toast.error(r.error ?? t('unimportError'))
+      } finally {
+        setPending(false)
+      }
+    })()
   const del = (c: Capability) =>
-    startTransition(async () => {
-      const r = await deleteCapabilityVersionAction(c.id, c.version)
-      if (r.ok) toast.success(t('deleted', { name: c.name }))
-      else toast.error(r.error ?? t('deleteError'))
-      setConfirming(null)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteCapabilityVersionAction(c.id, c.version)
+        if (r.ok) toast.success(t('deleted', { name: c.name }))
+        else toast.error(r.error ?? t('deleteError'))
+        setConfirming(null)
+      } finally {
+        setPending(false)
+      }
+    })()
 
   const scopes: { value: Scope; label: string }[] = [
     { value: 'all', label: t('envScopeAll') },

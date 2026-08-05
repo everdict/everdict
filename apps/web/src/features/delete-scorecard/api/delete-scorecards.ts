@@ -1,7 +1,5 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
-
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -9,6 +7,10 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // multi-select delete fans out over the chosen ids here — each authorized server-side (the batch's creator or a
 // workspace admin) and an in-flight batch rejected with a conflict. A partial failure (permission / still-running) is
 // reported per id rather than aborting the whole set, mirroring the harness version fan-out.
+
+// 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
+// (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
+// 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export async function deleteScorecardsAction(input: {
   ids: string[]
 }): Promise<{ deleted: string[]; failed: { id: string; error: string }[] }> {
@@ -24,7 +26,5 @@ export async function deleteScorecardsAction(input: {
       failed.push({ id, error: e instanceof Error ? e.message : String(e) })
     }
   }
-  // Broad revalidation — the list, analyze/trend/leaderboard lenses, and the runs view all reflect the removals.
-  if (deleted.length > 0) revalidatePath('/[workspace]', 'layout')
   return { deleted, failed }
 }

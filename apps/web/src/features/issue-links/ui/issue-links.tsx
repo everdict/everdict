@@ -1,8 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Loader2, Plus, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -14,10 +12,12 @@ import {
   type IssueLink,
   type IssueLinkType,
 } from '@/entities/issue'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { EntityRef } from '@/shared/ui/chip'
 import { Combobox } from '@/shared/ui/combobox'
 import { Input, Label } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 
 import { addIssueLinkAction, removeIssueLinkAction } from '../api/links'
 
@@ -34,12 +34,12 @@ export function IssueLinks({
 }) {
   const t = useTranslations('issueLinks')
   const tracker = useTranslations('tracker')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [adding, setAdding] = useState(false)
   const [type, setType] = useState<IssueLinkType>('harness')
   const [id, setId] = useState('')
   const [version, setVersion] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // 이슈를 검증하는 능력만 — 스코어카드는 증거라서 "평가 이력" 섹션이 소유한다(ISSUE_CAPABILITY_LINK_TYPES).
   // 그래서 여기서 거는 것과 보이는 것이 같은 집합이다: 걸 수는 있는데 보이지 않는 종류를 만들지 않는다.
@@ -51,32 +51,42 @@ export function IssueLinks({
   function add() {
     const trimmed = id.trim()
     if (trimmed.length === 0) return
-    startTransition(async () => {
-      const r = await addIssueLinkAction(issueId, {
-        type,
-        id: trimmed,
-        ...(version.trim() ? { version: version.trim() } : {}),
-      })
-      if (!r.ok) {
-        toast.error(r.error ?? t('addError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await addIssueLinkAction(issueId, {
+          type,
+          id: trimmed,
+          ...(version.trim() ? { version: version.trim() } : {}),
+        })
+        if (!r.ok) {
+          toast.error(r.error ?? t('addError'))
+          return
+        }
+        setId('')
+        setVersion('')
+        setAdding(false)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setId('')
-      setVersion('')
-      setAdding(false)
-      router.refresh()
-    })
+    })()
   }
 
   function remove(link: IssueLink) {
-    startTransition(async () => {
-      const r = await removeIssueLinkAction(issueId, link.type, link.id)
-      if (!r.ok) {
-        toast.error(r.error ?? t('removeError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await removeIssueLinkAction(issueId, link.type, link.id)
+        if (!r.ok) {
+          toast.error(r.error ?? t('removeError'))
+          return
+        }
+        refresh()
+      } finally {
+        setPending(false)
       }
-      router.refresh()
-    })
+    })()
   }
 
   return (

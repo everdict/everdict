@@ -1,17 +1,21 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { ISSUE_STATUSES, type IssueStatus } from '@/entities/issue'
-import { WORKFLOW_STATE_COLORS, type WorkflowState, type WorkflowStateColor } from '@/entities/workflow-state'
+import {
+  WORKFLOW_STATE_COLORS,
+  type WorkflowState,
+  type WorkflowStateColor,
+} from '@/entities/workflow-state'
+import { useRefresh } from '@/shared/lib/use-refresh'
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
 import { Input } from '@/shared/ui/input'
-import { cn } from '@/shared/lib/utils'
 
 import {
   createWorkflowStateAction,
@@ -46,24 +50,29 @@ export function WorkflowStatesEditor({
 }) {
   const t = useTranslations('manageTeams')
   const tracker = useTranslations('tracker')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [error, setError] = useState<string>()
   const [name, setName] = useState('')
   const [status, setStatus] = useState<IssueStatus>('todo')
   const [color, setColor] = useState<WorkflowStateColor>('blue')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function act(run: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await run()
-      if (!r.ok) {
-        setError(r.error)
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await run()
+        if (!r.ok) {
+          setError(r.error)
+          return
+        }
+        after?.()
+        refresh()
+      } finally {
+        setPending(false)
       }
-      after?.()
-      router.refresh()
-    })
+    })()
   }
 
   // 순서 바꾸기는 두 컬럼의 position 을 맞바꾸는 것 — 보드의 순서가 곧 의미라, 화면에서만 움직이면 안 된다.

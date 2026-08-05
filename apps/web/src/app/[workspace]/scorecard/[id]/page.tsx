@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { ChevronLeft, Download } from 'lucide-react'
 import { getLocale, getTimeZone, getTranslations } from 'next-intl/server'
 
@@ -43,6 +42,7 @@ import { Card } from '@/shared/ui/card'
 import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
 import { DistributionBar } from '@/shared/ui/distribution-bar'
 import { ExpandableText } from '@/shared/ui/expandable-text'
+import { Link } from '@/shared/ui/link'
 import { CriterionBadge, MetricLabel } from '@/shared/ui/metric-label'
 import { OriginInline, OriginPins } from '@/shared/ui/origin'
 import { PageHeader } from '@/shared/ui/page-header'

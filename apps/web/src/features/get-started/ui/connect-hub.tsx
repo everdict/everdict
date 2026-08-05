@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import Link from 'next/link'
 import { Laptop, Puzzle, Terminal } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -8,6 +7,7 @@ import type { DesktopRelease } from '@/features/download-desktop/api/releases'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/ui/callout'
 import { CodeBlock } from '@/shared/ui/code-block'
+import { Link } from '@/shared/ui/link'
 
 // 코딩 에이전트 연결 허브 — 데스크탑 / Claude Code / Codex 를 경로 기반 탭(/connect/<tab>)으로 전환한다.
 // 탭을 라우트로 두면 사이드바(RESOURCES 그룹)의 개별 항목이 각자 활성 표시되고, 각 탭은 서버에서 그대로 렌더된다.
@@ -76,10 +76,7 @@ export async function ConnectHub({
 
   // t.rich 청크 — 본문 안의 "API 키 만들기" 링크와 인라인 코드 표기.
   const apiKeyLink = (chunks: ReactNode) => (
-    <Link
-      href={apiKeysHref}
-      className="font-[510] text-primary underline-offset-2 hover:underline"
-    >
+    <Link href={apiKeysHref} className="font-[510] text-primary underline-offset-2 hover:underline">
       {chunks}
     </Link>
   )
@@ -129,7 +126,9 @@ export async function ConnectHub({
             <Step n={1} title={t('claude.step1Title')} body={t('claude.step1Body')}>
               <CodeBlock
                 copyLabel={copyLabel}
-                code={'/plugin marketplace add everdict/everdict\n/plugin install everdict@everdict'}
+                code={
+                  '/plugin marketplace add everdict/everdict\n/plugin install everdict@everdict'
+                }
               />
             </Step>
             <Step n={2} title={t('claude.step2Title')} body={t('claude.step2Body')}>

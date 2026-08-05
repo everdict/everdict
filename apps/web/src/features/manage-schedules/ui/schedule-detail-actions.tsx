@@ -1,14 +1,15 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Pause, Pencil, Play, Trash2, Zap } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button, buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
+import { Link } from '@/shared/ui/link'
 
 import {
   deleteScheduleAction,
@@ -33,38 +34,54 @@ export function ScheduleDetailActions({
   canEdit: boolean // 편집 (생성자 or admin)
 }) {
   const router = useRouter()
+  const refresh = useRefresh()
   const t = useTranslations('scheduleDetail')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const onFire = () =>
-    startTransition(async () => {
-      setError(undefined)
-      const res = await fireScheduleAction(id)
-      if (res.ok && res.scorecardId)
-        router.push(`/${workspace}/scorecard/${encodeURIComponent(res.scorecardId)}`)
-      else setError(res.error ?? t('actionFailed'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        setError(undefined)
+        const res = await fireScheduleAction(id)
+        if (res.ok && res.scorecardId)
+          router.push(`/${workspace}/scorecard/${encodeURIComponent(res.scorecardId)}`)
+        else setError(res.error ?? t('actionFailed'))
+      } finally {
+        setPending(false)
+      }
+    })()
 
   const onToggle = () =>
-    startTransition(async () => {
-      setError(undefined)
-      const res = await setScheduleEnabledAction(id, !enabled)
-      if (res.ok) router.refresh()
-      else setError(res.error ?? t('actionFailed'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        setError(undefined)
+        const res = await setScheduleEnabledAction(id, !enabled)
+        if (res.ok) refresh()
+        else setError(res.error ?? t('actionFailed'))
+      } finally {
+        setPending(false)
+      }
+    })()
 
   const onDelete = () =>
-    startTransition(async () => {
-      setError(undefined)
-      const res = await deleteScheduleAction(id)
-      if (res.ok) router.push(`/${workspace}/schedules`)
-      else {
-        setError(res.error ?? t('actionFailed'))
-        setConfirmingDelete(false)
+    void (async () => {
+      setPending(true)
+      try {
+        setError(undefined)
+        const res = await deleteScheduleAction(id)
+        if (res.ok) router.push(`/${workspace}/schedules`)
+        else {
+          setError(res.error ?? t('actionFailed'))
+          setConfirmingDelete(false)
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
 
   return (
     <div className="flex flex-col items-end gap-2">

@@ -1,12 +1,14 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
-
 import { saveModelResultSchema, testModelConnectionResultSchema } from '@/entities/model'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
 // 커넥션 테스트(더미콜) 결과의 평탄한 뷰 — UI 는 ok/응답텍스트/사유만 쓴다. throw(네트워크/403)도 ok:false 로 흡수.
+
+// 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
+// (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
+// 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export interface TestConnectionActionResult {
   ok: boolean
   text?: string
@@ -20,10 +22,10 @@ export async function testModelConnectionAction(
 ): Promise<TestConnectionActionResult> {
   const ctx = await authContext()
   try {
-    const r = testModelConnectionResultSchema.parse(await controlPlane.testModelConnection(ctx, connection))
-    return r.ok
-      ? { ok: true, text: r.text, latencyMs: r.latencyMs }
-      : { ok: false, error: r.error }
+    const r = testModelConnectionResultSchema.parse(
+      await controlPlane.testModelConnection(ctx, connection)
+    )
+    return r.ok ? { ok: true, text: r.text, latencyMs: r.latencyMs } : { ok: false, error: r.error }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
@@ -42,7 +44,6 @@ export async function saveModelAction(id: string, body: unknown): Promise<SaveMo
   const ctx = await authContext()
   try {
     const r = saveModelResultSchema.parse(await controlPlane.saveModel(ctx, id, body))
-    revalidatePath('/[workspace]/settings')
     return { ok: true, version: r.version, created: r.created }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -56,7 +57,6 @@ export async function deleteModelAction(id: string): Promise<{ ok: boolean; erro
   const ctx = await authContext()
   try {
     await controlPlane.deleteModelVersions<{ deleted: string[] }>(ctx, id)
-    revalidatePath('/[workspace]/settings')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

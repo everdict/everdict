@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { CalendarClock, ChevronsRight, CircleDashed, Laptop, Loader2, Server } from 'lucide-react'
 import { useTimeZone, useTranslations } from 'next-intl'
 
@@ -10,6 +9,7 @@ import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { EntityRef } from '@/shared/ui/chip'
+import { Link } from '@/shared/ui/link'
 
 import { useInfraPanel, type WorkAuthor } from '../model/infra-panel-context'
 

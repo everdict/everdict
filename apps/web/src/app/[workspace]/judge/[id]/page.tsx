@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ChevronLeft, GitCompare } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
@@ -27,6 +26,7 @@ import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EntityRef, ModelChip, RuntimeChip } from '@/shared/ui/chip'
 import { CodeEditor } from '@/shared/ui/code-editor'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 

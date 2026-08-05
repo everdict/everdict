@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useMemo, useState } from 'react'
 import { CornerDownRight, File as FileIcon, Folder, Loader2, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -31,7 +31,7 @@ export function MoveEntriesDialog({
   onMoved: (moves: { from: string; to: string }[]) => void
 }) {
   const t = useTranslations('files')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [destination, setDestination] = useState('')
   const [failed, setFailed] = useState<{ path: string; error: string }[]>([])
   const titleId = 'move-fs-entries'
@@ -51,20 +51,25 @@ export function MoveEntriesDialog({
 
   function onConfirm() {
     if (pending || movable.length === 0) return
-    startTransition(async () => {
-      const res = await moveEntriesAction(
-        movable.map((from) => ({ from, to: joinFsPath(destination, baseNameOf(from)) }))
-      )
-      if (res.moved.length > 0) {
-        toast.success(t('movedMany', { count: res.moved.length }))
-        onMoved(res.moved)
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await moveEntriesAction(
+          movable.map((from) => ({ from, to: joinFsPath(destination, baseNameOf(from)) }))
+        )
+        if (res.moved.length > 0) {
+          toast.success(t('movedMany', { count: res.moved.length }))
+          onMoved(res.moved)
+        }
+        if (res.failed.length === 0) {
+          onClose()
+          return
+        }
+        setFailed(res.failed)
+      } finally {
+        setPending(false)
       }
-      if (res.failed.length === 0) {
-        onClose()
-        return
-      }
-      setFailed(res.failed)
-    })
+    })()
   }
 
   return (

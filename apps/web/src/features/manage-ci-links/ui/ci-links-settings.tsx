@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import { GitBranch } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -11,6 +10,7 @@ import { fmtSubject } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { Link } from '@/shared/ui/link'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 
 import { deleteCiLinkAction } from '../api/manage-ci-links'
@@ -34,16 +34,21 @@ export function CiLinksSettings({
   const [links, setLinks] = useState<CiLink[]>(initialLinks)
   const [confirmRepo, setConfirmRepo] = useState<string>()
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function onDelete(link: CiLink) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await deleteCiLinkAction(link.repository, link.host)
-      setConfirmRepo(undefined)
-      if (r.ok && r.links) setLinks(r.links)
-      else setError(r.error ?? t('unlinkFailed'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteCiLinkAction(link.repository, link.host)
+        setConfirmRepo(undefined)
+        if (r.ok && r.links) setLinks(r.links)
+        else setError(r.error ?? t('unlinkFailed'))
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

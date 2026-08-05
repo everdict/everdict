@@ -1,15 +1,15 @@
 'use client'
 
-import { useTransition } from 'react'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { CalendarClock, Check, ChevronDown, Loader2, Plus, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { type CycleState } from '@/entities/cycle'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
+import { Link } from '@/shared/ui/link'
 
 import { updateIssueAction } from '../api/issues'
 
@@ -43,21 +43,26 @@ export function IssueCycleControl({
 }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
 
   // `null` 은 비운다 — 사이클에서 뺀다는 뜻이고, `undefined`(손대지 않음)와 절대 섞이면 안 된다.
   // 낙관적으로 그리지 않는다: 실패하면 서버가 이유를 말하고, 화면은 새로고침으로 진실을 다시 받는다.
   function assign(cycleId: string | null): void {
     if (cycleId === (cycle?.id ?? null)) return
-    startTransition(async () => {
-      const r = await updateIssueAction(id, { cycleId })
-      if (!r.ok) {
-        toast.error(r.error ?? t('cycleError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await updateIssueAction(id, { cycleId })
+        if (!r.ok) {
+          toast.error(r.error ?? t('cycleError'))
+          return
+        }
+        refresh()
+      } finally {
+        setPending(false)
       }
-      router.refresh()
-    })
+    })()
   }
 
   const chip = cycle ? (
@@ -127,7 +132,9 @@ export function IssueCycleControl({
               </span>
             </DropdownItem>
           ))}
-          {cycles.length === 0 && <p className="px-2 py-1.5 text-[12px] text-faint">{t('cycleNone')}</p>}
+          {cycles.length === 0 && (
+            <p className="px-2 py-1.5 text-[12px] text-faint">{t('cycleNone')}</p>
+          )}
         </div>
         {cycle && (
           <>

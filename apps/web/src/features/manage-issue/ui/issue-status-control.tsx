@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { ChevronDown, Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { issueStatusIcon, IssueStatusIcon, type IssueStatus } from '@/entities/issue'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
@@ -46,27 +46,39 @@ export function IssueStatusControl({
 }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [resolving, setResolving] = useState(false)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
-  function move(to: IssueStatus, resolution?: { scorecardId?: string; note?: string }, stateId?: string) {
-    startTransition(async () => {
-      const r = await setIssueStatusAction(id, to, resolution, stateId)
-      if (!r.ok) {
-        // An illegal move is the domain's own refusal — surface it verbatim rather than guessing a next step.
-        toast.error(r.error ?? t('statusError'))
-        return
+  function move(
+    to: IssueStatus,
+    resolution?: { scorecardId?: string; note?: string },
+    stateId?: string
+  ) {
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await setIssueStatusAction(id, to, resolution, stateId)
+        if (!r.ok) {
+          // An illegal move is the domain's own refusal — surface it verbatim rather than guessing a next step.
+          toast.error(r.error ?? t('statusError'))
+          return
+        }
+        setResolving(false)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setResolving(false)
-      router.refresh()
-    })
+    })()
   }
 
   if (!canWrite) {
     if (variant === 'icon')
       return (
-        <span className="inline-flex shrink-0 items-center" title={tracker(`issueStatus.${status}`)}>
+        <span
+          className="inline-flex shrink-0 items-center"
+          title={tracker(`issueStatus.${status}`)}
+        >
           <IssueStatusIcon status={status} className="[&_svg]:size-3.5" />
         </span>
       )
@@ -111,7 +123,12 @@ export function IssueStatusControl({
         {(states.length > 0
           ? states
               .filter((state) => reachableFrom(status).includes(state.status))
-              .map((state) => ({ key: state.id, label: state.name, to: state.status, stateId: state.id }))
+              .map((state) => ({
+                key: state.id,
+                label: state.name,
+                to: state.status,
+                stateId: state.id,
+              }))
           : reachableFrom(status).map((next) => ({
               key: next,
               label: tracker(`issueStatus.${next}`),
@@ -125,7 +142,9 @@ export function IssueStatusControl({
               key={option.key}
               icon={<Icon className="size-3.5" />}
               onSelect={() =>
-                option.to === 'done' ? setResolving(true) : move(option.to, undefined, option.stateId)
+                option.to === 'done'
+                  ? setResolving(true)
+                  : move(option.to, undefined, option.stateId)
               }
             >
               {option.label}

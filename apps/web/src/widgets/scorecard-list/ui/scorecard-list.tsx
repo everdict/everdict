@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import Link from 'next/link'
 import { Check, Search, Telescope, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
@@ -25,6 +24,7 @@ import { EntityRef, MetricChip, ModelChip, RuntimeChip, SubsetChip } from '@/sha
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { OriginChip } from '@/shared/ui/origin'
 import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { StatCard } from '@/shared/ui/stat-card'

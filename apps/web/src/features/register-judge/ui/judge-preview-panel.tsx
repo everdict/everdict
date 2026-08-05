@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Check, ChevronDown, ChevronRight, ExternalLink, Loader2, Play } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -13,6 +12,7 @@ import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 
 import {
   judgeTryRunAction,

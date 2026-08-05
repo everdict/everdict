@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, ExternalLink, X } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
@@ -11,6 +10,7 @@ import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
+import { Link } from '@/shared/ui/link'
 
 import {
   getTrajectoryAction,

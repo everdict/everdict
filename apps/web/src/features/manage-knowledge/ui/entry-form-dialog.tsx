@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useId, useState, useTransition } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -117,7 +117,7 @@ export function EntryFormDialog({
   const [evidence, setEvidence] = useState<NodeRefView[]>([])
   const [shared, setShared] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // 열릴 때마다 initial 로 리셋 — edit 재진입/다른 엔트리 편집 시 이전 폼 상태가 남지 않게.
   useEffect(() => {
@@ -134,26 +134,31 @@ export function EntryFormDialog({
   const completeRefs = (rows: NodeRefView[]) => rows.filter((r) => r.key.trim() !== '')
 
   const submit = () =>
-    startTransition(async () => {
-      setError(undefined)
-      const payload = {
-        kind,
-        title: title.trim(),
-        body: body.trim(),
-        refs: completeRefs(refs),
-        evidence: completeRefs(evidence),
-        visibility: (shared ? 'workspace' : 'private') as 'workspace' | 'private',
+    void (async () => {
+      setPending(true)
+      try {
+        setError(undefined)
+        const payload = {
+          kind,
+          title: title.trim(),
+          body: body.trim(),
+          refs: completeRefs(refs),
+          evidence: completeRefs(evidence),
+          visibility: (shared ? 'workspace' : 'private') as 'workspace' | 'private',
+        }
+        const res = initial
+          ? await updateKnowledgeEntryAction(initial.id, payload)
+          : await createKnowledgeEntryAction(payload)
+        if (!res.ok || !res.entry) {
+          setError(res.error ?? t('actionFailed'))
+          return
+        }
+        onSaved?.(res.entry)
+        onClose()
+      } finally {
+        setPending(false)
       }
-      const res = initial
-        ? await updateKnowledgeEntryAction(initial.id, payload)
-        : await createKnowledgeEntryAction(payload)
-      if (!res.ok || !res.entry) {
-        setError(res.error ?? t('actionFailed'))
-        return
-      }
-      onSaved?.(res.entry)
-      onClose()
-    })
+    })()
 
   // 상세와 같은 규약 — 패널은 뷰포트에 묶고(85vh) 필드만 스크롤, 제목과 저장/취소는 고정.
   return (

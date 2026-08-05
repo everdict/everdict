@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ChevronLeft, Lock } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
@@ -12,6 +11,7 @@ import { bumpSemver, maxSemver, sortSemverDesc } from '@/shared/lib/semver'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'

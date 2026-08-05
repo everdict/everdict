@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { CheckCircle2, Target, TriangleAlert } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -7,6 +6,7 @@ import { issueHref, IssueStatusIcon } from '@/entities/issue'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
+import { Link } from '@/shared/ui/link'
 
 // 목표 진척 — 오버뷰가 가장 먼저 답해야 하는 질문("우리가 세운 목표들은 지금 어디쯤인가"). 진척은 취소되지 않은
 // 모든 프로젝트의 열린 이슈를 세므로, completed 프로젝트 안의 regressed 이슈도 여기서 남은 일로 나타난다.

@@ -1,13 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Pin, PinOff } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { AnalysisArtifact } from '@/entities/analysis-artifact'
 import { viewsSchema, type View } from '@/entities/view'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
 // Pin/unpin a conversation artifact onto a View — the artifact's creator curates which outputs graduate from
@@ -15,7 +15,7 @@ import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-
 // the same list the control plane returns for the views page).
 export function PinControl({ artifact }: { artifact: AnalysisArtifact }) {
   const t = useTranslations('analysisArtifacts')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [views, setViews] = useState<View[] | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -40,7 +40,7 @@ export function PinControl({ artifact }: { artifact: AnalysisArtifact }) {
       })
       if (!res.ok) throw new Error('pin failed')
       toast.success(t('pinned'))
-      router.refresh()
+      refresh()
     } catch {
       toast.error(t('pinFailed'))
     } finally {
@@ -56,7 +56,7 @@ export function PinControl({ artifact }: { artifact: AnalysisArtifact }) {
       })
       if (!res.ok) throw new Error('unpin failed')
       toast.success(t('unpinned'))
-      router.refresh()
+      refresh()
     } catch {
       toast.error(t('pinFailed'))
     } finally {

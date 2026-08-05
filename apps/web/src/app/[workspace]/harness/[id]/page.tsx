@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import Link from 'next/link'
 import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock, Shapes } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
@@ -42,6 +41,7 @@ import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'

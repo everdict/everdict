@@ -1,7 +1,5 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
-
 import {
   issueSchema,
   type Issue,
@@ -15,16 +13,17 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // Tracker issue server actions — a pure HTTP client of the control plane's /issues (authz is the control
 // plane's: read issues:read · write issues:write · delete creator-or-admin). Transition facts
 // (issue.status_changed etc.) are emitted server-side; nothing here decides legality.
+//
+// ⚠️ 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다.
+// 이 앱에는 그것이 무효화할 캐시가 없고(페이지는 전부 `force-dynamic`, 제어 평면 호출은 전부 `no-store`,
+// `staleTimes.dynamic` 은 0), Next 16 은 액션이 무효화를 선언했다는 사실만으로 클라이언트 prefetch 캐시를
+// 통째로 버리고 300ms 쿨다운을 건다. 그러면 화면에 걸린 모든 `<Link>` 가 한꺼번에 다시 prefetch 되고
+// (이슈 상세 기준 23개), 변이의 트랜지션이 그 큐에 묶여 스피너가 몇 초씩 돈다. 자세한 내용은 `docs/web.md`.
 
 export interface IssueActionResult {
   ok: boolean
   issue?: Issue
   error?: string
-}
-
-function revalidateIssues(): void {
-  revalidatePath('/[workspace]/issues', 'page')
-  revalidatePath('/[workspace]/issues/[id]', 'page')
 }
 
 export async function createIssueAction(input: {
@@ -46,7 +45,6 @@ export async function createIssueAction(input: {
   const ctx = await authContext()
   try {
     const issue = issueSchema.parse(await controlPlane.createIssue(ctx, input))
-    revalidateIssues()
     return { ok: true, issue }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -76,7 +74,6 @@ export async function updateIssueAction(
   const ctx = await authContext()
   try {
     const issue = issueSchema.parse(await controlPlane.updateIssue(ctx, id, patch))
-    revalidateIssues()
     return { ok: true, issue }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -98,16 +95,20 @@ export async function moveIssuesToCycleAction(
       controlPlane
         .updateIssue(ctx, id, { cycleId })
         .then(() => ({ ok: true }) as const)
-        .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }) as const)
+        .catch(
+          (e: unknown) =>
+            ({ ok: false, error: e instanceof Error ? e.message : String(e) }) as const
+        )
     )
   )
   const failures = results.filter((r) => !r.ok)
-  if (results.some((r) => r.ok)) revalidateIssues()
   const first = failures[0]
   return {
     moved: results.length - failures.length,
     failed: failures.length,
-    ...(first !== undefined && !first.ok && first.error !== undefined ? { error: first.error } : {}),
+    ...(first !== undefined && !first.ok && first.error !== undefined
+      ? { error: first.error }
+      : {}),
   }
 }
 
@@ -129,7 +130,6 @@ export async function setIssueStatusAction(
         ...(stateId !== undefined ? { stateId } : {}),
       })
     )
-    revalidateIssues()
     return { ok: true, issue }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -142,7 +142,6 @@ export async function moveIssueAction(id: string, teamId: string): Promise<Issue
   const ctx = await authContext()
   try {
     const issue = issueSchema.parse(await controlPlane.moveIssue(ctx, id, teamId))
-    revalidateIssues()
     return { ok: true, issue }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -151,11 +150,13 @@ export async function moveIssueAction(id: string, teamId: string): Promise<Issue
 
 // 트리아지에서 나가는 두 길. 받아들이기는 워크플로로 들여보내고, 거절은 사유와 함께 취소한다 — 레코드는
 // 남는다("우리가 거절했다"는 나중에 찾는 답이다).
-export async function acceptTriageAction(id: string, status: IssueStatus): Promise<IssueActionResult> {
+export async function acceptTriageAction(
+  id: string,
+  status: IssueStatus
+): Promise<IssueActionResult> {
   const ctx = await authContext()
   try {
     const issue = issueSchema.parse(await controlPlane.acceptTriage(ctx, id, status))
-    revalidateIssues()
     return { ok: true, issue }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -166,7 +167,6 @@ export async function declineTriageAction(id: string, note?: string): Promise<Is
   const ctx = await authContext()
   try {
     const issue = issueSchema.parse(await controlPlane.declineTriage(ctx, id, note))
-    revalidateIssues()
     return { ok: true, issue }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -177,7 +177,6 @@ export async function deleteIssueAction(id: string): Promise<{ ok: boolean; erro
   const ctx = await authContext()
   try {
     await controlPlane.deleteIssue(ctx, id)
-    revalidateIssues()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

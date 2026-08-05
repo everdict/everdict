@@ -1,10 +1,10 @@
-import Link from 'next/link'
 import { ArrowRight, BarChart3, Boxes, Database, Gavel, Plug } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { cn } from '@/shared/lib/utils'
 import { buttonVariants } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
+import { Link } from '@/shared/ui/link'
 
 // 신규 유저 온보딩 가이드 — everdict 의 eval-first 흐름(하니스 → 데이터셋 → 스코어카드 → 평가자)을
 // 번호 카드로 안내하고, 각 단계는 해당 섹션으로 딥링크한다. 마지막은 "코딩 에이전트 연결" CTA(/connect).

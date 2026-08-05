@@ -1,7 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { Check, Copy, Github, Lock, Search, Server, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
@@ -15,6 +14,7 @@ import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 
 import {
   githubInstallRunnerAction,
@@ -54,15 +54,20 @@ export function WorkspaceRunnersManager({
   const [githubOpen, setGithubOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function onRevoke(id: string) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await revokeWorkspaceRunnerAction(id)
-      setConfirmId(undefined)
-      if (!r.ok) setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await revokeWorkspaceRunnerAction(id)
+        setConfirmId(undefined)
+        if (!r.ok) setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (
@@ -277,7 +282,7 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
   const [issued, setIssued] = useState<{ installCommand?: string; attachCommand: string }>()
   const [copied, setCopied] = useState<'install' | 'attach'>()
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -293,16 +298,21 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
       setError(t('nameRequired'))
       return
     }
-    startTransition(async () => {
-      const r = await pairWorkspaceRunnerAction({ label: label.trim() })
-      // The control plane authors both commands (correct `--pair <token>` form, api-url embedded) — display them verbatim.
-      if (r.ok && r.token && r.attachCommand)
-        setIssued({
-          attachCommand: r.attachCommand,
-          ...(r.installCommand ? { installCommand: r.installCommand } : {}),
-        })
-      else setError(r.error ?? t('registerFailed'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await pairWorkspaceRunnerAction({ label: label.trim() })
+        // The control plane authors both commands (correct `--pair <token>` form, api-url embedded) — display them verbatim.
+        if (r.ok && r.token && r.attachCommand)
+          setIssued({
+            attachCommand: r.attachCommand,
+            ...(r.installCommand ? { installCommand: r.installCommand } : {}),
+          })
+        else setError(r.error ?? t('registerFailed'))
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   function copy(text: string, which: 'install' | 'attach') {
@@ -458,7 +468,7 @@ function GithubInstallDialog({
   const [result, setResult] = useState<GithubRunnerInstall>()
   const [copied, setCopied] = useState<'script' | 'hint'>()
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -513,11 +523,16 @@ function GithubInstallDialog({
       setError(mode === 'org' ? t('orgSelectRequired') : t('repoSelectRequired'))
       return
     }
-    startTransition(async () => {
-      const r = await githubInstallRunnerAction(payload)
-      if (r.ok && r.install) setResult(r.install)
-      else setError(r.error ?? t('generateFailed'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await githubInstallRunnerAction(payload)
+        if (r.ok && r.install) setResult(r.install)
+        else setError(r.error ?? t('generateFailed'))
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

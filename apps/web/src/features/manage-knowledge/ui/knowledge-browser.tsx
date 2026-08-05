@@ -1,7 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useMemo, useState } from 'react'
 import { BadgeCheck, History, Lock, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -14,6 +13,7 @@ import {
   type NodeRefView,
 } from '@/entities/knowledge'
 import { fmtDateTime } from '@/shared/lib/format'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Dialog } from '@/shared/ui/dialog'
@@ -101,22 +101,27 @@ function EntryDetailDialog({
 }) {
   const t = useTranslations('knowledge')
   const f = useTranslations('files') // the body's file history speaks the Files vocabulary
-  const router = useRouter()
+  const refresh = useRefresh()
   const [error, setError] = useState<string | undefined>(undefined)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const act = (fn: () => Promise<{ ok: boolean; error?: string }>, close = false) =>
-    startTransition(async () => {
-      setError(undefined)
-      const res = await fn()
-      if (!res.ok) {
-        setError(res.error ?? t('actionFailed'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        setError(undefined)
+        const res = await fn()
+        if (!res.ok) {
+          setError(res.error ?? t('actionFailed'))
+          return
+        }
+        refresh()
+        if (close) onClose()
+      } finally {
+        setPending(false)
       }
-      router.refresh()
-      if (close) onClose()
-    })
+    })()
 
   const behind = entry.coverage?.state === 'behind'
 
@@ -270,7 +275,7 @@ function EntryDetailDialog({
 }
 
 // 워크스페이스 지식 브라우저 — kind 필터 + 목록 + 작성/상세 다이얼로그. 목록은 서버 컴포넌트가 내려준 props 가 SSOT
-// (액션 후 router.refresh() 로 재조회 — 상세는 id 로 props 를 다시 읽으므로 자동 갱신).
+// (액션 후 refresh() 로 재조회 — 상세는 id 로 props 를 다시 읽으므로 자동 갱신).
 export function KnowledgeBrowser({
   entries,
   canWrite,

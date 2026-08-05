@@ -1,11 +1,12 @@
 'use client'
 
-import { useMemo, useTransition } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTimeZone, useTranslations } from 'next-intl'
 
 import { DEFAULT_TIMEZONE, detectTimeZone, listTimeZones } from '@/shared/i18n/timezone'
 import { reloadInfraFrames } from '@/shared/lib/reload-infra-frames'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 
 import { setTimezone } from '../api/set-timezone'
@@ -36,7 +37,8 @@ export function TimezoneSwitcher() {
   const t = useTranslations('timezone')
   const current = useTimeZone()
   const router = useRouter()
-  const [, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [, set_pending] = useState(false)
 
   const options = useMemo<ComboboxOption[]>(() => {
     return listTimeZones().map((tz) => {
@@ -51,13 +53,18 @@ export function TimezoneSwitcher() {
   }, [])
 
   function choose(next: string) {
-    startTransition(async () => {
-      await setTimezone(next)
-      router.refresh()
-      // Re-render the infra panel's mounted iframes too — they resolve the timezone server-side off the cookie
-      // and router.refresh() does not reach their separate browsing context.
-      reloadInfraFrames()
-    })
+    void (async () => {
+      set_pending(true)
+      try {
+        await setTimezone(next)
+        refresh()
+        // Re-render the infra panel's mounted iframes too — they resolve the timezone server-side off the cookie
+        // and refresh() does not reach their separate browsing context.
+        reloadInfraFrames()
+      } finally {
+        set_pending(false)
+      }
+    })()
   }
 
   return (

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 
@@ -60,18 +60,23 @@ export function TeamDetailManager({
   const [isPrivate, setIsPrivate] = useState(team.isPrivate)
   const [addSubject, setAddSubject] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function act(run: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await run()
-      if (!r.ok) {
-        setError(r.error)
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await run()
+        if (!r.ok) {
+          setError(r.error)
+          return
+        }
+        after?.()
+      } finally {
+        setPending(false)
       }
-      after?.()
-    })
+    })()
   }
 
   const dirty =
@@ -141,7 +146,11 @@ export function TeamDetailManager({
           </SettingsRow>
           {cyclesOn && (
             <>
-              <SettingsRow label={t('cycleWeeksLabel')} htmlFor="team-cycle-weeks" hint={t('cycleWeeksHint')}>
+              <SettingsRow
+                label={t('cycleWeeksLabel')}
+                htmlFor="team-cycle-weeks"
+                hint={t('cycleWeeksHint')}
+              >
                 <Input
                   id="team-cycle-weeks"
                   type="number"
@@ -164,7 +173,10 @@ export function TeamDetailManager({
                   onChange={setCycleStartDay}
                   disabled={!canWrite}
                   className="w-40"
-                  options={WEEKDAYS.map((day) => ({ value: String(day), label: t(`weekday.${day}`) }))}
+                  options={WEEKDAYS.map((day) => ({
+                    value: String(day),
+                    label: t(`weekday.${day}`),
+                  }))}
                 />
               </SettingsRow>
               <SettingsRow

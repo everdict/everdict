@@ -6,6 +6,7 @@ import { CheckCircle2, ListPlus, Loader2, ShieldCheck, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label, Textarea } from '@/shared/ui/input'
@@ -99,6 +100,7 @@ function Field({
 // (at least one; the control plane enforces). Dry-run validate, then register.
 export function RegisterRubricForm({ workspace }: { workspace: string }) {
   const router = useRouter()
+  const refresh = useRefresh()
   const t = useTranslations('registerRubric')
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
@@ -157,7 +159,7 @@ export function RegisterRubricForm({ workspace }: { workspace: string }) {
       if (r.ok) {
         toast.success(t('registered', { id: r.id ?? '', version: r.version ?? '' }))
         router.push(`/${workspace}/rubrics`)
-        router.refresh()
+        refresh()
       } else {
         setError(r.error ?? t('errorGeneric'))
       }

@@ -1,14 +1,14 @@
 'use client'
 
-import { useEffect, useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
-import { createPortal } from 'react-dom'
+import { useEffect, useRef, useState } from 'react'
 import { CalendarClock, Loader2, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
+import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 
 import { moveIssuesToCycleAction } from '@/features/manage-issue'
 import type { CycleState } from '@/entities/cycle'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 
@@ -30,9 +30,9 @@ export interface BulkCycleOption {
 export function IssueBulkBar({ cycles }: { cycles: BulkCycleOption[] }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
-  const router = useRouter()
+  const refresh = useRefresh()
   const selection = useIssueSelection()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const anchorRef = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ left: number; width: number } | null>(null)
 
@@ -60,20 +60,25 @@ export function IssueBulkBar({ cycles }: { cycles: BulkCycleOption[] }) {
   function move(cycleId: string | null): void {
     if (!selection) return
     const ids = [...selection.selected]
-    startTransition(async () => {
-      const r = await moveIssuesToCycleAction(ids, cycleId)
-      // 부분 실패는 정상적인 결과다 — 옮겨진 것과 못 옮긴 것을 둘 다 말한다.
-      if (r.failed > 0) toast.error(t('bulkCyclePartial', { moved: r.moved, failed: r.failed }))
-      else toast.success(t('bulkCycleDone', { count: r.moved }))
-      if (r.moved > 0) {
-        selection.clear()
-        router.refresh()
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await moveIssuesToCycleAction(ids, cycleId)
+        // 부분 실패는 정상적인 결과다 — 옮겨진 것과 못 옮긴 것을 둘 다 말한다.
+        if (r.failed > 0) toast.error(t('bulkCyclePartial', { moved: r.moved, failed: r.failed }))
+        else toast.success(t('bulkCycleDone', { count: r.moved }))
+        if (r.moved > 0) {
+          selection.clear()
+          refresh()
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
   }
 
   return (
-    <div ref={anchorRef} aria-hidden className="pointer-events-none h-0" >
+    <div ref={anchorRef} aria-hidden className="pointer-events-none h-0">
       {active &&
         typeof document !== 'undefined' &&
         createPortal(

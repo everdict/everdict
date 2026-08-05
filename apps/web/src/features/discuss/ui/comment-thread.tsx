@@ -1,7 +1,6 @@
 'use client'
 
-import { memo, useEffect, useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { memo, useEffect, useRef, useState } from 'react'
 import {
   CornerDownRight,
   Loader2,
@@ -14,6 +13,7 @@ import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { MediaDropZone, withBlockInsertion } from '@/features/attach-media'
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
@@ -244,16 +244,21 @@ export const CommentCard = memo(function CommentCard({
   const t = useTranslations('discuss')
   const locale = useLocale()
   const timeZone = useTimeZone()
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   function onDelete() {
     setError(undefined)
-    startTransition(async () => {
-      const r = await deleteCommentAction(item.id)
-      if (r.ok) router.refresh()
-      else setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteCommentAction(item.id)
+        if (r.ok) refresh()
+        else setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
   return (
     <div
@@ -476,10 +481,10 @@ function Composer({
   onDone?: () => void
 }) {
   const t = useTranslations('discuss')
-  const router = useRouter()
+  const refresh = useRefresh()
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [value, setValue] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const [menu, setMenu] = useState<{ query: string; at: number } | undefined>(undefined)
   const [active, setActive] = useState(0)
@@ -549,22 +554,27 @@ function Composer({
     const mentions = extractMentions(body)
     // @everdict mentioned → hand the thread to the discussion agent (its answer lands as an agent comment).
     const askAgent = mentionables.some((mn) => mn.isAgent && mentioned(body, mn.name))
-    startTransition(async () => {
-      const r = await createCommentAction({
-        resourceType,
-        resourceId,
-        body,
-        ...(parentId ? { parentId } : {}),
-        ...(mentions.length > 0 ? { mentions } : {}),
-        ...(askAgent ? { askAgent: true } : {}),
-      })
-      if (r.ok) {
-        setValue('')
-        setMenu(undefined)
-        onDone?.()
-        router.refresh()
-      } else setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createCommentAction({
+          resourceType,
+          resourceId,
+          body,
+          ...(parentId ? { parentId } : {}),
+          ...(mentions.length > 0 ? { mentions } : {}),
+          ...(askAgent ? { askAgent: true } : {}),
+        })
+        if (r.ok) {
+          setValue('')
+          setMenu(undefined)
+          onDone?.()
+          refresh()
+        } else setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

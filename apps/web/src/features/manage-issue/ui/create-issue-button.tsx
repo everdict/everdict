@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { ISSUE_PRIORITIES, issueHref, type IssuePriority, type IssueStatus } from '@/entities/issue'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
@@ -49,6 +50,7 @@ export function CreateIssueButton({
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
   const router = useRouter()
+  const refresh = useRefresh()
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -59,40 +61,45 @@ export function CreateIssueButton({
   const [priority, setPriority] = useState<IssuePriority>('none')
   const [estimate, setEstimate] = useState('')
   const [dueDate, setDueDate] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function submit() {
     const trimmed = title.trim()
     if (trimmed.length === 0) return
-    startTransition(async () => {
-      const r = await createIssueAction({
-        title: trimmed,
-        ...(description.trim() ? { description: description.trim() } : {}),
-        status,
-        ...(teamId ? { teamId } : {}),
-        ...(projectId ? { projectId } : {}),
-        ...(cycleId ? { cycleId } : {}),
-        ...(priority !== 'none' ? { priority } : {}),
-        ...(estimate ? { estimate: Number(estimate) } : {}),
-        ...(dueDate ? { dueDate } : {}),
-        ...(parentId ? { parentId } : {}),
-      })
-      if (!r.ok || !r.issue) {
-        toast.error(r.error ?? t('createError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createIssueAction({
+          title: trimmed,
+          ...(description.trim() ? { description: description.trim() } : {}),
+          status,
+          ...(teamId ? { teamId } : {}),
+          ...(projectId ? { projectId } : {}),
+          ...(cycleId ? { cycleId } : {}),
+          ...(priority !== 'none' ? { priority } : {}),
+          ...(estimate ? { estimate: Number(estimate) } : {}),
+          ...(dueDate ? { dueDate } : {}),
+          ...(parentId ? { parentId } : {}),
+        })
+        if (!r.ok || !r.issue) {
+          toast.error(r.error ?? t('createError'))
+          return
+        }
+        setOpen(false)
+        setTitle('')
+        setDescription('')
+        setProjectId('')
+        setCycleId('')
+        setPriority('none')
+        setEstimate('')
+        setDueDate('')
+        // 하위 이슈를 만들 때는 부모 화면에 머문다(다음 조각을 이어서 적는 흐름) — 그 외에는 만든 이슈로 간다.
+        if (parentId !== undefined) refresh()
+        else router.push(issueHref(workspace, r.issue.identifier, r.issue.title))
+      } finally {
+        setPending(false)
       }
-      setOpen(false)
-      setTitle('')
-      setDescription('')
-      setProjectId('')
-      setCycleId('')
-      setPriority('none')
-      setEstimate('')
-      setDueDate('')
-      // 하위 이슈를 만들 때는 부모 화면에 머문다(다음 조각을 이어서 적는 흐름) — 그 외에는 만든 이슈로 간다.
-      if (parentId !== undefined) router.refresh()
-      else router.push(issueHref(workspace, r.issue.identifier, r.issue.title))
-    })
+    })()
   }
 
   return (

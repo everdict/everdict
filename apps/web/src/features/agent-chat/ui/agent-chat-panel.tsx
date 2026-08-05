@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
@@ -26,6 +25,7 @@ import {
   type AnalysisArtifact,
 } from '@/entities/analysis-artifact'
 import { modelsSchema } from '@/entities/model'
+import { useRefresh } from '@/shared/lib/use-refresh'
 
 import { pushPromptHistory } from '../lib/prompt-history'
 import { ConversationView, type PendingUserMessage } from './conversation-view'
@@ -111,7 +111,7 @@ export function AgentChatPanel({
   user?: ChatUser
 } = {}) {
   const t = useTranslations('agentChat')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [sessions, setSessions] = useState<AgentSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AgentMessage[]>([])
@@ -571,7 +571,7 @@ export function AgentChatPanel({
       if (sessionId !== null) void reconcileMessages(sessionId)
       void loadSessions()
       void loadTeammates()
-      router.refresh()
+      refresh()
       setAttachEpoch((e) => e + 1)
     },
     [loadSessions, loadTeammates, reconcileMessages, router]

@@ -1,10 +1,10 @@
 'use client'
 
-import Link from 'next/link'
 import { Boxes, Layers, Plus, Shapes } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { HarnessTemplate } from '@/entities/harness'
+import { Link } from '@/shared/ui/link'
 import { StatCard } from '@/shared/ui/stat-card'
 
 // 한 형상당 한 줄 — 무엇인지(kind·category·서비스 수) + 그 위에 올라탄 하네스들 + 하나 더 만들기.

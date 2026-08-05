@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
@@ -6,6 +5,7 @@ import { getTranslations } from 'next-intl/server'
 import { CreateWorkspaceForm } from '@/features/create-workspace'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { Card } from '@/shared/ui/card'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'

@@ -1,10 +1,10 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowRight, FlaskConical, GitCompareArrows, Layers, ShieldCheck } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { currentPrincipal } from '@/shared/auth/principal'
 import { buttonVariants } from '@/shared/ui/button'
+import { Link } from '@/shared/ui/link'
 import { ThemeToggle } from '@/shared/ui/theme-toggle'
 
 // Not statically rendered, since it must verify the current auth via the control-plane GET /me.

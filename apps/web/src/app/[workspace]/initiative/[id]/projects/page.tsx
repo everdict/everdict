@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { Target } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -21,6 +20,7 @@ import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 
 import { loadInitiative } from '../load-initiative'
 

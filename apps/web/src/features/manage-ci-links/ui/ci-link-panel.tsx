@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useMemo, useState } from 'react'
 import { GitBranch, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -50,7 +50,7 @@ export function CiLinkPanel({
   const [dialogOpen, setDialogOpen] = useState(false)
   const [confirmRepo, setConfirmRepo] = useState<string>()
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const slotChoices = useMemo(() => slotChoicesFor(kind, serviceNames), [kind, serviceNames])
 
@@ -61,12 +61,17 @@ export function CiLinkPanel({
 
   function onDelete(link: CiLink) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await deleteCiLinkAction(link.repository, link.host)
-      setConfirmRepo(undefined)
-      if (r.ok && r.links) applyLinks(r.links)
-      else setError(r.error ?? t('unlinkFailed'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteCiLinkAction(link.repository, link.host)
+        setConfirmRepo(undefined)
+        if (r.ok && r.links) applyLinks(r.links)
+        else setError(r.error ?? t('unlinkFailed'))
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

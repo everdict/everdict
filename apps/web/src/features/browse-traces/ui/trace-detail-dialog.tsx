@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import {
   Boxes,
@@ -24,10 +23,11 @@ import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
+import { Link } from '@/shared/ui/link'
 
 import { inspectTraceAction } from '../api/browse-traces'
 import { AttributesView, IoPanel } from './data-view'
-import { SpanLegend, SpanTypeTag, SpanWaterfall, spanMetricLine } from './span-waterfall'
+import { SpanLegend, spanMetricLine, SpanTypeTag, SpanWaterfall } from './span-waterfall'
 import { TraceDetail } from './trace-detail'
 
 // The observability-grade trace detail — a near-fullscreen modal: waterfall on the left, the selected

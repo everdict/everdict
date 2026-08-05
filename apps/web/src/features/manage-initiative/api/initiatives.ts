@@ -1,6 +1,5 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
 import { initiativeSchema, type Initiative, type InitiativeStatus } from '@/entities/initiative'
@@ -11,6 +10,10 @@ import { controlPlane } from '@/shared/lib/control-plane'
 
 // Tracker initiative server actions. Completing an initiative is a GATE: refused with a 409 while any issue
 // under any of its projects is open. `force` closes it with known gaps and is recorded on the fact.
+//
+// ⚠️ 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
+// (무효화할 캐시가 없는데 Next 16 은 선언만으로 prefetch 캐시를 통째로 버려 화면의 모든 `<Link>` 가
+// 다시 prefetch 되고, 변이의 트랜지션이 그 큐에 묶인다). 근거는 `docs/web.md`.
 
 export interface InitiativeActionResult {
   ok: boolean
@@ -26,13 +29,6 @@ const errorEnvelopeSchema = z.object({
   data: z.unknown().optional(),
 })
 
-function revalidateInitiatives(): void {
-  revalidatePath('/[workspace]/initiatives', 'page')
-  // 상세는 탭 셋(개요·프로젝트·업데이트)이 한 레이아웃을 공유한다 — 레이아웃째 무효화해야 어느 탭에서
-  // 바꾸든 나머지 두 탭이 옛 숫자를 들고 있지 않는다.
-  revalidatePath('/[workspace]/initiatives/[id]', 'layout')
-}
-
 export async function createInitiativeAction(input: {
   name: string
   description?: string
@@ -45,7 +41,6 @@ export async function createInitiativeAction(input: {
   const ctx = await authContext()
   try {
     const initiative = initiativeSchema.parse(await controlPlane.createInitiative(ctx, input))
-    revalidateInitiatives()
     return { ok: true, initiative }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -81,9 +76,6 @@ async function relinkProjects(
       return { ok: false, error: e instanceof Error ? e.message : String(e), changed }
     }
   }
-  revalidateInitiatives()
-  revalidatePath('/[workspace]/projects', 'page')
-  revalidatePath('/[workspace]/projects/[id]', 'page')
   return { ok: true, changed }
 }
 
@@ -124,7 +116,6 @@ export async function updateInitiativeAction(
   const ctx = await authContext()
   try {
     const initiative = initiativeSchema.parse(await controlPlane.updateInitiative(ctx, id, patch))
-    revalidateInitiatives()
     return { ok: true, initiative }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -144,7 +135,6 @@ export async function setInitiativeStatusAction(
     })
     if (res.ok) {
       const initiative = initiativeSchema.parse(res.body)
-      revalidateInitiatives()
       return { ok: true, initiative }
     }
     const envelope = errorEnvelopeSchema.safeParse(res.body)
@@ -168,7 +158,6 @@ export async function postInitiativeUpdateAction(
   const ctx = await authContext()
   try {
     await controlPlane.postInitiativeUpdate(ctx, id, input)
-    revalidateInitiatives()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -179,7 +168,6 @@ export async function deleteInitiativeAction(id: string): Promise<{ ok: boolean;
   const ctx = await authContext()
   try {
     await controlPlane.deleteInitiative(ctx, id)
-    revalidateInitiatives()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -1,11 +1,13 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
 import type { PortabilityIssue } from '@everdict/contracts/wire'
 
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
+// 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
+// (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
+// 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export interface ValidateHarnessResult {
   ok: boolean
   errors?: string[]
@@ -45,8 +47,6 @@ export async function registerHarnessAction(instance: unknown): Promise<Register
   const ctx = await authContext()
   try {
     const rec = await controlPlane.registerHarness<{ id: string; version: string }>(ctx, instance)
-    revalidatePath('/[workspace]/harnesses')
-    revalidatePath('/[workspace]')
     return { ok: true, id: rec.id, version: rec.version }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -71,8 +71,6 @@ export async function registerHarnessTemplateAction(spec: unknown): Promise<Regi
       ctx,
       spec
     )
-    revalidatePath('/[workspace]/harnesses')
-    revalidatePath('/[workspace]')
     return { ok: true, id: rec.id, version: rec.version }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

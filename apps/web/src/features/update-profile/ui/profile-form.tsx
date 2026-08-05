@@ -1,11 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Check, Loader2, Lock, Pencil, Trash2 } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import { fileToImageDataUrl, MAX_IMAGE_UPLOAD_BYTES } from '@/shared/lib/image-resize'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input } from '@/shared/ui/input'
@@ -85,7 +85,7 @@ export function ProfileForm({
 }) {
   const t = useTranslations('updateProfile')
   const locale = useLocale()
-  const router = useRouter()
+  const refresh = useRefresh()
   const [n, setN] = useState(name ?? '')
   const [a, setA] = useState(avatarUrl ?? '')
   const [busy, setBusy] = useState(false)
@@ -127,7 +127,7 @@ export function ProfileForm({
     setBusy(false)
     if (r.ok) {
       setSaved(true)
-      router.refresh()
+      refresh()
     } else {
       setError(r.error)
     }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { ChevronRight, Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -48,9 +48,9 @@ export function IssueGroup({
   const [collapsed, setCollapsed] = useState(false)
   const [items, setItems] = useState(initial)
   const [cursor, setCursor] = useState(initialCursor)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
-  // 서버가 새로 그린 첫 장이 진실이다 — 상태를 바꿔 `router.refresh()` 가 돌면 여기에 맞춘다. 더 불러온
+  // 서버가 새로 그린 첫 장이 진실이다 — 상태를 바꿔 `refresh()` 가 돌면 여기에 맞춘다. 더 불러온
   // 행은 그때 사라진다: 필터가 바뀐 뒤에도 남아 있으면 그 그룹에 속하지 않는 행이 계속 서 있게 된다.
   const [seen, setSeen] = useState(initial)
   if (seen !== initial) {
@@ -61,15 +61,20 @@ export function IssueGroup({
 
   function loadMore() {
     if (cursor === undefined) return
-    startTransition(async () => {
-      const r = await loadIssuePageAction({ ...query, cursor })
-      if (!r.ok) {
-        toast.error(r.error)
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await loadIssuePageAction({ ...query, cursor })
+        if (!r.ok) {
+          toast.error(r.error)
+          return
+        }
+        setItems((prev) => [...prev, ...r.page.items])
+        setCursor(r.page.nextCursor)
+      } finally {
+        setPending(false)
       }
-      setItems((prev) => [...prev, ...r.page.items])
-      setCursor(r.page.nextCursor)
-    })
+    })()
   }
 
   return (
@@ -82,7 +87,10 @@ export function IssueGroup({
           className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-[12.5px] font-[510] text-foreground transition-colors hover:bg-accent"
         >
           <ChevronRight
-            className={cn('size-3.5 shrink-0 text-faint transition-transform', !collapsed && 'rotate-90')}
+            className={cn(
+              'size-3.5 shrink-0 text-faint transition-transform',
+              !collapsed && 'rotate-90'
+            )}
             aria-hidden
           />
           <IssueGroupLabel groupBy={groupBy} groupKey={groupKey} directories={directories} />

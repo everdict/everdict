@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Github, Link2, Loader2, RefreshCw, Unlink } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { issueAttachmentProxy, type Issue } from '@/entities/issue'
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -42,43 +42,58 @@ export function IssueGithubPanel({
   const t = useTranslations('issueGithub')
   const locale = useLocale()
   const timeZone = useTimeZone()
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   const [detaching, setDetaching] = useState(false)
 
   function sync() {
-    startTransition(async () => {
-      const r = await pullIssueAction(issueId)
-      if (!r.ok) {
-        toast.error(r.error ?? t('syncError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await pullIssueAction(issueId)
+        if (!r.ok) {
+          toast.error(r.error ?? t('syncError'))
+          return
+        }
+        toast.success(t('syncDone'))
+        refresh()
+      } finally {
+        setPending(false)
       }
-      toast.success(t('syncDone'))
-      router.refresh()
-    })
+    })()
   }
 
   function setSync(next: { pull: boolean; push: boolean }) {
-    startTransition(async () => {
-      const r = await setIssueGithubSyncAction(issueId, next)
-      if (!r.ok) {
-        toast.error(r.error ?? t('syncSettingError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await setIssueGithubSyncAction(issueId, next)
+        if (!r.ok) {
+          toast.error(r.error ?? t('syncSettingError'))
+          return
+        }
+        refresh()
+      } finally {
+        setPending(false)
       }
-      router.refresh()
-    })
+    })()
   }
 
   function detach() {
-    startTransition(async () => {
-      const r = await detachIssueGithubAction(issueId)
-      if (!r.ok) {
-        toast.error(r.error ?? t('detachError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await detachIssueGithubAction(issueId)
+        if (!r.ok) {
+          toast.error(r.error ?? t('detachError'))
+          return
+        }
+        setDetaching(false)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setDetaching(false)
-      router.refresh()
-    })
+    })()
   }
 
   return (

@@ -1,13 +1,13 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Check, ChevronsUpDown, Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { Workspace } from '@/entities/workspace'
 import { cn } from '@/shared/lib/utils'
+import { Link } from '@/shared/ui/link'
 
 // First-letter monogram of the name (workspace avatar).
 function monogram(name: string): string {

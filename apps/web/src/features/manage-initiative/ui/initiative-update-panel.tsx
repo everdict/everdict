@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Loader2, Megaphone } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { HealthPicker, type TrackerHealth } from '@/entities/tracker-health'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/input'
 
@@ -16,23 +16,28 @@ import { postInitiativeUpdateAction } from '../api/initiatives'
 // 판정과 그 문장이 한 폼에 있다 — 본문 없는 판정은 서버도 거절한다.
 export function InitiativeUpdatePanel({ id }: { id: string }) {
   const t = useTranslations('initiativesPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [health, setHealth] = useState<TrackerHealth>('on_track')
   const [body, setBody] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function submit() {
     const trimmed = body.trim()
     if (trimmed.length === 0) return
-    startTransition(async () => {
-      const r = await postInitiativeUpdateAction(id, { health, body: trimmed })
-      if (!r.ok) {
-        toast.error(r.error ?? t('updateError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await postInitiativeUpdateAction(id, { health, body: trimmed })
+        if (!r.ok) {
+          toast.error(r.error ?? t('updateError'))
+          return
+        }
+        setBody('')
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setBody('')
-      router.refresh()
-    })
+    })()
   }
 
   return (

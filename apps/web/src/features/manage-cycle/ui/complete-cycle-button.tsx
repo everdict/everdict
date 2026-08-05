@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { CheckCircle2, Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
@@ -26,21 +26,26 @@ export function CompleteCycleButton({
   unfinished: number
 }) {
   const t = useTranslations('cyclesPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [open, setOpen] = useState(false)
   const [target, setTarget] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function submit() {
-    startTransition(async () => {
-      const r = await completeCycleAction(id, target || undefined)
-      if (!r.ok) {
-        toast.error(r.error ?? t('completeError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await completeCycleAction(id, target || undefined)
+        if (!r.ok) {
+          toast.error(r.error ?? t('completeError'))
+          return
+        }
+        setOpen(false)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setOpen(false)
-      router.refresh()
-    })
+    })()
   }
 
   return (

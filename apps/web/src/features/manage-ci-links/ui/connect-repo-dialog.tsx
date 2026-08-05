@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import Link from 'next/link'
 import { Check, GitBranch, Lock, Search } from 'lucide-react'
 import { useTimeZone, useTranslations } from 'next-intl'
 
@@ -15,6 +14,7 @@ import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 
 import {
   listGithubAppReposAction,

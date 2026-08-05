@@ -1,7 +1,6 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
-import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -19,6 +18,7 @@ import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Kbd } from '@/shared/ui/kbd'
+import { Link } from '@/shared/ui/link'
 
 import { isNavItemActive, NAV_SECTIONS, RESOURCES_SECTION } from './nav-config'
 import { navGroupOpen } from './nav-group-open'
@@ -61,6 +61,10 @@ const rowClass =
 const iconClass =
   'size-[17px] shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'
 
+// 사이드바의 링크도 `shared/ui/link` 를 쓴다 — 즉 prefetch 가 꺼져 있다. 여기가 가장 크게 체감되는
+// 자리였다: 항상 떠 있는 18줄이 라우터 캐시가 무효화될 때마다 한꺼번에 다시 prefetch 되면서, 진행 중인
+// 변이의 트랜지션을 그 큐 뒤로 밀어냈다. 이유와 실측은 `shared/ui/link` 주석에 있다.
+//
 // Active nav-row markup (shared by the app nav + the settings nav): indigo active bar + accent fill.
 function navRowClass(active: boolean) {
   return cn(

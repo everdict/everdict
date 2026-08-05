@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useState, useTransition } from 'react'
+import { useId, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -37,7 +37,7 @@ export function CreateInitiativeButton({
   const [parentId, setParentId] = useState('')
   const [icon, setIcon] = useState('')
   const [targetDate, setTargetDate] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // 지난 날짜도 받는다 — 이미 넘긴 마감을 그대로 기록하는 건 정당하다. 다만 만들자마자 "기한 초과"로
   // 보일 거라는 사실은 저장 전에 알려준다.
@@ -46,26 +46,31 @@ export function CreateInitiativeButton({
   function submit() {
     const trimmed = name.trim()
     if (trimmed.length === 0) return
-    startTransition(async () => {
-      const r = await createInitiativeAction({
-        name: trimmed,
-        ...(description.trim() ? { description: description.trim() } : {}),
-        ...(parentId ? { parentId } : {}),
-        ...(icon.trim() ? { icon: icon.trim() } : {}),
-        ...(targetDate ? { targetDate } : {}),
-      })
-      if (!r.ok || !r.initiative) {
-        toast.error(r.error ?? t('createError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createInitiativeAction({
+          name: trimmed,
+          ...(description.trim() ? { description: description.trim() } : {}),
+          ...(parentId ? { parentId } : {}),
+          ...(icon.trim() ? { icon: icon.trim() } : {}),
+          ...(targetDate ? { targetDate } : {}),
+        })
+        if (!r.ok || !r.initiative) {
+          toast.error(r.error ?? t('createError'))
+          return
+        }
+        setOpen(false)
+        setName('')
+        setDescription('')
+        setParentId('')
+        setIcon('')
+        setTargetDate('')
+        router.push(`/${workspace}/initiative/${encodeURIComponent(r.initiative.id)}`)
+      } finally {
+        setPending(false)
       }
-      setOpen(false)
-      setName('')
-      setDescription('')
-      setParentId('')
-      setIcon('')
-      setTargetDate('')
-      router.push(`/${workspace}/initiative/${encodeURIComponent(r.initiative.id)}`)
-    })
+    })()
   }
 
   return (

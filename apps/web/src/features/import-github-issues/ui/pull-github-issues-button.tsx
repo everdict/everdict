@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { ChevronDown, Github, Loader2, RefreshCw } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Dialog } from '@/shared/ui/dialog'
@@ -29,28 +29,33 @@ const repoKey = (r: SyncedRepository) => `${r.host ?? 'github.com'}:${r.reposito
 // call per repo, then a per-issue apply whose failures are recorded per issue rather than failing the batch.
 export function PullGithubIssuesButton({ repositories }: { repositories: SyncedRepository[] }) {
   const t = useTranslations('importGithubIssues')
-  const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   const [failures, setFailures] = useState<IssueSyncOutcome[]>()
 
   function pull(repo: SyncedRepository) {
-    startTransition(async () => {
-      const r = await pullIssueRepositoryAction({
-        repository: repo.repository,
-        ...(repo.host ? { host: repo.host } : {}),
-      })
-      if (!r.ok || !r.outcomes) {
-        toast.error(r.error ?? t('pullFailed'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await pullIssueRepositoryAction({
+          repository: repo.repository,
+          ...(repo.host ? { host: repo.host } : {}),
+        })
+        if (!r.ok || !r.outcomes) {
+          toast.error(r.error ?? t('pullFailed'))
+          return
+        }
+        const changed = r.outcomes.filter((o) => o.changed).length
+        // A per-issue error is news the summary must not absorb — the count says the batch finished, the dialog
+        // says which issues did not.
+        const errors = r.outcomes.filter((o) => o.error !== undefined)
+        toast.success(t('pullDone', { changed, total: r.outcomes.length }))
+        if (errors.length > 0) setFailures(errors)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      const changed = r.outcomes.filter((o) => o.changed).length
-      // A per-issue error is news the summary must not absorb — the count says the batch finished, the dialog
-      // says which issues did not.
-      const errors = r.outcomes.filter((o) => o.error !== undefined)
-      toast.success(t('pullDone', { changed, total: r.outcomes.length }))
-      if (errors.length > 0) setFailures(errors)
-      router.refresh()
-    })
+    })()
   }
 
   if (repositories.length === 0) return null

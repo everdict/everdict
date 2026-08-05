@@ -8,6 +8,7 @@ import { useTimeZone, useTranslations } from 'next-intl'
 import { listGithubAppReposAction } from '@/features/manage-ci-links'
 import type { RepoInfo } from '@/entities/ci-link'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -61,6 +62,7 @@ export function ImportGithubIssuesDialog({
   const t = useTranslations('importGithubIssues')
   const timeZone = useTimeZone()
   const router = useRouter()
+  const refresh = useRefresh()
 
   const [repos, setRepos] = useState<RepoInfo[]>()
   const [reposError, setReposError] = useState<string>()
@@ -156,7 +158,7 @@ export function ImportGithubIssuesDialog({
         return
       }
       setOutcome({ created: r.created, skipped: r.skipped })
-      router.refresh()
+      refresh()
     })
   }
 

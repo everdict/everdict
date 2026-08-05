@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { getTranslations } from 'next-intl/server'
 
 import {
@@ -9,6 +8,7 @@ import {
   type TeamWithSummary,
 } from '@/entities/team'
 import { cn } from '@/shared/lib/utils'
+import { Link } from '@/shared/ui/link'
 
 // 팀 아래의 화면이 자기가 어디에 있는지 말하는 한 줄 — 브레드크럼(Teams › ENG)과, 그 팀이 **실제로 가진**
 // 자원들의 탭. 팀마다 가진 것이 다르므로(트리아지를 켜지 않은 팀에는 인박스가 없다) 탭은 팀 레코드에서

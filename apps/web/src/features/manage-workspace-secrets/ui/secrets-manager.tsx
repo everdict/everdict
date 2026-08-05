@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
   Activity,
@@ -26,6 +25,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { FieldError, Input, Label, Textarea } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
@@ -211,15 +211,20 @@ function SecretRows({
   const [addingOffline, setAddingOffline] = useState(false)
   const [confirmName, setConfirmName] = useState<string>()
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function onDelete(target: string) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await deleteSecretAction(target, scope)
-      setConfirmName(undefined)
-      if (!r.ok) setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteSecretAction(target, scope)
+        setConfirmName(undefined)
+        if (!r.ok) setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (
@@ -378,16 +383,21 @@ function AddSecretForm({
   const [show, setShow] = useState(false)
   const [multiline, setMultiline] = useState(false) // toggle for multi-line value input like a kubeconfig
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const nameInvalid = name.length > 0 && !NAME_RE.test(name)
 
   function onSave() {
     setError(undefined)
-    startTransition(async () => {
-      const r = await setSecretAction(name, value, scope)
-      if (r.ok) onDone()
-      else setError(r.error)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await setSecretAction(name, value, scope)
+        if (r.ok) onDone()
+        else setError(r.error)
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (
@@ -499,25 +509,30 @@ function OfflineTokenForm({
   const [oauthScope, setOauthScope] = useState('')
   const [show, setShow] = useState(false)
   const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const nameInvalid = name.length > 0 && !NAME_RE.test(name)
   const incomplete =
     name.length === 0 || tokenUrl.length === 0 || clientId.length === 0 || refreshToken.length === 0
 
   function onSave() {
     setError(undefined)
-    startTransition(async () => {
-      const grant: OfflineTokenGrantInput = {
-        tokenUrl,
-        clientId,
-        refreshToken,
-        ...(clientSecret ? { clientSecret } : {}),
-        ...(oauthScope ? { scope: oauthScope } : {}),
+    void (async () => {
+      setPending(true)
+      try {
+        const grant: OfflineTokenGrantInput = {
+          tokenUrl,
+          clientId,
+          refreshToken,
+          ...(clientSecret ? { clientSecret } : {}),
+          ...(oauthScope ? { scope: oauthScope } : {}),
+        }
+        const r = await setOfflineTokenAction(name, grant, scope)
+        if (r.ok) onDone()
+        else setError(r.error)
+      } finally {
+        setPending(false)
       }
-      const r = await setOfflineTokenAction(name, grant, scope)
-      if (r.ok) onDone()
-      else setError(r.error)
-    })
+    })()
   }
 
   return (

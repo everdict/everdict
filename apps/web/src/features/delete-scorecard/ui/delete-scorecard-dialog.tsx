@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, TriangleAlert, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EntityRef } from '@/shared/ui/chip'
@@ -35,27 +36,33 @@ export function DeleteScorecardDialog({
 }) {
   const t = useTranslations('deleteScorecard')
   const router = useRouter()
-  const [pending, startTransition] = useTransition()
+  const refresh = useRefresh()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const titleId = `delete-scorecard-${id}`
   const shortId = id.slice(0, 8)
 
   function onConfirm() {
     if (pending) return
-    startTransition(async () => {
-      const res = await deleteScorecardAction({ id })
-      if (!res.ok) {
-        // Keep the dialog open on failure (permission / still-running conflict) and show why.
-        setError(res.error)
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await deleteScorecardAction({ id })
+        if (!res.ok) {
+          // Keep the dialog open on failure (permission / still-running conflict) and show why.
+          setError(res.error)
+          return
+        }
+        toast.success(t('deleted', { id: shortId }))
+        if (afterDelete === 'toList') {
+          router.push(`/${workspace}/scorecards`)
+        }
+        refresh()
+        onClose()
+      } finally {
+        setPending(false)
       }
-      toast.success(t('deleted', { id: shortId }))
-      if (afterDelete === 'toList') {
-        router.push(`/${workspace}/scorecards`)
-      }
-      router.refresh()
-      onClose()
-    })
+    })()
   }
 
   return (

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
 import { BarChart3, History, Sparkles, type LucideIcon } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
@@ -13,6 +12,7 @@ import {
   type ActivityTone,
 } from '@/shared/ui/activity-feed'
 import { Badge } from '@/shared/ui/badge'
+import { Link } from '@/shared/ui/link'
 
 export interface Actor {
   name: string

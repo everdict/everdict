@@ -1,13 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 
 import type { ScorecardStatus } from '@/entities/scorecard'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { EntityRef, MetricChip } from '@/shared/ui/chip'
+import { Link } from '@/shared/ui/link'
 import { StatusIcon } from '@/shared/ui/status-pill'
 
 // 한 페이지에 노출할 개수 — 초기 대량 렌더를 막고 "더보기"로 10개씩 점진 노출.

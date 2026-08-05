@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { getTranslations } from 'next-intl/server'
 
 import {
@@ -12,6 +11,7 @@ import { issuePageSchema, type IssueSummary } from '@/entities/issue'
 import type { TeamWithSummary } from '@/entities/team'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { Link } from '@/shared/ui/link'
 import { Skeleton } from '@/shared/ui/skeleton'
 
 // 동기화 저장소 목록을 만들기 위한 상한. 저장소 이름을 세는 게 목적이라 한 장이면 충분하다.

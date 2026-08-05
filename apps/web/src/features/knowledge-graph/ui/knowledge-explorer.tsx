@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Maximize2, Network, RefreshCw, Search, ZoomIn, ZoomOut } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { KnowledgeGraph } from '@/entities/knowledge'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -36,11 +36,11 @@ export function KnowledgeExplorer({
   onSelect: (nodeId: string | null) => void
 }) {
   const t = useTranslations('knowledge')
-  const router = useRouter()
+  const refresh = useRefresh()
   const canvas = useRef<GraphCanvasHandle>(null)
   const [query, setQuery] = useState('')
   const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(new Set())
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const typeCounts = useMemo(
     () => Object.entries(graph.stats.nodesByType).sort((a, b) => b[1] - a[1]),
@@ -98,15 +98,20 @@ export function KnowledgeExplorer({
   }
 
   const reindex = (): void =>
-    startTransition(async () => {
-      const r = await reindexKnowledgeAction()
-      if (r.ok) {
-        toast.success(t('reindexed', { nodes: r.nodes ?? 0, edges: r.edges ?? 0 }))
-        router.refresh()
-      } else {
-        toast.error(r.error ?? t('reindexError'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await reindexKnowledgeAction()
+        if (r.ok) {
+          toast.success(t('reindexed', { nodes: r.nodes ?? 0, edges: r.edges ?? 0 }))
+          refresh()
+        } else {
+          toast.error(r.error ?? t('reindexError'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
 
   const reindexButton = canReindex ? (
     <Button size="sm" variant="secondary" onClick={reindex} disabled={pending}>

@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import Link from 'next/link'
 import { ChevronLeft, ChevronRight, Cpu, RefreshCw } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
@@ -9,6 +8,7 @@ import type { Run } from '@/entities/run'
 import { fmtTimeAgo } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
+import { Link } from '@/shared/ui/link'
 import { StatusPill } from '@/shared/ui/status-pill'
 
 import { listRunnerRunsAction } from '../api/runner-detail'
@@ -60,7 +60,8 @@ export function RunnerActivity({ runnerId, workspace }: { runnerId: string; work
   // Live-ish: quietly refresh the newest page while the tab is visible (no spinner reset, no page jump).
   useEffect(() => {
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible' && pageRef.current === 0) void load(0, { quiet: true })
+      if (document.visibilityState === 'visible' && pageRef.current === 0)
+        void load(0, { quiet: true })
     }, REFRESH_MS)
     return () => clearInterval(timer)
   }, [load])

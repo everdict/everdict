@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { Callout } from '@/shared/ui/callout'
@@ -24,7 +24,7 @@ export function HarnessSinkSelect({
   canAssign: boolean
 }) {
   const t = useTranslations('manageTraceSink')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const [value, setValue] = useState(current ?? '')
 
@@ -37,13 +37,18 @@ export function HarnessSinkSelect({
     const previous = value
     setError(undefined)
     setValue(next)
-    startTransition(async () => {
-      const r = await assignHarnessTraceSinkAction(harnessId, next || null)
-      if (!r.ok) {
-        setError(r.error)
-        setValue(previous) // revert to the previous selection on failure (the server is the source of truth).
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await assignHarnessTraceSinkAction(harnessId, next || null)
+        if (!r.ok) {
+          setError(r.error)
+          setValue(previous) // revert to the previous selection on failure (the server is the source of truth).
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
   }
 
   return (

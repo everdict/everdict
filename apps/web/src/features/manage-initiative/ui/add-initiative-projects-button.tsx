@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Dialog } from '@/shared/ui/dialog'
 import { Label } from '@/shared/ui/input'
@@ -26,24 +26,29 @@ export function AddInitiativeProjectsButton({
   candidates: { id: string; name: string }[]
 }) {
   const t = useTranslations('initiativesPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function submit() {
     if (selected.length === 0) return
-    startTransition(async () => {
-      const r = await addProjectsToInitiativeAction(initiativeId, selected)
-      if (!r.ok) {
-        toast.error(r.error ?? t('addProjectsError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await addProjectsToInitiativeAction(initiativeId, selected)
+        if (!r.ok) {
+          toast.error(r.error ?? t('addProjectsError'))
+          return
+        }
+        setOpen(false)
+        setSelected([])
+        toast.success(t('addProjectsDone', { count: r.changed }))
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setOpen(false)
-      setSelected([])
-      toast.success(t('addProjectsDone', { count: r.changed }))
-      router.refresh()
-    })
+    })()
   }
 
   return (

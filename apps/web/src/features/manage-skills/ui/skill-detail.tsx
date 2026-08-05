@@ -1,21 +1,21 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { FileText, Globe, Lock, Pencil, Store, Tag } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { Skill, SkillVersion } from '@/entities/skill'
 import { fmtDateTime } from '@/shared/lib/format'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Avatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
-import { InfoTip } from '@/shared/ui/tooltip'
 import { SkillDocs } from '@/shared/ui/skill-docs'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 import { stampSkillVersionAction } from '../api/skill-versions'
 import { ShareSkillToStoreDialog } from './share-skill-to-store-dialog'
@@ -56,7 +56,7 @@ export function SkillDetail({
   actions?: React.ReactNode
 }) {
   const t = useTranslations('skillsManager')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [editing, setEditing] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [stamping, setStamping] = useState(false)
@@ -156,7 +156,7 @@ export function SkillDetail({
           author={author}
           onClose={() => {
             setEditing(false)
-            router.refresh() // 편집 결과를 서버 데이터로 다시 읽는다(상세는 서버 컴포넌트 fetch).
+            refresh() // 편집 결과를 서버 데이터로 다시 읽는다(상세는 서버 컴포넌트 fetch).
           }}
         />
       )}
@@ -174,7 +174,7 @@ export function SkillDetail({
           skill={skill}
           onClose={() => {
             setStamping(false)
-            router.refresh()
+            refresh()
           }}
         />
       )}
@@ -187,19 +187,24 @@ function StampVersionDialog({ skill, onClose }: { skill: Skill; onClose: () => v
   const t = useTranslations('skillsManager')
   const [bump, setBump] = useState<'major' | 'minor' | 'patch'>('patch')
   const [note, setNote] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const submit = () =>
-    startTransition(async () => {
-      const r = await stampSkillVersionAction(skill.id, {
-        bump,
-        ...(note.trim() ? { note: note.trim() } : {}),
-      })
-      if (r.ok) {
-        toast.success(t('stamped', { version: r.stamped?.version ?? '' }))
-        onClose()
-      } else toast.error(r.error ?? t('stampError'))
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await stampSkillVersionAction(skill.id, {
+          bump,
+          ...(note.trim() ? { note: note.trim() } : {}),
+        })
+        if (r.ok) {
+          toast.success(t('stamped', { version: r.stamped?.version ?? '' }))
+          onClose()
+        } else toast.error(r.error ?? t('stampError'))
+      } finally {
+        setPending(false)
+      }
+    })()
 
   return (
     <Dialog open onClose={onClose} className="max-w-md">

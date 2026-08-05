@@ -1,12 +1,12 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useMemo, useState } from 'react'
 import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { LabelChip, type IssueLabel } from '@/entities/issue-label'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { DropdownMenu } from '@/shared/ui/dropdown-menu'
 
 import { updateIssueAction } from '../api/issues'
@@ -31,11 +31,11 @@ export function IssueLabelControl({
   canWrite: boolean
 }) {
   const t = useTranslations('issuesPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [created, setCreated] = useState<IssueLabel[]>([])
   const [selected, setSelected] = useState(labelIds)
   const [seen, setSeen] = useState(labelIds.join(' '))
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // 서버가 실어 온 값이 진실이다 — 저장이 끝나 페이지가 새로 그려졌거나 다른 화면이 고쳤으면 거기에 맞춘다.
   // 저장 중에는 맞추지 않는다: 연달아 두 번 토글하면 첫 응답이 두 번째 선택을 되돌려 깜빡인다.
@@ -53,15 +53,20 @@ export function IssueLabelControl({
   function apply(next: string[]): void {
     const previous = selected
     setSelected(next)
-    startTransition(async () => {
-      const r = await updateIssueAction(id, { labelIds: next })
-      if (!r.ok) {
-        setSelected(previous)
-        toast.error(r.error ?? t('labelsError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await updateIssueAction(id, { labelIds: next })
+        if (!r.ok) {
+          setSelected(previous)
+          toast.error(r.error ?? t('labelsError'))
+          return
+        }
+        refresh()
+      } finally {
+        setPending(false)
       }
-      router.refresh()
-    })
+    })()
   }
 
   if (!canWrite) {

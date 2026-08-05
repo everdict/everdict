@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Loader2, Megaphone } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { HealthPicker, type TrackerHealth } from '@/entities/tracker-health'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Textarea } from '@/shared/ui/input'
 
@@ -16,23 +16,28 @@ import { postProjectUpdateAction } from '../api/projects'
 // 서버도 거절한다. 판정 줄 자체는 이니셔티브 업데이트와 공유한다(entities/tracker-health).
 export function ProjectUpdatePanel({ id }: { id: string }) {
   const t = useTranslations('projectsPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [health, setHealth] = useState<TrackerHealth>('on_track')
   const [body, setBody] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function submit() {
     const trimmed = body.trim()
     if (trimmed.length === 0) return
-    startTransition(async () => {
-      const r = await postProjectUpdateAction(id, { health, body: trimmed })
-      if (!r.ok) {
-        toast.error(r.error ?? t('updateError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await postProjectUpdateAction(id, { health, body: trimmed })
+        if (!r.ok) {
+          toast.error(r.error ?? t('updateError'))
+          return
+        }
+        setBody('')
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setBody('')
-      router.refresh()
-    })
+    })()
   }
 
   return (

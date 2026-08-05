@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { File as FileIcon, Folder, Loader2, TriangleAlert, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
@@ -28,7 +28,7 @@ export function DeleteEntriesDialog({
   onDeleted: (paths: string[]) => void
 }) {
   const t = useTranslations('files')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   // Shrinks as entries are deleted, so a partial failure leaves only the still-present ones actionable.
   const [remaining, setRemaining] = useState<FsTarget[]>(targets)
   const [failed, setFailed] = useState<{ path: string; error: string }[]>([])
@@ -37,22 +37,27 @@ export function DeleteEntriesDialog({
 
   function onConfirm() {
     if (pending || remaining.length === 0) return
-    startTransition(async () => {
-      const res = await removeEntriesAction(
-        remaining.map((target) => ({ path: target.path, recursive: target.kind === 'dir' }))
-      )
-      if (res.removed.length > 0) {
-        toast.success(t('deletedMany', { count: res.removed.length }))
-        onDeleted(res.removed)
+    void (async () => {
+      setPending(true)
+      try {
+        const res = await removeEntriesAction(
+          remaining.map((target) => ({ path: target.path, recursive: target.kind === 'dir' }))
+        )
+        if (res.removed.length > 0) {
+          toast.success(t('deletedMany', { count: res.removed.length }))
+          onDeleted(res.removed)
+        }
+        if (res.failed.length === 0) {
+          onClose()
+          return
+        }
+        const failedPaths = new Set(res.failed.map((f) => f.path))
+        setRemaining(remaining.filter((target) => failedPaths.has(target.path)))
+        setFailed(res.failed)
+      } finally {
+        setPending(false)
       }
-      if (res.failed.length === 0) {
-        onClose()
-        return
-      }
-      const failedPaths = new Set(res.failed.map((f) => f.path))
-      setRemaining(remaining.filter((target) => failedPaths.has(target.path)))
-      setFailed(res.failed)
-    })
+    })()
   }
 
   return (

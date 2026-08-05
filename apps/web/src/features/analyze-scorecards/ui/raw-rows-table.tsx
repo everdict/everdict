@@ -1,13 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { ScorecardRecord } from '@/entities/scorecard'
 import { fmtDateTime } from '@/shared/lib/format'
+import { Link } from '@/shared/ui/link'
 import { OriginChip } from '@/shared/ui/origin'
 import { Score } from '@/shared/ui/score'
 import { StatusPill } from '@/shared/ui/status-pill'

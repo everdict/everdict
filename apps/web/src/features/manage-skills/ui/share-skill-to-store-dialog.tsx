@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { Store } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import type { Skill } from '@/entities/skill'
 import { saveCapabilityAction } from '@/features/publish-capability'
+import type { Skill } from '@/entities/skill'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
@@ -34,7 +34,7 @@ export function ShareSkillToStoreDialog({
       .replace(/^-+|-+$/g, '')
   )
   const [reach, setReach] = useState<'private' | 'workspace' | 'public'>('workspace')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // public 도 항상 목록에 노출 — 권한이 없으면 숨기는 대신 선택 시 사유를 보여주고 발행만 막는다
   // (스토어 에디터와 동일 패턴; 말없이 숨기면 "왜 없지?"가 된다). 컨트롤플레인이 최종 강제.
@@ -46,20 +46,25 @@ export function ShareSkillToStoreDialog({
   const publicLocked = reach === 'public' && !canPublishPublic
 
   const publish = () =>
-    startTransition(async () => {
-      const r = await saveCapabilityAction(capId, {
-        name: skill.name,
-        description: skill.description,
-        spec: { type: 'skill', instructions: skill.instructions, files: skill.files },
-        visibility: reach,
-      })
-      if (r.ok && r.result) {
-        toast.success(t('publishedToStore', { name: skill.name, version: r.result.version }))
-        onClose()
-      } else {
-        toast.error(r.error ?? t('publishError'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await saveCapabilityAction(capId, {
+          name: skill.name,
+          description: skill.description,
+          spec: { type: 'skill', instructions: skill.instructions, files: skill.files },
+          visibility: reach,
+        })
+        if (r.ok && r.result) {
+          toast.success(t('publishedToStore', { name: skill.name, version: r.result.version }))
+          onClose()
+        } else {
+          toast.error(r.error ?? t('publishError'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
 
   return (
     <Dialog open onClose={onClose} className="max-w-md">

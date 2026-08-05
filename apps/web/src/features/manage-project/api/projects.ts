@@ -1,6 +1,5 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
 import { projectSchema, type Project, type ProjectStatus } from '@/entities/project'
@@ -11,6 +10,10 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // Tracker project server actions. The one interesting operation is completion: it is a GATE, refused with a
 // 409 while the project has open issues. `force` is the deliberate override (a release ships with known gaps)
 // and is recorded on the fact, so the history says the deadline was overridden rather than met.
+//
+// ⚠️ 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
+// (무효화할 캐시가 없는데 Next 16 은 선언만으로 prefetch 캐시를 통째로 버려 화면의 모든 `<Link>` 가
+// 다시 prefetch 되고, 변이의 트랜지션이 그 큐에 묶인다). 근거는 `docs/web.md`.
 
 export interface ProjectActionResult {
   ok: boolean
@@ -28,11 +31,6 @@ const errorEnvelopeSchema = z.object({
   data: z.unknown().optional(),
 })
 
-function revalidateProjects(): void {
-  revalidatePath('/[workspace]/projects', 'page')
-  revalidatePath('/[workspace]/projects/[id]', 'page')
-}
-
 export async function createProjectAction(input: {
   name: string
   description?: string
@@ -43,7 +41,6 @@ export async function createProjectAction(input: {
   const ctx = await authContext()
   try {
     const project = projectSchema.parse(await controlPlane.createProject(ctx, input))
-    revalidateProjects()
     return { ok: true, project }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -64,7 +61,6 @@ export async function updateProjectAction(
   const ctx = await authContext()
   try {
     const project = projectSchema.parse(await controlPlane.updateProject(ctx, id, patch))
-    revalidateProjects()
     return { ok: true, project }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -84,7 +80,6 @@ export async function setProjectStatusAction(
     })
     if (res.ok) {
       const project = projectSchema.parse(res.body)
-      revalidateProjects()
       return { ok: true, project }
     }
     const envelope = errorEnvelopeSchema.safeParse(res.body)
@@ -108,7 +103,6 @@ export async function postProjectUpdateAction(
   const ctx = await authContext()
   try {
     await controlPlane.postProjectUpdate(ctx, id, input)
-    revalidateProjects()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -122,7 +116,6 @@ export async function addProjectMilestoneAction(
   const ctx = await authContext()
   try {
     const project = projectSchema.parse(await controlPlane.addProjectMilestone(ctx, id, input))
-    revalidateProjects()
     return { ok: true, project }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -139,7 +132,6 @@ export async function removeProjectMilestoneAction(
     const project = projectSchema.parse(
       await controlPlane.removeProjectMilestone(ctx, id, milestoneId)
     )
-    revalidateProjects()
     return { ok: true, project }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -150,7 +142,6 @@ export async function deleteProjectAction(id: string): Promise<{ ok: boolean; er
   const ctx = await authContext()
   try {
     await controlPlane.deleteProject(ctx, id)
-    revalidateProjects()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

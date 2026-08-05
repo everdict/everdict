@@ -1,12 +1,12 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Check, Copy, Loader2, Trash2, Upload } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import { copyText } from '@/shared/lib/clipboard'
 import { fileToImageDataUrl, MAX_IMAGE_UPLOAD_BYTES } from '@/shared/lib/image-resize'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Button, buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -56,7 +56,7 @@ export function WorkspaceInfoCard({
 }) {
   const t = useTranslations('workspaceSettings')
   const locale = useLocale()
-  const router = useRouter()
+  const refresh = useRefresh()
   const fileRef = useRef<HTMLInputElement>(null)
   const [n, setN] = useState(name)
   const [logo, setLogo] = useState(logoUrl ?? '')
@@ -97,7 +97,7 @@ export function WorkspaceInfoCard({
     setBusy(false)
     if (r.ok) {
       setSaved(true)
-      router.refresh()
+      refresh()
     } else {
       setError(r.error)
     }

@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { Loader2, Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label, Textarea } from '@/shared/ui/input'
@@ -16,36 +16,41 @@ import { createCycleAction } from '../api/cycles'
 // 바로 만들기" 한 번이고, 날짜는 건너뛴 주가 있을 때만 손댄다.
 export function CreateCycleButton({ teamId }: { teamId: string }) {
   const t = useTranslations('cyclesPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [startsAt, setStartsAt] = useState('')
   const [endsAt, setEndsAt] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // 반쪽 창은 서버가 400 으로 거절한다 — 누르기 전에 알려주는 편이 낫다.
   const halfWindow = (startsAt === '') !== (endsAt === '')
 
   function submit() {
-    startTransition(async () => {
-      const r = await createCycleAction({
-        teamId,
-        ...(name.trim() ? { name: name.trim() } : {}),
-        ...(description.trim() ? { description: description.trim() } : {}),
-        ...(startsAt && endsAt ? { startsAt, endsAt } : {}),
-      })
-      if (!r.ok || !r.cycle) {
-        toast.error(r.error ?? t('createError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createCycleAction({
+          teamId,
+          ...(name.trim() ? { name: name.trim() } : {}),
+          ...(description.trim() ? { description: description.trim() } : {}),
+          ...(startsAt && endsAt ? { startsAt, endsAt } : {}),
+        })
+        if (!r.ok || !r.cycle) {
+          toast.error(r.error ?? t('createError'))
+          return
+        }
+        setOpen(false)
+        setName('')
+        setDescription('')
+        setStartsAt('')
+        setEndsAt('')
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setOpen(false)
-      setName('')
-      setDescription('')
-      setStartsAt('')
-      setEndsAt('')
-      router.refresh()
-    })
+    })()
   }
 
   return (

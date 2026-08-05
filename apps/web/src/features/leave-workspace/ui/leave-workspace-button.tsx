@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
@@ -16,22 +17,28 @@ import { leaveWorkspaceAction } from '../api/leave-workspace'
 export function LeaveWorkspaceButton() {
   const t = useTranslations('leaveWorkspace')
   const router = useRouter()
+  const refresh = useRefresh()
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function onLeave() {
     setError(undefined)
-    startTransition(async () => {
-      const r = await leaveWorkspaceAction()
-      if (r.ok) {
-        router.push('/')
-        router.refresh()
-      } else {
-        setConfirming(false)
-        setError(r.error ?? t('leaveFailed'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await leaveWorkspaceAction()
+        if (r.ok) {
+          router.push('/')
+          refresh()
+        } else {
+          setConfirming(false)
+          setError(r.error ?? t('leaveFailed'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
   }
 
   return (

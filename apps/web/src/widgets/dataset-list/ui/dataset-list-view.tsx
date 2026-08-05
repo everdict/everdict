@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { Database } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -15,6 +14,7 @@ import { buildDatasetRelations } from '@/shared/lib/dataset-relations'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 import { DatasetList } from './dataset-list'

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState, useTransition } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   Bot,
   Check,
@@ -49,7 +49,7 @@ export function TaskBoard({
   const [tasks, setTasks] = useState<AgentTask[]>(initialTasks)
   const [filter, setFilter] = useState<AgentTaskStatus | 'all'>('all')
   const [subject, setSubject] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const visible = useMemo(
     () => (filter === 'all' ? tasks : tasks.filter((task) => task.status === filter)),
@@ -63,43 +63,58 @@ export function TaskBoard({
   const create = useCallback(() => {
     const trimmed = subject.trim()
     if (trimmed.length === 0) return
-    startTransition(async () => {
-      const r = await createTaskAction({ subject: trimmed })
-      if (!r.ok || !r.task) {
-        toast.error(r.error ?? t('errorCreate'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await createTaskAction({ subject: trimmed })
+        if (!r.ok || !r.task) {
+          toast.error(r.error ?? t('errorCreate'))
+          return
+        }
+        const created = r.task
+        setTasks((prev) => [created, ...prev])
+        setSubject('')
+      } finally {
+        setPending(false)
       }
-      const created = r.task
-      setTasks((prev) => [created, ...prev])
-      setSubject('')
-    })
+    })()
   }, [subject, t])
 
   const transition = useCallback(
     (id: string, status: AgentTaskStatus) => {
-      startTransition(async () => {
-        const r = await updateTaskAction(id, { status })
-        if (!r.ok || !r.task) {
-          toast.error(r.error ?? t('errorUpdate'))
-          return
+      void (async () => {
+        setPending(true)
+        try {
+          const r = await updateTaskAction(id, { status })
+          if (!r.ok || !r.task) {
+            toast.error(r.error ?? t('errorUpdate'))
+            return
+          }
+          const updated = r.task
+          setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)))
+        } finally {
+          setPending(false)
         }
-        const updated = r.task
-        setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)))
-      })
+      })()
     },
     [t]
   )
 
   const remove = useCallback(
     (id: string) => {
-      startTransition(async () => {
-        const r = await deleteTaskAction(id)
-        if (!r.ok) {
-          toast.error(r.error ?? t('errorDelete'))
-          return
+      void (async () => {
+        setPending(true)
+        try {
+          const r = await deleteTaskAction(id)
+          if (!r.ok) {
+            toast.error(r.error ?? t('errorDelete'))
+            return
+          }
+          setTasks((prev) => prev.filter((task) => task.id !== id))
+        } finally {
+          setPending(false)
         }
-        setTasks((prev) => prev.filter((task) => task.id !== id))
-      })
+      })()
     },
     [t]
   )

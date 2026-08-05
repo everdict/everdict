@@ -1,10 +1,10 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
 import { CircleStop } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 
 import { stopScorecardAction } from '../api/stop-scorecard'
@@ -13,7 +13,7 @@ import { stopScorecardAction } from '../api/stop-scorecard'
 // then calls the server action; on success it refreshes so the header shows the new `cancelled` status.
 export function StopScorecardButton({ id }: { id: string }) {
   const t = useTranslations('scorecardsPage')
-  const router = useRouter()
+  const refresh = useRefresh()
   const [pending, start] = useTransition()
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string>()
@@ -24,7 +24,7 @@ export function StopScorecardButton({ id }: { id: string }) {
       const res = await stopScorecardAction(id)
       if (res.ok) {
         setConfirming(false)
-        router.refresh()
+        refresh()
       } else {
         setError(res.error ?? t('stopError'))
       }

@@ -21,6 +21,7 @@ import { AgentChatPanel, type ChatUser } from '@/features/agent-chat'
 import { HarnessPlaygroundPanel } from '@/features/harness-playground'
 import { agentChatMissionSchema, agentReferenceSchema } from '@/entities/agent-session'
 import { RELOAD_INFRA_FRAMES_EVENT } from '@/shared/lib/reload-infra-frames'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 
 import {
@@ -92,6 +93,7 @@ export function InfraPanel({
 } = {}) {
   const t = useTranslations('infraPanel')
   const router = useRouter()
+  const refresh = useRefresh()
   const {
     workspace,
     open,
@@ -310,9 +312,9 @@ export function InfraPanel({
   ])
 
   // A server-resolved per-device preference (locale / timezone) changed in the parent. The mounted iframes read
-  // it server-side off the cookie and stay frozen, so router.refresh() in the switcher never reaches their
+  // it server-side off the cookie and stay frozen, so refresh() in the switcher never reaches their
   // separate browsing context. Signal each frame to soft-refresh IN PLACE (everdict:refresh → EmbedShell calls
-  // its own router.refresh()) — the server re-renders with the new cookie without a hard reload, so scroll,
+  // its own refresh()) — the server re-renders with the new cookie without a hard reload, so scroll,
   // in-iframe route and live streams survive and it feels like one app (not a flashing sub-frame). Theme is
   // client-only and syncs live via the storage event, so it is not signalled here.
   useEffect(() => {

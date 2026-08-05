@@ -1,24 +1,20 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
-
 import { cycleSchema, type Cycle } from '@/entities/cycle'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
 // 사이클 서버 액션 — 제어 평면의 /cycles 를 그대로 부르는 HTTP 클라이언트다. 번호 발번, 창 제안, 이월은
 // 전부 서버가 하고 여기서는 아무것도 판단하지 않는다.
+//
+// ⚠️ 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
+// (무효화할 캐시가 없는데 Next 16 은 선언만으로 prefetch 캐시를 통째로 버려 화면의 모든 `<Link>` 가
+// 다시 prefetch 되고, 변이의 트랜지션이 그 큐에 묶인다). 근거는 `docs/web.md`.
 
 export interface CycleActionResult {
   ok: boolean
   cycle?: Cycle
   error?: string
-}
-
-function revalidateCycles(): void {
-  revalidatePath('/[workspace]/cycles', 'page')
-  revalidatePath('/[workspace]/cycles/[id]', 'page')
-  revalidatePath('/[workspace]/issues', 'page')
 }
 
 export async function createCycleAction(input: {
@@ -32,7 +28,6 @@ export async function createCycleAction(input: {
   const ctx = await authContext()
   try {
     const cycle = cycleSchema.parse(await controlPlane.createCycle(ctx, input))
-    revalidateCycles()
     return { ok: true, cycle }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -46,7 +41,6 @@ export async function updateCycleAction(
   const ctx = await authContext()
   try {
     const cycle = cycleSchema.parse(await controlPlane.updateCycle(ctx, id, patch))
-    revalidateCycles()
     return { ok: true, cycle }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -63,7 +57,6 @@ export async function completeCycleAction(
     const cycle = cycleSchema.parse(
       await controlPlane.completeCycle(ctx, id, moveUnfinishedTo ? { moveUnfinishedTo } : {})
     )
-    revalidateCycles()
     return { ok: true, cycle }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -74,7 +67,6 @@ export async function deleteCycleAction(id: string): Promise<{ ok: boolean; erro
   const ctx = await authContext()
   try {
     await controlPlane.deleteCycle(ctx, id)
-    revalidateCycles()
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -37,7 +37,7 @@ export function MattermostManager({
   secretNames: string[]
 }) {
   const t = useTranslations('manageMattermost')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [probing, startProbing] = useTransition()
   const [error, setError] = useState<string>()
   // Edit target name — a row's Edit prefills the form (save is an upsert keyed by name). undefined = add a connection.
@@ -130,25 +130,35 @@ export function MattermostManager({
       setError(t('validationName'))
       return
     }
-    startTransition(async () => {
-      const r = await setMattermostAction({
-        name: name.trim(),
-        botTokenSecretName: tokenName.trim(),
-        ...(channel.trim() ? { defaultChannelId: channel.trim() } : {}),
-        ...(cmdName.trim() ? { commandTokenSecretName: cmdName.trim() } : {}),
-      })
-      if (!r.ok) setError(r.error)
-      else resetForm()
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await setMattermostAction({
+          name: name.trim(),
+          botTokenSecretName: tokenName.trim(),
+          ...(channel.trim() ? { defaultChannelId: channel.trim() } : {}),
+          ...(cmdName.trim() ? { commandTokenSecretName: cmdName.trim() } : {}),
+        })
+        if (!r.ok) setError(r.error)
+        else resetForm()
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   function onRemove(target: string) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await removeMattermostAction(target)
-      if (!r.ok) setError(r.error)
-      else if (editing === target) resetForm()
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await removeMattermostAction(target)
+        if (!r.ok) setError(r.error)
+        else if (editing === target) resetForm()
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

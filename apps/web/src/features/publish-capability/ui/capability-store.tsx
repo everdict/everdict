@@ -1,7 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
-import Link from 'next/link'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight,
   Boxes,
@@ -44,6 +43,7 @@ import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { StatCard } from '@/shared/ui/stat-card'
 import { InfoTip } from '@/shared/ui/tooltip'
@@ -109,7 +109,7 @@ export function CapabilityStore({
   const [editing, setEditing] = useState<Capability | 'new' | null>(null)
   const [reaching, setReaching] = useState<Capability | null>(null)
   const [confirming, setConfirming] = useState<Capability | null>(null)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   // 필터 — 하네스/데이터셋 목록과 동일한 지속 필터(검색·종류·상태·정렬). 워크스페이스 + variant 별로 기억.
   // 카탈로그에서 상태 필터가 사라졌으므로(있는 것은 아예 안 보임) 저장 키를 v2 로 올려 예전 값이 되살아나지 않게 한다.
@@ -190,12 +190,17 @@ export function CapabilityStore({
   const managedCount = useMemo(() => items.filter(isBuiltInCapability).length, [items])
 
   const del = (c: Capability) =>
-    startTransition(async () => {
-      const r = await deleteCapabilityVersionAction(c.id, c.version)
-      if (r.ok) toast.success(t('deleted', { name: c.name }))
-      else toast.error(r.error ?? t('deleteError'))
-      setConfirming(null)
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteCapabilityVersionAction(c.id, c.version)
+        if (r.ok) toast.success(t('deleted', { name: c.name }))
+        else toast.error(r.error ?? t('deleteError'))
+        setConfirming(null)
+      } finally {
+        setPending(false)
+      }
+    })()
 
   const typeOptions = [
     { value: 'all', label: t('typeLabel') },
@@ -621,7 +626,7 @@ function CapabilityEditorDialog({
   const initialSecrets: RequiredSecret[] = mcp?.requiredSecrets ?? code?.requiredSecrets ?? []
   const [secrets, setSecrets] = useState<RequiredSecret[]>(initialSecrets)
 
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const splitCsv = (s: string): string[] =>
     s
@@ -775,50 +780,60 @@ function CapabilityEditorDialog({
 
   // 저장 전 검증(dry-run) — 새 capability/새 버전 여부 + 예측 버전 + 이미지 경고를 인라인으로 보여준다.
   const runValidate = () =>
-    startTransition(async () => {
-      const spec = buildSpec()
-      if ('error' in spec) {
-        setValidateResult({ ok: false, errors: [spec.error] })
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const spec = buildSpec()
+        if ('error' in spec) {
+          setValidateResult({ ok: false, errors: [spec.error] })
+          return
+        }
+        const r = await validateCapabilityAction(
+          (isNew ? id.trim() : capability.id) || '(unnamed)',
+          name.trim(),
+          description.trim(),
+          spec
+        )
+        if (r.ok && r.result) setValidateResult(r.result)
+        else toast.error(r.error ?? t('saveError'))
+      } finally {
+        setPending(false)
       }
-      const r = await validateCapabilityAction(
-        (isNew ? id.trim() : capability.id) || '(unnamed)',
-        name.trim(),
-        description.trim(),
-        spec
-      )
-      if (r.ok && r.result) setValidateResult(r.result)
-      else toast.error(r.error ?? t('saveError'))
-    })
+    })()
 
   const save = () =>
-    startTransition(async () => {
-      const spec = buildSpec()
-      if ('error' in spec) {
-        toast.error(spec.error)
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const spec = buildSpec()
+        if ('error' in spec) {
+          toast.error(spec.error)
+          return
+        }
+        const r = await saveCapabilityAction(isNew ? id.trim() : capability.id, {
+          name,
+          description,
+          spec,
+          ...(isNew ? { visibility, sharedWith } : {}),
+          tags: splitCsv(tags),
+        })
+        if (r.ok) {
+          toast.success(isNew ? t('published', { name }) : t('saved', { name }))
+          // 이미지 분류 경고(warn-not-block) — 발행은 성공, 풀 보장/재현성만 주의 환기.
+          for (const w of r.result?.imageWarnings ?? [])
+            toast.warning(
+              t(`imageWarning_${w.class === 'mutable-tag' ? 'mutableTag' : 'noPull'}`, {
+                image: w.image,
+              })
+            )
+          onClose()
+        } else {
+          toast.error(r.error ?? t('saveError'))
+        }
+      } finally {
+        setPending(false)
       }
-      const r = await saveCapabilityAction(isNew ? id.trim() : capability.id, {
-        name,
-        description,
-        spec,
-        ...(isNew ? { visibility, sharedWith } : {}),
-        tags: splitCsv(tags),
-      })
-      if (r.ok) {
-        toast.success(isNew ? t('published', { name }) : t('saved', { name }))
-        // 이미지 분류 경고(warn-not-block) — 발행은 성공, 풀 보장/재현성만 주의 환기.
-        for (const w of r.result?.imageWarnings ?? [])
-          toast.warning(
-            t(`imageWarning_${w.class === 'mutable-tag' ? 'mutableTag' : 'noPull'}`, {
-              image: w.image,
-            })
-          )
-        onClose()
-      } else {
-        toast.error(r.error ?? t('saveError'))
-      }
-    })
+    })()
 
   const canSave =
     name.trim().length > 0 &&

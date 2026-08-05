@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 
 import type { Project } from '@/entities/project'
 import { TeamKeyBadge } from '@/entities/team'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Dialog } from '@/shared/ui/dialog'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -44,6 +45,7 @@ export function ProjectActions({
 }) {
   const t = useTranslations('projectsPage')
   const router = useRouter()
+  const refresh = useRefresh()
   const [editing, setEditing] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [name, setName] = useState(project.name)
@@ -51,7 +53,7 @@ export function ProjectActions({
   const [initiativeIds, setInitiativeIds] = useState<string[]>(project.initiativeIds)
   const [teamIds, setTeamIds] = useState<string[]>(project.teamIds)
   const [targetDate, setTargetDate] = useState(project.targetDate ?? '')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   function save() {
     const patch = {
@@ -69,27 +71,37 @@ export function ProjectActions({
       setEditing(false)
       return
     }
-    startTransition(async () => {
-      const r = await updateProjectAction(project.id, patch)
-      if (!r.ok) {
-        toast.error(r.error ?? t('editError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await updateProjectAction(project.id, patch)
+        if (!r.ok) {
+          toast.error(r.error ?? t('editError'))
+          return
+        }
+        setEditing(false)
+        refresh()
+      } finally {
+        setPending(false)
       }
-      setEditing(false)
-      router.refresh()
-    })
+    })()
   }
 
   function remove() {
-    startTransition(async () => {
-      const r = await deleteProjectAction(project.id)
-      if (!r.ok) {
-        toast.error(r.error ?? t('deleteError'))
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await deleteProjectAction(project.id)
+        if (!r.ok) {
+          toast.error(r.error ?? t('deleteError'))
+          return
+        }
+        setConfirming(false)
+        router.push(`/${workspace}/projects`)
+      } finally {
+        setPending(false)
       }
-      setConfirming(false)
-      router.push(`/${workspace}/projects`)
-    })
+    })()
   }
 
   return (

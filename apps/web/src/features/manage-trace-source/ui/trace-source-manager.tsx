@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -82,7 +82,7 @@ export function TraceSourceManager({
   secretNames: string[]
 }) {
   const t = useTranslations('manageTraceSource')
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   // The register form stays hidden until asked for — an add button or a row's edit opens it; save/cancel closes it.
   const [adding, setAdding] = useState(false)
@@ -151,31 +151,36 @@ export function TraceSourceManager({
     }
     const key = probeKey
     setProbe({ status: 'testing', key, scopes: [] })
-    startTransition(async () => {
-      const r = await probeTraceSourceAction({
-        kind,
-        endpoint: endpoint.trim(),
-        ...(authName.trim() ? { authSecretName: authName.trim() } : {}),
-      })
-      if (!r.ok) {
-        setProbe({ status: 'fail', key, reason: 'error', detail: r.error, scopes: [] })
-        return
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await probeTraceSourceAction({
+          kind,
+          endpoint: endpoint.trim(),
+          ...(authName.trim() ? { authSecretName: authName.trim() } : {}),
+        })
+        if (!r.ok) {
+          setProbe({ status: 'fail', key, reason: 'error', detail: r.error, scopes: [] })
+          return
+        }
+        const res = r.result
+        setProbe({
+          status: res.reachable ? 'ok' : 'fail',
+          key,
+          detail: res.detail,
+          reason: res.reason,
+          scopes: res.scopes ?? [],
+        })
+        // Clear a stale scope selection that is no longer offered by this platform.
+        if (res.reachable) {
+          const ids = new Set((res.scopes ?? []).map((s) => s.id))
+          if (service && !ids.has(service)) setService('')
+          if (project && !ids.has(project)) setProject('')
+        }
+      } finally {
+        setPending(false)
       }
-      const res = r.result
-      setProbe({
-        status: res.reachable ? 'ok' : 'fail',
-        key,
-        detail: res.detail,
-        reason: res.reason,
-        scopes: res.scopes ?? [],
-      })
-      // Clear a stale scope selection that is no longer offered by this platform.
-      if (res.reachable) {
-        const ids = new Set((res.scopes ?? []).map((s) => s.id))
-        if (service && !ids.has(service)) setService('')
-        if (project && !ids.has(project)) setProject('')
-      }
-    })
+    })()
   }
 
   function onSave() {
@@ -184,29 +189,39 @@ export function TraceSourceManager({
       setError(t('nameRequired'))
       return
     }
-    startTransition(async () => {
-      const r = await upsertTraceSourceAction({
-        name: name.trim(),
-        kind,
-        endpoint: endpoint.trim(),
-        correlate,
-        ...(authName.trim() ? { authSecretName: authName.trim() } : {}),
-        ...(service.trim() ? { service: service.trim() } : {}),
-        ...(project.trim() ? { project: project.trim() } : {}),
-        ...(webUrl.trim() ? { webUrl: webUrl.trim() } : {}),
-      })
-      if (!r.ok) setError(r.error)
-      else resetForm()
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await upsertTraceSourceAction({
+          name: name.trim(),
+          kind,
+          endpoint: endpoint.trim(),
+          correlate,
+          ...(authName.trim() ? { authSecretName: authName.trim() } : {}),
+          ...(service.trim() ? { service: service.trim() } : {}),
+          ...(project.trim() ? { project: project.trim() } : {}),
+          ...(webUrl.trim() ? { webUrl: webUrl.trim() } : {}),
+        })
+        if (!r.ok) setError(r.error)
+        else resetForm()
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   function onRemove(target: string) {
     setError(undefined)
-    startTransition(async () => {
-      const r = await removeTraceSourceAction(target)
-      if (!r.ok) setError(r.error)
-      else if (editing === target) resetForm()
-    })
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await removeTraceSourceAction(target)
+        if (!r.ok) setError(r.error)
+        else if (editing === target) resetForm()
+      } finally {
+        setPending(false)
+      }
+    })()
   }
 
   return (

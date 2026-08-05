@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo } from 'react'
-import Link from 'next/link'
 import { Boxes, Clock, Database, Search, Waypoints } from 'lucide-react'
 import { useTimeZone, useTranslations } from 'next-intl'
 
@@ -15,6 +14,7 @@ import { UserAvatar } from '@/shared/ui/avatar'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { Score } from '@/shared/ui/score'
 import { StatCard } from '@/shared/ui/stat-card'

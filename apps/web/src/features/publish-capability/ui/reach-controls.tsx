@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
@@ -105,21 +105,26 @@ export function ReachDialog({
   const t = useTranslations('capabilityStore')
   const [visibility, setVisibility] = useState<CapabilityVisibility>(capability.visibility)
   const [sharedWith, setSharedWith] = useState<string[]>(capability.sharedWith)
-  const [pending, startTransition] = useTransition()
+  const [pending, setPending] = useState(false)
 
   const apply = () =>
-    startTransition(async () => {
-      const r = await setCapabilityVisibilityAction(capability.id, {
-        visibility,
-        sharedWith: visibility === 'subset' ? sharedWith : [],
-      })
-      if (r.ok) {
-        toast.success(t('reachSaved', { name: capability.name }))
-        onClose()
-      } else {
-        toast.error(r.error ?? t('saveError'))
+    void (async () => {
+      setPending(true)
+      try {
+        const r = await setCapabilityVisibilityAction(capability.id, {
+          visibility,
+          sharedWith: visibility === 'subset' ? sharedWith : [],
+        })
+        if (r.ok) {
+          toast.success(t('reachSaved', { name: capability.name }))
+          onClose()
+        } else {
+          toast.error(r.error ?? t('saveError'))
+        }
+      } finally {
+        setPending(false)
       }
-    })
+    })()
 
   return (
     <Dialog open onClose={onClose} className="max-w-md">
