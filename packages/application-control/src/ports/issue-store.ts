@@ -32,6 +32,11 @@ export interface IssueListFilter {
   // Issues that point at a given capability — powers "which issues watch this harness" and the regression
   // watch's candidate lookup (id-level, version-agnostic: a cross-version regression is exactly the signal).
   link?: { type: IssueLinkType; id: string };
+  // Free-text search over what an issue is CITED by — its identifier (`ENG-12`, including the ones it used to
+  // answer to) and its title. Not the description: a picker that has to say why a row matched cannot show a
+  // paragraph, and "the title contains it" is the one match a person can verify at a glance. Case-insensitive,
+  // substring, ANDed with every other filter.
+  query?: string;
   githubRepository?: string;
   syncPull?: boolean; // only issues whose GitHub copy has pull enabled (the manual bulk sync's working set)
   limit?: number;

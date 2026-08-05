@@ -433,6 +433,9 @@ export default async function HarnessDetailPage({
       {/* 만들어진 배경 — 이 하네스가 어느 이슈에서 태어났고 어떤 이슈들이 그것을 지켜보는지. */}
       <CapabilityLineage
         workspace={workspace}
+        kind="harness"
+        id={id}
+        canLinkIssues={can(principal?.roles, 'issues:write')}
         {...(harnessOrigin ? { origin: harnessOrigin } : {})}
         issues={linkedIssues}
         {...(author.known ? { createdByLabel: author.name } : {})}

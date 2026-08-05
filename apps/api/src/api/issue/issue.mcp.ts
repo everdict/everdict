@@ -118,7 +118,8 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         "under a different order is refused rather than served as a meaningless window. status, priority, " +
         "project, assignee, cycle and label take an ARRAY to mean 'any of these', and AND across facets; the " +
         'empty string reaches the unset bucket (assignee: [""] = unassigned). `linkType` + `linkId` answers ' +
-        "'which issues watch this harness/dataset', the lookup to run before investigating a failing batch. " +
+        "'which issues watch this harness/dataset', the lookup to run before investigating a failing batch, and " +
+        "`q` searches the identifier + title when you know what the issue is CALLED but not its id. " +
         "`parent` takes an issue id for its sub-issues, or the literal `none` for the top-level issues only.",
       inputSchema: {
         status: z.array(IssueStatusSchema).optional(),
@@ -131,6 +132,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         parent: z.string().optional().describe("an issue id for its sub-issues, or `none` for top-level only"),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
+        q: z.string().optional().describe("free-text search over identifier + title (the issue's own name)"),
         order: IssueOrderSchema.optional().describe("updated (default) | created | priority | due"),
         limit: z.number().int().positive().max(200).optional().describe("page size (default 50, max 200)"),
         cursor: z.string().optional().describe("page token from a prior page's nextCursor (next page)"),
@@ -175,6 +177,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         parent: z.string().optional(),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
+        q: z.string().optional().describe("free-text search over identifier + title (the issue's own name)"),
       },
     },
     (a) =>
@@ -363,6 +366,7 @@ function issueFilterOfArgs(a: {
   parent?: string;
   linkType?: IssueListFilter["link"] extends infer L ? (L extends { type: infer T } ? T : never) : never;
   linkId?: string;
+  q?: string;
 }): IssueListFilter {
   return {
     ...(a.status !== undefined ? { statuses: a.status } : {}),
@@ -373,5 +377,6 @@ function issueFilterOfArgs(a: {
     ...(a.label !== undefined ? { labelIds: a.label } : {}),
     ...(a.parent !== undefined ? { parentId: a.parent === "none" ? null : a.parent } : {}),
     ...(a.linkType !== undefined && a.linkId !== undefined ? { link: { type: a.linkType, id: a.linkId } } : {}),
+    ...(a.q !== undefined ? { query: a.q } : {}),
   };
 }

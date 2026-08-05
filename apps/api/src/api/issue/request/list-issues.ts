@@ -44,6 +44,10 @@ export const ListIssuesQuerySchema = z.object({
   // "Which issues watch this harness" — the capability detail pages' reverse lookup.
   linkType: IssueLinkTypeSchema.optional(),
   linkId: z.string().min(1).optional(),
+  // Free-text search over identifier + title — what every "which issue do you mean" picker asks. Server-side
+  // because the alternative is loading a window and filtering it in the client, which quietly stops finding
+  // issues once the workspace outgrows the window.
+  q: z.string().min(1).max(200).optional(),
   // The bulk GitHub sync's working set. Exposed because the alternative a caller is left with is reading the
   // whole list and filtering client-side, which is what the issues page used to do.
   syncPull: z.enum(["true", "false"]).optional(),
@@ -81,6 +85,7 @@ export function issueFilterOf(
   parentId?: string | null;
   inTriage?: boolean;
   link?: { type: z.infer<typeof IssueLinkTypeSchema>; id: string };
+  query?: string;
   syncPull?: boolean;
 } {
   return {
@@ -98,6 +103,7 @@ export function issueFilterOf(
     ...(query.linkType !== undefined && query.linkId !== undefined
       ? { link: { type: query.linkType, id: query.linkId } }
       : {}),
+    ...(query.q !== undefined ? { query: query.q } : {}),
     ...(query.syncPull === "true" ? { syncPull: true } : {}),
   };
 }

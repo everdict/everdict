@@ -4759,7 +4759,8 @@
       "judge": "Judge",
       "scorecard": "Scorecard",
       "run": "Run",
-      "view": "View"
+      "view": "View",
+      "issue": "Mentions"
     },
     "subject": {
       "issue": "issue",
@@ -4881,7 +4882,6 @@
     "detailFallbackTitle": "Issue",
     "metaCreated": "Created",
     "metaUpdated": "Updated",
-    "linksTitle": "Linked capabilities",
     "evaluationTitle": "Evaluation history",
     "evaluationCount": "{count} scorecards",
     "evaluationBaseline": "Baseline",
@@ -5022,19 +5022,22 @@
       "assignee": "Unassigned",
       "project": "No project",
       "cycle": "No cycle"
-    }
+    },
+    "fieldMentionedBy": "Mentioned by"
   },
   "issueLinks": {
-    "add": "Add link",
+    "add": "Add",
     "addError": "Couldn't add the link.",
-    "remove": "Remove link",
+    "remove": "Unlink {id}",
     "removeError": "Couldn't remove the link.",
-    "cancel": "Cancel",
-    "fieldType": "Kind",
-    "fieldId": "Id",
-    "fieldIdPlaceholder": "e.g. browser-suite",
-    "fieldVersion": "Version",
-    "fieldVersionAny": "any"
+    "controlLabel": "{kind} links on this issue",
+    "searchPlaceholder": "Search",
+    "noMatch": "No match.",
+    "none": "Nothing registered yet.",
+    "searchIssuePlaceholder": "Search issues",
+    "searching": "Searching…",
+    "noIssueMatch": "No issues match.",
+    "mentionControlLabel": "Issues this one mentions"
   },
   "projectsPage": {
     "title": "Projects",
@@ -5445,6 +5448,7 @@
   },
   "capabilityLineage": {
     "title": "Where this came from",
+    "watching": "Linked issues ({count})",
     "bornFrom": "Created from",
     "createdBy": "Created by",
     "onBehalfOf": "for {name}",
@@ -5459,7 +5463,10 @@
       "dataset": "Dataset",
       "judge": "Judge",
       "benchmark": "Benchmark"
-    }
+    },
+    "linkIssue": "Link an issue",
+    "linkError": "Couldn't link the issue.",
+    "linked": "Linked to {identifier}."
   },
   "cyclesPage": {
     "title": "Cycles",

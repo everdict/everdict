@@ -118,9 +118,20 @@ The control plane's `?team=` narrowing on those lists is unchanged.
 
 Every issue belongs to exactly one team (`teamId`, required) and carries the identity that team minted
 (`number`, `identifier`). An issue gathers the capabilities that verify it (`links[]`: harness · dataset · judge · scorecard · run ·
-view), so the discussion happens where the evidence is. Links are **pointers** — unvalidated, resolved through
+view · issue), so the discussion happens where the evidence is. Links are **pointers** — unvalidated, resolved through
 the normal RBAC-gated reads at render time, exactly like a platform event's subject. The one validated
 reference is `resolution.scorecardId`, because that one is evidence rather than navigation.
+
+**One issue can point at another** (`type: "issue"`) — the cross-reference GitHub spells `#123`. It is stored like
+every other link, on the MENTIONING issue and one-directional, and the mentioned issue reads its backlinks with the
+same reverse query a harness uses (`?linkType=issue&linkId=`), so both screens show the pair without a second
+record to keep in step. Two deliberate details: the id is the target's **UUID**, not its identifier, because a team
+move re-mints `ENG-12` into `PLT-3` and a containment query on the old spelling would stop matching; and a mention
+is made by PICKING (the web's issue picker, `add_issue_link` over MCP), never by parsing `ENG-12` out of a
+description — a link nobody chose is one nobody can explain, and edited text would leave the graph to garbage-collect.
+Finding the issue to pick is what `GET /issues?q=` answers: a case-insensitive substring of the identifier (including
+the ones it used to answer to) or the title. Not the description — a picker row cannot show a paragraph to say why it
+matched.
 
 ### Moving between teams
 
@@ -387,6 +398,12 @@ properties are deliberate:
 The reverse read (`GET /issues?linkType=judge&linkId=…`) is what a capability's detail view asks to draw "the
 issues watching this" — and it is how a capability registered *before* the origin stamp existed can still show
 its issue, with no backfill.
+
+The capability's screen can also MAKE that link ("link an issue" beside the list): it searches issues with `?q=`
+and then writes the ordinary `POST /issues/:id/links` on the issue it picked. There is deliberately no
+capability→issue write endpoint — the link is one fact, and a second place to store it is a second answer to
+"which issues watch this harness". So both directions are the same record, reached from whichever screen you are
+standing on.
 
 ## Cycles — a team's iteration
 

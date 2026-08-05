@@ -247,6 +247,9 @@ export default async function JudgeDetailPage({
       {/* 리니지 — 이 저지가 어디서 태어났고 어떤 이슈들이 그것을 지켜보는지. 그릴 게 없으면 섹션이 없다. */}
       <CapabilityLineage
         workspace={workspace}
+        kind="judge"
+        id={id}
+        canLinkIssues={can(principal?.roles, 'issues:write')}
         {...(origin ? { origin } : {})}
         issues={linkedIssues}
         {...(summary.createdBy ? { createdByLabel: resolveRunner(summary.createdBy)?.name } : {})}

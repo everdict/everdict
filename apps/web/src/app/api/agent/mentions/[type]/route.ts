@@ -18,7 +18,7 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
 }
 
-async function fetchRows(ctx: AuthContext, type: AgentReferenceType): Promise<unknown> {
+async function fetchRows(ctx: AuthContext, type: AgentReferenceType, q: string): Promise<unknown> {
   switch (type) {
     case 'harness':
       return controlPlane.listHarnesses<Row[]>(ctx)
@@ -63,12 +63,16 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType): Promise<un
       // 목록은 한 PAGE(`{ items, nextCursor? }`)로 오고, @-피커는 첫 장이면 충분하다.
       // 참조 키는 UUID 가 아니라 식별자(ENG-12) — get_issue 가 둘 다 받고, 이슈를 부르는 이름은 식별자다.
       // 이슈 상세의 "대화에서 분석" 진입도 같은 키를 쓰므로 두 경로가 같은 참조를 만든다.
-      return controlPlane.listIssues<{ items: Row[] }>(ctx, { limit: 50 }).then((page) =>
-        (Array.isArray(page.items) ? page.items : []).map((row) => ({
-          ...row,
-          id: str(row.identifier) ?? row.id,
-        }))
-      )
+      // 검색은 제어 평면이 한다(`search`) — 창 하나를 받아 아래에서 거르면 워크스페이스가 그 창보다
+      // 커지는 순간 조용히 못 찾기 시작한다(이슈만 서버 검색이 있다; 나머지는 아래의 클라이언트 여과).
+      return controlPlane
+        .listIssues<{ items: Row[] }>(ctx, { ...(q ? { search: q } : {}), limit: 50 })
+        .then((page) =>
+          (Array.isArray(page.items) ? page.items : []).map((row) => ({
+            ...row,
+            id: str(row.identifier) ?? row.id,
+          }))
+        )
     case 'trace':
       // trace references are attached from the observability browser (keyed by source+traceId), not @-picked here.
       return []
@@ -101,7 +105,7 @@ export async function GET(
   const ctx = await authContext()
   const q = (new URL(request.url).searchParams.get('q') ?? '').toLowerCase()
   try {
-    const rows = await fetchRows(ctx, type as AgentReferenceType)
+    const rows = await fetchRows(ctx, type as AgentReferenceType, q)
     let items = (Array.isArray(rows) ? rows : [])
       .map(normalize)
       .filter((x): x is MentionItem => x !== null)

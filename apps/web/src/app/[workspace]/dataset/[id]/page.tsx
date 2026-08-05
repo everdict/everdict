@@ -388,6 +388,9 @@ export default async function DatasetDetailPage({
           "출처 · 리니지"가 데이터가 어디서 왔는지(행의 출처)라면, 이쪽은 왜 존재하는지(의도의 출처)다. */}
       <CapabilityLineage
         workspace={workspace}
+        kind="dataset"
+        id={id}
+        canLinkIssues={can(principal?.roles, 'issues:write')}
         {...(datasetOrigin ? { origin: datasetOrigin } : {})}
         issues={linkedIssues}
         {...(author.known ? { createdByLabel: author.name } : {})}

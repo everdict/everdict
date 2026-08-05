@@ -127,6 +127,9 @@ export interface IssueListQuery {
   triage?: boolean
   linkType?: string
   linkId?: string
+  // 이슈를 이름으로 찾는다(식별자·제목의 부분 일치). 피커가 창 하나를 받아 클라이언트에서 거르면
+  // 워크스페이스가 그 창보다 커지는 순간 조용히 못 찾기 시작한다 — 그래서 서버가 좁힌다.
+  search?: string
   // GitHub 대량 동기화의 작업 집합. 전체 목록을 받아 클라이언트에서 거르는 대신 서버가 좁힌다.
   syncPull?: boolean
   // 아래 셋은 PAGE 만의 것 — 집계에는 장도 순서도 없다.
@@ -152,6 +155,7 @@ function issueListParams(filter?: IssueListQuery): URLSearchParams {
     q.set('linkId', filter.linkId)
   }
   if (filter?.syncPull) q.set('syncPull', 'true')
+  if (filter?.search) q.set('q', filter.search)
   return q
 }
 

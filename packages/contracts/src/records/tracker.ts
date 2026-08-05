@@ -72,7 +72,12 @@ export type IssuePriority = z.infer<typeof IssuePrioritySchema>;
 // What kind of everdict object an issue points at. Links are POINTERS (same semantics as a platform event's
 // subject) — unvalidated by design, resolved through the normal RBAC-gated reads at render time. The one
 // exception is `resolution.scorecardId`, which the service validates because it is evidence, not a pointer.
-export const ISSUE_LINK_TYPES = ["harness", "dataset", "judge", "scorecard", "run", "view"] as const;
+// `issue` is the cross-reference GitHub spells with `#123`: one issue naming another. It is stored like every
+// other link — on the MENTIONING issue, one-directional — and the mentioned issue reads its backlinks with the
+// same reverse query a harness uses (`?linkType=issue&linkId=`). The id is the target's UUID, not its
+// identifier: a team move re-mints `ENG-12` into `PLT-3`, and a pointer that survives the move is worth more
+// than one that reads nicely in the raw record (the screen resolves it to the identifier anyway).
+export const ISSUE_LINK_TYPES = ["harness", "dataset", "judge", "scorecard", "run", "view", "issue"] as const;
 export const IssueLinkTypeSchema = z.enum(ISSUE_LINK_TYPES);
 export type IssueLinkType = z.infer<typeof IssueLinkTypeSchema>;
 

@@ -107,6 +107,43 @@ describe("issue routes", () => {
     await app.close();
   });
 
+  // An issue picker (the capability detail's "link an issue", one issue mentioning another) types a NAME, not
+  // an id. Searching in the control plane is what keeps it finding issues once the workspace outgrows a page.
+  it("searches issues by identifier or title, and mentions one issue from another", async () => {
+    const { app } = build();
+    const target = await createIssue(app, { title: "Judge reads a stale rubric", status: "todo" });
+    const other = await createIssue(app, { title: "Agent drops the tool result on retry", status: "todo" });
+
+    const byTitle = await app.inject({ method: "GET", url: "/issues?q=stale%20rubric", headers: H });
+    expect(byTitle.json().items.map((i: { id: string }) => i.id)).toEqual([target.id]);
+    const byIdentifier = await app.inject({
+      method: "GET",
+      url: `/issues?q=${target.identifier.toLowerCase()}`,
+      headers: H,
+    });
+    expect(byIdentifier.json().items.map((i: { id: string }) => i.id)).toEqual([target.id]);
+    expect((await app.inject({ method: "GET", url: "/issues?q=nothing-matches", headers: H })).json().items).toEqual(
+      [],
+    );
+
+    // One issue mentions another — stored on the MENTIONING issue, read back from the mentioned one with the
+    // same reverse query a harness uses.
+    const mentioned = await app.inject({
+      method: "POST",
+      url: `/issues/${other.id}/links`,
+      headers: H,
+      payload: { type: "issue", id: target.id },
+    });
+    expect(mentioned.statusCode).toBe(200);
+    const backlinks = await app.inject({
+      method: "GET",
+      url: `/issues?linkType=issue&linkId=${target.id}`,
+      headers: H,
+    });
+    expect(backlinks.json().items.map((i: { id: string }) => i.id)).toEqual([other.id]);
+    await app.close();
+  });
+
   // The web addresses an issue by the name its team minted — `/{workspace}/issues/ENG-12` — so the same ref has
   // to reach the control plane's reads AND mutations, or a link people paste only half works.
   it("addresses an issue by its identifier as well as its id, on reads and mutations alike", async () => {

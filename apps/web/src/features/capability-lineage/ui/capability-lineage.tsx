@@ -3,11 +3,18 @@ import { Bot, GitBranch, UserRound } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { hasLineage, originRefHref, type CapabilityOrigin } from '@/entities/capability-origin'
-import { issueHref, IssueStatusIcon, type IssueSummary } from '@/entities/issue'
+import {
+  issueHref,
+  IssueStatusIcon,
+  type IssueCapabilityLinkType,
+  type IssueSummary,
+} from '@/entities/issue'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Link } from '@/shared/ui/link'
 import { SectionHeader } from '@/shared/ui/section-header'
+
+import { LinkIssueButton } from './link-issue-button'
 
 // 능력의 리니지 — "이건 왜 있나, 어디서 나왔나". 이슈에서 태어난 저지·데이터셋·하네스가 자기 출처를 말하고,
 // 그 능력을 지켜보는 이슈들을 한자리에 모은다.
@@ -21,23 +28,33 @@ import { SectionHeader } from '@/shared/ui/section-header'
 // 피처가 위젯을 가져오면 레이어를 거슬러 올라간다. 그래서 위젯을 아는 페이지(app)가 노드를 넘긴다.
 export async function CapabilityLineage({
   workspace,
+  kind,
+  id,
   origin,
   issues,
   createdByLabel,
   createdAt,
   timeZone,
+  canLinkIssues,
   conversationAction,
 }: {
   workspace: string
+  // 이 능력이 무엇이고 무엇으로 불리는가 — 여기서 이슈를 걸 때 그대로 링크가 된다.
+  kind: IssueCapabilityLinkType
+  id: string
   origin?: CapabilityOrigin
   issues: IssueSummary[]
   createdByLabel?: string
   createdAt?: string
   timeZone: string
+  // issues:write — 링크를 만드는 것은 이슈를 고치는 일이다.
+  canLinkIssues: boolean
   conversationAction?: ReactNode
 }) {
   const t = await getTranslations('capabilityLineage')
-  if (!hasLineage(origin) && issues.length === 0) return null
+  // 아직 아무 이슈도 걸리지 않은 능력에서는 이 섹션이 이슈를 걸 수 있는 유일한 자리다 — 쓸 수 있는 사람에게는
+  // 비어 있어도 낸다(빈 섹션 숨김의 예외는 "여기가 유일한 진입"일 때뿐이다).
+  if (!hasLineage(origin) && issues.length === 0 && !canLinkIssues) return null
 
   const from = origin?.from
   const fromHref = from ? originRefHref(workspace, from) : undefined
@@ -100,6 +117,22 @@ export async function CapabilityLineage({
           </p>
         )}
 
+        {/* 이 능력을 건 이슈들. 출처 한 줄과 섞이면 "여기서 태어났다"와 "여기서 쓰인다"가 같은 말로 읽히므로
+            제목을 하나 세운다 — 이 목록이 이슈로 건너가는 유일한 길이고, 그 길이 있다는 걸 먼저 말해야 한다.
+            거는 자리도 같은 줄이다: 읽는 곳과 더하는 곳이 떨어져 있으면 "여기서도 걸 수 있다"를 아무도 모른다. */}
+        {(linked.length > 0 || canLinkIssues) && (
+          <div className="flex items-center justify-between gap-2 px-3.5 py-2">
+            <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+              {t('watching', { count: linked.length })}
+            </p>
+            <LinkIssueButton
+              type={kind}
+              capabilityId={id}
+              canWrite={canLinkIssues}
+              linkedIssueIds={issues.map((issue) => issue.id)}
+            />
+          </div>
+        )}
         {linked.map((issue) => (
           <Link
             key={issue.id}

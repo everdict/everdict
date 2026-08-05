@@ -6,7 +6,11 @@ import { MentionInChatButton } from '@/widgets/infra-panel'
 import { CommentsSection } from '@/features/discuss'
 import { IssueGithubPanel } from '@/features/import-github-issues'
 import { IssueEvaluationHistory, type IssueEvaluationEntry } from '@/features/issue-evaluation'
-import { IssueLinks } from '@/features/issue-links'
+import {
+  IssueCapabilityControl,
+  IssueMentionControl,
+  type CapabilityOption,
+} from '@/features/issue-links'
 import {
   CreateIssueButton,
   IssueActions,
@@ -28,9 +32,12 @@ import {
   todayIso,
   type Cycle,
 } from '@/entities/cycle'
+import { datasetsSchema, type DatasetSummary } from '@/entities/dataset'
+import { harnessesSchema, type Harness } from '@/entities/harness'
 import {
   isOpenIssueStatus,
   ISSUE_CAPABILITY_LINK_TYPES,
+  ISSUE_MENTION_LINK_TYPES,
   issueAttachmentProxy,
   issueHref,
   issuePageSchema,
@@ -39,9 +46,12 @@ import {
   issueScorecardsSchema,
   IssueStatusIcon,
   type Issue,
+  type IssueCapabilityLinkType,
+  type IssueOption,
   type IssueSummary,
 } from '@/entities/issue'
 import { issueLabelsSchema, type IssueLabel } from '@/entities/issue-label'
+import { judgesSchema, type JudgeSummary } from '@/entities/judge'
 import { memberDirectoryOf, memberNameOf, membersSchema, type Member } from '@/entities/member'
 import { isPastDue, projectsSchema, type Project } from '@/entities/project'
 import {
@@ -74,6 +84,10 @@ export const dynamic = 'force-dynamic'
 // 위/아래 이동이 훑을 형제 이슈의 창. 목록 화면의 기본 정렬(최근 활동순)을 팀 범위로 다시 받아 "보던 목록의
 // 다음 이슈"가 되게 한다. 창 밖으로 밀려난 이슈에서는 화살표가 비활성으로 남는다 — 팀 전체를 끌어오는 것보다 낫다.
 const SIBLING_WINDOW = 200
+
+// 한 이슈가 손으로 걸 만한 언급의 수 — 양쪽 방향 모두에 걸린다. 이보다 많이 걸린 이슈는 언급이 아니라
+// 목록을 만든 것이고, 속성 열은 목록을 그리는 자리가 아니다.
+const MENTION_WINDOW = 20
 
 function BackLink({ workspace, label }: { workspace: string; label: string }) {
   return (
@@ -181,6 +195,10 @@ export default async function IssueDetailPage({
     children,
     cycles,
     parent,
+    harnesses,
+    datasets,
+    judges,
+    mentionedBy,
   ] = await Promise.all([
     controlPlane
       .listIssueScorecards(ctx, current.id)
@@ -236,7 +254,52 @@ export default async function IssueDetailPage({
           .getIssue(ctx, current.parentId)
           .then((r) => issueSchema.parse(r))
           .catch((): Issue | undefined => undefined),
+    // 이 이슈를 검증하는 능력으로 고를 수 있는 것들 — 워크스페이스에 등록된 하네스·데이터셋·저지 전부다.
+    // 팀으로 좁히지 않는 이유: 링크는 포인터일 뿐 제어 평면이 팀을 따지지 않고(docs/tracker.md), 다른 팀이
+    // 만든 데이터셋으로 우리 이슈를 검증하는 것은 정상적인 일이다. 읽을 수 없는 것(비공개 팀)은 애초에 오지 않는다.
+    controlPlane
+      .listHarnesses(ctx)
+      .then((r) => harnessesSchema.parse(r))
+      .catch((): Harness[] => []),
+    controlPlane
+      .listDatasets(ctx)
+      .then((r) => datasetsSchema.parse(r))
+      .catch((): DatasetSummary[] => []),
+    controlPlane
+      .listJudges(ctx)
+      .then((r) => judgesSchema.parse(r))
+      .catch((): JudgeSummary[] => []),
+    // 이 이슈를 **언급한** 이슈들 — 링크는 언급하는 쪽에만 저장되므로, 언급당한 쪽에서 알려면 이 방향으로
+    // 물어보는 수밖에 없다(하네스 상세가 자기를 지켜보는 이슈를 찾는 것과 같은 질의).
+    controlPlane
+      .listIssues(ctx, { linkType: 'issue', linkId: current.id, limit: MENTION_WINDOW })
+      .then((r) => issuePageSchema.parse(r).items)
+      .catch((): IssueSummary[] => []),
   ])
+
+  // 이 이슈가 언급한 이슈들 — 링크는 UUID 만 들고 있어 그 자체로는 아무 말도 하지 않는다. 그리려면 식별자·
+  // 제목·상태가 필요하므로 하나씩 읽는다(언급은 손으로 거는 것이라 몇 개뿐이고, 못 읽은 것은 조용히 빠진다:
+  // 지워졌거나 볼 수 없는 이슈를 UUID 한 줄로 그리면 아무에게도 도움이 안 된다).
+  const mentions: IssueOption[] = (
+    await Promise.all(
+      current.links
+        .filter((link) => link.type === 'issue')
+        .slice(0, MENTION_WINDOW)
+        .map((link) =>
+          controlPlane
+            .getIssue(ctx, link.id)
+            .then((r) => issueSchema.parse(r))
+            .catch((): Issue | undefined => undefined)
+        )
+    )
+  )
+    .filter((issue): issue is Issue => issue !== undefined)
+    .map((issue) => ({
+      id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      status: issue.status,
+    }))
 
   const canWrite = can(principal?.roles ?? [], 'issues:write')
   // 설명에 파일을 붙이는 것은 워크스페이스 파일시스템에 쓰는 일이다 — 이슈 쓰기와 같은 등급(member+)이지만
@@ -310,11 +373,20 @@ export default async function IssueDetailPage({
     name: actors[m.subject]?.name ?? m.subject,
     ...(m.avatarUrl !== undefined ? { avatarUrl: m.avatarUrl } : {}),
   }))
-  // 속성 열이 보여주는 링크 = 이슈를 검증하는 능력(하니스·데이터셋·평가자)뿐. 스코어카드 링크는 증거이고
-  // 아래 "평가 이력"이 이미 고정 배지로 보여주므로, 여기 세면 빈 섹션 판정이 틀어진다.
-  const capabilityLinks = current.links.filter((link) =>
-    ISSUE_CAPABILITY_LINK_TYPES.some((kind) => kind === link.type)
-  )
+  // 속성 열이 보여주는 링크 = 이슈를 검증하는 능력(하네스·데이터셋·저지)뿐이고, 종류마다 자기 줄을 갖는다 —
+  // 상태·프로젝트·라벨과 같은 속성이라서 같은 격자에서 고른다. 스코어카드 링크는 능력이 아니라 증거이고
+  // 아래 "평가 이력"이 이미 고정 배지로 보여주므로 여기 서지 않는다.
+  const capabilityOptions: Record<IssueCapabilityLinkType, CapabilityOption[]> = {
+    harness: harnesses.map((h) => ({
+      id: h.id,
+      ...(h.subtitle !== undefined ? { hint: h.subtitle } : {}),
+    })),
+    dataset: datasets.map((d) => ({
+      id: d.id,
+      ...(d.description !== undefined ? { hint: d.description } : {}),
+    })),
+    judge: judges.map((j) => ({ id: j.id })),
+  }
 
   return (
     <div className="@container">
@@ -542,6 +614,63 @@ export default async function IssueDetailPage({
                 />
               </PropertyRow>
             )}
+            {/* 이 이슈를 검증하는 능력 — 하네스·데이터셋·저지가 각자 한 줄이다. 예전에는 속성 격자 밖의 작은
+                폼이었고 id 를 손으로 적어야 했다: 레지스트리에 무엇이 있는지 아는 사람만 쓸 수 있었고, 오타는
+                아무 데도 가리키지 않는 링크가 됐다(링크는 검증되지 않는 포인터다). 이제 등록된 것 중에서 고른다.
+                고를 것도 걸린 것도 없는 종류는 줄을 내지 않는다(빈 섹션 숨김). */}
+            {ISSUE_CAPABILITY_LINK_TYPES.map((kind) => {
+              const linked = current.links.filter((link) => link.type === kind)
+              const options = capabilityOptions[kind]
+              if (linked.length === 0 && !(canWrite && options.length > 0)) return null
+              return (
+                <PropertyRow key={kind} label={tracker(`linkType.${kind}`)}>
+                  <IssueCapabilityControl
+                    workspace={workspace}
+                    issueId={current.id}
+                    type={kind}
+                    links={linked}
+                    options={options}
+                    canWrite={canWrite}
+                  />
+                </PropertyRow>
+              )
+            })}
+            {/* 언급 — 이 이슈가 가리키는 다른 이슈들. 능력 세 줄이 "무엇으로 검증하는가"라는 고정된 질문인
+                것과 달리 이건 자유로운 교차참조라, 종류를 파라미터로 받는 한 줄이 맡는다(지금은 이슈만). */}
+            {ISSUE_MENTION_LINK_TYPES.map((kind) => {
+              if (mentions.length === 0 && !canWrite) return null
+              return (
+                <PropertyRow key={kind} label={tracker(`linkType.${kind}`)}>
+                  <IssueMentionControl
+                    workspace={workspace}
+                    issueId={current.id}
+                    type={kind}
+                    mentions={mentions}
+                    canWrite={canWrite}
+                  />
+                </PropertyRow>
+              )
+            })}
+            {/* 반대 방향 — 나를 언급한 이슈들. 남의 레코드에 있는 링크라서 여기서는 읽기만 한다(GitHub 이
+                교차참조를 타임라인에 남기고 그 자리에서 지우게 하지 않는 것과 같다). 없으면 줄이 없다. */}
+            {mentionedBy.length > 0 && (
+              <PropertyRow label={t('fieldMentionedBy')}>
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  {mentionedBy.map((issue) => (
+                    <Link
+                      key={issue.id}
+                      href={issueHref(workspace, issue.identifier, issue.title)}
+                      title={`${issue.identifier} · ${issue.title}`}
+                      className="inline-flex max-w-full items-center gap-1 rounded bg-secondary py-0.5 px-1.5 text-[11px] text-secondary-foreground ring-1 ring-inset ring-border transition-colors hover:text-foreground"
+                    >
+                      <IssueStatusIcon status={issue.status} />
+                      <span className="shrink-0 font-mono">{issue.identifier}</span>
+                      <span className="min-w-0 truncate">{issue.title}</span>
+                    </Link>
+                  ))}
+                </span>
+              </PropertyRow>
+            )}
             <PropertyRow label={t('metaCreated')}>
               <time
                 dateTime={current.createdAt}
@@ -580,23 +709,6 @@ export default async function IssueDetailPage({
               </PropertyRow>
             )}
           </PropertyList>
-
-          {/* 이 이슈를 검증하는 자산들 — 속성 중 유일하게 편집 폼을 달고 있어 구분선 아래로 내린다.
-              @container 는 그 폼이 좁은 사이드바에서 세로로 접히도록 자기 너비를 재게 하려는 것이다.
-              세는 것도 능력 링크만: 스코어카드만 걸려 있는 이슈에 빈 섹션이 서면 안 된다(빈 섹션 숨김). */}
-          {(capabilityLinks.length > 0 || canWrite) && (
-            <div className="@container space-y-2 border-t border-border pt-3.5">
-              <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-                {t('linksTitle')}
-              </p>
-              <IssueLinks
-                workspace={workspace}
-                issueId={current.id}
-                links={current.links}
-                canWrite={canWrite}
-              />
-            </div>
-          )}
         </aside>
 
         {/* ③ 이슈의 맥락과 증거, 그리고 논의.

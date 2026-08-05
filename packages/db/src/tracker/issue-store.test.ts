@@ -61,6 +61,20 @@ describe("InMemoryIssueStore", () => {
     expect(await store.list("acme", { link: { type: "harness", id: "other" } })).toEqual([]);
   });
 
+  it("searches by what the issue is CALLED — identifier, a former identifier, or the title", async () => {
+    const store = new InMemoryIssueStore();
+    await store.create(issue({ id: "a", identifier: "ENG-12", title: "Agent drops the tool result on retry" }));
+    await store.create(
+      issue({ id: "b", identifier: "PLT-3", formerIdentifiers: ["ENG-40"], title: "Judge reads a stale rubric" }),
+    );
+
+    expect((await store.list("acme", { query: "eng-12" })).map((r) => r.id)).toEqual(["a"]); // 대소문자 무시
+    expect((await store.list("acme", { query: "rubric" })).map((r) => r.id)).toEqual(["b"]); // 제목의 일부
+    // 팀을 옮기며 이름이 다시 찍혀도, 사람들이 아직 부르는 옛 이름으로 찾힌다.
+    expect((await store.list("acme", { query: "ENG-40" })).map((r) => r.id)).toEqual(["b"]);
+    expect(await store.list("acme", { query: "nothing here" })).toEqual([]);
+  });
+
   it("matches an imported copy by its remote identity and narrows to the pull-enabled working set", async () => {
     const store = new InMemoryIssueStore();
     const github = {
@@ -294,6 +308,18 @@ describe("PgIssueStore", () => {
     expect(queries[1]?.text).toContain("links @> $2::jsonb");
     expect(queries[1]?.text).toContain("(github->'sync'->>'pull') = 'true'");
     expect(queries[1]?.params?.[1]).toBe(JSON.stringify([{ type: "dataset", id: "regression-suite" }]));
+  });
+
+  it("searches identifier, former identifiers and title with ONE bound needle", async () => {
+    const { client, queries } = fakeClient();
+    await new PgIssueStore(client).list("acme", { query: "50% off_day" });
+    const text = queries[0]?.text ?? "";
+
+    expect(text).toContain("identifier ILIKE $2");
+    expect(text).toContain("title ILIKE $2"); // 같은 바늘을 다시 바인딩하지 않는다
+    expect(text).toContain("jsonb_array_elements_text(COALESCE(former_identifiers, '[]'::jsonb))");
+    // LIKE 의 와일드카드가 되는 글자는 이스케이프한다 — 제목의 `%`/`_` 는 글자이지 패턴이 아니다.
+    expect(queries[0]?.params?.[1]).toBe("%50\\% off\\_day%");
   });
 
   it("selects only the projected columns for a list page, and seeks with a row-value cursor", async () => {

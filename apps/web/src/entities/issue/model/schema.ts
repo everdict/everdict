@@ -51,7 +51,18 @@ export function isOpenIssueStatus(status: WireIssueStatus): boolean {
 export const ISSUE_PRIORITIES = ['none', 'urgent', 'high', 'medium', 'low'] as const
 export const issuePrioritySchema = z.enum(ISSUE_PRIORITIES)
 
-export const ISSUE_LINK_TYPES = ['harness', 'dataset', 'judge', 'scorecard', 'run', 'view'] as const
+// `issue` 는 GitHub 이 `#123` 으로 적는 교차참조다 — 한 이슈가 다른 이슈를 언급한다. 저장은 다른 링크와
+// 똑같이 **언급하는 쪽** 레코드에 한 방향으로만 하고, 언급당한 이슈는 하네스와 같은 역방향 질의로 읽는다.
+// id 는 대상의 UUID 다(식별자가 아니다): 팀을 옮기면 `ENG-12` 가 `PLT-3` 로 다시 찍히므로.
+export const ISSUE_LINK_TYPES = [
+  'harness',
+  'dataset',
+  'judge',
+  'scorecard',
+  'run',
+  'view',
+  'issue',
+] as const
 export const issueLinkTypeSchema = z.enum(ISSUE_LINK_TYPES)
 
 export const issueLinkSchema = z.object({

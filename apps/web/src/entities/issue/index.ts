@@ -72,7 +72,15 @@ export {
 } from './model/view'
 export { issueHref, issueSlug } from './lib/href'
 export { issueAttachmentProxy } from './lib/attachment-proxy'
-export { ISSUE_CAPABILITY_LINK_TYPES, ISSUE_LINK_REF_KIND, issueLinkHref } from './lib/link-target'
+export {
+  ISSUE_CAPABILITY_LINK_TYPES,
+  ISSUE_LINK_REF_KIND,
+  ISSUE_MENTION_LINK_TYPES,
+  issueLinkHref,
+  type IssueCapabilityLinkType,
+  type IssueMentionLinkType,
+} from './lib/link-target'
 export { issueStatusTone, type IssueStatusTone } from './model/status'
 export { IssuePriorityBadge, IssuePriorityIcon, issuePriorityIcon } from './ui/issue-priority-badge'
+export { IssueSearchOptions, type IssueOption } from './ui/issue-search-options'
 export { IssueStatusBadge, IssueStatusIcon, issueStatusIcon } from './ui/issue-status-badge'

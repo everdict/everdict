@@ -63,7 +63,8 @@ export const issueDocs: Record<
       "and they AND across facets; an empty value reaches the unset bucket (`?assignee=` = unassigned). Also " +
       "filter by team (or mine=true for every team you belong to), syncPull (the GitHub bulk sync's working " +
       "set), parent (an issue id for its sub-issues, `none` for the top-level ones), or by the capability an " +
-      "issue links (linkType + linkId — 'which issues watch this harness'). Requires issues:read.",
+      "issue links (linkType + linkId — 'which issues watch this harness'), or search by name (`q` — a " +
+      "case-insensitive substring of the identifier or title, what every issue picker asks). Requires issues:read.",
     tags: ["issue"],
     querystring: toJsonSchema(
       z.object({
@@ -79,6 +80,7 @@ export const issueDocs: Record<
         triage: z.enum(["true", "false"]).optional(),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
+        q: z.string().min(1).max(200).optional(),
         syncPull: z.enum(["true", "false"]).optional(),
         order: IssueOrderSchema.optional(),
         limit: z.coerce.number().int().positive().max(200).optional(),
@@ -115,6 +117,7 @@ export const issueDocs: Record<
         triage: z.enum(["true", "false"]).optional(),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
+        q: z.string().min(1).max(200).optional(),
       }),
     ),
     response: {

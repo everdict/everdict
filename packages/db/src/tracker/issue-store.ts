@@ -121,6 +121,13 @@ function matchesFilter(record: IssueRecord, filter: IssueListFilter | undefined)
     const { type, id } = filter.link;
     if (!record.links.some((link) => link.type === type && link.id === id)) return false;
   }
+  if (filter.query !== undefined) {
+    // Case-insensitive substring over what the issue is CITED by — the identifier it answers to now, the ones
+    // it used to, and the title (never the description; see the port).
+    const needle = filter.query.toLocaleLowerCase();
+    const cited = [record.identifier, ...record.formerIdentifiers, record.title];
+    if (!cited.some((text) => text.toLocaleLowerCase().includes(needle))) return false;
+  }
   // The screen's set-per-facet filters. An EMPTY array selects nothing rather than everything: the caller asked
   // for "any of these" and named none, and widening that back to "all" would show rows they filtered out.
   if (filter.statuses !== undefined && !filter.statuses.includes(record.status)) return false;
@@ -533,6 +540,18 @@ export class PgIssueStore implements IssueStore {
       // Containment over the links array — id-level, version-agnostic (a cross-version regression is the signal).
       conds.push(`links @> ${next()}::jsonb`);
       params.push(JSON.stringify([{ type: filter.link.type, id: filter.link.id }]));
+    }
+    if (filter?.query !== undefined) {
+      // What the issue is CITED by: the identifier it answers to now, the ones it used to answer to, and the
+      // title. `%` and `_` are escaped so a title containing them searches for the characters rather than for
+      // whatever LIKE would read them as.
+      // One placeholder, referenced three times — the same needle in each column (rebinding it per column
+      // would be three parameters saying the same thing).
+      const needle = next();
+      conds.push(
+        `(identifier ILIKE ${needle} OR title ILIKE ${needle} OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(former_identifiers, '[]'::jsonb)) AS former WHERE former ILIKE ${needle}))`,
+      );
+      params.push(`%${filter.query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     }
     // The screen's set-per-facet filters. `= ANY` rather than `IN` so the whole set rides as ONE parameter —
     // a filter bar with eight labels selected must not rewrite the statement into a shape the plan cache has

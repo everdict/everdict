@@ -239,16 +239,38 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   for pages whose title is a NAME and truncates); ③ a container-queried two-column grid (`@3xl`) with the body
   (description · evidence · discussion) left and ④ EVERY property gathered in one right column
   (`shared/ui/property-list.tsx` — label-left/value-right, no card, empty rows omitted), placed by explicit
-  `col-start`/`row-start` so it collapses ABOVE the body when the container is narrow. Reading and changing live
-  in separate columns: the only control inside the property list is the one that IS a property (status). A
-  property block carrying its own form (issue links) declares its own `@container` so the form folds in the
-  narrow column. Siblings come from the list's own ordering, windowed (`SIBLING_WINDOW`), and the arrows stay
-  rendered-but-inert at the ends so their position never shifts. **The linked-assets block lists only what
-  VERIFIES the record** — `ISSUE_CAPABILITY_LINK_TYPES` (harness · dataset · judge), not the full six-type link
-  vocabulary the control plane accepts: a scorecard is EVIDENCE and the evaluation-history section already owns
-  it (pinned + baseline badges), so repeating it as a chip puts one thing on the screen twice with no answer to
-  which is authoritative. Display and the add-form read the SAME allowlist — never offer a type that then renders
-  nowhere — and the empty-section test counts the allowlisted links, not `links.length`.
+  `col-start`/`row-start` so it collapses ABOVE the body when the container is narrow. Siblings come from the
+  list's own ordering, windowed (`SIBLING_WINDOW`), and the arrows stay rendered-but-inert at the ends so their
+  position never shifts. **The capabilities that verify the record are PROPERTIES, one row per kind** —
+  `ISSUE_CAPABILITY_LINK_TYPES` (harness · dataset · judge), not the full six-type link vocabulary the control
+  plane accepts: a scorecard is EVIDENCE and the evaluation-history section already owns it (pinned + baseline
+  badges), so repeating it as a chip puts one thing on the screen twice with no answer to which is
+  authoritative. Each row is `IssueCapabilityControl` (`features/issue-links`) — chips that LINK to the
+  capability's own detail, plus a dropdown over what the workspace has REGISTERED, applied on click like the
+  label/project rows. Never a free-text id field: a link is an unvalidated pointer, so a typo becomes a chip
+  that leads nowhere, and the picker is what makes "what may I link" and "what exists" one answer. It offers no
+  version — an issue means "this judge", not "this judge at 1.2.0", and the regression watch matches at id
+  level (`docs/tracker.md`) — but a version an agent pinned over MCP still renders on the chip. A kind with no
+  links and nothing registered draws no row (hide-empty), so the count that decides it is that kind's links,
+  never `links.length`. **A MENTION is not a property, so it gets one row that takes the kind as a parameter**
+  (`ISSUE_MENTION_LINK_TYPES` → `IssueMentionControl`): the capability rows answer a fixed question ("what
+  verifies this"), while a mention is a free cross-reference, and one row per future kind would be a column of
+  mostly-empty labels. Today that vocabulary is `issue` — one issue naming another, GitHub's `#123` — and
+  turning on `run`/`view` is one array entry plus that kind's option loader; `scorecard` stays out (the
+  evaluation-history section owns it). Mentions are made by PICKING, never by parsing text out of the
+  description (user decision): `IssueSearchOptions` (`entities/issue`) is the one search list — debounced,
+  abort-on-retype, server-narrowed through `/api/issues/search` → `?q=`, because a picker that filters a fetched
+  window silently stops finding issues once the workspace outgrows it. The chip shows what people CITE (status
+  icon + identifier + title); the stored id is the UUID, so a team move cannot break it.
+  **The reverse direction is the capability's own page, and it is writable too**: `CapabilityLineage`
+  (`features/capability-lineage`, `GET /issues?linkType=&linkId=`) lists the issues watching it under a
+  "Linked issues (n)" heading with `LinkIssueButton` beside it. That button writes the SAME
+  `POST /issues/:id/links` on the issue it picked (there is no capability→issue endpoint, and asking for one
+  would mean storing the fact twice), and it is gated on `issues:write` — not on the capability's own action —
+  because the record it edits is the issue. The section renders for a writer even when nothing is linked yet:
+  hide-empty loses to "this is the only place the first link can be made". An issue's own backlinks ("Mentioned
+  by") render read-only in the property column — the link lives on someone else's record, and GitHub does not
+  let you delete a cross-reference from the mentioned side either.
   **A detail with more than one QUESTION is a tabbed route, not a longer page** (`app/[workspace]/initiatives/[id]`
   is the reference — Linear's initiative view): the `layout.tsx` owns everything that must not disappear while you
   move around (breadcrumb + record actions, the `h1`, the tab bar, the whole right property/progress column) and each
