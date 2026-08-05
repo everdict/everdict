@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
+import { PermissionPrompt, type PendingPermission } from '@/features/agent-chat'
 import { MediaDropZone, withBlockInsertion } from '@/features/attach-media'
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { useRefresh } from '@/shared/lib/use-refresh'
@@ -384,9 +385,10 @@ function AgentCommentBody({
 // Inline HITL: the parked write-tool asks, decidable RIGHT IN the comment (any member — the discussion session
 // is workspace-visible and the permission route accepts it). Polls the session's /pending while parked; a
 // decision posts to the normal /permission route and the thread's own polling reflects the resumed turn.
+// 렌더링은 채팅 패널과 같은 PermissionPrompt — 승인 카드는 어디서 보든 도구명+실행 인자를 같이 보여줘야 한다.
 function ApprovalStrip({ sessionId }: { sessionId: string }) {
   const t = useTranslations('discuss')
-  const [asks, setAsks] = useState<{ requestId: string; name: string }[]>([])
+  const [asks, setAsks] = useState<PendingPermission[]>([])
   useEffect(() => {
     let cancelled = false
     const tick = async () => {
@@ -396,16 +398,16 @@ function ApprovalStrip({ sessionId }: { sessionId: string }) {
         })
         if (!res.ok) return
         const data = (await res.json()) as {
-          pending?: { requestId?: unknown; name?: unknown }[]
+          pending?: { requestId?: unknown; name?: unknown; input?: unknown }[]
         }
         if (!cancelled && Array.isArray(data.pending))
           setAsks(
             data.pending
               .filter(
-                (p): p is { requestId: string; name: string } =>
+                (p): p is { requestId: string; name: string; input?: unknown } =>
                   typeof p.requestId === 'string' && typeof p.name === 'string'
               )
-              .map((p) => ({ requestId: p.requestId, name: p.name }))
+              .map((p) => ({ requestId: p.requestId, name: p.name, input: p.input }))
           )
       } catch {
         // silent — retried on the next tick
@@ -434,33 +436,7 @@ function ApprovalStrip({ sessionId }: { sessionId: string }) {
         {t('awaitingApproval', { name: '…' })}
       </span>
     )
-  return (
-    <div className="space-y-1.5">
-      {asks.map((ask) => (
-        <div key={ask.requestId} className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-[510] text-amber-600 dark:text-amber-400">
-            <ShieldAlert className="size-3.5" />
-            {t('awaitingApproval', { name: ask.name })}
-          </span>
-          <Button
-            size="sm"
-            className="h-6 px-2 text-[11.5px]"
-            onClick={() => decide(ask.requestId, 'allow')}
-          >
-            {t('approve')}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 px-2 text-[11.5px]"
-            onClick={() => decide(ask.requestId, 'deny')}
-          >
-            {t('deny')}
-          </Button>
-        </div>
-      ))}
-    </div>
-  )
+  return <PermissionPrompt pending={asks} onDecide={decide} className="rounded-lg border" />
 }
 
 // @mention autocomplete composer — shared by top-level/reply. On submit, resolve @names in the body to members and pass mentions.

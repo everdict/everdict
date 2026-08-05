@@ -3,6 +3,7 @@
 import { ShieldAlert } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 
 // A write (mutating) tool call the agent paused on, awaiting the member's decision. `input` is the tool's raw
@@ -24,18 +25,26 @@ function previewInput(input: unknown): string {
 }
 
 // The inline approval strip: one card per parked write-tool call, with Allow / Deny. Rendered between the transcript
-// and the composer so the member can't miss it while the turn is blocked.
+// and the composer so the member can't miss it while the turn is blocked. `className` lets an embedding surface
+// (the discussion thread's comment card) reshape the container — the ask's anatomy stays identical everywhere.
 export function PermissionPrompt({
   pending,
   onDecide,
+  className,
 }: {
   pending: PendingPermission[]
   onDecide: (requestId: string, decision: 'allow' | 'deny') => void
+  className?: string
 }) {
   const t = useTranslations('agentChat')
   if (pending.length === 0) return null
   return (
-    <div className="flex flex-col gap-2 border-t border-amber-500/30 bg-amber-500/[0.06] px-3 py-2.5">
+    <div
+      className={cn(
+        'flex flex-col gap-2 border-t border-amber-500/30 bg-amber-500/[0.06] px-3 py-2.5',
+        className
+      )}
+    >
       {pending.map((p) => {
         const preview = previewInput(p.input)
         return (
