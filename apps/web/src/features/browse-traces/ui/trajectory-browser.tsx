@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
+import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -41,8 +42,12 @@ export function TrajectoryBrowser() {
   const [loaded, setLoaded] = useState(false)
   const [kind, setKind] = useState<string | undefined>(undefined)
   const [pending, setPending] = useState(false)
+  // Load generation — a newer query supersedes an in-flight one, so a slow page for the kind you just left
+  // can never land on top of the kind you are now looking at.
+  const genRef = useRef(0)
 
   const load = useCallback((cursor?: string, forKind?: string) => {
+    const gen = ++genRef.current
     void (async () => {
       setPending(true)
       try {
@@ -51,25 +56,30 @@ export function TrajectoryBrowser() {
           ...(cursor ? { cursor } : {}),
           ...(forKind ? { kind: forKind } : {}),
         })
+        if (gen !== genRef.current) return // superseded — drop this page, and its pending/error with it
         if (!page.ok) {
           setError(page.error)
           return
         }
         setError(undefined)
+        // The list is REPLACED when the new page arrives, never emptied while it is on the way: clearing on
+        // the click collapsed the list to an empty bordered box and re-expanded it a moment later, which
+        // reads as the whole section blinking on every filter press. Paging appends, as before.
         setItems((prev) => (cursor ? [...prev, ...page.items] : page.items))
+        // A replacement invalidates the indices the dialog walks; an append leaves them pointing at the
+        // same rows.
+        if (!cursor) setOpenIndex(undefined)
         setNextCursor(page.nextCursor)
         setLoaded(true)
       } finally {
-        setPending(false)
+        if (gen === genRef.current) setPending(false)
       }
     })()
   }, [])
 
-  // Switching the kind restarts paging — the cursor belongs to the query that produced it.
+  // Switching the kind restarts paging — the cursor belongs to the query that produced it. The previous
+  // rows stay on screen (dimmed) until the new ones land.
   useEffect(() => {
-    setItems([])
-    setNextCursor(undefined)
-    setLoaded(false)
     load(undefined, kind)
   }, [load, kind])
 
@@ -80,13 +90,14 @@ export function TrajectoryBrowser() {
           the agent they just ran could not tell which row was theirs — evidence you cannot recognize reads as
           evidence that is not there. Filtering happens in the store's query, so a page is never short. */}
       <div className="flex flex-wrap items-center gap-1">
+        {/* Never disabled while a page is in flight: a greyed-out row of buttons is its own flicker, and the
+            load generation already makes a second press safe. */}
         {KIND_FILTERS.map((k) => (
           <Button
             key={k ?? 'all'}
             variant={kind === k ? 'secondary' : 'ghost'}
             size="sm"
             onClick={() => setKind(k)}
-            disabled={pending}
           >
             {k === undefined ? t('kindAll') : t(`kind_${k}`)}
           </Button>
@@ -98,7 +109,10 @@ export function TrajectoryBrowser() {
           hint={kind ? t('emptyKindHint') : t('emptyHint')}
         />
       ) : (
-        <>
+        <div
+          className={cn('space-y-2 transition-opacity', pending && 'opacity-60')}
+          aria-busy={pending}
+        >
           <div className="text-xs text-muted-foreground">{t('count', { count: items.length })}</div>
           <ul className="divide-y divide-border rounded-md border border-border">
             {items.map((m, i) => (
@@ -146,7 +160,7 @@ export function TrajectoryBrowser() {
               {t('loadMore')}
             </Button>
           ) : null}
-        </>
+        </div>
       )}
       {/* prev/next moves only within the pages already loaded — the dialog never pulls the cursor further. */}
       {openIndex !== undefined && items[openIndex] && (

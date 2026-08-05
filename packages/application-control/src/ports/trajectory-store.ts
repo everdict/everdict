@@ -335,7 +335,14 @@ export interface TrajectoryStore {
   // store). Metas only: a page never hauls bodies. `viewer` (the member asking) drops evidence owned by
   // someone else IN THE QUERY — filtering afterwards would hand the reader a short page and let one member's
   // chat history crowd out everyone else's traces. Unset = an internal read (retention, metering).
-  list(tenant: string, opts?: { limit?: number; cursor?: string; viewer?: string }): Promise<TrajectoryListResult>;
+  // `kind` is the run family filter ("show me my agent conversations"), applied in the query beside the owner
+  // predicate for the same reason. DECLARED here, not merely honored by the impls: a decorator that
+  // destructures the options would otherwise drop it silently and the filter would read as "nothing of this
+  // kind exists".
+  list(
+    tenant: string,
+    opts?: { limit?: number; cursor?: string; viewer?: string; kind?: string },
+  ): Promise<TrajectoryListResult>;
   // Ingestion accounting (N3's admission lane): what this workspace sealed since `sinceIso`. The STORE is
   // the meter — no separate counter to drift or lose on restart; the door's quota check reads this.
   ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }>;

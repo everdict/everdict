@@ -56,6 +56,83 @@ describe("GET /trajectories — browsing the owned evidence ledger (N1 look-inwa
     expect(seen).toEqual(["r1", "r2", "r3"]); // all of acme's, exactly once — rival's r9 never appears
   });
 
+  // The complaint this covers: "my conversations with the agent are not in here". A chat turn IS a run, its
+  // evidence IS a trajectory, and the browse page's kind axis is how a member finds it among a workspace full
+  // of eval cases — so the whole chain (internal report → run record → seal → filtered list) is asserted end
+  // to end, not one link at a time.
+  it("lists a member's agent conversation under kind=agent, named and scoped to that member", async () => {
+    const trajectoryStore = new InMemoryTrajectoryStore();
+    const runStore = new InMemoryRunStore();
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: runStore, trajectories: trajectoryStore }),
+      platformEvents: new PlatformEventService({ store: new InMemoryPlatformEventStore() }),
+      trajectoryStore,
+      internalToken: "itok",
+    });
+    // An eval run's evidence, for the kind axis to separate the conversation from.
+    await trajectoryStore.seal({
+      runId: "eval-1",
+      tenant: "acme",
+      source: "run",
+      events: [{ t: 0, kind: "llm_call", model: "m" }],
+      kind: "eval",
+      label: "case-7",
+    });
+    const report = (over: Record<string, unknown>): Promise<unknown> =>
+      app.inject({
+        method: "POST",
+        url: "/internal/agent-run-events",
+        headers: { "x-internal-token": "itok" },
+        payload: {
+          tenant: "acme",
+          sessionId: "sess-chat",
+          agentId: "sentinel",
+          eventKind: "chat",
+          runId: "run-chat-1",
+          creator: "dev", // the unauthenticated dev principal — the member browsing below
+          cause: "chat",
+          ...over,
+        },
+      });
+    await report({ kind: "agent.run.started", message: "Chat turn in conversation sess-chat." });
+    await report({
+      kind: "agent.run.completed",
+      message: "Chat turn completed in conversation sess-chat.",
+      // The turn's OWN record — the form a live agent turn actually reports (N6), and the one whose loss on
+      // the wire left the conversation with no trajectory at all.
+      spans: [
+        {
+          traceId: "0af7651916cd43dd8448eb211c80319c",
+          spanId: "b7ad6b7169203331",
+          name: "invoke_agent sentinel",
+          kind: "internal",
+          startedAt: "2026-08-05T00:00:00.000Z",
+          endedAt: "2026-08-05T00:00:02.000Z",
+          attributes: {},
+        },
+      ],
+    });
+
+    const all = (await app.inject({ method: "GET", url: "/trajectories", headers: H })).json();
+    expect(all.items.map((m: { runId: string }) => m.runId).sort()).toEqual(["eval-1", "run-chat-1"]);
+
+    const agents = (await app.inject({ method: "GET", url: "/trajectories?kind=agent", headers: H })).json();
+    expect(agents.items).toHaveLength(1);
+    expect(agents.items[0]).toMatchObject({ runId: "run-chat-1", kind: "agent", label: "sentinel", owner: "dev" });
+
+    // Another member's conversation is not the reader's evidence — dropped in the query, not after the page.
+    await report({ kind: "agent.run.started", message: "Chat turn.", runId: "run-chat-2", creator: "mallory" });
+    await report({
+      kind: "agent.run.completed",
+      message: "Chat turn completed.",
+      runId: "run-chat-2",
+      creator: "mallory",
+      trace: [{ t: 0, kind: "message", role: "user", text: "hi" }],
+    });
+    const mine = (await app.inject({ method: "GET", url: "/trajectories?kind=agent", headers: H })).json();
+    expect(mine.items.map((m: { runId: string }) => m.runId)).toEqual(["run-chat-1"]);
+  });
+
   it("is absent (404) when no trajectory store is configured", async () => {
     const app = buildServer({
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
