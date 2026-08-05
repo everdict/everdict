@@ -51,15 +51,21 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   }, [chart, dark])
 
   // 로딩 중/실패 = 원문 코드 블록(펜스 기본 표현과 동일) — 렌더 성공 시에만 다이어그램으로 교체.
+  // data-mermaid 는 두 상태에 다 붙는다: "이 펜스는 다이어그램으로 갔다"가 서버 출력만 봐도 보여야
+  // 렌더 성공 여부(브라우저에서만 갈리는 것)와 배선 여부(여기서 갈리는 것)를 따로 확인할 수 있다.
   if (failed || svg === '') {
     return (
-      <pre className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-[12px] leading-relaxed text-foreground">
+      <pre
+        data-mermaid=""
+        className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-[12px] leading-relaxed text-foreground"
+      >
         <code>{chart}</code>
       </pre>
     )
   }
   return (
     <div
+      data-mermaid=""
       className="overflow-x-auto rounded-md border border-border bg-muted/20 p-3 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
       dangerouslySetInnerHTML={{ __html: svg }}
     />

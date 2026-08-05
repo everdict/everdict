@@ -109,6 +109,31 @@ describe('markdown viewer (GFM)', () => {
   })
 })
 
+// A ```mermaid fence is a drawing, not a listing — an issue body that argues a design with a flowchart showed the
+// source code instead, because every tracker surface left the viewer's diagram pass switched off.
+const DIAGRAM = '```mermaid\ngraph TD;\n  A-->B;\n```'
+
+describe('markdown viewer (mermaid)', () => {
+  it('sends a mermaid fence to the diagram viewer', () => {
+    const out = renderToStaticMarkup(<Markdown content={DIAGRAM} mermaid />)
+
+    expect(out).toContain('data-mermaid')
+  })
+
+  // The diagram viewer only draws in a browser, so on the server it stands in as the fence's own source — the
+  // reader never loses the text, whether the library is still loading or the syntax is wrong.
+  it('keeps the fence source readable until the diagram renders', () => {
+    const out = renderToStaticMarkup(<Markdown content={DIAGRAM} mermaid />)
+
+    expect(out).toContain('graph TD;')
+  })
+
+  // Off by default: a streaming surface re-parses its body on every chunk, so it opts out of the diagram pass.
+  it('leaves the fence a plain code block when the surface has not opted in', () => {
+    expect(html(DIAGRAM)).not.toContain('data-mermaid')
+  })
+})
+
 // A comment body is markdown too, and the thread it lives in addresses people — so the same viewer has to keep
 // the @mention chip the plain-text renderer used to draw, without letting a body forge one.
 const mentioned = (content: string, names: string[]) =>

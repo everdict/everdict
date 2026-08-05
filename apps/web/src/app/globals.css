@@ -238,8 +238,15 @@ samp {
   --raise-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
-* {
-  border-color: var(--color-border);
+/* The default border colour, in the BASE layer on purpose. Unlayered CSS beats every layered rule regardless of
+   specificity, so while this sat outside a layer it silently overrode every `border-*` colour utility in the app:
+   an active tab's `border-primary` underline drew in the default grey, and `border-transparent` (an inline editor
+   that should look like text until you hover it) drew a visible box. In `@layer base` the utilities win again and
+   an element that names no border colour still gets this one. */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
 }
 
 /* Clickable controls get the pointer cursor — the browser/Tailwind preflight default is an arrow, so buttons

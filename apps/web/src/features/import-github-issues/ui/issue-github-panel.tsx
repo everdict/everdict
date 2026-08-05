@@ -230,6 +230,7 @@ export function IssueGithubPanel({
                     첨부 이미지는 설명과 똑같이 우리 프록시를 거친다(직접 받아올 수 없는 주소다). */}
                 <Markdown
                   content={comment.body}
+                  mermaid
                   imageProxy={issueAttachmentProxy(issueId, github)}
                   className="mt-1.5"
                 />
