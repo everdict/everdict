@@ -4,10 +4,25 @@ import { contextWindowFor, effectiveBudget, estimateTokens, thresholdReached } f
 describe("contextWindowFor", () => {
   it("resolves known models by substring (order-sensitive), else the default", () => {
     expect(contextWindowFor("chatgpt/gpt-5.4-mini")).toBe(400_000);
-    expect(contextWindowFor("anthropic/claude-opus-4-8")).toBe(200_000);
     expect(contextWindowFor("gpt-4o-mini")).toBe(128_000); // gpt-4o matches before gpt-4
     expect(contextWindowFor("gpt-4.1")).toBe(1_000_000);
     expect(contextWindowFor("some-unknown-model")).toBe(128_000);
+  });
+
+  it("budgets 1M-context Claude models at 1M instead of capping them at 200k", () => {
+    // Regression: the old table matched every "opus"/"sonnet"/"claude" at 200k, so a 1M model compacted at ~20%.
+    expect(contextWindowFor("anthropic/claude-opus-4-8")).toBe(1_000_000);
+    expect(contextWindowFor("claude-opus-5")).toBe(1_000_000);
+    expect(contextWindowFor("claude-sonnet-4-6")).toBe(1_000_000);
+    expect(contextWindowFor("claude-sonnet-5")).toBe(1_000_000);
+    expect(contextWindowFor("claude-fable-5")).toBe(1_000_000);
+  });
+
+  it("keeps 200k-context Claude models at 200k (the allowlist is explicit, not tier-wide)", () => {
+    expect(contextWindowFor("claude-opus-4-5-20251101")).toBe(200_000);
+    expect(contextWindowFor("claude-sonnet-4-5-20250929")).toBe(200_000);
+    expect(contextWindowFor("claude-haiku-4-5-20251001")).toBe(200_000);
+    expect(contextWindowFor("claude-3-haiku-20240307")).toBe(200_000);
   });
 });
 

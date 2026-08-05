@@ -16,6 +16,17 @@ const CONTEXT_WINDOWS: { match: string; window: number }[] = [
   { match: "gpt-4", window: 128_000 },
   { match: "o3", window: 200_000 },
   { match: "o1", window: 200_000 },
+  // 1M-context Claude models are an explicit allowlist (Opus 4.6+, Sonnet 4.6+, Fable/Mythos 5); every other
+  // opus/sonnet/haiku/claude stays at the conservative 200k. The asymmetry is deliberate: budgeting a 200k model
+  // at 1M overruns the window mid-run, while budgeting a 1M model at 200k only compacts far too early.
+  { match: "opus-4-6", window: 1_000_000 },
+  { match: "opus-4-7", window: 1_000_000 },
+  { match: "opus-4-8", window: 1_000_000 },
+  { match: "opus-5", window: 1_000_000 },
+  { match: "sonnet-4-6", window: 1_000_000 },
+  { match: "sonnet-5", window: 1_000_000 },
+  { match: "fable", window: 1_000_000 },
+  { match: "mythos", window: 1_000_000 },
   { match: "opus", window: 200_000 },
   { match: "sonnet", window: 200_000 },
   { match: "haiku", window: 200_000 },
