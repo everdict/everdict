@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { issueStatusIcon, IssueStatusIcon, type IssueStatus } from '@/entities/issue'
+import { orderWorkflowStates } from '@/entities/workflow-state'
 import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -41,8 +42,9 @@ export function IssueStatusControl({
   // 사본을 만드는 게 아니다: 상태 어휘·닿을 수 있는 전이·완료 시 해결 다이얼로그가 한 곳에만 있어야 한다.
   variant?: 'default' | 'icon'
   // 이 이슈가 속한 팀의 보드 컬럼들. 있으면 팀이 붙인 이름으로 고르고(리니어와 같은 동선), 없으면 정규
-  // 어휘로 떨어진다 — 어느 쪽이든 서버가 받는 것은 같은 전이다.
-  states?: { id: string; name: string; status: IssueStatus }[]
+  // 어휘로 떨어진다 — 어느 쪽이든 서버가 받는 것은 같은 전이다. `position` 은 보드의 순서를 다시 세우는 데
+  // 쓴다(orderWorkflowStates) — 자리 안의 순서는 팀이 정한 것이라 화면이 지어내면 안 된다.
+  states?: { id: string; name: string; status: IssueStatus; position: number }[]
 }) {
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
@@ -119,9 +121,11 @@ export function IssueStatusControl({
         )}
       >
         <DropdownLabel>{t('statusMoveTo')}</DropdownLabel>
-        {/* 팀 보드가 있으면 그 이름들로 — 닿을 수 있는 정규 상태에 매핑된 컬럼만 낸다. */}
+        {/* 팀 보드가 있으면 그 이름들로 — 닿을 수 있는 정규 상태에 매핑된 컬럼만 낸다.
+            순서는 보드의 순서(정규 상태 → 그 안의 자리)로 다시 세운다: 서버는 `position` 만으로 정렬해 주고
+            새 컬럼은 보드 끝에 붙으므로, 팀이 「검토 중」에 컬럼을 하나 더하면 그것이 「취소됨」 아래에 나타난다. */}
         {(states.length > 0
-          ? states
+          ? orderWorkflowStates(states)
               .filter((state) => reachableFrom(status).includes(state.status))
               .map((state) => ({
                 key: state.id,

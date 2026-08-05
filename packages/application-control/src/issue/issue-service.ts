@@ -161,7 +161,10 @@ export class IssueService {
 
   async create(input: CreateIssueInput): Promise<IssueRecord> {
     // A parent has to exist in this workspace before it can be one — the child's whole meaning is the link.
-    if (input.parentId !== undefined) await this.get(input.tenant, input.parentId);
+    // What is STORED is the resolved id, never what the caller spelled: `get` takes the name a team cites
+    // (`ENG-12`) just as readily as the uuid, and the sub-issue query keys on the id — so filing by identifier
+    // used to mint a child that its own parent's detail could never list. Re-parenting already resolved.
+    const parent = input.parentId === undefined ? undefined : await this.get(input.tenant, input.parentId);
     const { team, grant } = await this.deps.teams.allocateForIssue(input.tenant, input.teamId, input.createdBy);
     if (input.cycleId !== undefined) await this.assertCycleOfTeam(input.tenant, input.cycleId, team.id);
     if (input.projectId !== undefined) await this.assertProjectOfTeam(input.tenant, input.projectId, team.id);
@@ -177,7 +180,7 @@ export class IssueService {
       ...(input.priority !== undefined ? { priority: input.priority } : {}),
       ...(input.estimate !== undefined ? { estimate: input.estimate } : {}),
       ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
-      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      ...(parent !== undefined ? { parentId: parent.id } : {}),
       ...(input.cycleId !== undefined ? { cycleId: input.cycleId } : {}),
       ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {}),
       ...(input.inTriage !== undefined ? { inTriage: input.inTriage } : {}),

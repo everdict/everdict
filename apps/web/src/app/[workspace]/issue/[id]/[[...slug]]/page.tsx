@@ -13,6 +13,7 @@ import {
   IssueAssigneeControl,
   IssueCycleControl,
   IssueLabelControl,
+  IssueParentControl,
   IssuePriorityControl,
   IssueProjectControl,
   IssueStatusControl,
@@ -264,6 +265,13 @@ export default async function IssueDetailPage({
   // 고를 수 있는 것은 열려 있는 이터레이션뿐이다 — 닫힌 주기는 계획이 아니라 기록이고, 거기에 새 일을 넣는 것은
   // 어느 팀도 하려는 일이 아니다.
   const cycleOptions = cycles.filter((c) => c.completedAt === undefined).map(cycleOptionOf)
+  // 상위로 세울 수 있는 이슈 — 같은 팀의 이슈들이다. 형제 이동이 이미 읽어 둔 창을 그대로 쓰므로 읽기가
+  // 하나 늘지 않는다. 자기 자신과 자기 하위 이슈는 뺀다(자기 자손 아래로 들어가면 고리가 닫힌다); 더 깊은
+  // 자손은 살아 있는 트리를 봐야 알 수 있어 제어 평면이 판정하고, 거절은 컨트롤이 그대로 띄운다.
+  const childIds = new Set(children.map((child) => child.id))
+  const parentOptions = siblings
+    .filter((s) => s.id !== current.id && !childIds.has(s.id))
+    .map((s) => ({ id: s.id, identifier: s.identifier, title: s.title, status: s.status }))
   // 이력·담당자·해결 기록이 같은 이름·같은 얼굴을 쓰도록 subject → 프로필을 한 번만 만든다.
   const actors = memberDirectoryOf(members)
   const displayName = (subject: string): string => memberNameOf(actors, subject)
@@ -337,13 +345,16 @@ export default async function IssueDetailPage({
             {parent && (
               <>
                 <ChevronRight className="size-3 shrink-0 text-faint" />
-                {/* 하위 이슈는 부모를 경로에 이고 다닌다 — 이 이슈가 무엇에서 쪼개져 나왔는지가 곧 위치다. */}
+                {/* 하위 이슈는 부모를 경로에 이고 다닌다 — 이 이슈가 무엇에서 쪼개져 나왔는지가 곧 위치다.
+                    식별자만으로는 `ENG-11` 이 무엇인지 알 수 없어 위치를 말해 주지 못했다 — 제목까지 함께
+                    이고 다녀야 "무엇에서 쪼개져 나왔나"에 답이 된다(좁아지면 제목부터 줄어든다). */}
                 <Link
                   href={issueHref(workspace, parent.identifier, parent.title)}
-                  title={parent.title}
-                  className="truncate text-muted-foreground transition-colors hover:text-foreground"
+                  title={`${parent.identifier} · ${parent.title}`}
+                  className="flex min-w-0 items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  <span className="font-mono text-[12px]">{parent.identifier}</span>
+                  <span className="shrink-0 font-mono text-[12px]">{parent.identifier}</span>
+                  <span className="truncate">{parent.title}</span>
                 </Link>
               </>
             )}
@@ -407,6 +418,7 @@ export default async function IssueDetailPage({
                   id: state.id,
                   name: state.name,
                   status: state.status,
+                  position: state.position,
                 }))}
               />
             </PropertyRow>
@@ -444,6 +456,30 @@ export default async function IssueDetailPage({
                 canWrite={canWrite}
               />
             </PropertyRow>
+            {/* 상위 이슈 — 이 이슈가 무엇에서 쪼개져 나왔는지. 브레드크럼에도 있지만 그건 위치이지 속성이
+                아니라, 하위 이슈인 것을 알아채고 붙였다 뗄 수 있는 자리는 여기다(예전에는 그 자리가 화면
+                어디에도 없어서 에이전트만 부모를 바꿀 수 있었다). 세울 수 있는 이슈가 하나도 없는 팀에서는
+                빈 행을 내지 않는다(빈 섹션 숨김). */}
+            {(parent !== undefined || (canWrite && parentOptions.length > 0)) && (
+              <PropertyRow label={t('fieldParent')}>
+                <IssueParentControl
+                  workspace={workspace}
+                  id={current.id}
+                  parent={
+                    parent
+                      ? {
+                          id: parent.id,
+                          identifier: parent.identifier,
+                          title: parent.title,
+                          status: parent.status,
+                        }
+                      : undefined
+                  }
+                  options={parentOptions}
+                  canWrite={canWrite}
+                />
+              </PropertyRow>
+            )}
             {/* 프로젝트도 이 열에서 바로 넣고 뺀다 — 붙어 있을 때만 보이던 링크 한 줄로는 "이 이슈를 어느
                 프로젝트에 넣을까"에 답할 자리가 화면 어디에도 없었다(편집 다이얼로그 안에만 있었다).
                 고를 프로젝트가 하나도 없는 워크스페이스에서는 빈 행을 내지 않는다(빈 섹션 숨김). */}
@@ -574,9 +610,13 @@ export default async function IssueDetailPage({
           {/* 트리아지에 있는 이슈에 지금 할 일은 "받을까 말까" 하나뿐이라, 본문 맨 위에 선다. */}
           {current.inTriage && canWrite && <IssueTriageActions id={current.id} />}
 
+          {/* mermaid: an issue body is where a design gets argued, and the drawing IS the argument — a
+              ```mermaid fence renders as the diagram (GitHub does the same). Safe to opt in here because
+              this body is finished text, not a stream: nothing re-parses it per chunk. */}
           {current.description && (
             <Markdown
               content={current.description}
+              mermaid
               imageProxy={issueAttachmentProxy(current.id, current.github)}
             />
           )}
@@ -600,6 +640,9 @@ export default async function IssueDetailPage({
                         workspace={workspace}
                         projects={projects.map((p) => ({ id: p.id, name: p.name }))}
                         parentId={current.id}
+                        // 하위 이슈는 부모의 팀에서 태어난다 — 팀이 식별자를 찍으므로, 물려주지 않으면
+                        // `ENG-12` 의 자식이 워크스페이스 기본 팀에서 찍혀 나온다.
+                        defaultTeamId={current.teamId}
                         label={t('subIssueAdd')}
                       />
                     )}

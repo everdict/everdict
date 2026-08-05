@@ -480,9 +480,16 @@ describe("IssueService — an issue only joins a project its own team is on", ()
 describe("IssueService — sub-issues", () => {
   const actor = { subject: "dana" };
 
+  // Ids have to be DISTINCT here, unlike the single-issue blocks: a parent and a child that mint the same id
+  // collapse onto one record in the store, and then every assertion about the edge between them is answered by
+  // an issue that is its own parent. That is how a create path storing the identifier verbatim stayed green.
   function service() {
     const store = new FakeIssueStore();
-    return { store, svc: new IssueService({ teams: movingAllocator(), store, newId: () => "ev", now: () => NOW }) };
+    let n = 0;
+    return {
+      store,
+      svc: new IssueService({ teams: movingAllocator(), store, newId: () => `iss-${++n}`, now: () => NOW }),
+    };
   }
 
   it("files a sub-issue under an existing parent", async () => {
@@ -495,6 +502,23 @@ describe("IssueService — sub-issues", () => {
       parentId: parent.id,
     });
     expect(child.parentId).toBe(parent.id);
+  });
+
+  it("stores the parent's id when a sub-issue is filed under the name the team cites", async () => {
+    const { svc } = service();
+    const parent = await svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retries" });
+    // Every read takes `ENG-12` exactly like the uuid, and the agent-facing tool says so — so filing this way
+    // has to produce the same child. It used to store the identifier verbatim, which made the sub-issue
+    // invisible to the query its own parent's detail runs (`parentId = <uuid>`).
+    const child = await svc.create({
+      tenant: "acme",
+      createdBy: "dana",
+      title: "reproduce it",
+      parentId: parent.identifier,
+    });
+    expect(child.parentId).toBe(parent.id);
+    const under = await svc.listSummaries("acme", { parentId: parent.id });
+    expect(under.items.map((item) => item.id)).toContain(child.id);
   });
 
   it("404s on a parent that does not exist in this workspace", async () => {

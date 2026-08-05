@@ -9,7 +9,7 @@ import {
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assertTeamVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, ok, run } from "../mcp-context.js";
+import { type McpToolContext, ok, resolveTeam, run } from "../mcp-context.js";
 
 // MCP twin of the issue routes (BFF↔MCP parity). This is the surface an agent uses to triage its own
 // regressions: find the issue that watches a harness, read how it was closed last time, and move it.
@@ -42,6 +42,12 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         "when you find a defect worth tracking across runs, not for one-off notes.",
       inputSchema: {
         title: z.string().min(1).max(300),
+        team: z
+          .string()
+          .optional()
+          .describe(
+            'the team whose list it lands on — id or key ("ENG"); the identifier is minted from that team\'s counter. Absent: the workspace default team',
+          ),
         description: z.string().max(50_000).optional(),
         status: IssueStatusSchema.exclude(["done", "regressed"]).optional(),
         priority: IssuePrioritySchema.optional().describe(
@@ -80,6 +86,9 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
           await issues.create({
             tenant: ws,
             createdBy: principal.subject,
+            // Resolved here (id or key) so an unknown team is a 404 rather than an issue quietly filed under
+            // the default one.
+            ...(a.team !== undefined ? { teamId: await resolveTeam(ctx, a.team) } : {}),
             title: a.title,
             ...(a.description !== undefined ? { description: a.description } : {}),
             ...(a.status !== undefined ? { status: a.status } : {}),
@@ -113,6 +122,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         "`parent` takes an issue id for its sub-issues, or the literal `none` for the top-level issues only.",
       inputSchema: {
         status: z.array(IssueStatusSchema).optional(),
+        team: z.string().optional().describe('only this team\'s issues — id or key ("ENG")'),
         project: z.array(z.string()).optional(),
         assignee: z.array(z.string()).optional().describe('issue assignees; "" selects the unassigned ones'),
         priority: z.array(IssuePrioritySchema).optional(),
@@ -134,6 +144,9 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
             // A private team's issues are not the workspace's — the same narrowing the HTTP list applies. An
             // agent reading through this tool must not see what the person it acts for cannot.
             ...(await teamNarrow(ctx)),
+            // `team` is the NARROW on top of that ceiling (the HTTP list's `?team=`): naming a team you cannot
+            // see returns nothing rather than that team's issues.
+            ...(a.team !== undefined ? { teamId: await resolveTeam(ctx, a.team) } : {}),
             ...(a.order !== undefined ? { order: a.order } : {}),
             ...(a.limit !== undefined ? { limit: a.limit } : {}),
             ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),

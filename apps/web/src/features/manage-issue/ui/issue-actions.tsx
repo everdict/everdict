@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { GitBranchPlus, Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
@@ -10,13 +10,19 @@ import type { Issue } from '@/entities/issue'
 import type { IssueLabel } from '@/entities/issue-label'
 import { Button } from '@/shared/ui/button'
 import { Dialog } from '@/shared/ui/dialog'
-import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
+import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 
 import { deleteIssueAction } from '../api/issues'
+import { CreateIssueDialog } from './create-issue-dialog'
 import { EditIssueDialog } from './edit-issue-dialog'
 
-// Edit + delete for one issue. Delete is creator-or-admin at the control plane (403), so the affordance is
-// shown to any writer and the refusal is surfaced verbatim rather than pre-guessed here.
+// Edit + delete for one issue, and the one entry that files a sub-issue. Delete is creator-or-admin at the
+// control plane (403), so the affordance is shown to any writer and the refusal is surfaced verbatim rather
+// than pre-guessed here.
+//
+// 하위 이슈 추가가 여기 있는 이유: 상세 화면의 「하위 이슈」 섹션은 자식이 있을 때만 선다(빈 섹션 숨김).
+// 그러면 첫 자식을 만들 길이 화면에서 사라진다 — 하위 이슈가 하나도 없는 이슈가 바로 쪼갤 것이 남은 이슈인데도
+// 그렇다. 리니어도 이 진입을 ⋯ 메뉴에 두므로, 자식이 있든 없든 항상 닿는 자리는 여기다.
 export function IssueActions({
   workspace,
   issue,
@@ -37,6 +43,7 @@ export function IssueActions({
   const t = useTranslations('issuesPage')
   const router = useRouter()
   const [editing, setEditing] = useState(false)
+  const [addingSub, setAddingSub] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [pending, setPending] = useState(false)
 
@@ -77,6 +84,13 @@ export function IssueActions({
           {t('edit')}
         </DropdownItem>
         <DropdownItem
+          icon={<GitBranchPlus className="size-3.5" />}
+          onSelect={() => setAddingSub(true)}
+        >
+          {t('subIssueAdd')}
+        </DropdownItem>
+        <DropdownSeparator />
+        <DropdownItem
           icon={<Trash2 className="size-3.5" />}
           tone="danger"
           onSelect={() => setConfirming(true)}
@@ -84,6 +98,17 @@ export function IssueActions({
           {t('delete')}
         </DropdownItem>
       </DropdownMenu>
+
+      {/* 하위 이슈는 부모의 팀에서 태어난다 — 팀이 식별자를 찍으므로, 팀을 물려주지 않으면 `ENG-12` 의 자식이
+          워크스페이스 기본 팀에서 `PLAT-3` 으로 찍혀 나온다. */}
+      <CreateIssueDialog
+        workspace={workspace}
+        projects={projects}
+        parentId={issue.id}
+        defaultTeamId={issue.teamId}
+        open={addingSub}
+        onClose={() => setAddingSub(false)}
+      />
 
       <EditIssueDialog
         labels={labels}
