@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { useTimeZone, useTranslations } from 'next-intl'
 
 import { DEFAULT_TIMEZONE, detectTimeZone, listTimeZones } from '@/shared/i18n/timezone'
@@ -36,7 +35,6 @@ function offsetLabel(timeZone: string): string {
 export function TimezoneSwitcher() {
   const t = useTranslations('timezone')
   const current = useTimeZone()
-  const router = useRouter()
   const refresh = useRefresh()
   const [, set_pending] = useState(false)
 

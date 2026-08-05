@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Check, Languages } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
@@ -26,7 +25,6 @@ export function LocaleSwitcher({
 }) {
   const t = useTranslations('locale')
   const locale = useLocale()
-  const router = useRouter()
   const refresh = useRefresh()
   const [, set_pending] = useState(false)
 

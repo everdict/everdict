@@ -21,7 +21,6 @@ import { AgentChatPanel, type ChatUser } from '@/features/agent-chat'
 import { HarnessPlaygroundPanel } from '@/features/harness-playground'
 import { agentChatMissionSchema, agentReferenceSchema } from '@/entities/agent-session'
 import { RELOAD_INFRA_FRAMES_EVENT } from '@/shared/lib/reload-infra-frames'
-import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 
 import {
@@ -93,7 +92,6 @@ export function InfraPanel({
 } = {}) {
   const t = useTranslations('infraPanel')
   const router = useRouter()
-  const refresh = useRefresh()
   const {
     workspace,
     open,
