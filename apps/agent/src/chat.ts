@@ -134,10 +134,11 @@ export async function workspaceMemoryPreamble(call: McpInvoke): Promise<string |
       file.content.length > MAX_MEMORY_INDEX_CHARS
         ? `${file.content.slice(0, MAX_MEMORY_INDEX_CHARS)}\n… [index truncated — read ${MEMORY_INDEX_PATH} in full, and shorten its entries]`
         : file.content;
-    const discipline =
-      `Read a listed memory's body with get_file (${MEMORY_DIRECTORY}/<file>) when it bears on THIS task. ` +
-      "A memory reflects when it was written: before recommending from one that names a file, resource, or version, verify it against the live workspace. " +
-      "If the user asks you to ignore memory, proceed as if this index were empty.";
+    const discipline = [
+      `Read a listed memory's body with get_file (${MEMORY_DIRECTORY}/<file>) when it bears on THIS task.`,
+      "A memory reflects when it was written: before recommending from one that names a file, resource, or version, verify it against the live workspace.",
+      "If the user asks you to ignore memory, proceed as if this index were empty.",
+    ].join(" ");
     return `Workspace memory index (${MEMORY_INDEX_PATH} — what agents learned in PAST conversations; persists across conversations):\n\n${index}\n\n${discipline}`;
   } catch {
     return undefined; // best-effort — memory must never fail a turn
