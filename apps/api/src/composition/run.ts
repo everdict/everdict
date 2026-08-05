@@ -16,7 +16,6 @@ import type { PersistentBudget } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
 import { buildCodeJudgeJob, defaultJudgeRunner } from "../core/execution/judge-runner.js";
-import type { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
 import type { PlacementPreflight } from "../core/execution/placement-preflight.js";
 import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
 
@@ -71,7 +70,8 @@ export function buildRun(deps: {
   // Cascade cancel (§5.5 O8) — late-bound to ScorecardService.cancelCausedBy (built after the run service).
   onAgentRunCancelled?: (tenant: string, runId: string) => Promise<unknown>;
   meteredDispatcher: CoreDispatcher;
-  dispatcher: ModelResolvingDispatcher;
+  // 저지의 하네스 위임 경로가 쓰는 공유 디스패처 — dispatch 만 쓰므로 인터페이스에 의존한다(backends 규칙).
+  dispatcher: CoreDispatcher;
   settingsStore: WorkspaceSettingsStore;
   harnessInstanceRegistry: HarnessInstanceRegistry;
   modelRegistry: ModelRegistry;

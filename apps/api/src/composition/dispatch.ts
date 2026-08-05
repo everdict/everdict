@@ -22,6 +22,7 @@ import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";
 import { SelfHostedBackend } from "../core/execution/self-hosted-backend.js";
 import { StoreCallbackRendezvous } from "../core/execution/store-callback-rendezvous.js";
 import { buildTopologyBackend } from "../core/execution/topology-backend.js";
+import { TraceRecordingDispatcher } from "../core/execution/trace-recording-dispatcher.js";
 import { makeRuntimeController } from "../core/ops/runtime-control.js";
 import { makeRuntimeInspector } from "../core/ops/runtime-inspect.js";
 import { makeRuntimeProber } from "../core/ops/runtime-probe.js";
@@ -200,7 +201,11 @@ export function buildDispatch(deps: {
   });
   // scopedSecretsFor: a harness Model binding injects its baseUrl + underlying model + API key (from the model's
   // apiKeySecret, workspace→personal tiers) into the agent server's env — the same secret seam the judge uses.
-  const dispatcher = new ModelResolvingDispatcher(modelRegistry, judgeAuthDispatcher, scopedSecretsFor);
+  const resolvingDispatcher = new ModelResolvingDispatcher(modelRegistry, judgeAuthDispatcher, scopedSecretsFor);
+  // Control-plane infra-plane recording — the OUTERMOST decorator, so the sealed trajectory's account starts at
+  // "the control plane accepted this case → target X" and carries queue wait + waiting diagnostics before the
+  // backend's own events. Sits outside ModelResolving/RuntimeDispatcher to see the user-chosen target name.
+  const dispatcher = new TraceRecordingDispatcher(resolvingDispatcher);
   // Workspace secrets feed the cached runtime backends' secretEnv — a secret change must drop that tenant's
   // cache so the next dispatch rebuilds with fresh values (previously only a CP restart picked them up).
   const invalidateTenantBackends = (tenant: string) => runtimeDispatcher.invalidateTenant(tenant);

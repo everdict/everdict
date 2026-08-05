@@ -113,6 +113,10 @@ export interface ServiceTopologyBackendOptions {
   recordSink?: (runId: string) => EnvRecordSink | undefined;
 }
 
+// Per-service log-tail cap for the sealed trajectory (half the failure-path FAILURE_LOG_TAIL_CAP) — the tail is
+// evidence, not an archive; the on-demand inspection route still serves the full runtime read.
+const SERVICE_LOG_TAIL_CAP = 8_000;
+
 // A declared pool coordinate that is not a finite number tells us nothing, and reporting a guess as capacity is
 // worse than reporting none — an operator would size batches against it.
 function numberAt(body: unknown, path: string): number | undefined {
@@ -193,6 +197,38 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     }
   }
 
+  // Each roster unit's log tail at case completion, as service-scope infra events — the sealed twin of the
+  // on-demand `topologyServiceLogs` read. Best-effort everywhere (a log miss never fails a run), tail-capped
+  // per service so one chatty unit can't bloat the sealed trajectory.
+  private async collectServiceLogTails(
+    spec: ServiceHarnessSpec,
+    roster: TopologyStatus | undefined,
+    zone: TrustZone | undefined,
+    t0: number,
+  ): Promise<TraceEvent[]> {
+    const read = this.opts.runtime.serviceLogs;
+    if (!read) return [];
+    const units = (roster?.services ?? []).slice(0, 20);
+    const at = new Date().toISOString();
+    const events = await Promise.all(
+      units.map(async (unit): Promise<TraceEvent | undefined> => {
+        const text = await read.call(this.opts.runtime, spec, unit.name, zone).catch(() => undefined);
+        if (text === undefined || text.trim() === "") return undefined;
+        const tail = text.length > SERVICE_LOG_TAIL_CAP ? text.slice(-SERVICE_LOG_TAIL_CAP) : text;
+        return {
+          t: Math.max(0, Date.now() - t0),
+          kind: "infra",
+          scope: "service",
+          service: unit.name,
+          event: "logs",
+          message: tail,
+          at,
+        };
+      }),
+    );
+    return events.filter((e): e is TraceEvent => e !== undefined);
+  }
+
   // Resolve any artifact-ref seed to inline bytes (via the injected resolver) so the runtime only handles inline seeds.
   // A ref fixture with no resolver configured fails loud — the required world-state can't be materialized.
   private async resolveSeedRefs(plans: StoreSeedPlan[]): Promise<StoreSeedPlan[]> {
@@ -246,6 +282,28 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     const runId = job.runId ?? (this.opts.newRunId ?? newRunId)();
     const keys = keysFor(runId);
 
+    // The infra-plane record of THIS dispatch (topology readiness, seeding, target acquisition, the drive) —
+    // appended to the result's trace so the sealed trajectory tells the whole placement story, the same account
+    // NomadBackend/K8sBackend keep for job-runner dispatches. A topology case never submits an orchestrator job
+    // per case (the drive is an HTTP call into the warm stack), so without these marks its trace starts at the
+    // agent's first step and the infra half of the run is invisible.
+    const t0 = Date.now();
+    const infraMarks: TraceEvent[] = [];
+    const markMessages: string[] = []; // 같은 마크의 문자열판 — 실패 throw 의 placement.events 증거로 동반된다
+    const mark = (event: string, message: string, service?: string): void => {
+      const now = Date.now();
+      markMessages.push(message);
+      infraMarks.push({
+        t: Math.max(0, now - t0),
+        kind: "infra",
+        scope: service !== undefined ? "service" : "placement",
+        event,
+        message,
+        ...(service !== undefined ? { service } : {}),
+        at: new Date(now).toISOString(),
+      });
+    };
+
     // Resolve the tenant zone — untrusted forces hardened isolation, and the warm pool is separated per zone.
     let zone: TrustZone | undefined;
     if (this.opts.trustZones) {
@@ -254,6 +312,10 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     }
 
     const topo = await this.opts.runtime.ensureTopology(spec, zone);
+    mark(
+      "topology_ready",
+      `topology ${spec.id}@${spec.version} ready in ${Date.now() - t0}ms — services: ${spec.services.map((s) => s.name).join(", ")}${spec.dependencies.length > 0 ? `; stores: ${spec.dependencies.map((d) => d.store).join(", ")}` : ""}`,
+    );
     // World-state fixture seeding (P2): seed the case's declared fixtures into their per-case isolation slices AFTER the
     // warm topology is up and BEFORE the drive, so the agent operates on the seeded state. A PRECONDITION — planStoreSeed
     // binds/validates each fixture against a purpose:"data" store (throws on a bad target), and a seed failure or a
@@ -271,6 +333,7 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
         );
       }
       await this.opts.runtime.seedFixtures(spec, runId, plans, zone);
+      mark("fixtures_seeded", `${plans.length} store fixture(s) seeded into per-case isolation slices`);
     }
     // Target acquisition (#2/#4): only when spec.target is declared. Branch by acquire strategy — provision (default, runtime browser) |
     // service (the session API of a declared service). If absent, trace-only with no observation stage. Pass the base wiring for open/close path interpolation
@@ -287,6 +350,14 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     // Publish this case's reachable browser for the whole drive, so an out-of-band live read (GET /runs/:id/screen)
     // can look at the SAME browser the agent is driving — for a session-acquired target that address exists nowhere else.
     if (target?.cdpBase) this.liveTargets.set(runId, target.cdpBase);
+    if (target) {
+      mark(
+        "target_acquired",
+        spec.target?.acquire?.mode === "service"
+          ? `session opened on service ${spec.target.acquire.service}${target.cdpBase ? " (live CDP reachable)" : ""}`
+          : `per-case browser provisioned${target.cdpBase ? ` (CDP ${target.cdpBase})` : ""}`,
+      );
+    }
     // A DECLARED observation coordinate that resolved to nothing degrades visibly instead of leaving the operator
     // staring at an empty live view: the run's own trajectory says the session returned no reachable CDP.
     const targetInfra: TraceEvent[] =
@@ -447,6 +518,11 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
         driveAbort.abort();
       });
       let outcome: DriveOutcome;
+      const driveStartedAt = Date.now();
+      mark(
+        "drive_submitted",
+        `front-door ${spec.frontDoor.service}: ${spec.frontDoor.submit} (completion ${spec.frontDoor.completion?.mode ?? "sync"}, budget ${job.evalCase.timeoutSec}s)`,
+      );
       try {
         outcome = await driver.drive({
           base,
@@ -479,6 +555,9 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
               reason: "completion-timeout",
               budgetSec: job.evalCase.timeoutSec,
               ...(health ? { topologyHealth: health } : {}),
+              // 여기까지의 인프라 마크를 증거로 동반 — classifyFailure 가 CaseFailure.placement.events 로 들어
+              // 올리고 failedCaseResult 가 궤적에 봉인하므로, "예산 소진 전까지 어디까지 갔나"가 기록에 남는다.
+              placement: { events: markMessages },
             },
             `The agent did not finish within the per-case budget (timeoutSec).${health ? ` Topology health: ${health}` : ""}`,
           );
@@ -496,10 +575,17 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
         const health = await this.opts.runtime.diagnose?.(spec, zone).catch(() => undefined);
         throw new InternalError(
           "HARNESS_RUN_FAILED",
-          { runId, reason: "completion-timeout", ...(health ? { topologyHealth: health } : {}) },
+          {
+            runId,
+            reason: "completion-timeout",
+            ...(health ? { topologyHealth: health } : {}),
+            // 예산 경로와 동일 — 인프라 마크를 실패 증거로 동반해 궤적에 봉인되게 한다.
+            placement: { events: markMessages },
+          },
           `The agent did not finish within the completion deadline.${health ? ` Topology health: ${health}` : ""}`,
         );
       }
+      mark("drive_completed", `front-door completed in ${Date.now() - driveStartedAt}ms`);
 
       // Trace acquisition. Unset traceInline = pull from the platform traceSource. traceInline = the agent returned a
       // normalized TraceEvent[] in the front-door response (no observability platform needed) → the judge sees the action
@@ -537,6 +623,10 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
             trace = await source.fetch(traceKey);
           }
         }
+        mark(
+          "trace_collected",
+          `${trace.length} trace event(s) ${inline ? "returned inline by the front-door" : `pulled from the platform (key ${traceKey})`}`,
+        );
       } catch (err) {
         const how = inline ? "extract" : "fetch";
         trace = [
@@ -584,20 +674,27 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
       // restarts/OOM/node), appended to the trace so the sealed trajectory says what stack the case actually ran
       // against — after the roster read landed, "the stack was healthy/churning when this case ran" is evidence,
       // not archaeology. Best-effort; scored ABOVE (the graders never see these events).
+      const rosterAt = new Date().toISOString();
       const roster = await this.opts.runtime.describeTopology?.(spec, zone).catch(() => undefined);
       const infra: TraceEvent[] = (roster?.services ?? []).slice(0, 20).map((s) => ({
-        t: 0,
+        t: Math.max(0, Date.now() - t0),
         kind: "infra" as const,
         scope: "service" as const,
         service: s.name,
         event: s.status,
         message: `${s.role ?? "unit"}/${s.name} ${s.status}${s.restarts !== undefined && s.restarts > 0 ? `, restarts ${s.restarts}` : ""}${s.oom ? ", OOM-killed" : ""}${s.lastEvent ? ` — ${s.lastEvent}` : ""}`,
         ...(s.node ? { node: s.node } : {}),
+        at: rosterAt,
       }));
+      // Each service's OWN log tail at case completion — the read the on-demand inspection route serves
+      // (`TopologyRuntime.serviceLogs`), sealed per case so "what did service X print while this case ran"
+      // survives the warm stack's churn and teardown. Best-effort per service; tail-capped so a chatty
+      // service can't bloat the trajectory. Roster-driven: the roster already merged silo store units.
+      const serviceLogEvents = await this.collectServiceLogTails(spec, roster, zone, t0);
       return {
         caseId: job.evalCase.id,
         harness: `${spec.id}@${spec.version}`,
-        trace: [...trace, ...targetInfra, ...infra],
+        trace: [...trace, ...infraMarks, ...targetInfra, ...infra, ...serviceLogEvents],
         snapshot,
         scores,
       };

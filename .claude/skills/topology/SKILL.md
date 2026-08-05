@@ -127,6 +127,12 @@ exposes them as the `TopologyInspectable` capability (`@everdict/backends` — h
 `GET /runs/:id/topology`(+`/services/:service/logs`) + MCP `get_run_topology`/`get_topology_service_logs` + the web
 run detail's "Service topology" panel. All reads best-effort, never throw — readable WHILE a run drives the stack,
 not only inside a timeout error. See `docs/architecture/live-observability.md` ⑧.
+**The RECORD half — dispatch seals its own infra plane per case** (a topology case submits no orchestrator job, so
+nothing else would): `service-backend.ts` marks `topology_ready → fixtures_seeded → target_acquired →
+drive_submitted → drive_completed → trace_collected` as `infra` placement events, appends the roster AND each
+unit's log tail (`serviceLogs`, `SERVICE_LOG_TAIL_CAP` per unit, empty skipped) at completion, and the two
+completion-timeout throws carry the marks as `placement.events` failure evidence. Keep new dispatch stages marked
+the same way — the sealed trajectory is the only account that survives the warm stack's churn/teardown.
 **Warm-topology idle reclamation (A9).** `teardown()` is now ON the `TopologyRuntime` port and actually called: every
 runtime (Nomad/K8s/Docker — isomorphic) stamps `lastUsedAt` on its warm entries (touched on each ensure) and
 self-schedules an unref'd `sweepIdle(ttl)` interval (lazy-started on first ensure; defaults

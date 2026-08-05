@@ -851,6 +851,87 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(recorded[0]?.minio_prefix).toBe("runs/fixed/");
   });
 
+  // Infra-plane recording — a topology case never submits an orchestrator job per case, so the backend itself
+  // seals the placement story (topology ready → target → drive → trace pull) plus each service's own log tail;
+  // without it the sealed trajectory starts at the agent's first step and the infra half of the run is invisible.
+  it("seals the dispatch lifecycle, the service roster AND each service's log tail into the result trace", async () => {
+    const longLog = `head-marker\n${"x".repeat(20_000)}tail-marker`;
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return {
+          wiring: { target_cdp_url: "ws://browser/ctx" },
+          async snapshot(): Promise<BrowserSnapshot> {
+            return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+          },
+          async dispose() {},
+        };
+      },
+      async describeTopology() {
+        return {
+          deployed: true,
+          runtime: "nomad",
+          services: [
+            { name: "agent-server", status: "running", ready: true, events: [] },
+            { name: "browser-mcp", status: "running", ready: true, events: [] },
+          ],
+        };
+      },
+      async serviceLogs(_spec, service) {
+        return service === "agent-server" ? longLog : ""; // 빈 로그 유닛은 이벤트를 만들지 않아야 한다
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [{ t: 0, kind: "message", role: "assistant", text: "done" }];
+        },
+      },
+      specFor: () => SPEC,
+      submit: async () => {},
+      newRunId: () => "fixed",
+    });
+    const result = await backend.dispatch({
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "go",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    });
+
+    // The placement-plane lifecycle marks, in dispatch order, each with an absolute timestamp.
+    const placement = result.trace.filter((e) => e.kind === "infra" && e.scope === "placement");
+    expect(placement.map((e) => (e.kind === "infra" ? e.event : undefined))).toEqual([
+      "topology_ready",
+      "target_acquired",
+      "drive_submitted",
+      "drive_completed",
+      "trace_collected",
+    ]);
+    expect(placement.every((e) => e.at !== undefined)).toBe(true);
+
+    // The service roster (what stack the case ran against) still seals as before.
+    const roster = result.trace.filter((e) => e.kind === "infra" && e.scope === "service" && e.event === "running");
+    expect(roster.map((e) => (e.kind === "infra" ? e.service : undefined))).toEqual(["agent-server", "browser-mcp"]);
+
+    // Each service's own log tail seals per case — tail-capped, and an empty log makes no event.
+    const logs = result.trace.filter((e) => e.kind === "infra" && e.event === "logs");
+    expect(logs).toHaveLength(1);
+    const tail = logs[0];
+    if (tail?.kind !== "infra") throw new Error("expected an infra event");
+    expect(tail.service).toBe("agent-server");
+    expect(tail.message.length).toBeLessThanOrEqual(8_000);
+    expect(tail.message.endsWith("tail-marker")).toBe(true); // 캡은 머리가 아니라 꼬리를 남긴다
+  });
+
   // Replay ② — when the per-case browser exposes a reachable CDP AND a record sink is configured, dispatch opens an
   // environment recorder against it (keyed by the runId). The recorder itself is unit- + live-tested; here we assert the
   // DISPATCH SEAM: the sink factory is invoked with the runId, and a recorder that can't connect (unreachable CDP) is

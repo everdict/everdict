@@ -89,9 +89,12 @@ export class ScoringService {
       ? { ...evalCase.placement, target: runtime }
       : evalCase.placement;
     // Pulled-trace evidence (mapping evidence slots) rides the CaseResult — carries custom template slots to the judge.
+    // The infra plane (placement lifecycle, roster, per-service log tails) is evidence about the EXECUTION, not the
+    // agent's work — the judge contract says it may be ignored, and the model judge serializes the trace verbatim
+    // into a char-capped prompt, so leaving it in would crowd the agent's own steps out of the judged window.
     const ctx: GradeContext = {
       case: evalCase,
-      trace: result.trace,
+      trace: result.trace.filter((e) => e.kind !== "infra"),
       snapshot: result.snapshot,
       ...(result.evidence ? { evidence: result.evidence } : {}),
     };

@@ -224,11 +224,24 @@ The placement/topology reads above are LIVE — once the orchestrator GC's the j
 answer with. The record half: every dispatch now APPENDS the infra plane to the result's trace as `infra`
 TraceEvents (`scope placement | service`), so it seals with the trajectory and survives the cluster:
 
+- The CONTROL PLANE itself opens the account (`TraceRecordingDispatcher`, apps/api — the outermost decorator
+  around the shared dispatcher): `accepted` (the user-chosen target, before RuntimeDispatcher rewrites it) →
+  every `waiting` diagnostic (runner offline, blocked placement, no capacity — the onWaiting callbacks, now
+  also evidence) → `started` (queue wait). Prepended to the result's trace on success; attached under the
+  thrown error's `placement.events` on failure so `failedCaseResult` seals the same account.
 - Nomad/K8s dispatch: `submitted` → blocked verdicts (as they are first seen) → `placed` (unit + node) → the
   orchestrator's own task/pod events with their REAL timestamps (event time − dispatch t0), on success AND
   failure (`failedCaseResult` renders `CaseFailure.placement.events` as infra events ahead of the log tail).
+- `ServiceTopologyBackend` seals its own dispatch lifecycle — a topology case submits no orchestrator job, so
+  without this its infra half was invisible: `topology_ready` (services + stores, warm-or-deployed duration) →
+  `fixtures_seeded` → `target_acquired` (provisioned browser / opened service session) → `drive_submitted`
+  (front-door + completion mode + budget) → `drive_completed` → `trace_collected` (count + pull key). The two
+  completion-timeout throws carry the marks as `placement.events` evidence.
 - `ServiceTopologyBackend` appends the topology roster at case completion (per unit: role/status/restarts/OOM/
-  node) — "what stack did this case actually run against" is evidence, not archaeology.
+  node) — "what stack did this case actually run against" is evidence, not archaeology — AND each unit's own
+  log tail (`scope service`, event `logs`, `SERVICE_LOG_TAIL_CAP`=8 KB per unit, empty logs skipped): the same
+  read the on-demand `GET /runs/:id/topology/services/:service/logs` serves, sealed per case so "what did
+  service X print while this case ran" survives the warm stack's churn and teardown.
 - Consumers: judges/sinks ignore the kind (same contract as `log`); the web timeline and the trace browser
   render it (`[placement] Started: Task started by client @node`).
 
