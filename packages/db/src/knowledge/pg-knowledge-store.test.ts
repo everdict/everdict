@@ -109,4 +109,23 @@ describe("PgKnowledgeStore", () => {
     expect(calls[0]?.text).not.toContain("predicate =");
     expect(calls[0]?.params).toEqual(["acme", "harness:acme:web-agent@2.1.0"]);
   });
+
+  it("lists node ids by type and deletes only node rows (the reindex prune)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [{ node_id: "scorecard:acme:sc1" }] }));
+    const store = new PgKnowledgeStore(client);
+
+    const ids = await store.listNodeIds("acme", ["scorecard", "run"]);
+    expect(ids).toEqual(["scorecard:acme:sc1"]);
+    expect(calls[0]?.text).toContain("SELECT node_id FROM everdict_knowledge_nodes");
+    expect(calls[0]?.text).toContain("type = ANY($2)");
+    expect(calls[0]?.params).toEqual(["acme", ["scorecard", "run"]]);
+
+    await store.deleteNodes("acme", ["scorecard:acme:sc1"]);
+    expect(calls[1]?.text).toContain("DELETE FROM everdict_knowledge_nodes");
+    expect(calls[1]?.text).not.toContain("mentions"); // the audit spine is never touched
+    expect(calls[1]?.params).toEqual(["acme", ["scorecard:acme:sc1"]]);
+
+    await store.deleteNodes("acme", []); // nothing stale — no round-trip at all
+    expect(calls).toHaveLength(2);
+  });
 });

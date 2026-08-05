@@ -1,5 +1,6 @@
 import type {
   AgentSpec,
+  CapabilityOrigin,
   CapabilityRecord,
   Dataset,
   HarnessSpec,
@@ -11,7 +12,7 @@ import type {
   RubricSpec,
   RuntimeSpec,
 } from "@everdict/contracts";
-import { isPulledCommandTrace } from "@everdict/contracts";
+import { NodeTypeSchema, isPulledCommandTrace } from "@everdict/contracts";
 import { HarvestBuilder, type HarvestResult } from "./harvest.js";
 
 // Structured harvesters for the versioned REGISTRY specs (the eval subjects/config the scorecard/schedule harvesters'
@@ -29,13 +30,17 @@ export const AGENT_HARVESTER = "agent_harvester_v1";
 export const CAPABILITY_HARVESTER = "capability_harvester_v1";
 
 // The registry metadata a spec does not carry itself. `tags` is here (not on the spec) for harnesses — a HarnessSpec has
-// no tags field; dataset/judge/runtime carry their own on the spec and ignore this.
+// no tags field; dataset/judge/runtime carry their own on the spec and ignore this. `origin` is the version's birth
+// stamp (CapabilityOrigin, stored beside the spec in the registry) — its `from` ref becomes the `born_from` lineage
+// edge; `teamId` is the owning team (also registry metadata) → `belongs_to`.
 export interface SpecHarvestMeta {
   tenant: string;
   createdAt: string;
   updatedAt: string;
   createdBy?: string;
   tags?: string[];
+  origin?: CapabilityOrigin;
+  teamId?: string;
 }
 
 // A registered-Model binding resolves to a `model` node only when it is a REF (an object) — a bare string is a raw
@@ -51,12 +56,29 @@ function rubricRefNode(rubric: string | RubricRef | undefined): NodeRef | undefi
   return { type: "rubric", key: rubric.id, version: rubric.version };
 }
 
-// The edges every spec shares: workspace scoping, ownership, and tag classification.
+// The edges every spec shares: workspace scoping, ownership, tag classification, team scoping, and the `born_from`
+// lineage — WHY this version exists (the issue/scorecard/… its CapabilityOrigin names). Origin `from.type` values that
+// are not node types (`trace`, `benchmark`) are skipped by the safeParse, same idiom as harvestComment.
 function common(b: HarvestBuilder, tenant: string, meta: SpecHarvestMeta, tags: string[]): void {
   b.ref("in_workspace", { type: "workspace", key: tenant }, "tenant");
   if (meta.createdBy !== undefined && meta.createdBy !== "")
     b.ref("created_by", { type: "user", key: meta.createdBy }, "createdBy");
   tags.forEach((t, i) => b.ref("tagged_with", { type: "tag", key: t }, `tags[${i}]`));
+  if (meta.teamId !== undefined && meta.teamId !== "")
+    b.ref("belongs_to", { type: "team", key: meta.teamId }, "teamId");
+  const from = meta.origin?.from;
+  if (from !== undefined) {
+    const ft = NodeTypeSchema.safeParse(from.type);
+    if (ft.success) {
+      const ref =
+        from.version !== undefined && from.version !== ""
+          ? { type: ft.data, key: from.id, version: from.version }
+          : { type: ft.data, key: from.id };
+      const edgeAttrs: Record<string, unknown> = { via: meta.origin?.via };
+      if (meta.origin?.agentId !== undefined && meta.origin.agentId !== "") edgeAttrs.agentId = meta.origin.agentId;
+      b.ref("born_from", ref, "origin.from", edgeAttrs);
+    }
+  }
 }
 
 // A HarnessSpec — the agent under test (process | service | command). Tags live in the registry meta, not the spec.

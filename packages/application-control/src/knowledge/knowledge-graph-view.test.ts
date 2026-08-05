@@ -15,6 +15,8 @@ const emptyStore: KnowledgeStore = {
   incoming: async () => [],
   listMentions: async () => [],
   notesForNode: async () => [],
+  listNodeIds: async () => [],
+  deleteNodes: async () => {},
 };
 
 const entry = (

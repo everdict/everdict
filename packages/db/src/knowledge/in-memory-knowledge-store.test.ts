@@ -57,4 +57,23 @@ describe("InMemoryKnowledgeStore — harvest → ingest → query round-trip", (
     expect(await store.getNode("other", scId)).toBeUndefined();
     expect(await store.outgoing("other", scId)).toHaveLength(0);
   });
+
+  it("retracts node rows by type while the mention/edge spine stays (the reindex prune)", async () => {
+    const store = new InMemoryKnowledgeStore();
+    await ingestHarvest(store, harvestScorecard(sc));
+    const scId = nodeId("acme", { type: "scorecard", key: "sc1" });
+
+    expect(await store.listNodeIds("acme", ["scorecard", "run"])).toEqual([scId]);
+    expect(await store.listNodeIds("other", ["scorecard"])).toHaveLength(0); // tenant-scoped
+    expect(await store.listNodeIds("acme", ["harness"])).toHaveLength(0); // type-scoped
+
+    await store.deleteNodes("other", [scId]); // wrong tenant — a cross-tenant delete must be a no-op
+    expect(await store.getNode("acme", scId)).toBeDefined();
+
+    await store.deleteNodes("acme", [scId]);
+    expect(await store.getNode("acme", scId)).toBeUndefined();
+    // the audit spine survives the retraction
+    expect((await store.listMentions("acme", "scorecard", "sc1")).length).toBeGreaterThan(0);
+    expect((await store.outgoing("acme", scId)).length).toBeGreaterThan(0);
+  });
 });

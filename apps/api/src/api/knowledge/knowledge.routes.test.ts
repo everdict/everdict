@@ -1,9 +1,10 @@
 import { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import type { Dataset, NodeRef, ScorecardRecord } from "@everdict/contracts";
+import type { Dataset, IssueRecord, NodeRef, ScorecardRecord } from "@everdict/contracts";
 import {
   InMemoryCommentStore,
+  InMemoryIssueStore,
   InMemoryKnowledgeEntryStore,
   InMemoryKnowledgeStore,
   InMemoryRunStore,
@@ -36,6 +37,27 @@ const H = { "x-everdict-tenant": "acme" };
 const SC_NODE = nodeId("acme", { type: "scorecard", key: "sc1" });
 const HARNESS_NODE = nodeId("acme", { type: "harness", key: "web-agent", version: "2.1.0" });
 
+const ISSUE: IssueRecord = {
+  id: "i1",
+  tenant: "acme",
+  teamId: "team-eng",
+  number: 12,
+  identifier: "ENG-12",
+  formerIdentifiers: [],
+  title: "Judge misses truncated answers",
+  status: "done",
+  priority: "none",
+  inTriage: false,
+  labelIds: [],
+  links: [],
+  resolution: { scorecardId: "sc1", by: "user-alice", at: "2026-07-28T00:00:00Z" },
+  history: [],
+  createdBy: "user-alice",
+  createdAt: "2026-07-27T00:00:00Z",
+  updatedAt: "2026-07-28T00:00:00Z",
+};
+const ISSUE_NODE = nodeId("acme", { type: "issue", key: "i1" });
+
 async function build(withKnowledge: boolean) {
   const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
   if (!withKnowledge) return buildServer({ service });
@@ -65,8 +87,13 @@ async function build(withKnowledge: boolean) {
   ]);
   const scorecards = new InMemoryScorecardStore();
   await scorecards.create(SCORECARD);
+  await scorecards.create({ ...SCORECARD, id: "sc2" }); // nothing references sc2 — reindex must not materialise it
   const datasets = new InMemoryDatasetRegistry();
   await datasets.register("acme", DATASET, "user-alice");
+  // The intent stratum: an issue whose resolution names SCORECARD — the reference that ADMITS the scorecard into
+  // the reindexed graph (an unreferenced execution record is pruned; see the admission rule in the service).
+  const issues = new InMemoryIssueStore();
+  await issues.create(ISSUE);
   const knowledgeEntryStore = new InMemoryKnowledgeEntryStore();
   // Fake registry-latest: the harness family moved on to 2.3.0 (so a 2.1.0-pinned ref reads superseded).
   const latestVersionOf = async (_tenant: string, ref: NodeRef) =>
@@ -98,7 +125,7 @@ async function build(withKnowledge: boolean) {
     service,
     knowledgeService: new KnowledgeService({
       store,
-      reindexSources: { scorecards, datasets },
+      reindexSources: { scorecards, datasets, issues },
       contextSources: { knowledgeEntries: knowledgeEntryStore, latestVersionOf },
     }),
     knowledgeEntryService,
@@ -191,6 +218,53 @@ describe("knowledge routes", () => {
     });
     expect(after.statusCode).toBe(200);
     expect((after.json() as { type: string }).type).toBe("dataset");
+  });
+
+  it("reindex materialises the issue hub, and keeps the scorecard its resolution references", async () => {
+    const app = await build(true);
+    // Before reindex the tracker has never been projected.
+    const before = await app.inject({
+      method: "GET",
+      url: `/knowledge/node?id=${encodeURIComponent(ISSUE_NODE)}`,
+      headers: H,
+    });
+    expect(before.statusCode).toBe(404);
+    await app.inject({ method: "POST", url: "/knowledge/reindex", headers: H });
+    const after = await app.inject({
+      method: "GET",
+      url: `/knowledge/node?id=${encodeURIComponent(ISSUE_NODE)}`,
+      headers: H,
+    });
+    expect(after.statusCode).toBe(200);
+    expect((after.json() as { type: string; label: string }).label).toBe("ENG-12 · Judge misses truncated answers");
+    // The issue's resolution references sc1, so the scorecard survives the execution-admission prune…
+    const sc = await app.inject({
+      method: "GET",
+      url: `/knowledge/node?id=${encodeURIComponent(SC_NODE)}`,
+      headers: H,
+    });
+    expect(sc.statusCode).toBe(200);
+    // …and the resolved_by edge is on the issue's related facts.
+    const related = await app.inject({
+      method: "GET",
+      url: `/knowledge/related?id=${encodeURIComponent(ISSUE_NODE)}`,
+      headers: H,
+    });
+    expect(related.statusCode).toBe(200);
+    const facts = (related.json() as { facts: Array<{ predicate: string }> }).facts;
+    expect(facts.some((f) => f.predicate === "resolved_by")).toBe(true);
+  });
+
+  it("reindex leaves an unreferenced execution record OFF the graph (evidence, not inventory)", async () => {
+    const app = await build(true);
+    await app.inject({ method: "POST", url: "/knowledge/reindex", headers: H });
+    // sc2 sits in the scorecard store, but no issue/knowledge references it — never materialised.
+    const sc2 = await app.inject({
+      method: "GET",
+      url: `/knowledge/node?id=${encodeURIComponent(nodeId("acme", { type: "scorecard", key: "sc2" }))}`,
+      headers: H,
+    });
+    expect(sc2.statusCode).toBe(404);
   });
 
   it("returns the whole workspace graph rooted at the workspace hub node", async () => {

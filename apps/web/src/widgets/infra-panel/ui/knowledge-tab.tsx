@@ -156,6 +156,7 @@ export function KnowledgeTab() {
 const REFERENCE_TYPE_OF: Partial<Record<string, AgentReferenceType>> = {
   knowledge: 'knowledge',
   skill: 'skill',
+  issue: 'issue',
   harness: 'harness',
   dataset: 'dataset',
   judge: 'judge',

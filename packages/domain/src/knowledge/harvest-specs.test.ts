@@ -135,3 +135,35 @@ describe("harvestRuntime", () => {
     expect(secretEdges).toContain(nodeId("acme", { type: "secret", key: "k8s-config" }));
   });
 });
+
+describe("spec harvest — the born_from lineage and team scoping", () => {
+  const ds: Dataset = { id: "web-bench", version: "2.0.0", cases: [], tags: [] };
+
+  it("projects the version's CapabilityOrigin.from as a born_from edge with the channel on the edge", () => {
+    const res = harvestDataset(
+      {
+        ...meta,
+        teamId: "team-eng",
+        origin: { via: "mcp", from: { type: "issue", id: "i1", label: "ENG-12" }, agentId: "agent-7" },
+      },
+      ds,
+    );
+    const p = preds(res.edges);
+    expect(p.get("born_from")).toBe(nodeId("acme", { type: "issue", key: "i1" }));
+    const born = res.edges.find((e) => e.predicate === "born_from");
+    expect(born?.edgeAttrs).toMatchObject({ via: "mcp", agentId: "agent-7" });
+    expect(p.get("belongs_to")).toBe(nodeId("acme", { type: "team", key: "team-eng" }));
+    valid(res);
+  });
+
+  it("skips an origin whose source type is not a graph node (trace/benchmark)", () => {
+    const res = harvestDataset({ ...meta, origin: { via: "web", from: { type: "trace", id: "tr-1" } } }, ds);
+    expect(res.edges.some((e) => e.predicate === "born_from")).toBe(false);
+  });
+
+  it("emits no lineage edges when the registry has no origin stamp for the version", () => {
+    const res = harvestDataset(meta, ds);
+    expect(res.edges.some((e) => e.predicate === "born_from")).toBe(false);
+    expect(res.edges.some((e) => e.predicate === "belongs_to")).toBe(false);
+  });
+});

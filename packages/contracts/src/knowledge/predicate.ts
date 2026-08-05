@@ -17,6 +17,16 @@ export const PREDICATES = [
   "member_of", // user → workspace (edge_attrs.role: admin|member|viewer|…) — replaces a standalone membership node
   "in_workspace", // any node → workspace (tenant scoping; derivable from node.tenant, materialised for hub traversal)
 
+  // INTENT — the tracker stratum (issue as hub). An issue POINTS AT what verifies/resolved it (links live on the
+  // issue record), so the direction convention holds: the issue is the referencing subject.
+  "verified_by", // issue → harness | dataset | judge | scorecard | run | view (an IssueLink; note in edge_attrs)
+  "resolved_by", // issue → scorecard (resolution.scorecardId — the closing evidence AND the regression baseline)
+  "part_of", // issue → project | cycle; project → initiative; initiative → parent initiative; team → parent team
+  "belongs_to", // issue | cycle | project | registry spec → team (team scoping; `in_workspace` stays the tenant hub)
+  "assigned_to", // issue → user (assignee); project | initiative → user with edge_attrs.role: "lead"
+  "born_from", // versioned capability → issue | project | initiative | scorecard | run (CapabilityOrigin.from —
+  // why a registered version exists at all; edge_attrs carries {via, agentId?})
+
   // EVAL COMPOSITION — how an evaluation is wired together
   "evaluates", // scorecard | run → harness (the agent under test)
   "uses_dataset", // scorecard | schedule → dataset
@@ -27,7 +37,7 @@ export const PREDICATES = [
   "uses_model", // judge | harness | agent | schedule → model
   "runs_on", // scorecard | run | judge → runtime (execution placement)
   "placed_on", // run → runner (self-hosted device placement)
-  "child_of", // run → scorecard (fan-out child of a batch)
+  "child_of", // run → scorecard (fan-out child of a batch); issue → issue (a sub-issue's parent pointer)
   "fired_by", // scorecard → schedule (origin.scheduleId — a schedule-triggered batch)
 
   // RESULTS & MEASUREMENT

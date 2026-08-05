@@ -1,4 +1,4 @@
-import type { EdgeMention, KnowledgeNode, Mention, Predicate, SourceKind } from "@everdict/contracts";
+import type { EdgeMention, KnowledgeNode, Mention, NodeType, Predicate, SourceKind } from "@everdict/contracts";
 
 // Persistence port for the knowledge graph. The mention/edge tables are APPEND-ONLY and idempotent by id (a re-harvest
 // writes the same rows); nodes are UPSERT-by-nodeId (a later, richer harvester replaces a stub). The read surface here
@@ -10,6 +10,11 @@ export interface KnowledgeStore {
   putEdges(edges: EdgeMention[]): Promise<void>;
   // Upsert by nodeId (last writer wins — a richer projection replaces a stub of the same node).
   putNodes(nodes: KnowledgeNode[]): Promise<void>;
+  // The node table is a DERIVED read-model (rebuilt from the mention spine), so reindex may retract projections whose
+  // admission rule no longer holds — the execution stratum (run/scorecard) is materialised only while something
+  // references it. The mention/edge spine stays append-only; only node rows are deleted.
+  listNodeIds(tenant: string, types: NodeType[]): Promise<string[]>;
+  deleteNodes(tenant: string, nodeIds: string[]): Promise<void>;
 
   getNode(tenant: string, nodeId: string): Promise<KnowledgeNode | undefined>;
   // Single-hop neighbours, optionally filtered by predicate. `outgoing` = edges where the node is the subject;

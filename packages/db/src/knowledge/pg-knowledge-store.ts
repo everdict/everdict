@@ -6,6 +6,7 @@ import {
   KnowledgeNodeSchema,
   type Mention,
   MentionSchema,
+  type NodeType,
   type Predicate,
   type SourceKind,
 } from "@everdict/contracts";
@@ -269,6 +270,24 @@ export class PgKnowledgeStore implements KnowledgeStore {
       [tenant, nodeId],
     );
     return res.rows[0] ? rowToNode(res.rows[0]) : undefined;
+  }
+
+  async listNodeIds(tenant: string, types: NodeType[]): Promise<string[]> {
+    const res = await this.client.query<{ node_id: string }>(
+      "SELECT node_id FROM everdict_knowledge_nodes WHERE tenant = $1 AND type = ANY($2)",
+      [tenant, types],
+    );
+    return res.rows.map((r) => r.node_id);
+  }
+
+  // Node rows are a derived read-model — reindex retracts execution projections whose admission went away. The
+  // mention/edge spine stays append-only (audit); only node rows are deleted.
+  async deleteNodes(tenant: string, nodeIds: string[]): Promise<void> {
+    if (nodeIds.length === 0) return;
+    await this.client.query("DELETE FROM everdict_knowledge_nodes WHERE tenant = $1 AND node_id = ANY($2)", [
+      tenant,
+      nodeIds,
+    ]);
   }
 
   async outgoing(tenant: string, subjectNodeId: string, predicate?: Predicate): Promise<EdgeMention[]> {

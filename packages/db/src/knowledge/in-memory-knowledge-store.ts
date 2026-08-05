@@ -1,5 +1,5 @@
 import type { KnowledgeStore } from "@everdict/application-control";
-import type { EdgeMention, KnowledgeNode, Mention, Predicate, SourceKind } from "@everdict/contracts";
+import type { EdgeMention, KnowledgeNode, Mention, NodeType, Predicate, SourceKind } from "@everdict/contracts";
 
 // In-memory KnowledgeStore — the dev/test impl (the Pg impl + migrations are a later step). Mentions/edges are
 // append-only and idempotent by id; nodes upsert by nodeId. Interchangeable with the future Pg impl by construction.
@@ -23,6 +23,19 @@ export class InMemoryKnowledgeStore implements KnowledgeStore {
   async getNode(tenant: string, nodeId: string): Promise<KnowledgeNode | undefined> {
     const n = this.nodes.get(nodeId);
     return n && n.tenant === tenant ? n : undefined;
+  }
+
+  async listNodeIds(tenant: string, types: NodeType[]): Promise<string[]> {
+    return [...this.nodes.values()].filter((n) => n.tenant === tenant && types.includes(n.type)).map((n) => n.nodeId);
+  }
+
+  // Node rows are a derived read-model — reindex retracts execution projections whose admission went away. The
+  // mention/edge spine stays append-only (audit); only the node row is deleted.
+  async deleteNodes(tenant: string, nodeIds: string[]): Promise<void> {
+    for (const id of nodeIds) {
+      const n = this.nodes.get(id);
+      if (n !== undefined && n.tenant === tenant) this.nodes.delete(id);
+    }
   }
 
   async outgoing(tenant: string, subjectNodeId: string, predicate?: Predicate): Promise<EdgeMention[]> {

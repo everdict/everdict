@@ -14,6 +14,8 @@ const emptyGraph: KnowledgeStore = {
   incoming: async () => [],
   listMentions: async () => [],
   notesForNode: async () => [],
+  listNodeIds: async () => [],
+  deleteNodes: async () => {},
 };
 
 const skill = (

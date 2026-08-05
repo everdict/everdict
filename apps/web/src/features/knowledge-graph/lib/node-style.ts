@@ -3,9 +3,11 @@
 // lookups with a fallback — an unmapped (newly added) type/predicate degrades gracefully instead of crashing.
 
 // The render axes from the node vocabulary (docs/architecture/knowledge-graph.md §node vocabulary). `claim` is the
-// KNOWLEDGE LAYER — the reified claims and skills the map exists to show; the rest is the entity stratum they are about.
+// KNOWLEDGE LAYER — the reified claims and skills; `intent` is the TRACKER stratum (the issue hub the resource
+// strata hang off); the rest is the entity stratum they are about.
 type NodeAxis =
   | 'claim'
+  | 'intent'
   | 'actor'
   | 'subject'
   | 'infra'
@@ -17,6 +19,12 @@ type NodeAxis =
 const AXIS_OF: Record<string, NodeAxis> = {
   knowledge: 'claim',
   skill: 'claim',
+  issue: 'intent',
+  project: 'intent',
+  initiative: 'intent',
+  // team/cycle are organisational scoping around the intent stratum — quiet, like the other actors.
+  team: 'actor',
+  cycle: 'actor',
   workspace: 'actor',
   user: 'actor',
   harness: 'subject',
@@ -49,6 +57,7 @@ const AXIS_OF: Record<string, NodeAxis> = {
 // claims get the loudest hue and actors the quietest, since a workspace/user node is scoping chrome, not content.
 const AXIS_COLOR: Record<NodeAxis, string> = {
   claim: '#8b5cf6', // violet — the knowledge layer
+  intent: '#f97316', // orange — the issue hub (why we evaluate)
   actor: '#64748b', // slate
   subject: '#5e6ad2', // indigo (brand)
   infra: '#0ea5e9', // sky
@@ -73,6 +82,9 @@ export function humanize(id: string): string {
 // Display priority for a node's relationships (mirrors @everdict/domain PREDICATE_PRIORITY — the eval story first,
 // scoping edges last). Kept as a local copy because the web may not import the domain value. Lower = higher priority.
 const PREDICATE_PRIORITY: readonly string[] = [
+  'resolved_by',
+  'verified_by',
+  'born_from',
   'evaluates',
   'uses_dataset',
   'applies_judge',
@@ -104,6 +116,9 @@ const PREDICATE_PRIORITY: readonly string[] = [
   'tagged_with',
   'includes_case',
   'covers_case',
+  'part_of',
+  'assigned_to',
+  'belongs_to',
   'succeeds',
   'created_by',
   'member_of',

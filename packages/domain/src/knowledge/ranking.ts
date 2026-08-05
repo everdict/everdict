@@ -5,7 +5,11 @@ import type { Predicate } from "@everdict/contracts";
 // evaluated and measured beats the workspace-scoping edge. Pure policy, hence domain. Any predicate absent here sorts
 // last (still shown, just after the ranked ones).
 export const PREDICATE_PRIORITY: readonly Predicate[] = [
-  // the eval story first — what was tested, with what, judged how, scoring what
+  // the intent story first — WHY something exists: what closed an issue, what verifies it, what was born from it
+  "resolved_by",
+  "verified_by",
+  "born_from",
+  // the eval story — what was tested, with what, judged how, scoring what
   "evaluates",
   "uses_dataset",
   "applies_judge",
@@ -42,6 +46,10 @@ export const PREDICATE_PRIORITY: readonly Predicate[] = [
   "tagged_with",
   "includes_case",
   "covers_case",
+  // plan structure — where work sits (below the content facts, above raw scoping)
+  "part_of",
+  "assigned_to",
+  "belongs_to",
   // lineage / low-signal scoping
   "succeeds",
   "created_by",

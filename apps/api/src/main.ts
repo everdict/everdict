@@ -277,14 +277,20 @@ async function main(): Promise<void> {
   });
 
   // Workspace knowledge graph — the query surface over the harvested graph + a pull reindex that harvests the
-  // tenant-listable record stores (scorecards/runs/schedules) into it, plus task-time context assembly over the
-  // knowledge-layer records (skills + entries). See docs/architecture/knowledge-graph.md.
+  // tenant-listable record stores into it, plus task-time context assembly over the knowledge-layer records
+  // (skills + entries). The tracker stores are the INTENT stratum — the issue hub whose links/resolutions decide
+  // which execution records (runs/scorecards) are materialised at all. See docs/architecture/knowledge-graph.md.
   const knowledgeService = new KnowledgeService({
     store: knowledgeStore,
     reindexSources: {
       scorecards: scorecardStore,
       runs: store,
       schedules: scheduleStore,
+      issues: issueStore,
+      projects: projectStore,
+      initiatives: initiativeStore,
+      teams: teamStore,
+      cycles: cycleStore,
       datasets: datasetRegistry,
       judges: judgeRegistry,
       runtimes: runtimeRegistry,

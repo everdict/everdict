@@ -12,6 +12,7 @@ import {
   type Predicate,
 } from "@everdict/contracts";
 import type { KnowledgeEntryRecord, KnowledgePin } from "@everdict/contracts";
+import type { CapabilityOrigin } from "@everdict/contracts";
 import {
   type AnchorRelation,
   type Coverage,
@@ -20,32 +21,42 @@ import {
   anchorRelation,
   edgeId,
   harvestAgent,
+  harvestCycle,
   harvestDataset,
   harvestHarness,
+  harvestInitiative,
+  harvestIssue,
   harvestJudge,
   harvestKnowledgeEntry,
   harvestModel,
+  harvestProject,
   harvestRubric,
   harvestRun,
   harvestRuntime,
   harvestSchedule,
   harvestScorecard,
   harvestSkill,
+  harvestTeam,
   nodeId,
 } from "@everdict/domain";
 import type { AgentRegistry } from "../ports/agent-registry.js";
+import type { CycleStore } from "../ports/cycle-store.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
+import type { InitiativeStore } from "../ports/initiative-store.js";
+import type { IssueStore } from "../ports/issue-store.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
 import type { KnowledgeStore } from "../ports/knowledge-store.js";
 import type { ModelRegistry } from "../ports/model-registry.js";
+import type { ProjectStore } from "../ports/project-store.js";
 import type { RubricRegistry } from "../ports/rubric-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { RuntimeRegistry } from "../ports/runtime-registry.js";
 import type { ScheduleStore } from "../ports/schedule-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { SkillStore } from "../ports/skill-store.js";
+import type { TeamStore } from "../ports/team-store.js";
 import { type LatestVersionResolver, resolveCoverage } from "./freshness-resolver.js";
 import { ingestHarvest } from "./ingest-harvest.js";
 import {
@@ -56,20 +67,34 @@ import {
   type TraversalDirection,
 } from "./knowledge-query-service.js";
 
-// The sources a reindex harvests. Records (scorecards/runs/schedules) list all rows by tenant; the versioned registries
-// materialise their eval-config NODES by harvesting each entity's LATEST version. Comments are excluded — CommentStore
-// has no list-all; capability adoption is captured via the agent harvester (the CapabilityStore has a distinct API).
+// The sources a reindex harvests. Records list all rows by tenant; the versioned registries materialise their
+// eval-config NODES by harvesting each entity's LATEST version. Comments are excluded — CommentStore has no list-all;
+// capability adoption is captured via the agent harvester (the CapabilityStore has a distinct API).
+//
+// EXECUTION ADMISSION RULE: run/scorecard records are high-cardinality outcomes, and a graph that materialises them
+// wholesale drowns the strata a workspace reads it for (they dominated the map's render cap). An execution record is
+// therefore materialised ONLY while something references it — an issue link, an issue resolution, a knowledge entry's
+// refs/evidence, a skill's refs, a capability version's origin — and a reindex PRUNES execution nodes whose reference
+// went away (the node table is a derived read-model; the mention/edge audit spine is never touched). The graph's
+// execution nodes are EVIDENCE, by design: "recent runs of this harness" stays a RunStore question.
 export interface KnowledgeReindexSources {
   scorecards?: Pick<ScorecardStore, "list">;
   runs?: Pick<RunStore, "list">;
   schedules?: Pick<ScheduleStore, "list">;
-  datasets?: DatasetRegistry;
-  judges?: JudgeRegistry;
-  runtimes?: RuntimeRegistry;
-  models?: ModelRegistry;
-  rubrics?: RubricRegistry;
-  harnesses?: HarnessInstanceRegistry;
-  agents?: AgentRegistry;
+  // The intent stratum — the eval tracker. Issues are the graph's hub, and their links/resolutions are the main
+  // admission gate for the execution stratum above.
+  issues?: Pick<IssueStore, "list">;
+  projects?: Pick<ProjectStore, "list">;
+  initiatives?: Pick<InitiativeStore, "list">;
+  teams?: Pick<TeamStore, "list">;
+  cycles?: Pick<CycleStore, "list">;
+  datasets?: Pick<DatasetRegistry, "list" | "get">;
+  judges?: Pick<JudgeRegistry, "list" | "get">;
+  runtimes?: Pick<RuntimeRegistry, "list" | "get">;
+  models?: Pick<ModelRegistry, "list" | "get">;
+  rubrics?: Pick<RubricRegistry, "list" | "get">;
+  harnesses?: Pick<HarnessInstanceRegistry, "list" | "get">;
+  agents?: Pick<AgentRegistry, "list" | "get">;
   // Knowledge-layer records — only WORKSPACE-visible ones enter the shared graph (a private draft is personal until
   // its author shares it). Listed with an empty subject so no private rows leak into the projection.
   skills?: Pick<SkillStore, "list">;
@@ -80,6 +105,8 @@ export interface KnowledgeReindexResult {
   scanned: number;
   nodes: number;
   edges: number;
+  // Execution nodes retracted because nothing references them any more (the admission rule above).
+  pruned: number;
 }
 
 // The whole-workspace graph projection for rendering (Settings › Knowledge): the reachable nodes + edges plus derived
@@ -298,10 +325,15 @@ export class KnowledgeService {
   // Harvest the workspace's existing records + registry entities into the graph. Idempotent (the harvesters emit
   // deterministic ids), so a re-run reconciles rather than duplicates. Registry entities are harvested at their LATEST
   // version; the registration timestamp is unavailable uniformly, so the node's observation time is the reindex moment.
+  //
+  // Two passes: the intent stratum + config + knowledge layer go first and COLLECT every execution reference (issue
+  // links/resolutions, knowledge refs/evidence, skill refs, capability origins); the execution records (runs/
+  // scorecards) go last and are materialised only when referenced — then nodes whose reference went away are pruned.
+  // See the admission rule on KnowledgeReindexSources.
   async reindex(tenant: string): Promise<KnowledgeReindexResult> {
     const src = this.deps.reindexSources;
     const stamp = new Date().toISOString();
-    const acc: KnowledgeReindexResult = { scanned: 0, nodes: 0, edges: 0 };
+    const acc: KnowledgeReindexResult = { scanned: 0, nodes: 0, edges: 0, pruned: 0 };
     const apply = async (h: HarvestResult): Promise<void> => {
       await ingestHarvest(this.deps.store, h);
       acc.scanned += 1;
@@ -313,49 +345,135 @@ export class KnowledgeService {
         ? { tenant, createdAt: stamp, updatedAt: stamp, createdBy }
         : { tenant, createdAt: stamp, updatedAt: stamp };
 
-    // Record stores.
-    if (src?.scorecards) for (const sc of await src.scorecards.list(tenant)) await apply(harvestScorecard(sc));
-    if (src?.runs) for (const r of await src.runs.list(tenant, { includeChildren: true })) await apply(harvestRun(r));
+    // The execution nodes something admitted into the graph, by nodeId.
+    const referencedExecution = new Set<string>();
+    const referenceExecution = (type: "run" | "scorecard", key: string | undefined): void => {
+      if (key !== undefined && key !== "") referencedExecution.add(nodeId(tenant, { type, key }));
+    };
+    const referencePins = (pins: { type: string; key: string }[]): void => {
+      for (const p of pins) if (p.type === "run" || p.type === "scorecard") referenceExecution(p.type, p.key);
+    };
+    // Registry metadata for one entity's latest version: ownership + team scoping + the version's origin stamp
+    // (whose `from` may itself admit an execution record — a judge born from a scorecard keeps that scorecard on
+    // the map). Entry shapes vary per registry; the fields are read structurally and absent ones simply skip.
+    const specMeta = (
+      entry: { createdBy?: string; teamId?: string; versionOrigins?: Record<string, CapabilityOrigin> },
+      version: string,
+    ): SpecHarvestMeta => {
+      const origin = entry.versionOrigins?.[version];
+      const from = origin?.from;
+      if (from !== undefined && (from.type === "run" || from.type === "scorecard"))
+        referenceExecution(from.type, from.id);
+      return {
+        ...meta(entry.createdBy),
+        ...(origin !== undefined ? { origin } : {}),
+        ...(entry.teamId !== undefined && entry.teamId !== "" ? { teamId: entry.teamId } : {}),
+      };
+    };
+
+    // The intent stratum — teams/cycles first (issues point at them), then the plan, then the issues whose links
+    // and resolutions are the graph's main execution-admission gate.
+    if (src?.teams) for (const t of await src.teams.list(tenant)) await apply(harvestTeam(t));
+    if (src?.cycles) for (const c of await src.cycles.list(tenant)) await apply(harvestCycle(c));
+    if (src?.initiatives) for (const n of await src.initiatives.list(tenant)) await apply(harvestInitiative(n));
+    if (src?.projects) for (const p of await src.projects.list(tenant)) await apply(harvestProject(p));
+    if (src?.issues) {
+      for (const i of await src.issues.list(tenant)) {
+        await apply(harvestIssue(i));
+        referencePins(i.links.map((l) => ({ type: l.type, key: l.id })));
+        referenceExecution("scorecard", i.resolution?.scorecardId);
+      }
+    }
+
+    // Schedules (config-cardinality, harvested whole).
     if (src?.schedules) for (const s of await src.schedules.list(tenant)) await apply(harvestSchedule(s));
 
-    // Versioned registries — harvest each entity's latest version.
+    // Versioned registries — harvest each entity's latest version, with its origin/team registry metadata.
     if (src?.datasets) {
-      for (const e of await src.datasets.list(tenant))
-        await apply(harvestDataset(meta(e.createdBy), await src.datasets.get(tenant, e.id)));
+      for (const e of await src.datasets.list(tenant)) {
+        const spec = await src.datasets.get(tenant, e.id);
+        await apply(harvestDataset(specMeta(e, spec.version), spec));
+      }
     }
     if (src?.judges) {
-      for (const e of await src.judges.list(tenant))
-        await apply(harvestJudge(meta(e.createdBy), await src.judges.get(tenant, e.id)));
+      for (const e of await src.judges.list(tenant)) {
+        const spec = await src.judges.get(tenant, e.id);
+        await apply(harvestJudge(specMeta(e, spec.version), spec));
+      }
     }
     if (src?.runtimes) {
-      for (const e of await src.runtimes.list(tenant))
-        await apply(harvestRuntime(meta(), await src.runtimes.get(tenant, e.id)));
+      for (const e of await src.runtimes.list(tenant)) {
+        const spec = await src.runtimes.get(tenant, e.id);
+        await apply(harvestRuntime(specMeta(e, spec.version), spec));
+      }
     }
     if (src?.models) {
-      for (const e of await src.models.list(tenant))
-        await apply(harvestModel(meta(e.createdBy), await src.models.get(tenant, e.id)));
+      for (const e of await src.models.list(tenant)) {
+        const spec = await src.models.get(tenant, e.id);
+        await apply(harvestModel(specMeta(e, spec.version), spec));
+      }
     }
     if (src?.rubrics) {
-      for (const e of await src.rubrics.list(tenant))
-        await apply(harvestRubric(meta(e.createdBy), await src.rubrics.get(tenant, e.id)));
+      for (const e of await src.rubrics.list(tenant)) {
+        const spec = await src.rubrics.get(tenant, e.id);
+        await apply(harvestRubric(specMeta(e, spec.version), spec));
+      }
     }
     if (src?.harnesses) {
-      for (const e of await src.harnesses.list(tenant))
-        await apply(harvestHarness(meta(e.createdBy), await src.harnesses.get(tenant, e.id)));
+      for (const e of await src.harnesses.list(tenant)) {
+        const spec = await src.harnesses.get(tenant, e.id);
+        await apply(harvestHarness(specMeta(e, spec.version), spec));
+      }
     }
     if (src?.agents) {
-      for (const e of await src.agents.list(tenant))
-        await apply(harvestAgent(meta(e.createdBy), await src.agents.get(tenant, e.id)));
+      for (const e of await src.agents.list(tenant)) {
+        const spec = await src.agents.get(tenant, e.id);
+        await apply(harvestAgent(specMeta(e, spec.version), spec));
+      }
     }
 
     // Knowledge-layer records — workspace-visible only (empty subject → no private drafts; belt-and-braces filter).
+    // Their pins admit the execution records they cite as evidence.
     if (src?.skills) {
-      for (const s of await src.skills.list(tenant, "")) if (s.visibility === "workspace") await apply(harvestSkill(s));
+      for (const s of await src.skills.list(tenant, "")) {
+        if (s.visibility !== "workspace") continue;
+        await apply(harvestSkill(s));
+        referencePins(s.refs);
+      }
     }
     if (src?.knowledgeEntries) {
       // Proposed entries stay OUT of the graph — an unreviewed extraction candidate is not workspace knowledge yet.
-      for (const e of await src.knowledgeEntries.list(tenant, ""))
-        if (e.visibility === "workspace" && e.status !== "proposed") await apply(harvestKnowledgeEntry(e));
+      for (const e of await src.knowledgeEntries.list(tenant, "")) {
+        if (e.visibility !== "workspace" || e.status === "proposed") continue;
+        await apply(harvestKnowledgeEntry(e));
+        referencePins([...e.refs, ...e.evidence]);
+      }
+    }
+
+    // The execution stratum LAST — materialised only while referenced (evidence, not inventory).
+    if (src?.scorecards) {
+      for (const sc of await src.scorecards.list(tenant)) {
+        if (referencedExecution.has(nodeId(tenant, { type: "scorecard", key: sc.id }))) {
+          await apply(harvestScorecard(sc));
+        }
+      }
+    }
+    if (src?.runs) {
+      for (const r of await src.runs.list(tenant, { includeChildren: true })) {
+        if (referencedExecution.has(nodeId(tenant, { type: "run", key: r.id }))) await apply(harvestRun(r));
+      }
+    }
+
+    // Prune execution nodes whose admission went away — per type, and only when that type's source is wired (a
+    // partially-wired service must not retract projections another deployment owns). The mention/edge spine stays.
+    const pruneTypes: NodeType[] = [];
+    if (src?.scorecards) pruneTypes.push("scorecard");
+    if (src?.runs) pruneTypes.push("run");
+    if (pruneTypes.length > 0) {
+      const existing = await this.deps.store.listNodeIds(tenant, pruneTypes);
+      const stale = existing.filter((id) => !referencedExecution.has(id));
+      if (stale.length > 0) await this.deps.store.deleteNodes(tenant, stale);
+      acc.pruned = stale.length;
     }
     return acc;
   }

@@ -1,10 +1,12 @@
 # Workspace Knowledge Graph
 
 > **SSOT** for everdict's knowledge system. Status: **the backend + API/MCP surface + the authored write path are
-> landed** — the contract spine; the `KnowledgeStore` (in-memory + Postgres); the multi-hop query engine; thirteen
-> harvesters (scorecard/run/schedule/comment/membership + harness/dataset/judge/runtime/model/rubric/agent/capability);
-> and the `knowledge/` HTTP + MCP slice — read (node/related/subgraph/annotations) + `reindex` + the **authored write
-> path** (`annotate`/`relate`) so a user or agent contributes knowledge from Claude Code via the everdict plugin.
+> landed** — the contract spine; the `KnowledgeStore` (in-memory + Postgres); the multi-hop query engine; eighteen
+> harvesters (scorecard/run/schedule/comment/membership + issue/project/initiative/team/cycle + harness/dataset/judge/
+> runtime/model/rubric/agent/capability); and the `knowledge/` HTTP + MCP slice — read (node/related/subgraph/
+> annotations) + `reindex` + the **authored write path** (`annotate`/`relate`) so a user or agent contributes knowledge
+> from Claude Code via the everdict plugin. The graph is centred on the **intent stratum** (§The intent stratum): the
+> issue is the hub, and execution records are evidence admitted by reference, not inventory.
 > The workspace-facing **map** (Settings › Knowledge) is landed too; text extraction + resolution and ingest-on-write
 > are next (see §Roadmap).
 
@@ -122,13 +124,14 @@ that resolve to it, aggregating evidence. It never duplicates a record's body �
 
 ## Node vocabulary (closed, PR-gated)
 
-`NODE_TYPES` ([node-type.ts](../../packages/contracts/src/knowledge/node-type.ts)) — 27 types by axis. The vocabulary
+`NODE_TYPES` ([node-type.ts](../../packages/contracts/src/knowledge/node-type.ts)) — 32 types by axis. The vocabulary
 is **closed**: inventing a type is a code change, never a runtime value. Because the spine is type-agnostic, adding one
 is a one-line enum extension plus a harvester — the same cheap axis digo grew 14 → 17 on.
 
 | Axis | Node types |
 | --- | --- |
 | **Actors (WHO)** | `workspace`, `user` |
+| **Intent (WHY — the hub)** | `issue`, `project`, `initiative`, `team`, `cycle` |
 | **Under test (versioned)** | `harness`, `dataset`, `case`, `judge`, `rubric`, `model`, `agent`, `capability` |
 | **Execution infra (WHERE)** | `runtime`, `runner`, `image` |
 | **Execution & outcomes (WHEN)** | `run`, `scorecard`, `schedule` |
@@ -141,7 +144,7 @@ metering, downstream of the graph), `workspace_settings` (a source whose sub-obj
 
 ## Predicate vocabulary (closed, PR-gated)
 
-`PREDICATES` ([predicate.ts](../../packages/contracts/src/knowledge/predicate.ts)) — 35 predicates by axis. **Direction
+`PREDICATES` ([predicate.ts](../../packages/contracts/src/knowledge/predicate.ts)) — 41 predicates by axis. **Direction
 is fixed**: an edge points FROM the dependent/referencing node TO the referenced node. The `typical (subject → object)`
 shapes are conventions the harvesters emit, not wire enforcement — per-predicate validation is a downstream (reduce)
 concern, keeping the vocabulary the single extension axis.
@@ -149,7 +152,8 @@ concern, keeping the vocabulary the single extension axis.
 | Axis | Predicates (typical subject → object) |
 | --- | --- |
 | **Provenance** | `created_by` (any → user), `member_of` (user → workspace, role in `edgeAttrs`), `in_workspace` (any → workspace) |
-| **Eval composition** | `evaluates` (scorecard/run → harness), `uses_dataset`, `includes_case` (dataset → case), `covers_case` (run → case), `applies_judge`, `uses_rubric` (judge → rubric), `uses_model`, `runs_on` (→ runtime), `placed_on` (run → runner), `child_of` (run → scorecard), `fired_by` (scorecard → schedule) |
+| **Intent** | `verified_by` (issue → harness/dataset/judge/scorecard/run/view — an issue link; note in `edgeAttrs`), `resolved_by` (issue → scorecard — the closing evidence and regression baseline), `part_of` (issue → project/cycle; project → initiative; initiative/team → parent), `belongs_to` (issue/cycle/project/spec → team), `assigned_to` (issue → user; project/initiative lead with `edgeAttrs.role`), `born_from` (capability version → issue/project/scorecard/… — `CapabilityOrigin.from`) |
+| **Eval composition** | `evaluates` (scorecard/run → harness), `uses_dataset`, `includes_case` (dataset → case), `covers_case` (run → case), `applies_judge`, `uses_rubric` (judge → rubric), `uses_model`, `runs_on` (→ runtime), `placed_on` (run → runner), `child_of` (run → scorecard; sub-issue → parent issue), `fired_by` (scorecard → schedule) |
 | **Results & measurement** | `measures` (→ metric; value/pass in `edgeAttrs`), `compared_to` (scorecard ↔ scorecard diff), `supersedes` (scorecard → scorecard) |
 | **Lineage** | `succeeds` (entity@vN → @vN-1), `derived_from` (dataset → dataset, instance → template) |
 | **Agent & comms** | `adopts` (agent → capability), `references` (agent turn → any), `discusses` (comment → resource), `reply_to` (comment → comment), `mentions` (→ user) |
@@ -160,6 +164,43 @@ concern, keeping the vocabulary the single extension axis.
 `uses_secret` deserves note: it turns the existing secret-usage feature into a first-class graph query ("what
 references this secret"), and `pins_image` / `runs_image` do the same for image provenance — showing the payoff of a
 unified graph over point features.
+
+## The intent stratum — the issue as hub
+
+The graph's first design was FLAT: 27 node types rendered as equals, which let the high-cardinality execution
+records (every run, every scorecard) drown the strata a workspace actually reads the map for. The re-design adds the
+**intent stratum** — the eval tracker ([docs/tracker.md](../tracker.md)) — and re-centres the graph on it: the
+**issue is the hub**, because it is the one record whose whole job is to gather the others ("what verifies this
+problem, what closed it, why did it come back").
+
+Three strata, with a deliberate tiering:
+
+1. **Intent (WHY)** — `issue` / `project` / `initiative` (+ `team` / `cycle` as organisational scoping). Harvested
+   whole from the tracker stores ([harvest-tracker.ts](../../packages/domain/src/knowledge/harvest-tracker.ts)):
+   an issue's links become `verified_by` edges (version pin + note preserved), its resolution `resolved_by` (the
+   regression baseline), its plan coordinates `part_of` (project/cycle) + `child_of` (parent issue) +
+   `belongs_to` (team) + `assigned_to` (assignee; project/initiative leads carry `edgeAttrs.role: "lead"`).
+2. **Capability (WHAT)** — the versioned eval subjects/config, unchanged, plus the **`born_from` lineage**: a
+   registered version's `CapabilityOrigin.from` (stored per-version in the registries, exposed on list entries as
+   `versionOrigins`) becomes `harness/dataset/judge/… -[born_from]-> issue|scorecard|…` — "which issue was this
+   judge built to evaluate" is now a graph query. Registry `teamId` metadata adds the spec's `belongs_to` edge.
+3. **Execution (EVIDENCE — demoted)** — run/scorecard records are materialised **only while something references
+   them**: an issue link, an issue resolution, a knowledge entry's refs/evidence, a skill's refs, or a capability
+   origin. Reindex collects those references first, harvests only the referenced execution records, and **prunes**
+   execution nodes whose reference went away (per type, only when that type's source is wired). The node table is a
+   derived read-model, so retraction is within contract; the append-only mention/edge spine is never touched — the
+   audit trail survives, and a re-referenced record re-materialises idempotently on the next reindex. The accepted
+   trade-off: "recent runs of this harness" is a `RunStore` question, not a graph question — the graph's execution
+   nodes are evidence, not inventory.
+
+Because the spine is type-agnostic, the moment `issue` became a NodeType the existing machinery lit up for free:
+`harvestComment`'s `NodeTypeSchema.safeParse` now yields `comment -[discusses]-> issue` for issue threads; knowledge
+entries and skills can pin issues (`about` / `evidenced_by`); and the infra panel's "Ask in chat" button works on
+issue nodes (`AGENT_REFERENCE_TYPES` already carried `issue` → `get_issue`).
+
+Deliberately NOT projected (follow-ups): issue `labelIds` (registry ids — a tag node labelled by a UUID says
+nothing; needs label-name resolution at harvest time) and team roster edges (`member_of` runs user → team, but the
+`HarvestBuilder` emits self → object only — the same reason `harvestMembership` materialises the USER node).
 
 ## The knowledge layer — claims over predicates
 
@@ -296,8 +337,11 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    `uses_model` / `uses_rubric` / `uses_secret` / `adopts` — the secret-usage + capability-adoption graph, incl.
    cross-tenant `adopts` via `HarvestBuilder.ref`'s `objectTenant`). Every core scorecard edge resolves to a
    materialised node, and every referenced eval-config node has an owning harvester. ✅ the knowledge-layer harvesters
-   `skill` / `knowledge_entry` (projecting `refs` → `about`, `evidence` → `evidenced_by`). Remaining (low-fan-in
-   leaves): `view` / `browser_profile` / `trace_source` / `agent_session`. Idempotent, versioned by `extractor`.
+   `skill` / `knowledge_entry` (projecting `refs` → `about`, `evidence` → `evidenced_by`). ✅ the intent-stratum
+   harvesters `issue` / `project` / `initiative` / `team` / `cycle` (§The intent stratum — the issue hub's
+   `verified_by` / `resolved_by` / `part_of` / `belongs_to` / `assigned_to` edges, plus `born_from` via
+   `SpecHarvestMeta.origin` on every registry-spec harvester). Remaining (low-fan-in leaves): `view` /
+   `browser_profile` / `trace_source` / `agent_session`. Idempotent, versioned by `extractor`.
 3. **Contribution & extraction** — ✅ the AUTHORED write path (`annotate` / `relate`, origin `authored`): a user or
    agent contributes knowledge from Claude Code via the everdict MCP plugin, AND ✅ the **in-product conversational
    agent** (`apps/agent`) drives the same path — the `annotate_knowledge` / `relate_knowledge` tools are in its default
@@ -319,10 +363,13 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    behind the same surface later.
 5. ✅ **API + MCP** — an isolated `knowledge/` slice: `GET /knowledge/node|related|subgraph` + `POST /knowledge/reindex`
    (read = `scorecards:read`; reindex = `settings:write`) and the four matching MCP tools, over a `KnowledgeService`
-   facade. The `KnowledgeStore` is `InMemory`/`Pg` by `DATABASE_URL`; `reindex` is a pull harvest of the record stores
-   (scorecards/runs/schedules) AND the registries (dataset/judge/runtime/model/rubric/harness/agent, at each entity's
-   latest version) — so a reindex materialises every eval-config node, not just the record nodes. Write-path
-   ingest-on-write (keeping the graph current without a manual reindex) is the follow-up.
+   facade. The `KnowledgeStore` is `InMemory`/`Pg` by `DATABASE_URL`; `reindex` is a pull harvest of the tracker
+   stores (issues/projects/initiatives/teams/cycles), the record stores (schedules, plus runs/scorecards under the
+   execution-admission rule), AND the registries (dataset/judge/runtime/model/rubric/harness/agent, at each entity's
+   latest version, with `versionOrigins`/`teamId` registry metadata) — so a reindex materialises the intent stratum
+   and every eval-config node, while execution records enter only by reference and stale execution nodes are PRUNED
+   (`KnowledgeStore.listNodeIds`/`deleteNodes`; §The intent stratum). Write-path ingest-on-write (keeping the graph
+   current without a manual reindex) is the follow-up.
 6. **Rendering** — ranked flat fact lists first (resource "related" panels, impact analysis, the agent's context),
    ✅ plus the **map** the workspace reads: Settings › Knowledge is a force-directed graph of the knowledge layer over
    the entities it concerns (`features/knowledge-graph` — canvas-2D, pan/zoom/drag, search, per-type filters), and

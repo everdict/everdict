@@ -17,6 +17,16 @@ export const NODE_TYPES = [
   "workspace", // the tenant / trust-zone root that scopes every other node
   "user", // an authenticated subject (OIDC sub or api-key/runner identity), unifying UserProfile + Principal.subject
 
+  // WHY — the intent stratum (the eval tracker, records/tracker.ts + team.ts + cycle.ts). The ISSUE is the graph's
+  // hub: it gathers the capabilities that verify it (`verified_by`), the scorecard that closed it (`resolved_by`),
+  // and its place in the plan (`part_of` / `child_of` / `belongs_to`) — so the massive resource strata hang off the
+  // problem they exist to answer, not the other way round.
+  "issue", // the unit of intent — the problem under evaluation (IssueRecord; key = record id, identifier in attrs)
+  "project", // issues under one target date (ProjectRecord)
+  "initiative", // the GOAL several projects work toward (InitiativeRecord)
+  "team", // the tracker's grouping layer inside a workspace — owns issues and names them (`ENG-12`)
+  "cycle", // a team's numbered, dated iteration window
+
   // UNDER TEST — the versioned eval subjects & configuration (registry entities keyed by (tenant, id, version))
   "harness", // the agent under test (process | service | command | agent)
   "dataset", // a harness-agnostic bundle of eval cases

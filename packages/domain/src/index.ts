@@ -445,6 +445,18 @@ export {
   SKILL_HARVESTER,
 } from "./knowledge/harvest-knowledge.js";
 export {
+  CYCLE_HARVESTER,
+  harvestCycle,
+  harvestInitiative,
+  harvestIssue,
+  harvestProject,
+  harvestTeam,
+  INITIATIVE_HARVESTER,
+  ISSUE_HARVESTER,
+  PROJECT_HARVESTER,
+  TEAM_HARVESTER,
+} from "./knowledge/harvest-tracker.js";
+export {
   type AnchorRelation,
   anchorRelation,
   assessCoverage,
