@@ -143,11 +143,42 @@ fairness (interactive must never starve behind background work):
 Both refusals name what holds the capacity and **when the next slot frees** (`freesAt`) — "retry shortly"
 is not something a caller, human or agent, can act on.
 
+## W4 — snapshotting without a daemon
+
+`docker commit` only exists where the control plane and the container share a host. A world placed on a
+cluster — the point of moving worlds off the control-plane host — has no such daemon in reach, and the
+platform does not run a build service. But an image is a base plus layers, and appending one is **pure
+registry protocol**: upload a blob, rewrite the config's `rootfs`/`history`, PUT a manifest
+(`appendLayer` in `@everdict/images`). No builder, no daemon, no privileged anything.
+
+The capture reads the session's work tree over the **exec channel** — `tar -C / … everdict | gzip | base64`
+— because base64-over-exec is the one encoding every placement already agrees on (`docker exec`,
+`nomad alloc exec`, `kubectl exec`). That is what makes the path placement-independent; it also bounds it,
+so a tree past `EVERDICT_WORLD_MAX_CAPTURE_BYTES` (default 2 GiB compressed) is **refused by name** rather
+than truncated into an image that boots missing files.
+
+Mechanism selection: `driver.snapshot` first (the bytes never cross the control plane, and it captures the
+whole filesystem rather than the work tree), this as the fallback. A deployment with neither is refused at
+session CREATE, not hours later.
+
+Two rules the live drill wrote:
+
+- **The tar is rooted at `/` and names the directory** (`tar -C / … everdict`), not taken from inside it. An
+  image layer's paths are root-relative, so `tar -C /everdict .` yields `./proj/…`, which unpacks to
+  `/proj/…` — beside where it came from. The drill's first snapshot published cleanly and the next session
+  read the OLD file; nothing but a real registry unpacking a real layer would have shown it.
+- **The compressed digest goes in the manifest, the UNCOMPRESSED one (diffID) in the config.** Conflating
+  them publishes an image that pulls and then fails to unpack, so `appendLayer` computes both itself rather
+  than accepting them.
+
+A multi-platform base is refused: snapshotting would have to pick an architecture, and a world is one
+running filesystem.
+
 ## Not yet (the rest of the arc)
 
-- **W4 — placement**: world sessions on cluster runtimes (the Nomad browser-session `Type:"service"`
-  precedent) — requires wiring trust zones into dispatch, and a snapshot mechanism that does not
-  assume a host-local docker daemon.
+- **W4 remainder — actual cluster placement**: a world session as a Nomad `Type:"service"` job (the
+  browser-session precedent) with exec routed through the orchestrator. The snapshot half no longer blocks
+  it; what remains is that `Backend` models one-shot `dispatch(CaseJob)` and a session is not that shape.
 - **Queueing**: a refused create is a refusal, not a wait. `freesAt` makes waiting a decision the caller
   can take, but the platform does not take it for them.
 - **A credentialed push has not been drilled live** (W2) — it needs a GitHub App installation, which grants

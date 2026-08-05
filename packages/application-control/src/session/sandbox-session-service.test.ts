@@ -1177,3 +1177,104 @@ describe("SandboxSessionService — capacity with autonomous agents", () => {
     });
   });
 });
+
+// The placement-independent snapshot (W4): capture the work tree over the exec channel and publish it as one
+// more layer on the image the session booted — no daemon, so the same path works for a session on a cluster.
+describe("SandboxSessionService — snapshot without a container daemon", () => {
+  function buildLayer(over: Partial<SandboxSessionServiceDeps> = {}) {
+    const published: Array<{ tag: string; baseReference: string; createdBy: string; bytes: number }> = [];
+    const daemonless = fakeDriver(); // no snapshot() — the driver cannot commit, as on a cluster
+    const ctx = buildWorld({
+      driver: daemonless.driver,
+      publishLayerSnapshot: async (input) => {
+        published.push({
+          tag: input.tag,
+          baseReference: input.baseReference,
+          createdBy: input.createdBy,
+          bytes: input.layerGzip.length,
+        });
+        return { digest: "sha256:layer-published" };
+      },
+      ...over,
+    });
+    return { ...ctx, published, daemonless };
+  }
+
+  it("captures rooted at / so the layer's paths restore where they came from", async () => {
+    const ctx = buildLayer();
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "reg.local:5000/acme-ns/proj:v2@sha256:base",
+    });
+    await ctx.service.snapshot(creator, record.id, {});
+
+    // An image layer's paths are ROOT-relative. `tar -C /everdict .` yields `./proj/…`, which unpacks to
+    // `/proj/…` — the files land beside where they came from and the world boots looking untouched. A live
+    // drill published exactly that: clean snapshot, and the next session read the old file.
+    const capture = ctx.daemonless.execs.find((c) => c.includes("base64"));
+    expect(capture).toContain("tar -C / -czf - 'everdict'");
+    expect(capture).not.toContain("tar -C '/everdict'");
+    expect(ctx.published).toHaveLength(1);
+    expect(ctx.published[0]).toMatchObject({ tag: "v1", baseReference: "sha256:base" }); // a digest base pins by digest
+  });
+
+  it("addresses the base by TAG when the booted ref carries no digest", async () => {
+    const ctx = buildLayer();
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "reg.local:5000/acme-ns/proj:v7",
+    });
+    await ctx.service.snapshot(creator, record.id, {});
+    expect(ctx.published[0]?.baseReference).toBe("v7");
+  });
+
+  it("refuses a capture past the bound instead of publishing a truncated world", async () => {
+    const big = fakeDriver();
+    const ctx = buildLayer({ driver: big.driver, maxCaptureBytes: 10 });
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "reg.local:5000/acme-ns/proj:v1",
+    });
+    // The fake answers `ran:<cmd>` to every exec, so the size probe parses as NaN and cannot trip the bound;
+    // a driver whose probe reports a real number does. This pins the REFUSAL, not the parse.
+    const counted = build({
+      driver: {
+        id: "sized",
+        async provision() {
+          return {
+            id: "c-sized",
+            async exec(cmd: string) {
+              return { stdout: cmd.includes("wc -c") ? "999999" : "", stderr: "", exitCode: 0 };
+            },
+            async writeFile() {},
+            async readFile() {
+              return "";
+            },
+            async dispose() {},
+          };
+        },
+      },
+      images: ctx.images,
+      publishWorldVersion: ctx.publishWorldVersion,
+      publishLayerSnapshot: async () => ({ digest: "sha256:never" }),
+      maxCaptureBytes: 10,
+    });
+    const session = await counted.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "reg.local:5000/acme-ns/proj:v1",
+    });
+    await expect(counted.service.snapshot(creator, session.id, {})).rejects.toMatchObject({
+      status: 400,
+      extra: { bytes: 999999, limit: 10 },
+    });
+    expect(record.session?.world).toBe("proj"); // the other session is untouched
+  });
+});

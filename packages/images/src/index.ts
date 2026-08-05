@@ -23,3 +23,11 @@ export {
   scopeValues,
 } from "./token-exchange.js";
 export { InMemoryImageStore } from "./in-memory-image-store.js";
+export {
+  appendLayer,
+  type AppendLayerInput,
+  type AppendLayerResult,
+  type RegistryWriter,
+  sha256Of,
+} from "./layer-append.js";
+export { fetchRegistryWriter } from "./registry-writer.js";

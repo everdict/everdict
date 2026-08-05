@@ -6,7 +6,9 @@ import {
   InMemoryImageStore,
   ManagedImageStore,
   RegistryTokenIssuer,
+  appendLayer,
   fetchManagedRegistryApi,
+  fetchRegistryWriter,
   grantAsRegistryAuth,
 } from "@everdict/images";
 
@@ -16,6 +18,17 @@ import {
 export interface ManagedImages {
   images?: WorkspaceImages;
   imageTokenService?: ImageTokenService;
+  // Publish "base image + one captured layer" through the registry API alone (agent worlds W4). Present
+  // wherever the managed store is: it is the snapshot path for a session the control plane cannot reach a
+  // daemon for — which is every placement except this host.
+  publishLayerSnapshot?: (input: {
+    tenant: string;
+    world: string;
+    tag: string;
+    baseReference: string;
+    layerGzip: Buffer;
+    createdBy: string;
+  }) => Promise<{ digest: string }>;
 }
 
 // A PEM read from disk rather than an env value: a private key in the process environment leaks into every child
@@ -71,12 +84,30 @@ export function buildManagedImages(
     api: fetchManagedRegistryApi(apiBase, (access) => issuer.mintRegistryToken("everdict-control-plane", access)),
     ...(opts.crossTenantPull ? { crossTenantPull: opts.crossTenantPull } : {}),
   });
+  const writer = fetchRegistryWriter(apiBase, (access) => issuer.mintRegistryToken("everdict-control-plane", access));
   return {
     images,
     imageTokenService: new ImageTokenService({
       issuer,
       service: env.EVERDICT_IMAGE_STORE_SERVICE ?? "everdict-registry",
     }),
+    // The repository is resolved through the STORE (`namespaceFor`), never assembled here — the namespace
+    // rule is the isolation boundary, and a second place that spells it is a second place to get it wrong.
+    publishLayerSnapshot: async (input) => {
+      const repository = `${images.namespaceFor(input.tenant)}/${input.world}`;
+      return appendLayer(
+        writer,
+        {
+          repository,
+          baseReference: input.baseReference,
+          tag: input.tag,
+          layerGzip: input.layerGzip,
+          createdBy: input.createdBy,
+          created: new Date().toISOString(),
+        },
+        [{ type: "repository", name: repository, actions: ["pull", "push"] }],
+      );
+    },
   };
 }
 

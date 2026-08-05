@@ -52,6 +52,24 @@ const DEFAULT_MAX_PER_AGENT = 1;
 // assumes, so a cloned session and an eval case agree on where "the code" is.
 const DEFAULT_REPO_DIR = "work";
 const GIT_TIMEOUT_SEC = 600; // a clone/push of a real repository is minutes, not the 60s exec default
+// What a placement-independent capture reads (W4): the session's own working root. NOT the whole filesystem —
+// a tar of `/` over an exec channel is neither affordable nor meaningful (it would capture /proc and the
+// container's own runtime), and everything a world accumulates lives under the base directory by convention.
+const CAPTURE_DIR = "/everdict";
+const CAPTURE_TIMEOUT_SEC = 1800; // a real tree compresses for minutes; the exec default would truncate it
+const DEFAULT_MAX_CAPTURE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB compressed — base64 in memory bounds this
+
+// The tag or digest a snapshot's base is addressed by, given the ref the session booted. The registry is
+// asked for a reference WITHIN the repository, so the host/namespace prefix is dropped and a digest pin wins
+// over the tag it carries (`repo:v3@sha256:…` resolves by digest — the tag is for humans).
+function baseReferenceOf(image: string): string {
+  const atDigest = image.lastIndexOf("@");
+  if (atDigest !== -1) return image.slice(atDigest + 1);
+  const lastSlash = image.lastIndexOf("/");
+  const name = lastSlash === -1 ? image : image.slice(lastSlash + 1);
+  const colon = name.lastIndexOf(":");
+  return colon === -1 ? "latest" : name.slice(colon + 1);
+}
 
 export interface SandboxActor {
   tenant: string;
@@ -146,6 +164,7 @@ interface LiveSession {
   execCount: number;
   world?: string; // agent worlds (W1): the environment capability this session snapshots into
   hibernate: boolean; // auto-snapshot at teardown (world sessions default true)
+  bootImage: string; // W4: the image this session started from — the base a captured layer extends
   repo?: { git: string; ref?: string; dir: string }; // W2: what was cloned in, and where
   // The agent behind this session, remembered because teardown and expiry emit facts long after the request
   // that knew who asked — an expiry fact must carry the same causedBy the creation one did.
@@ -257,6 +276,20 @@ export interface SandboxSessionServiceDeps {
   // Retention (W3): drop the world's oldest snapshots past the operator's bound, image bytes included. A world
   // gains a version per hibernate and the registry has no GC, so autonomy without this is a disk that fills.
   // Best-effort AFTER a successful publish: pruning failure never fails the snapshot the caller is waiting on.
+  // The PLACEMENT-INDEPENDENT capture (W4): the driver's own snapshot needs a daemon the control plane can
+  // reach, which is true on this host and false for a session placed on a cluster. This seam takes the tar of
+  // the session's work tree — read out over the same exec channel every placement already has — and publishes
+  // it as one more layer on the image the session booted. Preferred order is `driver.snapshot` (cheaper: the
+  // bytes never travel through the control plane) with this as the fallback, so a deployment that has neither
+  // is refused at CREATE rather than hours later.
+  publishLayerSnapshot?: (input: {
+    tenant: string;
+    world: string;
+    tag: string;
+    baseReference: string;
+    layerGzip: Buffer;
+    createdBy: string;
+  }) => Promise<{ digest: string }>;
   pruneWorldVersions?: (
     tenant: string,
     actor: { subject: string; isAdmin: boolean },
@@ -268,6 +301,9 @@ export interface SandboxSessionServiceDeps {
   // W3: how many live sessions ONE agent may hold (default 1). Bounds an autonomous loop against itself;
   // the per-tenant cap additionally keeps its last slot for a member.
   maxPerAgent?: number;
+  // W4: the ceiling on a placement-independent capture (compressed bytes). Past it the snapshot is refused by
+  // name — a truncated capture would publish an image that boots missing files.
+  maxCaptureBytes?: number;
   maxTotal?: number;
   newId?: () => string;
   now?: () => string;
@@ -366,6 +402,7 @@ export class SandboxSessionService {
         tenant: input.tenant,
         createdBy: input.createdBy,
         label: record.harness.id,
+        bootImage: resolved.image,
         ...(resolved.world !== undefined ? { world: resolved.world } : {}),
         hibernate,
         ...(repo !== undefined ? { repo } : {}),
@@ -900,6 +937,65 @@ export class SandboxSessionService {
     return result;
   }
 
+  // Capture the session's work tree over the exec channel and publish it as one more layer on the image the
+  // session booted (W4). Base64 is the wire because it is the ONE encoding every exec transport agrees on —
+  // docker exec, `nomad alloc exec`, `kubectl exec` — which is exactly what makes this path placement
+  // independent. It costs a third more bytes and holds them in memory, so the capture is bounded and a tree
+  // past the bound is REFUSED by name rather than silently truncated into an image that boots missing files.
+  private async captureAsLayer(
+    input: { tenant: string; runId: string; world: string; computeId: string },
+    ctx: {
+      tag: string;
+      publishLayer: NonNullable<SandboxSessionServiceDeps["publishLayerSnapshot"]>;
+    },
+  ): Promise<void> {
+    const live = this.sessions.get(input.runId);
+    if (!live)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: input.runId },
+        "This control plane no longer holds the session, and a layer capture reads through its exec channel.",
+      );
+    const dir = CAPTURE_DIR;
+    const limit = this.deps.maxCaptureBytes ?? DEFAULT_MAX_CAPTURE_BYTES;
+    // The tar is rooted at `/` and names the directory, NOT taken from inside it. An image layer's paths are
+    // root-relative, so `tar -C /everdict .` produces `./proj/…`, which unpacks to `/proj/…` — the files
+    // land beside the place they came from and the world boots looking untouched. Found by a live drill,
+    // where the snapshot published cleanly and the next session read the OLD file.
+    const captureRoot = dir.replace(/^\/+/, "");
+    // `tar | gzip | base64 -w0` — one pipeline, so nothing lands on the container's disk. The size check runs
+    // in the container too: refusing after transferring 4 GiB would be a refusal that already cost the money.
+    const sized = await live.handle.exec(`tar -C / -czf - ${shq(captureRoot)} | wc -c`, {
+      timeoutSec: CAPTURE_TIMEOUT_SEC,
+    });
+    const bytes = Number.parseInt(sized.stdout.trim(), 10);
+    if (Number.isFinite(bytes) && bytes > limit)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: input.runId, bytes, limit },
+        `This world's ${dir} is ${bytes} bytes compressed, past the ${limit}-byte capture bound — snapshot from a host-attached driver, or set EVERDICT_WORLD_MAX_CAPTURE_BYTES.`,
+      );
+    const captured = await live.handle.exec(`tar -C / -czf - ${shq(captureRoot)} | base64 -w0`, {
+      timeoutSec: CAPTURE_TIMEOUT_SEC,
+    });
+    if (captured.exitCode !== 0)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { run: input.runId, dir },
+        `Could not capture ${dir}: ${clamp(captured.stderr || captured.stdout)}`,
+      );
+    const layerGzip = Buffer.from(captured.stdout.trim(), "base64");
+    await ctx.publishLayer({
+      tenant: input.tenant,
+      world: input.world,
+      tag: ctx.tag,
+      // The image the session BOOTED is the base — so a snapshot is always "this world, plus what changed".
+      baseReference: baseReferenceOf(live.bootImage),
+      layerGzip,
+      createdBy: `everdict snapshot of ${dir} (session ${input.runId})`,
+    });
+  }
+
   // The snapshot core (live and crash paths share it): mint the next v<n> tag → commit+push HOST-side with
   // a transient grant (the credential never enters the container, so it can never be captured INTO the
   // snapshot) → read the digest back from the registry (authoritative — what it actually stored) → publish
@@ -918,7 +1014,8 @@ export class SandboxSessionService {
     const images = this.deps.images;
     const publish = this.deps.publishWorldVersion;
     const snapshot = this.deps.driver.snapshot?.bind(this.deps.driver);
-    if (!images || !publish || !snapshot)
+    const publishLayer = this.deps.publishLayerSnapshot;
+    if (!images || !publish || (!snapshot && !publishLayer))
       throw new BadRequestError("BAD_REQUEST", {}, "World snapshots are not configured.");
     const tags = await images.listTags(input.tenant, input.world).catch(() => [] as string[]);
     let next = 1;
@@ -928,12 +1025,18 @@ export class SandboxSessionService {
     }
     const tag = `v${next}`;
     const ref = `${images.endpoint}/${images.namespaceFor(input.tenant)}/${input.world}:${tag}`;
-    const grant = await images.mintPushGrant(input.tenant, input.world);
-    await snapshot(input.computeId, ref, {
-      host: grant.endpoint,
-      username: IMAGE_GRANT_USERNAME,
-      password: grant.token,
-    });
+    if (snapshot) {
+      // The driver holds the compute: it commits and pushes without the bytes ever crossing the control
+      // plane. Cheapest path, and the only one that captures the WHOLE filesystem rather than the work tree.
+      const grant = await images.mintPushGrant(input.tenant, input.world);
+      await snapshot(input.computeId, ref, {
+        host: grant.endpoint,
+        username: IMAGE_GRANT_USERNAME,
+        password: grant.token,
+      });
+    } else if (publishLayer) {
+      await this.captureAsLayer(input, { tag, publishLayer });
+    }
     // Pin the digest WITH the tag (pinDigest) so a human still reads a version off the ref. No digest →
     // the tag ref stands and the capability publish itself warns mutable-tag.
     const digest = await images
@@ -1066,11 +1169,12 @@ export class SandboxSessionService {
       // snapshot, not at the first snapshot hours of work later.
       if (input.harness)
         throw new BadRequestError("BAD_REQUEST", {}, "world and harness are mutually exclusive on one session.");
-      if (!this.deps.images || !this.deps.publishWorldVersion || this.deps.driver.snapshot === undefined)
+      const canSnapshot = this.deps.driver.snapshot !== undefined || this.deps.publishLayerSnapshot !== undefined;
+      if (!this.deps.images || !this.deps.publishWorldVersion || !canSnapshot)
         throw new BadRequestError(
           "BAD_REQUEST",
           {},
-          "World sessions are not configured (a managed image store and a snapshot-capable driver are required).",
+          "World sessions are not configured (a managed image store and a way to snapshot — a snapshot-capable driver or the registry layer-append path — are required).",
         );
       const world = input.world.id;
       // The world id doubles as its snapshot repository — the managed store's single-segment rule applies.

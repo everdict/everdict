@@ -48,6 +48,8 @@ export function buildSandboxSessions(opts: {
   // Agent worlds (W2): the workspace GitHub App, bound behind the service's `git` seam (peer services never
   // call each other). Absent = clone-in works only for public repos and pushing 400s.
   githubApp?: GithubAppService;
+  // W4: publish a captured work tree as a layer on the session's base image (registry API only, no daemon).
+  publishLayerSnapshot?: SandboxSessionServiceDeps["publishLayerSnapshot"];
 }): SandboxSessionService | undefined {
   const driver = process.env.EVERDICT_SANDBOX_DRIVER;
   if (driver === undefined || driver === "") return undefined;
@@ -194,6 +196,10 @@ export function buildSandboxSessions(opts: {
     ...(opts.events ? { events: opts.events } : {}),
     ...(opts.reaper ? { reaper: opts.reaper } : {}),
     ...(opts.images ? { images: opts.images } : {}),
+    ...(opts.publishLayerSnapshot ? { publishLayerSnapshot: opts.publishLayerSnapshot } : {}),
+    ...(intEnv("EVERDICT_WORLD_MAX_CAPTURE_BYTES") !== undefined
+      ? { maxCaptureBytes: intEnv("EVERDICT_WORLD_MAX_CAPTURE_BYTES") }
+      : {}),
     ...(opts.registryAuthsFor ? { resolvePullAuths: opts.registryAuthsFor } : {}),
     ...(publishWorldVersion ? { publishWorldVersion } : {}),
     ...(pruneWorldVersions ? { pruneWorldVersions } : {}),

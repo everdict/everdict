@@ -372,7 +372,11 @@ async function main(): Promise<void> {
   // needs the store's coordinates to classify an image. The cycle is real, so the predicate is a thunk over a
   // holder the adoption wiring fills in — until then it denies, which is the same answer as running without M6.
   const imageReach: { resolve?: (tenant: string, ref: string) => Promise<boolean> } = {};
-  const { images: workspaceImages, imageTokenService } = buildManagedImages(process.env, {
+  const {
+    images: workspaceImages,
+    imageTokenService,
+    publishLayerSnapshot,
+  } = buildManagedImages(process.env, {
     crossTenantPull: (tenant, ref) => (imageReach.resolve ? imageReach.resolve(tenant, ref) : Promise.resolve(false)),
   });
   // The workspace's coordinates in that store — what makes classifyImageRef able to answer "managed". One
@@ -943,6 +947,9 @@ async function main(): Promise<void> {
     // versions — absent managed store = world sessions 400, everything else keeps working. The pull side is
     // the dispatch lane's own credential seam: booting a world snapshot means pulling from our registry.
     ...(workspaceImages ? { images: workspaceImages } : {}),
+    // W4: the placement-independent snapshot — publish the captured work tree as a layer through the
+    // registry API, for a session whose container this control plane cannot reach a daemon for.
+    ...(publishLayerSnapshot ? { publishLayerSnapshot } : {}),
     capabilityService,
     registryAuthsFor,
     // W2: git in and out of a session — the workspace App resolves a read credential for a clone and mints a
