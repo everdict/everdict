@@ -51,6 +51,36 @@ export interface FsUsage {
 
 const USAGE_WALK_CAP = 20_000; // max entries visited per usage sweep — keeps a huge tree from stalling Settings
 
+// Search over the workspace tree — the recall primitive. `glob` narrows by path, `pattern` greps file content;
+// at least one is required. Results are a FLOOR when `truncated` (a cap fired) — the caps keep one search from
+// walking an unbounded tree or fetching every object in the bucket (each content read is a storage GET).
+export interface FsSearchInput {
+  pattern?: string; // case-insensitive regex over file content, matched line by line
+  glob?: string; // path pattern (* = within a segment, ** = across segments, ? = one char), e.g. memory/*.md, **/*.ts
+  path?: string; // subtree to search ("" = the whole tree)
+  limit?: number; // max matches returned (default 50, cap 200)
+}
+
+export interface FsSearchMatch {
+  path: string;
+  line?: number; // 1-based — present for content matches, absent for glob-only matches
+  excerpt?: string; // the matching line, trimmed
+}
+
+export interface FsSearchResult {
+  matches: FsSearchMatch[];
+  scanned: number; // files considered (post-glob candidates)
+  truncated: boolean; // a cap fired — treat the result as a floor, and narrow with glob/path
+}
+
+const SEARCH_WALK_CAP = 5_000; // entries visited per search
+const SEARCH_READ_CAP = 500; // files fetched for content matching per search
+const SEARCH_MAX_FILE_BYTES = 262_144; // content matching skips files larger than this (256 KiB)
+const SEARCH_MATCHES_PER_FILE = 5;
+const SEARCH_DEFAULT_LIMIT = 50;
+const SEARCH_MAX_LIMIT = 200;
+const SEARCH_EXCERPT_CHARS = 200;
+
 // The workspace-filesystem use-cases — response shaping over the WorkspaceFs port: text-vs-binary encoding on
 // read, base64 decode on write, a read/remove miss mapped to 404. Path safety + tenant isolation live in the
 // port implementations (every operation normalizes + prefix-scopes internally); this layer never re-derives them.
@@ -189,6 +219,97 @@ export class FsService {
     return this.fs.move(tenant, from, to);
   }
 
+  // Search the workspace tree — glob on paths, regex grep on content, or both. This is the RECALL primitive:
+  // memory files, knowledge bodies, and task artifacts are only useful if an agent can find them without already
+  // knowing the exact path. Deliberately index-free (structural-first, like the knowledge layer): a budgeted walk
+  // over the port, so it works identically on S3 and InMemory and costs nothing at write time.
+  async search(tenant: string, input: FsSearchInput): Promise<FsSearchResult> {
+    const hasPattern = input.pattern !== undefined && input.pattern.length > 0;
+    const hasGlob = input.glob !== undefined && input.glob.length > 0;
+    if (!hasPattern && !hasGlob) {
+      throw new BadRequestError("BAD_REQUEST", {}, "search needs a `pattern` (content regex) and/or a `glob` (path)");
+    }
+    let pattern: RegExp | undefined;
+    if (hasPattern && input.pattern !== undefined) {
+      try {
+        pattern = new RegExp(input.pattern, "i");
+      } catch (err) {
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { pattern: input.pattern },
+          `invalid search pattern: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    const glob = hasGlob && input.glob !== undefined ? globToRegExp(input.glob) : undefined;
+    const limit = Math.min(input.limit ?? SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT);
+    const state = {
+      matches: [] as FsSearchMatch[],
+      scanned: 0,
+      truncated: false,
+      walkLeft: SEARCH_WALK_CAP,
+      readLeft: SEARCH_READ_CAP,
+      limit,
+    };
+    await this.searchWalk(tenant, input.path ?? "", glob, pattern, state);
+    return { matches: state.matches, scanned: state.scanned, truncated: state.truncated };
+  }
+
+  private async searchWalk(
+    tenant: string,
+    dir: string,
+    glob: RegExp | undefined,
+    pattern: RegExp | undefined,
+    state: {
+      matches: FsSearchMatch[];
+      scanned: number;
+      truncated: boolean;
+      walkLeft: number;
+      readLeft: number;
+      limit: number;
+    },
+  ): Promise<void> {
+    if (state.matches.length >= state.limit) return;
+    for (const entry of await this.fs.list(tenant, dir)) {
+      if (state.matches.length >= state.limit) {
+        state.truncated = true; // more entries were pending when the match limit filled
+        return;
+      }
+      if (state.walkLeft-- <= 0) {
+        state.truncated = true;
+        return;
+      }
+      if (entry.kind === "dir") {
+        await this.searchWalk(tenant, entry.path, glob, pattern, state);
+        continue;
+      }
+      if (glob && !glob.test(entry.path)) continue;
+      state.scanned += 1;
+      if (!pattern) {
+        state.matches.push({ path: entry.path });
+        continue;
+      }
+      // Content matching skips what a grep would: oversized files, and binary bytes (invalid utf-8 / NUL).
+      if ((entry.size ?? 0) > SEARCH_MAX_FILE_BYTES) continue;
+      if (state.readLeft-- <= 0) {
+        state.truncated = true;
+        return;
+      }
+      const file = await this.fs.read(tenant, entry.path);
+      if (!file) continue; // raced a delete — not an error
+      const text = sniffText(file.data);
+      if (text === undefined) continue;
+      let perFile = 0;
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i] ?? "";
+        if (!pattern.test(line)) continue;
+        state.matches.push({ path: entry.path, line: i + 1, excerpt: line.trim().slice(0, SEARCH_EXCERPT_CHARS) });
+        if (++perFile >= SEARCH_MATCHES_PER_FILE || state.matches.length >= state.limit) break;
+      }
+    }
+  }
+
   // The workspace's storage picture for Settings › Files: totals + per-top-level breakdown, walked through the
   // port (works identically over S3 and InMemory; the user never needs the object-storage console).
   async usage(tenant: string): Promise<FsUsage> {
@@ -311,6 +432,36 @@ function shapeContent(entry: FsEntry, data: Uint8Array): FsFileContent {
 
 function resolveEntry(entry: FsEntry, stored: string | undefined, contentType: string): FsEntry {
   return contentType === stored ? entry : { ...entry, contentType };
+}
+
+// Translate a path glob into an anchored RegExp over the tenant-relative path. `**` crosses segment boundaries,
+// `*` stays within one, `?` is a single non-separator char; everything else is literal. A leading `**/` also
+// matches zero directories, so `**/*.md` finds root-level markdown too.
+function globToRegExp(glob: string): RegExp {
+  const normalized = glob.replace(/^\/+/, "");
+  let out = "";
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
+    if (ch === "*") {
+      if (normalized[i + 1] === "*") {
+        i++;
+        // `**/` matches zero or more whole segments; a bare/trailing `**` matches anything.
+        if (normalized[i + 1] === "/") {
+          i++;
+          out += "(?:[^/]+/)*";
+        } else {
+          out += ".*";
+        }
+      } else {
+        out += "[^/]*";
+      }
+    } else if (ch === "?") {
+      out += "[^/]";
+    } else {
+      out += (ch ?? "").replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${out}$`);
 }
 
 function decodeBase64(path: string, content: string): Uint8Array {

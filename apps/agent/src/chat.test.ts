@@ -298,7 +298,12 @@ describe("agent-plane metrics", () => {
 
 describe("workspace memory recall", () => {
   const indexFile = (content: string, over: Record<string, unknown> = {}) => ({
-    content: JSON.stringify({ path: "memory/MEMORY.md", content, encoding: "utf8", revision: 3, ...over }),
+    content: JSON.stringify({
+      entry: { path: "memory/MEMORY.md", name: "MEMORY.md", kind: "file", modifiedAt: "2026-08-05T17:08:31.000Z" },
+      content,
+      encoding: "utf8",
+      ...over,
+    }),
     isError: false,
   });
 
@@ -313,6 +318,8 @@ describe("workspace memory recall", () => {
     expect(preamble).toContain("Billing quirk");
     expect(preamble).toContain("verify it against the live workspace");
     expect(preamble).toContain("ignore memory");
+    // Staleness at a glance — day precision so the injected block stays byte-identical across a day's turns.
+    expect(preamble).toContain("index last updated 2026-08-05");
   });
 
   it("recalls nothing when the workspace has no memory yet, an fs error, or a binary index", async () => {

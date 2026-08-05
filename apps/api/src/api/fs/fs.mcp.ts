@@ -27,6 +27,31 @@ export function registerFsTools(server: McpServer, ctx: McpToolContext): void {
   );
 
   server.registerTool(
+    "search_files",
+    {
+      description:
+        "Search the workspace filesystem — find files by path glob (`glob`: * within a segment, ** across segments, ?) and/or grep file content with a case-insensitive regex (`pattern`); at least one is required. `path` scopes to a subtree. Content matches return the path, a 1-based line and an excerpt. Use it to RECALL before you re-derive: past memories (memory/), knowledge bodies (knowledge/), reports and task outputs — when you don't already know the exact path, search first. `truncated: true` means the result is a floor — narrow with glob/path and search again.",
+      inputSchema: {
+        pattern: z.string().min(1).max(300).optional(),
+        glob: z.string().min(1).max(300).optional(),
+        path: z.string().max(600).optional(),
+        limit: z.number().int().positive().max(200).optional(),
+      },
+    },
+    ({ pattern, glob, path, limit }) =>
+      run(principal, "files:read", async () =>
+        ok(
+          await fs.search(ws, {
+            ...(pattern !== undefined ? { pattern } : {}),
+            ...(glob !== undefined ? { glob } : {}),
+            ...(path !== undefined ? { path } : {}),
+            ...(limit !== undefined ? { limit } : {}),
+          }),
+        ),
+      ),
+  );
+
+  server.registerTool(
     "get_file",
     {
       description:

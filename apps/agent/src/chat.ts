@@ -127,19 +127,23 @@ export async function workspaceMemoryPreamble(call: McpInvoke): Promise<string |
   try {
     const r = await call("get_file", { path: MEMORY_INDEX_PATH });
     if (r.isError) return undefined; // no memory yet (NOT_FOUND) or an unreachable fs — recall nothing
-    const file = JSON.parse(r.content) as { content?: unknown; encoding?: unknown };
+    const file = JSON.parse(r.content) as { content?: unknown; encoding?: unknown; entry?: { modifiedAt?: unknown } };
     if (typeof file.content !== "string" || file.content.trim().length === 0 || file.encoding === "base64")
       return undefined;
+    // Day precision, and only re-rendered when the index actually changes — a stable header keeps the injected
+    // block byte-identical across turns (the same cache discipline as the environment date).
+    const updatedAt = typeof file.entry?.modifiedAt === "string" ? file.entry.modifiedAt.slice(0, 10) : undefined;
     const index =
       file.content.length > MAX_MEMORY_INDEX_CHARS
         ? `${file.content.slice(0, MAX_MEMORY_INDEX_CHARS)}\n… [index truncated — read ${MEMORY_INDEX_PATH} in full, and shorten its entries]`
         : file.content;
     const discipline = [
-      `Read a listed memory's body with get_file (${MEMORY_DIRECTORY}/<file>) when it bears on THIS task.`,
-      "A memory reflects when it was written: before recommending from one that names a file, resource, or version, verify it against the live workspace.",
+      `Read a listed memory's body with get_file (${MEMORY_DIRECTORY}/<file>) when it bears on THIS task, or grep across memories with search_files (path: ${MEMORY_DIRECTORY}).`,
+      "A memory reflects when it was written (each body's get_file result carries its modifiedAt): before recommending from one that names a file, resource, or version, verify it against the live workspace.",
       "If the user asks you to ignore memory, proceed as if this index were empty.",
     ].join(" ");
-    return `Workspace memory index (${MEMORY_INDEX_PATH} — what agents learned in PAST conversations; persists across conversations):\n\n${index}\n\n${discipline}`;
+    const age = updatedAt !== undefined ? `; index last updated ${updatedAt}` : "";
+    return `Workspace memory index (${MEMORY_INDEX_PATH} — what agents learned in PAST conversations; persists across conversations${age}):\n\n${index}\n\n${discipline}`;
   } catch {
     return undefined; // best-effort — memory must never fail a turn
   }

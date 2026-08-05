@@ -11,6 +11,15 @@ import { WriteFsFileBodySchema } from "./request/write-fs-file.js";
 
 const ListQuerySchema = z.object({ path: z.string().max(600).optional() });
 const FileQuerySchema = z.object({ path: z.string().min(1).max(600) });
+const SearchQuerySchema = z.object({
+  pattern: z.string().min(1).max(300).optional(), // case-insensitive content regex
+  glob: z.string().min(1).max(300).optional(), // path pattern (* ? **)
+  path: z.string().max(600).optional(), // subtree to search
+  limit: z
+    .string()
+    .regex(/^\d{1,3}$/)
+    .optional(),
+});
 const RemoveQuerySchema = z.object({
   path: z.string().min(1).max(600),
   recursive: z.enum(["true", "false"]).optional(),
@@ -55,6 +64,32 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
       return reply.send(await deps.fsService.list(principal.workspace, parsed.data.path));
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  app.get("/fs/search", { schema: fsDocs.search }, async (req, reply) => {
+    if (!deps.fsService) return reply.code(404).send({ code: "NOT_FOUND", message: "filesystem not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "files:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = SearchQuerySchema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    const { pattern, glob, path, limit } = parsed.data;
+    try {
+      return reply.send(
+        await deps.fsService.search(principal.workspace, {
+          ...(pattern !== undefined ? { pattern } : {}),
+          ...(glob !== undefined ? { glob } : {}),
+          ...(path !== undefined ? { path } : {}),
+          ...(limit !== undefined ? { limit: Number(limit) } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // neither pattern nor glob, or a bad regex → 400
     }
   });
 

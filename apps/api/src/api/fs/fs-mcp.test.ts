@@ -78,6 +78,24 @@ describe("MCP file-revision tools (BFF↔MCP parity)", () => {
     });
   });
 
+  it("search_files greps content and globs paths — the MCP twin of GET /fs/search", async () => {
+    // Given a workspace holding a memory file and a report
+    const deps = makeDeps();
+    const client = await connect(deps);
+    await call(client, "write_file", { path: "memory/cadence.md", content: "Eval report ships every Friday." });
+    await call(client, "write_file", { path: "reports/q3.md", content: "Q3 regression report." });
+    // When the agent greps for a fact it half-remembers
+    const grep = jsonOf(await call(client, "search_files", { pattern: "friday" }));
+    // Then it finds the memory file with a line + excerpt, without knowing the path up front
+    expect(grep).toMatchObject({
+      matches: [{ path: "memory/cadence.md", line: 1 }],
+      truncated: false,
+    });
+    // …and a glob narrows by path alone
+    const glob = jsonOf(await call(client, "search_files", { glob: "memory/*.md" }));
+    expect((glob as { matches: { path: string }[] }).matches.map((m) => m.path)).toEqual(["memory/cadence.md"]);
+  });
+
   it("records a member's own write as a member edit when no agent is declared", async () => {
     const deps = makeDeps();
     const client = await connect(deps);

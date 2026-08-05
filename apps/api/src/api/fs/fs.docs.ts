@@ -38,6 +38,49 @@ const docs = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
+  search: {
+    summary: "Search the workspace filesystem",
+    description:
+      "Find files by path glob (`glob`: * within a segment, ** across, ?) and/or grep file content with a " +
+      "case-insensitive regex (`pattern`) — at least one is required. `path` scopes the walk to a subtree; " +
+      "`limit` caps matches (default 50, max 200). Content matches carry a 1-based `line` and an `excerpt`; " +
+      "`truncated` means a cap fired and the result is a floor — narrow with glob/path. Binary and oversized " +
+      "files are skipped for content matching. Requires files:read (viewer+).",
+    tags: ["fs"],
+    querystring: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "case-insensitive content regex" },
+        glob: { type: "string", description: "path pattern, e.g. memory/*.md or **/*.ts" },
+        path: { type: "string", description: "subtree to search (default: the whole tree)" },
+        limit: { type: "string", description: "max matches (default 50, max 200)" },
+      },
+    },
+    response: {
+      200: {
+        description: "Matches",
+        type: "object",
+        properties: {
+          matches: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+                line: { type: "number" },
+                excerpt: { type: "string" },
+              },
+              required: ["path"],
+            },
+          },
+          scanned: { type: "number" },
+          truncated: { type: "boolean" },
+        },
+        required: ["matches", "scanned", "truncated"],
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
   read: {
     summary: "Read a file",
     description:

@@ -77,6 +77,47 @@ describe("fs routes (the workspace filesystem HTTP surface)", () => {
     expect(read.json()).toMatchObject({ content: "# Q3", encoding: "utf8" });
   });
 
+  it("searches by content pattern and path glob (the recall primitive), workspace-scoped", async () => {
+    const app = build();
+    await app.inject({
+      method: "PUT",
+      url: "/fs/file",
+      headers: H,
+      payload: { path: "memory/cadence.md", content: "The team ships the eval report every Friday." },
+    });
+    await app.inject({
+      method: "PUT",
+      url: "/fs/file",
+      headers: H,
+      payload: { path: "reports/q3.md", content: "Q3 regression report." },
+    });
+
+    const grep = await app.inject({ method: "GET", url: "/fs/search?pattern=friday", headers: H });
+    expect(grep.statusCode).toBe(200);
+    expect(grep.json()).toMatchObject({
+      matches: [{ path: "memory/cadence.md", line: 1 }],
+      truncated: false,
+    });
+
+    const glob = await app.inject({ method: "GET", url: "/fs/search?glob=**/*.md", headers: H });
+    expect((glob.json() as { matches: { path: string }[] }).matches.map((m) => m.path).sort()).toEqual([
+      "memory/cadence.md",
+      "reports/q3.md",
+    ]);
+
+    // Another workspace's search sees nothing (tenant isolation lives in the walk's own reads).
+    const other = await app.inject({
+      method: "GET",
+      url: "/fs/search?pattern=friday",
+      headers: { "x-everdict-tenant": "rival" },
+    });
+    expect(other.json()).toMatchObject({ matches: [] });
+
+    // Neither pattern nor glob is a 400, as is an invalid regex.
+    expect((await app.inject({ method: "GET", url: "/fs/search", headers: H })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/fs/search?pattern=(", headers: H })).statusCode).toBe(400);
+  });
+
   it("isolates workspaces: another tenant sees an empty root and 404 on the file", async () => {
     const app = build();
     await app.inject({ method: "PUT", url: "/fs/file", headers: H, payload: { path: "a.txt", content: "x" } });
