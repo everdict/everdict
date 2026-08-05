@@ -34,6 +34,7 @@ export {
   decodeIssueDisplays,
   encodeIssueDisplays,
   issueDisplayFor,
+  saveIssueDisplay,
   issueDisplaySchema,
   issueViewKeyOf,
   normalizeIssueDisplay,

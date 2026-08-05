@@ -14,16 +14,14 @@ export {
 } from './model/schema'
 export {
   matchTeamPath,
-  TEAM_EVAL_SECTIONS,
   TEAM_SECTIONS,
   TEAM_SETTINGS_SECTIONS,
   teamHref,
-  teamNewHref,
   teamSectionHref,
   teamSettingsHref,
-  type TeamEvalSection,
   type TeamPathScope,
   type TeamSection,
   type TeamSettingsSection,
 } from './lib/href'
+export { withResolvedTeamFilter } from './lib/team-filter'
 export { TeamKeyBadge } from './ui/team-key-badge'

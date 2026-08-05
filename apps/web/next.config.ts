@@ -21,8 +21,22 @@ const DETAIL_MOVES = DETAIL_ROUTES.filter((route) => route.plural !== 'teams')
 // Not permanent (307, not 308) on purpose: a browser caches a permanent redirect hard enough that reverting the
 // scheme would strand anyone who had followed one. Promote these to `permanent: true` once the singular
 // addresses have been confirmed live.
+// The evaluation collections a team used to own an address for. The team axis over them is gone — the registry
+// still records an owning team (who may CHANGE one), but there is one place to find them, so an old link lands
+// on the workspace list rather than a 404. Matched BEFORE the generic team rules below, which would otherwise
+// rewrite `/teams/ENG/harnesses` into a team path that no longer exists.
+const FORMER_TEAM_EVAL_SECTIONS = ['scorecards', 'harnesses', 'datasets', 'judges'] as const
+
 async function movedDetailRoutes() {
   return [
+    ...FORMER_TEAM_EVAL_SECTIONS.flatMap((section) =>
+      // Both spellings of the team segment, and anything under them (`…/scorecards/new` included).
+      ['team', 'teams'].map((segment) => ({
+        source: `/:workspace/${segment}/:key/${section}/:rest*`,
+        destination: `/:workspace/${section}`,
+        permanent: false,
+      }))
+    ),
     // A team's cycle is addressed by its number under the team — more specific than the generic team rule
     // below, so it has to be matched first. Digits only, because `…/cycles/all` is the index and stays put.
     {

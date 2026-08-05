@@ -100,14 +100,19 @@ harnesses · datasets · judges, via `resolveTeamRef` at the route and `resolveT
 ref answers **404 rather than an empty list** — a list filtered to nothing reads as "this team has nothing",
 which is a different and wrong answer to "no such team".
 
-**In the web, a team's resources are PATHS, not a query parameter**: `/{workspace}/team/ENG/{issues, triage,
-cycles, projects, scorecards}`, with the team home at `/{workspace}/team/ENG`. `?team=<uuid>` said "the same
-list, filtered", and that is not what it is — each team holds different things, its triage inbox exists only if
-it turned one on, and its cycles are numbered in its own sequence. The workspace-wide `/issues`, `/projects` and
-`/scorecards` stay (they answer a real question: every team's), and one component renders both addresses;
-`/cycles` is a redirect to a team's, because "Cycle 3" has no meaning without whose third it is — and so is
-`/cycle/<id>`, which now lands on `…/team/ENG/cycle/7`. Old `?team=` links redirect to the new path, so
-nothing pasted before this change breaks.
+**In the web, a team's WORK is a PATH, not a query parameter**: `/{workspace}/team/ENG/{issues, triage, cycles,
+projects}`, with the team home at `/{workspace}/team/ENG`. `?team=<uuid>` said "the same list, filtered", and
+that is not what those are — each team holds different things, its triage inbox exists only if it turned one on,
+and its cycles are numbered in its own sequence. The workspace-wide `/issues` and `/projects` stay (they answer a
+real question: every team's), and one component renders both addresses; `/cycles` is a redirect to a team's,
+because "Cycle 3" has no meaning without whose third it is — and so is `/cycle/<id>`, which now lands on
+`…/team/ENG/cycle/7`. Old `?team=` links redirect to the new path, so nothing pasted before this change breaks.
+
+The team's EVALUATION assets are the exception, and deliberately so (user decision 2026-08-05). Harness · dataset
+· judge · scorecard briefly had team paths too; they now have ONE workspace address each and the owning team is a
+FILTER on that list (`?team=`, the same spelling the old links used, with a team key resolved to its id). The
+registry's `team_id` still decides who may CHANGE one — ownership did not move, only the way you navigate to it.
+The control plane's `?team=` narrowing on those lists is unchanged.
 
 ## Issue
 

@@ -2,9 +2,13 @@ import {
   Bookmark,
   BookOpen,
   Bot,
+  Boxes,
   CircleDot,
+  ClipboardCheck,
+  Database,
   Ellipsis,
   FolderKanban,
+  Gavel,
   LayoutDashboard,
   MonitorDown,
   Network,
@@ -56,10 +60,12 @@ export interface NavSection {
 // Settings pages, which made them read as one-time configuration; they are none of that, they are the working
 // material of the agent and belong beside it. Their pages MOVED out of /settings rather than being copied, so the
 // product still has exactly one Skills page and one Tools page.
-// The eval primitives that answer "what ran" have no group here at all — they are the ones a TEAM owns.
-// Harness · dataset · judge · scorecard all carry a team (registry `team_id`), so their sidebar home is the team's
-// `Evaluation` disclosure (TeamsNav in sidebar.tsx), not a workspace-wide row. The workspace-wide routes stay
-// reachable by URL and from the command palette — they are simply not how you navigate.
+// The third group is EVALUATION — the primitives that answer "what ran, against what, judged how". They carry an
+// owning team in the registry (`team_id`), and for a while that made the team their sidebar home; it doesn't any
+// more. A team owns them the way it owns a document — it decides who may CHANGE one — but nobody looks for a
+// harness by first choosing a team, and four collections repeated under every team turned the team group into a
+// wall. So there is ONE address per collection, and "our team's only" is a filter on it (the `team` facet), which
+// is what a narrowing of one list should have been all along.
 // Infra concerns (runs · schedules · runtimes · work queue) are NOT sidebar entries — they live on the vertical
 // infra rail (widgets/infra-panel) on the right; their full pages remain routable (panel "full page" links,
 // command palette infra group).
@@ -128,6 +134,38 @@ export const NAV_SECTIONS: NavSection[] = [
             keywords: 'team directory browse key 팀 목록',
           },
         ],
+      },
+    ],
+  },
+  // Evaluation — the order is the sentence: what agent (harness), against what (dataset), judged how (judge),
+  // and what came back (scorecard). The result sits last because it is the only one you arrive at rather than
+  // author.
+  {
+    headingKey: 'evaluation',
+    items: [
+      {
+        href: '/harnesses',
+        labelKey: 'harnesses',
+        icon: Boxes,
+        keywords: 'harness agent under test cli command service 하네스 하니스 에이전트',
+      },
+      {
+        href: '/datasets',
+        labelKey: 'datasets',
+        icon: Database,
+        keywords: 'dataset benchmark case suite eval 데이터셋 벤치마크 케이스',
+      },
+      {
+        href: '/judges',
+        labelKey: 'judges',
+        icon: Gavel,
+        keywords: 'judge rubric grader verdict llm 저지 평가자 채점 루브릭',
+      },
+      {
+        href: '/scorecards',
+        labelKey: 'scorecards',
+        icon: ClipboardCheck,
+        keywords: 'scorecard batch eval result regression pass rate 스코어카드 배치 평가 결과',
       },
     ],
   },

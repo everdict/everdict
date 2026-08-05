@@ -21,3 +21,11 @@ export {
   type JudgeSpecDiff,
 } from './model/schema'
 export { JudgePicker, type JudgeRef, type JudgePickerChoice } from './ui/judge-picker'
+export {
+  DEFAULT_JUDGE_DISPLAY,
+  JUDGE_FACETS,
+  JUDGE_GROUPINGS,
+  JUDGE_ORDERS,
+  judgeListSpec,
+  SHARED_OWNER,
+} from './model/list-view'

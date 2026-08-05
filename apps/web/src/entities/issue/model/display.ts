@@ -1,6 +1,14 @@
 import { z } from 'zod'
 
 import {
+  decodeKeyedPreference,
+  encodeKeyedPreference,
+  readPreferenceCookie,
+  withKeyedPreference,
+  writePreferenceCookie,
+} from '@/shared/lib/keyed-preference'
+
+import {
   ISSUE_GROUPINGS,
   ISSUE_LAYOUTS,
   ISSUE_ORDERS,
@@ -113,20 +121,19 @@ export function normalizeIssueDisplay(display: IssueDisplay): IssueDisplay {
   return { ...display, grouping: 'status' }
 }
 
-// The whole cookie: view key → display, most recently changed first. URLSearchParams is the container because it
-// already escapes the `:` in a view key and answers with the last value for a repeated key, so a hand-edited
-// cookie cannot produce two answers for one view.
+// The whole cookie: view key → display, most recently changed first. The map layer is shared with every other
+// per-view preference (`shared/lib/keyed-preference`) — it escapes the `:` in a view key and answers with the
+// last value for a repeated key, so a hand-edited cookie cannot produce two answers for one view.
 export function decodeIssueDisplays(cookie: string | undefined): Map<string, IssueDisplay> {
   const entries = new Map<string, IssueDisplay>()
-  if (cookie === undefined || cookie === '') return entries
-  for (const [key, value] of new URLSearchParams(cookie)) entries.set(key, decodeOne(value))
+  for (const [key, value] of decodeKeyedPreference(cookie)) entries.set(key, decodeOne(value))
   return entries
 }
 
 export function encodeIssueDisplays(entries: Map<string, IssueDisplay>): string {
-  const params = new URLSearchParams()
-  for (const [key, display] of entries) params.append(key, encodeOne(display))
-  return params.toString()
+  const encoded = new Map<string, string>()
+  for (const [key, display] of entries) encoded.set(key, encodeOne(display))
+  return encodeKeyedPreference(encoded)
 }
 
 // The display for one view, defaults when this reader has never chosen one.
@@ -141,14 +148,22 @@ export function withIssueDisplay(
   viewKey: string,
   display: IssueDisplay
 ): string {
-  const existing = decodeIssueDisplays(cookie)
-  existing.delete(viewKey)
-  const next = new Map<string, IssueDisplay>([[viewKey, normalizeIssueDisplay(display)]])
-  for (const [key, value] of existing) {
-    if (next.size >= MAX_REMEMBERED_VIEWS) break
-    next.set(key, value)
-  }
-  return encodeIssueDisplays(next)
+  return withKeyedPreference(
+    cookie,
+    viewKey,
+    encodeOne(normalizeIssueDisplay(display)),
+    MAX_REMEMBERED_VIEWS
+  )
+}
+
+// 브라우저에서 바로 써 넣는다 — 서버 액션 왕복 없이. 표시 설정은 데이터가 아니라 취향이고, 이 쿠키는
+// httpOnly 가 아니다(서버가 첫 화면을 그릴 때 읽는 것이 유일한 용도다). 액션을 한 번 다녀오는 동안 화면이
+// 기다릴 이유가 없어서, 지금 화면은 클라이언트 상태로 즉시 바뀌고 쿠키는 다음 방문을 위해 남는다.
+export function saveIssueDisplay(viewKey: string, display: IssueDisplay): void {
+  writePreferenceCookie(
+    ISSUE_DISPLAY_COOKIE,
+    withIssueDisplay(readPreferenceCookie(ISSUE_DISPLAY_COOKIE), viewKey, display)
+  )
 }
 
 // The schema and the type say the same thing, in both directions — adding a field to one without the other stops

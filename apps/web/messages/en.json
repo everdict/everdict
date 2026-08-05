@@ -5557,5 +5557,71 @@
     "changeHint": "Change the owning team",
     "moved": "Moved to {team}.",
     "error": "Could not change the team."
+  },
+  "listView": {
+    "filter": "Filter",
+    "filterBy": "Filter by",
+    "filterBack": "Back to filters",
+    "filterSearchPlaceholder": "Search",
+    "filterNoMatch": "No matching values.",
+    "filterDone": "Done",
+    "filterRemove": "Remove the {name} filter",
+    "filterClear": "Clear all",
+    "display": "Display",
+    "grouping": "Grouping",
+    "ordering": "Ordering",
+    "searchPlaceholder": "Search by name",
+    "searchAria": "Search by name",
+    "totalCount": "{count, plural, one {# item} other {# items}}",
+    "emptyFilteredTitle": "Nothing matches",
+    "emptyFilteredHint": "Drop a filter, or clear the search.",
+    "facet": {
+      "team": "Team",
+      "creator": "Creator",
+      "category": "Category",
+      "kind": "Kind",
+      "owner": "Source",
+      "status": "Status",
+      "harness": "Harness",
+      "dataset": "Dataset",
+      "runtime": "Runtime",
+      "tag": "Tag",
+      "origin": "Trigger"
+    },
+    "groupBy": {
+      "none": "No grouping",
+      "team": "Team",
+      "creator": "Creator",
+      "category": "Category",
+      "kind": "Kind",
+      "owner": "Source",
+      "status": "Status",
+      "harness": "Harness",
+      "dataset": "Dataset",
+      "runtime": "Runtime",
+      "template": "Shape",
+      "day": "Day it ran"
+    },
+    "orderBy": {
+      "name": "Name",
+      "updated": "Last updated",
+      "created": "Last created",
+      "recent": "Most recent run",
+      "versions": "Most versions",
+      "cases": "Most cases"
+    },
+    "unset": {
+      "team": "No team",
+      "creator": "No creator",
+      "category": "No category",
+      "kind": "No kind",
+      "harness": "No harness",
+      "dataset": "No dataset",
+      "runtime": "No runtime",
+      "tag": "No tag",
+      "origin": "Run by hand"
+    },
+    "ownerWorkspace": "Workspace",
+    "ownerShared": "Built in"
   }
 }

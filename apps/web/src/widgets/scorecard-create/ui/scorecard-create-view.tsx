@@ -6,9 +6,8 @@ import { harnessesSchema } from '@/entities/harness'
 import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
-import { teamSectionHref, type TeamWithSummary } from '@/entities/team'
 import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
-import { canInTeam } from '@/shared/auth/can'
+import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -17,24 +16,13 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { ScorecardCreate } from './scorecard-create'
 
-// Starting a batch evaluation. ONE component behind TWO addresses, like the list it returns to:
-// `/{workspace}/scorecards/new` and `/{workspace}/teams/ENG/scorecards/new`. The difference is ownership — under
-// the team's address the batch is that team's, stated by the URL rather than guessed from whichever membership
-// happened to load first. At the workspace address nothing is pinned and the batch inherits the team that owns
-// the harness, so choosing what to run is also choosing whose result it is.
-export async function ScorecardCreateView({
-  workspace,
-  team,
-}: {
-  workspace: string
-  team?: TeamWithSummary
-}) {
+// Starting a batch evaluation — one address, `/{workspace}/scorecards/new`. Nothing is team-pinned here: the
+// batch inherits the team that owns the harness chosen, so choosing what to run is also choosing whose result
+// it is. (The team-pinned twin under `…/team/ENG/scorecards/new` is gone with the team eval axis.)
+export async function ScorecardCreateView({ workspace }: { workspace: string }) {
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('scorecardsPage')
-  const allowed = canInTeam(principal, 'scorecards:run', team?.id)
-  // Under a team, the choices are that team's — the same narrow its list uses, so the form cannot offer a
-  // harness the resulting batch would not belong with.
-  const scope = team?.id
+  const allowed = can(principal?.roles, 'scorecards:run')
 
   let datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[] = []
   let harnesses: {
@@ -50,14 +38,14 @@ export async function ScorecardCreateView({
   let traceSources: TraceSourceConfig[] = []
   if (allowed) {
     try {
-      datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx, scope))
-      harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx, scope))
+      datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
+      harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
     } catch {
       // Even if the list fails, the form still works (just empty choices)
     }
     // Agent Judges — optional model/harness judges to score each case's trace (→ judge:<id> metrics). Not shown if it fails/is empty.
     try {
-      judges = judgesSchema.parse(await controlPlane.listJudges(ctx, scope))
+      judges = judgesSchema.parse(await controlPlane.listJudges(ctx))
     } catch {
       // Even if the judge list fails, the form still works (judge picker just empty → control-plane default scoring)
     }
@@ -93,18 +81,13 @@ export async function ScorecardCreateView({
   return (
     <div className="space-y-6">
       <Link
-        href={
-          team ? teamSectionHref(workspace, team.key, 'scorecards') : `/${workspace}/scorecards`
-        }
+        href={`/${workspace}/scorecards`}
         className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-3.5" />
         {t('backToList')}
       </Link>
-      <PageHeader
-        title={t('run')}
-        description={team ? t('runForTeam', { team: team.name }) : t('runDescription')}
-      />
+      <PageHeader title={t('run')} description={t('runDescription')} />
       {allowed ? (
         <ScorecardCreate
           datasets={datasets}
@@ -114,7 +97,6 @@ export async function ScorecardCreateView({
           runners={runners}
           hasWorkspaceRunners={hasWorkspaceRunners}
           traceSources={traceSources}
-          {...(team ? { teamId: team.id } : {})}
         />
       ) : (
         <EmptyState title={t('noRunPermTitle')} hint={t('noPermHint')} />

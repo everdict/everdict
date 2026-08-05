@@ -8,27 +8,15 @@ import { pluralSegment } from '@/shared/lib/resource-routes'
 // 필터로 감췄고, 무엇보다 팀마다 가진 자원이 다르다는 사실을 URL 이 말해 주지 못했다. 링크를 만드는 곳은
 // 전부 이 함수들을 거쳐 슬러그 결정이 한 곳에만 존재하게 한다.
 
-// 팀 아래에 사는 자원들. 사이드바의 팀 그룹이 여는 목적지이자, 팀 홈이 "전체 보기"로 잇는 곳이다.
+// 팀 아래에 사는 자원들 — 팀이 **일하는** 것들이다. 사이드바의 팀 그룹이 여는 목적지이자, 팀 홈이 "전체
+// 보기"로 잇는 곳이다.
 //
-// 뒤의 네 가지는 그 팀이 **무엇으로 참을 확립하는가**다 — 하네스·데이터셋·저지·스코어카드는 전부 레지스트리에
-// `team_id` 를 들고 있으니(제어 평면이 `?team=` 으로 좁혀 준다) 이슈와 똑같이 팀이 소유한다. 예전에는 이것들이
-// 워크스페이스 전역 목록에 `?team=` 을 붙여서만 좁혀졌는데, 그러면 "누구의 것인가"가 필터로 감춰진다.
-export const TEAM_SECTIONS = [
-  'issues',
-  'triage',
-  'cycles',
-  'projects',
-  'scorecards',
-  'harnesses',
-  'datasets',
-  'judges',
-] as const
+// 평가 자원(하네스·데이터셋·저지·스코어카드)은 여기 없다. 한동안 팀 아래의 경로 자원이었지만, 그 축은
+// 걷어냈다: 레지스트리의 `team_id` 는 그대로 남아 **누가 고칠 수 있나**를 정하되, 그것들을 찾아가는 길은
+// 워크스페이스 하나다(사이드바의 「평가」 그룹). 사람은 "우리 팀의 하네스"를 팀 화면에서 찾는 게 아니라
+// 하네스 목록에서 팀으로 좁혀서 찾는다 — 그래서 소유 팀은 이제 경로가 아니라 그 목록의 필터 한 축이다.
+export const TEAM_SECTIONS = ['issues', 'triage', 'cycles', 'projects'] as const
 export type TeamSection = (typeof TEAM_SECTIONS)[number]
-
-// 그중 "이 팀이 무엇으로 평가하는가"에 답하는 것들 — 사이드바의 팀 그룹에서 한 마디(평가) 아래로 모인다.
-// 순서가 곧 화면의 순서다: 결과(스코어카드)를 먼저 두고, 그 결과를 만든 재료를 뒤에 둔다.
-export const TEAM_EVAL_SECTIONS = ['scorecards', 'harnesses', 'datasets', 'judges'] as const
-export type TeamEvalSection = (typeof TEAM_EVAL_SECTIONS)[number]
 
 // 팀 홈 — 이 팀이 지금 무엇을 하고 있나.
 export function teamHref(workspace: string, key: string): string {
@@ -39,13 +27,6 @@ export function teamHref(workspace: string, key: string): string {
 // addresses ONE team; the section stays plural because it is that team's collection.
 export function teamSectionHref(workspace: string, key: string, section: TeamSection): string {
   return `${teamHref(workspace, key)}/${section}`
-}
-
-// A team's "create one of these" screen — `/{workspace}/team/ENG/scorecards/new`. Creating under the team's own
-// address is what carries the owner: the same form at the workspace address has to infer whose it is, and the
-// inference is exactly what put every batch in one team.
-export function teamNewHref(workspace: string, key: string, section: TeamSection): string {
-  return `${teamSectionHref(workspace, key, section)}/new`
 }
 
 // 팀 설정은 한 장이 아니라 리니어처럼 **탭 라우트**다 — 한 팀에게 묻는 질문이 여럿이고(누구인가 · 누가 있나 ·

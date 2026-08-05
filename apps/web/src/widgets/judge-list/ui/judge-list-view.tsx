@@ -1,29 +1,35 @@
 import { Gavel } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
-import { TeamScopeBar, type TeamScope } from '@/widgets/team-scope-bar'
-import { DeleteJudgeRowButton } from '@/features/delete-judge'
-import { judgesSchema } from '@/entities/judge'
-import type { TeamWithSummary } from '@/entities/team'
+import {
+  DEFAULT_JUDGE_DISPLAY,
+  JUDGE_FACETS,
+  JUDGE_GROUPINGS,
+  JUDGE_ORDERS,
+  judgesSchema,
+} from '@/entities/judge'
+import { membersSchema } from '@/entities/member'
+import { teamsSchema, withResolvedTeamFilter, type Team } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { sortSemverDesc } from '@/shared/lib/semver'
-import { Badge } from '@/shared/ui/badge'
+import { loadListViewScope } from '@/shared/lib/load-list-view'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
-// Agent Judges (model | harness) — workspace-owned + shared defaults. ONE component behind TWO addresses:
-// `/{workspace}/judges` 와 `/{workspace}/teams/ENG/judges`. 하네스·데이터셋과 같은 규칙이다.
+import { JudgeList } from './judge-list'
+
+// Agent Judges (model | harness) — workspace-owned + shared defaults. 하네스·데이터셋과 같은 규칙이다:
+// 워크스페이스 하나의 주소이고, 소유 팀은 필터 한 축이며, 거르기·묶기는 브라우저에서 일어난다.
 export async function JudgeListView({
   workspace,
-  team,
+  params,
 }: {
   workspace: string
-  team?: TeamWithSummary
+  params: Record<string, string | string[] | undefined>
 }) {
   const t = await getTranslations('judgesPage')
   const { principal, ctx } = await currentPrincipal()
@@ -31,25 +37,51 @@ export async function JudgeListView({
   let error: string | undefined
   let judges = judgesSchema.parse([])
   try {
-    judges = judgesSchema.parse(await controlPlane.listJudges(ctx, team?.id))
+    judges = judgesSchema.parse(await controlPlane.listJudges(ctx))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
+
+  // 만든 사람 · 팀 이름은 축의 이름표를 위한 보조 읽기다 — 실패하면 그 축만 조용히 사라진다.
+  const members = await controlPlane
+    .listMembers(ctx)
+    .then((r) => membersSchema.parse(r))
+    .catch(() => [])
+  const teams = await controlPlane
+    .listTeams(ctx)
+    .then((r) => teamsSchema.parse(r))
+    .catch((): Team[] => [])
+
+  const authors: Record<string, { name: string; avatarUrl?: string }> = {}
+  for (const m of members)
+    authors[m.subject] = {
+      name: m.name ?? m.email?.split('@')[0] ?? m.subject,
+      ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+    }
 
   const currentWorkspace = principal?.workspace ?? workspace
   // Delete = admin only (the creator exception is server-side); the affordance shows only on workspace-owned judges
   // (_shared/first-party delete 404s at the control plane).
   const canDeleteJudges = can(principal?.roles, 'judges:delete')
-  const scope: TeamScope | undefined = team ? { workspace, team, section: 'judges' } : undefined
+
+  const scope = await loadListViewScope({
+    basePath: `/${workspace}/judges`,
+    viewKey: 'judges',
+    facets: JUDGE_FACETS,
+    vocabulary: {
+      groupings: JUDGE_GROUPINGS,
+      orders: JUDGE_ORDERS,
+      fallback: DEFAULT_JUDGE_DISPLAY,
+    },
+    params,
+  })
 
   return (
     <div className="space-y-6">
-      {scope && <TeamScopeBar scope={scope} />}
       <PageHeader
         title={t('title')}
         description={t('description')}
         actions={
-          // 하네스·데이터셋과 같다 — 팀 주소에서도 같은 워크스페이스 폼으로 간다.
           can(principal?.roles, 'judges:write') ? (
             <Link href={`/${workspace}/judges/new`} className={buttonVariants({ size: 'sm' })}>
               {t('register')}
@@ -66,50 +98,15 @@ export async function JudgeListView({
           hint={t('emptyHint')}
         />
       ) : (
-        <div className="space-y-2">
-          {judges.map((j) => (
-            <Link
-              key={j.id}
-              href={`/${workspace}/judge/${encodeURIComponent(j.id)}`}
-              className="group flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border">
-                  <Gavel className="size-[18px]" strokeWidth={1.75} />
-                </span>
-                <div className="min-w-0 space-y-1">
-                  <div className="truncate font-mono text-[13px] font-[560] text-foreground">
-                    {j.id}
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {j.versions.map((v) => (
-                      <code
-                        key={v}
-                        className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border"
-                      >
-                        {v}
-                      </code>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Badge tone={j.owner === currentWorkspace ? 'success' : 'neutral'}>
-                  {j.owner === currentWorkspace ? t('workspaceBadge') : t('sharedBadge')}
-                </Badge>
-                {canDeleteJudges && j.owner === currentWorkspace && (
-                  <DeleteJudgeRowButton
-                    id={j.id}
-                    versions={[...sortSemverDesc(j.versions)].reverse()}
-                    latest={sortSemverDesc(j.versions)[0] ?? j.versions[0] ?? ''}
-                    workspace={workspace}
-                    versionTags={j.versionTags ?? {}}
-                  />
-                )}
-              </div>
-            </Link>
-          ))}
-        </div>
+        <JudgeList
+          workspace={workspace}
+          judges={judges}
+          currentWorkspace={currentWorkspace}
+          authors={authors}
+          teams={teams.map((team) => ({ id: team.id, key: team.key, name: team.name }))}
+          scope={{ ...scope, filters: withResolvedTeamFilter(scope.filters, teams) }}
+          canDelete={canDeleteJudges}
+        />
       )}
     </div>
   )

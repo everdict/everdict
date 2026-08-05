@@ -6,12 +6,7 @@ import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Search, Settings, X } fro
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
-import {
-  matchTeamPath,
-  TEAM_EVAL_SECTIONS,
-  teamSectionHref,
-  type TeamPathScope,
-} from '@/entities/team'
+import { matchTeamPath, teamSectionHref, type TeamPathScope } from '@/entities/team'
 import type { Workspace } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { cn } from '@/shared/lib/utils'
@@ -269,8 +264,6 @@ function TeamsNav({
 }) {
   const t = useTranslations('nav')
   const [openTeams, setOpenTeams] = useState<Record<string, boolean>>({})
-  // 팀 안의 「평가」 하위 그룹 — 팀별로 따로 기억한다(ENG 에서 펼친 것이 DES 까지 펼치지는 않는다).
-  const [openEvalGroups, setOpenEvalGroups] = useState<Record<string, boolean>>({})
   if (teams.length === 0) return null
   return (
     <div className="flex flex-col gap-0.5">
@@ -283,13 +276,6 @@ function TeamsNav({
           recorded: openTeams[team.id],
           holdsActive,
           whenUnrecorded: teams.length === 1,
-        })
-        // 지금 이 팀의 평가 자원 화면에 서 있나 — 「평가」 하위 그룹의 자동 펼침이 이 판정을 쓴다.
-        const holdsActiveEval =
-          holdsActive && TEAM_EVAL_SECTIONS.some((section) => section === scope?.section)
-        const evalOpen = navGroupOpen({
-          recorded: openEvalGroups[team.id],
-          holdsActive: holdsActiveEval,
         })
         // 팀이 소유하는 것은 전부 팀 아래의 경로 자원이다 — `/{workspace}/teams/ENG/issues`. 목록은 여전히
         // 한 벌이지만(같은 컴포넌트, 다른 주소), 팀마다 가진 것이 다르다는 사실은 URL 이 말한다.
@@ -328,14 +314,6 @@ function TeamsNav({
             page: 'projects',
           },
         ]
-        // 그 팀이 무엇으로 참을 확립하는가 — 스코어카드와 그것을 만든 재료(하네스·데이터셋·저지)는 전부 팀
-        // 소유이므로 팀 아래에 산다. 다만 매일 여는 줄은 아니라서 워크스페이스의 「더 보기」와 같은 문법으로
-        // 한 마디 아래에 접어 둔다: 팀 그룹이 여덟 줄로 벽이 되면 정작 이슈가 안 보인다.
-        const evalChildren = TEAM_EVAL_SECTIONS.map((section) => ({
-          href: teamSectionHref(workspace, team.key, section),
-          labelKey: section,
-          page: section,
-        }))
         return (
           <div key={team.id} className="flex flex-col gap-0.5">
             <button
@@ -368,34 +346,6 @@ function TeamsNav({
                     {...(onNavigate ? { onNavigate } : {})}
                   />
                 ))}
-                <button
-                  type="button"
-                  onClick={() => setOpenEvalGroups((prev) => ({ ...prev, [team.id]: !evalOpen }))}
-                  aria-expanded={evalOpen}
-                  className={cn(rowClass, 'relative w-full text-left')}
-                >
-                  <span className="truncate">{t('evaluation')}</span>
-                  <ChevronRight
-                    className={cn(
-                      'ml-auto size-3 shrink-0 text-faint transition-transform duration-150',
-                      evalOpen && 'rotate-90'
-                    )}
-                    strokeWidth={2.25}
-                  />
-                </button>
-                {evalOpen && (
-                  <div className="ml-[9px] flex flex-col gap-0.5 border-l border-border/60 pl-2">
-                    {evalChildren.map((child) => (
-                      <TeamNavRow
-                        key={child.page}
-                        href={child.href}
-                        label={t(child.labelKey)}
-                        active={holdsActive && scope?.section === child.page}
-                        {...(onNavigate ? { onNavigate } : {})}
-                      />
-                    ))}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -405,8 +355,7 @@ function TeamsNav({
   )
 }
 
-// 팀 그룹 안의 한 줄 — 아이콘 없이 라벨만, 활성 표시는 왼쪽 인디고 바. 팀의 직속 줄과 「평가」 아래 줄이
-// 같은 컴포넌트를 쓰므로, 한쪽만 다르게 보이는 일이 생기지 않는다.
+// 팀 그룹 안의 한 줄 — 아이콘 없이 라벨만, 활성 표시는 왼쪽 인디고 바.
 function TeamNavRow({
   href,
   label,

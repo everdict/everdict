@@ -5557,5 +5557,71 @@
     "changeHint": "소유 팀 바꾸기",
     "moved": "{team} 팀으로 넘겼습니다.",
     "error": "팀을 바꾸지 못했습니다."
+  },
+  "listView": {
+    "filter": "필터",
+    "filterBy": "필터 기준",
+    "filterBack": "기준 목록으로",
+    "filterSearchPlaceholder": "검색",
+    "filterNoMatch": "일치하는 값이 없습니다.",
+    "filterDone": "완료",
+    "filterRemove": "{name} 필터 제거",
+    "filterClear": "전체 해제",
+    "display": "표시",
+    "grouping": "묶는 기준",
+    "ordering": "정렬",
+    "searchPlaceholder": "이름으로 검색",
+    "searchAria": "이름으로 검색",
+    "totalCount": "{count}건",
+    "emptyFilteredTitle": "조건에 맞는 것이 없습니다",
+    "emptyFilteredHint": "필터를 줄이거나 검색어를 지워 보세요.",
+    "facet": {
+      "team": "팀",
+      "creator": "만든 사람",
+      "category": "분류",
+      "kind": "종류",
+      "owner": "출처",
+      "status": "상태",
+      "harness": "하네스",
+      "dataset": "데이터셋",
+      "runtime": "런타임",
+      "tag": "태그",
+      "origin": "트리거"
+    },
+    "groupBy": {
+      "none": "묶지 않음",
+      "team": "팀",
+      "creator": "만든 사람",
+      "category": "분류",
+      "kind": "종류",
+      "owner": "출처",
+      "status": "상태",
+      "harness": "하네스",
+      "dataset": "데이터셋",
+      "runtime": "런타임",
+      "template": "형상",
+      "day": "실행한 날"
+    },
+    "orderBy": {
+      "name": "이름순",
+      "updated": "최근 수정순",
+      "created": "최근 생성순",
+      "recent": "최근 실행순",
+      "versions": "버전 많은순",
+      "cases": "케이스 많은순"
+    },
+    "unset": {
+      "team": "팀 없음",
+      "creator": "만든 사람 없음",
+      "category": "분류 없음",
+      "kind": "종류 없음",
+      "harness": "하네스 없음",
+      "dataset": "데이터셋 없음",
+      "runtime": "런타임 없음",
+      "tag": "태그 없음",
+      "origin": "직접 실행"
+    },
+    "ownerWorkspace": "워크스페이스",
+    "ownerShared": "기본 제공"
   }
 }

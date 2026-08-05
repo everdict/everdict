@@ -45,3 +45,10 @@ export {
   type FrontDoor,
   type CommandTrace,
 } from './model/schema'
+export {
+  DEFAULT_HARNESS_DISPLAY,
+  HARNESS_FACETS,
+  HARNESS_GROUPINGS,
+  HARNESS_ORDERS,
+  harnessListSpec,
+} from './model/list-view'

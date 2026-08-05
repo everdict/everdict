@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  matchTeamPath,
-  TEAM_EVAL_SECTIONS,
-  TEAM_SECTIONS,
-  teamHref,
-  teamSectionHref,
-  teamSettingsHref,
-} from './href'
+import { matchTeamPath, TEAM_SECTIONS, teamHref, teamSectionHref, teamSettingsHref } from './href'
 
 // 팀 스코프는 쿼리 파라미터가 아니라 경로다 — 팀마다 가진 자원이 다르므로 주소가 그 사실을 말해야 하고,
 // 그래야 붙여넣은 링크가 사람이 그 팀을 부르는 이름(`ENG`)으로 읽힌다.
@@ -22,19 +15,14 @@ describe('team hrefs — the team is a path segment, not a filter', () => {
     expect(teamSectionHref('acme', 'ENG', 'cycles')).toBe('/acme/team/ENG/cycles')
   })
 
-  // 하네스·데이터셋·저지는 레지스트리에 `team_id` 를 들고 있으므로 이슈와 똑같이 팀이 소유한다 —
-  // 워크스페이스 목록에 `?team=` 을 붙여 좁히던 시절에는 그 소유가 필터 뒤에 숨어 있었다.
-  it('gives the team its evaluation assets an address of their own', () => {
-    expect(teamSectionHref('acme', 'ENG', 'harnesses')).toBe('/acme/team/ENG/harnesses')
-    expect(teamSectionHref('acme', 'ENG', 'datasets')).toBe('/acme/team/ENG/datasets')
-    expect(teamSectionHref('acme', 'ENG', 'judges')).toBe('/acme/team/ENG/judges')
-  })
-
-  // 사이드바의 「평가」 아래 줄들은 전부 실제 팀 자원이어야 한다 — 아니면 라우트가 없는 링크가 된다.
-  it('draws the evaluation group only from sections a team actually has', () => {
-    for (const section of TEAM_EVAL_SECTIONS) {
-      expect(TEAM_SECTIONS).toContain(section)
-    }
+  // 평가 자원은 팀 아래에 살지 않는다 — 소유 팀은 남지만(누가 고칠 수 있나) 찾아가는 길은 워크스페이스
+  // 목록 하나이고, "우리 팀 것만"은 그 목록의 필터 한 축이다. 팀 주소를 다시 만들면 사이드바의 「평가」
+  // 그룹과 팀 탭이 같은 컬렉션을 두 곳에서 말하게 된다.
+  it('keeps evaluation assets out of the team path — they are a workspace collection', () => {
+    expect(TEAM_SECTIONS).not.toContain('harnesses')
+    expect(TEAM_SECTIONS).not.toContain('datasets')
+    expect(TEAM_SECTIONS).not.toContain('judges')
+    expect(TEAM_SECTIONS).not.toContain('scorecards')
   })
 
   it('uses the same slug for the settings surface — one team, one name', () => {
@@ -77,15 +65,11 @@ describe('matchTeamPath — one answer to who owns a path', () => {
     expect(matchTeamPath('/acme/team/', 'acme')).toBeNull()
   })
 
-  it('reads a team-owned evaluation asset back as belonging to that team', () => {
-    expect(matchTeamPath(teamSectionHref('acme', 'ENG', 'harnesses'), 'acme')).toEqual({
-      key: 'ENG',
-      section: 'harnesses',
-    })
-    expect(matchTeamPath(teamSectionHref('acme', 'ENG', 'judges'), 'acme')).toEqual({
-      key: 'ENG',
-      section: 'judges',
-    })
+  // An evaluation collection is no longer a team's — an address someone bookmarked while it was still is read
+  // as "that team's screen, section unknown" rather than resurrecting a section that has no route.
+  it('reads a retired evaluation address as the team’s, naming no section', () => {
+    expect(matchTeamPath('/acme/team/ENG/harnesses', 'acme')).toEqual({ key: 'ENG', section: null })
+    expect(matchTeamPath('/acme/team/ENG/judges', 'acme')).toEqual({ key: 'ENG', section: null })
   })
 
   it('keeps a detail page under the section that owns it', () => {

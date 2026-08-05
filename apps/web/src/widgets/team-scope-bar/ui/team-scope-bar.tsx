@@ -37,11 +37,6 @@ export async function TeamScopeBar({ scope }: { scope: TeamScope }) {
       ? [{ key: 'cycles' as const, label: t('cycles') }]
       : []),
     { key: 'projects', label: t('projects') },
-    // 평가 자원들 — 사이드바에서 「평가」 아래로 모이는 그것들이고, 순서도 같다(결과 먼저, 재료 뒤).
-    { key: 'scorecards', label: t('scorecards') },
-    { key: 'harnesses', label: t('harnesses') },
-    { key: 'datasets', label: t('datasets') },
-    { key: 'judges', label: t('judges') },
   ]
 
   return (

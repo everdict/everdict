@@ -23,6 +23,14 @@ describe('sidebar active state — at most one row owns a path', () => {
     expect(activeRows('/acme/store/mine')).toEqual(['store'])
   })
 
+  // 평가 자원은 워크스페이스 축이다 — 한동안 팀 아래에만 있어서 사이드바에 행이 아예 없었고, 그러면
+  // "이 제품에 그런 게 있다"는 사실 자체가 화면에서 사라진다.
+  it('gives every evaluation collection a workspace row of its own', () => {
+    for (const collection of ['harnesses', 'datasets', 'judges', 'scorecards']) {
+      expect(activeRows(`/acme/${collection}`)).toEqual([collection])
+    }
+  })
+
   // Regression: the nav points at a COLLECTION (`/scorecards`) while one of them lives at the SINGULAR address
   // (`/scorecard/{id}`). A plain prefix test therefore lit no row at all on a detail page — the row went dark
   // exactly when the reader had drilled into it.
@@ -35,9 +43,13 @@ describe('sidebar active state — at most one row owns a path', () => {
     expect(
       isNavItemActive({ href: '/issues' }, '/acme/issue/ENG-12/the-judge-drops-cost-scores', 'acme')
     ).toBe(true)
-    // A resource with NO workspace-wide row (its home is the team's Evaluation group, and the all-issues list is
-    // palette-only) still lights nothing — a detail address must not invent an owner the collection never had.
-    expect(activeRows('/acme/scorecard/sc-1')).toEqual([])
+    // The evaluation collections have a workspace-wide row again, so one of them lights its collection too.
+    expect(activeRows('/acme/scorecard/sc-1')).toEqual(['scorecards'])
+    expect(activeRows('/acme/harness/h1')).toEqual(['harnesses'])
+    expect(activeRows('/acme/dataset/d1')).toEqual(['datasets'])
+    expect(activeRows('/acme/judge/j1')).toEqual(['judges'])
+    // A resource with NO workspace-wide row (the all-issues list is palette-only) still lights nothing — a
+    // detail address must not invent an owner the collection never had.
     expect(activeRows('/acme/issue/ENG-12')).toEqual([])
   })
 
@@ -45,7 +57,7 @@ describe('sidebar active state — at most one row owns a path', () => {
   // 팀 스코프 경로의 주인은 사이드바의 팀 그룹이며, 워크스페이스 나브의 어떤 행도 그 경로를 갖지 않는다.
   it('hands every team-scoped path to the team group, claiming none of it', () => {
     expect(activeRows(teamHref('acme', 'ENG'))).toEqual([])
-    // 섹션 목록 자체를 읽어 온다 — 팀이 소유하는 자원이 늘어나도(하네스·데이터셋·저지) 이 불변식이 같이 늘어난다.
+    // 섹션 목록 자체를 읽어 온다 — 팀이 소유하는 자원이 늘거나 줄어도 이 불변식이 같이 따라간다.
     for (const section of TEAM_SECTIONS) {
       expect(activeRows(teamSectionHref('acme', 'ENG', section))).toEqual([])
     }

@@ -1,14 +1,21 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Search, Telescope, Trash2 } from 'lucide-react'
+import { Check, Telescope, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
 
 import { DeleteScorecardRowButton, DeleteScorecardsDialog } from '@/features/delete-scorecard'
-import { isTraceEvaluation, TRACE_EVAL_REF, type ScorecardRecord } from '@/entities/scorecard'
 import {
-  dayKeyOf,
+  isTraceEvaluation,
+  SCORECARD_FACETS,
+  SCORECARD_GROUPINGS,
+  SCORECARD_ORDERS,
+  scorecardListSpec,
+  TRACE_EVAL_REF,
+  type ScorecardRecord,
+} from '@/entities/scorecard'
+import {
   fmtDateHeading,
   fmtDateTime,
   fmtDateTimeFull,
@@ -16,32 +23,22 @@ import {
   fmtSubject,
   fmtTimeOnly,
 } from '@/shared/lib/format'
-import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
+import { applyListView } from '@/shared/lib/list-view'
+import type { ListViewScope } from '@/shared/lib/load-list-view'
+import { useListView } from '@/shared/lib/use-list-view'
 import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
 import { EntityRef, MetricChip, ModelChip, RuntimeChip, SubsetChip } from '@/shared/ui/chip'
-import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
-import { Input } from '@/shared/ui/input'
 import { Link } from '@/shared/ui/link'
+import { facetOptionsOf, ListSection, ListToolbar, type FacetSpec } from '@/shared/ui/list-toolbar'
 import { OriginChip } from '@/shared/ui/origin'
-import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusIcon } from '@/shared/ui/status-pill'
 
-type Sort = 'recent' | 'name'
 type Author = { name: string; avatarUrl?: string }
-
-// Filter defaults that persist across page navigation (query, sort, dataset, harness, status, runner).
-const FILTER_DEFAULTS = {
-  query: '',
-  sort: 'recent' as Sort,
-  dataset: '',
-  harness: '',
-  status: '',
-  user: '',
-}
+type TeamOption = { id: string; key: string; name: string }
 
 // The runtime a batch ran on → a display label (no link — the whole card is already a <Link>, so a nested <a> is
 // invalid). A registered runtime's id IS its name; a self-hosted runner shows its friendly device name (resolved
@@ -69,11 +66,15 @@ export function ScorecardList({
   scorecards,
   authors,
   runnerLabels,
+  teams,
+  scope,
   viewer,
 }: {
   workspace: string
   scorecards: ScorecardRecord[]
   authors: Record<string, Author>
+  teams: TeamOption[]
+  scope: ListViewScope
   // Self-hosted runner id → friendly device name, for resolving a row's self:<id> runtime to a readable chip.
   runnerLabels: Record<string, string>
   // Delete gating (mirrors the harness/judge list-row trash): a workspace admin deletes any terminal batch, a
@@ -81,27 +82,20 @@ export function ScorecardList({
   viewer: { subject?: string; admin: boolean }
 }) {
   const t = useTranslations('scorecardList')
+  const list = useTranslations('listView')
   const locale = useLocale()
   const timeZone = useTimeZone()
-  const sorts: { value: Sort; label: string }[] = [
-    { value: 'recent', label: t('sortRecent') },
-    { value: 'name', label: t('sortName') },
-  ]
-  const statusOptions = [
-    { value: '', label: t('allStatuses') },
-    { value: 'succeeded', label: t('statusSucceeded') },
-    { value: 'running', label: t('statusRunning') },
-    { value: 'queued', label: t('statusQueued') },
-    { value: 'failed', label: t('statusFailed') },
-    { value: 'superseded', label: t('statusSuperseded') },
-    { value: 'cancelled', label: t('statusCancelled') },
-  ]
-  // Filter/search state is remembered per workspace (persists across navigation) — show the reset button when dirty.
-  const { values, set, reset, dirty } = usePersistentFilters(
-    `scorecards:${workspace}`,
-    FILTER_DEFAULTS
-  )
-  const { query, sort, dataset, harness, status, user } = values
+
+  const view = useListView({
+    basePath: scope.basePath,
+    viewKey: scope.viewKey,
+    facets: SCORECARD_FACETS,
+    initialFilters: scope.filters,
+    initialSearch: scope.search,
+    initialDisplay: scope.display,
+  })
+  // 날짜로 묶었을 때만 행이 시각만 보여 준다 — 머리글이 이미 날짜를 말했으니 줄마다 되풀이할 이유가 없다.
+  const byDay = view.display.grouping === 'day'
 
   // Multi-select delete — a Set of selected scorecard ids (only ever deletable rows). While anything is selected the
   // list enters "selection mode": every checkbox stays visible and clicking a card toggles it instead of navigating,
@@ -177,40 +171,58 @@ export function ScorecardList({
     return { name: '—', known: false }
   }
 
-  // Filter dropdown options — dataset · harness · runner (derived from all scorecards). The reserved trace-eval
-  // sentinel is shown with a friendly label (so it reads as "Trace evaluation", not a literal "_traces" id).
-  const datasetOptions = useMemo(() => {
-    const s = new Set(scorecards.map((c) => c.dataset.id))
-    return [
-      { value: '', label: t('allDatasets') },
-      ...[...s]
-        .sort()
-        .map((d) => ({ value: d, label: d === TRACE_EVAL_REF ? t('traceEvaluation') : d })),
-    ]
-  }, [scorecards, t])
-
-  const harnessOptions = useMemo(() => {
-    const s = new Set(scorecards.map((c) => c.harness.id))
-    return [
-      { value: '', label: t('allHarnesses') },
-      ...[...s]
-        .sort()
-        .map((h) => ({ value: h, label: h === TRACE_EVAL_REF ? t('traceEvaluation') : h })),
-    ]
-  }, [scorecards, t])
-
-  const userOptions = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const c of scorecards) {
-      if (c.createdBy) m.set(c.createdBy, authors[c.createdBy]?.name ?? fmtSubject(c.createdBy))
+  const teamName = useMemo(
+    () => Object.fromEntries(teams.map((team) => [team.id, team.name])),
+    [teams]
+  )
+  const creatorName = (subject: string): string => authors[subject]?.name ?? fmtSubject(subject)
+  // 예약된 트레이스 평가 표식은 친절한 이름으로 — 목록에 `_traces` 라는 내부 문자열이 뜨면 안 된다.
+  const refName = (id: string): string => (id === TRACE_EVAL_REF ? t('traceEvaluation') : id)
+  const runtimeName = (target: string): string =>
+    runtimeChipLabel(target, {
+      runnerLabelOf: (id) => runnerLabels[id],
+      poolPersonal: t('runtimePoolPersonal'),
+      poolWorkspace: t('runtimePoolWorkspace'),
+    })
+  const statusName = (status: string): string => {
+    switch (status) {
+      case 'succeeded':
+        return t('statusSucceeded')
+      case 'running':
+        return t('statusRunning')
+      case 'queued':
+        return t('statusQueued')
+      case 'failed':
+        return t('statusFailed')
+      case 'superseded':
+        return t('statusSuperseded')
+      case 'cancelled':
+        return t('statusCancelled')
+      default:
+        return status
     }
+  }
+
+  const facets = useMemo((): FacetSpec[] => {
+    const of = (facet: string, labelOf: (value: string) => string, unset?: string) => ({
+      key: facet,
+      label: list(`facet.${facet}`),
+      options: facetOptionsOf(
+        scorecards,
+        (s) => scorecardListSpec.facetValues(s, facet),
+        labelOf,
+        unset
+      ),
+    })
     return [
-      { value: '', label: t('allUsers') },
-      ...[...m.entries()]
-        .sort((a, b) => a[1].localeCompare(b[1]))
-        .map(([sub, name]) => ({ value: sub, label: name })),
-    ]
-  }, [scorecards, authors, t])
+      of('status', statusName),
+      of('harness', refName),
+      of('dataset', refName),
+      of('team', (id) => teamName[id] ?? id, list('unset.team')),
+      of('runtime', runtimeName, list('unset.runtime')),
+      of('creator', creatorName, list('unset.creator')),
+    ].filter((facet) => facet.options.length > 0)
+  }, [scorecards, teamName, runnerLabels, list, t, authors])
 
   // Row-level delete gating — terminal batches only (a live one must be stopped first, same as the detail page).
   const canDeleteRow = (s: ScorecardRecord) =>
@@ -239,33 +251,36 @@ export function ScorecardList({
     }
   })
 
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const matched = scorecards.filter((s) => {
-      if (dataset && s.dataset.id !== dataset) return false
-      if (harness && s.harness.id !== harness) return false
-      if (status && s.status !== status) return false
-      if (user && s.createdBy !== user) return false
-      if (!q) return true
-      const hay = [
-        s.dataset.id,
-        s.harness.id,
-        s.models?.primary ?? '',
-        ...(s.judgeModels ?? []),
-        s.origin?.source ?? '',
-        s.createdBy ? (authors[s.createdBy]?.name ?? s.createdBy) : '',
-      ]
-        .join(' ')
-        .toLowerCase()
-      return hay.includes(q)
-    })
-    const by: Record<Sort, (a: ScorecardRecord, b: ScorecardRecord) => number> = {
-      recent: (a, b) => b.createdAt.localeCompare(a.createdAt),
-      name: (a, b) =>
-        a.dataset.id.localeCompare(b.dataset.id) || a.harness.id.localeCompare(b.harness.id),
+  const { total: matchedCount, groups } = useMemo(
+    () =>
+      applyListView(
+        scorecards,
+        { filters: view.filters, search: view.search, display: view.display },
+        scorecardListSpec
+      ),
+    [scorecards, view.filters, view.search, view.display]
+  )
+  // 화면에 실제로 서 있는 순서 그대로 — shift 범위 선택과 「보이는 것 전체」가 이 순서를 읽는다.
+  const visible = useMemo(() => groups.flatMap((group) => group.items), [groups])
+
+  function groupLabel(key: string | null, items: ScorecardRecord[]): string {
+    if (key === null) return list(`unset.${view.display.grouping}`)
+    switch (view.display.grouping) {
+      case 'day':
+        return items[0] ? fmtDateHeading(items[0].createdAt, locale, timeZone) : key
+      case 'status':
+        return statusName(key)
+      case 'harness':
+      case 'dataset':
+        return refName(key)
+      case 'team':
+        return teamName[key] ?? key
+      case 'creator':
+        return creatorName(key)
+      default:
+        return key
     }
-    return [...matched].sort(by[sort])
-  }, [scorecards, authors, query, sort, dataset, harness, status, user])
+  }
 
   // "Select all" adds every currently-visible deletable row to the selection (keeps ones hidden by a filter untouched).
   const selectAllVisible = () =>
@@ -345,84 +360,32 @@ export function ScorecardList({
         <StatCard label={t('statFailed')} value={failed} tone={failed > 0 ? 'danger' : 'default'} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5">
-        <div className="relative min-w-[200px] flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => set('query', e.target.value)}
-            placeholder={t('searchPlaceholder')}
-            className="pl-8"
-            aria-label={t('searchAria')}
-          />
-        </div>
-        <Combobox
-          options={datasetOptions}
-          value={dataset}
-          onChange={(v) => set('dataset', v)}
-          placeholder={t('datasetPlaceholder')}
-          className="w-[150px]"
-        />
-        <Combobox
-          options={harnessOptions}
-          value={harness}
-          onChange={(v) => set('harness', v)}
-          placeholder={t('harnessPlaceholder')}
-          className="w-[150px]"
-        />
-        <Combobox
-          options={statusOptions}
-          value={status}
-          onChange={(v) => set('status', v)}
-          placeholder={t('statusPlaceholder')}
-          className="w-[130px]"
-        />
-        {userOptions.length > 1 && (
-          <Combobox
-            options={userOptions}
-            value={user}
-            onChange={(v) => set('user', v)}
-            placeholder={t('userPlaceholder')}
-            className="w-[150px]"
-          />
-        )}
-        <Combobox
-          options={sorts.map((s) => ({ value: s.value, label: s.label }))}
-          value={sort}
-          onChange={(v) => set('sort', v as Sort)}
-          className="w-[130px]"
-          align="end"
-          aria-label={t('sortAria')}
-        />
-        {dirty && <ResetFiltersButton onClick={reset} />}
-      </div>
+      <ListToolbar
+        search={view.search}
+        onSearch={view.setSearch}
+        facets={facets}
+        filters={view.filters}
+        onToggleFilter={view.toggleFilter}
+        onClearFilters={view.clearFilters}
+        total={matchedCount}
+        groupings={SCORECARD_GROUPINGS}
+        orders={SCORECARD_ORDERS}
+        display={view.display}
+        onDisplay={view.setDisplay}
+      />
 
-      {visible.length === 0 ? (
-        <EmptyState icon={<Search />} title={t('emptyTitle')} hint={t('emptyHint')} />
+      {matchedCount === 0 ? (
+        <EmptyState title={list('emptyFilteredTitle')} hint={list('emptyFilteredHint')} />
       ) : (
         <div className="space-y-4">
-          {(sort === 'recent'
-            ? // recent sort: grouped by date (header = today/yesterday/date, rows show time only)
-              [
-                ...visible
-                  .reduce((m, s) => {
-                    const k = dayKeyOf(s.createdAt, timeZone)
-                    const g = m.get(k)
-                    if (g) g.push(s)
-                    else m.set(k, [s])
-                    return m
-                  }, new Map<string, ScorecardRecord[]>())
-                  .entries(),
-              ]
-            : ([['', visible]] as Array<[string, ScorecardRecord[]]>)
-          ).map(([day, items]) => (
-            <section key={day || 'all'} className="space-y-2">
-              {day && items[0] && (
-                <h4 className="px-0.5 text-[11.5px] font-[560] uppercase tracking-wide text-faint">
-                  {fmtDateHeading(items[0].createdAt, locale, timeZone)}
-                </h4>
-              )}
-              {items.map((s, i) => {
+          {groups.map((group) => (
+            <ListSection
+              key={group.key ?? 'unset'}
+              grouped={view.display.grouping !== 'none'}
+              label={groupLabel(group.key, group.items)}
+              count={group.items.length}
+            >
+              {group.items.map((s, i) => {
                 const author = authorInfo(s)
                 const metrics = s.summary ?? []
                 const shownMetrics = metrics.slice(0, 3) // keep the card format — top 3 only, the rest as +N
@@ -607,13 +570,13 @@ export function ScorecardList({
                       </span>
                       <time
                         className={
-                          sort === 'recent'
+                          byDay
                             ? 'hidden w-[44px] text-right font-mono text-[11px] text-muted-foreground sm:block'
                             : 'hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block'
                         }
                         title={fmtDateTimeFull(s.createdAt, { locale, timeZone })}
                       >
-                        {sort === 'recent'
+                        {byDay
                           ? fmtTimeOnly(s.createdAt, timeZone)
                           : fmtDateTime(s.createdAt, timeZone)}
                       </time>
@@ -648,7 +611,7 @@ export function ScorecardList({
                   </Link>
                 )
               })}
-            </section>
+            </ListSection>
           ))}
         </div>
       )}

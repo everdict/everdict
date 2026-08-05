@@ -77,13 +77,20 @@ An ISSUE carries its title as a trailing decorative slug — `/{workspace}/issue
 (`issueHref(workspace, identifier, title)`; the route is `issue/[id]/[[...slug]]`). Nothing reads the slug: the
 identifier alone resolves, a stale slug after a rename still opens, and `/issue/ENG-12` is equally valid.
 
-**A scope is a PATH; a filter is a query parameter.** The same rule one level down: what a TEAM owns lives under
-the team's slug — `/{workspace}/team/ENG/{issues,triage,cycles,projects,scorecards,harnesses,datasets,judges}`
-(`TEAM_SECTIONS`; the last four are `TEAM_EVAL_SECTIONS`, what the team evaluates WITH) — never `?team=<id>` on the
-workspace-wide list. Each team holds different things (its triage inbox exists only if it turned one on, its
-cycles are numbered in its own sequence), so "the same list, filtered" is the wrong description of it. Status,
-priority, project and the page cursor stay query parameters, because those really are filters over whichever list
-the path named. Slug = the team KEY (`ENG`), decided in `entities/team/lib/href.ts` (`teamHref` /
+**A scope is a PATH; a filter is a query parameter — when the path really names a different collection.** What a
+TEAM owns lives under the team's slug — `/{workspace}/team/ENG/{issues,triage,cycles,projects}` (`TEAM_SECTIONS`)
+— never `?team=<id>` on the workspace-wide list. Each team holds different things there (its triage inbox exists
+only if it turned one on, its cycles are numbered in its own sequence), so "the same list, filtered" is the wrong
+description of it. Status, priority, project and the page cursor stay query parameters, because those really are
+filters over whichever list the path named.
+The EVALUATION collections (harness · dataset · judge · scorecard) were team paths for a while and are not any
+more (user decision 2026-08-05): a team owns one the way it owns a document — the registry's `team_id` decides who
+may CHANGE it — but nobody looks for a harness by first choosing a team, and four collections repeated under every
+team turned the sidebar's team group into a wall. So each has ONE workspace address, they sit in the sidebar's
+`평가` group beside the agent group, and "our team's only" is the `team` FACET on that list. The old addresses
+(both team spellings, `…/scorecards/new` included) 307 to the workspace list in `next.config.ts`, and a legacy
+`?team=` needs no redirect at all — the same parameter name IS the new filter, with a team KEY resolved to its id
+by `withResolvedTeamFilter` (`entities/team`). Slug = the team KEY (`ENG`), decided in `entities/team/lib/href.ts` (`teamHref` /
 `teamSectionHref` / `teamSettingsHref`) — every link goes through those, never a hand-built string.
 The team's SHORT address is the issue list itself (`/{workspace}/team/ENG` renders `IssueListView`, with
 `…/issues` as the canonical twin) — Linear's landing, and the reason `matchTeamPath` reads a bare team path as
@@ -94,11 +101,9 @@ The team's SHORT address is the issue list itself (`/{workspace}/team/ENG` rende
 `redirectLegacyTeamScope` in the same module.
 
 **A list that has two addresses is ONE component**, not two pages: the fetch-and-render body lives in a widget
-(`widgets/{issue,project,cycle,scorecard,harness,dataset,judge}-list` — `<Resource>ListView`, a server component
-taking an optional `team`), and both route files are thin adapters. A team address NARROWS the read (`?team=` on the
-control-plane call) and adds the scope bar; it never gates it. Harness/dataset/judge creation is NOT yet team-pinned
-(no `…/new` under the team — the wizards don't carry `teamId`), so their CTA points at the workspace form from both
-addresses rather than promising an owner the form cannot honour. Duplicating a list to scope it is how the two copies drift.
+(`widgets/{issue,project,cycle}-list` — `<Resource>ListView`, a server component taking an optional `team`), and
+both route files are thin adapters. A team address NARROWS the read (`?team=` on the control-plane call) and adds
+the scope bar; it never gates it. Duplicating a list to scope it is how the two copies drift.
 The rule holds when a screen EMBEDS the list too: the cycle board (`widgets/cycle-board`) draws its own header,
 progress and burn-down and then renders `IssueListView` with a `cycle` scope — the widget suppresses its own
 header, pins the facet and re-bases its filter links, rather than a second issue list growing under `cycles/`.
@@ -339,16 +344,43 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   derived by the control plane with `caseVerdict` on the same read as `usage`) — never recompute the authority
   ranking in the web (those mirrors were deleted in re-architecture P1g; one authority, one answer). Live attach
   panels (logs/exec/terminal/screen) render only for channels the run declares in `attach`.
+- **A view change must not re-render the route.** Filtering and grouping are the two things people do most on a
+  list, and both used to cost a full RSC render: `router.push` for a filter, a server action + `router.refresh()`
+  for a grouping. The route is `force-dynamic` with a loading boundary, so the screen blanked to a skeleton and
+  every read the page does — members, projects, labels, cycles, the team roster, the GitHub-App state — ran again
+  to produce a list that was the only thing that changed. Two shapes replace it, and which one applies is decided
+  by whether the collection fits in one read:
+  · **Server-backed (the issue list)** — the body is a client island (`features/browse-issues` `IssueListBody`)
+    holding the view; a change calls ONE server action (`loadIssueViewAction`) that returns only the list payload.
+    The action and the server component's first paint share `loadIssueViewData`, so "after a filter" and "after a
+    refresh" cannot describe different lists. The previous rows STAY on screen (dimmed, `aria-busy`) instead of
+    flashing a skeleton, and a stale response is dropped by sequence number.
+  · **Client-side (harness · dataset · judge · scorecard)** — these have no pagination, so the whole collection is
+    already in hand: `applyListView` does filter/search/order/group in memory and a change costs zero round trips.
+  Either way the URL follows rather than drives: filters are written with `window.history.replaceState` (no server
+  render, still a pasteable link — `replace`, not `push`, so six filter touches are not six back-button steps) and
+  the display preference is written straight to its cookie from the browser.
+- **The list toolbar is ONE grammar** (`shared/ui/list-toolbar`): `FacetFilterMenu` (Linear's two-step menu →
+  tokens in the toolbar, each with its own remove) + `ListDisplayMenu` (optional layout segment · grouping ·
+  ordering · extra toggles) + `ListSection`/`ListGroup` + `ListToolbar` (search · filter · count · display) for
+  the eval lists. The issue list passes ITS vocabulary into the same components — a filter menu that looks or
+  behaves differently on one screen is the drift this exists to prevent. A resource declares its axes once in
+  `entities/<x>/model/list-view.ts` (`<X>_FACETS` / `_GROUPINGS` / `_ORDERS` / `DEFAULT_<X>_DISPLAY` + a
+  `ListViewSpec`), the server reads filters-from-URL + display-from-cookie in one call (`loadListViewScope`), and
+  the axis labels come from the SHARED `listView.*` catalog so "team" is not two different words on two screens.
+  A facet only offers values PRESENT in the collection (`facetOptionsOf`) — an option whose only possible answer
+  is an empty list is not an option.
 - **A work LIST is a view with two halves: WHICH issues is the URL's, HOW they are drawn is the READER's**
   (`widgets/issue-list` + `features/browse-issues` + `entities/issue/model/{view,display}.ts` — the tracker's
   issue list is the reference). A filter decides the SET, so it serializes into the query string (`issueViewOf` /
   `issueViewHref`) and a pasted link opens the same issues for everybody. Grouping · ordering · layout ·
   "show completed" · sub-issues decide only presentation, so they are **never** in the URL: sending someone a
   link must not rearrange their screen. They live per reader in the `everdict-issue-display` COOKIE, keyed by the
-  list's address (`issueViewKeyOf` — workspace list / team issues / team triage / cycle board), written by the
-  `setIssueDisplay` server action and re-read on `router.refresh()`. Cookie, not localStorage, because the list is
-  a server component that needs the grouping before it can ask for group counts — localStorage would make the
-  chosen view a flicker. The cookie is bounded (12 views, least-recently-changed evicted) because it rides every
+  list's address (`issueViewKeyOf` — workspace list / team issues / team triage / cycle board), written straight
+  from the browser (`saveIssueDisplay` → `shared/lib/keyed-preference`; it is a preference, not data, and the
+  cookie is not httpOnly, so a server-action round trip bought nothing). Cookie, not localStorage, because the
+  FIRST paint is a server render that needs the grouping before it can ask for group counts — localStorage would
+  make the chosen view a flicker. The cookie is bounded (12 views, least-recently-changed evicted) because it rides every
   request, and each field falls back independently so one renamed grouping does not discard the whole preference.
   Filters are a SET per
   facet (`?status=todo&status=in_progress`); toggling the last value off DELETES the facet rather than leaving

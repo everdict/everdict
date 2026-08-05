@@ -56,8 +56,17 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
 - **A list's FILTERS live in the URL; its DISPLAY lives with the reader.** Which issues (status/priority/label/…)
   is a query parameter, so a pasted link opens the same set for everyone. How they are drawn (grouping, ordering,
   layout, show-completed, sub-issues) is NEVER in the URL — a link must not rearrange the recipient's screen — and
-  is stored per view in the `everdict-issue-display` cookie (`entities/issue/model/display.ts`, written by the
-  `setIssueDisplay` action). Cookie rather than localStorage because the list is a server component.
+  is stored per view in a cookie written straight from the browser (`saveIssueDisplay` / `saveListDisplay` over
+  `shared/lib/keyed-preference`). Cookie rather than localStorage because the first paint is a server render.
+- **Changing a view must not re-render the route.** A filter or grouping change costs ONE list-only server action
+  (`loadIssueViewAction`, sharing `loadIssueViewData` with the first paint) or nothing at all when the collection
+  is already in hand (`applyListView` for harness/dataset/judge/scorecard). The URL follows via
+  `window.history.replaceState`; the previous rows stay on screen instead of flashing the loading skeleton. Never
+  reintroduce `router.push`/`router.refresh()` for a view change. Toolbar UI comes from `shared/ui/list-toolbar`
+  and the axes from `entities/<x>/model/list-view.ts` — one filter/display grammar for every list.
+- **Evaluation collections are workspace-wide, not team paths.** Harness · dataset · judge · scorecard have ONE
+  address each and sit in the sidebar's `평가` group; the owning team is the `team` FILTER on that list, not a
+  path segment (`TEAM_SECTIONS` is issues/triage/cycles/projects only). Old team addresses 307 in `next.config.ts`.
 - **Styling**: Tailwind v4 tokens in `globals.css` `@theme inline` (**Linear-style**: indigo `#5e6ad2` primary,
   tight radius `0.5rem`, near-black `#08090a` dark surface, thin low-alpha borders, top indigo glow + subtle
   grain overlay); `cn()` from `shared/lib/utils`. shadcn new-york conventions. Light **and** dark themes via the

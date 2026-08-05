@@ -192,12 +192,11 @@ panel/list guidance is not.
   run form gains a runtime selector. See `docs/runtimes.md`.
 - **Sidebar teams section** (`widgets/app-shell` `TeamsNav`) — Linear's "Your teams": the teams the signed-in
   member belongs to, each expanding to what that team owns under its own path (`/{workspace}/team/ENG/issues`,
-  `…/triage` when the team turned one on, `…/cycles`, `…/projects`) plus an **Evaluation** disclosure holding what
-  the team evaluates with — `…/scorecards`, `…/harnesses`, `…/datasets`, `…/judges` (`TEAM_EVAL_SECTIONS`; those four
-  all carry a registry `team_id`, so the team is where they live, and the workspace-wide lists stay as the other
-  address onto the same collection). It is a disclosure for the same reason `Workspace › More` is one: eight flat rows
-  per team turn the group into a wall in front of the issues. It auto-expands on any of its own pages and remembers
-  the toggle PER TEAM. There is no "Home" row: the
+  `…/triage` when the team turned one on, `…/cycles`, `…/projects`). The evaluation collections are NOT here: they
+  had a team `Evaluation` disclosure for a while and it was removed (user decision 2026-08-05) in favour of one
+  workspace-wide `평가` nav group (harness · dataset · judge · scorecard), because nobody looks for a harness by
+  first choosing a team and four collections per team turned the group into a wall in front of the issues. The
+  owning team survives as a FILTER on those lists. There is no "Home" row: the
   team's short address (`/{workspace}/team/ENG`) IS its issue list — same component, canonical `…/issues` twin —
   so `matchTeamPath` reads the bare path as `issues` and one destination never gets two nav rows. The active row is decided by the
   PATH alone now — the group used to read `?team=` off the query string, which meant two different judgements for

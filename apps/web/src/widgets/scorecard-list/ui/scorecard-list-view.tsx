@@ -1,13 +1,19 @@
 import { getTranslations } from 'next-intl/server'
 
-import { TeamScopeBar, type TeamScope } from '@/widgets/team-scope-bar'
 import { membersSchema } from '@/entities/member'
 import { runnersResponseSchema } from '@/entities/runner'
-import { scorecardsSchema } from '@/entities/scorecard'
-import { teamNewHref, type TeamWithSummary } from '@/entities/team'
-import { canInTeam } from '@/shared/auth/can'
+import {
+  DEFAULT_SCORECARD_DISPLAY,
+  SCORECARD_FACETS,
+  SCORECARD_GROUPINGS,
+  SCORECARD_ORDERS,
+  scorecardsSchema,
+} from '@/entities/scorecard'
+import { teamsSchema, withResolvedTeamFilter, type Team } from '@/entities/team'
+import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { loadListViewScope } from '@/shared/lib/load-list-view'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -16,24 +22,21 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { ScorecardList } from './scorecard-list'
 
-// 배치 평가 결과 목록. ONE component behind TWO addresses: `/{workspace}/scorecards` (워크스페이스 전체)와
-// `/{workspace}/teams/ENG/scorecards` (그 팀이 소유한 것). 소유권이 읽기에 하는 일은 필터이지 403 이 아니므로
-// 팀 밖에서도 계속 보이고, 팀 주소는 "우리 팀이 무엇을 평가했나"에 답한다.
+// 배치 평가 결과 목록 — 워크스페이스 하나의 주소다. 소유 팀은 레지스트리에 남아 "누가 고칠 수 있나"를
+// 정하되, 찾아가는 길은 하나이고 "우리 팀 것만"은 이 목록의 필터 한 축이다.
 export async function ScorecardListView({
   workspace,
-  team,
+  params,
 }: {
   workspace: string
-  team?: TeamWithSummary
+  params: Record<string, string | string[] | undefined>
 }) {
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('scorecardsPage')
   let error: string | undefined
   let scorecards = scorecardsSchema.parse([])
   try {
-    scorecards = scorecardsSchema.parse(
-      await controlPlane.listScorecards(ctx, team ? { team: team.id } : undefined)
-    )
+    scorecards = scorecardsSchema.parse(await controlPlane.listScorecards(ctx))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -43,6 +46,11 @@ export async function ScorecardListView({
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
+  // 팀 축의 이름표 — 실패하면 그 축만 조용히 사라진다.
+  const teams = await controlPlane
+    .listTeams(ctx)
+    .then((r) => teamsSchema.parse(r))
+    .catch((): Team[] => [])
 
   // For run-by display — subject → name + avatar (if any). Name is profile name > email local part > subject fallback.
   const authors: Record<string, { name: string; avatarUrl?: string }> = {}
@@ -69,32 +77,33 @@ export async function ScorecardListView({
     }
   }
 
-  const canRun = canInTeam(principal, 'scorecards:run', team?.id)
+  const canRun = can(principal?.roles, 'scorecards:run')
   // Row-trash gating info for the list: an admin deletes any terminal batch, a member only their own.
   const viewer = {
     ...(principal?.subject !== undefined ? { subject: principal.subject } : {}),
-    admin: canInTeam(principal, 'scorecards:delete', team?.id),
+    admin: can(principal?.roles, 'scorecards:delete'),
   }
-  const scope: TeamScope | undefined = team ? { workspace, team, section: 'scorecards' } : undefined
+
+  const scope = await loadListViewScope({
+    basePath: `/${workspace}/scorecards`,
+    viewKey: 'scorecards',
+    facets: SCORECARD_FACETS,
+    vocabulary: {
+      groupings: SCORECARD_GROUPINGS,
+      orders: SCORECARD_ORDERS,
+      fallback: DEFAULT_SCORECARD_DISPLAY,
+    },
+    params,
+  })
 
   return (
     <div className="space-y-6">
-      {scope && <TeamScopeBar scope={scope} />}
       <PageHeader
         title={t('title')}
         description={t('description')}
         actions={
           canRun ? (
-            <Link
-              // Under a team, running starts at the TEAM's address so the batch is filed as that team's — the
-              // workspace form would have to guess, and guessing is what put every batch in one team.
-              href={
-                team
-                  ? teamNewHref(workspace, team.key, 'scorecards')
-                  : `/${workspace}/scorecards/new`
-              }
-              className={buttonVariants({ size: 'sm' })}
-            >
+            <Link href={`/${workspace}/scorecards/new`} className={buttonVariants({ size: 'sm' })}>
               {t('run')}
             </Link>
           ) : null
@@ -111,6 +120,8 @@ export async function ScorecardListView({
           scorecards={scorecards}
           authors={authors}
           runnerLabels={runnerLabels}
+          teams={teams.map((team) => ({ id: team.id, key: team.key, name: team.name }))}
+          scope={{ ...scope, filters: withResolvedTeamFilter(scope.filters, teams) }}
           viewer={viewer}
         />
       )}

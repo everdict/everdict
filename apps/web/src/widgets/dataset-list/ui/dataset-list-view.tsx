@@ -1,16 +1,22 @@
 import { Database } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
-import { TeamScopeBar, type TeamScope } from '@/widgets/team-scope-bar'
-import { datasetsSchema } from '@/entities/dataset'
+import {
+  DATASET_FACETS,
+  DATASET_GROUPINGS,
+  DATASET_ORDERS,
+  datasetsSchema,
+  DEFAULT_DATASET_DISPLAY,
+} from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
 import { membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
-import type { TeamWithSummary } from '@/entities/team'
+import { teamsSchema, withResolvedTeamFilter, type Team } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { buildDatasetRelations } from '@/shared/lib/dataset-relations'
+import { loadListViewScope } from '@/shared/lib/load-list-view'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -19,14 +25,14 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { DatasetList } from './dataset-list'
 
-// 평가 케이스 묶음 목록. ONE component behind TWO addresses: `/{workspace}/datasets` 와
-// `/{workspace}/teams/ENG/datasets`. 하네스 목록과 같은 규칙이다 — 팀 주소는 좁히기만 하고, 읽기는 막지 않는다.
+// 평가 케이스 묶음 목록 — 하네스 목록과 같은 규칙이다. 워크스페이스 하나의 주소이고, 소유 팀은 필터 한 축이며,
+// 거르기·묶기·정렬은 전부 브라우저에서 일어난다.
 export async function DatasetListView({
   workspace,
-  team,
+  params,
 }: {
   workspace: string
-  team?: TeamWithSummary
+  params: Record<string, string | string[] | undefined>
 }) {
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('datasetsPage')
@@ -34,7 +40,7 @@ export async function DatasetListView({
   let error: string | undefined
   let datasets = datasetsSchema.parse([])
   try {
-    datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx, team?.id))
+    datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -55,6 +61,11 @@ export async function DatasetListView({
     .listHarnesses(ctx)
     .then((r) => new Set(harnessesSchema.parse(r).map((h) => h.id)))
     .catch(() => undefined)
+  // 팀 축의 이름표 — 실패하면 그 축만 조용히 사라진다.
+  const teams = await controlPlane
+    .listTeams(ctx)
+    .then((r) => teamsSchema.parse(r))
+    .catch((): Team[] => [])
 
   const relations = buildDatasetRelations(scorecards, liveHarnessIds)
   // For displaying the creator — subject → name + avatar (if any). Name is profile name > email local part > subject fallback.
@@ -68,16 +79,25 @@ export async function DatasetListView({
   const currentWorkspace = principal?.workspace ?? workspace
   // Only expose datasets owned by this workspace — shared (first-party) benchmarks are handled in the 'add benchmark'/recipe flow.
   const ownDatasets = datasets.filter((d) => d.owner === currentWorkspace)
-  const scope: TeamScope | undefined = team ? { workspace, team, section: 'datasets' } : undefined
+
+  const scope = await loadListViewScope({
+    basePath: `/${workspace}/datasets`,
+    viewKey: 'datasets',
+    facets: DATASET_FACETS,
+    vocabulary: {
+      groupings: DATASET_GROUPINGS,
+      orders: DATASET_ORDERS,
+      fallback: DEFAULT_DATASET_DISPLAY,
+    },
+    params,
+  })
 
   return (
     <div className="space-y-6">
-      {scope && <TeamScopeBar scope={scope} />}
       <PageHeader
         title={t('title')}
         description={t('description')}
         actions={
-          // 하네스와 같다 — 팀 주소에서도 같은 워크스페이스 폼으로 간다(데이터셋에도 팀 못 박기 주소는 아직 없다).
           can(principal?.roles, 'datasets:write') ? (
             <div className="flex gap-2">
               <Link
@@ -103,6 +123,8 @@ export async function DatasetListView({
           datasets={ownDatasets}
           relations={relations}
           authors={authors}
+          teams={teams.map((team) => ({ id: team.id, key: team.key, name: team.name }))}
+          scope={{ ...scope, filters: withResolvedTeamFilter(scope.filters, teams) }}
         />
       )}
     </div>
