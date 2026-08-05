@@ -15,8 +15,11 @@ const JUDGE: JudgeSpec = {
   kind: "model",
   id: "quality",
   version: "1.0.0",
+  provider: "openai",
   model: "gpt-5.4-mini",
   rubric: "is it good?",
+  inputs: ["trace"],
+  tags: [],
 };
 
 describe("ScoringService — applyJudgesToCase", () => {
