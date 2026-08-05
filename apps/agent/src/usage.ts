@@ -84,6 +84,12 @@ export function runEventReporter(
         ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}),
         ...(input.cause !== undefined ? { cause: input.cause } : {}),
         ...(input.trace !== undefined ? { trace: input.trace } : {}),
+        // The spans ARE the evidence for a turn that recorded them (N6), and a settle that carries spans
+        // deliberately carries no transcript projection — so dropping this field here dropped the turn's
+        // whole trajectory: the run settled, the ledger sealed nothing, and the conversation was missing
+        // from Settings › Traces entirely. A body assembled field-by-field forgets silently; every field
+        // the report declares is written here.
+        ...(input.spans !== undefined ? { spans: input.spans } : {}),
       }),
     });
     if (!res.ok) throw new Error(`agent-run event report failed: ${res.status}`);

@@ -1,5 +1,6 @@
+import type { TraceSpan } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { usageReporter } from "./usage.js";
+import { runEventReporter, usageReporter } from "./usage.js";
 
 describe("usageReporter", () => {
   it("POSTs the usage as source 'agent' to /internal/usage with the internal-token header", async () => {
@@ -34,5 +35,46 @@ describe("usageReporter", () => {
     const report = usageReporter("https://cp", "t");
     await expect(report({ workspace: "a", model: "m", inputTokens: 1, outputTokens: 1 })).rejects.toThrow(/500/);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("runEventReporter", () => {
+  it("carries the turn's SPANS to the control plane — they are the evidence the trajectory is sealed from", async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        bodies.push(JSON.parse(init.body as string));
+        return new Response(null, { status: 200 });
+      }),
+    );
+    const spans: TraceSpan[] = [
+      {
+        traceId: "0af7651916cd43dd8448eb211c80319c",
+        spanId: "b7ad6b7169203331",
+        name: "invoke_agent default",
+        kind: "internal",
+        startedAt: "2026-08-05T00:00:00.000Z",
+        endedAt: "2026-08-05T00:00:02.000Z",
+        attributes: {},
+      },
+    ];
+    const report = runEventReporter("https://cp.example.com/", "s3cret");
+    await report({
+      workspace: "acme",
+      kind: "agent.run.completed",
+      sessionId: "sess-1",
+      agentId: "default",
+      eventKind: "chat",
+      message: "Chat turn completed in conversation sess-1.",
+      runId: "run-1",
+      creator: "alice",
+      cause: "chat",
+      spans,
+    });
+    // A turn that recorded spans reports NO transcript projection, so a body that forgets `spans` reports no
+    // evidence at all: the run settles and the ledger seals nothing — the conversation vanishes from the
+    // trace browse.
+    expect(bodies[0]).toMatchObject({ runId: "run-1", cause: "chat", spans });
   });
 });

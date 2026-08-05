@@ -161,6 +161,19 @@ describe("withChatTurnRun — a chat turn is a run (O1)", () => {
     expect(settled?.trace).toMatchObject([{ kind: "error", message: "no model is configured for this workspace" }]);
   });
 
+  it("falls back to the transcript when the turn recorded an EMPTY span list — a settle never goes out evidence-less", async () => {
+    const { deps, reports } = await harness();
+
+    // A runner that records no spans hands back `[]`, not `undefined`. Reading that as "the turn kept its own
+    // record" suppressed the transcript projection while attaching nothing, and the run settled with neither.
+    await withChatTurnRun(deps, PRINCIPAL, "s-1", async () => ({ ...result(), spans: [] }));
+
+    const settled = reports.at(-1);
+    expect(settled?.kind).toBe("agent.run.completed");
+    expect(settled?.spans).toBeUndefined();
+    expect(settled?.trace).toHaveLength(2);
+  });
+
   it("carries a headless turn's own identity — a wake-up is event-caused work, not something a member typed", async () => {
     const { deps, reports } = await harness();
 

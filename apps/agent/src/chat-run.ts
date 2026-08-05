@@ -94,14 +94,17 @@ export async function withTurnRun(
     // Prefer the RECORD the turn kept for itself; the transcript projection is the fallback for a turn that
     // ran without one (no run id to hang spans under), and the bare failure is the fallback for a turn that
     // died with neither.
-    const trace: TraceEvent[] =
-      spans !== undefined
-        ? []
-        : messages
-          ? transcriptToTrace(messages, usage)
-          : failure !== undefined
-            ? [{ ...stamp(Date.now), kind: "error", message: failure }]
-            : [];
+    // The test is "did it record anything", not "is the field set" — an EMPTY span list is a turn with no
+    // record, and reading it as one suppressed the transcript fallback below (which only attaches non-empty
+    // spans), settling the run with no evidence at all.
+    const recorded = spans !== undefined && spans.length > 0;
+    const trace: TraceEvent[] = recorded
+      ? []
+      : messages
+        ? transcriptToTrace(messages, usage)
+        : failure !== undefined
+          ? [{ ...stamp(Date.now), kind: "error", message: failure }]
+          : [];
     void report({
       workspace,
       kind: outcome,
