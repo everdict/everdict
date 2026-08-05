@@ -9,6 +9,7 @@ import { ValidateJudgeResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { withOriginDoc } from "../capability-origin.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { teamMoveDocs } from "../team-move.js";
 import { PreviewJudgeBodySchema, TryJudgeBodySchema } from "./request/judge-evidence.js";
 import { JudgePreviewResultSchema, JudgeTryResultSchema } from "./response/preview-judge-result.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
@@ -164,6 +165,16 @@ const docs = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
+  move: teamMoveDocs({
+    resource: "judge",
+    tag: "judge",
+    idDescription: "Judge id",
+    action: "judges:write",
+    extra:
+      "EVERY version moves — ownership belongs to the judge, not to one release of it — including retired " +
+      "(tombstoned) ones. Content is untouched: no version is minted, and past scorecards keep the judge " +
+      "coordinates they snapshotted.",
+  }),
 } satisfies Record<string, FastifySchema>;
 
 // Widened re-export (team convention): the descriptors' literal response keys would otherwise make Fastify

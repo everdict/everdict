@@ -6,6 +6,7 @@ import { RegisterHarnessTemplateResultSchema } from "@everdict/contracts/wire";
 import { ValidateHarnessTemplateResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { teamMoveDocs } from "../team-move.js";
 
 // OpenAPI descriptors for the harness-template (category) routes — doc-only (rule api-layer): the no-op
 // compilers in server.ts make attaching these behavior-free; validation stays in the handlers.
@@ -90,6 +91,15 @@ const docs = {
       ...errorResponses(401, 403, 404),
     },
   },
+  move: teamMoveDocs({
+    resource: "harness template",
+    tag: "harness",
+    idDescription: "Harness template id",
+    action: "templates:write",
+    extra:
+      "EVERY version of the shape moves — ownership belongs to the template, not to one release of it. " +
+      "Instances that pin this template are their own entities and keep their own team; move them separately.",
+  }),
 } satisfies Record<string, FastifySchema>;
 
 // Widened re-export (team convention): the descriptors' literal response keys would otherwise make Fastify

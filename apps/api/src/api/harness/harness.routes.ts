@@ -1,4 +1,5 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
+import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
 import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { AppError, HarnessInstanceSpecSchema, type ImageWarning, resolveHarnessInstance } from "@everdict/contracts";
@@ -23,6 +24,7 @@ import {
   teamForNew,
   zodIssues,
 } from "../route-context.js";
+import { MoveToTeamBodySchema } from "../team-move.js";
 import { harnessDocs } from "./harness.docs.js";
 
 // Individual harnesses (instances) — /harnesses is the instance surface (category = /harness-templates). template reference + pins.
@@ -293,6 +295,37 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       }
     },
   );
+
+  // Hand the harness to another team. A transition, not an edit: it re-files EVERY version at once (ownership
+  // belongs to the harness, not to one release of it) and emits `harness.moved`, so it gets its own endpoint
+  // exactly like the issue's team move does. Both teams are authorized inside the service — the one it is
+  // leaving and the one it is joining.
+  app.post<{ Params: { id: string } }>("/harnesses/:id/team", { schema: harnessDocs.move }, async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = MoveToTeamBodySchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      const agent = agentAttributionFrom(req.headers);
+      return reply.send(
+        await moveCapabilityToTeam({
+          registry: deps.harnessInstances,
+          capability: TEAM_TRANSFERABLE_CAPABILITIES.harness,
+          principal,
+          id: req.params.id,
+          // Resolved here (id or key, `ENG`) so an unknown team is a 404 before the gate compares it against the
+          // teams the principal carries — which are ids.
+          teamId: await resolveTeamRef(deps, principal.workspace, body.data.teamId),
+          ...(deps.platformEvents ? { events: deps.platformEvents } : {}),
+          ...(agent ? { agent } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // not on one of the teams 403 / unknown harness 404 / already there 409
+    }
+  });
 
   // Soft-delete a harness version — only that version's own creator or a workspace admin (deleteHarnessVersion gates it).
   // Deletion is a tombstone (data preserved, excluded from reads) → past scorecard history·aggregates are unaffected (the harness coordinates are snapshotted in the record).

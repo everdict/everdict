@@ -1,5 +1,6 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
+import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
 import { diffDatasets, harborToDataset, terminalBenchToDataset } from "@everdict/datasets";
 import { ownedByVisibleTeam } from "@everdict/domain";
@@ -16,6 +17,7 @@ import {
   teamForNew,
   zodIssues,
 } from "../route-context.js";
+import { MoveToTeamBodySchema } from "../team-move.js";
 import { datasetDocs } from "./dataset.docs.js";
 import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
 import { ImportHarborBodySchema } from "./request/import-harbor.js";
@@ -195,6 +197,37 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       }
     },
   );
+
+  // Hand the dataset to another team. A transition, not an edit: it re-files EVERY version at once (ownership
+  // belongs to the dataset, not to one release of it) and emits `dataset.moved`, so it gets its own endpoint
+  // exactly like the issue's team move does. Both teams are authorized inside the service — the one it is
+  // leaving and the one it is joining.
+  app.post<{ Params: { id: string } }>("/datasets/:id/team", { schema: datasetDocs.move }, async (req, reply) => {
+    if (!deps.datasetRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = MoveToTeamBodySchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      const agent = agentAttributionFrom(req.headers);
+      return reply.send(
+        await moveCapabilityToTeam({
+          registry: deps.datasetRegistry,
+          capability: TEAM_TRANSFERABLE_CAPABILITIES.dataset,
+          principal,
+          id: req.params.id,
+          // Resolved here (id or key, `ENG`) so an unknown team is a 404 before the gate compares it against
+          // the teams the principal carries — which are ids.
+          teamId: await resolveTeamRef(deps, principal.workspace, body.data.teamId),
+          ...(deps.platformEvents ? { events: deps.platformEvents } : {}),
+          ...(agent ? { agent } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // not on one of the teams 403 / unknown dataset 404 / already there 409
+    }
+  });
 
   // Soft-delete a dataset version — only that version's own creator or a workspace admin (deleteDatasetVersion gates it).
   // Deletion is a tombstone (data preserved, excluded from reads) → past scorecards stay reproducible. Missing/already-deleted/non-owned version = 404.

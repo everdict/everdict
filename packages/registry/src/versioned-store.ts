@@ -115,6 +115,25 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return this.ownLiveEntry(tenant, id, version).createdBy;
   }
 
+  // Ownership transfer — the ENTITY moves, so every one of its versions moves with it.
+  //
+  // Per-version transfer was the alternative and it is incoherent: reads already answer "whose is this?" off the
+  // newest version (`teamOfEntity`), so a split id would change owner whenever a new release landed. Ownership
+  // belongs to the thing, not to one release of it.
+  //
+  // Tombstones move too. They are excluded from every read, but re-registering identical content REVIVES one —
+  // and a revived version reappearing under the team that no longer owns the id is a resource that walked back
+  // across a boundary on its own.
+  //
+  // Tenant directly-owned only, and only while something of it is live: a `_shared` first-party asset is not a
+  // workspace's to re-file, and an id whose every version is a tombstone is invisible to reads, so moving it
+  // would be moving something that (as far as this workspace can tell) does not exist.
+  moveToTeam(tenant: string, id: string, teamId: string): void {
+    if (this.ownerVersions(tenant, id).length === 0)
+      throw new NotFoundError("NOT_FOUND", { tenant, id }, `${this.label} '${id}' not found.`);
+    for (const entry of this.byOwner.get(tenant)?.get(id)?.values() ?? []) entry.teamId = teamId;
+  }
+
   // version tag replacement (full-array PUT semantics) — tenant directly-owned + live versions only (same discipline as softDelete; _shared can't be tagged).
   // Tags are mutable registry metadata — not spec content, so they don't factor into specsEqual/immutability.
   setVersionTags(tenant: string, id: string, version: string, tags: string[]): void {

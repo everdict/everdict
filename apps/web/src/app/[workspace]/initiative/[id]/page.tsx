@@ -63,8 +63,9 @@ export default async function InitiativeOverviewPage({
     <div className="space-y-7">
       {/* 설명은 이름 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 목표 그 자체다. 이슈 본문과
           같은 마크다운 표면을 쓴다: 목표를 정의하는 글에는 링크와 목록이 들어가고, 그걸 평문으로 두면
-          "무엇이 참이면 이룬 것인가"가 한 덩어리 문단이 된다. */}
-      {current.description && <Markdown content={current.description} />}
+          "무엇이 참이면 이룬 것인가"가 한 덩어리 문단이 된다. ```mermaid 펜스가 다이어그램이 되는 것도
+          이슈 본문과 같다 — 목표를 그림으로 세우는 글이 여기서만 소스로 떨어질 이유가 없다. */}
+      {current.description && <Markdown content={current.description} mermaid />}
 
       {(projectSegments.length > 0 || issueSegments.length > 0) && (
         <section className="space-y-4">

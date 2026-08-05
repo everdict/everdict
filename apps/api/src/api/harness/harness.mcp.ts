@@ -1,6 +1,7 @@
 import { setVersionTags } from "@everdict/application-control";
 import { repinHarnessImages } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
+import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { HarnessInstanceSpecSchema } from "@everdict/contracts";
 import { diffHarnessSpecs, ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -12,7 +13,8 @@ import {
   capabilityOriginFor,
   declaredOriginFromIssue,
 } from "../capability-origin.js";
-import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
+import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
 
 // Harness-instance MCP tools — the MCP twin of harness.routes.ts.
 export function registerHarnessTools(server: McpServer, ctx: McpToolContext): void {
@@ -23,17 +25,25 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
     const instances = deps.harnessInstances;
     server.registerTool(
       "list_harnesses",
-      { description: "Harness instances this workspace sees (grouped by template; owned + _shared)", inputSchema: {} },
-      () =>
+      {
+        description:
+          "Harness instances this workspace sees (grouped by template; owned + _shared). `team` narrows to one " +
+          "team's own harnesses (id or key, ENG).",
+        inputSchema: { team: z.string().optional().describe('only this team\'s harnesses — id or key ("ENG")') },
+      },
+      ({ team }) =>
         run(principal, "harnesses:read", async () => {
           // A private harness (references a personal secret) is createdBy-only — hidden from other users (same as the HTTP list).
           const entries = await instances.list(ws);
           const seen = await visibleTeamsFor(ctx.deps, principal);
-          return ok(
-            entries
-              .filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject)
-              .filter((e) => ownedByVisibleTeam(e, seen)),
-          );
+          const visible = entries
+            .filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject)
+            .filter((e) => ownedByVisibleTeam(e, seen));
+          if (team === undefined) return ok(visible);
+          // The narrow sits ON TOP of the ceiling above — naming a team you cannot see returns nothing rather
+          // than that team's work.
+          const teamId = await resolveTeam(ctx, team);
+          return ok(visible.filter((e) => e.teamId === teamId));
         }),
     );
 
@@ -120,12 +130,19 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             .describe(
               "HarnessInstanceSpec JSON: { template:{id,version}, id, version, pins, description? } (description = this version's changelog, optional)",
             ),
+          team: z
+            .string()
+            .optional()
+            .describe(
+              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
+            ),
           fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
           originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
         },
       },
-      ({ spec, fromIssue, originNote }) =>
-        run(principal, "harnesses:register", async () => {
+      ({ spec, team, fromIssue, originNote }) =>
+        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
+        runForTeam(ctx, "harnesses:register", team, async (teamId) => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(spec);
@@ -142,17 +159,29 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             declaredOriginFromIssue(fromIssue, originNote),
           );
           // creator stamp = HTTP parity — without it a user-secret (private) instance becomes invisible even to its registrant
-          await instances.register(ws, result.data, principal.subject, undefined, origin); // resolve validation (missing template / absent pins → error)
+          await instances.register(ws, result.data, principal.subject, teamId, origin); // resolve validation (missing template / absent pins → error)
           // Visibility tradeoff surfaced at write time (HTTP parity): user-scope secretRef → visible to you only.
           const isPrivate = await harnessIsPrivate(instances, ws, result.data.id, result.data.version);
           return ok({
             workspace: ws,
             id: result.data.id,
             version: result.data.version,
+            ...(teamId ? { teamId } : {}),
             ...(isPrivate ? { private: true } : {}),
           });
         }),
     );
+
+    registerCapabilityMoveTool(server, ctx, {
+      tool: "move_harness",
+      registry: instances,
+      capability: TEAM_TRANSFERABLE_CAPABILITIES.harness,
+      description: moveToolDescription(
+        "Hand a harness to another team. EVERY version moves — ownership belongs to the harness, not to one " +
+          "release of it — and no version is minted, so pins and reproducibility are untouched. Scorecards it " +
+          "already produced keep their own team (move those with move_scorecard).",
+      ),
+    });
 
     server.registerTool(
       "pin_harness_images",

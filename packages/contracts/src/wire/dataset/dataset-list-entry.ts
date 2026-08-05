@@ -7,6 +7,10 @@ import { CapabilityOriginSchema } from "../../records/capability-origin.js";
 export const DatasetListEntrySchema = z.object({
   id: z.string(),
   owner: z.string().describe("Owning tenant, or _shared for first-party benchmarks"),
+  teamId: z
+    .string()
+    .optional()
+    .describe("Owning team (migration 0106) — absent means unowned (a _shared entry, or one from before the axis)"),
   versions: z.array(z.string()).describe("Live versions (semver ascending)"),
   latestVersion: z.string(),
   caseCount: z.number().int().describe("Case count of the latest version"),

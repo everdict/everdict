@@ -13,6 +13,7 @@ import { ValidateHarnessResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { withOriginDoc } from "../capability-origin.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { teamMoveDocs } from "../team-move.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
 
 // OpenAPI descriptors for the harness (instance) routes — doc-only (rule api-layer): the no-op compilers in
@@ -182,6 +183,16 @@ const docs = {
       ...errorResponses(400, 401, 403, 404, 409),
     },
   },
+  move: teamMoveDocs({
+    resource: "harness",
+    tag: "harness",
+    idDescription: "Harness instance id",
+    action: "harnesses:register",
+    extra:
+      "EVERY version moves — ownership belongs to the harness, not to one release of it — including retired " +
+      "(tombstoned) ones. Content is untouched: no version is minted, so pins and reproducibility are " +
+      "unaffected. Scorecards this harness already produced keep their own team; move them separately.",
+  }),
 } satisfies Record<string, FastifySchema>;
 
 // Widened re-export (team convention): the descriptors' literal response keys would otherwise make Fastify

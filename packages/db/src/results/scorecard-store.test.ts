@@ -510,6 +510,42 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(paged.calls[0]?.params).toEqual(["acme", "2026-08-03T00:00:00.000Z", "r1", "alice"]);
   });
 
+  it("carries what a row IS, and filters on it — a browse page of bare uuids cannot be read", async () => {
+    // Evidence you cannot recognize is indistinguishable from evidence that is not there: every row used to
+    // render `<uuid> · run · N events`, so a member could not find the agent conversation they just ran.
+    const store = new InMemoryTrajectoryStore();
+    await store.seal({
+      runId: "turn-a",
+      tenant: "acme",
+      source: "run",
+      kind: "agent",
+      label: "sentinel",
+      events: events as never,
+    });
+    await store.seal({
+      runId: "case-1",
+      tenant: "acme",
+      source: "run",
+      kind: "eval",
+      label: "swe-bench-7",
+      events: events as never,
+    });
+
+    expect((await store.list("acme", { kind: "agent" })).items).toMatchObject([
+      { runId: "turn-a", kind: "agent", label: "sentinel" },
+    ]);
+    expect((await store.list("acme", { kind: "eval" })).items.map((m) => m.label)).toEqual(["swe-bench-7"]);
+    expect((await store.list("acme")).items).toHaveLength(2); // no filter = the whole ledger
+    expect((await store.get("acme", "turn-a"))?.meta).toMatchObject({ kind: "agent", label: "sentinel" });
+  });
+
+  it("Pg impl filters the kind IN the WHERE too — beside the owner, before the LIMIT", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgTrajectoryStore(client).list("acme", { viewer: "alice", kind: "agent" });
+    expect(calls[0]?.text).toMatch(/kind = \$3/);
+    expect(calls[0]?.params).toEqual(["acme", "alice", "agent"]);
+  });
+
   it("meters ingestion from the store itself and sweeps retention by cutoff (N3)", async () => {
     const store = new InMemoryTrajectoryStore();
     await store.seal({ runId: "old", tenant: "acme", source: "otlp", events: events as never });

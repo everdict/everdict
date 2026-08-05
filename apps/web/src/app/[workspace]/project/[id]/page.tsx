@@ -326,8 +326,9 @@ export default async function ProjectDetailPage({
         {/* ③ 프로젝트가 무엇이고, 그 아래에서 무슨 일이 벌어지고 있는지. */}
         <div className="min-w-0 space-y-7 @3xl:col-start-1 @3xl:row-start-1">
           {/* 설명은 이름 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 프로젝트 그 자체다. */}
-          {/* 목표(이니셔티브)의 설명과 같은 마크다운 표면 — 한 층 아래라고 다르게 읽힐 이유가 없다. */}
-          {current.description && <Markdown content={current.description} />}
+          {/* 목표(이니셔티브)의 설명과 같은 마크다운 표면 — 한 층 아래라고 다르게 읽힐 이유가 없다.
+              ```mermaid 펜스가 다이어그램이 되는 것까지 같다. */}
+          {current.description && <Markdown content={current.description} mermaid />}
 
           {grouped.length > 0 && (
             <section className="space-y-4">

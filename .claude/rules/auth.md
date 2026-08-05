@@ -61,6 +61,14 @@ token courier, never an auth authority. See `docs/auth.md`.
   credentials (`via ∈ {runner, github-actions}`) reach every team; an `agent` does not. **Counts are computed
   over everything, listings are narrowed** — an initiative's progress is one number for everybody, but it names
   only the projects/blockers the reader may see.
+- **Ownership is transferable, and BOTH teams are authorized.** `POST /<resource>/:id/team` + MCP
+  `move_<resource>` (harness · harness template · dataset · judge · scorecard; an issue moves via its own
+  identifier-re-minting endpoint). One core — `moveCapabilityToTeam` / `ScorecardService.moveToTeam` — gates the
+  SOURCE (else moving something out of a team you are not on is a way to take it) AND the DESTINATION (else it is
+  a way to push work into other teams' hands), on the resource's EXISTING write action (never a new one). An
+  admin passes both; an unowned asset has no source to authorize. A capability re-files EVERY version at once and
+  mints none; its past scorecards do NOT follow it (evidence belongs to whoever ran it). `_shared` → 404, no-op
+  move → 409. See `docs/auth.md` §The team axis.
 - **Resource-ownership override (use sparingly).** A few actions are "admin **or** the resource's creator". Keep
   the **admin** half in the flat matrix (e.g. `datasets:delete` = admin-only) and put the **creator** half in the
   service layer that knows who created the row (`dataset-service.ts` `deleteDatasetVersion`: `creatorOf` vs

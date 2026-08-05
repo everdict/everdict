@@ -43,9 +43,13 @@ export class PgJudgeRegistry implements JudgeRegistry {
   get(tenant: string, id: string, ref?: string): Promise<JudgeSpec> {
     return this.store.get(tenant, id, ref);
   }
-  // 소유 팀 위임 — 인가 커널의 팀 축이 읽는 값.
+  // Owning-team delegation — the authz kernel's team-axis input.
   teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
     return this.store.teamOfVersion(tenant, id, version);
+  }
+  // Ownership transfer — every version of the entity, tenant-owned only (see PgVersionedStore.moveToTeam).
+  moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
+    return this.store.moveToTeam(tenant, id, teamId);
   }
 
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {

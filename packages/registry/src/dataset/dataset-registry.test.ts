@@ -185,6 +185,34 @@ describe("InMemoryDatasetRegistry (tenant-owned)", () => {
     await expect(r.setVersionTags("acme", "mine", "1.0.0", ["y"])).rejects.toBeInstanceOf(NotFoundError);
   });
 
+  it("moveToTeam re-owns EVERY version of the id, tombstones included", async () => {
+    const r = new InMemoryDatasetRegistry();
+    await r.register("acme", ds("mine", "1.0.0"), "alice", "team_eng");
+    await r.register("acme", ds("mine", "1.1.0"), "alice", "team_eng");
+    await r.register("acme", ds("mine", "2.0.0"), "alice", "team_eng");
+    await r.softDelete("acme", "mine", "1.1.0"); // retired, but still transferable
+
+    await r.moveToTeam("acme", "mine", "team_platform");
+
+    expect(await r.teamOfVersion("acme", "mine", "1.0.0")).toBe("team_platform");
+    expect(await r.teamOfVersion("acme", "mine", "2.0.0")).toBe("team_platform");
+    // The tombstone moved too: re-registering identical content revives it, and it must come back under the
+    // team that owns the dataset now — not the one that owned it when the version was retired.
+    expect(await r.teamOfVersion("acme", "mine", "1.1.0")).toBe("team_platform");
+  });
+
+  it("moveToTeam acts on tenant directly-owned live entities only — _shared / other tenants / all-tombstoned → NotFound", async () => {
+    const r = new InMemoryDatasetRegistry();
+    await r.register(SHARED_TENANT, ds("bench", "1.0.0"));
+    await r.register("acme", ds("mine", "1.0.0"), "alice");
+    // A first-party benchmark is visible through the fallback but is not this workspace's to re-file.
+    await expect(r.moveToTeam("acme", "bench", "team_eng")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(r.moveToTeam("beta", "mine", "team_eng")).rejects.toBeInstanceOf(NotFoundError);
+    await r.softDelete("acme", "mine", "1.0.0");
+    // Every version retired = invisible to every read, so there is nothing here to move.
+    await expect(r.moveToTeam("acme", "mine", "team_eng")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
   it("softDelete/creatorOf act on this tenant's directly-owned versions only — _shared/other tenants → NotFound (no fallback)", async () => {
     const r = new InMemoryDatasetRegistry();
     await r.register(SHARED_TENANT, ds("bench", "1.0.0"), "sys");

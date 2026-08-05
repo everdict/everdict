@@ -9,6 +9,10 @@ import { versionOriginsSchema } from '@/entities/capability-origin'
 export const judgeSummarySchema = z.object({
   id: z.string(),
   owner: z.string(),
+  // The owning team (mig 0106). It decides who may CHANGE this and — for a private team — who sees it at
+  // all, and it is re-fileable (`POST /<resource>/:id/team`), so the detail shows it and offers the move.
+  // Absent = unowned (a `_shared` entry, or one from before the axis), which is the workspace's.
+  teamId: z.string().optional(),
   versions: z.array(z.string()),
   // 첫 등록의 주체/시각, 그리고 가장 최근 등록 시각. 저지 상세가 "누가 언제 만들었나"를 말할 근거이며,
   // 아래 versionOrigins 와 함께 리니지 한 줄을 이룬다(시드/_shared 는 등록 주체가 없다).

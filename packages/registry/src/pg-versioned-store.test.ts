@@ -18,11 +18,13 @@ interface Row {
   deleted_at: number | null;
 }
 
-function fake(rows: Row[]): { client: SqlClient; queries: string[] } {
+function fake(rows: Row[]): { client: SqlClient; queries: string[]; calls: Array<[string, unknown[]]> } {
   const queries: string[] = [];
+  const calls: Array<[string, unknown[]]> = [];
   const client: SqlClient = {
     async query<R = Record<string, unknown>>(text: string, params: unknown[] = []): Promise<{ rows: R[] }> {
       queries.push(text);
+      calls.push([text, params]);
       const live = (r: Row) => r.deleted_at === null;
       if (text.startsWith("SELECT DISTINCT id")) {
         const ids = [...new Set(rows.filter((r) => r.tenant === params[0] && live(r)).map((r) => r.id))];
@@ -57,7 +59,7 @@ function fake(rows: Row[]): { client: SqlClient; queries: string[] } {
       return { rows: [] as R[] };
     },
   };
-  return { client, queries };
+  return { client, queries, calls };
 }
 
 function row(over: Partial<Row> = {}): Row {
@@ -116,5 +118,31 @@ describe("PgVersionedStore.listMeta — the owning team travels with the row", (
     const metas = await store(client, false).listMeta("acme");
     expect(queries.some((q) => q.includes("team_id"))).toBe(false);
     expect(metas[0]?.teamId).toBeUndefined();
+  });
+});
+
+describe("PgVersionedStore.moveToTeam — ownership transfer is entity-wide", () => {
+  it("updates every version of the id in one statement, keyed by (tenant, id) only", async () => {
+    const { client, calls } = fake([row({ version: "1.0.0" }), row({ version: "2.0.0" })]);
+
+    await store(client, true).moveToTeam("acme", "h", "mobile");
+
+    const update = calls.find(([text]) => text.startsWith("UPDATE"));
+    expect(update?.[0]).toBe("UPDATE everdict_things SET team_id = $3 WHERE tenant = $1 AND id = $2");
+    expect(update?.[1]).toEqual(["acme", "h", "mobile"]);
+  });
+
+  it("does NOT exclude tombstones — a revived version must not reappear under the previous team", async () => {
+    const { client, calls } = fake([row()]);
+    await store(client, true).moveToTeam("acme", "h", "mobile");
+    // The UPDATE carries no `deleted_at IS NULL`: reviving is re-registering identical content, and it must not
+    // walk the version back across a team boundary.
+    expect(calls.find(([text]) => text.startsWith("UPDATE"))?.[0]).not.toContain("deleted_at");
+  });
+
+  it("is NotFound for an id with no live version of its own — an invisible entity is not movable", async () => {
+    const { client, calls } = fake([row({ deleted_at: 1 })]);
+    await expect(store(client, true).moveToTeam("acme", "h", "mobile")).rejects.toMatchObject({ status: 404 });
+    expect(calls.some(([text]) => text.startsWith("UPDATE"))).toBe(false);
   });
 });

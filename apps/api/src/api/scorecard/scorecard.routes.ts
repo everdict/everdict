@@ -3,6 +3,7 @@ import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { teamCeiling, visibleTeamsFor } from "../../common/team-scope.js";
+import { agentAttributionFrom } from "../fs/fs-actor.js";
 import {
   type ServerDeps,
   gate,
@@ -12,6 +13,7 @@ import {
   teamForNew,
   zodIssues,
 } from "../route-context.js";
+import { MoveToTeamBodySchema } from "../team-move.js";
 import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
@@ -161,6 +163,32 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.send(await deps.scorecardService.delete({ principal, id: req.params.id }));
     } catch (err) {
       return sendError(reply, err); // no permission 403 / not found 404 / still running 409
+    }
+  });
+
+  // Re-file a batch under another team. A scorecard is the EVIDENCE a capability produced and is read through
+  // the same team lens the capability is, so it moves the same way — otherwise handing a harness to another team
+  // strands every result it ever produced. Both teams are authorized in the service.
+  app.post<{ Params: { id: string } }>("/scorecards/:id/team", { schema: scorecardDocs.move }, async (req, reply) => {
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = MoveToTeamBodySchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      const agent = agentAttributionFrom(req.headers);
+      return reply.send(
+        await deps.scorecardService.moveToTeam({
+          principal,
+          id: req.params.id,
+          // Resolved here (id or key, `ENG`) so an unknown team is a 404 rather than a puzzling 403.
+          teamId: await resolveTeamRef(deps, principal.workspace, body.data.teamId),
+          ...(agent ? { agent } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // not on one of the teams 403 / unknown scorecard 404 / already there 409
     }
   });
 

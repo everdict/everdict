@@ -43,6 +43,29 @@ describe("HarnessInstanceRegistry", () => {
     expect(resolved.version).toBe("pr-1");
   });
 
+  // Regression: the harness instance registry was the ONE versioned registry with no `ownVersions`, and the
+  // team axis reads ownership through it (`teamOfEntity` → `ownVersions` → `teamOfVersion`). Optional-method
+  // call sites (`registry?.ownVersions?.(…)`) meant its absence was not a type error and not a runtime error —
+  // it just answered "no versions", so every harness looked UNOWNED: a private team's harness stayed visible to
+  // the whole workspace, and the re-pin gate authorized against no team at all.
+  it("ownVersions reports what this tenant registered directly, so the team axis can see who owns it", async () => {
+    await templates.register("acme", buTemplate);
+    await templates.register(SHARED_TENANT, { ...buTemplate, id: "shared-bu" });
+    await instances.register("acme", instance("1.0.0", { planner: "p:1", browser: "b:1" }), "alice", "team_eng");
+    await instances.register(SHARED_TENANT, {
+      ...instance("1.0.0", { planner: "p:1", browser: "b:1" }),
+      template: { id: "shared-bu", version: "1" },
+      id: "shared-bu",
+    });
+
+    expect(await instances.ownVersions("acme", "bu")).toEqual(["1.0.0"]);
+    // A first-party instance is READABLE through the fallback but is not the workspace's own — the distinction
+    // ownership rests on.
+    expect(await instances.versions("acme", "shared-bu")).toEqual(["1.0.0"]);
+    expect(await instances.ownVersions("acme", "shared-bu")).toEqual([]);
+    expect(await instances.teamOfVersion("acme", "bu", "1.0.0")).toBe("team_eng");
+  });
+
   it("instance register without a template → NotFoundError", async () => {
     await expect(instances.register("acme", instance("x", { planner: "p", browser: "b" }))).rejects.toBeInstanceOf(
       NotFoundError,

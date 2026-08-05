@@ -11,6 +11,7 @@ import { ScorecardResponseSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { teamMoveDocs } from "../team-move.js";
 import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
@@ -288,6 +289,16 @@ const docs = {
       ...errorResponses(401, 403, 404, 502),
     },
   },
+  move: teamMoveDocs({
+    resource: "scorecard",
+    tag: "scorecard",
+    idDescription: "Scorecard id",
+    action: "scorecards:run",
+    extra:
+      "A scorecard is the evidence a capability produced, and it is read through the same team lens the " +
+      "capability is — so handing a harness or dataset to another team does not drag its past results along; " +
+      "re-file those here. Results and scores are untouched.",
+  }),
 } satisfies Record<string, FastifySchema>;
 
 // Export widened to FastifySchema: literal response-status keys would otherwise constrain reply.code()

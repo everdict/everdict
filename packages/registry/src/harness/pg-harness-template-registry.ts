@@ -29,9 +29,14 @@ export class PgHarnessTemplateRegistry implements HarnessTemplateRegistry {
   ): Promise<void> {
     return this.store.register(tenant, spec, createdBy, teamId, origin);
   }
-  // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
+  // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned (_shared/seeded),
+  // which is NOT "everyone's".
   teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
     return this.store.teamOfVersion(tenant, id, version);
+  }
+  // Ownership transfer — every version of the entity, tenant-owned only (see PgVersionedStore.moveToTeam).
+  moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
+    return this.store.moveToTeam(tenant, id, teamId);
   }
 
   has(tenant: string, id: string, version: string): Promise<boolean> {

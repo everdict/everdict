@@ -3,7 +3,8 @@ import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { teamCeiling, teamForNew, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
+import { moveToolDescription } from "../team-move.js";
 import { AnalysisDimensionSchema } from "./request/analysis-query.js";
 import { serveScorecard } from "./serve.js";
 
@@ -306,9 +307,10 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
           schedule: z.string().optional().describe("narrow to the runs a schedule fired (its run history)"),
           dataset: z.string().optional().describe("narrow to batches run on this dataset (any version)"),
           harness: z.string().optional().describe("narrow to batches run with this harness (any version)"),
+          team: z.string().optional().describe('narrow to one team\'s batches — id or key ("ENG")'),
         },
       },
-      ({ judge, schedule, dataset, harness }) =>
+      ({ judge, schedule, dataset, harness, team }) =>
         run(principal, "scorecards:read", async () =>
           ok(
             await scorecards.list(ws, {
@@ -317,9 +319,38 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
                 : judge
                   ? { judge }
                   : { ...(dataset !== undefined ? { dataset } : {}), ...(harness !== undefined ? { harness } : {}) }),
+              // `team` COMBINES with the narrows above rather than replacing them — "of these, which are ours".
+              ...(team !== undefined ? { teamId: await resolveTeam(ctx, team) } : {}),
               // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
-              // person's teams and no more.
+              // person's teams and no more. The narrow above never reaches past this ceiling.
               ...(await teamCeiling(ctx.deps, principal)),
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
+      "move_scorecard",
+      {
+        description: moveToolDescription(
+          "Re-file a scorecard under another team. A scorecard is the EVIDENCE a capability produced and is " +
+            "read through the same team lens, so handing a harness or dataset to another team does not drag " +
+            "its past results along — move those here. Results and scores are untouched.",
+        ),
+        inputSchema: {
+          id: z.string(),
+          team: z.string().describe('the destination team — id or key ("ENG")'),
+        },
+      },
+      ({ id, team }) =>
+        // The service authorizes BOTH teams, so this runs unguarded here rather than re-asking half the question.
+        plain(async () =>
+          ok(
+            await scorecards.moveToTeam({
+              principal,
+              id,
+              teamId: await resolveTeam(ctx, team),
+              ...(ctx.agent?.agentId !== undefined ? { agent: ctx.agent } : {}),
             }),
           ),
         ),

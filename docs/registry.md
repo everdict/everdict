@@ -53,6 +53,22 @@ tenant's own harness and falls back to the **`_shared`** owner for first-party h
 registers under `_shared` by default). `loadHarnessDir(dir, { into, tenant })` chooses the owner. The HTTP
 surface (`POST/GET /harnesses`, authed) exposes this per-tenant — see `docs/tenancy.md`.
 
+### Handing an entity to another team (`moveToTeam`)
+The owning team (`team_id`, migration `0106`) is registry metadata beside `created_by`, so it can be **changed**
+without touching content — which is the whole reason it lives outside the versioned spec. `moveToTeam(tenant, id,
+teamId)` on the harness-instance / harness-template / dataset / judge registries is that change:
+
+- **Entity-wide, never per version.** Reads answer ownership off the newest own version (`teamOfEntity`), so a
+  split id would change owner the next time somebody registered a release. Tombstoned versions move too — a
+  tombstone is revived by re-registering identical content, and it must not come back under the team that no
+  longer owns the id.
+- **Tenant directly-owned and live only.** A `_shared` first-party entry is not a workspace's to re-file, and an
+  id whose every version is a tombstone is invisible to every read → `NotFoundError` for both, no separate check.
+- **No version is minted** and `specsEqual`/immutability are untouched: nothing about the content changed.
+- Authorization is the CALLER's (`moveCapabilityToTeam` in `@everdict/application-control`) — the same split
+  `softDelete` follows. It authorizes BOTH the source and the destination team, on the entity's existing
+  content-mutation action, and emits `<subject>.moved`. See `docs/auth.md` §The team axis.
+
 ## Rubrics (`RubricRegistry`)
 Rubrics — HOW to judge: freeform `text` and/or named `criteria` plus an optional `promptTemplate`
 (`docs/architecture/eval-domain-model.md` S3) — are their own versioned entity, mirroring the judge registry:

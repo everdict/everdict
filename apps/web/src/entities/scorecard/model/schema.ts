@@ -178,6 +178,10 @@ export const scorecardRecordSchema = z.object({
   judgeModels: z.array(z.string()).optional(), // the judge model(s) that graded this run — separate from the model axis (the grader)
   origin: scorecardOriginSchema.optional(), // trigger provenance — lightweight, so also included in the list. Unset on legacy records.
   createdBy: z.string().optional(), // the runner (submitter subject) — the 'who' paired with origin (the 'where'). Unset on legacy records.
+  // The owning team (mig 0106). It decides who may CHANGE this and — for a private team — who sees it at
+  // all, and it is re-fileable (`POST /<resource>/:id/team`), so the detail shows it and offers the move.
+  // Absent = unowned (a `_shared` entry, or one from before the axis), which is the workspace's.
+  teamId: z.string().optional(),
   runtime: z.string().optional(), // the runtime the batch ran on (placement.target: registered runtime id | self:* runner). Unset = legacy·ingest records. Lightweight → also included in the list.
   // Batch-on-Temporal ownership — when set, a durable workflow drives this batch (shown as a chip on the detail).
   orchestration: z

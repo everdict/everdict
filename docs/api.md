@@ -53,6 +53,7 @@ arrives by polling or webhook.
 | `POST` | `/keys` | self-serve issue an API key `{ label?, scopes? }` → **201** `{ apiKey }` (plaintext **once**; `scopes` = `read\|write\|admin`, omitted = Full Access/`admin`) (`keys:write`, admin) |
 | `GET`  | `/keys` | API key metadata `{ id, prefix, label?, scopes?, createdAt }[]` — never the plaintext/hash; `scopes` absent = Full Access (`keys:read`, admin) |
 | `DELETE` | `/keys/:id` | revoke a key → **204** (tenant-scoped; foreign id is a no-op) (`keys:write`, admin) |
+| `GET`  | `/workspace/pulse` | the home screen's ONE read: state now (open/regressed issues · active cycles + their commitment · goals & projects at risk · open agent tasks + pending approvals · window pass rate vs. the preceding window) + the trend over `days` (activity per day by axis · issues in vs. out · pass rate per day), folded from the platform-event log. Team-privacy scoped; `issues:read`, viewer+ (MCP `get_workspace_pulse`) — see `docs/architecture/workspace-pulse.md` |
 | `GET`  | `/members` | workspace members `{ subject, role, email?, addedAt }[]` (`members:read`, viewer+) |
 | `PATCH` | `/members/:subject` | change a member's `{ role }` → **204** (404 if not a member; **409** last-admin) (`members:write`, admin) |
 | `DELETE` | `/members/:subject` | remove a member → **204** (idempotent; **409** last-admin) (`members:write`, admin) |

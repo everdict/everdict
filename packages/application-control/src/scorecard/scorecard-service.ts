@@ -1,6 +1,7 @@
 import {
   BadRequestError,
   type CaseResult,
+  ConflictError,
   type Dataset,
   EXPERIMENT_ADHOC_REF,
   ForbiddenError,
@@ -19,6 +20,7 @@ import {
   type ScorecardDiff,
   type ScorecardTrend,
   type TrialDiff,
+  authorize,
   can,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
@@ -618,6 +620,63 @@ export class ScorecardService {
     const childRuns = this.deps.runStore ? await this.deps.runStore.deleteByScorecard(rec.id) : 0;
     await this.deps.store.delete(rec.id);
     return { workspace: ws, id: rec.id, deleted: true, childRuns };
+  }
+
+  // Re-file a batch under a different team. A scorecard is the EVIDENCE a capability produced, and it is read
+  // through the same team lens the capability is (a private team's results are its own), so it needs the same
+  // transfer the capability has — otherwise moving a harness leaves every result it ever produced behind, under
+  // a team that no longer owns the thing that made them.
+  //
+  // Both teams are authorized for the reason the capability transfer states: the SOURCE so a batch cannot be
+  // taken out of a team you are not on, the DESTINATION so results cannot be pushed onto (or hidden inside)
+  // someone else's team. An admin passes both; an unowned batch has no source to authorize. `scorecards:run` is
+  // the existing write action — re-filing evidence is not a new permission.
+  //
+  // `teamId` arrives ALREADY resolved (transports accept `ENG` and resolve at the boundary), so the gate below
+  // compares ids to ids.
+  async moveToTeam(input: {
+    principal: Principal;
+    id: string;
+    teamId: string;
+    agent?: { agentId?: string; conversationId?: string };
+  }): Promise<ScorecardRecord> {
+    const ws = input.principal.workspace;
+    const rec = await this.deps.store.get(input.id);
+    if (!rec || rec.tenant !== ws)
+      throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "Scorecard not found.");
+    if (rec.teamId === input.teamId)
+      throw new ConflictError(
+        "CONFLICT",
+        { workspace: ws, scorecard: rec.id, team: input.teamId },
+        "This scorecard already belongs to that team.",
+      );
+    authorize(input.principal, "scorecards:run", rec.teamId === undefined ? {} : { teamId: rec.teamId });
+    authorize(input.principal, "scorecards:run", { teamId: input.teamId });
+
+    const fact = stampFacts(
+      ws,
+      [
+        {
+          kind: "scorecard.moved" as const,
+          subject: { type: "scorecard", id: rec.id },
+          actor: input.principal.subject,
+          payload: { id: rec.id, to: input.teamId, ...(rec.teamId !== undefined ? { from: rec.teamId } : {}) },
+          ...(input.agent?.agentId !== undefined
+            ? { causedBy: `agent:${input.agent.agentId}:${input.agent.conversationId ?? "unknown"}` }
+            : {}),
+          message: `scorecard ${rec.id} moved to team ${input.teamId}`,
+        },
+      ],
+      { newId: this.newId, now: this.now },
+    );
+    // E0 outbox: the fact persists in the same write as the ownership change it describes.
+    const updated = await this.deps.store.update(
+      rec.id,
+      { teamId: input.teamId },
+      fact.map((f) => f.record),
+    );
+    if (fact.length > 0) void this.deps.events?.pushPersisted?.(fact);
+    return updated ?? { ...rec, teamId: input.teamId };
   }
 
   // A dispatched scorecard doesn't embed the heavy scorecard (case results), storing only runIds (storage dedup) →

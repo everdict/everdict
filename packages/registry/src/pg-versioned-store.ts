@@ -178,6 +178,22 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     return r.rows[0]?.team_id ?? undefined;
   }
 
+  // Ownership transfer — the whole entity, every version of it. See the InMemory twin for why it is entity-wide
+  // (reads answer ownership off the newest version, so a split id would change owner on the next release) and why
+  // the UPDATE deliberately omits `this.live` (a revived tombstone must not reappear under the previous team).
+  // The existence check DOES require a live version: an all-tombstoned id is invisible to every read.
+  // (Only wired for tables that HAVE the column — the same contract every optional capability here follows: a
+  // registry over a table without team_id never calls this, exactly as it never calls setVersionTags.)
+  async moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
+    if ((await this.ownerVersions(tenant, id)).length === 0)
+      throw new NotFoundError("NOT_FOUND", { tenant, id }, `${this.label} '${id}' not found.`);
+    await this.client.query(`UPDATE ${this.table} SET team_id = $3 WHERE tenant = $1 AND id = $2`, [
+      tenant,
+      id,
+      teamId,
+    ]);
+  }
+
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     const owner = await this.ownerOf(tenant, id);
     if (!owner) return false;

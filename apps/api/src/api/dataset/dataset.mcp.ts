@@ -1,5 +1,6 @@
 import { setVersionTags } from "@everdict/application-control";
 import { deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
+import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
 import {
   HarborTaskSchema,
@@ -18,7 +19,8 @@ import {
   capabilityOriginFor,
   declaredOriginFromIssue,
 } from "../capability-origin.js";
-import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
+import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
 
 // Dataset MCP tools — the MCP twin of dataset.routes.ts.
 // A private team's work is not the workspace's — the same ceiling the HTTP list stays under.
@@ -36,15 +38,18 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       "list_datasets",
       {
         description:
-          "Datasets this workspace sees (owned + _shared benchmarks). The workspace is the 'active workspace' fixed by your credential — confirm with the user which workspace you are working in first (you cannot change it via a parameter; a different workspace requires reconnecting with that workspace's credential/session). Each entry groups multiple immutable versions under one id (id → versions[]). Before creating a new dataset, first use this list to check whether the same id already exists.",
-        inputSchema: {},
+          "Datasets this workspace sees (owned + _shared benchmarks). The workspace is the 'active workspace' fixed by your credential — confirm with the user which workspace you are working in first (you cannot change it via a parameter; a different workspace requires reconnecting with that workspace's credential/session). Each entry groups multiple immutable versions under one id (id → versions[]). Before creating a new dataset, first use this list to check whether the same id already exists. `team` narrows to one team's datasets (id or key, ENG) — what the team owns, not everything it can see.",
+        inputSchema: { team: z.string().optional().describe('only this team\'s datasets — id or key ("ENG")') },
       },
-      () =>
-        run(principal, "datasets:read", async () =>
+      ({ team }) =>
+        run(principal, "datasets:read", async () => {
           // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
-          // person's teams and no more.
-          ok(await keepVisible(ctx, await datasets.list(ws))),
-        ),
+          // person's teams and no more. `team` is the NARROW on top of that ceiling, never a way past it.
+          const visible = await keepVisible(ctx, await datasets.list(ws));
+          if (team === undefined) return ok(visible);
+          const teamId = await resolveTeam(ctx, team);
+          return ok(visible.filter((entry) => entry.teamId === teamId));
+        }),
     );
 
     server.registerTool(
@@ -125,12 +130,20 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
           "Register a Dataset (JSON string) as owned by the active workspace (versions immutable; re-registering the same id@version with different content is CONFLICT). Before registering, always confirm in order: (1) workspace — confirm with the user which workspace (fixed by credential, not changeable via a parameter). (2) id — one id groups multiple versions. If you are adding/editing cases in the same dataset, reuse the existing id and bump to a new 'version' (e.g. 1.0.0 → 1.1.0). Do not flatten into a new id each time. (3) version — a new semver that doesn't collide with an existing one. First check existing ids/versions via list_datasets/validate_dataset.",
         inputSchema: {
           dataset: z.string().describe("Dataset JSON (id·version·cases)"),
+          team: z
+            .string()
+            .optional()
+            .describe(
+              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
+            ),
           fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
           originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
         },
       },
-      ({ dataset, fromIssue, originNote }) =>
-        run(principal, "datasets:write", async () => {
+      ({ dataset, team, fromIssue, originNote }) =>
+        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair) — an agent
+        // must not be able to file a dataset under a team the person it acts for is not on.
+        runForTeam(ctx, "datasets:write", team, async (teamId) => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(dataset);
@@ -146,10 +159,20 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             ctx.agent,
             declaredOriginFromIssue(fromIssue, originNote),
           );
-          await datasets.register(ws, result.data, principal.subject, undefined, origin); // creator = subject (delete permission)
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+          await datasets.register(ws, result.data, principal.subject, teamId, origin); // creator = subject (delete permission)
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
         }),
     );
+
+    registerCapabilityMoveTool(server, ctx, {
+      tool: "move_dataset",
+      registry: datasets,
+      capability: TEAM_TRANSFERABLE_CAPABILITIES.dataset,
+      description: moveToolDescription(
+        "Hand a dataset to another team. EVERY version moves — ownership belongs to the dataset, not to one " +
+          "release of it — and no version is minted, so content and immutability are untouched.",
+      ),
+    });
 
     server.registerTool(
       "import_terminal_bench",

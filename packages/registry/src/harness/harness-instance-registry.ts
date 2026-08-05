@@ -117,9 +117,13 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
   }
-  // 소유 팀 위임 — 인가 커널의 팀 축이 읽는 값.
+  // Owning-team delegation — the authz kernel's team-axis input.
   async teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
     return await this.store.teamOfVersion(tenant, id, version);
+  }
+  // Ownership transfer — every version of the entity, tenant-owned only (see VersionedStore.moveToTeam).
+  async moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
+    this.store.moveToTeam(tenant, id, teamId);
   }
 
   async creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
@@ -157,6 +161,13 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
   }
   async versions(tenant: string, id: string): Promise<string[]> {
     return this.store.versions(tenant, id);
+  }
+  // Only what this tenant registered directly (no `_shared` fallback). It is what tells "the workspace's own
+  // harness" from "a first-party one it can see" — which is the question BOTH the private-team read ceiling
+  // (`assertEntityVisible`) and the ownership transfer ask. Its absence here made every one of those answer
+  // "unowned", so a private team's harness was visible to the whole workspace.
+  async ownVersions(tenant: string, id: string): Promise<string[]> {
+    return this.store.ownVersions(tenant, id);
   }
   async creatorOf(tenant: string, id: string): Promise<string | undefined> {
     return this.store.listMeta(tenant).find((m) => m.id === id)?.createdBy;

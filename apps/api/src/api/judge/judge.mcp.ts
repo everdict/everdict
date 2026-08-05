@@ -1,4 +1,5 @@
 import { deleteJudgeVersion, setVersionTags } from "@everdict/application-control";
+import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { JudgeSpecSchema, TraceEventSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
 import { ownedByVisibleTeam } from "@everdict/domain";
@@ -11,7 +12,8 @@ import {
   capabilityOriginFor,
   declaredOriginFromIssue,
 } from "../capability-origin.js";
-import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
+import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
 
 // Judge MCP tools — the MCP twin of judge.routes.ts.
 // A private team's work is not the workspace's — the same ceiling the HTTP list stays under.
@@ -27,8 +29,20 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     const judges = deps.judgeRegistry;
     server.registerTool(
       "list_judges",
-      { description: "Agent Judges visible to this workspace (owned + _shared default judges)", inputSchema: {} },
-      () => run(principal, "judges:read", async () => ok(await keepVisible(ctx, await judges.list(ws)))),
+      {
+        description:
+          "Agent Judges visible to this workspace (owned + _shared default judges). `team` narrows to one " +
+          "team's own judges (id or key, ENG).",
+        inputSchema: { team: z.string().optional().describe('only this team\'s judges — id or key ("ENG")') },
+      },
+      ({ team }) =>
+        run(principal, "judges:read", async () => {
+          // The visible-team ceiling first; `team` is the narrow on top of it, never a way past it.
+          const visible = await keepVisible(ctx, await judges.list(ws));
+          if (team === undefined) return ok(visible);
+          const teamId = await resolveTeam(ctx, team);
+          return ok(visible.filter((entry) => entry.teamId === teamId));
+        }),
     );
 
     server.registerTool(
@@ -133,12 +147,19 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
           "Register a JudgeSpec (JSON string) as owned by this workspace (model/harness; immutable; CONFLICT on collision)",
         inputSchema: {
           judge: z.string().describe("JudgeSpec JSON"),
+          team: z
+            .string()
+            .optional()
+            .describe(
+              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
+            ),
           fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
           originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
         },
       },
-      ({ judge, fromIssue, originNote }) =>
-        run(principal, "judges:write", async () => {
+      ({ judge, team, fromIssue, originNote }) =>
+        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
+        runForTeam(ctx, "judges:write", team, async (teamId) => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(judge);
@@ -154,10 +175,20 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
             ctx.agent,
             declaredOriginFromIssue(fromIssue, originNote),
           );
-          await judges.register(ws, result.data, principal.subject, undefined, origin); // creator stamp — HTTP parity
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+          await judges.register(ws, result.data, principal.subject, teamId, origin); // creator stamp — HTTP parity
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
         }),
     );
+    registerCapabilityMoveTool(server, ctx, {
+      tool: "move_judge",
+      registry: judges,
+      capability: TEAM_TRANSFERABLE_CAPABILITIES.judge,
+      description: moveToolDescription(
+        "Hand a judge to another team. EVERY version moves — ownership belongs to the judge, not to one " +
+          "release of it — and no version is minted, so past scorecards keep the judge coordinates they " +
+          "snapshotted.",
+      ),
+    });
   }
 
   if (deps.judgePreviewService) {

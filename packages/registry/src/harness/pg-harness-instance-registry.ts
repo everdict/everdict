@@ -55,9 +55,13 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
   }
-  // 소유 팀 위임 — 인가 커널의 팀 축이 읽는 값.
+  // Owning-team delegation — the authz kernel's team-axis input.
   teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
     return this.store.teamOfVersion(tenant, id, version);
+  }
+  // Ownership transfer — every version of the entity, tenant-owned only (see PgVersionedStore.moveToTeam).
+  moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
+    return this.store.moveToTeam(tenant, id, teamId);
   }
 
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
@@ -95,6 +99,11 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
   }
   versions(tenant: string, id: string): Promise<string[]> {
     return this.store.versions(tenant, id);
+  }
+  // Only what this tenant registered directly (no `_shared` fallback) — see the InMemory twin for why the
+  // private-team ceiling and the ownership transfer both depend on it.
+  ownVersions(tenant: string, id: string): Promise<string[]> {
+    return this.store.ownVersions(tenant, id);
   }
   async creatorOf(tenant: string, id: string): Promise<string | undefined> {
     return (await this.store.listMeta(tenant)).find((m) => m.id === id)?.createdBy;

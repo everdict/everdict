@@ -4,6 +4,7 @@ import { getLocale, getTimeZone, getTranslations } from 'next-intl/server'
 import { MentionInChatButton } from '@/widgets/infra-panel'
 import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
+import { moveDestinationsFor, TeamOwnerControl } from '@/features/move-to-team'
 import { RerunScorecardButton } from '@/features/rerun-scorecard'
 import { StopScorecardButton } from '@/features/stop-scorecard'
 import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
@@ -17,6 +18,7 @@ import {
   type MetricSummary,
   type ScorecardRecord,
 } from '@/entities/scorecard'
+import { teamsSchema } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -285,6 +287,14 @@ export default async function ScorecardDetailPage({
     const m = members.find((x) => x.subject === createdBy)
     authorName = m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(createdBy)
   }
+
+  // 소유 팀을 이름으로 부르고, 넘길 수 있는 사람에게는 그 자리에서 다시 세우게 하기 위한 로스터. 배치는
+  // 능력이 만든 증거라, 하네스가 팀을 옮겨도 과거 결과는 따라가지 않는다 — 여기서 따로 옮긴다.
+  const teams = await controlPlane
+    .listTeams(ctx)
+    .then((r) => teamsSchema.parse(r))
+    .catch(() => [])
+  const teamMove = moveDestinationsFor(principal, teams, 'scorecards:run')
 
   const summary = record.summary ?? []
   const summaryMetrics = summary.map((m) => m.metric) // sibling context for judge-metric disambiguation
@@ -659,6 +669,16 @@ export default async function ScorecardDetailPage({
           }
         />
         {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
+        <MetaItem label={t('metaTeam')}>
+          <TeamOwnerControl
+            kind="scorecards"
+            id={record.id}
+            {...(record.teamId !== undefined ? { teamId: record.teamId } : {})}
+            teams={teamMove.teams}
+            writableIds={teamMove.writableIds}
+            showLabel={false}
+          />
+        </MetaItem>
         {/* Temporal-owned batch — the durable workflow's id; deep-links to the Temporal UI when TEMPORAL_UI_URL is set. */}
         {record.orchestration?.workflowId && (
           <MetaItem label={t('metaWorkflow')}>

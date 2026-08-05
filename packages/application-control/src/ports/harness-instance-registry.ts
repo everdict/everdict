@@ -64,6 +64,10 @@ export interface HarnessInstanceRegistry {
   ): Promise<HarnessSpec>;
   getService(tenant: string, id: string, ref?: string): Promise<ServiceHarnessSpec>;
   versions(tenant: string, id: string): Promise<string[]>;
+  // Only the versions this tenant registered DIRECTLY (no `_shared` fallback) — the question "is this the
+  // workspace's own harness, and whose is it here" that the private-team read ceiling and the ownership
+  // transfer both stand on.
+  ownVersions(tenant: string, id: string): Promise<string[]>;
   list(tenant: string): Promise<HarnessListEntry[]>;
   // The first-registrant subject of this harness id (no seed/shared) — for verifying the owner of a private (references a personal secret) harness.
   creatorOf(tenant: string, id: string): Promise<string | undefined>;
@@ -71,6 +75,10 @@ export interface HarnessInstanceRegistry {
   // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned
   // (`_shared`/seeded), which the gate lets through; it is NOT "everyone's".
   teamOfVersion?(tenant: string, id: string, version: string): Promise<string | undefined>;
+  // Ownership transfer — the ENTITY moves, so every version of it moves (see VersionedStore.moveToTeam). A
+  // transfer mints no version: ownership is metadata beside createdBy, outside the immutable spec. Tenant
+  // directly-owned live entities only → NotFound otherwise; authorization lives in the caller.
+  moveToTeam(tenant: string, id: string, teamId: string): Promise<void>;
 
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
   // Version soft-delete (tombstone) — data is preserved (past scorecard reproducibility), excluded from every read, re-registering identical content revives it.

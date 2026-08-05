@@ -105,6 +105,24 @@ failure mode a `[]` would silently produce. The API layer wraps it as `visibleTe
   EXPLICIT choice is authorized, an implicit fallback is the caller's team, else the workspace's default. A
   scorecard resolves one step earlier: an explicit choice → **the team that owns the harness it runs** → the
   submitter's team. That middle step is what gives a schedule, a CI token or a chat command an owner at all.
+- **Ownership is TRANSFERABLE, and the transfer is its own act.** `POST /<resource>/:id/team` +
+  `move_<resource>` (harness · harness template · dataset · judge · scorecard; an issue's is `POST
+  /issues/:id/team` / `move_issue`, which additionally re-mints its identifier). Teams split and work is handed
+  over, so an asset filed under the wrong team on a Tuesday must not stay there forever — visible to the wrong
+  people and editable by the wrong people. Three rules make it safe:
+  - **BOTH teams are authorized** — the source (or moving something out of a team you are not on would be a way
+    to take it) and the destination (or this becomes a way to push work into other teams' hands, and if that team
+    is private, out of your own sight). An admin passes both; an unowned asset has no source to authorize.
+  - **The ENTITY moves, not one version.** Reads already answer ownership off the newest version
+    (`teamOfEntity`), so a split id would change owner on its next release. Tombstoned versions move too, or a
+    revived one would reappear under the previous team. A transfer mints **no version**: ownership is metadata
+    beside `created_by`, so content immutability is untouched.
+  - **No new action.** It gates on the resource's existing content-mutation action (`datasets:write`,
+    `harnesses:register`, `templates:write`, `judges:write`, `scorecards:run`) — whoever may change a thing may
+    re-file it. The core is `moveCapabilityToTeam` (`@everdict/application-control`), one core for both
+    transports; a `_shared` first-party asset is **404** (not a workspace's to re-file) and a no-op move is 409.
+  A capability's transfer does NOT drag its past scorecards along — evidence is re-filed separately, because a
+  result belongs to whoever ran it.
 
 ## How `apps/api` enforces it
 `resolvePrincipal(req)` is called by **every** route:

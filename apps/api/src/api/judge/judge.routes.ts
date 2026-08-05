@@ -1,4 +1,5 @@
 import { VersionTagsBodySchema, deleteJudgeVersion, setVersionTags } from "@everdict/application-control";
+import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
 import { JudgeSpecSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
 import { ownedByVisibleTeam } from "@everdict/domain";
@@ -15,6 +16,7 @@ import {
   teamForNew,
   zodIssues,
 } from "../route-context.js";
+import { MoveToTeamBodySchema } from "../team-move.js";
 import { judgeDocs } from "./judge.docs.js";
 import { PreviewJudgeBodySchema, TryJudgeBodySchema } from "./request/judge-evidence.js";
 
@@ -203,6 +205,37 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
       }
     },
   );
+
+  // Hand the judge to another team. A transition, not an edit: it re-files EVERY version at once (ownership
+  // belongs to the judge, not to one release of it) and emits its fact, so it gets its own endpoint exactly
+  // like the issue's team move does. Both teams are authorized inside the service — the one it is leaving and the
+  // one it is joining.
+  app.post<{ Params: { id: string } }>("/judges/:id/team", { schema: judgeDocs.move }, async (req, reply) => {
+    if (!deps.judgeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = MoveToTeamBodySchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      const agent = agentAttributionFrom(req.headers);
+      return reply.send(
+        await moveCapabilityToTeam({
+          registry: deps.judgeRegistry,
+          capability: TEAM_TRANSFERABLE_CAPABILITIES.judge,
+          principal,
+          id: req.params.id,
+          // Resolved here (id or key, `ENG`) so an unknown team is a 404 before the gate compares it against the
+          // teams the principal carries — which are ids.
+          teamId: await resolveTeamRef(deps, principal.workspace, body.data.teamId),
+          ...(deps.platformEvents ? { events: deps.platformEvents } : {}),
+          ...(agent ? { agent } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // not on one of the teams 403 / unknown judge 404 / already there 409
+    }
+  });
 
   // Soft-delete a judge version — only that version's own creator or a workspace admin (deleteJudgeVersion gates it).
   // Deletion is a tombstone (data preserved, excluded from reads) → past scorecard history·aggregates are unaffected

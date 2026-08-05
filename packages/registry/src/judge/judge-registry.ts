@@ -63,9 +63,13 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
   async get(tenant: string, id: string, ref?: string): Promise<JudgeSpec> {
     return this.store.get(tenant, id, ref);
   }
-  // 소유 팀 위임 — 인가 커널의 팀 축이 읽는 값.
+  // Owning-team delegation — the authz kernel's team-axis input.
   async teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
     return await this.store.teamOfVersion(tenant, id, version);
+  }
+  // Ownership transfer — every version of the entity, tenant-owned only (see VersionedStore.moveToTeam).
+  async moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
+    this.store.moveToTeam(tenant, id, teamId);
   }
 
   async creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
