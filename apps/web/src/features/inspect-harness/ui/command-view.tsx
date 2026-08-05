@@ -48,7 +48,10 @@ export function CommandView({ spec }: { spec: HarnessSpec }) {
         </DefRow>
         {trace && trace.kind !== 'none' && (
           <DefRow label={t('trace')} mono>
-            {trace.kind} · pull{trace.endpoint ? ` · ${trace.endpoint}` : ''}
+            {/* `file` 은 명령이 자기 궤적을 직접 쓴 것이라 끌어올 곳이 없다 — "pull" 이라고 적으면 거짓말이다. */}
+            {trace.kind === 'file'
+              ? `${trace.kind}${trace.path ? ` · ${trace.path}` : ''}`
+              : `${trace.kind} · pull${trace.endpoint ? ` · ${trace.endpoint}` : ''}`}
           </DefRow>
         )}
       </Card>

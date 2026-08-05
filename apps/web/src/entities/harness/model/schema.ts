@@ -320,10 +320,15 @@ export const frontDoorSchema = z
   .passthrough()
 export type FrontDoor = z.infer<typeof frontDoorSchema>
 
-// trace extraction for a command harness: none (result only) | OTel/MLflow pull.
+// trace extraction for a command harness: none (result only) | file (the command writes its OWN TraceEvent
+// stream into the sandbox) | a pull from one of the four observability platforms.
+// ⚠️ 이 목록은 계약(`CommandTraceSpecSchema`)의 7종을 그대로 따라야 한다 — 여기 없는 kind 하나가 오면
+// `.parse()` 가 스펙 전체를 거절해서 그 하네스의 상세 화면이 "불러오지 못했습니다" 한 줄로 죽는다
+// (드리프트 가드는 타입만 잡고 enum 값은 못 잡는다 — 그래서 `file` 하네스가 전부 열리지 않았다).
 export const commandTraceSchema = z.object({
-  kind: z.enum(['none', 'otel', 'mlflow']),
-  endpoint: z.string().optional(),
+  kind: z.enum(['none', 'file', 'otel', 'mlflow', 'langfuse', 'langsmith', 'phoenix']),
+  endpoint: z.string().optional(), // 플랫폼에서 끌어오는 kind 만 갖는다
+  path: z.string().optional(), // file 만 갖는다 — 샌드박스 workDir 기준 상대 경로
 })
 export type CommandTrace = z.infer<typeof commandTraceSchema>
 
