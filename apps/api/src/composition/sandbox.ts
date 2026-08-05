@@ -9,8 +9,9 @@ import type {
   WorkspaceImages,
 } from "@everdict/application-control";
 import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
+import { NomadSessionDriver } from "@everdict/backends";
 import { NotFoundError, type RegistryAuth } from "@everdict/contracts";
-import type { BudgetTracker, UsageMeter } from "@everdict/domain";
+import type { BudgetTracker, TrustZonePolicy, UsageMeter } from "@everdict/domain";
 import { canConsumeCapability, harnessAuthEnv, parseImageRef, resolveHarnessSecrets } from "@everdict/domain";
 import { DockerDriver } from "@everdict/drivers";
 import { makeHarness } from "@everdict/job-runner";
@@ -50,14 +51,42 @@ export function buildSandboxSessions(opts: {
   githubApp?: GithubAppService;
   // W4: publish a captured work tree as a layer on the session's base image (registry API only, no daemon).
   publishLayerSnapshot?: SandboxSessionServiceDeps["publishLayerSnapshot"];
+  // The operator's isolation policy — applied to a cluster-placed session exactly as to a dispatched case.
+  trustZones?: TrustZonePolicy;
 }): SandboxSessionService | undefined {
-  const driver = process.env.EVERDICT_SANDBOX_DRIVER;
-  if (driver === undefined || driver === "") return undefined;
-  if (driver !== "docker") {
-    console.warn(`▶ sandbox sessions: ignoring EVERDICT_SANDBOX_DRIVER='${driver}' (only 'docker' is supported)`);
+  // WHERE a session's container lives. `docker` is this host (dev, and the fastest snapshot — the driver can
+  // commit); `nomad` places it on a cluster, which is what takes worlds off the control-plane host. The
+  // cluster driver cannot reach a daemon, so its snapshots go through the registry layer-append path — which
+  // is why that had to exist first (docs/architecture/agent-worlds.md §W4).
+  const driverKind = process.env.EVERDICT_SANDBOX_DRIVER;
+  if (driverKind === undefined || driverKind === "") return undefined;
+  if (driverKind !== "docker" && driverKind !== "nomad") {
+    console.warn(`▶ sandbox sessions: ignoring EVERDICT_SANDBOX_DRIVER='${driverKind}' (expected 'docker' or 'nomad')`);
     return undefined;
   }
-  console.log("▶ sandbox sessions: docker (POST /sandboxes + create_sandbox)");
+  const nomadAddr = process.env.EVERDICT_SANDBOX_NOMAD_ADDR ?? process.env.NOMAD_ADDR;
+  if (driverKind === "nomad" && (nomadAddr === undefined || nomadAddr === "")) {
+    console.warn("▶ sandbox sessions: EVERDICT_SANDBOX_DRIVER=nomad needs EVERDICT_SANDBOX_NOMAD_ADDR (or NOMAD_ADDR)");
+    return undefined;
+  }
+  const driver =
+    driverKind === "nomad" && nomadAddr !== undefined
+      ? new NomadSessionDriver({
+          addr: nomadAddr,
+          ...(process.env.EVERDICT_SANDBOX_NOMAD_TOKEN ? { apiToken: process.env.EVERDICT_SANDBOX_NOMAD_TOKEN } : {}),
+          ...(process.env.EVERDICT_SANDBOX_NOMAD_NAMESPACE
+            ? { namespace: process.env.EVERDICT_SANDBOX_NOMAD_NAMESPACE }
+            : {}),
+          // The SAME isolation policy the dispatch lanes use — a session runs untrusted code exactly as an
+          // eval case does, so it must not be isolated by a second, nearby rule.
+          ...(opts.trustZones ? { trustZones: opts.trustZones } : {}),
+        })
+      : new DockerDriver();
+  console.log(
+    driverKind === "nomad"
+      ? `▶ sandbox sessions: nomad at ${nomadAddr} (cluster-placed; snapshots publish through the registry)`
+      : "▶ sandbox sessions: docker (POST /sandboxes + create_sandbox)",
+  );
   const capabilities = opts.capabilities;
   const { harnesses, models, scopedSecretsFor } = opts;
   // harness ref → a session-ready harness: registry spec (a built-in like claude-code has none — undefined
@@ -190,7 +219,7 @@ export function buildSandboxSessions(opts: {
       : undefined;
   return new SandboxSessionService({
     store: opts.store,
-    driver: new DockerDriver(),
+    driver,
     ...(git ? { git } : {}),
     ...(opts.trajectories ? { trajectories: opts.trajectories } : {}),
     ...(opts.events ? { events: opts.events } : {}),

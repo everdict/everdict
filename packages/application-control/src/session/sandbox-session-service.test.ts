@@ -175,7 +175,9 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
     const { service, runStore, driver } = build();
     const record = await service.create({ tenant: "acme", createdBy: "alice", image: "python:3.12-slim" });
 
-    expect(driver.provisioned).toEqual([{ os: "linux", image: "python:3.12-slim", needs: ["shell"] }]);
+    // `tenant` rides the provision so a driver that places on shared infrastructure (a cluster) can resolve
+    // the tenant's trust zone; a host-local driver ignores it.
+    expect(driver.provisioned).toEqual([{ os: "linux", image: "python:3.12-slim", needs: ["shell"], tenant: "acme" }]);
     expect(record).toMatchObject({
       kind: "sandbox",
       lifetime: "session",

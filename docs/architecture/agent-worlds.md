@@ -174,11 +174,41 @@ Two rules the live drill wrote:
 A multi-platform base is refused: snapshotting would have to pick an architecture, and a world is one
 running filesystem.
 
+## W4 — a session on a cluster is a Driver, not a new placement concept
+
+`Backend` is one-shot `dispatch(CaseJob) → CaseResult`; a session is not that shape, and bending it into one
+would have meant a second lifecycle in the placement layer. But the **Driver** contract already says nothing
+about where compute lives — `provision` hands back something you can `exec` on and must `dispose`. So a
+cluster session is that contract implemented over the orchestrator:
+
+`NomadSessionDriver` (`@everdict/backends`) submits a Nomad **`Type:"service"`** job with
+`RestartPolicy{Attempts:0}` (the container's filesystem IS the session — a silent restart would hand back a
+fresh one and lose the work), waits for a running allocation, and returns a handle whose `exec` shells
+`nomad alloc exec`. `writeFile`/`readFile` ride the same channel as base64. `dispose`/`reap` purge the job,
+and the compute id is self-describing (`job|alloc|namespace`) because the reaper in a later process gets
+nothing but that string off the run row.
+
+Everything the session service already does — worlds, hibernation, git, retention, capacity, causedBy, the
+trajectory — then works off the control-plane host **with no changes at all**. Two properties make that true:
+
+- The driver has **no `snapshot()`**, so the service automatically takes the registry layer-append path. That
+  is why W4's snapshot half had to land first.
+- `ComputeSpec.tenant` carries whose session it is, so the driver resolves the **same trust-zone policy** the
+  dispatch lanes use (namespace + isolation runtime, `assertHardenedIsolation`) — a session runs untrusted
+  code exactly as an eval case does and must not be isolated by a second, nearby rule.
+
+`EVERDICT_SANDBOX_DRIVER=nomad` + `EVERDICT_SANDBOX_NOMAD_ADDR` (`_TOKEN`, `_NAMESPACE`) selects it; `docker`
+stays the default and the faster path where the control plane and the container share a host.
+
 ## Not yet (the rest of the arc)
 
-- **W4 remainder — actual cluster placement**: a world session as a Nomad `Type:"service"` job (the
-  browser-session precedent) with exec routed through the orchestrator. The snapshot half no longer blocks
-  it; what remains is that `Backend` models one-shot `dispatch(CaseJob)` and a session is not that shape.
+- **Per-tenant runtime selection for sessions**: the cluster is operator-configured (one address), not
+  resolved from the tenant's registered `RuntimeSpec` the way a dispatched case's is.
+- **A cluster session has not been drilled live** — this host has no Nomad cluster. The unit tests pin the
+  submitted job's shape, the zone application and the exec argv; the round trip is unverified.
+- **Queueing**: a refused create is a refusal, not a wait.
+- **A credentialed git push has not been drilled live** (W2) — it needs a GitHub App installation, which
+  grants real write access and is the workspace owner's call.
 - **Queueing**: a refused create is a refusal, not a wait. `freesAt` makes waiting a decision the caller
   can take, but the platform does not take it for them.
 - **A credentialed push has not been drilled live** (W2) — it needs a GitHub App installation, which grants

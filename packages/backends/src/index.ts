@@ -68,3 +68,9 @@ export {
   type BackendConfig,
   type BackendsConfig,
 } from "./placement/config.js";
+export {
+  NomadSessionDriver,
+  type NomadSessionDriverOptions,
+  parseSessionComputeId,
+  sessionComputeId,
+} from "./orchestrators/nomad-session-driver.js";

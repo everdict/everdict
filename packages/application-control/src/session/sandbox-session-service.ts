@@ -345,6 +345,9 @@ export class SandboxSessionService {
         os: "linux",
         image: resolved.image,
         needs: ["shell"],
+        // WHOSE session this is — a driver that places on shared infrastructure resolves the tenant's trust
+        // zone from it; a host-local driver ignores it.
+        tenant: input.tenant,
         ...(registryAuths !== undefined && registryAuths.length > 0 ? { registryAuths } : {}),
       });
     } catch (err) {

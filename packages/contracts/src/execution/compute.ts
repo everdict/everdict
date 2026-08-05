@@ -14,6 +14,10 @@ export const ComputeSpecSchema = z.object({
   // a grant is short-lived, so it belongs to the call, not to a driver built once at boot). A driver that
   // authenticates pulls prefers these over its constructor-level ones.
   registryAuths: z.array(RegistryAuthSchema).optional(),
+  // WHOSE compute this is. A driver that places on shared infrastructure resolves the tenant's trust zone
+  // from it (namespace + isolation runtime); a host-local driver ignores it. Per provision rather than per
+  // driver because one cluster driver serves every tenant.
+  tenant: z.string().optional(),
 });
 export type ComputeSpec = z.infer<typeof ComputeSpecSchema>;
 
