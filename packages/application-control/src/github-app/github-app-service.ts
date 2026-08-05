@@ -233,6 +233,33 @@ export class GithubAppService {
     return { url: pr.url, branch: opts.branch, base: defaultBranch };
   }
 
+  // Open a pull request for a branch that ALREADY exists on the remote (agent worlds W2: a sandbox session
+  // pushed its own working tree, so the changes are on the branch and there is nothing for us to write).
+  // Sibling of openPullRequest, not a variant of it: that one authors the branch's content through the API,
+  // this one only proposes what git already delivered. Token scoped to pull_requests write.
+  async openPullRequestForBranch(
+    workspace: string,
+    repository: string,
+    opts: { branch: string; title: string; body?: string },
+    host?: string,
+  ): Promise<{ url: string; base: string }> {
+    const { token, host: resolved } = await this.tokenForRepository(
+      workspace,
+      repository,
+      { contents: "read", pull_requests: "write" },
+      host,
+    );
+    const writer = this.repoOps.for(token, resolved);
+    const { defaultBranch } = await writer.repoHead(repository);
+    const pr = await writer.openPr(repository, {
+      title: opts.title,
+      head: opts.branch,
+      base: defaultBranch,
+      body: opts.body ?? "",
+    });
+    return { url: pr.url, base: defaultBranch };
+  }
+
   // Which App install targets the operator configured via env (github.com and/or the enterprise host).
   private providers(): GithubAppProviders {
     const e = this.config.githubEnterprise;
@@ -324,6 +351,18 @@ export class GithubAppService {
   // Private-repo clone token — if the git URL's owner matches a workspace installation account, mint via that App
   // a short-lived (~1h) installation token scoped to that repo (contents:read). No matching installation → undefined.
   // execute-case calls this at dispatch time; the returned token rides only as transient (CaseJob.repoToken), never stored.
+  // A clone URL as this service's repository coordinates ("owner/name" + the GHE host, if any) — the one
+  // parse, exported so a caller holding only a remote URL (a sandbox session pushes what it cloned) reaches
+  // the repository-based methods without re-implementing URL handling.
+  repoRefFromGitUrl(gitUrl: string): { repository: string; host?: string } | undefined {
+    const parsed = parseGitRepo(gitUrl);
+    if (!parsed) return undefined;
+    return {
+      repository: `${parsed.owner}/${parsed.repo}`,
+      ...(parsed.host !== undefined ? { host: parsed.host } : {}),
+    };
+  }
+
   async tokenForRepo(workspace: string, gitUrl: string): Promise<string | undefined> {
     const parsed = parseGitRepo(gitUrl);
     if (!parsed) return undefined;

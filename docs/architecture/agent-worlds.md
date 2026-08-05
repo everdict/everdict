@@ -59,12 +59,37 @@ create_sandbox({world:{id}})     ── continue from the last snapshot
   write. Deliberately **not** trigger-matchable in v1 — an agent waking on its own snapshot is loop
   guard #1's textbook vector. Making it triggerable is a W3 decision alongside `causedBy` review.
 
+## W2 — a repository in, commits out
+
+A world is where work accumulates, so it has to be able to take a repository in and give commits back.
+Both halves are credential problems, and both are solved the same way: **the credential belongs to the
+command, never to the session.**
+
+- **In** — `create({repo:{git, ref?, dir?}})` clones before the record exists (a session handed over without
+  the repo it was asked for is a lie the member only discovers by looking). The read credential is a GitHub
+  App installation token (`contents:read`) that reaches git through `gitAuthEnv` — `http.extraheader` in the
+  ENVIRONMENT, never argv (`ps` is world-readable) and never `.git/config` (that file would travel inside
+  every later snapshot of this world). A public repo clones anonymously. Full clone, not depth-1: this tree
+  is meant to be worked in and pushed from. `session.repo` on the row records what the tree IS.
+- **Out** — `POST /sandboxes/:id/git/push` (`sandbox_git_push`) mints a `contents:write` token **at the
+  moment of the push**, uses it for that one command, and drops it. Committing stays the caller's own job
+  through `exec` — `git add`/`commit` need no credential, and the one thing a container cannot do for itself
+  is authenticate. The remote URL is read from the **container**, not the create-time record: the working
+  tree is the truth about what is being pushed. `pullRequest:{title, body?}` additionally opens a PR for the
+  pushed branch against the repo's default branch (`openPullRequestForBranch` — the sibling of
+  `openPullRequest` that proposes what git already delivered instead of authoring content through the API).
+
+`sandbox_git_push` is a **guarded** agent tool (it mints a write credential and lands code on a real remote);
+`sandbox_exec` deliberately stays unguarded — a container is the agent's own scratch space until its contents
+leave for a repository.
+
 ## Surface (BFF ↔ MCP parity)
 
 | HTTP | MCP | gate |
 | --- | --- | --- |
-| `POST /sandboxes` (`world`, `hibernate` added) | `create_sandbox` | `runs:submit` |
+| `POST /sandboxes` (`world`, `hibernate`, `repo` added) | `create_sandbox` | `runs:submit` |
 | `POST /sandboxes/:id/snapshot` | `snapshot_sandbox` | `images:push` (capability owner rule inside the publish) |
+| `POST /sandboxes/:id/git/push` | `sandbox_git_push` | `github:write` + creator-or-admin in the service |
 | `POST /sandboxes/:id/touch` | `touch_sandbox` | `runs:read` + creator-or-admin in the service |
 | `POST /sandboxes/:id/close` (`snapshot` override added) | `close_sandbox` | `runs:read` + creator-or-admin |
 
@@ -72,10 +97,8 @@ World sessions **refuse at create** (400) when the deployment cannot snapshot �
 store (`EVERDICT_IMAGE_STORE_*`), no capability service, or a driver without `snapshot` — instead of
 failing hours of work later at the first snapshot.
 
-## Not in W1 (the rest of the arc)
+## Not yet (the rest of the arc)
 
-- **W2 — git in/out**: clone with a GitHub App installation token at session create; per-call
-  re-minted write tokens for push/PR from inside the world.
 - **W3 — autonomy**: guarded-tool policy for the snapshot/credential tools, `causedBy` stamping +
   trigger-matchability review, per-world retention (keep-last-N; the image store still has no GC),
   per-agent compute budgets instead of the flat per-tenant session caps.

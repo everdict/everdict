@@ -45,6 +45,10 @@ const GUARDED_NAMES = new Set<string>([
   "pair_runner", // device/runner credential minting …
   "pair_workspace_runner",
   "github_install_workspace_runner",
+  // Agent worlds (W2): a session push mints a write credential against the workspace's GitHub App and lands
+  // code on a real remote. `sandbox_exec` stays unguarded — a container is the agent's own scratch space —
+  // but the moment its contents leave for a repository, that is a governed write like any other.
+  "sandbox_git_push",
   // native (non-MCP) kernel tool — spawning a persistent teammate mints it a write-scoped execution token and it
   // then acts autonomously with no human channel, so the delegation itself stays consented even in auto mode.
   "spawn_teammate",

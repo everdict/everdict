@@ -106,6 +106,9 @@ export const RunSessionSchema = z.object({
   world: z.string().optional(), // the environment capability id this session snapshots into
   hibernate: z.boolean().optional(), // auto-snapshot at teardown (close/expiry) instead of losing the state
   snapshots: z.array(z.object({ version: z.string(), image: z.string(), at: z.string() })).optional(), // what this session published (capability version + digest-pinned ref), append-only
+  // W2: the repository cloned into this session at create — what the working tree IS, and where. No
+  // credential ever lands here: a read token is used for the clone and discarded, and a push mints its own.
+  repo: z.object({ git: z.string(), ref: z.string().optional(), dir: z.string() }).optional(),
 });
 export type RunSession = z.infer<typeof RunSessionSchema>;
 

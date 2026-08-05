@@ -938,6 +938,9 @@ async function main(): Promise<void> {
     ...(workspaceImages ? { images: workspaceImages } : {}),
     capabilityService,
     registryAuthsFor,
+    // W2: git in and out of a session — the workspace App resolves a read credential for a clone and mints a
+    // write one per push. Absent install = public clones only, pushing 404s with the repo named.
+    ...(githubAppService ? { githubApp: githubAppService } : {}),
     // T-b: the durable reaper rides the same Temporal driver as approvals — a CP dying with the live
     // handle no longer leaks the container or the row. extend re-arms the deadline on touch (W1).
     ...(approvalTemporal

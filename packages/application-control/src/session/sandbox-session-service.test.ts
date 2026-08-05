@@ -87,12 +87,17 @@ function fakeTrajectories() {
 }
 
 function fakeDriver(
-  opts: { failProvision?: boolean; snapshot?: (id: string, ref: string, auth?: RegistryAuth) => void } = {},
+  opts: {
+    failProvision?: boolean;
+    emptyStdout?: boolean; // every command answers with empty output (a directory with no remote, say)
+    snapshot?: (id: string, ref: string, auth?: RegistryAuth) => void;
+  } = {},
 ) {
   const provisioned: ComputeSpec[] = [];
   const disposed: string[] = [];
   const reaped: string[] = [];
   const execs: string[] = [];
+  const execEnvs: Array<Record<string, string> | undefined> = [];
   let seq = 0;
   const snapshotFn = opts.snapshot;
   const driver: Driver = {
@@ -113,10 +118,12 @@ function fakeDriver(
       const cid = `c-${++seq}`;
       const handle: ComputeHandle = {
         id: cid,
-        async exec(command) {
+        async exec(command, execOpts) {
           execs.push(command);
-          return command.includes("boom")
-            ? { stdout: "", stderr: "kaboom", exitCode: 1 }
+          execEnvs.push(execOpts?.env);
+          if (command.includes("boom")) return { stdout: "", stderr: "kaboom", exitCode: 1 };
+          return opts.emptyStdout
+            ? { stdout: "", stderr: "", exitCode: 0 }
             : { stdout: `ran:${command}`, stderr: "", exitCode: 0 };
         },
         async writeFile() {},
@@ -130,7 +137,7 @@ function fakeDriver(
       return handle;
     },
   };
-  return { driver, provisioned, disposed, reaped, execs };
+  return { driver, provisioned, disposed, reaped, execs, execEnvs };
 }
 
 function build(over: Partial<SandboxSessionServiceDeps> = {}) {
@@ -877,5 +884,119 @@ describe("SandboxSessionService — pull credentials for the booted image", () =
     const bare = build(); // no resolver wired at all
     await bare.service.create({ tenant: "acme", createdBy: "alice", image: "img" });
     expect(bare.driver.provisioned[0]?.registryAuths).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Agent worlds (W2): a repository in, commits out. The credential rules are the point — a clone holds a
+// read token for one command, a push mints a write token for one command, and neither is ever stored.
+// ---------------------------------------------------------------------------------------------------
+
+function buildGit(over: Partial<SandboxSessionServiceDeps> = {}) {
+  const reads: string[] = [];
+  const writes: string[] = [];
+  const prs: Array<{ gitUrl: string; branch: string; title: string }> = [];
+  const git: NonNullable<SandboxSessionServiceDeps["git"]> = {
+    readToken: async (_tenant, gitUrl) => {
+      reads.push(gitUrl);
+      return gitUrl.includes("public") ? undefined : "read-token";
+    },
+    writeToken: async (_tenant, gitUrl) => {
+      writes.push(gitUrl);
+      if (gitUrl.includes("uninstalled")) throw new NotFoundError("NOT_FOUND", { git: gitUrl }, "no installation");
+      return "write-token";
+    },
+    openPullRequest: async (_tenant, gitUrl, input) => {
+      prs.push({ gitUrl, branch: input.branch, title: input.title });
+      return { url: "https://github.com/acme/app/pull/7", base: "main" };
+    },
+  };
+  const ctx = build({ git, ...over });
+  return { ...ctx, git, reads, writes, prs };
+}
+
+describe("SandboxSessionService — agent worlds (W2: a repository in, commits out)", () => {
+  it("clone happens BEFORE the record, with the token in the environment and never in argv", async () => {
+    const ctx = buildGit();
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      image: "debian",
+      repo: { git: "https://github.com/acme/app.git", ref: "v1.2.0" },
+    });
+    expect(ctx.reads).toEqual(["https://github.com/acme/app.git"]);
+    expect(record.session?.repo).toEqual({ git: "https://github.com/acme/app.git", ref: "v1.2.0", dir: "work" });
+    const clone = ctx.driver.execs.find((c) => c.includes("git clone"));
+    expect(clone).toContain("git clone 'https://github.com/acme/app.git' 'work'");
+    expect(clone).not.toContain("read-token"); // the credential is NEVER an argument
+    expect(ctx.driver.execEnvs.find((e) => e?.GIT_CONFIG_VALUE_0 !== undefined)?.GIT_CONFIG_VALUE_0).toBe(
+      "Authorization: Bearer read-token",
+    );
+    expect(ctx.driver.execs.some((c) => c.includes("git checkout 'v1.2.0'"))).toBe(true);
+    expect(ctx.driver.execs.some((c) => c.includes("git config user.email"))).toBe(true);
+  });
+
+  it("a public repo clones with no credential; a failed clone leaves NO record and no container", async () => {
+    const ctx = buildGit();
+    await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      image: "debian",
+      repo: { git: "https://github.com/acme/public.git" },
+    });
+    expect(ctx.driver.execEnvs.every((e) => e?.GIT_CONFIG_VALUE_0 === undefined)).toBe(true);
+
+    const failing = buildGit();
+    await expect(
+      failing.service.create({
+        tenant: "acme",
+        createdBy: "alice",
+        image: "debian",
+        repo: { git: "https://github.com/acme/boom.git" }, // the fake driver fails any command containing "boom"
+      }),
+    ).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+    expect(await failing.runStore.store.list("acme")).toEqual([]);
+    expect(failing.driver.disposed).toEqual(["c-1"]); // provision-before-record: no row, no leak
+  });
+
+  it("push mints a write token per call, reads the remote from the CONTAINER, and can open a PR", async () => {
+    const ctx = buildGit();
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      image: "debian",
+      repo: { git: "https://github.com/acme/app.git" },
+    });
+    const result = await ctx.service.gitPush(creator, record.id, {
+      pullRequest: { title: "Add the thing" },
+    });
+    expect(ctx.writes).toEqual(["ran:git remote get-url 'origin'"]); // the container's answer, not the record's
+    expect(result.branch).toBe("ran:git rev-parse --abbrev-ref HEAD");
+    expect(ctx.prs).toMatchObject([{ title: "Add the thing" }]);
+    expect(result.pullRequest).toEqual({ url: "https://github.com/acme/app/pull/7", base: "main" });
+    const push = ctx.driver.execs.find((c) => c.startsWith("git push"));
+    expect(push).not.toContain("write-token");
+    // The evidence names what left the session — never the credential.
+    await ctx.service.close(creator, record.id);
+    const sealed = await ctx.trajectories.store.get("acme", record.id);
+    const pushEvent = sealed?.events.find((e) => e.kind === "env_action" && e.action === "git.push");
+    expect(JSON.stringify(pushEvent)).not.toContain("write-token");
+    expect(pushEvent).toBeDefined();
+  });
+
+  it("push is creator-or-admin, 400s without a remote or git seam, and surfaces an uninstalled repo", async () => {
+    const ctx = buildGit();
+    const record = await ctx.service.create({ tenant: "acme", createdBy: "alice", image: "debian" });
+    await expect(
+      ctx.service.gitPush({ tenant: "acme", subject: "mallory", isAdmin: false }, record.id, {}),
+    ).rejects.toMatchObject({ status: 403 });
+
+    const bare = build(); // no git seam wired at all
+    const plain = await bare.service.create({ tenant: "acme", createdBy: "alice", image: "debian" });
+    await expect(bare.service.gitPush(creator, plain.id, {})).rejects.toMatchObject({ status: 400 });
+
+    const empty = buildGit({ driver: fakeDriver({ emptyStdout: true }).driver });
+    const noRemote = await empty.service.create({ tenant: "acme", createdBy: "alice", image: "debian" });
+    await expect(empty.service.gitPush(creator, noRemote.id, {})).rejects.toMatchObject({ status: 400 });
   });
 });

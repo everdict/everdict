@@ -4,6 +4,7 @@ import { type ServerDeps, constantTimeEq, gate, resolvePrincipal, sendError, zod
 import { CloseSandboxBodySchema } from "./request/close-sandbox.js";
 import { CreateSandboxBodySchema } from "./request/create-sandbox.js";
 import { ExecSandboxBodySchema } from "./request/exec-sandbox.js";
+import { PushSandboxGitBodySchema } from "./request/push-sandbox-git.js";
 import { ReadSandboxTaskTraceQuerySchema } from "./request/read-sandbox-task-trace.js";
 import { SnapshotSandboxBodySchema } from "./request/snapshot-sandbox.js";
 import { SubmitSandboxTaskBodySchema } from "./request/submit-sandbox-task.js";
@@ -150,6 +151,35 @@ export function registerSandboxRoutes(app: FastifyInstance, deps: ServerDeps): v
           return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
         return reply.send(
           await deps.sandboxSessions.snapshot(
+            { tenant: principal.workspace, subject: principal.subject, isAdmin: principal.roles.includes("admin") },
+            req.params.id,
+            parsed.data,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Agent worlds (W2): push the session's working tree to its remote (and optionally open a PR). Gated
+  // `github:write` — the same authorization as the other tools that write to a repository on the workspace's
+  // behalf; the write credential is minted inside the service for this one command and never stored.
+  app.post<{ Params: { id: string } }>(
+    "/sandboxes/:id/git/push",
+    { schema: sandboxDocs.gitPush },
+    async (req, reply) => {
+      if (!deps.sandboxSessions)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "sandbox sessions not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "github:write");
+        const parsed = PushSandboxGitBodySchema.safeParse(req.body ?? {});
+        if (!parsed.success)
+          return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+        return reply.send(
+          await deps.sandboxSessions.gitPush(
             { tenant: principal.workspace, subject: principal.subject, isAdmin: principal.roles.includes("admin") },
             req.params.id,
             parsed.data,

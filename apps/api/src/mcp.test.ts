@@ -586,6 +586,7 @@ describe("MCP tools", () => {
       "run_experiment",
       "run_scorecard",
       "sandbox_exec",
+      "sandbox_git_push",
       "score_group",
       "set_dataset_version_tags",
       "set_harness_version_tags",

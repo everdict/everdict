@@ -5,6 +5,7 @@ import {
   type Driver,
   type EvaluableHarness,
   ForbiddenError,
+  GIT_MACHINE_IDENTITY,
   type HarnessSpec,
   IMAGE_GRANT_USERNAME,
   NotFoundError,
@@ -14,6 +15,8 @@ import {
   type RunStatus,
   type TraceEvent,
   UpstreamError,
+  gitAuthEnv,
+  shq,
 } from "@everdict/contracts";
 import { type BudgetTracker, IMAGE_REPOSITORY_NAME, Run, type UsageMeter, pinDigest } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -41,6 +44,10 @@ const DEFAULT_TASK_TIMEOUT_SEC = 600;
 const MAX_TASK_TIMEOUT_SEC = 3600;
 const TASK_PREVIEW_CHARS = 200;
 const TEARDOWN_TASK_GRACE_MS = 5_000;
+// The working directory a session's repository lands in — the same `work` every harness and grader already
+// assumes, so a cloned session and an eval case agree on where "the code" is.
+const DEFAULT_REPO_DIR = "work";
+const GIT_TIMEOUT_SEC = 600; // a clone/push of a real repository is minutes, not the 60s exec default
 
 export interface SandboxActor {
   tenant: string;
@@ -63,6 +70,9 @@ export interface CreateSandboxInput {
   // Auto-snapshot at teardown (close and expiry both) — defaults ON for world sessions: an expiring world
   // session HIBERNATES instead of losing its filesystem. Meaningless without `world`.
   hibernate?: boolean;
+  // Agent worlds (W2): clone a repository into the session before it is handed over. A private repo resolves a
+  // read credential through the injected git seam; a public one clones anonymously. Combines with any target.
+  repo?: { git: string; ref?: string; dir?: string };
   ttlSec?: number;
 }
 
@@ -109,6 +119,7 @@ interface LiveSession {
   execCount: number;
   world?: string; // agent worlds (W1): the environment capability this session snapshots into
   hibernate: boolean; // auto-snapshot at teardown (world sessions default true)
+  repo?: { git: string; ref?: string; dir: string }; // W2: what was cloned in, and where
   playground?: PlaygroundState; // present only for harness-target sessions
 }
 
@@ -181,6 +192,23 @@ export interface SandboxSessionServiceDeps {
   // our own registry, which is every world snapshot and every managed-store environment. Best-effort by
   // contract: no credential just means the pull is anonymous, and the registry says what it thinks of that.
   resolvePullAuths?: (tenant: string, imageRefs: string[]) => Promise<RegistryAuth[]>;
+  // Agent worlds (W2): the workspace's git access, injected as a seam (apps/api binds the GitHub App service
+  // behind it — peer services never call each other). Read and write are SEPARATE calls on purpose: a session
+  // clones with a read credential and holds nothing, and a push mints a write credential at the moment of the
+  // push. Nothing here is ever stored on the session — a token that outlives its command is a token that
+  // travels inside a snapshot.
+  git?: {
+    // Read credential for a clone. `undefined` = no installation covers this repo → clone anonymously (a
+    // public repo still works; a private one fails at git with the remote's own message).
+    readToken(tenant: string, gitUrl: string): Promise<string | undefined>;
+    // Write credential for a push, minted per call. Throws when no installation covers the repo.
+    writeToken(tenant: string, gitUrl: string): Promise<string>;
+    openPullRequest(
+      tenant: string,
+      gitUrl: string,
+      input: { branch: string; title: string; body?: string },
+    ): Promise<{ url: string; base: string }>;
+  };
   publishWorldVersion?: (
     tenant: string,
     actor: { subject: string; isAdmin: boolean },
@@ -256,6 +284,9 @@ export class SandboxSessionService {
           );
         }
       }
+      // Clone BEFORE the record too, and for the same reason: a session handed over without the repo it was
+      // asked for is a lie the member would only discover by looking.
+      const repo = input.repo !== undefined ? await this.cloneRepo(input.tenant, handle, input.repo) : undefined;
       const hibernate = resolved.world !== undefined ? (input.hibernate ?? true) : false;
       const record = Run.newSandboxSession({
         id: this.newId(),
@@ -266,6 +297,7 @@ export class SandboxSessionService {
         createdBy: input.createdBy,
         ...(handle.id !== undefined ? { computeId: handle.id } : {}),
         ...(resolved.world !== undefined ? { world: resolved.world, hibernate } : {}),
+        ...(repo !== undefined ? { repo } : {}),
         ...(resolved.playground ? { attach: ["exec" as const, "tasks" as const] } : {}),
         now: this.now(),
       });
@@ -282,6 +314,7 @@ export class SandboxSessionService {
         label: record.harness.id,
         ...(resolved.world !== undefined ? { world: resolved.world } : {}),
         hibernate,
+        ...(repo !== undefined ? { repo } : {}),
         expiresAtMs: new Date(this.now()).getTime() + ttlSec * 1000,
         trace: [
           // M3 — the sandbox's infra-plane record: the driver container identity, so the sealed trajectory says
@@ -303,6 +336,7 @@ export class SandboxSessionService {
               image: resolved.image,
               ttlSec,
               ...(resolved.world !== undefined ? { world: resolved.world } : {}),
+              ...(repo !== undefined ? { repo: repo.git, dir: repo.dir } : {}),
               ...(resolved.playground ? { harness: `${resolved.harness.id}@${resolved.harness.version}` } : {}),
             },
           },
@@ -383,6 +417,72 @@ export class SandboxSessionService {
         "A test case is running in this session — snapshot after it finishes.",
       );
     return this.snapshotLive(runId, live, { subject: actor.subject, isAdmin: actor.isAdmin }, input);
+  }
+
+  // Agent worlds (W2): push the session's working tree to its remote, optionally opening a pull request.
+  // The credential is minted HERE, used for this one command, and discarded — it is never stored on the
+  // session and never enters an image. Committing stays the caller's job through exec (it needs no
+  // credential); the one thing a container cannot do for itself is authenticate.
+  async gitPush(
+    actor: SandboxActor,
+    runId: string,
+    input: { dir?: string; branch?: string; remote?: string; pullRequest?: { title: string; body?: string } },
+  ): Promise<{ branch: string; remote: string; pushed: string; pullRequest?: { url: string; base: string } }> {
+    this.sweep();
+    const live = this.sessions.get(runId);
+    if (!live || live.tenant !== actor.tenant)
+      throw new NotFoundError("NOT_FOUND", { run: runId }, "No live sandbox session with that id.");
+    if (live.createdBy !== actor.subject && !actor.isAdmin)
+      throw new ForbiddenError("FORBIDDEN", { run: runId }, "Only the session's creator or an admin can push.");
+    const git = this.deps.git;
+    if (!git) throw new BadRequestError("BAD_REQUEST", {}, "Git access is not configured for this deployment.");
+    const dir = input.dir ?? live.repo?.dir ?? DEFAULT_REPO_DIR;
+    const remote = input.remote ?? "origin";
+    // The remote URL comes from the CONTAINER, not from the create-time record: the working tree is the truth
+    // about what is being pushed, and a session may have cloned or re-pointed a second repo through exec.
+    const remoteUrl = (await live.handle.exec(`git remote get-url ${shq(remote)}`, { cwd: dir })).stdout.trim();
+    if (remoteUrl === "")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId, dir, remote },
+        `No git remote '${remote}' in '${dir}' — clone a repository into the session first.`,
+      );
+    const branch =
+      input.branch ?? (await live.handle.exec("git rev-parse --abbrev-ref HEAD", { cwd: dir })).stdout.trim();
+    if (branch === "" || branch === "HEAD")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId, dir },
+        "The working tree is on no branch (detached HEAD) — name a branch to push.",
+      );
+    const token = await git.writeToken(actor.tenant, remoteUrl);
+    const push = await live.handle.exec(`git push ${shq(remote)} HEAD:refs/heads/${shq(branch)}`, {
+      cwd: dir,
+      env: gitAuthEnv(token),
+      timeoutSec: GIT_TIMEOUT_SEC,
+    });
+    if (push.exitCode !== 0)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { run: runId, branch },
+        `git push failed: ${clamp(push.stderr || push.stdout)}`,
+      );
+    const pullRequest = input.pullRequest
+      ? await git.openPullRequest(actor.tenant, remoteUrl, { branch, ...input.pullRequest })
+      : undefined;
+    // Evidence, never the credential: what was pushed and where, on the session's own trajectory.
+    live.trace.push({
+      t: live.t++,
+      kind: "env_action",
+      action: "git.push",
+      detail: { remote: remoteUrl, branch, ...(pullRequest ? { pullRequest: pullRequest.url } : {}) },
+    });
+    return {
+      branch,
+      remote: remoteUrl,
+      pushed: push.stderr.trim() || push.stdout.trim(),
+      ...(pullRequest !== undefined ? { pullRequest } : {}),
+    };
   }
 
   // Keep-alive (touch): push the session's hard deadline out to now+ttl (never in — extendSession's max
@@ -662,6 +762,48 @@ export class SandboxSessionService {
 
   liveCount(): number {
     return this.sessions.size;
+  }
+
+  // Clone a repository into a fresh session (W2). A read credential is resolved through the git seam and
+  // reaches git through the environment only (never argv, never `.git/config` — a token written into the
+  // clone's config would travel inside every later snapshot of this world). Full clone, not depth-1: this
+  // tree is meant to be worked in and pushed from, and a shallow tree cannot do either well.
+  private async cloneRepo(
+    tenant: string,
+    handle: ComputeHandle,
+    repo: { git: string; ref?: string; dir?: string },
+  ): Promise<{ git: string; ref?: string; dir: string }> {
+    const dir = repo.dir ?? DEFAULT_REPO_DIR;
+    const token = await this.deps.git?.readToken(tenant, repo.git).catch(() => undefined);
+    const env = token !== undefined ? gitAuthEnv(token) : {};
+    const fail = (step: string, result: { stdout: string; stderr: string }): never => {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { repo: repo.git, step },
+        `Could not ${step} '${repo.git}': ${clamp(result.stderr || result.stdout)}`,
+      );
+    };
+    const cloned = await handle.exec(`rm -rf ${shq(dir)} && git clone ${shq(repo.git)} ${shq(dir)}`, {
+      env,
+      timeoutSec: GIT_TIMEOUT_SEC,
+    });
+    if (cloned.exitCode !== 0) fail("clone", cloned);
+    if (repo.ref !== undefined) {
+      const checkout = await handle.exec(`git checkout ${shq(repo.ref)}`, {
+        cwd: dir,
+        env,
+        timeoutSec: GIT_TIMEOUT_SEC,
+      });
+      if (checkout.exitCode !== 0) fail(`check out '${repo.ref}' in`, checkout);
+    }
+    // A committer identity, so `git commit` inside the session works without the caller discovering it doesn't.
+    await handle
+      .exec(
+        `git config user.email ${shq(GIT_MACHINE_IDENTITY.email)} && git config user.name ${shq(GIT_MACHINE_IDENTITY.name)}`,
+        { cwd: dir },
+      )
+      .catch(() => undefined);
+    return { git: repo.git, ...(repo.ref !== undefined ? { ref: repo.ref } : {}), dir };
   }
 
   // The live-session snapshot path: the core publisher plus the trajectory record (the sealed evidence of

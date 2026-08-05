@@ -3,23 +3,14 @@ import {
   type ComputeHandle,
   type EnvSpec,
   type Environment,
+  GIT_MACHINE_IDENTITY,
   type RepoSnapshot,
+  gitAuthEnv,
   shq,
 } from "@everdict/contracts";
 
 const WORK = "work";
-const GIT_ID = "git -c user.email=everdict@local -c user.name=everdict";
-
-// Private-repo clone auth — put the token into http.extraheader via env (git 2.31+ GIT_CONFIG_*), not argv, to
-// avoid exposure in `ps`/logs/.git/config. A token the control plane resolved from Connected accounts.
-function gitAuthEnv(token: string): Record<string, string> {
-  return {
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "http.extraheader",
-    GIT_CONFIG_VALUE_0: `Authorization: Bearer ${token}`,
-    GIT_TERMINAL_PROMPT: "0", // don't wait at a prompt on missing credentials (fail immediately)
-  };
-}
+const GIT_ID = `git -c user.email=${GIT_MACHINE_IDENTITY.email} -c user.name=${GIT_MACHINE_IDENTITY.name}`;
 
 // repo/coding environment. seed = a known initial state (remote git or inline files), snapshot = diff vs HEAD.
 // gitToken: transient credential to clone a private repo (env.source.connectionId), injected into the job by the control plane.

@@ -3,6 +3,7 @@ import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CloseSandboxBodySchema } from "./request/close-sandbox.js";
 import { CreateSandboxBodySchema } from "./request/create-sandbox.js";
 import { ExecSandboxBodySchema } from "./request/exec-sandbox.js";
+import { PushSandboxGitBodySchema } from "./request/push-sandbox-git.js";
 import { ReadSandboxTaskTraceQuerySchema } from "./request/read-sandbox-task-trace.js";
 import { SnapshotSandboxBodySchema } from "./request/snapshot-sandbox.js";
 import { SubmitSandboxTaskBodySchema } from "./request/submit-sandbox-task.js";
@@ -105,6 +106,23 @@ export const sandboxDocs: Record<string, FastifySchema> = {
     response: {
       200: { description: "{ world, version, image } — the published capability version and its pinned ref" },
       ...errorResponses(400, 401, 403, 404, 409, 502),
+    },
+  },
+  gitPush: {
+    summary: "Push a session's working tree to its remote (optionally opening a pull request)",
+    description:
+      "Agent worlds: pushes the session's checked-out branch to the repository it was cloned from. The write " +
+      "credential is a GitHub App installation token minted for THIS call and discarded — it is never stored " +
+      "on the session and never enters a snapshot. Committing is the caller's own job through exec (it needs " +
+      "no credential); this authenticates the push. The remote URL is read from the container, so what is " +
+      "pushed is what is actually checked out. 400 on a directory with no remote or a detached HEAD; 404 when " +
+      "no workspace GitHub App installation covers the repository. Creator-or-admin.",
+    tags: ["sandboxes"],
+    params: idParams,
+    body: toJsonSchema(PushSandboxGitBodySchema),
+    response: {
+      200: { description: "{ branch, remote, pushed, pullRequest?: { url, base } }" },
+      ...errorResponses(400, 401, 403, 404, 502),
     },
   },
   touch: {

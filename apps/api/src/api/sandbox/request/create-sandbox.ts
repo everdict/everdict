@@ -26,6 +26,15 @@ export const CreateSandboxBodySchema = z
       .optional(),
     world: z.object({ id: z.string().min(1).max(128) }).optional(),
     hibernate: z.boolean().optional(),
+    // W2: clone a repository into the session before it is handed over. A private repo needs the workspace's
+    // GitHub App installed on its owner; a public one clones anonymously.
+    repo: z
+      .object({
+        git: z.string().url().max(1000),
+        ref: z.string().min(1).max(255).optional(),
+        dir: z.string().min(1).max(512).optional(), // default "work"
+      })
+      .optional(),
     ttlSec: z
       .number()
       .int()
@@ -34,6 +43,17 @@ export const CreateSandboxBodySchema = z
       .optional(),
   })
   .superRefine((body, ctx) => {
+    if (
+      body.repo !== undefined &&
+      body.image === undefined &&
+      body.environment === undefined &&
+      body.world === undefined &&
+      body.harness === undefined
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "repo clones INTO a session — also provide image, environment, harness, or world.",
+      });
     if (body.world !== undefined) {
       if (body.environment !== undefined || body.harness !== undefined)
         ctx.addIssue({

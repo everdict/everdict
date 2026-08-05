@@ -250,6 +250,7 @@ export class Run {
     computeId?: string; // driver-level compute id (container id) — the reaper's teardown key after a crash
     world?: string; // agent worlds (W1): the environment capability this session snapshots into
     hibernate?: boolean; // auto-snapshot at teardown instead of losing the filesystem
+    repo?: { git: string; ref?: string; dir: string }; // W2: the repository cloned in at create
     origin?: RunOrigin;
     envelope?: RunEnvelope;
     attach?: RunAttachChannel[]; // default ["exec"]; a harness session adds "tasks" (test-case submissions)
@@ -277,6 +278,7 @@ export class Run {
         ...(input.computeId !== undefined ? { computeId: input.computeId } : {}),
         ...(input.world !== undefined ? { world: input.world } : {}),
         ...(input.hibernate !== undefined ? { hibernate: input.hibernate } : {}),
+        ...(input.repo !== undefined ? { repo: input.repo } : {}),
       },
       createdAt: input.now,
       updatedAt: input.now,

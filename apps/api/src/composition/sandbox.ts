@@ -8,8 +8,8 @@ import type {
   TrajectoryStore,
   WorkspaceImages,
 } from "@everdict/application-control";
-import { SandboxSessionService } from "@everdict/application-control";
-import type { RegistryAuth } from "@everdict/contracts";
+import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
+import { NotFoundError, type RegistryAuth } from "@everdict/contracts";
 import type { BudgetTracker, UsageMeter } from "@everdict/domain";
 import { canConsumeCapability, harnessAuthEnv, resolveHarnessSecrets } from "@everdict/domain";
 import { DockerDriver } from "@everdict/drivers";
@@ -45,6 +45,9 @@ export function buildSandboxSessions(opts: {
   // Image pull credentials — the same `buildImagePullAuths` seam the dispatch lane uses. A session booting a
   // world snapshot (or any managed-store environment) pulls from our own registry, which requires a grant.
   registryAuthsFor?: (workspace: string, imageRefs: string[]) => Promise<RegistryAuth[]>;
+  // Agent worlds (W2): the workspace GitHub App, bound behind the service's `git` seam (peer services never
+  // call each other). Absent = clone-in works only for public repos and pushing 400s.
+  githubApp?: GithubAppService;
 }): SandboxSessionService | undefined {
   const driver = process.env.EVERDICT_SANDBOX_DRIVER;
   if (driver === undefined || driver === "") return undefined;
@@ -129,9 +132,39 @@ export function buildSandboxSessions(opts: {
           return { version: saved.version };
         }
       : undefined;
+  // Agent worlds (W2): read and write are separate calls into the App service so a clone never holds a
+  // credential that could push, and a push mints its own at the moment it is needed. A repository no
+  // installation covers is a 404 with the repo named — the actionable answer ("install the App there").
+  const { githubApp } = opts;
+  const repoRef = (gitUrl: string): { repository: string; host?: string } => {
+    const ref = githubApp?.repoRefFromGitUrl(gitUrl);
+    if (!ref)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { git: gitUrl },
+        `'${gitUrl}' is not a repository URL this workspace can reach.`,
+      );
+    return ref;
+  };
+  const git: SandboxSessionServiceDeps["git"] =
+    githubApp !== undefined
+      ? {
+          readToken: (tenant, gitUrl) => githubApp.tokenForRepo(tenant, gitUrl),
+          writeToken: async (tenant, gitUrl) => {
+            const { repository, host } = repoRef(gitUrl);
+            const { token } = await githubApp.tokenForRepository(tenant, repository, { contents: "write" }, host);
+            return token;
+          },
+          openPullRequest: (tenant, gitUrl, input) => {
+            const { repository, host } = repoRef(gitUrl);
+            return githubApp.openPullRequestForBranch(tenant, repository, input, host);
+          },
+        }
+      : undefined;
   return new SandboxSessionService({
     store: opts.store,
     driver: new DockerDriver(),
+    ...(git ? { git } : {}),
     ...(opts.trajectories ? { trajectories: opts.trajectories } : {}),
     ...(opts.events ? { events: opts.events } : {}),
     ...(opts.reaper ? { reaper: opts.reaper } : {}),

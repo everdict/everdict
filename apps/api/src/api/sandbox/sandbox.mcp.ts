@@ -54,6 +54,13 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
           .boolean()
           .optional()
           .describe("Auto-snapshot at teardown (default true for world sessions; ignored without world)"),
+        repo: z
+          .object({ git: z.string(), ref: z.string().optional(), dir: z.string().optional() })
+          .optional()
+          .describe(
+            "Clone a repository into the session (default directory 'work'). A private repo needs the " +
+              "workspace GitHub App installed on its owner; commit with sandbox_exec, publish with sandbox_git_push",
+          ),
         ttlSec: z.number().int().positive().max(14400).optional().describe("Session TTL (default 900s)"),
       },
     },
@@ -63,6 +70,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       harness,
       world,
       hibernate,
+      repo,
       ttlSec,
     }: {
       image?: string;
@@ -70,6 +78,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       harness?: { id: string; version?: string; image?: string };
       world?: { id: string };
       hibernate?: boolean;
+      repo?: { git: string; ref?: string; dir?: string };
       ttlSec?: number;
     }) =>
       run(principal, "runs:submit", async () =>
@@ -82,6 +91,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
             ...(harness !== undefined ? { harness } : {}),
             ...(world !== undefined ? { world } : {}),
             ...(hibernate !== undefined ? { hibernate } : {}),
+            ...(repo !== undefined ? { repo } : {}),
             ...(ttlSec !== undefined ? { ttlSec } : {}),
           }),
         ),
@@ -119,6 +129,52 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
             ...(name !== undefined ? { name } : {}),
             ...(description !== undefined ? { description } : {}),
             ...(instructions !== undefined ? { instructions } : {}),
+          }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "sandbox_git_push",
+    {
+      description:
+        "Publish a session's work: push the checked-out branch to the repository it was cloned from, and " +
+        "optionally open a pull request for it. COMMIT FIRST with sandbox_exec (git add/commit need no " +
+        "credential) — this tool only authenticates the push, with a token minted for this one call and never " +
+        "stored. The remote is read from the container, so what is pushed is what is actually checked out. " +
+        "400 on a directory with no remote or a detached HEAD; 404 when no workspace GitHub App installation " +
+        "covers the repository. Creator-or-admin.",
+      inputSchema: {
+        id: z.string().describe("The sandbox session's run id"),
+        dir: z.string().optional().describe("Working directory (default: what the session cloned into)"),
+        branch: z.string().optional().describe("Branch to push (default: the working tree's current branch)"),
+        remote: z.string().optional().describe("Remote name (default: origin)"),
+        pullRequest: z
+          .object({ title: z.string(), body: z.string().optional() })
+          .optional()
+          .describe("Open a pull request for the pushed branch against the repository's default branch"),
+      },
+    },
+    ({
+      id,
+      dir,
+      branch,
+      remote,
+      pullRequest,
+    }: {
+      id: string;
+      dir?: string;
+      branch?: string;
+      remote?: string;
+      pullRequest?: { title: string; body?: string };
+    }) =>
+      run(principal, "github:write", async () =>
+        ok(
+          await sessions.gitPush(actor(), id, {
+            ...(dir !== undefined ? { dir } : {}),
+            ...(branch !== undefined ? { branch } : {}),
+            ...(remote !== undefined ? { remote } : {}),
+            ...(pullRequest !== undefined ? { pullRequest } : {}),
           }),
         ),
       ),

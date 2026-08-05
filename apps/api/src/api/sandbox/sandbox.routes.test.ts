@@ -548,3 +548,100 @@ describe("sandbox world routes — agent worlds (W1): snapshot, touch, close-wit
     ).toBe(400);
   });
 });
+
+describe("sandbox git routes — agent worlds (W2): a repository in, commits out", () => {
+  function buildGitApp() {
+    const store = new InMemoryRunStore();
+    const trajectories = new InMemoryTrajectoryStore();
+    const writes: string[] = [];
+    let seq = 0;
+    const driver: Driver = {
+      id: "fake",
+      async provision() {
+        const cid = `c-${++seq}`;
+        const handle: ComputeHandle = {
+          id: cid,
+          async exec(command) {
+            return { stdout: `ran:${command}`, stderr: "", exitCode: 0 };
+          },
+          async writeFile() {},
+          async readFile() {
+            return "";
+          },
+          async dispose() {},
+        };
+        return handle;
+      },
+    };
+    let n = 0;
+    const sandboxSessions = new SandboxSessionService({
+      store,
+      driver,
+      trajectories,
+      newId: () => `sbx-${++n}`,
+      git: {
+        readToken: async () => "read-token",
+        writeToken: async (_tenant, gitUrl) => {
+          writes.push(gitUrl);
+          return "write-token";
+        },
+        openPullRequest: async () => ({ url: "https://github.com/acme/app/pull/3", base: "main" }),
+      },
+    });
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store, trajectories }),
+      sandboxSessions,
+      internalToken: "itok",
+    });
+    return { app, writes };
+  }
+
+  it("create with repo records what was cloned; push returns the branch and its pull request", async () => {
+    const { app, writes } = buildGitApp();
+    const created = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { image: "debian", repo: { git: "https://github.com/acme/app.git", ref: "main" } },
+    });
+    expect(created.statusCode).toBe(200);
+    expect(created.json().session.repo).toEqual({ git: "https://github.com/acme/app.git", ref: "main", dir: "work" });
+
+    const pushed = await app.inject({
+      method: "POST",
+      url: `/sandboxes/${created.json().id}/git/push`,
+      headers: H,
+      payload: { pullRequest: { title: "Ship it" } },
+    });
+    expect(pushed.statusCode).toBe(200);
+    expect(pushed.json().pullRequest).toEqual({ url: "https://github.com/acme/app/pull/3", base: "main" });
+    expect(writes).toHaveLength(1); // one write credential, minted for this one push
+  });
+
+  it("validates the create body (repo needs a target) and scopes push by workspace (404)", async () => {
+    const { app } = buildGitApp();
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/sandboxes",
+          headers: H,
+          payload: { repo: { git: "https://github.com/acme/app.git" } },
+        })
+      ).statusCode,
+    ).toBe(400);
+
+    const created = await app.inject({ method: "POST", url: "/sandboxes", headers: H, payload: { image: "debian" } });
+    const rival = { ...H, "x-everdict-tenant": "rival" };
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/sandboxes/${created.json().id}/git/push`,
+          headers: rival,
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+});
