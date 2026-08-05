@@ -18,8 +18,21 @@ courier, not an auth authority**: it forwards the user's Keycloak token and trus
    Server-side outbound fetch is proxy-aware: `src/instrumentation.ts` installs an `EnvHttpProxyAgent`
    global dispatcher (`shared/lib/proxy-dispatcher.ts`, local mirror of apps/api's — runtime-decoupling
    forbids importing it) so corporate-proxy deployments work via standard `HTTP(S)_PROXY`/`NO_PROXY` env.
-4. **Pages = server components** that fetch + `.parse()` and pass plain props to `'use client'` islands;
-   mutations are `'use server'` server actions that forward the token then `revalidatePath`.
+4. **Pages = server components** that fetch + `.parse()` and pass plain props to `'use client'` islands.
+   **A mutation must not run inside a transition, and must not `revalidatePath`.** Write it as a plain async
+   IIFE with `useState` pending, and refresh through `useRefresh()` (`shared/lib/use-refresh`) — never
+   `router.refresh()` directly. Three measured reasons, all on one click of an issue's project picker:
+   `revalidatePath` evicts Next 16's ENTIRE client prefetch cache (+300 ms cooldown) although nothing here
+   caches; every mounted `<Link>` then re-prefetches four-at-a-time (49 RSC requests); and anything after the
+   `await` inside `startTransition` stays entangled with the router, so the commit lands whenever an
+   UNRELATED update happens — the same click measured 26 ms to 14.8 s, tracking the poll interval. Fixed it
+   is 41 ms for the control and 165–195 ms for the server-rendered half. Links go through `shared/ui/link`
+   (prefetch off by default; an eslint rule blocks `next/link`). See `docs/web.md` §"A mutation must not hold
+   the screen". A control that should show its new value before the page catches up keeps it in local state —
+   `IssueProjectControl` is the reference.
+   `revalidatePath` is gone from every action whose callers refresh or navigate (the tracker + 36 more); the
+   ~24 that remain are settings-style managers with no refresh of their own, so the action response is what
+   re-renders them — harmless now that nothing prefetches, and they migrate to `useRefresh()` when touched.
 5. **Role-gate UI** with the `shared/auth/can.ts` mirror (`can(roles, action)`) — enforcement is still the
    control plane's (403). Hide the CTA; don't rely on it for security.
 6. Web owns its LINTING (eslint/prettier, excluded from root Biome — its `lint` is a separate CI job), but its
@@ -30,7 +43,7 @@ courier, not an auth authority**: it forwards the user's Keycloak token and trus
 
 ## Reference impl
 A full slice: `features/submit-run/` — `ui/submit-run-form.tsx` (`'use client'` react-hook-form island) +
-`api/submit-run.ts` (`'use server'` action → `controlPlane.submitRun` → `revalidatePath`) exposed via
+`api/submit-run.ts` (`'use server'` action → `controlPlane.submitRun`; the caller refreshes) exposed via
 `index.ts`; the page `app/[workspace]/runs/page.tsx` fetches server-side and gates the CTA with `can(...)`.
 
 ## Auth = token courier (BFF), not authority

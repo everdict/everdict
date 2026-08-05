@@ -256,8 +256,45 @@ panel/list guidance is not.
 The **New run** and **Harness registration** pages (and their list-page CTAs) are role-gated off `/me`: a viewer sees a
 "You don't have permission" notice instead of the form, a member can submit runs, only an admin can register harnesses.
 All under a shared app shell (sidebar nav + topbar **workspace + role** chip / sign-in-out). Mutations are
-**server actions** (`'use server'`) that forward the user's token and call the control plane server-side, then
-`revalidatePath`.
+**server actions** (`'use server'`) that forward the user's token and call the control plane server-side; the
+screen is then refreshed by the CALLER's `router.refresh()`.
+
+### A mutation must not hold the screen
+
+A mutation here is a server action plus a refresh, and BOTH halves had to be taken out of the caller's
+transition before the screen would keep up. The user-visible symptom was a property change on the issue
+detail that took **4–15 seconds** to appear — with the server change committed in ~130 ms, the network
+finished under a second, and the main thread completely idle the whole time.
+
+Three things were wrong, in the order they were found:
+
+1. **`revalidatePath` in a mutation action.** Nothing here caches (every page is `force-dynamic`, every
+   control-plane call is `cache: 'no-store'`, `staleTimes.dynamic` is 0), but in Next 16 an action that
+   merely *declares* a revalidation makes the router run `invalidateEntirePrefetchCache()` and start a
+   300 ms cooldown. Actions no longer call it — see the note at the top of each `features/*/api` module.
+2. **Every `<Link>` re-prefetching.** A refresh invalidates the segments the current route shares with every
+   other route — the workspace layout — so each one re-prefetched through a scheduler capped at four
+   concurrent requests: 49 RSC requests for one click. On a `force-dynamic` route a prefetch only warms the
+   shell the screen is already rendering, so the app has ONE link component — `shared/ui/link` — which
+   defaults `prefetch` to `false` (an eslint `no-restricted-imports` rule keeps `next/link` out of
+   everything else). Navigation is unchanged to the eye: click → URL 36 ms, content 335 ms, the loading
+   boundary covering the gap.
+3. **The refresh, and everything after the `await`, living inside the caller's transition.** This was the
+   decisive one. `startTransition(async () => { await action(); setOpen(false); router.refresh() })` leaves
+   those updates entangled with the router's work, and the commit then happens *whenever*: eight identical
+   assignments measured 26 · 158 · 4691 · 9754 · 9757 · 14765 · 4754 · 235 ms. What actually released it was
+   an **unrelated** update — a poller tick, or the user clicking anything — which is why the delay tracked
+   the ~5 s poll interval. Nudging on purpose at 300 ms flattened the same eight to 328–380 ms.
+
+So mutations do not run in a transition. `pending` is plain `useState`, the action is awaited in a plain
+async IIFE, and the refresh goes through **`shared/lib/use-refresh`** (`useRefresh()`), which defers
+`router.refresh()` by a tick — out of any transition — and then wakes the pending commit a bounded number of
+times. Guarded by `shared/lib/use-refresh.test.tsx` and `features/manage-{issue,project}/api/*.test.ts`.
+
+After: the control settles in **41 ms** and the server-rendered half of the page (history feed, the project
+detail's `h1`) in **165–195 ms**, run after run. A control whose value is worth showing before the page
+catches up can also hold the accepted value locally — `IssueProjectControl` is the reference.
+
 
 The dev server runs on **port 3001** (`pnpm --filter @everdict/web dev`).
 

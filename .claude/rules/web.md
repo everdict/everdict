@@ -9,6 +9,16 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
 
 - **FSD layers** under `src/`: app → widgets → features → entities → shared. Imports go DOWNWARD only
   (a layer never imports a higher one). Barrels (`index.ts`) expose a slice's public surface.
+- **A mutation must not hold the screen.** No `startTransition` around it (plain async IIFE + `useState`
+  pending), no `revalidatePath` in the action, and the refresh goes through `useRefresh()`
+  (`shared/lib/use-refresh`) rather than `router.refresh()`. Anything after the `await` inside a transition
+  stays entangled with the router and commits only when some UNRELATED update happens — measured 26 ms to
+  14.8 s for the same click, versus 41 ms / 165 ms after. See `docs/web.md`.
+  Modules whose callers have no refresh of their own still carry `revalidatePath` (the action response is what
+  re-renders them); migrate them to `useRefresh()` when you touch them.
+- **`<Link>` comes from `shared/ui/link`, never `next/link`** (eslint-enforced): prefetch defaults to OFF,
+  because on a `force-dynamic` route it only warms the shell the screen already renders while every mounted
+  link re-prefetches on each router-cache invalidation.
 - **Runtime-decoupled: the only allowed `@everdict` dep is TYPE-ONLY `@everdict/contracts`** (wire/record TYPES —
   re-architecture P4). The web is a pure HTTP client of the control plane; it keeps its OWN zod v4 schemas in
   `entities/*/model/schema.ts` doing all runtime boundary validation (`.parse()`), but its EXPORTED TypeScript types are
