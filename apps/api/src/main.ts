@@ -76,6 +76,7 @@ import {
   buildView,
   buildViewSnapshot,
 } from "./composition/services.js";
+import { buildTrustZones } from "./composition/trust-zones.js";
 import { buildWorkspace } from "./composition/workspace.js";
 import { AgentMemberToolingService } from "./core/agent/agent-member-tooling-service.js";
 import { AgentService } from "./core/agent/agent-service.js";
@@ -381,6 +382,11 @@ async function main(): Promise<void> {
       ? { host: workspaceImages.endpoint, namespace: workspaceImages.namespaceFor(workspace) }
       : undefined;
 
+  // Per-tenant isolation for every dispatch — ONE policy for the process, chosen by the operator and
+  // announced at boot (composition/trust-zones.ts). Also feeds the interactive browser sessions below, so a
+  // tenant's eval jobs and its live browsers are isolated by the same rule rather than two nearby guesses.
+  const { trustZones } = buildTrustZones();
+
   const {
     runnerHub,
     callbackRendezvous,
@@ -398,6 +404,7 @@ async function main(): Promise<void> {
     releaseSelfRunnerBackend,
   } = buildDispatch({
     ...(workspaceImages ? { images: workspaceImages } : {}),
+    ...(trustZones ? { trustZones } : {}),
     callbackStore,
     secretStore,
     settingsStore,
@@ -819,7 +826,7 @@ async function main(): Promise<void> {
   // Runtime binding (browser-profiles S9) — a session with a `runtime` runs the browser on the tenant's registered
   // runtime inside that tenant's trust zone (per-tenant network isolation; reachable from a containerized control
   // plane), else the host provisioner above. Nomad ships first; K8s / self-hosted are follow-ups.
-  const sessionTrustZones = perTenantTrustZones();
+  const sessionTrustZones = trustZones ?? perTenantTrustZones();
   const runtimeBrowserProvisioner = new RuntimeBrowserProvisioner({
     resolveSpec: (tenant, id) => runtimeRegistry.get(tenant, id).catch(() => undefined),
     zoneFor: (tenant) => sessionTrustZones.resolve(tenant),

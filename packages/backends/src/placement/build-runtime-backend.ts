@@ -1,4 +1,5 @@
 import { BadRequestError, type RuntimeSpec } from "@everdict/contracts";
+import type { TrustZonePolicy } from "@everdict/domain";
 import type { Backend } from "../backend.js";
 import { K8sBackend, type K8sBackendOptions } from "../orchestrators/k8s.js";
 import { LocalBackend } from "../orchestrators/local.js";
@@ -83,10 +84,27 @@ export function k8sRuntimeOptions(
 // A tenant-registered RuntimeSpec (@everdict/contracts) → a live Backend. Model/cluster credentials are injected via secretEnv (the spec holds no secrets).
 // The cluster API token (authSecret) is used as an auth header and separated from the alloc env (the option builders above).
 // The control plane uses this at dispatch time to build a tenant runtime and register it in the Scheduler registry.
-export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> } = {}): Backend {
+// `trustZones`, when the operator configured one, is the ISOLATION AUTHORITY for every tenant's dispatch: the
+// backend resolves the job's tenant to a zone and applies its runtime + namespace, refusing an untrusted zone
+// on a non-hardened runtime (`assertHardenedIsolation`). Without it a job runs with whatever the RuntimeSpec
+// itself declared — which is a legitimate deployment (a single-tenant cluster the operator already hardened),
+// but NOT the same thing, and the difference used to be invisible: the parameter did not exist here at all,
+// so a control plane that believed it enforced per-tenant isolation silently did not. See docs/tenancy.md.
+export function buildRuntimeBackend(
+  spec: RuntimeSpec,
+  opts: { secretEnv?: Record<string, string>; trustZones?: TrustZonePolicy } = {},
+): Backend {
   if (spec.kind === "local") return new LocalBackend();
-  if (spec.kind === "k8s") return new K8sBackend(k8sRuntimeOptions(spec, opts.secretEnv));
-  if (spec.kind === "nomad") return new NomadBackend(nomadRuntimeOptions(spec, opts.secretEnv));
+  if (spec.kind === "k8s")
+    return new K8sBackend({
+      ...k8sRuntimeOptions(spec, opts.secretEnv),
+      ...(opts.trustZones ? { trustZones: opts.trustZones } : {}),
+    });
+  if (spec.kind === "nomad")
+    return new NomadBackend({
+      ...nomadRuntimeOptions(spec, opts.secretEnv),
+      ...(opts.trustZones ? { trustZones: opts.trustZones } : {}),
+    });
   // The union (local|nomad|k8s) is exhausted — unreachable at compile time. topology-capable (nomad/k8s + traceSource)
   // needs @everdict/topology ServiceTopologyBackend (no circular dep allowed) → handled by apps/api's buildBackend.
   // Runtime defense: explicitly reject an unvalidated kind arriving at the boundary (get the kind string only via a never cast).

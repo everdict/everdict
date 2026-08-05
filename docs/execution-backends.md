@@ -148,13 +148,32 @@ Live proof:
 Eval runs **untrusted code** — a tenant uploads its own harness image/code, which executes arbitrarily.
 So multi-tenancy is a *security* boundary, not just fairness. A `TrustZone` (`@everdict/contracts`) maps a tenant
 to enforced isolation: `{isolationRuntime, namespace, network, trusted}`. A `TrustZonePolicy`
-(`@everdict/backends`) resolves `tenant → TrustZone`; `perTenantTrustZones()` is the safe default — **every
+(`@everdict/backends`) resolves `tenant → TrustZone`; `perTenantTrustZones()` is the safe policy — **every
 tenant gets its own zone** (hardened `runsc`, dedicated `everdict-<tenant>` namespace, `deny-cross-tenant`,
 `trusted:false`); `overrides`/`staticTrustZones` relax only declared first-party (`trusted`) tenants.
 
 - **enforcement** — `assertHardenedIsolation(zone)` rejects an untrusted tenant on a shared-kernel runtime
   (`runc`/none); only `trusted` (first-party) zones may relax. `NomadBackend`/`ServiceTopologyBackend`
   apply this per dispatch, setting the docker `runtime` + Nomad `Namespace` from the resolved zone.
+- **the policy is the OPERATOR's, and the control plane says which one is live** —
+  `EVERDICT_TRUST_ZONES` (`apps/api` `composition/trust-zones.ts`) selects it, and the choice is printed at
+  boot:
+  - `runtime-declared` (default) — a dispatch is isolated by what its own `RuntimeSpec` declares
+    (`spec.runtime` / `spec.namespace` / `spec.runtimeClass`). Legitimate for a single-tenant cluster the
+    operator already hardened; **not** per-tenant enforcement.
+  - `per-tenant` — `perTenantTrustZones()` over every dispatch (`EVERDICT_TRUST_ZONE_RUNTIME`,
+    `EVERDICT_TRUST_ZONE_NAMESPACE_PREFIX` tune it). Has a **prerequisite**: the hardened runtime must be
+    installed on the clients and the namespaces must exist, or every job fails — which is why it cannot be
+    switched on for an operator by default.
+  An unrecognized value **fails the boot** rather than degrading to the permissive default: an isolation
+  setting nobody honors is worse than one that refuses to start.
+
+  This wiring is newer than the layers above it. Before it, `buildRuntimeBackend` had no `trustZones`
+  parameter at all and `buildTopologyBackend` never passed one — so the policy existed in the domain, the
+  backends accepted it, and *nothing in production ever supplied it*. A deployment could believe it enforced
+  per-tenant isolation while running every tenant's code under whatever its `RuntimeSpec` happened to say.
+  The default did not change (that would break running clusters); what changed is that the state is now
+  chosen and announced instead of silently assumed.
 - **warm pools are NOT shared across tenants** — the single most important rule for service-topology
   harnesses. `NomadTopologyRuntime` keys its warm pool by `(spec.id, version, zone.id)` and suffixes the
   topology job ID with the zone, so two tenants on the same harness version get **separate** warm

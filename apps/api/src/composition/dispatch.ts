@@ -11,6 +11,7 @@ import {
 } from "@everdict/backends";
 import type { RegistryAuth, RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
+import type { TrustZonePolicy } from "@everdict/domain";
 import { classifyFailure, isRunnerOnline } from "@everdict/domain";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
 import type { EnvRecordSink } from "@everdict/topology";
@@ -47,6 +48,10 @@ export function buildDispatch(deps: {
   // Managed image store (optional) — when present, a job's managed images are authorized with a minted grant
   // instead of a registered credential. docs/architecture/managed-image-store.md
   images?: WorkspaceImages;
+  // Per-tenant isolation policy, when the operator configured one (composition/trust-zones.ts). Threaded into
+  // BOTH dispatch lanes — the plain runtime backend and the topology one — because a control plane that
+  // enforces isolation on one lane and not the other enforces it on neither.
+  trustZones?: TrustZonePolicy;
   cipher?: SecretCipher; // browser-profiles S5 — decrypt the profile's captured storageState blob
   caseRecorder?: CaseRecorder; // replay ② — durable recorder the managed topology backend streams browser CDP events into
 }) {
@@ -150,8 +155,9 @@ export function buildDispatch(deps: {
           ...(seedProfile ? { seedProfile } : {}),
           // Replay ② — stream the per-case browser's CDP events into the durable recording (managed path).
           ...(recordSink ? { recordSink } : {}),
+          ...(deps.trustZones ? { trustZones: deps.trustZones } : {}),
         })
-      : buildRuntimeBackend(spec, opts);
+      : buildRuntimeBackend(spec, { ...opts, ...(deps.trustZones ? { trustZones: deps.trustZones } : {}) });
   // Resolve a command harness's {{model}} to a registered Model id (else raw), then delegate to RuntimeDispatcher (placement).
   // run/judge/scorecard share this one dispatcher, so every path runs with the identically-resolved model.
   const runtimeDispatcher = new RuntimeDispatcher({

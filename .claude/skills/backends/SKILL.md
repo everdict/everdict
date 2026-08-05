@@ -113,10 +113,14 @@ Two dispatchers (both satisfy `Dispatcher` — `dispatch(job)→CaseResult`; dep
     402; `runs` reserved at admit so bursts can't overshoot), `settle(costOf(result))` on completion.
 
 ## Tenant isolation, secrets, autoscaling
-- **Trust zones** (`TrustZonePolicy`, `perTenantTrustZones` default): eval = untrusted code, so each tenant
-  gets its own `TrustZone` (hardened `runsc`, `everdict-<tenant>` namespace, deny-cross-tenant). The backend
-  applies it per dispatch (docker `runtime` + Nomad `Namespace`) and calls `assertHardenedIsolation`
-  (untrusted ⇒ never shared-kernel runc). **Never share warm pools across tenants** (topology keys by zone).
+- **Trust zones** (`TrustZonePolicy`, `perTenantTrustZones`): eval = untrusted code, so each tenant gets its
+  own `TrustZone` (hardened `runsc`, `everdict-<tenant>` namespace, deny-cross-tenant). The backend applies it
+  per dispatch (docker `runtime` + Nomad `Namespace`) and calls `assertHardenedIsolation` (untrusted ⇒ never
+  shared-kernel runc). **Never share warm pools across tenants** (topology keys by zone). WHICH policy is live
+  is the operator's `EVERDICT_TRUST_ZONES` (`apps/api` `composition/trust-zones.ts`, announced at boot):
+  `runtime-declared` (default — the RuntimeSpec's own runtime/namespace) or `per-tenant` (needs the hardened
+  runtime installed + namespaces to exist). Pass it to BOTH lanes — `buildRuntimeBackend({trustZones})` and
+  `buildTopologyBackend({trustZones})` — because enforcing on one lane only enforces on neither.
 - **Secrets** (`SecretProvider`, `staticSecrets`): inject `secretsFor(tenant)` into ONLY that tenant's
   alloc env — a model key never crosses tenants.
 - **Autoscaling** (`Autoscaler`): reads `Scheduler.stats()` (queue depth + in-flight), drives `ScalingTarget`s

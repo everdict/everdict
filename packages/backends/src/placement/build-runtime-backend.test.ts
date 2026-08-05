@@ -1,4 +1,5 @@
 import type { RuntimeSpec } from "@everdict/contracts";
+import { perTenantTrustZones } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { isInspectable, isProbeable, isReclaimable } from "../backend.js";
 import { buildRuntimeBackend, k8sRuntimeOptions, nomadRuntimeOptions } from "./build-runtime-backend.js";
@@ -141,5 +142,52 @@ describe("k8sRuntimeOptions (external cluster API auth)", () => {
     expect(opts.gpu).toBe(4);
     expect(opts.nodeSelector).toEqual({ "nvidia.com/gpu.present": "true" });
     expect(opts.tolerations).toEqual([{ key: "nvidia.com/gpu", operator: "Exists", effect: "NoSchedule" }]);
+  });
+});
+
+// The isolation authority reaches the backend (W4a). This used to be impossible to express: the parameter
+// did not exist, so a control plane could believe it enforced per-tenant isolation while every job ran with
+// whatever its RuntimeSpec declared. The test pins the WIRING, which is where the guarantee was lost.
+describe("buildRuntimeBackend — trust zones reach the dispatched backend", () => {
+  const zones = perTenantTrustZones({ isolationRuntime: "kata", namespacePrefix: "zone-" });
+  const nomad: RuntimeSpec = {
+    kind: "nomad",
+    id: "n",
+    version: "1.0.0",
+    tags: [],
+    addr: "http://x:4646",
+    image: "i",
+    runtime: "runc", // what the SPEC declared — the zone must win over it
+    namespace: "default",
+  };
+
+  it("hands the policy to a nomad backend, and the zone's runtime/namespace override the spec's", async () => {
+    const backend = buildRuntimeBackend(nomad, { trustZones: zones });
+    const opts = await (
+      backend as unknown as {
+        effectiveOpts(job: { tenant?: string }): Promise<{ runtime?: string; namespace?: string }>;
+      }
+    ).effectiveOpts({ tenant: "acme" });
+    expect(opts).toMatchObject({ runtime: "kata", namespace: "zone-acme" });
+  });
+
+  it("without a policy the spec still decides — the permissive default stays a DELIBERATE deployment, not a bug", async () => {
+    const backend = buildRuntimeBackend(nomad);
+    const opts = await (
+      backend as unknown as {
+        effectiveOpts(job: { tenant?: string }): Promise<{ runtime?: string; namespace?: string }>;
+      }
+    ).effectiveOpts({ tenant: "acme" });
+    expect(opts).toMatchObject({ runtime: "runc", namespace: "default" });
+  });
+
+  it("refuses an untrusted zone on a runtime that does not isolate (assertHardenedIsolation, at dispatch)", async () => {
+    const soft = perTenantTrustZones({ isolationRuntime: "runc" });
+    const backend = buildRuntimeBackend(nomad, { trustZones: soft });
+    await expect(
+      (backend as unknown as { effectiveOpts(job: { tenant?: string }): Promise<unknown> }).effectiveOpts({
+        tenant: "acme",
+      }),
+    ).rejects.toThrow(/runc|isolation/i);
   });
 });

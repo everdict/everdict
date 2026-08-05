@@ -6,6 +6,7 @@ import {
   type RuntimeSpec,
   type TraceSourceConfig,
 } from "@everdict/contracts";
+import type { TrustZonePolicy } from "@everdict/domain";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 import {
   type CallbackRendezvous,
@@ -42,6 +43,9 @@ export function buildTopologyBackend(
     // network/console/nav (+ frames) into. For the managed backend this routes straight to the in-process CaseRecorder
     // (recordTrack/recordFrame → the durable RecordingStore). Undefined = no environment recording (trace-only replay).
     recordSink?: (runId: string) => EnvRecordSink | undefined;
+    // Per-tenant isolation, when the operator configured a policy: the topology's warm pool is keyed BY zone
+    // (so two tenants never share a pool) and each service runs under the zone's runtime + namespace.
+    trustZones?: TrustZonePolicy;
   },
 ): Backend {
   const ts = spec.traceSource;
@@ -91,6 +95,7 @@ export function buildTopologyBackend(
   return new ServiceTopologyBackend({
     runtime,
     traceSource,
+    ...(deps.trustZones ? { trustZones: deps.trustZones } : {}),
     ...(traceSourceFor ? { traceSourceFor } : {}),
     // Rendezvous for the callback completion model (if present) — issues {{callback_url}} + awaits inbound. The control-plane route delivers to the same instance.
     ...(deps.callbackRendezvous ? { callbackRendezvous: deps.callbackRendezvous } : {}),
