@@ -28,6 +28,18 @@ export function sortVersions(versions: string[]): string[] {
   return [...versions].sort(compareVersions);
 }
 
+// Retention over a version line (agent worlds W3): which versions fall outside "keep the newest N". A world
+// that snapshots on every hibernate grows a version per session, and the image store has no GC of its own —
+// so the line needs a bound, and the bound has to be a RULE, not a guess made at a call site. Keeps the
+// newest `keep` by the same ordering `latest` resolution uses; returns the rest oldest-first (the order they
+// should be dropped in, so an interrupted prune leaves the newest intact). `keep < 1` prunes nothing: a
+// retention policy that could delete every version is a bug, not a configuration.
+export function versionsBeyondKeep(versions: string[], keep: number): string[] {
+  if (keep < 1) return [];
+  const ordered = sortVersions(versions);
+  return ordered.slice(0, Math.max(0, ordered.length - keep));
+}
+
 // How far a stamp moves the version — the author's own judgement of the change, not a computed diff.
 export type VersionBump = "major" | "minor" | "patch";
 

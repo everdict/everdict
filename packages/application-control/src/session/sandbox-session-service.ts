@@ -153,6 +153,15 @@ export interface SandboxTaskTrace {
   done: boolean;
 }
 
+// What a snapshot published, and what retention removed to make room for it (W3). `prunedVersions` is
+// present only when something was actually dropped — a caller reporting a bound must be able to name it.
+export interface WorldSnapshotResult {
+  world: string;
+  version: string;
+  image: string;
+  prunedVersions?: string[];
+}
+
 export interface SandboxSessionServiceDeps {
   store: RunStore;
   driver: Driver;
@@ -215,6 +224,14 @@ export interface SandboxSessionServiceDeps {
     world: string,
     input: { image: string; sessionRunId: string; name?: string; description?: string; instructions?: string },
   ) => Promise<{ version: string }>;
+  // Retention (W3): drop the world's oldest snapshots past the operator's bound, image bytes included. A world
+  // gains a version per hibernate and the registry has no GC, so autonomy without this is a disk that fills.
+  // Best-effort AFTER a successful publish: pruning failure never fails the snapshot the caller is waiting on.
+  pruneWorldVersions?: (
+    tenant: string,
+    actor: { subject: string; isAdmin: boolean },
+    world: string,
+  ) => Promise<{ prunedVersions: string[] }>;
   defaultTtlSec?: number;
   maxTtlSec?: number;
   maxPerTenant?: number; // undefined = unlimited (dev); production sets both
@@ -403,7 +420,7 @@ export class SandboxSessionService {
     actor: SandboxActor,
     runId: string,
     input: { name?: string; description?: string; instructions?: string } = {},
-  ): Promise<{ world: string; version: string; image: string }> {
+  ): Promise<WorldSnapshotResult> {
     this.sweep();
     const live = this.sessions.get(runId);
     if (!live || live.tenant !== actor.tenant)
@@ -813,7 +830,7 @@ export class SandboxSessionService {
     live: LiveSession,
     actor: { subject: string; isAdmin: boolean },
     input: { name?: string; description?: string; instructions?: string },
-  ): Promise<{ world: string; version: string; image: string }> {
+  ): Promise<WorldSnapshotResult> {
     const world = live.world;
     if (world === undefined)
       throw new BadRequestError(
@@ -846,7 +863,7 @@ export class SandboxSessionService {
     name?: string;
     description?: string;
     instructions?: string;
-  }): Promise<{ world: string; version: string; image: string }> {
+  }): Promise<WorldSnapshotResult> {
     const images = this.deps.images;
     const publish = this.deps.publishWorldVersion;
     const snapshot = this.deps.driver.snapshot?.bind(this.deps.driver);
@@ -896,7 +913,17 @@ export class SandboxSessionService {
       );
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
     }
-    return { world: input.world, version: published.version, image };
+    // Retention runs AFTER the publish and never blocks it: the snapshot the caller asked for already
+    // exists, and a registry that refuses a delete must not turn that success into a failure. What it
+    // removed is reported, not swallowed — a bound that silently eats versions is indistinguishable from
+    // data loss (no silent caps).
+    const pruned = await this.deps.pruneWorldVersions?.(input.tenant, input.actor, input.world).catch(() => undefined);
+    return {
+      world: input.world,
+      version: published.version,
+      image,
+      ...(pruned !== undefined && pruned.prunedVersions.length > 0 ? { prunedVersions: pruned.prunedVersions } : {}),
+    };
   }
 
   private async teardown(

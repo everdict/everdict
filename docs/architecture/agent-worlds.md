@@ -97,11 +97,32 @@ World sessions **refuse at create** (400) when the deployment cannot snapshot �
 store (`EVERDICT_IMAGE_STORE_*`), no capability service, or a driver without `snapshot` — instead of
 failing hours of work later at the first snapshot.
 
+## W3 — retention: the bound autonomy needs
+
+A world gains a version on every hibernate, and the managed registry has no GC of its own. An autonomous
+loop that snapshots each time it wakes therefore grows storage forever — so the version line is **bounded**:
+after a successful publish, `pruneWorldVersions` drops the oldest versions past
+`EVERDICT_WORLD_KEEP_VERSIONS` (default 10), **capability versions and the image bytes behind them**
+(dropping only the version would leave the registry holding blobs nobody can name).
+
+Three rules make the bound safe:
+
+- **Which versions fall outside is a domain rule**, not a call-site guess: `versionsBeyondKeep` keeps the
+  newest N by the same ordering `latest` resolution uses and returns the rest **oldest-first**, so an
+  interrupted prune leaves the newest intact. `keep < 1` prunes nothing — a retention policy that could
+  empty the line is a bug, not a configuration.
+- **Retention is not a delete channel.** `CapabilityService.pruneVersions` SKIPS a version another member
+  published (it logs which) rather than failing or deleting it: a shared world can carry several authors,
+  and a bound must never become a way to remove someone else's work.
+- **It runs after the publish and can never undo it.** The snapshot the caller is waiting on already
+  exists; a registry that refuses a delete must not turn that success into a failure. What was removed is
+  reported (`prunedVersions` on the snapshot result) — a silent bound is indistinguishable from data loss.
+
 ## Not yet (the rest of the arc)
 
-- **W3 — autonomy**: guarded-tool policy for the snapshot/credential tools, `causedBy` stamping +
-  trigger-matchability review, per-world retention (keep-last-N; the image store still has no GC),
-  per-agent compute budgets instead of the flat per-tenant session caps.
+- **W3 remainder — autonomy**: `causedBy` stamping on session facts + the trigger-matchability review for
+  `run.snapshotted`, and per-agent compute budgets (with queueing) instead of the flat per-tenant session
+  caps, which two autonomous agents in one workspace collide on immediately.
 - **W4 — placement**: world sessions on cluster runtimes (the Nomad browser-session `Type:"service"`
   precedent) — requires wiring trust zones into dispatch, and a snapshot mechanism that does not
   assume a host-local docker daemon.

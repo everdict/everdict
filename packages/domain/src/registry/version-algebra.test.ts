@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bumpVersion, compareVersions, resolveRef, sortVersions } from "./version-algebra.js";
+import { bumpVersion, compareVersions, resolveRef, sortVersions, versionsBeyondKeep } from "./version-algebra.js";
 
 describe("version algebra — semver ordering + latest resolution", () => {
   it("orders semver versions numerically, not lexically", () => {
@@ -42,5 +42,20 @@ describe("version algebra — semver ordering + latest resolution", () => {
     // Free-string versions with no semver compare equal → their relative order is registration order (seq tie-break in
     // the store), which is the intended behavior for non-semver — but an EMPTY string must never enter (boundary-rejected).
     expect(compareVersions("v1", "v2")).toBe(0);
+  });
+});
+
+describe("versionsBeyondKeep — the retention bound over a version line (agent worlds W3)", () => {
+  it("keeps the newest N and returns the rest OLDEST-FIRST, so an interrupted prune leaves the newest intact", () => {
+    const line = ["1.0.0", "1.0.3", "1.0.1", "1.0.2"];
+    expect(versionsBeyondKeep(line, 2)).toEqual(["1.0.0", "1.0.1"]);
+    expect(versionsBeyondKeep(line, 4)).toEqual([]); // exactly at the bound
+    expect(versionsBeyondKeep(line, 9)).toEqual([]); // a young world is never pruned
+    expect(versionsBeyondKeep([], 3)).toEqual([]);
+  });
+
+  it("prunes NOTHING when keep < 1 — a retention policy that could empty the line is a bug, not a setting", () => {
+    expect(versionsBeyondKeep(["1.0.0", "1.0.1"], 0)).toEqual([]);
+    expect(versionsBeyondKeep(["1.0.0", "1.0.1"], -5)).toEqual([]);
   });
 });

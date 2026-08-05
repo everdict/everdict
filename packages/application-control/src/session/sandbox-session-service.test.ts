@@ -1000,3 +1000,52 @@ describe("SandboxSessionService — agent worlds (W2: a repository in, commits o
     await expect(empty.service.gitPush(creator, noRemote.id, {})).rejects.toMatchObject({ status: 400 });
   });
 });
+
+// Retention (agent worlds W3) — autonomy without a bound is a disk that fills: a world gains a version per
+// hibernate and the registry has no GC. The prune runs after the publish and can never undo it.
+describe("SandboxSessionService — world retention", () => {
+  it("reports what retention removed, and a prune failure never fails the snapshot that already succeeded", async () => {
+    const pruneCalls: Array<{ world: string; actor: string }> = [];
+    const ctx = buildWorld({
+      pruneWorldVersions: async (_tenant, actor, world) => {
+        pruneCalls.push({ world, actor: actor.subject });
+        return { prunedVersions: ["1.0.0", "1.0.1"] };
+      },
+    });
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    const result = await ctx.service.snapshot(creator, record.id, {});
+    expect(result.prunedVersions).toEqual(["1.0.0", "1.0.1"]);
+    expect(pruneCalls).toEqual([{ world: "proj", actor: "alice" }]); // pruned as the session's own creator
+
+    const broken = buildWorld({
+      pruneWorldVersions: async () => {
+        throw new Error("registry refused the delete");
+      },
+    });
+    const second = await broken.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    const survived = await broken.service.snapshot(creator, second.id, {});
+    expect(survived.version).toBe("1.0.0"); // the publish stands
+    expect(survived.prunedVersions).toBeUndefined(); // and says nothing was pruned
+  });
+
+  it("omits prunedVersions when nothing was dropped — the field means 'this was removed', not 'a bound exists'", async () => {
+    const ctx = buildWorld({ pruneWorldVersions: async () => ({ prunedVersions: [] }) });
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    expect((await ctx.service.snapshot(creator, record.id, {})).prunedVersions).toBeUndefined();
+  });
+});

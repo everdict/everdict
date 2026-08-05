@@ -343,6 +343,7 @@ export {
   sortVersions,
   specsEqual,
   type VersionBump,
+  versionsBeyondKeep,
 } from "./registry/version-algebra.js";
 
 // placement — pure multi-tenant placement policies (from @everdict/backends)

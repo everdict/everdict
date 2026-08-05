@@ -17,6 +17,7 @@ import {
   diffCapabilitySpecs,
   imageWarnings,
   specsEqual,
+  versionsBeyondKeep,
 } from "@everdict/domain";
 import type { CapabilityStore } from "../ports/capability-store.js";
 import { normalizeVersionTags } from "../version-tag/version-tag-service.js";
@@ -413,6 +414,39 @@ export class CapabilityService {
     const normalized = normalizeVersionTags(tags);
     await this.deps.store.setVersionTags(tenant, id, version, normalized);
     return { workspace: tenant, id, version, tags: normalized };
+  }
+
+  // Retention over one capability's version line (agent worlds W3): keep the newest `keep` versions and
+  // soft-delete the rest. A world snapshots on every hibernate, so without a bound the line — and the images
+  // behind it — grow forever. Which versions fall outside the bound is the domain's rule
+  // (`versionsBeyondKeep`); this method owns only the deletion, and it SKIPS a version this actor may not
+  // delete rather than failing the whole prune: a shared world can carry versions several members published,
+  // and retention must not become a way to delete another member's work. Returns what it actually removed
+  // (with each version's image, so the caller can reclaim the bytes too) — a caller that reports "pruned 3"
+  // must be able to say WHICH three.
+  async pruneVersions(
+    tenant: string,
+    id: string,
+    actor: CapabilityActor,
+    keep: number,
+  ): Promise<{ pruned: Array<{ version: string; image?: string }>; skipped: string[] }> {
+    const pruned: Array<{ version: string; image?: string }> = [];
+    const skipped: string[] = [];
+    for (const version of versionsBeyondKeep(await this.deps.store.versions(tenant, id), keep)) {
+      const creator = await this.deps.store.creatorOfVersion(tenant, id, version);
+      if (creator === undefined) continue; // already gone — nothing to reclaim
+      if (creator !== actor.subject && !actor.isAdmin) {
+        skipped.push(version);
+        continue;
+      }
+      const record = await this.deps.store.get(tenant, id, version);
+      await this.deps.store.softDelete(tenant, id, version);
+      pruned.push({
+        version,
+        ...(record?.spec.type === "environment" ? { image: record.spec.image } : {}),
+      });
+    }
+    return { pruned, skipped };
   }
 
   // Soft-delete a single version — the version's creator or a workspace admin (capabilities:delete). Missing /

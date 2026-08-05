@@ -11,7 +11,7 @@ import type {
 import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
 import { NotFoundError, type RegistryAuth } from "@everdict/contracts";
 import type { BudgetTracker, UsageMeter } from "@everdict/domain";
-import { canConsumeCapability, harnessAuthEnv, resolveHarnessSecrets } from "@everdict/domain";
+import { canConsumeCapability, harnessAuthEnv, parseImageRef, resolveHarnessSecrets } from "@everdict/domain";
 import { DockerDriver } from "@everdict/drivers";
 import { makeHarness } from "@everdict/job-runner";
 import type { HarnessInstanceRegistry, ModelRegistry } from "@everdict/registry";
@@ -132,6 +132,31 @@ export function buildSandboxSessions(opts: {
           return { version: saved.version };
         }
       : undefined;
+  // Retention (W3): a world gains a version per hibernate and the registry has no GC, so the line is bounded
+  // by operator policy — capability versions AND the image bytes behind them, because dropping only the
+  // version would leave the registry holding blobs nobody can name. Image removal is per-version
+  // best-effort: a tag already gone is the desired state, not a failure.
+  const keepVersions = intEnv("EVERDICT_WORLD_KEEP_VERSIONS") ?? 10;
+  const images = opts.images;
+  const pruneWorldVersions =
+    capabilityService !== undefined
+      ? async (
+          tenant: string,
+          actor: { subject: string; isAdmin: boolean },
+          world: string,
+        ): Promise<{ prunedVersions: string[] }> => {
+          const { pruned, skipped } = await capabilityService.pruneVersions(tenant, world, actor, keepVersions);
+          for (const entry of pruned) {
+            const tag = entry.image !== undefined ? parseImageRef(entry.image).tag : undefined;
+            if (tag !== undefined && images) await images.remove(tenant, world, tag).catch(() => 0);
+          }
+          if (skipped.length > 0)
+            console.warn(
+              `▶ world retention: kept ${skipped.length} version(s) of '${world}' published by another member (${skipped.join(", ")})`,
+            );
+          return { prunedVersions: pruned.map((p) => p.version) };
+        }
+      : undefined;
   // Agent worlds (W2): read and write are separate calls into the App service so a clone never holds a
   // credential that could push, and a push mints its own at the moment it is needed. A repository no
   // installation covers is a 404 with the repo named — the actionable answer ("install the App there").
@@ -171,6 +196,7 @@ export function buildSandboxSessions(opts: {
     ...(opts.images ? { images: opts.images } : {}),
     ...(opts.registryAuthsFor ? { resolvePullAuths: opts.registryAuthsFor } : {}),
     ...(publishWorldVersion ? { publishWorldVersion } : {}),
+    ...(pruneWorldVersions ? { pruneWorldVersions } : {}),
     ...(resolveSessionHarness ? { resolveSessionHarness } : {}),
     ...(opts.budget ? { budget: opts.budget } : {}),
     ...(opts.usage ? { usage: opts.usage } : {}),

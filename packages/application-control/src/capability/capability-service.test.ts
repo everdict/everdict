@@ -428,3 +428,47 @@ describe("CapabilityService — environment image warnings", () => {
     expect(listed.find((r) => r.id === "triage")?.imageClass).toBeUndefined();
   });
 });
+
+// Retention (agent worlds W3) — a world snapshots on every hibernate and the registry has no GC, so the
+// version line is bounded. The bound must never become a way to delete another member's work.
+describe("CapabilityService — pruneVersions (the retention bound)", () => {
+  const world = (image: string) => ({
+    name: "proj",
+    description: "an agent world",
+    spec: { type: "environment" as const, image, instructions: "boot it" },
+  });
+
+  it("keeps the newest N, reports each pruned version WITH its image, and leaves the rest readable", async () => {
+    const s = svc();
+    for (const n of [1, 2, 3, 4]) await s.save("acme", member("alice"), "proj", world(`reg/ns/proj:v${n}`));
+    const result = await s.pruneVersions("acme", "proj", member("alice"), 2);
+    expect(result.pruned).toEqual([
+      { version: "1.0.0", image: "reg/ns/proj:v1" },
+      { version: "1.0.1", image: "reg/ns/proj:v2" },
+    ]);
+    expect(result.skipped).toEqual([]);
+    expect(await s.listVersions("acme", "alice", "proj")).toMatchObject({ versions: ["1.0.2", "1.0.3"] });
+    expect((await s.get("acme", "proj", "alice", "latest")).version).toBe("1.0.3");
+  });
+
+  it("SKIPS a version published by another member instead of failing — retention is not a delete channel", async () => {
+    const s = svc();
+    await s.save("acme", member("alice"), "proj", world("reg/ns/proj:v1"));
+    await s.save("acme", admin("root"), "proj", world("reg/ns/proj:v2"));
+    await s.save("acme", admin("root"), "proj", world("reg/ns/proj:v3"));
+    const asAlice = await s.pruneVersions("acme", "proj", member("alice"), 1);
+    expect(asAlice.pruned.map((p) => p.version)).toEqual(["1.0.0"]);
+    expect(asAlice.skipped).toEqual(["1.0.1"]); // root's version survives a member's prune
+    // An admin's prune reaches it.
+    expect((await s.pruneVersions("acme", "proj", admin("root"), 1)).pruned.map((p) => p.version)).toEqual(["1.0.1"]);
+  });
+
+  it("prunes nothing below the bound, and nothing at all when keep < 1", async () => {
+    const s = svc();
+    await s.save("acme", member("alice"), "proj", world("reg/ns/proj:v1"));
+    await s.save("acme", member("alice"), "proj", world("reg/ns/proj:v2"));
+    expect((await s.pruneVersions("acme", "proj", member("alice"), 5)).pruned).toEqual([]);
+    expect((await s.pruneVersions("acme", "proj", member("alice"), 0)).pruned).toEqual([]);
+    expect(await s.listVersions("acme", "alice", "proj")).toMatchObject({ versions: ["1.0.0", "1.0.1"] });
+  });
+});
