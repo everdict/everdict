@@ -38,6 +38,8 @@ const SCHEMA_SQL = `CREATE TABLE IF NOT EXISTS everdict_trajectories (
   sealed_at String,
   owner String DEFAULT '',
   body_format String DEFAULT '',
+  kind String DEFAULT '',
+  label String DEFAULT '',
   INDEX idx_run run_id TYPE bloom_filter GRANULARITY 4
 ) ENGINE = MergeTree ORDER BY (tenant, sealed_at, run_id)`;
 
@@ -50,6 +52,11 @@ const ADD_OWNER_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXIST
 // What the body holds (N6's rung-2 twin of mig 0118). '' reads as 'events' — which is what every row written
 // before spans became the record actually is. No backfill: sealed evidence is not rewritten.
 const ADD_BODY_FORMAT_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS body_format String DEFAULT ''";
+// What a piece of evidence IS, and what to call it on a browse row (mig 0124's rung-2 twin). '' = evidence
+// that arrived with no run to name it. No backfill, for the same reason the owner column has none: this store
+// has no run ledger beside it to read from.
+const ADD_KIND_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS kind String DEFAULT ''";
+const ADD_LABEL_SQL = "ALTER TABLE everdict_trajectories ADD COLUMN IF NOT EXISTS label String DEFAULT ''";
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
@@ -61,6 +68,8 @@ interface RunRow {
   event_count_run: number | string;
   sealed_at_run: string;
   owner_run: string;
+  kind_run: string;
+  label_run: string;
 }
 
 function rowToMeta(row: RunRow): TrajectoryMeta {
@@ -71,7 +80,19 @@ function rowToMeta(row: RunRow): TrajectoryMeta {
     eventCount: Number(row.event_count_run),
     sealedAt: row.sealed_at_run,
     ...(row.owner_run ? { owner: row.owner_run } : {}),
+    ...(row.kind_run ? { kind: row.kind_run } : {}),
+    ...(row.label_run ? { label: row.label_run } : {}),
   };
+}
+
+// The browse page's row predicate, applied INSIDE the per-emitter aggregate so both filters run before the
+// LIMIT: a page filtered afterwards comes back short. Owned evidence is its owner's alone; the kind filter is
+// how a reader asks for just their agent conversations among a workspace full of eval cases.
+function listWhere(opts?: { viewer?: string; kind?: string }): string {
+  const conds = ["tenant = {tenant:String}"];
+  if (opts?.viewer !== undefined) conds.push("(owner = '' OR owner = {viewer:String})");
+  if (opts?.kind !== undefined) conds.push("kind = {kind:String}");
+  return conds.join(" AND ");
 }
 
 function encodeCursor(meta: TrajectoryMeta): string {
@@ -103,6 +124,8 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     await this.command(ADD_T0_SQL, {});
     await this.command(ADD_OWNER_SQL, {});
     await this.command(ADD_BODY_FORMAT_SQL, {});
+    await this.command(ADD_KIND_SQL, {});
+    await this.command(ADD_LABEL_SQL, {});
   }
 
   async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
@@ -118,6 +141,8 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       eventCount: count,
       sealedAt,
       ...(input.owner !== undefined ? { owner: input.owner } : {}),
+      ...(input.kind !== undefined ? { kind: input.kind } : {}),
+      ...(input.label !== undefined ? { label: input.label } : {}),
     };
     if (existing) {
       // First seal per emitter wins — evidence is never rewritten; a new emitter is a new plane.
@@ -142,6 +167,8 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       t0: input.t0 ?? "",
       sealed_at: sealedAt,
       owner: input.owner ?? "",
+      kind: input.kind ?? "",
+      label: input.label ?? "",
     };
     await this.command(`INSERT INTO ${this.table()} FORMAT JSONEachRow`, {}, JSON.stringify(row));
     if (!existing) return { ...fallback, created: true };
@@ -210,7 +237,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
 
   async list(
     tenant: string,
-    opts?: { limit?: number; cursor?: string; viewer?: string },
+    opts?: { limit?: number; cursor?: string; viewer?: string; kind?: string },
   ): Promise<TrajectoryListResult> {
     const limit = clampLimit(opts?.limit);
     const after = opts?.cursor !== undefined ? decodeCursor(opts.cursor) : undefined;
@@ -223,13 +250,10 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(source_first, sealed_at_first) AS source_run,
               sum(event_count_first) AS event_count_run,
               min(sealed_at_first) AS sealed_at_run,
-              argMin(owner_first, sealed_at_first) AS owner_run
-       FROM (${this.perEmitterSql(
-         // Owned evidence is the owner's alone — inside the WHERE so the page stays full for everyone else.
-         opts?.viewer !== undefined
-           ? "tenant = {tenant:String} AND (owner = '' OR owner = {viewer:String})"
-           : "tenant = {tenant:String}",
-       )})
+              argMin(owner_first, sealed_at_first) AS owner_run,
+              argMin(kind_first, sealed_at_first) AS kind_run,
+              argMin(label_first, sealed_at_first) AS label_run
+       FROM (${this.perEmitterSql(listWhere(opts))})
        GROUP BY run_id
        ${after !== undefined ? "HAVING (sealed_at_run, run_id) < ({afterSealedAt:String}, {afterRunId:String})" : ""}
        ORDER BY sealed_at_run DESC, run_id DESC
@@ -238,6 +262,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
         tenant,
         limitPlusOne: String(limit + 1),
         ...(opts?.viewer !== undefined ? { viewer: opts.viewer } : {}),
+        ...(opts?.kind !== undefined ? { kind: opts.kind } : {}),
         ...(after !== undefined ? { afterSealedAt: after.sealedAt, afterRunId: after.runId } : {}),
       },
     );
@@ -285,6 +310,8 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(source, sealed_at) AS source_first,
               argMin(event_count, sealed_at) AS event_count_first,
               argMin(owner, sealed_at) AS owner_first,
+              argMin(kind, sealed_at) AS kind_first,
+              argMin(label, sealed_at) AS label_first,
               min(sealed_at) AS sealed_at_first
        FROM ${this.table()} WHERE ${where} GROUP BY run_id, emitter`;
   }

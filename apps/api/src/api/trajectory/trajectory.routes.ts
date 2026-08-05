@@ -20,7 +20,7 @@ const TraceThresholdsBodySchema = z.object({
 // The owned trajectory ledger (N1): browse the sealed evidence, then open one. Envelope-free trivial reads —
 // the routes call the store directly (the secrets-list precedent).
 export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  app.get<{ Querystring: { limit?: string; cursor?: string } }>(
+  app.get<{ Querystring: { limit?: string; cursor?: string; kind?: string } }>(
     "/trajectories",
     { schema: trajectoryDocs.list },
     async (req, reply) => {
@@ -35,6 +35,9 @@ export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps)
           await deps.trajectoryStore.list(principal.workspace, {
             ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
             ...(req.query.cursor !== undefined && req.query.cursor !== "" ? { cursor: req.query.cursor } : {}),
+            // The kind axis: "show me my agent conversations" among a workspace full of eval cases. Applied
+            // in the store's query, beside the owner predicate, so the page never comes back short.
+            ...(req.query.kind !== undefined && req.query.kind !== "" ? { kind: req.query.kind } : {}),
             // Personal evidence (an agent turn, a shell session) is its owner's — the store drops everyone
             // else's IN the query, so this page stays full for the reader.
             viewer: principal.subject,

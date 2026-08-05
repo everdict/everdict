@@ -33,6 +33,14 @@ export interface TrajectoryMeta {
   // a browse page must not have to join the run ledger to stay private, and a page filtered after the fact
   // would be short. Absent = the workspace's evidence (evals, OTLP arrivals, imports).
   owner?: string;
+  // WHAT this evidence is, in the run ledger's own vocabulary (`RUN_KINDS`: eval · agent · command · sandbox ·
+  // analysis), and the human handle for it (a conversation's title, the case id, the harness id). Denormalized
+  // onto the row for the same reason `owner` is: a browse page has to answer "which of these is the agent
+  // conversation I just ran" from the row alone — without it every row reads `<uuid> · run · N events` and the
+  // evidence is present but unfindable, which is indistinguishable from missing. Absent = evidence that
+  // arrived with no run to name it; `source` still says how it got here.
+  kind?: string;
+  label?: string;
 }
 
 // One EMITTER's contribution to a run's trajectory (the multi-plane rung): the agent's own record, the
@@ -124,13 +132,22 @@ export async function sealExecutionPlanes(
     t0?: string;
     // What ran — the root span's name. Defaults to the run itself when the caller has nothing better.
     agentName?: string;
+    // What this evidence IS and what to call it on a browse row (see TrajectoryMeta.kind/label).
+    kind?: string;
+    label?: string;
     newSpanId?: () => string;
   },
 ): Promise<void> {
   const agent: TraceEvent[] = [];
   const infra: TraceEvent[] = [];
   for (const event of input.events) (event.kind === "infra" ? infra : agent).push(event);
-  const owner = input.owner !== undefined ? { owner: input.owner } : {};
+  // Identity travels with the evidence on every plane: the infra segment can win the race to create the
+  // trajectory, and a row that arrives first must not be the unnamed one.
+  const identity = {
+    ...(input.owner !== undefined ? { owner: input.owner } : {}),
+    ...(input.kind !== undefined ? { kind: input.kind } : {}),
+    ...(input.label !== undefined ? { label: input.label } : {}),
+  };
   const traceId = traceIdForRun(input.runId);
   const mintSpanId = input.newSpanId ?? (() => newSpanId());
   // The placement span, when there is one, is the parent the agent's root hangs under: the job really did
@@ -154,7 +171,7 @@ export async function sealExecutionPlanes(
       // The execution's own anchor when the caller knows it (an agent turn: the run's start). Without one a
       // relative `t` cannot be laid on a shared axis and the reader keeps this plane on its own.
       ...(input.t0 !== undefined ? { t0: input.t0 } : {}),
-      ...owner,
+      ...identity,
     });
   }
   if (infra.length > 0) {
@@ -171,7 +188,7 @@ export async function sealExecutionPlanes(
       emitter: INFRA_EMITTER,
       ...(placement !== undefined ? { spans: [placement] } : { events: infra }),
       ...(t0 !== undefined ? { t0 } : {}),
-      ...owner,
+      ...identity,
     });
   }
 }
@@ -281,6 +298,10 @@ export interface SealInput {
   // The member this evidence belongs to (see TrajectoryMeta.owner). Set by the FIRST seal — later planes
   // join evidence that already has an owner, so they never need to restate it.
   owner?: string;
+  // What this evidence is and what to call it (see TrajectoryMeta.kind/label). Like `owner`, the first seal
+  // names it and later planes join something already named.
+  kind?: string;
+  label?: string;
 }
 
 // The one place the body rule is enforced, so every store impl agrees on what it was handed. Throws rather

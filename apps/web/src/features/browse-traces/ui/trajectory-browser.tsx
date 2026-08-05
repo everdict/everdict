@@ -14,6 +14,16 @@ import { TrajectoryDetailDialog } from './trajectory-detail-dialog'
 
 const PAGE_SIZE = 25
 
+// The run families a trajectory can belong to (`RUN_KINDS`), plus "everything". `undefined` = no filter.
+const KIND_FILTERS: (string | undefined)[] = [
+  undefined,
+  'agent',
+  'eval',
+  'sandbox',
+  'command',
+  'analysis',
+]
+
 // The OWNED evidence ledger's browse list (native-observability N1 "look inward"): every sealed trajectory
 // this workspace holds — our own executions, OTLP-door arrivals, materialized imports — newest first. A row
 // opens the trajectory itself in a dialog (the ledger's own read), because only source "run" has a run
@@ -29,15 +39,17 @@ export function TrajectoryBrowser() {
   const [nextCursor, setNextCursor] = useState<string | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [loaded, setLoaded] = useState(false)
+  const [kind, setKind] = useState<string | undefined>(undefined)
   const [pending, setPending] = useState(false)
 
-  const load = useCallback((cursor?: string) => {
+  const load = useCallback((cursor?: string, forKind?: string) => {
     void (async () => {
       setPending(true)
       try {
         const page = await listTrajectoriesAction({
           limit: PAGE_SIZE,
           ...(cursor ? { cursor } : {}),
+          ...(forKind ? { kind: forKind } : {}),
         })
         if (!page.ok) {
           setError(page.error)
@@ -53,46 +65,90 @@ export function TrajectoryBrowser() {
     })()
   }, [])
 
+  // Switching the kind restarts paging — the cursor belongs to the query that produced it.
   useEffect(() => {
-    load()
-  }, [load])
+    setItems([])
+    setNextCursor(undefined)
+    setLoaded(false)
+    load(undefined, kind)
+  }, [load, kind])
 
   if (error) return <Callout tone="danger">{error}</Callout>
-  if (loaded && items.length === 0) {
-    return <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
-  }
   return (
     <div className="space-y-2">
-      <div className="text-xs text-muted-foreground">{t('count', { count: items.length })}</div>
-      <ul className="divide-y divide-border rounded-md border border-border">
-        {items.map((m, i) => (
-          <li key={m.runId}>
-            <button
-              type="button"
-              onClick={() => setOpenIndex(i)}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-xs">{m.runId}</span>
-              <Badge tone="outline">{t(`source_${m.source}`)}</Badge>
-              <span className="w-20 text-right text-xs text-muted-foreground">
-                {t('events', { count: m.eventCount })}
-              </span>
-              <span
-                className="w-28 text-right text-xs text-muted-foreground"
-                title={fmtDateTimeFull(m.sealedAt, { locale, timeZone })}
-              >
-                {fmtTimeAgo(m.sealedAt, locale, timeZone)}
-              </span>
-            </button>
-          </li>
+      {/* The kind axis. Every row used to read `<uuid> · run · N events`, so a member looking for the trace of
+          the agent they just ran could not tell which row was theirs — evidence you cannot recognize reads as
+          evidence that is not there. Filtering happens in the store's query, so a page is never short. */}
+      <div className="flex flex-wrap items-center gap-1">
+        {KIND_FILTERS.map((k) => (
+          <Button
+            key={k ?? 'all'}
+            variant={kind === k ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setKind(k)}
+            disabled={pending}
+          >
+            {k === undefined ? t('kindAll') : t(`kind_${k}`)}
+          </Button>
         ))}
-      </ul>
-      {nextCursor ? (
-        <Button variant="secondary" size="sm" onClick={() => load(nextCursor)} disabled={pending}>
-          {t('loadMore')}
-        </Button>
-      ) : null}
-      {/* prev/next 는 이미 불러온 페이지 안에서만 이동한다 — 다이얼로그가 커서를 더 당기지는 않는다. */}
+      </div>
+      {loaded && items.length === 0 ? (
+        <EmptyState
+          title={kind ? t('emptyKindTitle') : t('emptyTitle')}
+          hint={kind ? t('emptyKindHint') : t('emptyHint')}
+        />
+      ) : (
+        <>
+          <div className="text-xs text-muted-foreground">{t('count', { count: items.length })}</div>
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {items.map((m, i) => (
+              <li key={m.runId}>
+                <button
+                  type="button"
+                  onClick={() => setOpenIndex(i)}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent"
+                >
+                  {/* The handle first (what a person recognizes), the id second (what they paste into a search). */}
+                  <span className="min-w-0 flex-1 truncate">
+                    {m.label ? (
+                      <>
+                        <span className="text-foreground">{m.label}</span>
+                        <span className="ml-2 font-mono text-xs text-muted-foreground">
+                          {m.runId}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="font-mono text-xs">{m.runId}</span>
+                    )}
+                  </span>
+                  {m.kind ? <Badge tone="outline">{t(`kind_${m.kind}`)}</Badge> : null}
+                  <Badge tone="outline">{t(`source_${m.source}`)}</Badge>
+                  <span className="w-20 text-right text-xs text-muted-foreground">
+                    {t('events', { count: m.eventCount })}
+                  </span>
+                  <span
+                    className="w-28 text-right text-xs text-muted-foreground"
+                    title={fmtDateTimeFull(m.sealedAt, { locale, timeZone })}
+                  >
+                    {fmtTimeAgo(m.sealedAt, locale, timeZone)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {nextCursor ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => load(nextCursor, kind)}
+              disabled={pending}
+            >
+              {t('loadMore')}
+            </Button>
+          ) : null}
+        </>
+      )}
+      {/* prev/next moves only within the pages already loaded — the dialog never pulls the cursor further. */}
       {openIndex !== undefined && items[openIndex] && (
         <TrajectoryDetailDialog
           open

@@ -15,19 +15,22 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
     {
       description:
         "List the workspace's SEALED trajectories (the owned evidence ledger, newest first, cursor-paginated). " +
-        "Each meta says how the evidence arrived (source: run | otlp | import) and how big it is (eventCount). " +
-        "Open one with get_trajectory.",
+        "Each meta says how the evidence arrived (source: run | otlp | import), WHAT it is (kind: eval | " +
+        "agent | command | sandbox | analysis, with a human label — the case id, the agent, the harness) and " +
+        "how big it is (eventCount). Filter by kind to read just one family. Open one with get_trajectory.",
       inputSchema: {
         limit: z.number().int().positive().max(200).optional(),
         cursor: z.string().optional().describe("opaque cursor from the previous page"),
+        kind: z.string().optional().describe("only this run family (eval | agent | command | sandbox | analysis)"),
       },
     },
-    ({ limit, cursor }: { limit?: number; cursor?: string }) =>
+    ({ limit, cursor, kind }: { limit?: number; cursor?: string; kind?: string }) =>
       run(principal, "runs:read", async () =>
         ok(
           await store.list(ws, {
             ...(limit !== undefined ? { limit } : {}),
             ...(cursor !== undefined ? { cursor } : {}),
+            ...(kind !== undefined ? { kind } : {}),
             viewer: principal.subject, // personal evidence stays its owner's (BFF parity)
           }),
         ),

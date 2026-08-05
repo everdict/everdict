@@ -138,6 +138,16 @@ collector and the store**.
   keeps owner-scoped. A sealed trajectory now carries an `owner` (mig 0116, backfilled from the run ledger);
   `list` filters on it in the QUERY (a page filtered afterwards would be short) and the detail read answers 404
   for someone else's. The rule itself is `runAudience` in `@everdict/domain` — see docs/api.md §Run audience.
+
+  **And evidence has to be RECOGNIZABLE, or being retained is not the same as being there.** Every browse row
+  read `<run id> · run · N events`, so an agent conversation, an eval case, a sandbox shell and an OTLP arrival
+  were the same row four times over: a member looking for the trace of the agent they had just run reported it
+  as missing, and they were not wrong in any way that mattered. A trajectory now also carries `kind` (the run
+  family) and `label` (the handle a person would use — the case id, the agent, the harness), denormalized at
+  seal for exactly the reasons `owner` is: the ClickHouse rung has no run table beside it, and a name resolved
+  after the page would either N+1 or lie. `runEvidenceIdentity` (`@everdict/domain`) is the one rule; mig 0124
+  backfills from the run ledger; `list` takes a `kind` filter in the same WHERE as the owner predicate, and
+  Settings › Traces renders label + kind badge with a kind switcher.
 - **N2 — Libraries + production ingestion.** `everdict-otel` (TS/Py) + migration recipes; continuous
   evaluation (judges over live traces; platform events from trace facts). **Continuous-evaluation rung
   SHIPPED (master-plan W6)**: the reserved trace source `everdict` points the pull machinery at the owned

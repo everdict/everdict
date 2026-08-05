@@ -15,6 +15,11 @@ const trajectoryMetaSchema = z.object({
   source: z.enum(['run', 'otlp', 'import']),
   eventCount: z.number().int().nonnegative(),
   sealedAt: z.string(),
+  // WHAT this evidence is (the run family) and its human handle — without them every row reads as a bare
+  // uuid and a member cannot tell their own agent conversation from an eval case. Absent on evidence that
+  // arrived with no run to name it (and on a control plane older than the identity columns).
+  kind: z.string().optional(),
+  label: z.string().optional(),
 })
 export type TrajectoryMeta = z.infer<typeof trajectoryMetaSchema>
 
@@ -29,7 +34,7 @@ export type ListTrajectoriesResult =
 
 // One page of the workspace's sealed trajectories, newest first. authZ (runs:read) is the control plane's.
 export async function listTrajectoriesAction(
-  query: { limit?: number; cursor?: string } = {}
+  query: { limit?: number; cursor?: string; kind?: string } = {}
 ): Promise<ListTrajectoriesResult> {
   const ctx = await authContext()
   try {

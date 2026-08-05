@@ -197,6 +197,32 @@ describe("sealExecutionPlanes — the agent's plane and the orchestrator's are d
   });
 });
 
+describe("the identity a browse row is read by", () => {
+  it("stamps kind + label on EVERY plane — the infra segment can win the race to create the trajectory", async () => {
+    const { seals, store, newSpanId } = recorder();
+    await sealExecutionPlanes(store, {
+      runId: "r-1",
+      tenant: "acme",
+      events: [...agentEvents, ...infraEvents],
+      kind: "eval",
+      label: "case-7",
+      newSpanId,
+    });
+
+    // Both seals carry it: whichever row creates the header must be the named one, or the ledger's browse
+    // page shows an unnamed uuid for a run we can perfectly well describe.
+    expect(seals).toHaveLength(2);
+    for (const seal of seals) expect(seal).toMatchObject({ kind: "eval", label: "case-7" });
+  });
+
+  it("says nothing rather than guessing when the caller named nothing", async () => {
+    const { seals, store, newSpanId } = recorder();
+    await sealExecutionPlanes(store, { runId: "r-2", tenant: "acme", events: agentEvents, newSpanId });
+    expect(seals[0]).not.toHaveProperty("kind");
+    expect(seals[0]).not.toHaveProperty("label");
+  });
+});
+
 describe("sealBody — exactly one body", () => {
   const base = { runId: "r1", tenant: "acme", source: "run" as const };
 
