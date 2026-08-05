@@ -933,9 +933,11 @@ async function main(): Promise<void> {
     budget,
     usage: usageMeter,
     // Agent worlds (W1): snapshots publish into the managed store and register as environment-capability
-    // versions — absent managed store = world sessions 400, everything else keeps working.
+    // versions — absent managed store = world sessions 400, everything else keeps working. The pull side is
+    // the dispatch lane's own credential seam: booting a world snapshot means pulling from our registry.
     ...(workspaceImages ? { images: workspaceImages } : {}),
     capabilityService,
+    registryAuthsFor,
     // T-b: the durable reaper rides the same Temporal driver as approvals — a CP dying with the live
     // handle no longer leaks the container or the row. extend re-arms the deadline on touch (W1).
     ...(approvalTemporal

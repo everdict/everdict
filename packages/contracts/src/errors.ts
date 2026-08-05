@@ -10,6 +10,7 @@ export const ErrorCode = {
   // driver / compute
   DRIVER_PROVISION_FAILED: "Failed to provision the sandbox.",
   COMPUTE_EXEC_FAILED: "Failed to execute the sandbox command.",
+  DRIVER_SNAPSHOT_FAILED: "Failed to capture the sandbox filesystem as an image.",
   // harness
   HARNESS_INSTALL_FAILED: "Failed to install the harness.",
   HARNESS_RUN_FAILED: "Failed to run the harness.",

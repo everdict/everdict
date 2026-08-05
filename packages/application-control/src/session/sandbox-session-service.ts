@@ -9,6 +9,7 @@ import {
   IMAGE_GRANT_USERNAME,
   NotFoundError,
   RateLimitError,
+  type RegistryAuth,
   type RunRecord,
   type RunStatus,
   type TraceEvent,
@@ -175,6 +176,11 @@ export interface SandboxSessionServiceDeps {
   // pushed snapshot as an environment-capability version (apps/api wires CapabilityService behind it — the
   // same injected-closure seam as resolveEnvironmentImage). Either absent = world sessions 400 at create.
   images?: Pick<WorkspaceImages, "endpoint" | "namespaceFor" | "listTags" | "inspect" | "mintPushGrant">;
+  // Pull credentials for the image this session boots — the SAME seam the dispatch lane uses
+  // (`buildImagePullAuths`: managed grants + BYO registries). Without it a session cannot boot an image from
+  // our own registry, which is every world snapshot and every managed-store environment. Best-effort by
+  // contract: no credential just means the pull is anonymous, and the registry says what it thinks of that.
+  resolvePullAuths?: (tenant: string, imageRefs: string[]) => Promise<RegistryAuth[]>;
   publishWorldVersion?: (
     tenant: string,
     actor: { subject: string; isAdmin: boolean },
@@ -216,9 +222,17 @@ export class SandboxSessionService {
     this.enforceCapacity(input.tenant);
     const resolved = await this.resolveTarget(input);
     const ttlSec = Math.min(input.ttlSec ?? this.deps.defaultTtlSec ?? DEFAULT_TTL_SEC, this.maxTtl());
+    const registryAuths = await this.deps
+      .resolvePullAuths?.(input.tenant, [resolved.image])
+      .catch(() => [] as RegistryAuth[]);
     let handle: ComputeHandle;
     try {
-      handle = await this.deps.driver.provision({ os: "linux", image: resolved.image, needs: ["shell"] });
+      handle = await this.deps.driver.provision({
+        os: "linux",
+        image: resolved.image,
+        needs: ["shell"],
+        ...(registryAuths !== undefined && registryAuths.length > 0 ? { registryAuths } : {}),
+      });
     } catch (err) {
       if (err instanceof BadRequestError) throw err;
       throw new UpstreamError(

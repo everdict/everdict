@@ -9,6 +9,7 @@ import type {
   WorkspaceImages,
 } from "@everdict/application-control";
 import { SandboxSessionService } from "@everdict/application-control";
+import type { RegistryAuth } from "@everdict/contracts";
 import type { BudgetTracker, UsageMeter } from "@everdict/domain";
 import { canConsumeCapability, harnessAuthEnv, resolveHarnessSecrets } from "@everdict/domain";
 import { DockerDriver } from "@everdict/drivers";
@@ -41,6 +42,9 @@ export function buildSandboxSessions(opts: {
   // registers each snapshot as an environment-capability version. Either absent = world sessions 400.
   images?: WorkspaceImages;
   capabilityService?: CapabilityService;
+  // Image pull credentials — the same `buildImagePullAuths` seam the dispatch lane uses. A session booting a
+  // world snapshot (or any managed-store environment) pulls from our own registry, which requires a grant.
+  registryAuthsFor?: (workspace: string, imageRefs: string[]) => Promise<RegistryAuth[]>;
 }): SandboxSessionService | undefined {
   const driver = process.env.EVERDICT_SANDBOX_DRIVER;
   if (driver === undefined || driver === "") return undefined;
@@ -132,6 +136,7 @@ export function buildSandboxSessions(opts: {
     ...(opts.events ? { events: opts.events } : {}),
     ...(opts.reaper ? { reaper: opts.reaper } : {}),
     ...(opts.images ? { images: opts.images } : {}),
+    ...(opts.registryAuthsFor ? { resolvePullAuths: opts.registryAuthsFor } : {}),
     ...(publishWorldVersion ? { publishWorldVersion } : {}),
     ...(resolveSessionHarness ? { resolveSessionHarness } : {}),
     ...(opts.budget ? { budget: opts.budget } : {}),

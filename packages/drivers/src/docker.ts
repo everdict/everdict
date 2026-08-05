@@ -200,7 +200,9 @@ export class DockerDriver implements Driver {
       throw new BadRequestError("BAD_REQUEST", undefined, "DockerDriver requires spec.image or defaultImage.");
     }
     // For an image one of our credentials covers, authenticated pre-pull (temporary DOCKER_CONFIG) — leaves no login trace on the host daemon.
-    const auth = pickRegistryAuth(this.opts.registryAuths ?? [], image);
+    // Per-provision credentials win: a grant minted for THIS image (sandbox sessions) is fresher than whatever
+    // the driver was built with (a job's CaseJob.registryAuths), and a driver built once at boot has none at all.
+    const auth = pickRegistryAuth([...(spec.registryAuths ?? []), ...(this.opts.registryAuths ?? [])], image);
     if (auth) await pullWithRegistryAuth(image, auth);
     const keep = this.opts.keepAlive ?? "infinity";
     // Bind-mount args (-v source:target[:ro]) — come before the image.

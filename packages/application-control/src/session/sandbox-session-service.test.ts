@@ -843,3 +843,39 @@ describe("SandboxSessionService — agent worlds (W1: snapshot, hibernate, touch
     expect(before.published.at(-1)).toMatchObject({ actor: "alice" }); // attributed to the row's creator
   });
 });
+
+// Regression (live drill, 2026-08-05): booting a world snapshot 401'd at the registry because the session
+// lane never resolved pull credentials — every world image and every managed-store environment lives behind
+// a grant. The credential must ride the PROVISION (grants are short-lived), not the driver's construction.
+describe("SandboxSessionService — pull credentials for the booted image", () => {
+  it("resolves pull auths for the image and passes them to provision; no resolver = an anonymous pull", async () => {
+    const asked: Array<{ tenant: string; refs: string[] }> = [];
+    const ctx = build({
+      resolvePullAuths: async (tenant, refs) => {
+        asked.push({ tenant, refs });
+        return [{ host: "reg.local:5000", username: "everdict", password: "pull-grant" }];
+      },
+      resolveEnvironmentImage: async () => ({ image: "reg.local:5000/acme-ns/proj:v2", version: "1.0.1" }),
+    });
+    await ctx.service.create({ tenant: "acme", createdBy: "alice", environment: { id: "proj" } });
+    expect(asked).toEqual([{ tenant: "acme", refs: ["reg.local:5000/acme-ns/proj:v2"] }]);
+    expect(ctx.driver.provisioned[0]?.registryAuths).toEqual([
+      { host: "reg.local:5000", username: "everdict", password: "pull-grant" },
+    ]);
+
+    // A failing resolver never blocks the boot — the pull just goes anonymous and the registry decides.
+    const lenient = build({
+      resolvePullAuths: async () => {
+        throw new Error("registry unreachable");
+      },
+    });
+    await expect(lenient.service.create({ tenant: "acme", createdBy: "alice", image: "img" })).resolves.toMatchObject({
+      kind: "sandbox",
+    });
+    expect(lenient.driver.provisioned[0]?.registryAuths).toBeUndefined();
+
+    const bare = build(); // no resolver wired at all
+    await bare.service.create({ tenant: "acme", createdBy: "alice", image: "img" });
+    expect(bare.driver.provisioned[0]?.registryAuths).toBeUndefined();
+  });
+});

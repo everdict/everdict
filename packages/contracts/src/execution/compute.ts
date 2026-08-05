@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { RegistryAuth } from "../infra/image-ref.js";
+import { type RegistryAuth, RegistryAuthSchema } from "../infra/image-ref.js";
 
 export const CapabilitySchema = z.enum(["shell", "browser", "desktop"]);
 export type Capability = z.infer<typeof CapabilitySchema>;
@@ -10,6 +10,10 @@ export const ComputeSpecSchema = z.object({
   needs: z.array(CapabilitySchema).default(["shell"]),
   cpu: z.number().optional(),
   memMb: z.number().optional(),
+  // Pull credentials for `image`, resolved per provision (the CaseJob.registryAuths twin for the driver lane:
+  // a grant is short-lived, so it belongs to the call, not to a driver built once at boot). A driver that
+  // authenticates pulls prefers these over its constructor-level ones.
+  registryAuths: z.array(RegistryAuthSchema).optional(),
 });
 export type ComputeSpec = z.infer<typeof ComputeSpecSchema>;
 
