@@ -26,6 +26,16 @@ function fakeCompute() {
 }
 const ctx: RunContext = { apiKeyEnv: {}, timeoutSec: 60 };
 
+// Everdict's OWN record of the invocation — emitted for every run whatever the harness reports about itself,
+// so an agent whose trace lives on someone else's platform still leaves us evidence that we ran it.
+const commandExit = (exitCode: number) => ({
+  t: expect.any(Number),
+  at: expect.any(String),
+  kind: "env_action",
+  action: "command.exit",
+  detail: expect.objectContaining({ exitCode }),
+});
+
 const spec = (over: Partial<CommandHarnessSpec> = {}): CommandHarnessSpec => ({
   kind: "command",
   id: "aider",
@@ -77,10 +87,11 @@ describe("CommandHarness", () => {
     expect(wd.execs.every((e) => e.cwd === "/tmp")).toBe(true); // both setup(install) + command(run) run in /tmp
   });
 
-  it("run substitutes the command template (shell-safe) and injects env (EVERDICT_RUN_ID + spec.env); trace none + no output → no events", async () => {
+  it("run substitutes the command template (shell-safe) and injects env (EVERDICT_RUN_ID + spec.env); a silent command still records the invocation", async () => {
     const { compute, execs } = fakeCompute();
     const events = await collect(new CommandHarness(spec(), { runId: () => "rid1" }).run(compute, "fix the bug", ctx));
-    expect(events).toEqual([]); // trace none + empty stdout
+    // A command that says nothing is not a run that did nothing — what we invoked and how it ended is ours to record.
+    expect(events).toEqual([commandExit(0)]);
     const e = execs[0];
     expect(e?.cmd).toContain("--model sonnet");
     expect(e?.cmd).toContain("--message 'fix the bug'"); // {{task}} is shq-quoted
@@ -102,6 +113,7 @@ describe("CommandHarness", () => {
     };
     const events = await collect(new CommandHarness(spec()).run(compute, "debt?", ctx));
     expect(events).toEqual([
+      commandExit(0),
       {
         t: expect.any(Number),
         at: expect.any(String),
@@ -125,6 +137,7 @@ describe("CommandHarness", () => {
     };
     const events = await collect(new CommandHarness(spec()).run(compute, "t", ctx));
     expect(events).toEqual([
+      commandExit(127),
       {
         t: expect.any(Number),
         at: expect.any(String),
@@ -142,7 +155,7 @@ describe("CommandHarness", () => {
     ]);
   });
 
-  it("when a trace exists, run() emits no stdout message (that trace is the answer); platform events come via collectTrace", async () => {
+  it("when a trace exists, stdout stays a LOG rather than becoming the answer — but our own record is still kept; platform events come via collectTrace", async () => {
     const sourceEvents: TraceEvent[] = [{ t: 1, kind: "message", role: "assistant", text: "from-otel" }];
     const source: TraceSource = { fetch: async () => sourceEvents };
     const compute: ComputeHandle = {
@@ -162,7 +175,13 @@ describe("CommandHarness", () => {
       },
     );
     const events = await collect(h.run(compute, "t", ctx));
-    expect(events).toEqual([]); // no stdout message + run() doesn't pull the platform (collection happens after compute is released)
+    // The platform's trace is the answer, so stdout must NOT be promoted to an assistant message (that would
+    // fork what a judge reads) — but the bytes we saw are ours to keep, and run() still doesn't pull the
+    // platform here (collection happens after compute is released).
+    expect(events).toEqual([
+      commandExit(0),
+      { t: expect.any(Number), at: expect.any(String), kind: "log", stream: "stdout", text: "raw stdout noise" },
+    ]);
     expect(await h.collectTrace("rid")).toEqual(sourceEvents);
   });
 
@@ -342,6 +361,7 @@ describe("CommandHarness", () => {
     expect(calls.upstream).toBe("http://litellm:4000"); // the original base is the upstream
     expect(execs[0]?.env?.OPENAI_API_BASE).toBe("http://127.0.0.1:9999"); // the child goes to the proxy
     expect(events).toEqual([
+      commandExit(0),
       {
         t: expect.any(Number),
         at: expect.any(String),
@@ -423,14 +443,23 @@ describe("CommandHarness — trace:none evidence fallback (stderr log events)", 
     expect(log?.kind === "log" && log.text.length).toBe(16_000); // tail-capped, larger than the error's 2k excerpt
   });
 
-  it("harnesses with their own trace (kind≠none) do not get log events (no double evidence)", async () => {
+  it("a harness whose trace lives on a platform still leaves OUR evidence — as logs, never as the answer", async () => {
+    // The invariant this replaces was "no double evidence", which delegated our own observation to a platform:
+    // a dead endpoint or a mistyped correlation key then left the ledger with nothing at all for a run we
+    // actually performed. A registered trace source ADDS the agent's account; it never substitutes for ours.
+    // What must NOT double is the ANSWER — stdout stays a log here, so answer-match keeps reading the platform's.
     const compute = computeWith({ stdout: "ignored", stderr: "noise" });
     const h = new CommandHarness(
       spec({ trace: { kind: "otel", endpoint: "http://jaeger:16686", collect: "control-plane", correlate: "id" } }),
       { runId: () => "r-1" },
     );
     const events = await collect(h.run(compute, "t", ctx));
-    expect(events.filter((e) => e.kind === "log" || e.kind === "message")).toHaveLength(0);
+    expect(events.some((e) => e.kind === "message")).toBe(false);
+    expect(events.filter((e) => e.kind === "log").map((e) => e.kind === "log" && e.stream)).toEqual([
+      "stdout",
+      "stderr",
+    ]);
+    expect(events.some((e) => e.kind === "env_action" && e.action === "command.exit")).toBe(true);
   });
 
   it("empty stderr emits no log event (no noise records)", async () => {

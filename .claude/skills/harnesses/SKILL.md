@@ -15,7 +15,11 @@ never scores itself — `graders` read the trace and the env snapshot (see skill
    A harness whose trace lands on an external platform (OTel/MLflow) does NOT pull it in `run()` — implement
    the optional `traceSource()`/`collectTrace(runId)` hooks; `runCase` pulls **after compute release**
    (correlate with `ctx.runId` — it injects the same id it later collects by). See
-   `docs/architecture/streaming-case-pipeline.md` D4.
+   `docs/architecture/streaming-case-pipeline.md` D4. **A configured platform source is ADDITIVE, never a
+   substitute**: keep yielding your own account of the run (what you invoked, how it ended, the output you
+   saw), because a dead endpoint or a wrong correlation key must not leave everdict's ledger empty for a run
+   we performed. Only the ANSWER is single-sourced — don't promote raw output to an assistant `message` when
+   the platform's trace already carries the answer (file it as a `log` instead).
 3. Cost/tokens come from the harness's **own trace** (`llm_call.cost`, e.g. Claude `total_cost_usd`) — never measured by us.
 4. Do all work through the provided `ComputeHandle` (`compute.exec`, cwd `work`); assume no host state.
 5. Map install/run failures to `AppError` (`HARNESS_INSTALL_FAILED` / `HARNESS_RUN_FAILED`).
@@ -71,6 +75,10 @@ Graders only read the normalized event stream, so every harness converts its nat
 (same file) sums them — we never meter cost ourselves. Exceptions: a `trace:none` CommandHarness emits its
 stdout tail as one `assistant` message (for QA grading), and `meterUsage` (opt-in) can proxy an OpenAI-base
 black-box harness to recover a synthetic `llm_call`.
+
+Beside the harness's own report sits OUR report of the same run: `CommandHarness` always emits an `env_action`
+`command.exit` (command · exit code · duration) and the stdout/stderr tails as `log`s, whatever `trace` is set
+to. That is the half no external platform can be trusted to hold for us.
 
 **Every event a harness mints carries `at` — build it with `stamp(now)` (`@everdict/contracts`), never
 `t: Date.now()` by hand.** `t` is the emitter's own scalar (a step index here, epoch ms there); `at` is the

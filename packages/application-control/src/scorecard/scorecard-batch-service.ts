@@ -27,6 +27,7 @@ import {
   classifyFailure,
   modelBindingLabel,
   resolveHarnessSecrets,
+  runEvidenceIdentity,
   scorecardModels,
   summarizeScorecard,
 } from "@everdict/domain";
@@ -629,6 +630,8 @@ export class ScorecardBatchService {
             runId: child.id,
             tenant: ctx.tenant,
             events: result.trace,
+            // Names the row on the browse page: an eval is known by the case it evaluated.
+            ...runEvidenceIdentity(child),
           }).catch(() => {});
       // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
       if (ctx.judges.length > 0) {
@@ -1168,6 +1171,7 @@ export class ScorecardBatchService {
               runId: child.id,
               tenant,
               events: result.trace,
+              ...runEvidenceIdentity(child),
             }).catch(() => {});
         // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         if (runStore && child)

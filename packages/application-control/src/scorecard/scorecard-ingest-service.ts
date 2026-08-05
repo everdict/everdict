@@ -381,7 +381,9 @@ export class ScorecardIngestService {
     if (!this.deps.trajectories || events.length === 0) return events;
     try {
       const runId = `ingest:${scorecardId}:${caseId}`;
-      await this.deps.trajectories.seal({ runId, tenant, source: "import", events });
+      // `source` already says this is an import; the label says WHICH case it is, so the browse row is
+      // findable among a workspace's other materialized traces.
+      await this.deps.trajectories.seal({ runId, tenant, source: "import", events, label: caseId });
       return (await this.deps.trajectories.get(tenant, runId))?.events ?? events;
     } catch {
       return events;

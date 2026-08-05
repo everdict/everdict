@@ -13,5 +13,9 @@ A harness = the agent under test, driven over a process boundary. See skill `har
 - Platform-exported traces (OTel/MLflow) are NOT pulled inside `run()` — implement the optional
   `traceSource()`/`collectTrace(runId)` hooks (correlate with `ctx.runId`); `runCase` pulls after compute
   release. See `docs/architecture/streaming-case-pipeline.md` D4.
+- **A registered trace source/sink is ADDITIVE — everdict's own ledger is never the thing it replaces.** Keep
+  emitting your own account of the run (invocation, exit, the output you saw) even when a platform holds the
+  agent's; only the ANSWER stays single-sourced (raw output becomes a `log`, not an assistant `message`, when
+  the platform's trace already carries it).
 - Install into the provided `ComputeHandle`; do not assume host state.
 - Map harness failures to `AppError` (`HARNESS_INSTALL_FAILED` / `HARNESS_RUN_FAILED`).

@@ -228,8 +228,20 @@ export class CommandHarness implements EvaluableHarness {
     for (const [key, value] of Object.entries(this.spec.params ?? {})) {
       cmd = cmd.replaceAll(`{{${key}}}`, value);
     }
+    const startedMs = this.now();
     try {
       const res = await compute.exec(cmd, { cwd: this.cwd, env, timeoutSec: ctx.timeoutSec });
+      // OUR OWN account of the run, always — what everdict invoked, how it ended, how long it took. This is the
+      // one part of the evidence that is not the agent's testimony about itself, so it cannot be delegated to a
+      // platform: a harness whose trace is pulled from MLflow still gets this, and if that platform is down or
+      // the correlation key is wrong, the ledger still says what we ran and what came back. A configured trace
+      // source ADDS the agent's own account; it never replaces ours.
+      yield {
+        ...stamp(this.now),
+        kind: "env_action",
+        action: "command.exit",
+        detail: { command: cmd, exitCode: res.exitCode, durationMs: Math.max(0, this.now() - startedMs) },
+      };
       // Surface a failure (exit≠0) — previously swallowed silently, so it looked like "success with an empty result" (only the score was 0).
       if (res.exitCode !== 0) {
         yield {
@@ -250,14 +262,24 @@ export class CommandHarness implements EvaluableHarness {
           yield event;
         }
       }
-      if (trace.kind === "none" || (trace.kind === "file" && !selfReportedAnswer)) {
-        const text = res.stdout.trim().slice(-32_000);
-        if (text) yield { ...stamp(this.now), kind: "message", role: "assistant", text };
-        // Evidence fallback: black-box CLIs log progress to stderr — without this, a successful run leaves no
-        // trail at all (the error event above fires only on exit≠0). Tail-capped to avoid record bloat.
-        const errText = res.stderr.trim().slice(-16_000);
-        if (errText) yield { ...stamp(this.now), kind: "log", stream: "stderr", text: errText };
+      // Whether stdout IS the answer. For a black-box CLI it is (no trace of its own); for a self-reported file
+      // trace it is the fallback when the agent named no answer itself.
+      const stdoutIsAnswer = trace.kind === "none" || (trace.kind === "file" && !selfReportedAnswer);
+      const outText = res.stdout.trim().slice(-32_000);
+      if (outText) {
+        // The same bytes, filed as what they ARE here: the answer when nothing else carries it (QA scoring —
+        // answer-match/judge — reads it), otherwise plain process output. A platform-traced harness's
+        // conversation lives in its trace, so promoting stdout to an assistant message there would fork what a
+        // judge reads — but dropping it, as we used to, left our own ledger with nothing we saw ourselves.
+        yield stdoutIsAnswer
+          ? { ...stamp(this.now), kind: "message", role: "assistant", text: outText }
+          : { ...stamp(this.now), kind: "log", stream: "stdout", text: outText };
       }
+      // Evidence, unconditionally: black-box CLIs log progress to stderr, and a run whose trace is pulled from a
+      // platform is exactly the run where that progress is the only thing we hold if the pull comes back empty.
+      // Tail-capped to avoid record bloat.
+      const errText = res.stderr.trim().slice(-16_000);
+      if (errText) yield { ...stamp(this.now), kind: "log", stream: "stderr", text: errText };
 
       // Emit the metered tokens+cost as a synthetic llm_call — aggregated by the sumCost/cost grader via the existing path.
       // usd is recovered from the gateway cost header (real cost for metered models, 0 for subscription models).

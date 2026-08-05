@@ -32,6 +32,17 @@ are unchanged, so evaluation (git-diff snapshot, `tests-pass`, …) works as for
 path → runs on **Local / Nomad / K8s** backends with the existing isolation.
 
 ## Trace extraction
+
+**Everdict's own record is unconditional.** Whatever `trace` says, every run yields an `env_action`
+`command.exit` (the command we invoked, its exit code, its wall duration) plus the process output we saw
+(stdout/stderr tails as `log` events). That half is not the agent's testimony about itself, so it is never
+delegated to a platform: a harness that pulls its trace from MLflow still leaves us evidence, and a dead
+endpoint or a mistyped correlation key can no longer empty our ledger for a run we actually performed. A
+configured trace source **adds** the agent's own account on top; it never substitutes for ours. What must not
+double is the ANSWER — stdout is promoted to an assistant `message` only where nothing else carries the answer
+(`none`, or `file` with no self-reported assistant message); elsewhere it stays a `log`, so `answer-match` and
+judges keep reading exactly one answer.
+
 - **`none`** — no trajectory/cost. The command's **stdout (tail 32k) becomes the final assistant `message`**
   trace event, so prompt-QA benchmarks (`answer-match`/judge — e.g. OfficeQA-style) grade a black-box CLI's
   printed answer; outcome grading (repo diff + `tests-pass`) is unchanged. A non-zero exit yields an `error`
@@ -77,8 +88,9 @@ image/install versions.
 
 ## Verified
 - **Deterministic** (`packages/harnesses/src/command.test.ts`): setup ordering; `{{task}}` shell-quoting + env
-  injection (`EVERDICT_RUN_ID`); `trace:none` → stdout = final assistant message (empty stdout → no events);
-  exit≠0 → `error` event; `trace:otel` → pulls by run id (stdout not emitted); setup failure → error.
+  injection (`EVERDICT_RUN_ID`); every run records `command.exit` (a silent command still leaves that one event);
+  `trace:none` → stdout = final assistant message; exit≠0 → `error` event; `trace:otel` → pulls by run id and
+  keeps stdout/stderr as `log`s rather than as the answer; setup failure → error.
 - **2-phase collection live, real MLflow 3.14** (`scripts/live/trace-collect-mlflow.mjs`): `collect:"job"`
   round trip (injected `EVERDICT_RUN_ID` → post-release pull of real spans → steps/cost derived) +
   `collect:"control-plane"` (job returns `traceRef`; `executeCase` pulls + grades deferred observation
