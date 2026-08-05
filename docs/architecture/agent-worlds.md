@@ -118,11 +118,37 @@ Three rules make the bound safe:
   exists; a registry that refuses a delete must not turn that success into a failure. What was removed is
   reported (`prunedVersions` on the snapshot result) — a silent bound is indistinguishable from data loss.
 
+## W3 — the two rules autonomy needs beyond retention
+
+**Every session fact names the agent behind it.** `SandboxActor.agent` / `create({agent})` (threaded from
+the MCP session's declared attribution) stamps `causedBy: agent:<id>:<conversation>` on creation, snapshot
+and terminal facts — loop guard #1's key, so an autonomous agent never wakes on its own snapshot. The
+attribution is persisted on `session.agent` **on the row**, because the paths that emit LAST — expiry, and
+the crash-path reaper in a different process — must carry the same key the creation fact did. A
+member-driven session stamps nothing: `causedBy` names an agent or is absent.
+
+(`run.snapshotted` stays out of `TRIGGERABLE_EVENT_KINDS`. Making it triggerable is now *safe* rather than
+obviously unsafe, but it is a separate decision with its own blast radius — the guard belongs to the kind,
+not to this slice.)
+
+**Capacity is agent-aware.** A flat per-tenant cap was written for members clicking a button; an agent
+holding worlds across hibernates changes what it means. Two rules, the same shape as the scheduler's class
+fairness (interactive must never starve behind background work):
+
+1. an agent holds at most `EVERDICT_SANDBOX_MAX_PER_AGENT` sessions of its own (default 1 — a world is
+   meant to be worked in, then hibernated), and
+2. **agents never take the last tenant slot**; one stays reserved for a member. The reserve applies only
+   where the cap leaves room for it, so a 1-slot deployment doesn't ban agents outright.
+
+Both refusals name what holds the capacity and **when the next slot frees** (`freesAt`) — "retry shortly"
+is not something a caller, human or agent, can act on.
+
 ## Not yet (the rest of the arc)
 
-- **W3 remainder — autonomy**: `causedBy` stamping on session facts + the trigger-matchability review for
-  `run.snapshotted`, and per-agent compute budgets (with queueing) instead of the flat per-tenant session
-  caps, which two autonomous agents in one workspace collide on immediately.
 - **W4 — placement**: world sessions on cluster runtimes (the Nomad browser-session `Type:"service"`
   precedent) — requires wiring trust zones into dispatch, and a snapshot mechanism that does not
   assume a host-local docker daemon.
+- **Queueing**: a refused create is a refusal, not a wait. `freesAt` makes waiting a decision the caller
+  can take, but the platform does not take it for them.
+- **A credentialed push has not been drilled live** (W2) — it needs a GitHub App installation, which grants
+  real write access to a repository and is the workspace owner's call to make.

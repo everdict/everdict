@@ -9,7 +9,22 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   const { deps, principal, ws } = ctx;
   if (!deps.sandboxSessions) return;
   const sessions = deps.sandboxSessions;
-  const actor = () => ({ tenant: ws, subject: principal.subject, isAdmin: principal.roles.includes("admin") });
+  // The agent behind this MCP session, when the client declared one — every fact these tools emit then
+  // carries `causedBy: agent:<id>:<conversation>`, which is the loop guard's key: an autonomous agent that
+  // snapshots a world must never wake on its own snapshot (W3).
+  const agent =
+    ctx.agent?.agentId !== undefined
+      ? {
+          agentId: ctx.agent.agentId,
+          ...(ctx.agent.conversationId !== undefined ? { conversationId: ctx.agent.conversationId } : {}),
+        }
+      : undefined;
+  const actor = () => ({
+    tenant: ws,
+    subject: principal.subject,
+    isAdmin: principal.roles.includes("admin"),
+    ...(agent !== undefined ? { agent } : {}),
+  });
 
   server.registerTool(
     "create_sandbox",
@@ -92,6 +107,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
             ...(world !== undefined ? { world } : {}),
             ...(hibernate !== undefined ? { hibernate } : {}),
             ...(repo !== undefined ? { repo } : {}),
+            ...(agent !== undefined ? { agent } : {}),
             ...(ttlSec !== undefined ? { ttlSec } : {}),
           }),
         ),

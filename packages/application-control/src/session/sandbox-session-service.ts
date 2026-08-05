@@ -9,6 +9,7 @@ import {
   type HarnessSpec,
   IMAGE_GRANT_USERNAME,
   NotFoundError,
+  type PlatformFact,
   RateLimitError,
   type RegistryAuth,
   type RunRecord,
@@ -44,6 +45,9 @@ const DEFAULT_TASK_TIMEOUT_SEC = 600;
 const MAX_TASK_TIMEOUT_SEC = 3600;
 const TASK_PREVIEW_CHARS = 200;
 const TEARDOWN_TASK_GRACE_MS = 5_000;
+// How many live sessions ONE agent may hold (W3). One by default: a world is meant to be worked in, then
+// hibernated — an agent that needs several at once is a deployment decision, not a default.
+const DEFAULT_MAX_PER_AGENT = 1;
 // The working directory a session's repository lands in — the same `work` every harness and grader already
 // assumes, so a cloned session and an eval case agree on where "the code" is.
 const DEFAULT_REPO_DIR = "work";
@@ -53,6 +57,28 @@ export interface SandboxActor {
   tenant: string;
   subject: string;
   isAdmin: boolean;
+  // Which agent is acting for this member, when one is (the MCP session declares it at initialize). Every
+  // fact the session emits then carries `causedBy: agent:<id>:<conversation>` — loop guard #1 keys on that
+  // exact prefix, so an autonomous agent that snapshots a world never wakes on its own snapshot (W3).
+  agent?: SandboxAgentAttribution;
+}
+
+export interface SandboxAgentAttribution {
+  agentId: string;
+  conversationId?: string;
+}
+
+function causedByOf(agent: SandboxAgentAttribution | undefined): string | undefined {
+  if (!agent?.agentId) return undefined;
+  return `agent:${agent.agentId}:${agent.conversationId ?? "unknown"}`;
+}
+
+// The facts a transition produced, attributed to the agent behind the call when there is one. Applied at
+// every emit point in this service rather than inside the domain: legality is the aggregate's business,
+// WHO caused it is the caller's.
+function attributed(facts: PlatformFact[], agent: SandboxAgentAttribution | undefined): PlatformFact[] {
+  const causedBy = causedByOf(agent);
+  return causedBy === undefined ? facts : facts.map((fact) => ({ ...fact, causedBy }));
 }
 
 export interface CreateSandboxInput {
@@ -73,6 +99,7 @@ export interface CreateSandboxInput {
   // Agent worlds (W2): clone a repository into the session before it is handed over. A private repo resolves a
   // read credential through the injected git seam; a public one clones anonymously. Combines with any target.
   repo?: { git: string; ref?: string; dir?: string };
+  agent?: SandboxAgentAttribution; // stamps causedBy on this session's facts (loop guard #1)
   ttlSec?: number;
 }
 
@@ -120,6 +147,9 @@ interface LiveSession {
   world?: string; // agent worlds (W1): the environment capability this session snapshots into
   hibernate: boolean; // auto-snapshot at teardown (world sessions default true)
   repo?: { git: string; ref?: string; dir: string }; // W2: what was cloned in, and where
+  // The agent behind this session, remembered because teardown and expiry emit facts long after the request
+  // that knew who asked — an expiry fact must carry the same causedBy the creation one did.
+  agent?: SandboxAgentAttribution;
   playground?: PlaygroundState; // present only for harness-target sessions
 }
 
@@ -235,6 +265,9 @@ export interface SandboxSessionServiceDeps {
   defaultTtlSec?: number;
   maxTtlSec?: number;
   maxPerTenant?: number; // undefined = unlimited (dev); production sets both
+  // W3: how many live sessions ONE agent may hold (default 1). Bounds an autonomous loop against itself;
+  // the per-tenant cap additionally keeps its last slot for a member.
+  maxPerAgent?: number;
   maxTotal?: number;
   newId?: () => string;
   now?: () => string;
@@ -264,7 +297,7 @@ export class SandboxSessionService {
   // run.submitted fact via the E0 outbox). The id is minted before the record so the map and the row agree.
   async create(input: CreateSandboxInput): Promise<RunRecord> {
     this.sweep();
-    this.enforceCapacity(input.tenant);
+    this.enforceCapacity(input.tenant, input.agent);
     const resolved = await this.resolveTarget(input);
     const ttlSec = Math.min(input.ttlSec ?? this.deps.defaultTtlSec ?? DEFAULT_TTL_SEC, this.maxTtl());
     const registryAuths = await this.deps
@@ -315,10 +348,14 @@ export class SandboxSessionService {
         ...(handle.id !== undefined ? { computeId: handle.id } : {}),
         ...(resolved.world !== undefined ? { world: resolved.world, hibernate } : {}),
         ...(repo !== undefined ? { repo } : {}),
+        ...(input.agent !== undefined ? { agent: input.agent } : {}),
         ...(resolved.playground ? { attach: ["exec" as const, "tasks" as const] } : {}),
         now: this.now(),
       });
-      const stamped = stampFacts(input.tenant, Run.creationFacts(record), { newId: this.newId, now: this.now });
+      const stamped = stampFacts(input.tenant, attributed(Run.creationFacts(record), input.agent), {
+        newId: this.newId,
+        now: this.now,
+      });
       await this.deps.store.create(
         record,
         stamped.map((f) => f.record),
@@ -332,6 +369,7 @@ export class SandboxSessionService {
         ...(resolved.world !== undefined ? { world: resolved.world } : {}),
         hibernate,
         ...(repo !== undefined ? { repo } : {}),
+        ...(input.agent !== undefined ? { agent: input.agent } : {}),
         expiresAtMs: new Date(this.now()).getTime() + ttlSec * 1000,
         trace: [
           // M3 — the sandbox's infra-plane record: the driver container identity, so the sealed trajectory says
@@ -575,7 +613,10 @@ export class SandboxSessionService {
       createdBy: actor.subject,
       now: this.now(),
     });
-    const stamped = stampFacts(actor.tenant, Run.creationFacts(record), { newId: this.newId, now: this.now });
+    const stamped = stampFacts(actor.tenant, attributed(Run.creationFacts(record), actor.agent), {
+      newId: this.newId,
+      now: this.now,
+    });
     try {
       await this.deps.store.create(
         record,
@@ -761,10 +802,11 @@ export class SandboxSessionService {
         world: record.session.world,
         computeId,
         actor: { subject: record.createdBy, isAdmin: false },
+        ...(record.session.agent !== undefined ? { agent: record.session.agent } : {}),
       }).catch(() => undefined);
     }
     if (computeId !== undefined && this.deps.driver.reap) await this.deps.driver.reap(computeId).catch(() => undefined);
-    await this.settle(runId, tenant, "orphaned");
+    await this.settle(runId, tenant, "orphaned", record.session?.agent);
     return { reaped: true };
   }
 
@@ -845,7 +887,15 @@ export class SandboxSessionService {
         { run: runId },
         "This session's driver exposes no compute identity — snapshots need one.",
       );
-    const result = await this.publishSnapshot({ tenant: live.tenant, runId, world, computeId, actor, ...input });
+    const result = await this.publishSnapshot({
+      tenant: live.tenant,
+      runId,
+      world,
+      computeId,
+      actor,
+      ...(live.agent !== undefined ? { agent: live.agent } : {}),
+      ...input,
+    });
     live.trace.push({ t: live.t++, kind: "env_action", action: "session.snapshot", detail: { ...result } });
     return result;
   }
@@ -860,6 +910,7 @@ export class SandboxSessionService {
     world: string;
     computeId: string;
     actor: { subject: string; isAdmin: boolean };
+    agent?: SandboxAgentAttribution;
     name?: string;
     description?: string;
     instructions?: string;
@@ -905,7 +956,10 @@ export class SandboxSessionService {
         image,
         now: this.now(),
       });
-      const stamped = stampFacts(input.tenant, transition.facts, { newId: this.newId, now: this.now });
+      const stamped = stampFacts(input.tenant, attributed(transition.facts, input.agent), {
+        newId: this.newId,
+        now: this.now,
+      });
       await this.deps.store.update(
         input.runId,
         transition.patch,
@@ -973,7 +1027,7 @@ export class SandboxSessionService {
           label: live.label,
         })
         .catch(() => undefined);
-      const settled = await this.settle(runId, live.tenant, reason);
+      const settled = await this.settle(runId, live.tenant, reason, live.agent);
       // Prompt reaper completion (best-effort) — a missed signal just lets the timer fire a no-op later.
       void this.deps.reaper?.signalClosed(runId).catch(() => {});
       return settled;
@@ -986,11 +1040,12 @@ export class SandboxSessionService {
     runId: string,
     tenant: string,
     reason: "closed" | "expired" | "orphaned",
+    agent?: SandboxAgentAttribution,
   ): Promise<RunRecord | undefined> {
     const current = await this.deps.store.get(runId);
     if (!current || Run.from(current).isTerminal()) return current;
     const transition = Run.from(current).closeSession(reason, this.now());
-    const stamped = stampFacts(tenant, transition.facts, { newId: this.newId, now: this.now });
+    const stamped = stampFacts(tenant, attributed(transition.facts, agent), { newId: this.newId, now: this.now });
     const updated = await this.deps.store.update(
       runId,
       transition.patch,
@@ -1078,22 +1133,61 @@ export class SandboxSessionService {
     throw new BadRequestError("BAD_REQUEST", {}, "Either image, environment, or harness is required.");
   }
 
-  private enforceCapacity(tenant: string): void {
+  // Who may open a session when slots are scarce (W3). A flat per-tenant cap was written for members
+  // clicking a button; an autonomous agent holding world sessions across hibernates changes what that cap
+  // MEANS — two agents in one workspace collide on it immediately, and worse, a background agent can hold
+  // the last slot against the person waiting to debug something. Two rules, the same shape as the
+  // scheduler's class fairness (interactive must never starve behind background work):
+  //   1. an agent holds at most `maxPerAgent` sessions of its own, and
+  //   2. agents never take the LAST tenant slot — one stays reserved for a member.
+  // Both refusals name what is holding the capacity and when it frees, because "retry shortly" is not
+  // something a caller — human or agent — can act on.
+  private enforceCapacity(tenant: string, agent: SandboxAgentAttribution | undefined): void {
     if (this.deps.maxTotal !== undefined && this.sessions.size >= this.deps.maxTotal)
       throw new RateLimitError(
         "RATE_LIMITED",
-        { scope: "global", limit: this.deps.maxTotal },
-        "Sandbox session capacity is full — close a session or retry shortly.",
+        { scope: "global", limit: this.deps.maxTotal, ...this.nextFreeSlot() },
+        `Sandbox session capacity is full (${this.deps.maxTotal} across all workspaces)${this.freesAtSuffix()}.`,
       );
+    const owned = [...this.sessions.values()].filter((live) => live.tenant === tenant);
+    if (agent !== undefined) {
+      const maxPerAgent = this.deps.maxPerAgent ?? DEFAULT_MAX_PER_AGENT;
+      const mine = owned.filter((live) => live.agent?.agentId === agent.agentId).length;
+      if (mine >= maxPerAgent)
+        throw new RateLimitError(
+          "RATE_LIMITED",
+          { scope: "agent", agent: agent.agentId, limit: maxPerAgent, ...this.nextFreeSlot(tenant) },
+          `Agent '${agent.agentId}' already holds ${mine} sandbox session(s) — close one (or snapshot the world and close it) before opening another.`,
+        );
+    }
     if (this.deps.maxPerTenant === undefined) return;
-    let owned = 0;
-    for (const live of this.sessions.values()) if (live.tenant === tenant) owned++;
-    if (owned >= this.deps.maxPerTenant)
+    // The member reserve: only when the cap leaves room for one (a 1-slot deployment would otherwise ban
+    // agents outright, which is a different decision than "keep a slot for people").
+    const agentCeiling =
+      agent !== undefined && this.deps.maxPerTenant >= 2 ? this.deps.maxPerTenant - 1 : this.deps.maxPerTenant;
+    if (owned.length >= agentCeiling)
       throw new RateLimitError(
         "RATE_LIMITED",
-        { scope: "tenant", limit: this.deps.maxPerTenant },
-        `This workspace already has ${owned} open sandbox session(s) — close one first.`,
+        { scope: "tenant", limit: agentCeiling, ...this.nextFreeSlot(tenant) },
+        agent !== undefined && agentCeiling < this.deps.maxPerTenant
+          ? `This workspace has ${owned.length} of ${this.deps.maxPerTenant} sandbox session(s) open, and the last slot is reserved for a member${this.freesAtSuffix(tenant)}.`
+          : `This workspace already has ${owned.length} open sandbox session(s) — close one first${this.freesAtSuffix(tenant)}.`,
       );
+  }
+
+  // When the earliest-expiring session frees its slot — the one fact that makes a capacity refusal
+  // actionable (wait this long, or go close something).
+  private nextFreeSlot(tenant?: string): { freesAt?: string } {
+    const deadlines = [...this.sessions.values()]
+      .filter((live) => tenant === undefined || live.tenant === tenant)
+      .map((live) => live.expiresAtMs);
+    if (deadlines.length === 0) return {};
+    return { freesAt: new Date(Math.min(...deadlines)).toISOString() };
+  }
+
+  private freesAtSuffix(tenant?: string): string {
+    const { freesAt } = this.nextFreeSlot(tenant);
+    return freesAt === undefined ? "" : ` — the next slot frees at ${freesAt}`;
   }
 
   private maxTtl(): number {

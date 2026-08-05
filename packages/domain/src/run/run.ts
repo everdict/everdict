@@ -251,6 +251,7 @@ export class Run {
     world?: string; // agent worlds (W1): the environment capability this session snapshots into
     hibernate?: boolean; // auto-snapshot at teardown instead of losing the filesystem
     repo?: { git: string; ref?: string; dir: string }; // W2: the repository cloned in at create
+    agent?: { agentId: string; conversationId?: string }; // W3: whose loop guard key the facts carry
     origin?: RunOrigin;
     envelope?: RunEnvelope;
     attach?: RunAttachChannel[]; // default ["exec"]; a harness session adds "tasks" (test-case submissions)
@@ -279,6 +280,7 @@ export class Run {
         ...(input.world !== undefined ? { world: input.world } : {}),
         ...(input.hibernate !== undefined ? { hibernate: input.hibernate } : {}),
         ...(input.repo !== undefined ? { repo: input.repo } : {}),
+        ...(input.agent !== undefined ? { agent: input.agent } : {}),
       },
       createdAt: input.now,
       updatedAt: input.now,

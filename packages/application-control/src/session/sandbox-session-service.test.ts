@@ -9,18 +9,26 @@ import { SandboxSessionService, type SandboxSessionServiceDeps } from "./sandbox
 // live here, capturing the E0 events threaded into each write.
 function fakeRunStore() {
   const rows = new Map<string, RunRecord>();
-  const events: Array<{ op: "create" | "update"; kinds: string[] }> = [];
+  const events: Array<{ op: "create" | "update"; kinds: string[]; causedBy: Array<string | undefined> }> = [];
   const store: RunStore = {
     async create(record: RunRecord, evts?: OutboxEvent[]) {
       rows.set(record.id, record);
-      events.push({ op: "create", kinds: (evts ?? []).map((e) => e.kind) });
+      events.push({
+        op: "create",
+        kinds: (evts ?? []).map((e) => e.kind),
+        causedBy: (evts ?? []).map((e) => e.causedBy),
+      });
     },
     async update(id: string, patch: Partial<RunRecord>, evts?: OutboxEvent[]) {
       const cur = rows.get(id);
       if (!cur) return undefined;
       const next = { ...cur, ...patch, id: cur.id };
       rows.set(id, next);
-      events.push({ op: "update", kinds: (evts ?? []).map((e) => e.kind) });
+      events.push({
+        op: "update",
+        kinds: (evts ?? []).map((e) => e.kind),
+        causedBy: (evts ?? []).map((e) => e.causedBy),
+      });
       return next;
     },
     async get(id: string) {
@@ -179,7 +187,7 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
       createdBy: "alice",
       session: { image: "python:3.12-slim", ttlSec: 900, expiresAt: "2026-07-30T00:15:00.000Z" },
     });
-    expect(runStore.events[0]).toEqual({ op: "create", kinds: ["run.submitted"] });
+    expect(runStore.events[0]).toMatchObject({ op: "create", kinds: ["run.submitted"] });
   });
 
   it("an environment ref resolves through the injected consume gate; unresolvable → 404; no resolver → 400", async () => {
@@ -256,7 +264,7 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
     const closed = await service.close(creator, record.id);
     expect(closed).toMatchObject({ status: "succeeded", session: { closedReason: "closed" } });
     expect(driver.disposed).toEqual(["c-1"]);
-    expect(runStore.events.at(-1)).toEqual({ op: "update", kinds: ["run.completed"] });
+    expect(runStore.events.at(-1)).toMatchObject({ op: "update", kinds: ["run.completed"] });
 
     const sealed = await trajectories.store.get("acme", record.id);
     expect(sealed?.meta).toMatchObject({ source: "run", eventCount: 7 }); // infra(provisioned) + start + 2×(call+result) + close
@@ -729,7 +737,7 @@ describe("SandboxSessionService — agent worlds (W1: snapshot, hibernate, touch
       password: "grant-token",
     });
     expect(ctx.published[0]).toMatchObject({ tenant: "acme", actor: "alice", world: "proj", name: "My project" });
-    expect(ctx.runStore.events.at(-1)).toEqual({ op: "update", kinds: ["run.snapshotted"] });
+    expect(ctx.runStore.events.at(-1)).toMatchObject({ op: "update", kinds: ["run.snapshotted"] });
     expect((await ctx.runStore.store.get(record.id))?.session?.snapshots).toHaveLength(1);
 
     // The next snapshot sees v1 in the registry and mints v2.
@@ -1047,5 +1055,125 @@ describe("SandboxSessionService — world retention", () => {
       image: "img",
     });
     expect((await ctx.service.snapshot(creator, record.id, {})).prunedVersions).toBeUndefined();
+  });
+});
+
+// Loop guard (agent worlds W3) — an autonomous agent snapshots its world, and `run.snapshotted` is workspace
+// news. Without `causedBy: agent:<id>:<conversation>` on the fact, the agent's own subscription would wake it
+// on its own effect. The key has to survive the paths that emit LATER than the request: expiry, and the
+// crash-path reaper in a whole different process.
+describe("SandboxSessionService — agent attribution on the facts (loop guard #1)", () => {
+  const asAgent = { ...creator, agent: { agentId: "researcher", conversationId: "conv-7" } };
+
+  it("stamps every fact of an agent-driven session — creation, snapshot and the terminal one", async () => {
+    const ctx = buildWorld();
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+      agent: { agentId: "researcher", conversationId: "conv-7" },
+    });
+    expect(ctx.runStore.events[0]).toMatchObject({
+      kinds: ["run.submitted"],
+      causedBy: ["agent:researcher:conv-7"],
+    });
+    expect(record.session?.agent).toEqual({ agentId: "researcher", conversationId: "conv-7" }); // on the ROW
+
+    await ctx.service.snapshot(asAgent, record.id, {});
+    expect(ctx.runStore.events.at(-1)).toMatchObject({
+      kinds: ["run.snapshotted"],
+      causedBy: ["agent:researcher:conv-7"],
+    });
+
+    await ctx.service.close(asAgent, record.id, { snapshot: false });
+    expect(ctx.runStore.events.at(-1)).toMatchObject({
+      kinds: ["run.completed"],
+      causedBy: ["agent:researcher:conv-7"],
+    });
+  });
+
+  it("a member-driven session stamps nothing — causedBy names an agent or is absent", async () => {
+    const ctx = buildWorld();
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+    });
+    expect(ctx.runStore.events[0]).toMatchObject({ kinds: ["run.submitted"], causedBy: [undefined] });
+    await ctx.service.close(creator, record.id, { snapshot: false });
+    expect(ctx.runStore.events.at(-1)).toMatchObject({ kinds: ["run.completed"], causedBy: [undefined] });
+  });
+
+  it("the CRASH path keeps the key: a reaper in a later process reads it off the row", async () => {
+    const before = buildWorld();
+    const record = await before.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "img",
+      ttlSec: 60,
+      agent: { agentId: "researcher", conversationId: "conv-7" },
+    });
+    // A NEW process: only the row survives — no live map, no memory of who asked.
+    const rebornDriver = fakeDriver({ snapshot: () => {} });
+    const reborn = new SandboxSessionService({
+      store: before.runStore.store,
+      driver: rebornDriver.driver,
+      images: before.images,
+      publishWorldVersion: before.publishWorldVersion,
+      now: () => "2026-07-30T01:00:00.000Z", // past the deadline
+    });
+    await expect(reborn.reap("acme", record.id)).resolves.toEqual({ reaped: true });
+    const emitted = before.runStore.events.slice(1);
+    expect(emitted.flatMap((e) => e.kinds)).toEqual(["run.snapshotted", "run.completed"]);
+    expect(emitted.flatMap((e) => e.causedBy)).toEqual(["agent:researcher:conv-7", "agent:researcher:conv-7"]);
+  });
+});
+
+// Capacity when agents share the workspace (W3). The flat per-tenant cap was written for members clicking a
+// button; an autonomous agent holding worlds across hibernates changes what it means.
+describe("SandboxSessionService — capacity with autonomous agents", () => {
+  const bot = (agentId: string) => ({ agentId, conversationId: "c1" });
+
+  it("bounds ONE agent to its own slot and names what is holding it", async () => {
+    const ctx = build({ maxPerTenant: 4, maxPerAgent: 1 });
+    await ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img", agent: bot("researcher") });
+    await expect(
+      ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img", agent: bot("researcher") }),
+    ).rejects.toMatchObject({ status: 429, extra: { scope: "agent", agent: "researcher" } });
+    // A DIFFERENT agent still has its own slot — the bound is per agent, not "one agent at a time".
+    await expect(
+      ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img", agent: bot("reviewer") }),
+    ).resolves.toMatchObject({ kind: "sandbox" });
+  });
+
+  it("keeps the LAST tenant slot for a member — an agent cannot starve the person waiting to debug", async () => {
+    const ctx = build({ maxPerTenant: 2, maxPerAgent: 5 });
+    await ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img", agent: bot("researcher") });
+    // One of two slots is taken; the second is reserved, so the agent is refused …
+    await expect(
+      ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img", agent: bot("reviewer") }),
+    ).rejects.toMatchObject({ status: 429, extra: { scope: "tenant", limit: 1 } });
+    // … and the member gets it.
+    await expect(ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img" })).resolves.toMatchObject({
+      kind: "sandbox",
+    });
+  });
+
+  it("a 1-slot deployment does not ban agents outright (reserve applies only where there is room)", async () => {
+    const ctx = build({ maxPerTenant: 1 });
+    await expect(
+      ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img", agent: bot("researcher") }),
+    ).resolves.toMatchObject({ kind: "sandbox" });
+  });
+
+  it("a refusal says WHEN a slot frees, so waiting is a decision rather than a guess", async () => {
+    const ctx = build({ maxPerTenant: 1 });
+    await ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img", ttlSec: 600 });
+    await expect(ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img" })).rejects.toMatchObject({
+      extra: { freesAt: "2026-07-30T00:10:00.000Z" },
+    });
   });
 });

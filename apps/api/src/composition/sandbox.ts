@@ -217,6 +217,9 @@ export function buildSandboxSessions(opts: {
         }
       : {}),
     maxPerTenant: intEnv("EVERDICT_SANDBOX_MAX_PER_TENANT") ?? 2,
+    // W3: one live session per agent by default, and the tenant's last slot stays reserved for a member —
+    // an autonomous world loop must not be able to starve the person trying to open a shell.
+    maxPerAgent: intEnv("EVERDICT_SANDBOX_MAX_PER_AGENT") ?? 1,
     maxTotal: intEnv("EVERDICT_SANDBOX_MAX_TOTAL") ?? 8,
     ...(intEnv("EVERDICT_SANDBOX_TTL_SEC") !== undefined ? { defaultTtlSec: intEnv("EVERDICT_SANDBOX_TTL_SEC") } : {}),
   });

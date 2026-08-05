@@ -109,6 +109,10 @@ export const RunSessionSchema = z.object({
   // W2: the repository cloned into this session at create — what the working tree IS, and where. No
   // credential ever lands here: a read token is used for the clone and discarded, and a push mints its own.
   repo: z.object({ git: z.string(), ref: z.string().optional(), dir: z.string() }).optional(),
+  // W3 loop guard: the agent this session acts for. On the ROW because teardown can happen in a LATER
+  // process (the crash-path reaper), and a fact emitted there must carry the same `causedBy` the creation
+  // one did — otherwise an orphaned autonomous session's hibernate becomes an event its own agent wakes on.
+  agent: z.object({ agentId: z.string(), conversationId: z.string().optional() }).optional(),
 });
 export type RunSession = z.infer<typeof RunSessionSchema>;
 
