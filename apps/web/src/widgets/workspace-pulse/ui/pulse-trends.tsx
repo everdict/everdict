@@ -10,6 +10,7 @@ import type {
 import { fmtPct } from '@/shared/lib/format'
 import { BarChart, LineChart, seriesColorAt } from '@/shared/ui/charts'
 import { SectionHeader } from '@/shared/ui/section-header'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 // 추이 — 워크스페이스가 어느 쪽으로 움직이고 있나. 세 질문을 세 그림으로 나눈다:
 //   ① 무엇이 벌어지고 있나(축별 활동량)  ② 일이 들어오는 속도와 나가는 속도  ③ 평가가 매기는 점수
@@ -42,27 +43,79 @@ export function PulseTrends({
   const days = activity.map((point) => point.date)
   const count = (n: number) => String(Math.round(n))
 
+  // 밴드의 이름은 그 밴드가 세는 것을 말해야 한다 — "작업"처럼 제품 어디에도 없는 낱말이면 독자는 무엇이
+  // 거기 쌓였는지 알 길이 없다. 이름은 가장 큰 구성요소를 부르고(이슈·프로젝트), 정확한 내역은 hint 가
+  // 진다: 축 하나가 스무 종류가 넘는 사실을 묶으므로 두 낱말로는 다 담기지 않는다(가이드 문구는 인라인이
+  // 아니라 InfoTip 으로 — `.claude` 규약).
+  // 이름·색·값이 한 자리에 있는 이유: 범례와 값이 따로 나열되면 한쪽만 순서가 바뀌어도 라벨이 남의 막대를
+  // 가리키고, 그건 화면에 아무 티도 나지 않는다.
+  const bands = [
+    {
+      key: 'work',
+      label: t('axisWork'),
+      hint: t('axisWorkTip'),
+      color: seriesColorAt(0),
+      countOf: (point: PulseActivityPoint) => point.work,
+    },
+    {
+      key: 'evaluation',
+      label: t('axisEvaluation'),
+      hint: t('axisEvaluationTip'),
+      color: seriesColorAt(1),
+      countOf: (point: PulseActivityPoint) => point.evaluation,
+    },
+    {
+      key: 'agent',
+      label: t('axisAgent'),
+      hint: t('axisAgentTip'),
+      color: seriesColorAt(2),
+      countOf: (point: PulseActivityPoint) => point.agent,
+    },
+    {
+      key: 'knowledge',
+      label: t('axisKnowledge'),
+      hint: t('axisKnowledgeTip'),
+      color: seriesColorAt(3),
+      countOf: (point: PulseActivityPoint) => point.knowledge,
+    },
+  ]
+
   return (
     <div className="space-y-5">
       <section className="space-y-2.5">
-        <SectionHeader title={t('trendActivity')} />
+        <SectionHeader
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              {t('trendActivity')}
+              <InfoTip
+                content={
+                  <span className="block space-y-1.5">
+                    <span className="block text-muted-foreground">{t('trendActivityTip')}</span>
+                    {bands.map((band) => (
+                      <span key={band.key} className="flex items-start gap-1.5">
+                        <span
+                          className="mt-1 size-2.5 shrink-0 rounded-[3px]"
+                          style={{ background: band.color }}
+                        />
+                        <span>
+                          <span className="font-[560]">{band.label}</span>
+                          <span className="text-muted-foreground"> — {band.hint}</span>
+                        </span>
+                      </span>
+                    ))}
+                  </span>
+                }
+              />
+            </span>
+          }
+        />
         <div className="rounded-lg border bg-card p-3.5 shadow-raise">
           <BarChart
             x={days}
             stacked
             showTotal
-            series={[
-              { key: 'work', label: t('axisWork'), color: seriesColorAt(0) },
-              { key: 'evaluation', label: t('axisEvaluation'), color: seriesColorAt(1) },
-              { key: 'agent', label: t('axisAgent'), color: seriesColorAt(2) },
-              { key: 'knowledge', label: t('axisKnowledge'), color: seriesColorAt(3) },
-            ]}
-            values={[
-              activity.map((p) => p.work),
-              activity.map((p) => p.evaluation),
-              activity.map((p) => p.agent),
-              activity.map((p) => p.knowledge),
-            ]}
+            series={bands.map(({ key, label, color }) => ({ key, label, color }))}
+            values={bands.map((band) => activity.map(band.countOf))}
             formatValue={count}
             formatX={dayLabel}
             ariaLabel={t('trendActivity')}
