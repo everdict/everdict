@@ -48,4 +48,10 @@ describe("loadConfig", () => {
     expect(config.AGENT_MODEL).toBe("claude-opus-4-8");
     expect(config.AGENT_TOOL_TIMEOUT_MS).toBe(120000);
   });
+
+  it("parses the session running-memory trigger (and treats compose's empty string as unset)", () => {
+    expect(loadConfig({ ...BASE, AGENT_MEMORY_TRIGGER_CHARS: "250000" }).AGENT_MEMORY_TRIGGER_CHARS).toBe(250_000);
+    expect(loadConfig({ ...BASE, AGENT_MEMORY_TRIGGER_CHARS: "" }).AGENT_MEMORY_TRIGGER_CHARS).toBeUndefined();
+    expect(loadConfig({ ...BASE }).AGENT_MEMORY_TRIGGER_CHARS).toBeUndefined();
+  });
 });

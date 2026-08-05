@@ -47,6 +47,10 @@ const ConfigSchema = z.object({
   AGENT_LLM_API_KEY: z.string().optional(),
   AGENT_LLM_MODEL: z.string().optional(),
   AGENT_MAX_TURNS: z.coerce.number().int().positive().optional(),
+  // Session running-memory trigger: characters of replayed transcript before the oldest records fold into the
+  // session digest at the turn boundary (chat.ts maintainSessionMemory). Ops tuning knob; unset → the built-in
+  // default (100k chars ≈ 25k tokens).
+  AGENT_MEMORY_TRIGGER_CHARS: z.coerce.number().int().positive().optional(),
   // Operator opt-in for containerized stdio MCP servers (Capability Store `mcp` capabilities that declare an `image`).
   // "1"/"true" → the agent may spawn `docker run --rm -i <image>` for an adopted stdio server; anything else (default)
   // → those capabilities are skipped. Requires Docker where the agent runs. Off by default (no process-spawning).

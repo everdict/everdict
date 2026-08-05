@@ -247,6 +247,11 @@ async function main(): Promise<void> {
     now: () => new Date().toISOString(),
     newId: () => randomUUID(),
     ...(config.AGENT_MAX_TURNS !== undefined ? { maxTurns: config.AGENT_MAX_TURNS } : {}),
+    // Session running-memory fold trigger — without this line the ChatDeps knob exists but production always ran
+    // on the hardcoded default.
+    ...(config.AGENT_MEMORY_TRIGGER_CHARS !== undefined
+      ? { memoryTriggerChars: config.AGENT_MEMORY_TRIGGER_CHARS }
+      : {}),
     // Model tiering — only effective with resolveModelById (DB + secrets); otherwise ignored (single env model).
     ...(config.AGENT_SMALL_MODEL !== undefined ? { smallModelRef: config.AGENT_SMALL_MODEL } : {}),
     ...(config.AGENT_FALLBACK_MODEL !== undefined ? { fallbackModelRef: config.AGENT_FALLBACK_MODEL } : {}),
