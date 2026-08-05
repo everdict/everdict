@@ -1,3 +1,4 @@
+export { notificationHref } from './model/href'
 export {
   notificationKinds,
   notificationKindSchema,

@@ -21,6 +21,7 @@ import {
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import {
+  notificationHref,
   notificationsResponseSchema,
   type NotificationItem,
   type NotificationKind,
@@ -39,32 +40,6 @@ import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-
 // (N1 — in the desktop shell Electron routes these to OS notifications; fires only when the window is hidden to avoid noise).
 const POLL_MS = 25_000
 const NATIVE_FIRE_CAP = 3 // max native notifications fired per poll (flood prevention)
-
-// Resource type → detail path segment (a schedule has no detail, so → edit). Comment-mention links use this mapping to reach the detail.
-const RESOURCE_PATH: Record<string, (id: string) => string> = {
-  dataset: (id) => `datasets/${id}`,
-  harness: (id) => `harnesses/${id}`,
-  scorecard: (id) => `scorecards/${id}`,
-  view: (id) => `views/${id}`,
-  schedule: (id) => `schedules/${id}/edit`,
-  run: (id) => `runs/${id}`,
-  runtime: (id) => `runtimes/${id}`,
-  // 트래커 업데이트가 가리키는 곳 — 판정이 올라온 그 기록. 목표는 업데이트 탭으로 바로 떨어뜨린다(그 문장을
-  // 읽으러 온 것이므로).
-  project: (id) => `projects/${id}`,
-  initiative: (id) => `initiatives/${id}/updates`,
-}
-
-function hrefOf(workspace: string, n: NotificationItem): string {
-  if (n.link?.runId) return `/${workspace}/run/${n.link.runId}`
-  if (n.link?.scorecardId) return `/${workspace}/scorecard/${n.link.scorecardId}`
-  // Resource comment mention — resourceType→path mapping, with a commentId anchor to scroll to that comment.
-  if (n.link?.resourceType && n.link?.resourceId) {
-    const seg = RESOURCE_PATH[n.link.resourceType]?.(encodeURIComponent(n.link.resourceId))
-    if (seg) return `/${workspace}/${seg}${n.link.commentId ? `#comment-${n.link.commentId}` : ''}`
-  }
-  return `/${workspace}`
-}
 
 // Per-kind icon + outcome tone — the row leads with a tinted icon chip so "what happened" reads at a glance
 // (glyph = the notification type, tint = the outcome: success/danger/warning/info). Language-independent — no catalog.
@@ -147,7 +122,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
           const note = new Notification(n.title, { ...(n.body ? { body: n.body } : {}), tag: n.id })
           note.onclick = () => {
             window.focus()
-            router.push(hrefOf(workspace, n))
+            router.push(notificationHref(workspace, n))
           }
         }
       }
@@ -203,7 +178,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
   function onItemClick(n: NotificationItem) {
     if (n.readAt === undefined) void markRead({ ids: [n.id] })
     setOpen(false)
-    router.push(hrefOf(workspace, n))
+    router.push(notificationHref(workspace, n))
   }
 
   async function enableNative() {

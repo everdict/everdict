@@ -66,6 +66,7 @@ import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
+import { searchSuffix } from '@/shared/lib/search-suffix'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
@@ -148,11 +149,15 @@ function SiblingLink({
 // 바꾸는 자리를 섞지 않는 것이 이 레이아웃의 전부다.
 export default async function IssueDetailPage({
   params,
+  searchParams,
 }: {
   // `id` 세그먼트는 REF 다 — 슬러그(`ENG-12`)가 정규형이고, 예전에 복사된 uuid 링크도 제어 평면이 같이 받는다.
   // The trailing segment is the title slug — decorative, never read. It exists so a pasted link says what it
   // leads to; the identifier alone decides which issue this is, and `/issue/ENG-12` with no slug is just as valid.
   params: Promise<{ workspace: string; id: string; slug?: string[] }>
+  // Read only to be handed on when the address normalizes below — a mention notification arrives at the uuid
+  // carrying `?comment=<id>`, and that is what tells the thread which comment to scroll to.
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { workspace, id: ref } = await params
   const t = await getTranslations('issuesPage')
@@ -179,7 +184,11 @@ export default async function IssueDetailPage({
   }
   const current = issue
   // 주소를 정규화한다 — uuid 로 들어왔거나 소문자로 붙여넣은 링크는 팀이 찍은 이름으로 바꿔 준다.
-  if (ref !== current.identifier) redirect(issueHref(workspace, current.identifier, current.title))
+  // 알림이 들고 온 `?comment=` 는 그대로 넘긴다(리다이렉트를 건너뛰면 언급된 댓글에 영영 못 닿는다).
+  if (ref !== current.identifier)
+    redirect(
+      `${issueHref(workspace, current.identifier, current.title)}${searchSuffix(await searchParams)}`
+    )
 
   // Supplementary reads — the detail still renders if any of them fails, so they run together and a failure
   // degrades only its own slot (팀을 못 읽으면 브레드크럼이 한 칸 짧아질 뿐이다).

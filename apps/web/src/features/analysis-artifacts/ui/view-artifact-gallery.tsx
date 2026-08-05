@@ -10,6 +10,7 @@ import { agentPlane } from '@/shared/lib/agent-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { SectionHeader } from '@/shared/ui/section-header'
 
+import { ArtifactAnchor } from './artifact-anchor'
 import { PinControl } from './pin-control'
 
 // The View's pinned analysis artifacts (analysis-studio V3) — scheduled reports and agent-pinned charts/tables,
@@ -38,6 +39,7 @@ export async function ViewArtifactGallery({ viewId }: { viewId: string }) {
         <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <div className="space-y-3">
+          <ArtifactAnchor />
           {artifacts.map((artifact) => (
             <ArtifactCard
               key={artifact.id}

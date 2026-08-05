@@ -96,6 +96,33 @@ web bell (poll /notifications) ──▶ new items → Web Notification API ─�
   tests (backlog skip / cursor advance·persistence / empty first poll / retry on failure / firing cap). The
   full-GUI end-to-end script is `scripts/live/desktop-notify.mjs` (requires a graphics session).
 
+## N7 — a notification is only worth firing if the click LANDS (2026-08-05)
+
+A row whose `link` no reader understands falls back to `/{workspace}` — and the click still marks it read, so
+the person is told about something and can never reach it again. Measured on the live stack before the fix: an
+@mention on an **issue** and on a **cycle** did nothing at all (unread → read, no navigation), a regression
+opened the **scorecard** instead of the issue it names, a mention on a **goal** opened its Updates tab where
+the thread isn't, and every resource link lost its `#comment-…` anchor on the way. So:
+
+- **One resolver per surface, keyed by the WHOLE vocabulary.** `notificationHref`
+  (`apps/web/src/entities/notification/model/href.ts`) and its desktop mirror `notificationPathOf`
+  (`apps/desktop/src/notification-watcher.ts`) map `link.resourceType` over the full comment-target list
+  (`COMMENT_RESOURCE_TYPES`: dataset · harness · scorecard · view · schedule · run · runtime · issue · cycle ·
+  project · initiative). A resource that can be commented on but not addressed is the defect; the web test
+  enumerates all of them, and one case asserts every registered `kind` resolves.
+- **The subject beats the evidence.** `resourceType`+`resourceId` win over `runId`/`scorecardId`:
+  `issue_regressed` carries both and the headline is about the issue.
+- **The kind picks the screen only where the resource has two.** A posted goal update opens
+  `/initiative/{id}/updates`; a mention on that same goal opens its overview, where the thread is.
+- **Singular addresses, and the anchor is a QUERY parameter.** `/{ws}/datasets/{id}` still 307s to the singular
+  form, but a redirect DROPS a fragment — measured. So the link is built singular, and what on the page it is
+  about rides as `?comment=<id>` / `?artifact=<id>` (`useAnchorHighlight`, `shared/lib/use-anchor-highlight.ts`),
+  which the two normalizing gateways (issue uuid → `ENG-12`, cycle uuid → the team's numbered cycle) carry
+  through with `searchSuffix`. `#comment-<id>` is still honoured for a hand-copied link.
+- **The desktop shell must parse what it navigates by.** Its watcher schema had a nested `z.object` for `link`
+  that silently stripped `resourceType`/`resourceId`, so every mention/tracker/regression notification was a
+  dead click; the schema now mirrors the record.
+
 ## See also
 [connections.md](../connections.md) (Mattermost notify) · [desktop-app.md](./desktop-app.md) (D1/D4) ·
 [scheduled-evals.md](./scheduled-evals.md) (schedule fire/finalize).

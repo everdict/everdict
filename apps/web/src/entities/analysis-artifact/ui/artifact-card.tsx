@@ -455,7 +455,12 @@ export function ArtifactCard({
   }
 
   return (
-    <article className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
+    // The id a report notification addresses (`?artifact=<id>` → useAnchorHighlight('artifact')) — a scheduled
+    // report lands in a gallery of pinned artifacts, so "the report is ready" has to point at the one produced.
+    <article
+      id={`artifact-${artifact.id}`}
+      className="space-y-3 rounded-lg border bg-card p-4 shadow-raise"
+    >
       <header className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0 text-primary" />

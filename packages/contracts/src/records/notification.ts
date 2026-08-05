@@ -31,8 +31,13 @@ export const NotificationRecordSchema = z.object({
   kind: NotificationKindSchema,
   title: z.string(),
   body: z.string().optional(),
-  // Where a click navigates — run/scorecard detail, or a resource comment (mention: to that detail via resourceType+resourceId +
-  // scroll to the commentId anchor). resourceType ∈ dataset|harness|scorecard|view|schedule|run|runtime.
+  // Where a click navigates. `resourceType`+`resourceId` name the SUBJECT — the thing the notification is
+  // about — and win over runId/scorecardId, which may be the evidence attached to it (a regression carries
+  // both: the issue it happened to, and the scorecard that proved it). resourceType is the comment-target
+  // vocabulary (`COMMENT_RESOURCE_TYPES`): dataset|harness|scorecard|view|schedule|run|runtime|issue|cycle|
+  // project|initiative — the reader (`notificationHref` in the web, `notificationPathOf` in the desktop shell)
+  // must have an address for every one of them, or the click silently lands on the workspace home.
+  // commentId/artifactId say what ON that page it is about (carried as `?comment=`/`?artifact=`).
   link: z
     .object({
       runId: z.string().optional(),

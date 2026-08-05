@@ -4,6 +4,7 @@ import { cycleHref, cycleSchema } from '@/entities/cycle'
 import { teamWithSummarySchema } from '@/entities/team'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { searchSuffix } from '@/shared/lib/search-suffix'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,8 +14,11 @@ export const dynamic = 'force-dynamic'
 // 사람이 복사하는 주소는 한 형태로 모인다.
 export default async function LegacyCycleDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ workspace: string; id: string }>
+  // 알림이 들고 온 `?comment=<id>` 를 정식 주소까지 데려간다 — 여기서 떨어뜨리면 언급된 댓글에 못 닿는다.
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { workspace, id } = await params
   const ctx = await authContext()
@@ -32,5 +36,5 @@ export default async function LegacyCycleDetailPage({
     .catch(() => undefined)
   if (!team) notFound()
 
-  redirect(cycleHref(workspace, team.key, cycle.number))
+  redirect(`${cycleHref(workspace, team.key, cycle.number)}${searchSuffix(await searchParams)}`)
 }

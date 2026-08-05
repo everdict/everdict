@@ -8,14 +8,70 @@ const WatcherRowSchema = z
   .object({
     id: z.string(),
     workspace: z.string(),
+    // The kind decides one thing here: a posted tracker update opens the goal's update timeline (see notifyPathOf).
+    kind: z.string().optional(),
     title: z.string(),
     body: z.string().optional(),
-    link: z.object({ runId: z.string().optional(), scorecardId: z.string().optional() }).optional(),
+    // The WHOLE link — a nested `z.object` strips what it does not name, and dropping resourceType/resourceId
+    // left every mention, tracker update and regression with nowhere to go: the OS notification fired, the
+    // click focused the window, and nothing opened.
+    link: z
+      .object({
+        runId: z.string().optional(),
+        scorecardId: z.string().optional(),
+        resourceType: z.string().optional(),
+        resourceId: z.string().optional(),
+        commentId: z.string().optional(),
+        artifactId: z.string().optional(),
+      })
+      .optional(),
     createdAt: z.string(),
   })
   .passthrough();
 const WatcherResultSchema = z.object({ notifications: z.array(WatcherRowSchema) }).passthrough();
 export type WatcherNotification = z.infer<typeof WatcherRowSchema>;
+
+// Where a fired OS notification navigates when it is clicked — the desktop's mirror of the web bell's
+// `notificationHref` (apps/web `entities/notification/model/href.ts`; the shell cannot import the web, so the
+// two are kept in step by hand — the singular detail addresses and the comment/artifact parameter are the same
+// contract). Null only when the row carries no link at all: then the click just raises the window.
+const RESOURCE_SEGMENT: Record<string, string> = {
+  dataset: "dataset",
+  harness: "harness",
+  scorecard: "scorecard",
+  view: "view",
+  schedule: "schedule",
+  run: "run",
+  runtime: "runtime",
+  issue: "issue",
+  cycle: "cycle",
+  project: "project",
+  initiative: "initiative",
+};
+
+export function notificationPathOf(row: WatcherNotification): string | null {
+  const link = row.link;
+  if (!link) return null;
+  const workspace = encodeURIComponent(row.workspace);
+  // The subject before the evidence: a regression names the issue AND the scorecard that proved it, and the
+  // headline is about the issue.
+  if (link.resourceType !== undefined && link.resourceId !== undefined) {
+    const segment = RESOURCE_SEGMENT[link.resourceType];
+    if (segment !== undefined) {
+      // A posted update is read on the goal's own update timeline; a mention on the same goal is not.
+      const section = row.kind === "tracker_update_posted" && link.resourceType === "initiative" ? "/updates" : "";
+      const anchor = link.commentId
+        ? `?comment=${encodeURIComponent(link.commentId)}`
+        : link.artifactId
+          ? `?artifact=${encodeURIComponent(link.artifactId)}`
+          : "";
+      return `/${workspace}/${segment}/${encodeURIComponent(link.resourceId)}${section}${anchor}`;
+    }
+  }
+  if (link.runId !== undefined) return `/${workspace}/run/${encodeURIComponent(link.runId)}`;
+  if (link.scorecardId !== undefined) return `/${workspace}/scorecard/${encodeURIComponent(link.scorecardId)}`;
+  return null;
+}
 
 export interface NotificationWatcherDeps {
   // MCP tool call (runner-token session) — the same callJson contract as RunnerHost (isError is promoted to a throw).

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { NotificationWatcher, type WatcherNotification } from "./notification-watcher.js";
+import { NotificationWatcher, type WatcherNotification, notificationPathOf } from "./notification-watcher.js";
 
 const row = (id: string, createdAt: string): Record<string, unknown> => ({
   id,
@@ -117,5 +117,56 @@ describe("NotificationWatcher — desktop independent notifications (N6)", () =>
     await flush();
     expect(fired).toHaveLength(3);
     watcher.stop();
+  });
+});
+
+// Where the click lands. A fired OS notification that opens nothing is the same failure as no notification at
+// all — the shell mirrors the web bell's resolver, so these cases are its parity contract.
+describe("notificationPathOf", () => {
+  const link = (l: Record<string, string>): WatcherNotification => ({
+    id: "n1",
+    workspace: "acme",
+    title: "t",
+    createdAt: "2026-08-05T00:00:00Z",
+    link: l,
+  });
+
+  it("opens a run and a scorecard at the address that names ONE of them", () => {
+    expect(notificationPathOf(link({ runId: "r1" }))).toBe("/acme/run/r1");
+    expect(notificationPathOf(link({ scorecardId: "s1" }))).toBe("/acme/scorecard/s1");
+  });
+
+  // The gap that made every mention/tracker/regression notification a dead click on the desktop.
+  it("reaches the mentioned comment on a resource", () => {
+    expect(notificationPathOf(link({ resourceType: "issue", resourceId: "i1", commentId: "c1" }))).toBe(
+      "/acme/issue/i1?comment=c1",
+    );
+    expect(notificationPathOf(link({ resourceType: "cycle", resourceId: "y1", commentId: "c2" }))).toBe(
+      "/acme/cycle/y1?comment=c2",
+    );
+  });
+
+  it("opens the issue a regression is about, not the scorecard that proved it", () => {
+    expect(notificationPathOf(link({ resourceType: "issue", resourceId: "i1", scorecardId: "s1" }))).toBe(
+      "/acme/issue/i1",
+    );
+  });
+
+  it("sends a posted goal update to the update timeline", () => {
+    const row: WatcherNotification = {
+      id: "n2",
+      workspace: "acme",
+      kind: "tracker_update_posted",
+      title: "t",
+      createdAt: "2026-08-05T00:00:00Z",
+      link: { resourceType: "initiative", resourceId: "g1" },
+    };
+    expect(notificationPathOf(row)).toBe("/acme/initiative/g1/updates");
+  });
+
+  it("has nowhere to go without a link, and says so", () => {
+    expect(notificationPathOf({ id: "n3", workspace: "acme", title: "t", createdAt: "2026-08-05T00:00:00Z" })).toBe(
+      null,
+    );
   });
 });

@@ -14,6 +14,7 @@ import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { PermissionPrompt, type PendingPermission } from '@/features/agent-chat'
 import { MediaDropZone, withBlockInsertion } from '@/features/attach-media'
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
+import { useAnchorHighlight } from '@/shared/lib/use-anchor-highlight'
 import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
@@ -93,17 +94,8 @@ export function CommentThread({
     }
   }
 
-  // On arriving from a notification at #comment-<id>, scroll + highlight.
-  useEffect(() => {
-    const hash = window.location.hash
-    if (!hash.startsWith('#comment-')) return
-    const el = document.getElementById(hash.slice(1))
-    if (!el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    el.classList.add('ring-2', 'ring-primary/60')
-    const t = setTimeout(() => el.classList.remove('ring-2', 'ring-primary/60'), 2400)
-    return () => clearTimeout(t)
-  }, [])
+  // On arriving from a mention notification (`?comment=<id>`), scroll to that comment + highlight it.
+  useAnchorHighlight('comment')
 
   return (
     <div className="space-y-3">

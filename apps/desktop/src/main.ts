@@ -26,7 +26,7 @@ import {
   senderAllowed,
 } from "./bridge.js";
 import { type ConfigIo, type DesktopConfig, loadConfig, saveConfig } from "./config-store.js";
-import { NotificationWatcher, type WatcherNotification } from "./notification-watcher.js";
+import { NotificationWatcher, type WatcherNotification, notificationPathOf } from "./notification-watcher.js";
 import { RunnerSupervisor } from "./runner-supervisor.js";
 import { normalizeWebUrl, resolveWebUrl } from "./server-url.js";
 import { type TokenIo, clearToken, loadToken, loadTokens, saveTokens } from "./token-store.js";
@@ -178,12 +178,6 @@ function notifyDrainIfNeeded(prev: DesktopRunnersStatus, next: DesktopRunnersSta
 let notifyWatcher: NotificationWatcher | null = null;
 let notifySession: ResilientMcpSession | null = null;
 
-function notifyPathOf(row: WatcherNotification): string | null {
-  if (row.link?.runId) return `/${row.workspace}/runs/${row.link.runId}`;
-  if (row.link?.scorecardId) return `/${row.workspace}/scorecards/${row.link.scorecardId}`;
-  return null;
-}
-
 function fireOsNotification(row: WatcherNotification): void {
   // Skip if the app window is visible — the web bell badge is already showing (the web side's firing is symmetric via the document.hidden gate).
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()) return;
@@ -192,7 +186,7 @@ function fireOsNotification(row: WatcherNotification): void {
     const n = new Notification({ title: row.title, ...(row.body ? { body: row.body } : {}) });
     n.on("click", () => {
       createOrFocusWindow();
-      const path = notifyPathOf(row);
+      const path = notificationPathOf(row);
       if (path && webUrl !== null && mainWindow && !mainWindow.isDestroyed())
         void mainWindow.loadURL(`${webUrl}${path}`);
     });
