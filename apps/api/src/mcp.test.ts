@@ -555,6 +555,12 @@ describe("MCP tools", () => {
       "list_workspace_owned_runners",
       "list_workspace_runners",
       "list_workspace_trace_sources",
+      // Ownership transfer — the write half of the team axis, one tool per re-fileable resource.
+      "move_dataset",
+      "move_harness",
+      "move_harness_template",
+      "move_judge",
+      "move_scorecard",
       "open_github_pr",
       "pair_runner",
       "pair_workspace_runner",

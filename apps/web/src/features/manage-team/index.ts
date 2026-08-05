@@ -10,6 +10,9 @@ export {
   updateTeamAction,
   type TeamMutationResult,
 } from './api/manage-team'
-export { TeamDetailManager } from './ui/team-detail-manager'
+export { TeamCyclesForm } from './ui/team-cycles-form'
+export { TeamGeneralForm } from './ui/team-general-form'
+export { TeamRoster } from './ui/team-roster'
+export { TeamTriageForm } from './ui/team-triage-form'
 export { TeamsManager } from './ui/teams-manager'
 export { WorkflowStatesEditor } from './ui/workflow-states-editor'

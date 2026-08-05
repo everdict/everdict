@@ -113,6 +113,7 @@ export function buildIntegrations(deps: {
                   resourceType: input.resourceType,
                   resourceId: input.resourceId,
                   commentId: input.commentId,
+                  anchorId: input.anchorId,
                   sessionId: input.sessionId,
                   thread: input.thread,
                 }),

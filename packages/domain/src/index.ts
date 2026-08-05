@@ -82,6 +82,7 @@ export {
   Run,
   type RunAudience,
   runAudience,
+  runEvidenceIdentity,
   type RunTransition,
 } from "./run/run.js";
 export { Approval, type ApprovalTransition, type NewPendingApprovalInput } from "./approval/approval.js";
@@ -213,6 +214,16 @@ export {
   type MattermostConnection,
   mattermostConnections,
 } from "./workspace/mattermost-connections.js";
+
+// workspace pulse — the home screen's arithmetic: the log's sparse day buckets folded into the dense series a
+// dashboard draws, with "nobody measured" kept distinct from "measured zero"
+export {
+  activityTrend,
+  calendarSpan,
+  flowTrend,
+  meanPassRate,
+  qualityTrend,
+} from "./workspace/pulse.js";
 
 // judge — spec version diff (base ↔ candidate); shares the spec-diff engine with the harness diff
 export { diffJudgeSpecs } from "./judge/judge-diff.js";

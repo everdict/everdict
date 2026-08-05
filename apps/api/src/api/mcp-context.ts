@@ -73,6 +73,7 @@ import type { ModelService } from "../core/model/model-service.js";
 import type { DriverOpsService } from "../core/ops/driver-ops-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
+import type { WorkspacePulseService } from "../core/workspace/workspace-pulse-service.js";
 import type { McpProbeAuth, McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
 import type { AgentAttribution } from "./fs/fs-actor.js";
 
@@ -150,6 +151,7 @@ export interface McpDeps {
   benchmarkService?: BenchmarkService; // benchmark preview + import (source → dataset)
   bundleService?: BundleService; // bundle one-shot apply (harness + benchmark + runtime, etc.)
   workspaceService?: WorkspaceService; // workspace self-serve list/create (no role gate — by subject)
+  workspacePulseService?: WorkspacePulseService; // "how is this workspace doing" — state + trend in one read
   membershipService?: MembershipService; // member management (list/role/remove/leave) + invites (issue/accept)
   profileService?: ProfileService; // my profile (name/username/avatar) read/edit (self-serve)
   keyStore?: TenantKeyStore; // API key self-serve issue/list/revoke (admin)

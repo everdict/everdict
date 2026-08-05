@@ -135,6 +135,7 @@ import type { DriverOpsService } from "../core/ops/driver-ops-service.js";
 import type { RuntimeProbeResult } from "../core/ops/runtime-probe.js";
 import type { SecretUsageService } from "../core/secret/secret-usage-service.js";
 import type { SkillGenerator } from "../core/skill/skill-generator.js";
+import type { WorkspacePulseService } from "../core/workspace/workspace-pulse-service.js";
 import type { McpProbeAuth, McpProbeResult } from "../infrastructure/mcp/probe-mcp.js";
 import { buildMcpServer } from "../mcp.js";
 
@@ -241,6 +242,7 @@ export interface ServerDeps {
   settingsStore?: WorkspaceSettingsStore; // workspace settings (metering policy, etc.) (route disabled if absent)
   workspaceStore?: WorkspaceStore; // workspace membership — active-workspace resolution/bootstrap (single-workspace behavior if absent)
   workspaceService?: WorkspaceService; // workspace self-serve list/create (/workspaces route disabled if absent)
+  workspacePulseService?: WorkspacePulseService; // the home screen's one read: workspace state + trend (route disabled if absent)
   membershipService?: MembershipService; // member management (list/role/remove/leave) + invites (issue/accept) (route disabled if absent)
   profileService?: ProfileService; // user profile (name/username/avatar) read·update (/me.profile + PATCH /me/profile disabled if absent)
   authenticator?: Authenticator; // authentication owned by the control plane (OIDC + API keys)

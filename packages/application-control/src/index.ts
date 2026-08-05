@@ -211,6 +211,14 @@ export {
   type SaveCapabilityResult,
 } from "./capability/capability-service.js";
 export {
+  type CapabilityMoved,
+  type MoveCapabilityInput,
+  moveCapabilityToTeam,
+  TEAM_TRANSFERABLE_CAPABILITIES,
+  type TeamTransferableRegistry,
+  type TransferableCapability,
+} from "./capability/move-capability-team.js";
+export {
   type FirstPartyDefault,
   firstPartyCatalogExtras,
   firstPartyDefaults,
@@ -221,6 +229,7 @@ export { ProxyService, type ProxyServiceDeps, type ProxyView } from "./proxy/pro
 export {
   COMMENT_AGENT_AUTHOR,
   COMMENT_RESOURCE_TYPES,
+  type CommentAgentAttribution,
   type CommentResourceType,
   CommentService,
   type CommentServiceDeps,

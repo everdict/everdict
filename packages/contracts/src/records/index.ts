@@ -34,5 +34,6 @@ export * from "./view.js";
 export * from "./view-snapshot.js";
 export * from "./workspace.js";
 export * from "./workspace-file.js";
+export * from "./workspace-pulse.js";
 export * from "./workspace-invite.js";
 export * from "./workspace-settings.js";

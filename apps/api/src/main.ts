@@ -90,6 +90,7 @@ import { DriverOpsService } from "./core/ops/driver-ops-service.js";
 import { TemporalBatchDriver } from "./core/scorecard/temporal-batch-driver.js";
 import { SecretUsageService } from "./core/secret/secret-usage-service.js";
 import { SkillGenerator } from "./core/skill/skill-generator.js";
+import { WorkspacePulseService } from "./core/workspace/workspace-pulse-service.js";
 import { DockerBrowserProvisioner } from "./infrastructure/browser-session/docker-browser-provisioner.js";
 import { LocalChromeProvisioner } from "./infrastructure/browser-session/local-chrome-provisioner.js";
 import { runtimeSessionProvision } from "./infrastructure/browser-session/nomad-session-provision.js";
@@ -768,6 +769,19 @@ async function main(): Promise<void> {
     updates: initiativeUpdateStore,
     events: platformEventService,
   });
+  // The home screen's one read (docs/architecture/workspace-pulse.md) — how the workspace is doing, across every
+  // axis at once. Composed from STORES rather than from the services above: the pulse only counts, and routing a
+  // count through five peer services would be five services' worth of coupling for arithmetic none of them owns.
+  const workspacePulseService = new WorkspacePulseService({
+    issues: issueStore,
+    cycles: cycleStore,
+    projects: projectStore,
+    initiatives: initiativeStore,
+    tasks: taskStore,
+    approvals: approvalStore,
+    scorecards: scorecardStore,
+    events: platformEventStore,
+  });
   const subscriptionService = buildSubscription({ subscriptionStore, agentRegistry });
   // Reverse secret-usage index (GET /secrets/usage) — reads the registries + settings to annotate each workspace
   // secret with its live reference sites. Read-only; scans latest specs per request (nothing cached).
@@ -977,6 +991,7 @@ async function main(): Promise<void> {
     cycleService, // the team's iterations — /cycles
     projectService,
     initiativeService,
+    workspacePulseService,
     subscriptionService,
     // §5.1 activation admission — the agent service asks this before launching a run (402 past the tenant
     // budget; a pass reserves one run, settled later via the usage bridge below).

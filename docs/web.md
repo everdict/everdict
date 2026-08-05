@@ -80,7 +80,13 @@ panel/list guidance is not.
 - **Workspace switcher** (sidebar top, every screen) — the current-workspace (name+role) dropdown switches between
   the workspaces I belong to (= navigate to `/{id}`; the first URL segment is the authority for the active workspace, the middleware syncs the cookie) + **new workspace**
   (`/new-workspace` → `create-workspace`, the creator is admin). The list and active workspace are authoritative from `GET /me.workspaces`. See `docs/tenancy.md`.
-- **Overview `/{workspace}`** — scorecard stat cards (total / success / fail / pass-rate) + recent runs + harness summary.
+- **Overview `/{workspace}`** — the workspace PULSE, not an eval dashboard: eight state tiles (open issues ·
+  regressed · cycle progress · goals · agent runs · executions · pass rate vs. the previous window · recorded
+  activity), three trend charts (activity by axis · issues in vs. out · pass rate over time), then the
+  all-axis activity feed. One aggregate read (`GET /workspace/pulse`) rather than a fan-out of list endpoints,
+  because the arithmetic (what counts as open, what a cycle committed to, which metric is the headline pass
+  rate) is the control plane's — see `docs/architecture/workspace-pulse.md`. Deliberately NOT a per-team
+  comparison (user decision): a status board that ranks teams stops answering "how are we doing".
 - **Runs `/{workspace}/runs`** — full runs table (rows link to detail). Like schedules/runtimes, not linked
   from the UI at all — the infra panel is THE surface for infra concerns (sidebar is eval-only, the palette's
   infra group opens the panel); the route remains URL-reachable only.
@@ -201,16 +207,41 @@ panel/list guidance is not.
   → `Sidebar`; a failed read degrades to no section rather than breaking the shell. The issue list carries the matching
   key chips and the create dialog a team picker (both appear only past two teams), and every issue reads as `ENG-12` —
   the identifier is stored on the record, so neither surface re-reads the team to render it.
+- **A capability's owning team is shown where it is read, and changed there too** (`features/move-to-team`
+  `TeamOwnerControl`, in the meta strip of the dataset · harness · judge · scorecard details). It is the house
+  state control — an icon that opens a dropdown, never a row of text links — and it OFFERS EXACTLY WHAT THE
+  CONTROL PLANE ACCEPTS: `moveDestinationsFor` mirrors the server's rule (`moveCapabilityToTeam` authorizes BOTH
+  teams), so the menu opens only when the reader may write the team it is LEAVING, and lists only teams they may
+  file into. A team they are not on still renders by NAME — reads are not the roster's business — and a team the
+  server never sent (a private one) reads as "another team" rather than a name the screen invented. Moving a
+  capability does not drag its past scorecards along (evidence belongs to whoever ran it), which is why the
+  scorecard detail carries the same control. `_shared`/first-party rows show no control at all: they are not the
+  workspace's to re-file, so the affordance would be a guaranteed 404.
 - **Workspace settings `/{workspace}/settings`** — admin-gated tabs: General · **Secrets** ·
   **Integrations**(GitHub App · Mattermost) · CI · Shared runners · Members · **Teams**.
   **Teams tab** (`features/manage-team`, `teams:read` to see / `teams:write` = admin to change): the settings-list of
   teams — each row is a drill-in to `/settings/teams/{key}` (the same slug the working screens use) (key badge · name · default chip on the left, roster size +
-  open issues on the right). The detail is the team's General block (key READ-ONLY — it is baked into every identifier
-  the team has minted — name/description, and "make default" which hands the flag over) plus its **roster**, which is
-  separate from workspace membership: belonging to a team is what puts its issues in your list. Deletion is offered
-  but the server refuses the default team, the last remaining team, and a team that still holds issues — the reason is
-  surfaced verbatim rather than pre-hidden. Reading the list is also the invariant's repair point: a workspace that has
-  never had a team gets its default from that read. See `docs/tracker.md` § Team. **Secrets tab**: provider-token curation +
+  open issues on the right).
+  **One team's settings is a TABBED ROUTE** (`app/[workspace]/settings/teams/[key]`, Linear's team settings), because
+  a team is asked four unrelated questions and stacking them on one page loses which one you are answering — the former
+  single page even opened with its board-column editor, above the team's own name. The `layout.tsx` holds what must not
+  disappear (key badge + name, "all teams", the tab bar) over a `cache()`d `loadTeamSettings`, and each tab is its own
+  `page.tsx`: **General** (key READ-ONLY — baked into every identifier the team has minted — name/description/parent
+  with one Save, then private + "make default" as instant controls, then delete) · **Members** (the roster, separate
+  from workspace membership: belonging to a team is what puts its issues in your list) · **Workflow** (triage, the queue
+  in FRONT of the workflow, then the board) · **Cycles** (the rhythm; the cadence rows exist only once cycles are on).
+  Section addresses come from `teamSettingsHref(ws, key, section)` and the active tab from `useSelectedLayoutSegment()`.
+  **The board is grouped BY CANONICAL STATUS, and the add button lives in the group's header** — the canonical status
+  is the position, the team's states are the names it gave that position, so pressing `+` on *Backlog* already says what
+  the new state is (the old flat list re-printed the status per row — "Backlog · Backlog" — and floated an add form at
+  the page root that asked for the status again in a combobox). Rows rename in place and recolour through the same
+  `LabelColorPicker` the labels use; ↑/↓ appear only where a status holds more than one state and swap position WITHIN
+  it, so "Done" can never be dragged above "Backlog". Because a new state is appended at the end of the whole board,
+  every flat rendering of the states goes through `orderWorkflowStates` (canonical order, then position) — otherwise the
+  issue's status dropdown shows a fresh review column below "Cancelled" while settings shows it under "In review".
+  Deletion is offered but the server refuses the default team, the last remaining team, and a team that still holds
+  issues — the reason is surfaced verbatim rather than pre-hidden. Reading the list is also the invariant's repair
+  point: a workspace that has never had a team gets its default from that read. See `docs/tracker.md` § Team. **Secrets tab**: provider-token curation +
   a **single list** of directly-added secrets — the SecretStore is one flat namespace, so one list (splitting by purpose
   showed the same secrets twice); multi-line values (kubeconfig) are a toggle on the add form, and legacy
   `?tab=model|cluster` deep links land on this tab. **General tab**: the workspace card (`features/workspace-settings`
@@ -294,7 +325,6 @@ times. Guarded by `shared/lib/use-refresh.test.tsx` and `features/manage-{issue,
 After: the control settles in **41 ms** and the server-rendered half of the page (history feed, the project
 detail's `h1`) in **165–195 ms**, run after run. A control whose value is worth showing before the page
 catches up can also hold the accepted value locally — `IssueProjectControl` is the reference.
-
 
 The dev server runs on **port 3001** (`pnpm --filter @everdict/web dev`).
 

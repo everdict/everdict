@@ -283,10 +283,14 @@ export const controlPlane = {
   getTrajectory: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/trajectories/${encodeURIComponent(id)}`),
   // Browse the workspace's sealed trajectories (the owned evidence ledger, N1 look-inward) — metas only, cursor-paginated.
-  listTrajectories: <T>(auth: AuthContext, query: { limit?: number; cursor?: string } = {}) => {
+  listTrajectories: <T>(
+    auth: AuthContext,
+    query: { limit?: number; cursor?: string; kind?: string } = {}
+  ) => {
     const qs = new URLSearchParams()
     if (query.limit !== undefined) qs.set('limit', String(query.limit))
     if (query.cursor) qs.set('cursor', query.cursor)
+    if (query.kind) qs.set('kind', query.kind)
     const suffix = qs.toString()
     return call<T>(auth, `/trajectories${suffix ? `?${suffix}` : ''}`)
   },
@@ -420,6 +424,18 @@ export const controlPlane = {
   // GET /harnesses/:id — a harness's instance version tag list.
   getHarness: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}`),
+  // 다른 팀으로 넘기기. 소유는 릴리스가 아니라 대상 자체의 것이라 모든 버전이 함께 옮겨가고, 버전은 새로
+  // 찍히지 않는다(내용이 바뀐 게 아니다). 제어 평면이 출발 팀과 도착 팀을 둘 다 인가한다.
+  moveCapabilityTeam: <T>(
+    auth: AuthContext,
+    kind: 'harnesses' | 'harness-templates' | 'datasets' | 'judges' | 'scorecards',
+    id: string,
+    teamId: string
+  ) =>
+    call<T>(auth, `/${kind}/${encodeURIComponent(id)}/team`, {
+      method: 'POST',
+      body: JSON.stringify({ teamId }),
+    }),
   // Replace version tags (PUT the whole array; empty array = remove) — free-form labels outside the spec (to distinguish versions). The gate is each entity's
   // content mutation action (harnesses:register / datasets:write / runtimes:write) — the control plane enforces.
   setHarnessVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
@@ -1073,6 +1089,10 @@ export const controlPlane = {
     call<T>(auth, `/agents/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   // 플랫폼 이벤트 로그(라이프사이클 사실, 최신순) — 크래프팅 스튜디오의 리플레이 피커. events:read(viewer+).
   listPlatformEvents: <T>(auth: AuthContext, limit = 20) => call<T>(auth, `/events?limit=${limit}`),
+  // 워크스페이스 펄스 — 홈 화면의 단 한 번의 읽기(현황 + 추이). 지표를 목록 여덟 개에서 조립하지 않는 이유는
+  // 왕복 여덟 번 때문만이 아니라, 그 산식이 서버 것이기 때문이다(웹이 다시 구현하면 두 곳이 갈라진다).
+  getWorkspacePulse: <T>(auth: AuthContext, days?: number) =>
+    call<T>(auth, days === undefined ? '/workspace/pulse' : `/workspace/pulse?days=${days}`),
   saveAgent: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/agents/${encodeURIComponent(id)}`, {
       method: 'PUT',

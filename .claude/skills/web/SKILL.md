@@ -43,7 +43,8 @@ courier, not an auth authority**: it forwards the user's Keycloak token and trus
 
 ## Reference impl
 A full slice: `features/submit-run/` — `ui/submit-run-form.tsx` (`'use client'` react-hook-form island) +
-`api/submit-run.ts` (`'use server'` action → `controlPlane.submitRun`; the caller refreshes) exposed via
+`api/submit-run.ts` (`'use server'` action → `controlPlane.submitRun` → `revalidatePath`, still to be swept per
+checklist 4) exposed via
 `index.ts`; the page `app/[workspace]/runs/page.tsx` fetches server-side and gates the CTA with `can(...)`.
 
 ## Auth = token courier (BFF), not authority
@@ -135,6 +136,10 @@ Tailwind v4 tokens in `app/globals.css` `@theme inline` (Linear indigo `#5e6ad2`
 near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-variant dark`) toggled by
 `shared/ui/theme-toggle` — NO `next-themes`; no-flash inline script in `app/layout.tsx`. `cn()` from
 `shared/lib/utils.ts`; shadcn new-york atoms under `shared/ui/`. Dropdowns are always `shared/ui/combobox`.
+**Every global rule in `globals.css` stays inside a `@layer`** (the default border colour lives in `@layer base`):
+unlayered CSS beats every layered rule regardless of specificity, so while `* { border-color }` sat outside a layer
+it silently overrode EVERY `border-*` colour utility in the app — active tabs drew their `border-primary` underline
+in default grey, and `border-transparent` (an inline editor meant to look like text) drew a visible box.
 
 ## Established UI conventions (enforced — reuse, don't reinvent)
 - **Every route segment has a loading boundary, and slow reads sit behind `Suspense`.** Pages are
@@ -154,6 +159,16 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
 - **Image refs** render through `shared/lib/image-ref.ts` (`displayImageRef`, with the raw ref on `title`), never
   raw: a digest is 71 characters, so a truncated line shows the digest head and eats the TAG — the only thing that
   says which version is running. Same file owns `imageRepositoryOf` (tag/digest-blind repository matching).
+- **A dashboard reads ONE aggregate, and the aggregate is the server's.** The home screen
+  (`widgets/workspace-pulse`, `GET /workspace/pulse`) does not fan out over the list endpoints of every domain
+  it summarizes: the arithmetic behind each number — what counts as an OPEN issue, what an active cycle
+  committed to, which metric is the headline pass rate, when a goal is at risk — is a domain decision with one
+  right answer, and a screen re-deriving it is a second answer waiting to drift. A trend over time comes from
+  the platform-event log's day aggregate, never from paging records to tally them. The page's own job is the
+  split: the counts and the feed are separate `Suspense` boundaries, so the slower one never holds the other.
+  Two meanings that must survive into the render: a day with no rows is a ZERO, a measurement nobody took is
+  ABSENT (`passRate` optional → `null` into `LineChart`, which breaks the line rather than drawing a cliff).
+  See `docs/architecture/workspace-pulse.md`.
 - **Charts** = `shared/ui/charts` (`LineChart` / `BarChart` [grouped+stacked] / `RankedBars`), never a
   new hand-rolled SVG. The family owns the axis, the nice-rounded ticks, the recessive hairline grid, the
   hover/focus tooltip and the legend, so a chart cannot invent its own chrome. **Colors come only from
@@ -197,6 +212,16 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   `app/[workspace]/settings/layout.tsx` wrapper (centered `max-w-5xl`), so the content's left/right edges never
   shift between tabs. A page just starts with its own `<div className="space-y-6">` (no per-page width class,
   no inline `max-w-*` — the layout owns width). The former two-tier `SettingsColumn` split was removed.
+  **An on/off setting is a `shared/ui/switch.tsx` `Switch`, and a switch APPLIES IMMEDIATELY** — a button reading
+  "On" cannot say whether that is the current state or what pressing it will do, and a switch waiting on a Save
+  button looks flipped while nothing has changed. So the split inside a settings page is by SAVE BEHAVIOUR, not by
+  topic: discrete controls (switch, combobox) call the action on change — reverting local state and reporting the
+  failure with `toast.error` — while typed fields (name, description) collect into one dirty-gated Save. Put the two
+  kinds in separate cards; a card mixing them cannot say which of its rows is already live. A setting that only
+  matters once a feature is ON is rendered only then (the cycle cadence under `cyclesEnabled`), and a value picked
+  from a fixed range is a `Combobox`, not a number input (`1..12` weeks reads as "2 weeks", so the label drops the unit).
+  `app/[workspace]/settings/teams/[key]` is the reference — one team's settings is a TABBED ROUTE (General · Members ·
+  Workflow · Cycles) for the same reason an initiative detail is: four unrelated questions do not belong on one page.
 - **Guide/help copy is never inline** — render an info icon via `shared/ui/tooltip.tsx` (`InfoTip`), reveal
   on hover. Field-level `<p>` hints under inputs are fine; panel/list guidance is not.
 - **Detail views**: hide empty sections entirely (no "none" placeholder); entities show a meta strip, not a
