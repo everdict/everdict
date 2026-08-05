@@ -1,4 +1,4 @@
-import { type ChatMessage, ToolRegistry } from "@everdict/agent-runtime";
+import { type ChatMessage, ToolRegistry, extractTodosFromHistory } from "@everdict/agent-runtime";
 import { Metrics } from "@everdict/application-control";
 import type { AgentMessageRecord } from "@everdict/contracts";
 import { InMemoryAgentSessionStore } from "@everdict/db";
@@ -81,6 +81,46 @@ describe("session running memory", () => {
     expect(seen[0]?.content).toContain("OLD DIGEST");
     expect(seen.some((m) => typeof m.content === "string" && m.content.includes("message number 5"))).toBe(true);
     expect(seen.some((m) => typeof m.content === "string" && m.content.includes("message number 6"))).toBe(false);
+  });
+
+  it("carries the checklist across a fold — the digest keeps a machine-readable todo carryover", async () => {
+    // Given a transcript whose ONLY write_todos call sits in the span about to fold away
+    const sessions = new InMemoryAgentSessionStore();
+    await sessions.createSession({
+      id: "s-1",
+      tenant: "acme",
+      owner: "u-1",
+      title: "t",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z",
+    });
+    const todos = [{ content: "Summarize failures", activeForm: "Summarizing failures", status: "in_progress" }];
+    const records = Array.from({ length: 26 }, (_, i) =>
+      record(i, i % 2 === 0 ? "user" : "assistant", `message number ${i}`),
+    );
+    records[3] = {
+      ...record(3, "assistant", ""),
+      toolCalls: [{ id: "t1", name: "write_todos", arguments: JSON.stringify({ todos }) }],
+    };
+    await sessions.appendMessages(records);
+    // When the fold covers that span (seq 0..5)
+    await maintainSessionMemory({
+      sessions,
+      workspace: "acme",
+      sessionId: "s-1",
+      previousMemory: undefined,
+      coveredThroughSeq: undefined,
+      summarize: async () => "DIGEST",
+      now: "2026-07-31T01:00:00.000Z",
+      triggerChars: 10,
+    });
+    // Then the digest carries the checklist, and the next turn's history bootstrap recovers it — pre-fix the
+    // digest was plain prose with no tool_calls, so the todos silently reset to empty mid-task.
+    const s = await sessions.getSession("acme", "u-1", "s-1");
+    expect(s?.memoryThroughSeq).toBe(5);
+    expect(s?.memory).toContain("<todo-carryover>");
+    const replayed: ChatMessage[] = [{ role: "user", content: s?.memory ?? "" }];
+    expect(extractTodosFromHistory(replayed)).toEqual(todos);
   });
 
   it("does nothing below the trigger or when the summariser declines", async () => {

@@ -5,6 +5,7 @@ import {
   buildTodoTool,
   extractTodosFromHistory,
   parseTodos,
+  renderTodoCarryover,
   renderTodoReminder,
 } from "./todo-tool.js";
 
@@ -76,5 +77,53 @@ describe("extractTodosFromHistory", () => {
   });
   it("returns [] when the history has no write_todos call", () => {
     expect(extractTodosFromHistory([{ role: "user", content: "hi" }])).toEqual([]);
+  });
+
+  it("seeds from a digest's todo-carryover marker when the write_todos call was folded away", () => {
+    // Given a replayed history whose only checklist trace is the memory digest's carryover marker
+    const messages: ChatMessage[] = [
+      {
+        role: "user",
+        content: `[Conversation memory]\nA digest of earlier work.\n\n${renderTodoCarryover(parseTodos(items))}`,
+      },
+      { role: "user", content: "continue" },
+      { role: "assistant", content: "on it" },
+    ];
+    // Then the checklist survives the fold instead of resetting to empty
+    expect(extractTodosFromHistory(messages)).toEqual(items);
+  });
+
+  it("prefers a later write_todos call over an earlier digest carryover (backward scan)", () => {
+    const later = parseTodos([{ content: "New plan", activeForm: "Planning", status: "pending" }]);
+    const messages: ChatMessage[] = [
+      { role: "user", content: renderTodoCarryover(parseTodos(items)) },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "t2",
+            type: "function",
+            function: { name: WRITE_TODOS_TOOL_NAME, arguments: JSON.stringify({ todos: later }) },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: "t2", content: "ok" },
+    ];
+    expect(extractTodosFromHistory(messages)).toEqual(later);
+  });
+
+  it("treats a malformed carryover as no checklist rather than scanning past it", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: renderTodoCarryover(parseTodos(items)) },
+      { role: "user", content: "<todo-carryover>not json</todo-carryover>" },
+    ];
+    expect(extractTodosFromHistory(messages)).toEqual([]);
+  });
+});
+
+describe("renderTodoCarryover", () => {
+  it("is empty for an empty list", () => {
+    expect(renderTodoCarryover([])).toBe("");
   });
 });

@@ -7,6 +7,8 @@ import {
   ToolRegistry,
   type WaitRequest,
   buildSummarizer,
+  extractTodosFromHistory,
+  renderTodoCarryover,
   runAgentLoop,
   wellFormedArguments,
 } from "@everdict/agent-runtime";
@@ -373,12 +375,16 @@ export interface ChatDeps {
   desktopDownloadUrl?: string;
   // Report a conversation's metered LLM usage to the control plane (agent cost → the shared meter + enforcement
   // budget, source "agent"). Called best-effort after a turn completes, ONLY when the model was workspace-billed.
+  // cacheRead/cacheWrite are the prompt-cache subsets of inputTokens (the transport folds them in) so the meter can
+  // price cached tokens at their own rates instead of the full input price.
   // Absent (no CONTROL_PLANE_INTERNAL_TOKEN) → agent-conversation cost isn't metered. docs/architecture/usage-metering.md
   reportUsage?: (usage: {
     workspace: string;
     model: string;
     inputTokens: number;
     outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
   }) => Promise<void>;
 }
 
@@ -581,7 +587,13 @@ export async function maintainSessionMemory(opts: {
   ];
   const digest = (await opts.summarize(seeded)).trim();
   if (digest.length === 0) return; // the summariser declined — keep replaying in full rather than dropping context
-  await opts.sessions.setSessionMemory(opts.workspace, opts.sessionId, digest, throughSeq, opts.now);
+  // The checklist survives the fold: the digest is a plain user message with no tool_calls, so once the last
+  // write_todos call folds behind memoryThroughSeq the next turn's history bootstrap would silently reset the
+  // todos mid-task. Append the machine-readable carryover (the latest state from the folded span or the previous
+  // digest); a later write_todos in the kept tail still wins at replay (backward scan).
+  const carriedTodos = extractTodosFromHistory(seeded);
+  const withTodos = carriedTodos.length > 0 ? `${digest}\n\n${renderTodoCarryover(carriedTodos)}` : digest;
+  await opts.sessions.setSessionMemory(opts.workspace, opts.sessionId, withTodos, throughSeq, opts.now);
 }
 
 export function extractToolCalls(message: ChatMessage): AgentToolCall[] | undefined {
@@ -888,6 +900,8 @@ export async function runChat(
     // Accumulate this conversation's token usage across turns (the loop reports tokens; the control plane prices them).
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
     try {
       const loopResult = await runAgentLoop({
         transport: model.transport,
@@ -899,6 +913,8 @@ export async function runChat(
         onUsage: (u) => {
           inputTokens += u.inputTokens;
           outputTokens += u.outputTokens;
+          cacheReadTokens += u.cacheReadTokens ?? 0;
+          cacheWriteTokens += u.cacheWriteTokens ?? 0;
         },
         ...(summarize ? { summarize } : {}),
         ...(fallback ? { fallback } : {}),
@@ -966,7 +982,14 @@ export async function runChat(
       // aborted turn's consumed tokens are still billed. Best-effort: never fail the chat.
       if (model.billed && deps.reportUsage && inputTokens + outputTokens > 0) {
         try {
-          await deps.reportUsage({ workspace, model: model.model, inputTokens, outputTokens });
+          await deps.reportUsage({
+            workspace,
+            model: model.model,
+            inputTokens,
+            outputTokens,
+            ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+            ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+          });
         } catch {}
       }
       // Turn wall-clock, success or not — the latency half of the "why do turns die" distribution.

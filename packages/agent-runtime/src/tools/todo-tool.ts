@@ -90,20 +90,63 @@ export function renderTodoReminder(todos: TodoItem[]): string {
   ].join("\n");
 }
 
-// Seed the loop's todos from a prior run in the same conversation — scan the replayed history for the LAST write_todos
-// tool call and parse its arguments, so a continued conversation keeps its checklist.
+// Machine-readable todo carryover embedded in a session-memory digest. When the host folds the transcript span that
+// held the last write_todos call, the digest replaces it as a PLAIN user message with no tool_calls — without this
+// marker the next turn's history bootstrap would silently reset the checklist to empty mid-task. The host appends
+// renderTodoCarryover to the digest; extractTodosFromHistory below reads it back as the fallback source.
+const TODO_CARRYOVER_OPEN = "<todo-carryover>";
+const TODO_CARRYOVER_CLOSE = "</todo-carryover>";
+
+export function renderTodoCarryover(todos: TodoItem[]): string {
+  if (todos.length === 0) return "";
+  return `${TODO_CARRYOVER_OPEN}${JSON.stringify(todos)}${TODO_CARRYOVER_CLOSE}`;
+}
+
+function textOf(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((p) =>
+      typeof p === "object" && p !== null && "text" in p && typeof (p as { text?: unknown }).text === "string"
+        ? (p as { text: string }).text
+        : "",
+    )
+    .join("");
+}
+
+// undefined = no marker present (keep scanning); [] = a marker that failed to parse (treat as "no checklist", the
+// same contract as an unparseable write_todos call).
+function parseCarryover(text: string): TodoItem[] | undefined {
+  const start = text.lastIndexOf(TODO_CARRYOVER_OPEN);
+  if (start < 0) return undefined;
+  const end = text.indexOf(TODO_CARRYOVER_CLOSE, start);
+  if (end < 0) return undefined;
+  try {
+    return parseTodos(JSON.parse(text.slice(start + TODO_CARRYOVER_OPEN.length, end)));
+  } catch {
+    return [];
+  }
+}
+
+// Seed the loop's todos from a prior run in the same conversation — scan the replayed history backwards for the LAST
+// checklist state: a write_todos tool call, or a digest's todo-carryover marker (whichever came later wins, which the
+// backward scan guarantees), so a continued conversation keeps its checklist even across a memory fold.
 export function extractTodosFromHistory(messages: ChatMessage[]): TodoItem[] {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m?.role !== "assistant" || !Array.isArray(m.tool_calls)) continue;
-    for (const tc of m.tool_calls) {
-      if (tc.type !== "function" || tc.function.name !== WRITE_TODOS_TOOL_NAME) continue;
-      try {
-        const args = JSON.parse(tc.function.arguments) as { todos?: unknown };
-        return parseTodos(args.todos);
-      } catch {
-        return [];
+    if (m?.role === "assistant" && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        if (tc.type !== "function" || tc.function.name !== WRITE_TODOS_TOOL_NAME) continue;
+        try {
+          const args = JSON.parse(tc.function.arguments) as { todos?: unknown };
+          return parseTodos(args.todos);
+        } catch {
+          return [];
+        }
       }
+    } else if (m?.role === "user") {
+      const carried = parseCarryover(textOf(m.content));
+      if (carried !== undefined) return carried;
     }
   }
   return [];
