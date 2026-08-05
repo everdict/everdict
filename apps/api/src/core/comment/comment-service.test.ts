@@ -229,6 +229,125 @@ describe("CommentService", () => {
   });
 });
 
+// An agent reaches the control plane with the MEMBER'S credential, so without the declaration its comments were
+// signed by whoever happened to be running it.
+describe("CommentService agent authorship", () => {
+  it("a comment posted by a declared agent is Everdict's, not the member's whose credential carried it", async () => {
+    // Given a member's credential (the agent is a token courier)
+    const { service } = svc();
+    // When an agent posts through it, declaring the conversation it came out of
+    const comment = await service.create({
+      tenant: "acme",
+      resourceType: "issue",
+      resourceId: "ENG-12",
+      author: "u-operator",
+      body: "The regression traces to judge-v3.",
+      agent: { conversationId: "conv-9" },
+    });
+    // Then the thread credits Everdict, and links back to the conversation that produced the answer
+    expect(comment.author).toBe(COMMENT_AGENT_AUTHOR);
+    expect(comment.authorKind).toBe("agent");
+    expect(comment.agentSessionId).toBe("conv-9");
+    // and it renders its body immediately — there is no turn to wait for
+    expect(comment.agentStatus).toBe("complete");
+    expect(comment.body).toBe("The regression traces to judge-v3.");
+  });
+
+  it("without a declared agent the member is still the author (the ordinary path is untouched)", async () => {
+    const { service } = svc();
+    const comment = await service.create({
+      tenant: "acme",
+      resourceType: "issue",
+      resourceId: "ENG-12",
+      author: "u-operator",
+      body: "my own note",
+    });
+    expect(comment.author).toBe("u-operator");
+    expect(comment.authorKind).toBeUndefined();
+    expect(comment.agentStatus).toBeUndefined();
+  });
+
+  it("an agent's comment emits no comment.created fact — a watching agent must never wake on its own answer", async () => {
+    const store = new InMemoryCommentStore();
+    const kinds: string[] = [];
+    const service = new CommentService({
+      store,
+      events: { emit: async ({ kind }) => kinds.push(kind) },
+      newId: () => "c1",
+      now: () => "2026-07-04T00:00:00.000Z",
+    });
+    await service.create({
+      tenant: "acme",
+      resourceType: "issue",
+      resourceId: "ENG-12",
+      author: "u-operator",
+      body: "agent answer",
+      agent: { conversationId: "conv-9" },
+    });
+    expect(kinds).toEqual([]);
+    // the same member's OWN comment still records the fact
+    await service.create({
+      tenant: "acme",
+      resourceType: "issue",
+      resourceId: "ENG-12",
+      author: "u-operator",
+      body: "my own note",
+    });
+    expect(kinds).toEqual(["comment.created"]);
+  });
+
+  it("an agent may @-mention the member it acted for — they did not write the comment, so they get the ping", async () => {
+    const store = new InMemoryCommentStore();
+    const calls: string[][] = [];
+    const service = new CommentService({
+      store,
+      notifyMention: async ({ recipients }) => {
+        calls.push(recipients);
+      },
+      newId: () => "c1",
+      now: () => "2026-07-04T00:00:00.000Z",
+    });
+    await service.create({
+      tenant: "acme",
+      resourceType: "issue",
+      resourceId: "ENG-12",
+      author: "u-operator",
+      body: "@operator this one is yours",
+      mentions: ["u-operator"],
+      agent: { conversationId: "conv-9" },
+    });
+    expect(calls).toEqual([["u-operator"]]);
+  });
+
+  it("an agent cannot hand a thread to the discussion agent → 400 (it would answer its own comment)", async () => {
+    const store = new InMemoryCommentStore();
+    let fired = 0;
+    const service = new CommentService({
+      store,
+      discussionRunner: {
+        run: async () => {
+          fired++;
+        },
+      },
+      newId: () => "c1",
+      now: () => "2026-07-04T00:00:00.000Z",
+    });
+    await expect(
+      service.create({
+        tenant: "acme",
+        resourceType: "issue",
+        resourceId: "ENG-12",
+        author: "u-operator",
+        body: "@everdict take a look",
+        askAgent: true,
+        agent: { conversationId: "conv-9" },
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(fired).toBe(0);
+    expect(await service.list("acme", "issue", "ENG-12")).toHaveLength(0); // nothing persisted
+  });
+});
+
 // @everdict in the thread — the discussion-agent bridge (placeholder comment + detached turn trigger).
 describe("CommentService discussion agent (askAgent)", () => {
   type RunnerInput = Parameters<DiscussionTurnRunner["run"]>[0];
@@ -296,12 +415,40 @@ describe("CommentService discussion agent (askAgent)", () => {
     const input = calls[0];
     expect(input?.askedBy).toBe("u-b");
     expect(input?.commentId).toBe(placeholder?.id);
+    expect(input?.anchorId).toBe(trigger.id); // the thread to answer IN — the agent's only comment id
     expect(input?.sessionId).toBe(placeholder?.agentSessionId);
     // snapshot: both member comments, display names resolved, oldest→newest
     expect(input?.thread.map((t) => [t.authorName, t.body])).toEqual([
       ["Alice", "context note"],
       ["Bob", "@everdict summarize this harness"],
     ]);
+  });
+
+  it("asking from INSIDE a thread anchors both the placeholder and the turn on that thread's top-level comment", async () => {
+    // Given a top-level comment…
+    const { service, calls } = agentSvc();
+    const top = await service.create({
+      tenant: "acme",
+      resourceType: "issue",
+      resourceId: "ENG-12",
+      author: "u-a",
+      body: "the judge looks flaky",
+    });
+    // …When the ask is a REPLY to it (a reply can never be a parent — single-level threads)…
+    const reply = await service.create({
+      tenant: "acme",
+      resourceType: "issue",
+      resourceId: "ENG-12",
+      author: "u-b",
+      body: "@everdict is it the judge or the harness?",
+      parentId: top.id,
+      askAgent: true,
+    });
+    // …Then the answer hangs under the SAME anchor as the ask, and the turn is told that anchor.
+    const placeholder = (await service.list("acme", "issue", "ENG-12")).find((c) => c.authorKind === "agent");
+    expect(placeholder?.parentId).toBe(top.id);
+    expect(reply.parentId).toBe(top.id);
+    expect(calls[0]?.anchorId).toBe(top.id);
   });
 
   it("a later ask in the same thread REUSES the previous agent session id", async () => {

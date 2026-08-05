@@ -30,6 +30,47 @@ function harness(opts: { failRunner?: boolean } = {}) {
   return { app, store, calls };
 }
 
+// A headless agent posts over HTTP with the member's own bearer, so the declaration headers are the only thing
+// separating "Everdict answered" from "the operator commented".
+describe("comments — agent authorship over HTTP", () => {
+  it("POST /comments with the agent declaration headers is authored by Everdict, not the member", async () => {
+    const { app } = harness();
+    const res = await app.inject({
+      method: "POST",
+      url: "/comments",
+      headers: {
+        ...acme,
+        "x-everdict-agent-id": "triage",
+        "x-everdict-agent-name": "Triage",
+        "x-everdict-conversation-id": "conv-9",
+      },
+      payload: { resourceType: "issue", resourceId: "ENG-12", body: "The regression traces to judge-v3." },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({
+      author: "everdict:agent",
+      authorKind: "agent",
+      agentStatus: "complete",
+      agentSessionId: "conv-9",
+    });
+    await app.close();
+  });
+
+  it("POST /comments without those headers stays the member's own comment", async () => {
+    const { app } = harness();
+    const res = await app.inject({
+      method: "POST",
+      url: "/comments",
+      headers: acme,
+      payload: { resourceType: "issue", resourceId: "ENG-12", body: "my own note" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().authorKind).toBeUndefined();
+    expect(res.json().author).not.toBe("everdict:agent");
+    await app.close();
+  });
+});
+
 // The discussion-agent transport surface: askAgent on POST /comments + the internal lifecycle callback.
 describe("comments — @everdict discussion agent", () => {
   it("POST /comments with askAgent creates the member comment AND a running agent placeholder, firing the trigger", async () => {

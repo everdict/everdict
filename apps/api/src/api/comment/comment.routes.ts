@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { commentDocs } from "./comment.docs.js";
 import { CreateCommentBodySchema } from "./request/create-comment.js";
@@ -31,6 +32,9 @@ export function registerCommentRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
       gate(principal, "comments:write");
+      // An agent declaring itself in the headers speaks as Everdict — the MCP twin of the same attribution, so a
+      // headless agent posting over HTTP is credited the way one posting through a tool is.
+      const agent = agentAttributionFrom(req.headers);
       const comment = await deps.commentService.create({
         tenant: principal.workspace,
         resourceType: body.data.resourceType,
@@ -40,6 +44,7 @@ export function registerCommentRoutes(app: FastifyInstance, deps: ServerDeps): v
         ...(body.data.parentId ? { parentId: body.data.parentId } : {}),
         ...(body.data.mentions ? { mentions: body.data.mentions } : {}),
         ...(body.data.askAgent ? { askAgent: true } : {}),
+        ...(agent ? { agent } : {}),
       });
       return reply.code(201).send(comment);
     } catch (err) {

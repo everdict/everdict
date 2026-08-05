@@ -37,6 +37,19 @@ const MAX_BODY = 10_000; // cap the body (plenty for rich discussion, blocks DoS
 // (Keycloak subjects are opaque UUIDs; the "everdict:" prefix is ours).
 export const COMMENT_AGENT_AUTHOR = "everdict:agent";
 
+// WHO is really speaking, when the caller is an agent. An agent reaches the control plane with the MEMBER'S OWN
+// credential (apps/agent is a token courier), so the authenticated subject alone credited a member for words they
+// never wrote — an agent answering on an issue read as the operator's own comment. A caller that declares an agent
+// speaks as Everdict instead; the member stays only where they belong, as the authority the call was made under.
+// This is the same provenance the workspace filesystem's revision ledger already takes from the request headers
+// (`fs-actor.ts`) — attribution, not privilege: the write is authorized by the member's token either way, so a
+// forged declaration can only mislabel the caller's OWN comment, never widen what they may do.
+export interface CommentAgentAttribution {
+  // The agent conversation this comment came out of — the thread's "view details" target, and the only way back
+  // from a posted answer to the reasoning that produced it.
+  conversationId?: string;
+}
+
 export interface CommentServiceDeps {
   store: CommentStore;
   // Platform-event emit seam (agent-automation A1) — comment.created facts. Agent-authored comments are
@@ -85,10 +98,12 @@ export class CommentService {
     return this.deps.store.list(tenant, resourceType, resourceId);
   }
 
-  // Post a comment. Empty/overlong body → 400. author = author subject. mentions = @-mentioned subjects (notified, excluding the author).
+  // Post a comment. Empty/overlong body → 400. author = the authenticated subject. mentions = @-mentioned subjects
+  // (notified, excluding whoever is speaking).
   // With parentId it's a reply — only allowed on a "top-level" comment of the same resource (single-level thread; 400 if the parent is already a reply).
   // With askAgent (@everdict mentioned) the thread is handed to the discussion agent: a placeholder agent comment is
   // created in the same thread and the turn is fired (409 while a previous ask on this resource is still working).
+  // With agent, the comment is Everdict's own — see CommentAgentAttribution.
   async create(input: {
     tenant: string;
     resourceType: string;
@@ -98,12 +113,25 @@ export class CommentService {
     parentId?: string;
     mentions?: string[];
     askAgent?: boolean;
+    agent?: CommentAgentAttribution;
   }): Promise<CommentRecord> {
     this.assertType(input.resourceType);
     const body = input.body.trim();
     if (body.length === 0) throw new BadRequestError("BAD_REQUEST", undefined, "Comment content is required.");
     if (body.length > MAX_BODY)
       throw new BadRequestError("BAD_REQUEST", { max: MAX_BODY }, `Comment must be at most ${MAX_BODY} characters.`);
+    // Who the thread will show as the author. An agent's comment is Everdict's; a member's is their own.
+    const agent = input.agent;
+    const author = agent ? COMMENT_AGENT_AUTHOR : input.author;
+    // An agent handing a thread to the discussion agent would trigger a turn on its own comment, and that answer
+    // would sit in the snapshot of the next one — the echo the agent-authored fact suppression exists to prevent.
+    // Refused rather than silently dropped, so the caller learns why nothing was answered.
+    if (input.askAgent && agent)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        undefined,
+        "An agent cannot hand a thread to the discussion agent — it would be answering its own comment.",
+      );
     if (input.parentId) {
       const parent = await this.deps.store.get(input.tenant, input.parentId);
       if (!parent || parent.resourceType !== input.resourceType || parent.resourceId !== input.resourceId)
@@ -131,15 +159,24 @@ export class CommentService {
       resourceType: input.resourceType,
       resourceId: input.resourceId,
       ...(input.parentId ? { parentId: input.parentId } : {}),
-      author: input.author,
+      author,
       body,
+      // An agent posting through a tool already HAS its answer, so unlike a @everdict placeholder there is no
+      // lifecycle to drive: the comment is born `complete`, the status the thread renders markdown from.
+      ...(agent
+        ? {
+            authorKind: "agent" as const,
+            agentStatus: "complete" as const,
+            ...(agent.conversationId !== undefined ? { agentSessionId: agent.conversationId } : {}),
+          }
+        : {}),
       createdAt: ts,
       updatedAt: ts,
     };
     await this.deps.store.add(record);
     // Lifecycle FACT (agent-automation A2) — agent-authored comments are excluded so a watching agent never
     // wakes on its own (or a peer agent's) answers: the echo would loop.
-    if (input.author !== COMMENT_AGENT_AUTHOR) {
+    if (author !== COMMENT_AGENT_AUTHOR) {
       void this.deps.events?.emit({
         workspace: input.tenant,
         kind: "comment.created",
@@ -152,8 +189,10 @@ export class CommentService {
         message: `New comment on ${input.resourceType} ${input.resourceId}: ${body.slice(0, 140)}`,
       });
     }
-    // Mention notifications — exclude the author, dedupe. A notification failure doesn't affect the comment result (swallowed).
-    const recipients = [...new Set(input.mentions ?? [])].filter((s) => s && s !== input.author);
+    // Mention notifications — exclude the SPEAKER, dedupe. Not the authenticated subject: an agent tagging the
+    // member it acted for is telling someone about a comment they did not write, so that ping must go out.
+    // A notification failure doesn't affect the comment result (swallowed).
+    const recipients = [...new Set(input.mentions ?? [])].filter((s) => s && s !== author);
     if (recipients.length > 0 && this.deps.notifyMention) {
       try {
         await this.deps.notifyMention({ tenant: input.tenant, comment: record, recipients });
@@ -175,13 +214,15 @@ export class CommentService {
     const previous = [...thread].reverse().find((c) => c.authorKind === "agent" && c.agentSessionId);
     const sessionId = previous?.agentSessionId ?? this.newId();
     const ts = this.now();
+    // The thread the answer belongs to: the trigger when it is top-level, else the trigger's own anchor (a reply
+    // can never be a parent). The placeholder hangs here AND the turn is told it — see the port.
+    const anchorId = trigger.parentId ?? trigger.id;
     const placeholder: CommentRecord = {
       id: this.newId(),
       tenant: trigger.tenant,
       resourceType: trigger.resourceType,
       resourceId: trigger.resourceId,
-      // Nest the answer under the trigger's thread: reply to the trigger when it is top-level, else to its anchor.
-      parentId: trigger.parentId ?? trigger.id,
+      parentId: anchorId,
       author: COMMENT_AGENT_AUTHOR,
       body: "", // filled with the final markdown answer on complete
       authorKind: "agent",
@@ -202,6 +243,10 @@ export class CommentService {
         resourceType: trigger.resourceType,
         resourceId: trigger.resourceId,
         commentId: placeholder.id,
+        // The thread the turn is answering IN. The snapshot below is deliberately id-less (the agent reads people,
+        // not rows), so this is the one comment id it gets, and the one it needs: a create_comment without it can
+        // only be top-level, which is how an answer escapes its own discussion.
+        anchorId,
         sessionId,
         // Snapshot for the agent: member comments + finished agent answers (skip empty/failed placeholders).
         thread: thread

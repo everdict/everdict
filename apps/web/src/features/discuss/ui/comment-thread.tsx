@@ -318,10 +318,11 @@ export const CommentCard = memo(function CommentCard({
       {item.isAgent ? (
         <AgentCommentBody item={item} mentionables={mentionables} />
       ) : (
-        // A comment is written the way an issue body is — markdown. The viewer keeps single newlines, so a plain
-        // note still reads as typed, and it highlights the @names the composer offered.
+        // A comment is written the way an issue body is — markdown, ```mermaid fences included. The viewer keeps
+        // single newlines, so a plain note still reads as typed, and it highlights the @names the composer offered.
         <Markdown
           content={item.body}
+          mermaid
           mentions={mentionables.map((m) => m.name)}
           className="text-[13px] leading-relaxed"
         />
@@ -346,10 +347,12 @@ function AgentCommentBody({
   mentionables: Mentionable[]
 }) {
   const t = useTranslations('discuss')
+  // `complete` is the terminal body, not a stream — so this one may render diagrams, unlike the live transcript.
   if (item.agentStatus === 'complete')
     return (
       <Markdown
         content={item.body}
+        mermaid
         mentions={mentionables.map((m) => m.name)}
         className="text-[13px] leading-relaxed"
       />

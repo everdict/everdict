@@ -4,7 +4,7 @@ import { z } from "zod";
 import { type McpToolContext, ok, plain, run } from "../mcp-context.js";
 
 export function registerCommentTools(server: McpServer, ctx: McpToolContext): void {
-  const { deps, principal, ws } = ctx;
+  const { deps, principal, ws, agent } = ctx;
 
   if (deps.commentService) {
     const comments = deps.commentService;
@@ -27,8 +27,10 @@ export function registerCommentTools(server: McpServer, ctx: McpToolContext): vo
       "create_comment",
       {
         description:
-          "Post a comment on a resource. Author = me (subject). Reply via parent_id; @-mentioning member subjects via mentions notifies them. " +
-          "ask_agent=true hands the thread to the Everdict discussion agent — it answers in-thread as an agent comment (409 while a previous ask is still working).",
+          "Post a comment on a resource. Posted as Everdict when an agent holds this session, else as me (subject). " +
+          "Reply via parent_id; @-mentioning member subjects via mentions notifies them. " +
+          "ask_agent=true hands the thread to the Everdict discussion agent — it answers in-thread as an agent comment " +
+          "(409 while a previous ask is still working; 400 for an agent, which would be answering its own comment).",
         inputSchema: {
           resource_type: z.enum(COMMENT_RESOURCE_TYPES),
           resource_id: z.string(),
@@ -50,6 +52,9 @@ export function registerCommentTools(server: McpServer, ctx: McpToolContext): vo
               ...(parent_id ? { parentId: parent_id } : {}),
               ...(mentions ? { mentions } : {}),
               ...(ask_agent ? { askAgent: true } : {}),
+              // The session declared an agent at initialize → the thread shows Everdict, not the member whose
+              // token the agent is carrying.
+              ...(agent ? { agent } : {}),
             }),
           ),
         ),
