@@ -141,20 +141,28 @@ export function ProjectInitiativeControl({
             />
           </div>
         )}
-        {choices.length === 0 ? (
-          <p className="px-2 py-1.5 text-[12px] text-muted-foreground">{t('initiativeNone')}</p>
-        ) : (
-          choices.map((row) => {
-            const on = initiativeIds.includes(row.id)
-            return (
-              <DropdownItem key={row.id} onSelect={() => toggle(row.id)}>
-                <Check className={cn('size-3.5 shrink-0', on ? 'text-foreground' : 'opacity-0')} />
-                <Target className="size-3.5 shrink-0 text-faint" />
-                <span className="truncate">{row.name}</span>
+        {/* A row's icons go in the `icon`/`trailing` slots, never inside the label: preflight makes every
+            `svg` a block, so an icon placed in the label breaks its own line and a one-line row renders as
+            three. It also puts this picker back on the sibling pickers' shape (the issue's project picker) —
+            what it is in front, whether it is picked behind. */}
+        <div className="max-h-56 overflow-y-auto">
+          {choices.length === 0 ? (
+            <p className="px-2 py-1.5 text-[12px] text-faint">{t('initiativeNone')}</p>
+          ) : (
+            choices.map((row) => (
+              <DropdownItem
+                key={row.id}
+                icon={<Target />}
+                {...(initiativeIds.includes(row.id)
+                  ? { trailing: <Check className="size-3.5" /> }
+                  : {})}
+                onSelect={() => toggle(row.id)}
+              >
+                {row.name}
               </DropdownItem>
-            )
-          })
-        )}
+            ))
+          )}
+        </div>
       </DropdownMenu>
     </div>
   )

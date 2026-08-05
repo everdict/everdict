@@ -243,12 +243,16 @@ export default async function ProjectDetailPage({
             )}
             {projectTeams.length > 0 && (
               <PropertyRow label={t('fieldTeams')}>
-                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                {/* A team key is 2–6 characters, so the chip's width differs per team — flowing them wrapped
+                    each name to its own ragged start once several teams stack. Sharing the key column through
+                    subgrid sizes it to the widest key, so the rows keep the same column rhythm as the goal row
+                    right above (whose icon is fixed-width) no matter how many teams there are. */}
+                <span className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-y-1">
                   {projectTeams.map((row) => (
                     <Link
                       key={row.id}
                       href={teamHref(workspace, row.key)}
-                      className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
+                      className="col-span-2 grid grid-cols-subgrid items-center gap-x-2 transition-colors hover:text-foreground"
                     >
                       <TeamKeyBadge teamKey={row.key} />
                       <span className="truncate">{row.name}</span>
