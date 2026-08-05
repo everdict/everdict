@@ -18,6 +18,9 @@ function eventLog(records: Array<Omit<PlatformEventRecord, "seq">>): PlatformEve
     async list() {
       return rows;
     },
+    async dailyCounts() {
+      return []; // the pulse's aggregate — not what these tests are about
+    },
     async listAll(opts) {
       let out = rows.filter((r) => (opts?.afterSeq === undefined ? true : r.seq > opts.afterSeq));
       if (opts?.kinds) out = out.filter((r) => (opts.kinds as string[]).includes(r.kind));

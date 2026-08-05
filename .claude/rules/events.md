@@ -11,6 +11,11 @@ SSOT: `docs/architecture/event-plumbing.md` (E0 grammar + same-tx outbox · E1 c
   (`@everdict/contracts`) — never emit an ad-hoc string. A kind exists only with a live emit point.
   Trigger-matchable kinds are the separate `TRIGGERABLE_EVENT_KINDS` allowlist (mirrored in
   `apps/web/src/entities/agent-spec` — update both). Facts only, never judgments ("failed", not "flaky").
+- **A new kind is also CLASSIFIED**: `ACTIVITY_AXIS_BY_KIND` (`contracts/records/workspace-pulse.ts`) says
+  which part of the workspace the fact is news about (`work` · `evaluation` · `agent` · `knowledge`), and it
+  `satisfies Record<PlatformEventKind, …>` — so the typecheck refuses a kind nobody has placed. That map is
+  what the home screen's activity trend draws (`docs/architecture/workspace-pulse.md`); a kind with no axis is
+  silently missing from it, which is why the compiler asks instead.
 - **Transitions must never be spread**: `{...transition}` typechecks and silently drops both halves
   (`patch` AND `facts`). Destructure explicitly.
 - Agent-caused facts stamp `causedBy: agent:<agentId>:<sessionOrConversationId>` — loop guard #1 keys on

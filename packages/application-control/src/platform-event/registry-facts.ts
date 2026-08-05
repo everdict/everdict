@@ -1,3 +1,4 @@
+import type { CapabilityOrigin } from "@everdict/contracts";
 import { SHARED_TENANT } from "@everdict/domain";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 
@@ -12,17 +13,30 @@ interface RegisterableSpec {
   version: string;
 }
 
+// The decorator must name the registry's FULL parameter list, not just the part it reads. TypeScript accepts a
+// wider `register` against a narrower constraint (the extra parameters are optional), so a decorator that
+// forwards only what it uses typechecks perfectly and silently drops the rest — which is what happened here:
+// every dataset/judge/harness registered through the composed app arrived UNOWNED and unstamped, because
+// `teamId` and `origin` stopped at this Proxy. Forward the whole call; read what you need from it.
 export function withRegisteredFact<
   S extends RegisterableSpec,
-  R extends { register(tenant: string, spec: S, createdBy?: string): Promise<void> },
+  R extends {
+    register(tenant: string, spec: S, createdBy?: string, teamId?: string, origin?: CapabilityOrigin): Promise<void>;
+  },
 >(
   registry: R,
   kind: "harness.registered" | "dataset.registered" | "judge.registered",
   subjectType: "harness" | "dataset" | "judge",
   events: PlatformEventEmitter,
 ): R {
-  const register = async (tenant: string, spec: S, createdBy?: string): Promise<void> => {
-    await registry.register(tenant, spec, createdBy); // a refused registration (409/validation) emits nothing
+  const register = async (
+    tenant: string,
+    spec: S,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> => {
+    await registry.register(tenant, spec, createdBy, teamId, origin); // a refused registration (409/validation) emits nothing
     if (tenant === SHARED_TENANT) return;
     void events.emit({
       workspace: tenant,

@@ -111,6 +111,80 @@ describe("PgPlatformEventStore", () => {
   });
 });
 
+describe("dailyCounts — the log counted, for the workspace pulse's trend", () => {
+  it("in-memory: buckets per (day × kind × outcome), scoped to the tenant and the half-open window", async () => {
+    // Given facts across three days, one of them another tenant's
+    const store = new InMemoryPlatformEventStore();
+    await store.append(fact({ id: "a", kind: "issue.created", payload: {}, createdAt: "2026-08-01T01:00:00.000Z" }));
+    await store.append(fact({ id: "b", kind: "issue.created", payload: {}, createdAt: "2026-08-01T23:00:00.000Z" }));
+    await store.append(
+      fact({ id: "c", kind: "issue.status_changed", payload: { to: "done" }, createdAt: "2026-08-01T12:00:00.000Z" }),
+    );
+    await store.append(
+      fact({
+        id: "d",
+        kind: "issue.status_changed",
+        payload: { to: "in_progress" },
+        createdAt: "2026-08-01T13:00:00.000Z",
+      }),
+    );
+    await store.append(fact({ id: "e", kind: "issue.created", payload: {}, createdAt: "2026-08-02T00:00:00.000Z" }));
+    await store.append(
+      fact({ id: "other", tenant: "other", kind: "issue.created", payload: {}, createdAt: "2026-08-01T05:00:00.000Z" }),
+    );
+
+    // When counting the first day only (`to` is exclusive)
+    const counts = await store.dailyCounts("acme", {
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-02T00:00:00.000Z",
+    });
+
+    // Then the two creations collapse into one bucket, the transitions split by destination, and nothing from
+    // the next day or the other tenant appears
+    expect(counts).toEqual([
+      { day: "2026-08-01", kind: "issue.created", count: 2 },
+      { day: "2026-08-01", kind: "issue.status_changed", outcome: "done", count: 1 },
+      { day: "2026-08-01", kind: "issue.status_changed", outcome: "in_progress", count: 1 },
+    ]);
+  });
+
+  it("in-memory: a payload whose `to` is not a string has no outcome, exactly as SQL's ->> would report", async () => {
+    const store = new InMemoryPlatformEventStore();
+    await store.append(fact({ id: "a", kind: "run.completed", payload: { to: { id: 1 } } }));
+    const counts = await store.dailyCounts("acme", {
+      from: "2026-07-28T00:00:00.000Z",
+      to: "2026-07-29T00:00:00.000Z",
+    });
+    expect(counts).toEqual([{ day: "2026-07-28", kind: "run.completed", count: 1 }]);
+  });
+
+  it("pg: one grouped query cutting the day in UTC, with the window as parameters", async () => {
+    const { client, calls } = fakeClient(() => ({
+      rows: [
+        { day: "2026-08-01", kind: "issue.created", outcome: null, count: "2" },
+        { day: "2026-08-01", kind: "issue.status_changed", outcome: "done", count: 1 },
+      ],
+    }));
+    const store = new PgPlatformEventStore(client);
+
+    const counts = await store.dailyCounts("acme", {
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-02T00:00:00.000Z",
+    });
+
+    expect(calls[0]?.text).toContain("AT TIME ZONE 'UTC'");
+    expect(calls[0]?.text).toContain("payload->>'to' AS outcome");
+    expect(calls[0]?.text).toContain("created_at >= $2 AND created_at < $3");
+    expect(calls[0]?.text).toContain("GROUP BY 1, 2, 3");
+    expect(calls[0]?.params).toEqual(["acme", "2026-08-01T00:00:00.000Z", "2026-08-02T00:00:00.000Z"]);
+    // count comes back as a string from pg's bigint; a NULL outcome drops the key rather than becoming "null"
+    expect(counts).toEqual([
+      { day: "2026-08-01", kind: "issue.created", count: 2 },
+      { day: "2026-08-01", kind: "issue.status_changed", outcome: "done", count: 1 },
+    ]);
+  });
+});
+
 describe("deleteOlderThan — EO4 retention (the log is a buffer, the TTL is the operator's replay window)", () => {
   it("in-memory: prunes strictly-older facts and reports the count; newer facts and seq continuity survive", async () => {
     const store = new InMemoryPlatformEventStore();

@@ -16,6 +16,9 @@ function memoryStore(): PlatformEventStore & { rows: PlatformEventRecord[] } {
     async list(tenant, opts) {
       return rows.filter((r) => r.tenant === tenant && (opts?.afterSeq === undefined || r.seq > opts.afterSeq));
     },
+    async dailyCounts() {
+      return []; // the pulse's aggregate — not what these tests are about
+    },
     async listAll(opts) {
       return rows.filter((r) => opts?.afterSeq === undefined || r.seq > opts.afterSeq);
     },
@@ -78,6 +81,7 @@ describe("PlatformEventService", () => {
         },
         list: async () => [],
         listAll: async () => [],
+        dailyCounts: async () => [],
         get: async () => undefined,
         deleteOlderThan: async () => 0,
       },

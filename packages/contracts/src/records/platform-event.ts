@@ -32,6 +32,16 @@ export const PLATFORM_EVENT_KINDS = [
   "harness.registered",
   "dataset.registered",
   "judge.registered",
+  // Ownership moved between teams. A capability's owning team decides who may change it and (for a private
+  // team) who may see it at all, so a transfer is workspace-shaping news in the way a rename is not — the same
+  // split the issue aggregate makes between `update` and `issue.moved`. Subject is the entity (a harness
+  // TEMPLATE transfer carries `subject.type: "harness_template"` under the same harness kind), payload carries
+  // `{ from?, to }` teams. Facts, not judgments: the transfer happened; whether it was right is not ours to say.
+  "harness.moved",
+  "dataset.moved",
+  "judge.moved",
+  // A result batch was re-filed under a different team — the same fact for the evidence a capability produced.
+  "scorecard.moved",
   // A workspace-filesystem write published an attributed revision — the revision ledger is the state, this is
   // its fact (emitted by the RevisionedWorkspaceFs choke point). Agent-authored publishes stamp
   // causedBy agent:<agentId>:<conversationId>, the loop guard's key.
@@ -147,6 +157,21 @@ export const AGENT_RUN_EVENT_KIND_ALIASES = {
 
 export function canonicalEventKind(kind: PlatformEventKind): string {
   return (AGENT_RUN_EVENT_KIND_ALIASES as Partial<Record<PlatformEventKind, string>>)[kind] ?? kind;
+}
+
+// One (UTC day × kind × outcome) bucket of the log — the AGGREGATE a dashboard reads instead of the rows.
+// A trend over a month is a handful of integers; fetching the facts themselves to count them is how a home
+// screen ends up paging thousands of records to draw twenty bars.
+//
+// `outcome` is the transition's destination for the facts that fold their verb into a payload (`payload.to` on
+// `issue.status_changed` and its project/initiative siblings) — that is the only way "how many issues were
+// COMPLETED that day" can be answered without reading every issue's history. Absent for every kind that
+// carries no destination.
+export interface PlatformEventDailyCount {
+  day: string; // YYYY-MM-DD (UTC)
+  kind: string;
+  outcome?: string;
+  count: number;
 }
 
 // What the fact is about — a pointer, never the document. Detail is read back through the normal (RBAC-gated)
