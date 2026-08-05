@@ -477,15 +477,19 @@ export default async function RunDetailPage({
 
       {/* 결과 — kind 마다 갈아끼우는 단 하나의 슬롯. eval 이면 판정 한 줄 + 지표 표(근거는 행 확장), 에이전트
           턴이면 그 대화로 건너가기, 샌드박스면 세션 요약. 점수는 eval 의 결과일 뿐 보편 결과가 아니므로,
-          점수가 없는 패밀리에서 "아직 점수가 없어요"를 띄우던 영구 빈 섹션은 사라졌다. */}
-      <RunOutcome
-        run={run}
-        action={
-          run.group?.role === 'turn' ? (
-            <OpenConversationButton sessionId={run.group.id} />
-          ) : undefined
-        }
-      />
+          점수가 없는 패밀리에서 "아직 점수가 없어요"를 띄우던 영구 빈 섹션은 사라졌다.
+          스코어카드의 케이스 run 은 점수를 여기서 반복하지 않는다 — 점수의 권위 표면은 스코어카드 상세(케이스별
+          판정·지표 표를 이미 소유)이고, run 상세는 실행 기록(리플레이·라이브·궤적·논의)이다. */}
+      {!run.parentScorecardId && (
+        <RunOutcome
+          run={run}
+          action={
+            run.group?.role === 'turn' ? (
+              <OpenConversationButton sessionId={run.group.id} />
+            ) : undefined
+          }
+        />
+      )}
 
       {/* Evidence — the SAME reading surface as Settings › Observability's sealed-trajectory detail (rollup ·
           plane chips · event list left / full payload right). The run page's bespoke vertical timeline is gone:
