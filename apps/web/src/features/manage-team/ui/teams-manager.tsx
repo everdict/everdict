@@ -9,6 +9,7 @@ import {
   teamSettingsHref,
   type TeamWithSummary,
 } from '@/entities/team'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
@@ -30,6 +31,7 @@ export function TeamsManager({
   canWrite: boolean
 }) {
   const t = useTranslations('manageTeams')
+  const refresh = useRefresh()
   const [error, setError] = useState<string>()
   const [creating, setCreating] = useState(false)
   const [key, setKey] = useState('')
@@ -58,6 +60,8 @@ export function TeamsManager({
         setKey('')
         setName('')
         setParentId('')
+        // 화면 갱신은 부르는 쪽의 몫이다 — 서버 액션은 제어 평면에 쓰고 돌아올 뿐이다(`.claude/rules/web.md`).
+        refresh()
       } finally {
         setPending(false)
       }

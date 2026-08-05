@@ -48,9 +48,20 @@ export function teamNewHref(workspace: string, key: string, section: TeamSection
   return `${teamSectionHref(workspace, key, section)}/new`
 }
 
+// 팀 설정은 한 장이 아니라 리니어처럼 **탭 라우트**다 — 한 팀에게 묻는 질문이 여럿이고(누구인가 · 누가 있나 ·
+// 일이 어떻게 흐르나 · 어떤 리듬으로 도나) 서로 상관이 없어서, 한 페이지에 쌓으면 지금 무엇을 고치는 중인지가
+// 사라진다. 'general' 은 세그먼트가 없는 자리라 팀의 짧은 주소가 곧 일반 설정이다.
+export const TEAM_SETTINGS_SECTIONS = ['general', 'members', 'workflow', 'cycles'] as const
+export type TeamSettingsSection = (typeof TEAM_SETTINGS_SECTIONS)[number]
+
 // 팀 설정(이름·키·로스터·보드) — 일하는 화면이 아니라 구성 화면이라 Settings 아래에 있지만, 주소는 같은 슬러그다.
-export function teamSettingsHref(workspace: string, key: string): string {
-  return `/${workspace}/settings/teams/${encodeURIComponent(key)}`
+export function teamSettingsHref(
+  workspace: string,
+  key: string,
+  section: TeamSettingsSection = 'general'
+): string {
+  const base = `/${workspace}/settings/teams/${encodeURIComponent(key)}`
+  return section === 'general' ? base : `${base}/${section}`
 }
 
 // 경로가 가리키는 팀 스코프. 팀의 짧은 주소(`/team/ENG`)는 그 팀의 이슈 화면이라 'issues' 로 읽는다 —

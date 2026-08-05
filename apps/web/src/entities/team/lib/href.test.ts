@@ -41,6 +41,14 @@ describe('team hrefs — the team is a path segment, not a filter', () => {
     expect(teamSettingsHref('acme', 'ENG')).toBe('/acme/settings/teams/ENG')
   })
 
+  // 설정은 탭 라우트다 — 'general' 은 세그먼트가 없는 자리라, 팀 설정의 짧은 주소가 곧 일반 설정이다.
+  it('spells a team-settings tab as a segment under the team, and general as no segment at all', () => {
+    expect(teamSettingsHref('acme', 'ENG', 'general')).toBe('/acme/settings/teams/ENG')
+    expect(teamSettingsHref('acme', 'ENG', 'members')).toBe('/acme/settings/teams/ENG/members')
+    expect(teamSettingsHref('acme', 'ENG', 'workflow')).toBe('/acme/settings/teams/ENG/workflow')
+    expect(teamSettingsHref('acme', 'ENG', 'cycles')).toBe('/acme/settings/teams/ENG/cycles')
+  })
+
   it('escapes a key so it can never break out of its segment', () => {
     expect(teamHref('acme', 'A/B')).toBe('/acme/team/A%2FB')
   })
