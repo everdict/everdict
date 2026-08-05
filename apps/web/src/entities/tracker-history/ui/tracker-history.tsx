@@ -3,7 +3,6 @@
 import { useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
-  ArrowRight,
   ArrowRightLeft,
   CheckCircle2,
   CircleSlash,
@@ -22,7 +21,6 @@ import {
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import {
-  InitiativeStatusBadge,
   initiativeStatusIcon,
   initiativeStatusSchema,
   initiativeStatusTone,
@@ -31,19 +29,13 @@ import {
   ISSUE_LINK_REF_KIND,
   issueLinkHref,
   issueLinkTypeSchema,
-  IssueStatusBadge,
   issueStatusIcon,
   issueStatusSchema,
   issueStatusTone,
   type TrackerHistoryEntry,
 } from '@/entities/issue'
 import { memberNameOf, type MemberDirectory } from '@/entities/member'
-import {
-  ProjectStatusBadge,
-  projectStatusIcon,
-  projectStatusSchema,
-  projectStatusTone,
-} from '@/entities/project'
+import { projectStatusIcon, projectStatusSchema, projectStatusTone } from '@/entities/project'
 import { cn } from '@/shared/lib/utils'
 import {
   ActivityActorName,
@@ -57,15 +49,12 @@ import { EntityRef } from '@/shared/ui/chip'
 import { Link } from '@/shared/ui/link'
 
 import { detailFlag, detailNumber, detailString, detailStrings } from '../lib/history-detail'
+import { TrackerStatusMove, type TrackerKind } from './tracker-status'
 
 // 처음 보여줄 개수 — 나머지는 "이전 이력 더 보기"로. 도메인이 이력을 200개까지 들고 있어서
 // (TRACKER_HISTORY_LIMIT) GitHub 동기화가 잦은 이슈는 그대로 펼치면 화면이 이력으로 덮인다.
 const INITIAL = 10
 const STEP = 20
-
-// 이력을 가진 트래커 레코드. 상태 어휘가 종류마다 달라(이슈 7 · 프로젝트 4 · 이니셔티브 3) 상태 칩을
-// 고를 때만 쓰인다.
-export type TrackerKind = 'issue' | 'cycle' | 'project' | 'initiative'
 
 // `updated` 가 싣는 변경 필드 이름 — 카탈로그에 있는 것만 번역하고 모르는 키는 원문 그대로 보여준다
 // (제어 평면이 새 필드를 추가해도 이력이 깨지지 않는다).
@@ -243,7 +232,7 @@ function HistoryRow({
           text: t('history.statusChanged'),
           values: (
             <>
-              <StatusMove kind={kind} from={detailString(detail, 'from')} to={to} />
+              <TrackerStatusMove kind={kind} from={detailString(detail, 'from')} to={to} />
               {causeChip}
             </>
           ),
@@ -270,7 +259,7 @@ function HistoryRow({
           text: t('history.reopened', { subject }),
           values: (
             <>
-              <StatusMove kind={kind} from={detailString(detail, 'from')} to={to} />
+              <TrackerStatusMove kind={kind} from={detailString(detail, 'from')} to={to} />
               {causeChip}
               {scorecardChip}
             </>
@@ -407,46 +396,6 @@ function HistoryRow({
         return { icon: History, tone: 'neutral', text: entry.event, values: null }
     }
   }
-}
-
-// from → to. 옮겨 간 쪽(to)이 결론이라 화살표 뒤에 둔다. 한쪽만 읽히면 그 한쪽만 그린다.
-function StatusMove({
-  kind,
-  from,
-  to,
-}: {
-  kind: TrackerKind
-  from: string | undefined
-  to: string | undefined
-}) {
-  if (from === undefined && to === undefined) return null
-  return (
-    <span className="inline-flex items-center gap-1">
-      {from !== undefined && <StatusChip kind={kind} value={from} />}
-      {from !== undefined && to !== undefined && (
-        <ArrowRight className="size-3 shrink-0 text-faint" aria-hidden />
-      )}
-      {to !== undefined && <StatusChip kind={kind} value={to} />}
-    </span>
-  )
-}
-
-// 상태 칩은 목록·상세에서 쓰는 그 배지 그대로다 — 이력에서만 다른 모양을 쓰면 같은 상태가 화면마다 달라진다.
-// 이력의 detail 은 검증되지 않은 자유 값이라, 어휘에 없는 문자열은 원문 칩으로 떨어진다.
-function StatusChip({ kind, value }: { kind: TrackerKind; value: string }) {
-  if (kind === 'issue') {
-    const parsed = issueStatusSchema.safeParse(value)
-    if (parsed.success) return <IssueStatusBadge status={parsed.data} />
-  }
-  if (kind === 'project') {
-    const parsed = projectStatusSchema.safeParse(value)
-    if (parsed.success) return <ProjectStatusBadge status={parsed.data} />
-  }
-  if (kind === 'initiative') {
-    const parsed = initiativeStatusSchema.safeParse(value)
-    if (parsed.success) return <InitiativeStatusBadge status={parsed.data} />
-  }
-  return <Badge tone="outline">{value}</Badge>
 }
 
 function statusIcon(kind: TrackerKind, value: string | undefined): LucideIcon | undefined {

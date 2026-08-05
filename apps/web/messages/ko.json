@@ -1752,7 +1752,17 @@
       "placement_blocked": "배치 대기",
       "circuit_opened": "차단",
       "awaiting_approval": "승인 대기"
-    }
+    },
+    "activityDecision": {
+      "approved": "승인됨",
+      "denied": "거부됨",
+      "expired": "만료됨"
+    },
+    "activityVerdict": {
+      "pass": "통과",
+      "fail": "실패"
+    },
+    "activityCarriedOver": "{count}건 이월"
   },
   "palette": {
     "placeholder": "페이지로 이동하거나 작업 실행…",

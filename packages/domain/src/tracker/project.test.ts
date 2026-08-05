@@ -27,7 +27,7 @@ describe("Project — issues under one target date", () => {
     expect(Project.creationFacts(record)[0]).toMatchObject({
       kind: "project.created",
       subject: { type: "project", id: "prj-1" },
-      payload: { status: "planned", targetDate: "2026-08-10" },
+      payload: { status: "planned", name: "v1 agent launch", targetDate: "2026-08-10" },
     });
   });
 
@@ -44,7 +44,12 @@ describe("Project — issues under one target date", () => {
     );
     expect(transition.patch.status).toBe("completed");
     expect(transition.patch.completedAt).toBe(LATER);
-    expect(transition.facts[0]?.payload).toMatchObject({ to: "completed", openIssues: 0, onTime: false });
+    expect(transition.facts[0]?.payload).toMatchObject({
+      to: "completed",
+      name: "v1 agent launch",
+      openIssues: 0,
+      onTime: false,
+    });
     expect(transition.patch.history?.at(-1)?.event).toBe("completed");
   });
 
@@ -135,7 +140,7 @@ describe("Initiative — the completion gate", () => {
       "dana",
       LATER,
     );
-    expect(forced.facts[0]?.payload).toMatchObject({ forced: true, openIssues: 4 });
+    expect(forced.facts[0]?.payload).toMatchObject({ forced: true, openIssues: 4, name: "v1 deploy" });
   });
 
   it("carries a posted update's health onto the goal, and keeps the sentence as the record", () => {

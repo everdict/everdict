@@ -184,6 +184,9 @@ export class CommentService {
         actor: input.author,
         payload: {
           commentId: record.id,
+          // What was said, first line's worth — a "comment created" fact with no words is unreadable in any
+          // feed, and no feed reader can (or should) re-fetch the thread per row.
+          excerpt: body.slice(0, 140),
           ...(record.parentId !== undefined ? { parentId: record.parentId } : {}),
         },
         message: `New comment on ${input.resourceType} ${input.resourceId}: ${body.slice(0, 140)}`,

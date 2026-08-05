@@ -50,6 +50,7 @@ describe("Issue — the tracker's unit of intent", () => {
       source: "github",
       repository: "acme/agent",
       number: 42,
+      title: "Agent drops the tool result on retry",
     });
   });
 
@@ -110,6 +111,8 @@ describe("Issue — the tracker's unit of intent", () => {
           cause: "manual",
           teamId: "team-eng",
           identifier: "ENG-1",
+          // A feed row reads the fact alone — the title rides along so the line can say WHAT moved.
+          title: "Agent drops the tool result on retry",
         },
         message: "ENG-1 backlog → in_progress — Agent drops the tool result on retry",
       },

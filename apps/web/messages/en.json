@@ -1752,7 +1752,17 @@
       "placement_blocked": "placement blocked",
       "circuit_opened": "circuit opened",
       "awaiting_approval": "awaiting approval"
-    }
+    },
+    "activityDecision": {
+      "approved": "approved",
+      "denied": "denied",
+      "expired": "expired"
+    },
+    "activityVerdict": {
+      "pass": "pass",
+      "fail": "fail"
+    },
+    "activityCarriedOver": "{count} carried over"
   },
   "palette": {
     "placeholder": "Go to a page or run an action…",

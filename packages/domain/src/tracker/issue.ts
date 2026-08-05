@@ -423,6 +423,9 @@ export class Issue {
           source: record.github !== undefined ? "github" : "manual",
           teamId: record.teamId,
           identifier: record.identifier,
+          // The fact is what feeds render — without the title a reader sees "ENG-12" and has to open it to
+          // learn what was filed. Facts carry what a human needs to read the line, not just what filters match.
+          title: record.title,
           ...(record.projectId !== undefined ? { projectId: record.projectId } : {}),
           // Same origin shape as the history entry: a consumer woken by this fact (an agent, a webhook) can
           // open the GitHub issue without a second read of the record — and without assuming github.com.
@@ -784,6 +787,7 @@ export class Issue {
           payload: {
             linkType: link.type,
             linkId: link.id,
+            identifier: this.record.identifier,
             ...(link.version !== undefined ? { version: link.version } : {}),
           },
           message: `Issue linked to ${link.type} ${link.id} — ${this.record.title}`,
@@ -994,6 +998,7 @@ export class Issue {
             cause,
             teamId: this.record.teamId,
             identifier: this.record.identifier,
+            title: this.record.title,
             ...(this.record.projectId !== undefined ? { projectId: this.record.projectId } : {}),
             ...(options.scorecardId !== undefined ? { scorecardId: options.scorecardId } : {}),
           },

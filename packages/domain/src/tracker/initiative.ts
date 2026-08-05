@@ -111,6 +111,8 @@ export class Initiative {
         actor: record.createdBy,
         payload: {
           status: record.status,
+          // Same reason the project fact names itself: a goal's id is a uuid, and the feed row is the reader.
+          name: record.name,
           ...(record.targetDate !== undefined ? { targetDate: record.targetDate } : {}),
         },
         message: `Initiative created — ${record.name}`,
@@ -230,6 +232,7 @@ export class Initiative {
             actor: by,
             payload: {
               health: update.health,
+              name: this.record.name,
               ...(from !== undefined ? { from } : {}),
               // The first line of what was said, not the whole thing: every downstream reader of this fact
               // (the bell row, the chat post) needs the sentence to be worth anything, and none of them can
@@ -299,6 +302,7 @@ export class Initiative {
           payload: {
             from,
             to,
+            name: this.record.name,
             openIssues,
             ...(onTime !== undefined ? { onTime } : {}),
             ...(forced ? { forced: true } : {}),

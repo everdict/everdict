@@ -134,6 +134,9 @@ export class Project {
         actor: record.createdBy,
         payload: {
           status: record.status,
+          // The name a feed row cites — the record's id is a uuid, and a "project created" line that names
+          // nothing tells a reader nothing.
+          name: record.name,
           teamIds: record.teamIds,
           initiativeIds: record.initiativeIds,
           ...(record.targetDate !== undefined ? { targetDate: record.targetDate } : {}),
@@ -239,6 +242,7 @@ export class Project {
             actor: by,
             payload: {
               health: update.health,
+              name: this.record.name,
               ...(from !== undefined ? { from } : {}),
               // The same excerpt an initiative update carries, for the same reason: a bell row or a chat post
               // that only says the colour explains nothing, and neither can re-read the timeline.
@@ -362,6 +366,7 @@ export class Project {
           payload: {
             from,
             to,
+            name: this.record.name,
             openIssues,
             teamIds: this.record.teamIds,
             initiativeIds: this.record.initiativeIds,

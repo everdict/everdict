@@ -76,6 +76,8 @@ export class NotificationService implements ChannelPoster {
       subject: { type: "view", id: input.viewId },
       payload: {
         scheduleId: input.scheduleId,
+        // The schedule's name is what a feed row cites — the view id it links to is a uuid.
+        name: input.scheduleName,
         ...(input.artifactId !== undefined ? { artifactId: input.artifactId } : {}),
       },
       message: `Scheduled report "${input.scheduleName}" is ready on view ${input.viewId}${input.artifactId ? ` (artifact ${input.artifactId})` : " (no artifact produced)"}.`,
