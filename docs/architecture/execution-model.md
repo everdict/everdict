@@ -443,6 +443,16 @@ can be discussed like any other entity, and the knowledge layer can promote what
   `class: "interactive"` with `origin.cause: "member"`, so it is never scheduled like background fan-out and
   the ledger names who asked. The one narrowing taken at implementation: no `agent.run.*` event per turn
   (see P3).
+  **EVERY turn, not just the typed one.** "A turn is a run" is only true where the wrapper is applied, and
+  four entry points ran outside it — the comment-thread discussion turn, a wake-up resume, a scheduled report
+  turn, and a teammate woken by a delivered message. Each did real model and tool work and left the workspace's
+  evidence ledger with nothing at all. `withTurnRun` (`apps/agent/src/chat-run.ts`) now takes the turn's KIND
+  (`cause` + `eventKind` + label): `chat` for the member-caused turns (a typed message, an @-mention in a
+  thread — ledger-only, deliberately off the event log), `event` for headless work (wake · report · teammate),
+  which belongs on the log for the same reason an activation does — nobody watched it happen. The activation
+  path stays unwrapped because it already opens its own run; a second per turn would be a lie. The bridge
+  (`reportRunEvent`) moved onto `ChatDeps`, where every entry point can see it: a headless caller that could
+  not see the field was exactly how these turns came to be invisible.
 - **O2 — Is an agent transcript a trace?** *Recommendation: yes*, this is what makes agent runs first-class
   everywhere. Risk: the trace contract was built for harness output; agent-specific fields (approvals,
   todos, sub-agents) may need extension rather than shoe-horning.

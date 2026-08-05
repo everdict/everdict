@@ -328,6 +328,18 @@ a live "doing now" line while it works, then only the final markdown answer — 
 transcript opens on demand in the right panel (the normal conversation view), where any member can continue
 chatting 1:1.
 
+- **An agent's comment is Everdict's, wherever it came from.** The bridge is not the only way an agent ends up in
+  a thread — a triage/crafted agent posts through `create_comment` (MCP) or `POST /comments`, and it does so with
+  the MEMBER'S own credential, because apps/agent is a token courier. The authenticated subject therefore signed a
+  member's name to words they never wrote. The caller instead **declares** the agent in the request (the
+  `x-everdict-agent-id`/`-name`/`-conversation-id` headers the workspace filesystem's revision ledger already
+  reads — `fs-actor.ts`; MCP reads them once at initialize), and `CommentService.create` authors the row as
+  `COMMENT_AGENT_AUTHOR` with `agentSessionId` = that conversation, so the thread shows Everdict with a way back
+  to the reasoning. It is born `complete` (a tool caller already has its answer — no lifecycle to drive). Two
+  consequences follow from the same sentinel: the comment emits **no** `comment.created` fact (loop guard #1 — a
+  watching agent must never wake on its own answer), and `askAgent` from a declared agent is a **400** rather than
+  a turn fired on its own comment. Attribution, not privilege: the member's token authorizes the write either way,
+  so a forged declaration can only mislabel the caller's own comment.
 - **Comment row IS the answer.** `CommentRecord` gains `authorKind:'agent'` + `agentStatus`
   (`running → awaiting_approval → complete|failed`) + `agentActivity` (machine token
   `thinking|writing|tool:<name>`, localized by the web) + `agentSessionId` (mig 0082). The control plane stays
@@ -339,6 +351,14 @@ chatting 1:1.
   runs one capped `runChat` over the thread snapshot (+ the resource via the @-reference channel; `schedule`
   has no reference type → thread-only), and reports progress back over
   `POST /internal/comment-activity` (the `/internal/usage` twin) onto the placeholder.
+- **The answer stays in the thread it answers.** The placeholder is nested on the ask's anchor
+  (`trigger.parentId ?? trigger.id` — only a top-level comment can be a parent), and that `anchorId` rides on the
+  `DiscussionTurnRunner` port into the prompt, because the thread snapshot is deliberately id-less: without it the
+  agent knows no comment id at all, so any `create_comment` it writes can only land top-level, a second
+  conversation beside the one it is in. The prompt therefore forbids re-posting the answer (the turn's final
+  message IS the comment) and names the anchor for any comment it does write. The same gap closes on the
+  **activation** side: a `comment.*` fact already carries `commentId`/`parentId` in its payload, and
+  `renderActivationPrompt` now spends one line telling the woken agent to reply with that parent.
 - **One session per thread, reused + workspace-visible.** The thread's session
   (`visibility:'workspace'`, mig 0083, owner = first asker) is reused across asks, so the agent keeps the
   discussion's memory and panel follow-ups. `getVisibleSession` (owner OR workspace) relaxes the session read /

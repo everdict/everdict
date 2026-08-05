@@ -90,6 +90,9 @@ interface LiveSession {
   handle: ComputeHandle;
   tenant: string;
   createdBy: string;
+  // What the browse row calls this session's evidence — the environment the member asked for. Kept here
+  // because the seal happens at teardown, long after the request that knew it.
+  label: string;
   expiresAtMs: number;
   trace: TraceEvent[];
   t: number; // monotonic trajectory step
@@ -237,6 +240,7 @@ export class SandboxSessionService {
         handle,
         tenant: input.tenant,
         createdBy: input.createdBy,
+        label: record.harness.id,
         expiresAtMs: new Date(this.now()).getTime() + ttlSec * 1000,
         trace: [
           // M3 — the sandbox's infra-plane record: the driver container identity, so the sealed trajectory says
@@ -564,7 +568,16 @@ export class SandboxSessionService {
       await this.deps.trajectories
         // A shell session is personal work (`runAudience`), so its record is the member's — the browse ledger
         // must not hand one member's terminal history to the workspace.
-        ?.seal({ runId, tenant: live.tenant, source: "run", events: live.trace, owner: live.createdBy })
+        ?.seal({
+          runId,
+          tenant: live.tenant,
+          source: "run",
+          events: live.trace,
+          owner: live.createdBy,
+          // What the browse row calls it: a shell session, named by the environment the member asked for.
+          kind: "sandbox",
+          label: live.label,
+        })
         .catch(() => undefined);
       const settled = await this.settle(runId, live.tenant, reason);
       // Prompt reaper completion (best-effort) — a missed signal just lets the timer fire a no-op later.

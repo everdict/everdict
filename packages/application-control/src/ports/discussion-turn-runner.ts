@@ -11,6 +11,10 @@ export interface DiscussionTurnRunner {
     resourceType: string;
     resourceId: string;
     commentId: string; // the placeholder agent comment to drive (status/activity/final body)
+    // The thread's top-level comment — the ONLY legal parent in a single-level thread, and the anchor the turn
+    // must use if it posts a comment of its own. Without it the agent knows no comment ids at all (the snapshot
+    // below carries none), so any create_comment it makes lands top-level, outside the discussion it is in.
+    anchorId: string;
     sessionId: string; // the thread's workspace-visible agent session (created on first ask, reused after)
     // The full thread snapshot at ask time, oldest→newest (a later snapshot supersedes earlier ones).
     thread: { author: string; authorName: string; body: string; at: string }[];

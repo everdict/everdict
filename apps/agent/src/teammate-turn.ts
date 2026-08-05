@@ -1,7 +1,8 @@
 import type { PermissionHook } from "@everdict/agent-runtime";
 import type { TurnOutcome } from "./agent-activation.js";
 import type { AgentMailbox } from "./agent-mailbox.js";
-import { type ChatDeps, contentToString, runChat } from "./chat.js";
+import { withTurnRun } from "./chat-run.js";
+import { type ChatDeps, type ChatResult, type FailedTurnEvidence, contentToString, runChat } from "./chat.js";
 import type { Authenticate } from "./principal.js";
 
 // A3 (docs/architecture/agent-execution-auth.md + agent-teams.md S3): run ONE request-less turn for a teammate. Unlike
@@ -18,6 +19,10 @@ export async function runTeammateTurn(
   agentToken: string,
   signal?: AbortSignal,
   permit?: PermissionHook,
+  // Open a run for this turn on the ledger. Set by the callers that DON'T already own one — the supervisor
+  // waking a teammate on a delivered message. The activation path leaves it off: it opened its run before
+  // calling here (envelope, approval parking, event attribution), and a second one per turn would be a lie.
+  ledger?: boolean,
   // Returns what the turn spent on the model AND the spans it recorded live, so the caller can put both in the
   // run's sealed evidence (O2 + N6). undefined = nothing ran (drained empty) or the turn died before its first
   // model call.
@@ -34,22 +39,25 @@ export async function runTeammateTurn(
     const prompt = drained.map((m) => contentToString(m.content)).join("\n\n");
     // persistentRetry: an unattended turn has no user waiting on it — surviving a capacity dip (429/529 waited
     // out, Retry-After honored) beats failing fast and losing the reaction.
-    const result = await runChat(
-      { ...deps, persistentRetry: true },
-      principal,
-      headers,
-      sessionId,
-      prompt,
-      undefined,
-      undefined,
-      signal,
-      {
+    const turn = (collectFailure?: (evidence: FailedTurnEvidence) => void): Promise<ChatResult> =>
+      runChat({ ...deps, persistentRetry: true }, principal, headers, sessionId, prompt, undefined, undefined, signal, {
         drainInput: () => mailbox.drain(principal.workspace, sessionId),
         // Activation runs carry a mode-derived approval hook (agent-automation A6); a plain teammate turn has
         // none (its autonomy boundary is consent at spawn time).
         ...(permit ? { permit } : {}),
-      },
-    );
+        ...(collectFailure ? { onFailedTurn: collectFailure } : {}),
+      });
+    const result =
+      ledger === true
+        ? await withTurnRun(
+            deps,
+            principal,
+            sessionId,
+            { cause: "event", eventKind: "teammate", label: "Teammate turn" },
+            turn,
+            signal,
+          )
+        : await turn();
     return {
       ...(result.usage ? { usage: result.usage } : {}),
       ...(result.spans && result.spans.length > 0 ? { spans: result.spans } : {}),

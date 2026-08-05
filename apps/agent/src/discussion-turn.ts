@@ -1,6 +1,7 @@
 import type { PermissionHook } from "@everdict/agent-runtime";
 import { AGENT_REFERENCE_TYPES, type AgentReference, type AgentReferenceType } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
+import { withTurnRun } from "./chat-run.js";
 import { runChat } from "./chat.js";
 import type { PermissionRegistry } from "./permission-registry.js";
 import type { AgentServerDeps } from "./server.js";
@@ -18,6 +19,7 @@ export interface DiscussionTurnInput {
   resourceType: string;
   resourceId: string;
   commentId: string; // the placeholder agent comment to drive
+  anchorId: string; // the thread's top-level comment — the only legal parent, and the anchor for any extra comment
   sessionId: string; // the thread's shared session (created on first ask, reused after)
   thread: { author: string; authorName: string; body: string; at: string }[];
 }
@@ -43,6 +45,10 @@ export function buildDiscussionPrompt(input: DiscussionTurnInput): string {
     "approval, so never refuse an action just because it writes.",
     "Your reply is posted into the thread as a comment: write a self-contained markdown answer and keep it",
     "concise — this is a discussion, not a report. Prefer reasonable assumptions over asking questions back.",
+    "Do NOT post that answer with create_comment — this turn's final message IS the thread comment, so a second",
+    "one only duplicates it. If you do need a SEPARATE comment here (a later note, a different resource's",
+    `thread), reply INSIDE this discussion: create_comment with parent_id "${input.anchorId}". A comment on this`,
+    `${input.resourceType} without that parent starts a second conversation next to the one you are in.`,
   ];
   return lines.join("\n");
 }
@@ -110,33 +116,44 @@ export async function runDiscussionTurn(
       tick({ status: "running", activity: lastActivity });
       return decision;
     };
-    const result = await runChat(
-      // persistentRetry: a discussion turn is unattended — wait out capacity dips instead of failing the thread.
-      { ...deps, maxTurns: DISCUSSION_MAX_TURNS, persistentRetry: true },
+    const result = await withTurnRun(
+      deps,
       principal,
-      { authorization: `Bearer ${token}` },
       input.sessionId,
-      buildDiscussionPrompt(input),
-      references,
-      undefined,
-      undefined,
-      {
-        permit,
-        // Milestones → the comment's live "doing now" token (throttled to changes; the web localizes it).
-        onEvent: (e) => {
-          const activity =
-            e.type === "reasoning_delta"
-              ? "thinking"
-              : e.type === "text_delta"
-                ? "writing"
-                : e.type === "tool_call"
-                  ? `tool:${e.name}`
-                  : undefined;
-          if (activity === undefined || activity === lastActivity) return;
-          lastActivity = activity;
-          tick({ status: "running", activity });
-        },
-      },
+      // A member @-mentioned the agent in a thread, so the cause is a person — the same interactive record a
+      // typed turn gets. Without this wrapper the whole discussion turn ran outside the ledger: real model
+      // calls, real tool calls, and nothing in the workspace's evidence to show for it.
+      { cause: "chat", eventKind: "discussion", label: "Discussion turn" },
+      (collectFailure) =>
+        runChat(
+          // persistentRetry: a discussion turn is unattended — wait out capacity dips instead of failing the thread.
+          { ...deps, maxTurns: DISCUSSION_MAX_TURNS, persistentRetry: true },
+          principal,
+          { authorization: `Bearer ${token}` },
+          input.sessionId,
+          buildDiscussionPrompt(input),
+          references,
+          undefined,
+          undefined,
+          {
+            onFailedTurn: collectFailure,
+            permit,
+            // Milestones → the comment's live "doing now" token (throttled to changes; the web localizes it).
+            onEvent: (e) => {
+              const activity =
+                e.type === "reasoning_delta"
+                  ? "thinking"
+                  : e.type === "text_delta"
+                    ? "writing"
+                    : e.type === "tool_call"
+                      ? `tool:${e.name}`
+                      : undefined;
+              if (activity === undefined || activity === lastActivity) return;
+              lastActivity = activity;
+              tick({ status: "running", activity });
+            },
+          },
+        ),
     );
     const final = [...result.messages].reverse().find((m) => m.role === "assistant" && m.content.trim().length > 0);
     if (!final) throw new Error("The discussion turn produced no answer.");

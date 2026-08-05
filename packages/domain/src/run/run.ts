@@ -79,6 +79,23 @@ export function runAudience(record: Pick<RunRecord, "kind" | "createdBy" | "orig
   return owner === undefined ? { scope: "workspace" } : { scope: "member", subject: owner };
 }
 
+// How a run's evidence names ITSELF on a browse row. The trajectory ledger stores this beside the bytes
+// (mig 0124) for the same reason it stores the owner: the browse page must answer "what is this" from the
+// row alone — the ClickHouse rung has no run table beside it, and a page that resolved names afterwards
+// would either N+1 or lie. Without it every row read `<uuid> · run · N events`, and evidence you cannot
+// recognize is indistinguishable from evidence that is not there.
+//
+// The label is the handle a person would use: an eval is known by the CASE it evaluated, everything else by
+// what ran (the harness id — for a chat turn, the agent's own id).
+export function runEvidenceIdentity(record: Pick<RunRecord, "kind" | "caseId" | "harness">): {
+  kind: string;
+  label?: string;
+} {
+  const kind = record.kind ?? "eval";
+  const label = kind === "eval" && record.caseId ? record.caseId : record.harness?.id;
+  return { kind, ...(label ? { label } : {}) };
+}
+
 // May `viewer` (a member subject) read this run and its trajectory? Tenancy is checked separately and
 // first — this answers only the within-workspace question.
 export function canReadRun(record: Pick<RunRecord, "kind" | "createdBy" | "origin">, viewer: string): boolean {

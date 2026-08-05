@@ -1,6 +1,7 @@
 import type { AgentSessionRecord, AgentWakeIntent } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import { eventSelectorMatches } from "@everdict/domain";
+import { withTurnRun } from "./chat-run.js";
 import { type ChatDeps, runChat } from "./chat.js";
 import type { Authenticate } from "./principal.js";
 
@@ -69,9 +70,31 @@ function defaultRunTurn(deps: WakeResumeDeps): NonNullable<WakeResumeDeps["runTu
   return async (session, prompt, agentToken) => {
     const headers = { authorization: `Bearer ${agentToken}` };
     const principal = await deps.authenticate(headers);
-    // persistentRetry: nobody is necessarily watching this turn, so surviving a capacity dip beats failing fast —
-    // the whole point of the wait was that the member should not have to come back and ask.
-    await runChat({ ...deps.chat, persistentRetry: true }, principal, headers, session.id, prompt);
+    // A woken turn is headless work — nobody was watching it start, which is exactly why it has to leave a
+    // record. Without the wrapper the resume ran outside the ledger entirely: the member came back to an answer
+    // whose work had no trace behind it.
+    await withTurnRun(
+      deps.chat,
+      principal,
+      session.id,
+      { cause: "event", eventKind: "wake", label: "Wake-up turn" },
+      (collectFailure) =>
+        // persistentRetry: nobody is necessarily watching this turn, so surviving a capacity dip beats failing fast —
+        // the whole point of the wait was that the member should not have to come back and ask.
+        runChat(
+          { ...deps.chat, persistentRetry: true },
+          principal,
+          headers,
+          session.id,
+          prompt,
+          undefined,
+          undefined,
+          undefined,
+          {
+            onFailedTurn: collectFailure,
+          },
+        ),
+    );
   };
 }
 

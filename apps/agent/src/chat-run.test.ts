@@ -1,6 +1,6 @@
 import { InMemoryAgentSessionStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
-import { withChatTurnRun } from "./chat-run.js";
+import { withChatTurnRun, withTurnRun } from "./chat-run.js";
 import type { ChatResult } from "./chat.js";
 import type { AgentRunEventReport } from "./usage.js";
 
@@ -120,6 +120,59 @@ describe("withChatTurnRun — a chat turn is a run (O1)", () => {
       ),
     ).rejects.toThrow("aborted");
     expect(stopped.reports.at(-1)?.kind).toBe("agent.run.cancelled");
+  });
+
+  it("settles a DIED turn with the record it kept — the spans it collected before throwing", async () => {
+    const { deps, reports } = await harness();
+    const span = {
+      traceId: "0af7651916cd43dd8448eb211c80319c",
+      spanId: "b7ad6b7169203331",
+      name: "invoke_agent default",
+      kind: "internal" as const,
+      startedAt: NOW,
+      endedAt: NOW,
+      attributes: {},
+      status: { code: "error" as const, message: "The model provider call failed." },
+    };
+
+    await expect(
+      withChatTurnRun(deps, PRINCIPAL, "s-1", async (collectFailure) => {
+        collectFailure({ reason: "The model provider call failed.", spans: [span] });
+        throw new Error("The model provider call failed.");
+      }),
+    ).rejects.toThrow("The model provider call failed.");
+
+    // The evidence rides the SAME terminal report a succeeded turn uses — so the control plane seals a
+    // trajectory for the dead turn too, and it is readable in the ledger like any other.
+    expect(reports.at(-1)).toMatchObject({ kind: "agent.run.failed", spans: [span] });
+  });
+
+  it("settles a turn that died with NO record at all carrying the reason itself — never an empty run", async () => {
+    const { deps, reports } = await harness();
+
+    await expect(
+      withChatTurnRun(deps, PRINCIPAL, "s-1", async () => {
+        throw new Error("no model is configured for this workspace");
+      }),
+    ).rejects.toThrow("no model is configured");
+
+    const settled = reports.at(-1);
+    expect(settled?.kind).toBe("agent.run.failed");
+    expect(settled?.trace).toMatchObject([{ kind: "error", message: "no model is configured for this workspace" }]);
+  });
+
+  it("carries a headless turn's own identity — a wake-up is event-caused work, not something a member typed", async () => {
+    const { deps, reports } = await harness();
+
+    await withTurnRun(deps, PRINCIPAL, "s-1", { cause: "event", eventKind: "wake", label: "Wake-up turn" }, async () =>
+      result(),
+    );
+
+    // `cause` decides which record the control plane mints (headless work belongs on the event log; a typed
+    // turn deliberately stays off it), and the label is how a reader tells the run apart from a chat turn.
+    expect(reports[0]).toMatchObject({ cause: "event", eventKind: "wake" });
+    expect(reports[0]?.message).toContain("Wake-up turn");
+    expect(reports[1]).toMatchObject({ kind: "agent.run.completed", cause: "event", eventKind: "wake" });
   });
 
   it("runs the turn untouched when there is no ledger bridge, or when the conversation is not visible", async () => {

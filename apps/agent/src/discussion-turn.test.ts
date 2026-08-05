@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CommentActivityReport } from "./comment-activity.js";
 import { buildDiscussionPrompt } from "./discussion-turn.js";
 import { type AgentServerDeps, buildServer } from "./server.js";
+import type { AgentRunEventReport } from "./usage.js";
 
 const THREAD = [
   { author: "u-a", authorName: "Alice", body: "the pass rate dipped", at: "2026-07-27T00:00:00.000Z" },
@@ -17,6 +18,7 @@ const TRIGGER = {
   resourceType: "harness",
   resourceId: "h-1",
   commentId: "cmt-1",
+  anchorId: "cmt-root",
   sessionId: "disc-1",
   thread: THREAD,
 };
@@ -55,11 +57,16 @@ function discussionDeps(transport: LlmTransport): {
   deps: AgentServerDeps;
   sessions: InMemoryAgentSessionStore;
   reports: CommentActivityReport[];
+  runEvents: AgentRunEventReport[];
 } {
   let n = 0;
   const sessions = new InMemoryAgentSessionStore();
   const reports: CommentActivityReport[] = [];
+  const runEvents: AgentRunEventReport[] = [];
   const deps: AgentServerDeps = {
+    reportRunEvent: async (event) => {
+      runEvents.push(event);
+    },
     // The minted agt_ token resolves to the ASKER the discussion turn acts as.
     authenticate: async () => ({ subject: "u-b", workspace: "acme", roles: ["member"] }),
     sessions,
@@ -86,7 +93,7 @@ function discussionDeps(transport: LlmTransport): {
     now: () => "2026-07-27T00:00:00.000Z",
     newId: () => `id-${n++}`,
   };
-  return { deps, sessions, reports };
+  return { deps, sessions, reports, runEvents };
 }
 
 describe("buildDiscussionPrompt", () => {
@@ -97,6 +104,15 @@ describe("buildDiscussionPrompt", () => {
       prompt.indexOf("Bob: @everdict why did it dip?"),
     );
     expect(prompt).toContain("markdown answer");
+  });
+
+  it("forbids re-posting the answer with create_comment and gives the thread anchor for any comment it does write", () => {
+    // Given a turn whose answer already lands on the placeholder comment…
+    const prompt = buildDiscussionPrompt(TRIGGER);
+    // …Then the turn is told not to duplicate it as a second comment…
+    expect(prompt).toContain("Do NOT post that answer with create_comment");
+    // …and any comment it does write has a parent, so it cannot escape the discussion it is in.
+    expect(prompt).toContain('parent_id "cmt-root"');
   });
 });
 
@@ -140,6 +156,27 @@ describe("POST /internal/discussion-turn — detached thread answer", () => {
     // The thread's session is workspace-visible (any member can open/continue it) and owned by the asker.
     const session = await sessions.getVisibleSession("acme", "someone-else", "disc-1");
     expect(session).toMatchObject({ owner: "u-b", visibility: "workspace", title: "Discussion: harness h-1" });
+    await app.close();
+  });
+
+  it("puts the turn on the ledger — a discussion answer is real work, and it used to leave no evidence at all", async () => {
+    const { deps, runEvents } = discussionDeps(answeringTransport());
+    const app = buildServer(deps);
+    await app.inject({
+      method: "POST",
+      url: "/internal/discussion-turn",
+      headers: { "x-internal-token": "shhh" },
+      payload: TRIGGER,
+    });
+
+    await vi.waitFor(() => {
+      expect(runEvents.map((e) => e.kind)).toEqual(["agent.run.started", "agent.run.completed"]);
+    });
+    // Named for what it is (a thread answer), attributed to the member who asked, and settled WITH the turn's
+    // evidence — which is what makes it openable in the trace ledger.
+    expect(runEvents[0]).toMatchObject({ workspace: "acme", eventKind: "discussion", cause: "chat", creator: "u-b" });
+    const settled = runEvents[1];
+    expect((settled?.spans?.length ?? 0) + (settled?.trace?.length ?? 0)).toBeGreaterThan(0);
     await app.close();
   });
 

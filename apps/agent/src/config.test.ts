@@ -26,6 +26,19 @@ describe("loadConfig", () => {
     expect(config.AGENT_MAX_TURNS).toBeUndefined();
   });
 
+  it("leaves the web base unset when the deployment did not configure one (no localhost guess)", () => {
+    // Given a deployment whose compose forwards an unconfigured WEB_BASE_URL as "" — a localhost default here
+    // would put a link the member cannot open into every self-hosted conversation.
+    const config = loadConfig({ ...BASE, WEB_BASE_URL: "" });
+    expect(config.WEB_BASE_URL).toBeUndefined();
+    expect(loadConfig({ ...BASE }).WEB_BASE_URL).toBeUndefined();
+  });
+
+  it("carries the deployment's own web base when configured", () => {
+    const config = loadConfig({ ...BASE, WEB_BASE_URL: "https://everdict.acme.internal" });
+    expect(config.WEB_BASE_URL).toBe("https://everdict.acme.internal");
+  });
+
   it("still parses configured optional values", () => {
     const config = loadConfig({
       ...BASE,

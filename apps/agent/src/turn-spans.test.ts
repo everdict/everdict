@@ -1,5 +1,5 @@
 import type { AgentEvent } from "@everdict/agent-runtime";
-import { EVERDICT_ATTR, GEN_AI, GEN_AI_OPERATION, TRACE_PLANE } from "@everdict/contracts";
+import { EVERDICT_ATTR, GEN_AI, GEN_AI_OPERATION, OTEL_ATTR, TRACE_PLANE } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { TurnSpanRecorder } from "./turn-spans.js";
 
@@ -132,6 +132,25 @@ describe("what the recorder refuses", () => {
     expect(spans).toHaveLength(1);
     expect(spans[0]?.status?.code).toBe("ok");
   });
+});
+
+// The turn that DIED is the one a reader opens first. Before this it never reached a seal at all — the
+// recorder held the whole story and it was dropped on the throw.
+it("seals a turn that died with the reason on its root span, and closes what the failure left open", () => {
+  // now() ticks: construct(0) · turn_start(0) · tool_call(100) · seal(900)
+  const rec = recorder([0, 0, 100, 900]);
+  rec.observe({ type: "turn_start", turn: 1 });
+  rec.observe({ type: "tool_call", id: "c1", name: "list_runs", args: "{}" });
+  const spans = rec.seal(undefined, "The model provider call failed.");
+
+  const root = spans.find((s) => s.name.startsWith(GEN_AI_OPERATION.invokeAgent));
+  expect(root?.status).toEqual({ code: "error", message: "The model provider call failed." });
+  expect(root?.attributes[OTEL_ATTR.errorType]).toBe("The model provider call failed.");
+  // WHEN it stopped, not just that it did.
+  expect(root?.events).toMatchObject([{ name: "error", at: "2026-08-04T09:00:00.900Z" }]);
+  // The tool that never came back is evidence, not a gap.
+  const tool = spans.find((s) => s.name.startsWith(GEN_AI_OPERATION.executeTool));
+  expect(tool?.status?.code).toBe("error");
 });
 
 // Kept honest against the kernel's own union: an event this recorder does not handle must not throw.

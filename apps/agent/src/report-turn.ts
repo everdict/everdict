@@ -1,4 +1,5 @@
 import { issueAgentToken } from "@everdict/db";
+import { withTurnRun } from "./chat-run.js";
 import { DEFAULT_SESSION_TITLE, runChat } from "./chat.js";
 import type { AgentServerDeps } from "./server.js";
 
@@ -81,13 +82,26 @@ export async function runReportTurn(
   );
   try {
     const principal = await deps.authenticate({ authorization: `Bearer ${token}` });
-    await runChat(
-      // persistentRetry: a scheduled report is unattended — wait out capacity dips instead of losing the run.
-      { ...deps, maxTurns: REPORT_MAX_TURNS, persistentRetry: true },
+    // A scheduled report is headless work by definition — the member reads the deliverable later and has no
+    // other way to ask what the agent actually did to produce it. That is what the run record is for.
+    await withTurnRun(
+      deps,
       principal,
-      { authorization: `Bearer ${token}` },
       sessionId,
-      buildReportPrompt(input),
+      { cause: "event", eventKind: "report", label: "Report turn" },
+      (collectFailure) =>
+        runChat(
+          // persistentRetry: a scheduled report is unattended — wait out capacity dips instead of losing the run.
+          { ...deps, maxTurns: REPORT_MAX_TURNS, persistentRetry: true },
+          principal,
+          { authorization: `Bearer ${token}` },
+          sessionId,
+          buildReportPrompt(input),
+          undefined,
+          undefined,
+          undefined,
+          { onFailedTurn: collectFailure },
+        ),
     );
   } finally {
     await deps.keyStore.revoke(input.workspace, keyId, input.createdBy).catch(() => {}); // one-shot credential

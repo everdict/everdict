@@ -241,7 +241,8 @@ async function main(): Promise<void> {
     }),
     systemPrompt: EVERDICT_AGENT_SYSTEM_PROMPT,
     // Web links for the environment block — entity deep links + the desktop download page (see buildEnvironmentSection).
-    webBaseUrl: config.WEB_BASE_URL,
+    // Unset → no link lines at all; a guessed localhost base is worse than no link on a self-hosted deployment.
+    ...(config.WEB_BASE_URL !== undefined ? { webBaseUrl: config.WEB_BASE_URL } : {}),
     ...(config.DESKTOP_DOWNLOAD_URL !== undefined ? { desktopDownloadUrl: config.DESKTOP_DOWNLOAD_URL } : {}),
     now: () => new Date().toISOString(),
     newId: () => randomUUID(),
@@ -297,6 +298,12 @@ async function main(): Promise<void> {
     reply.header("content-type", "text/plain; version=0.0.4").send(metrics.render()),
   );
 
+  // A deployment that never set WEB_BASE_URL gets an agent that can only cite ids, never links. Say so at boot:
+  // silently link-less is the failure operators actually hit, and it is invisible from inside a conversation.
+  if (config.WEB_BASE_URL === undefined)
+    console.error(
+      "▶ everdict-agent: WEB_BASE_URL unset — the agent will cite ids but hand out NO links. Set it to the base members browse (not localhost).",
+    );
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
   console.error(`▶ everdict-agent listening on :${config.PORT} (control plane ${config.CONTROL_PLANE_URL})`);
 }

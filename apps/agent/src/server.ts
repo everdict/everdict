@@ -52,10 +52,8 @@ export interface AgentServerDeps extends ChatDeps {
   admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
   // Test seam: the activation run executor. Default = the teammate-turn machinery (one request-less loop turn).
   activationRunTurn?: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<TurnOutcome | undefined>;
-  // agent.run.* lifecycle facts + the P3 ledger correlation → the control plane (fleet observability,
-  // agent-automation A5). The report shape has ONE definition (usage.ts) — a hand-copied twin here silently
-  // dropped `trace` from the declared surface once already.
-  reportRunEvent?: (input: AgentRunEventReport) => Promise<void>;
+  // (`reportRunEvent` — the agent.run.* lifecycle bridge — is declared on ChatDeps: every turn entry point
+  // needs it, not just the ones this server hosts.)
   // Shared secret the control plane presents (x-internal-token) to POST /agent/events on a recipient's behalf (S4 —
   // the monitoring→agent bridge). Absent → the internal event path is disabled (only user-authenticated events).
   internalToken?: string;
@@ -188,7 +186,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const teammates = new Map<string, TeammateMeta>();
   const supervisor = new TeammateSupervisor(async (sessionId) => {
     const t = teammates.get(sessionId);
-    if (t) await runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, t.token);
+    // `ledger: true` — nothing above this opened a run (unlike the activation path), so without it a woken
+    // teammate's whole turn happens outside the workspace's evidence.
+    if (t) await runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, t.token, undefined, undefined, true);
   });
   // Deliver to a session's mailbox and, if it is a teammate, wake it to process the message (no-op for plain sessions).
   const deliver = (workspace: string, sessionId: string, envelope: Parameters<AgentMailbox["enqueue"]>[2]): void => {
@@ -549,7 +549,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           deps,
           principal,
           id,
-          () =>
+          (collectFailure) =>
             runChat(
               deps,
               principal,
@@ -561,6 +561,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
               controller.signal,
               {
                 onRecord: (r) => liveTurns.broadcast(principal.workspace, id, "message", r),
+                onFailedTurn: collectFailure,
                 drainInput,
                 sendMessage,
                 spawnTeammate,
@@ -640,7 +641,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         deps,
         principal,
         id,
-        () =>
+        (collectFailure) =>
           runChat(
             deps,
             principal,
@@ -651,6 +652,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
             attachments,
             controller.signal,
             {
+              onFailedTurn: collectFailure,
               onEvent: (e) => {
                 if (e.type === "text_delta") write("delta", { text: e.delta });
                 // Live extended-thinking tokens — grow the transcript's reasoning block before the answer streams in.
@@ -1210,6 +1212,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         resourceType: z.string().min(1),
         resourceId: z.string().min(1),
         commentId: z.string().min(1),
+        anchorId: z.string().min(1),
         sessionId: z.string().min(1),
         thread: z
           .array(z.object({ author: z.string(), authorName: z.string(), body: z.string(), at: z.string() }))

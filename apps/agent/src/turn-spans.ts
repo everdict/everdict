@@ -4,6 +4,7 @@ import {
   GENAI_SEMCONV_VERSION,
   GEN_AI,
   GEN_AI_OPERATION,
+  OTEL_ATTR,
   type SpanEvent,
   TRACE_PLANE,
   type TraceSpan,
@@ -183,7 +184,11 @@ export class TurnSpanRecorder {
 
   // Close the turn. Anything still open ended when the turn did — an aborted tool call is evidence of a tool
   // call that never returned, which is worth more than a span silently dropped.
-  seal(usage?: AgentTurnUsage): TraceSpan[] {
+  //
+  // `failure` is the reason a turn DIED (an upstream model error, a dead tool session). A thrown turn is the
+  // one a reader most needs to see, so it seals like any other — with its ending written down rather than
+  // dropped on the floor.
+  seal(usage?: AgentTurnUsage, failure?: string): TraceSpan[] {
     const endMs = this.now();
     if (this.chat) {
       this.close(this.chat, endMs);
@@ -193,6 +198,14 @@ export class TurnSpanRecorder {
     this.openTools.clear();
     for (const open of this.openSubagents.values()) this.close(open, endMs, "the turn ended before this returned");
     this.openSubagents.clear();
+    // The ending itself is a point in time — where the turn stopped is as much a part of the record as what
+    // it did before that.
+    if (failure !== undefined)
+      this.rootEvents.push({
+        name: "error",
+        at: new Date(endMs).toISOString(),
+        attributes: { [OTEL_ATTR.errorType]: failure },
+      });
 
     const root: TraceSpan = {
       traceId: this.ctx.traceId,
@@ -216,12 +229,14 @@ export class TurnSpanRecorder {
               [GEN_AI.outputTokens]: usage.outputTokens,
             }
           : {}),
+        ...(failure !== undefined ? { [OTEL_ATTR.errorType]: failure } : {}),
       },
       ...(this.rootEvents.length > 0 ? { events: this.rootEvents } : {}),
       // The turn ran to a stop reason, which is an OUTCOME, not a failure — `max_turns` and `interrupted` are
       // things that happened, and OTel already has the field for them (`gen_ai.response.finish_reasons`).
-      // A turn that THREW never reaches this seal at all; its failure lives on the run record.
-      status: { code: "ok" },
+      // A turn that THREW seals here too, with the status that says so: the evidence a reader needs most is
+      // the evidence of the turn that died.
+      status: failure !== undefined ? { code: "error", message: failure } : { code: "ok" },
     };
     return [root, ...this.closed];
   }

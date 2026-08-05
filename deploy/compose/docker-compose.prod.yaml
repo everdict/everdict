@@ -135,6 +135,10 @@ services:
       # Optional: eval-driving (HITL/RBAC-gated) + built-in web_search.
       AGENT_ALLOW_EVAL_DRIVE: ${AGENT_ALLOW_EVAL_DRIVE:-}
       AGENT_WEBSEARCH_API_KEY: ${AGENT_WEBSEARCH_API_KEY:-}
+      # The web base the agent hands the member as REAL links (entity deep links + the desktop download page). Same
+      # value the api gets; unset → the agent gives no links at all rather than guessing a localhost that is wrong.
+      WEB_BASE_URL: ${WEB_BASE_URL:-}
+      DESKTOP_DOWNLOAD_URL: ${DESKTOP_DOWNLOAD_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

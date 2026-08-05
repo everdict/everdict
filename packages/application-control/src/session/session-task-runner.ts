@@ -7,7 +7,14 @@ import {
   type RunRecord,
   type TraceEvent,
 } from "@everdict/contracts";
-import { type BudgetTracker, Run, type RunTransition, type UsageMeter, billingCharges } from "@everdict/domain";
+import {
+  type BudgetTracker,
+  Run,
+  type RunTransition,
+  type UsageMeter,
+  billingCharges,
+  runEvidenceIdentity,
+} from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
@@ -98,7 +105,13 @@ export class SessionTaskRunner {
     // Evidence, even partial: a cancelled/failed task still seals what happened (first write wins).
     if (events.length > 0) {
       await this.deps.trajectories
-        ?.seal({ runId: record.id, tenant: input.tenant, source: "run", events: events.slice() })
+        ?.seal({
+          runId: record.id,
+          tenant: input.tenant,
+          source: "run",
+          events: events.slice(),
+          ...runEvidenceIdentity(record),
+        })
         .catch(() => undefined);
     }
     return status;

@@ -9,7 +9,13 @@ import type {
   TraceEvent,
 } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type ActivationEvent, AgentActivator, type TurnOutcome, triggerMatches } from "./agent-activation.js";
+import {
+  type ActivationEvent,
+  AgentActivator,
+  type TurnOutcome,
+  renderActivationPrompt,
+  triggerMatches,
+} from "./agent-activation.js";
 import { AgentMailbox } from "./agent-mailbox.js";
 import type { AgentTurnUsage } from "./run-trace.js";
 
@@ -205,6 +211,36 @@ describe("triggerMatches", () => {
       true,
     );
     expect(triggerMatches(byOrigin, event({ kind: "scorecard.submitted", payload: { origin: "api" } }))).toBe(false);
+  });
+});
+
+describe("renderActivationPrompt", () => {
+  it("tells an agent woken by a comment to reply INSIDE that thread, with the parent id the fact carries", () => {
+    // Given the fact for a top-level comment on an issue…
+    const prompt = renderActivationPrompt(
+      { task: "watch the tracker" },
+      event({
+        kind: "comment.created",
+        subject: { type: "issue", id: "ENG-12" },
+        payload: { commentId: "cmt-1" },
+        message: "New comment on issue ENG-12: @sentinel what regressed?",
+      }),
+    );
+    // …Then the reply is anchored on that comment instead of becoming a second top-level thread.
+    expect(prompt).toContain('parent_id "cmt-1"');
+    expect(prompt).toContain("issue");
+  });
+
+  it("anchors on the PARENT when the fact is about a reply (only a top-level comment can be a parent)", () => {
+    const prompt = renderActivationPrompt(
+      { task: "watch the tracker" },
+      event({ kind: "comment.created", payload: { commentId: "cmt-2", parentId: "cmt-1" } }),
+    );
+    expect(prompt).toContain('parent_id "cmt-1"');
+  });
+
+  it("says nothing about threading for a fact that is not a comment", () => {
+    expect(renderActivationPrompt({ task: "watch scorecards" }, event())).not.toContain("parent_id");
   });
 });
 

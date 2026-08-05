@@ -34,6 +34,7 @@ import type { ProfileResolver } from "./profile.js";
 import type { AgentTurnUsage } from "./run-trace.js";
 import { buildEnvironmentSection } from "./system-prompt.js";
 import { TurnSpanRecorder } from "./turn-spans.js";
+import type { AgentRunEventReport } from "./usage.js";
 import { buildViewConfigTool } from "./view-config-tool.js";
 
 // An @-reference resolves to the workspace read tool that fetches that entity's full record. `trace` is the exception:
@@ -335,6 +336,12 @@ export interface ChatDeps {
   // The workspace's registered (crafted) agents as spawnable sub-agent types (registrySubagentTypes) — merged
   // after the builtins (a name collision keeps the builtin). Absent → builtins only (dev / no registry).
   listSubagentTypes?: (principal: Principal) => Promise<SubagentType[]>;
+  // agent.run.* lifecycle facts + the P3 ledger correlation → the control plane (fleet observability,
+  // agent-automation A5). Declared HERE, on the deps every turn entry point already carries, because "a turn is
+  // a run" is a property of turns, not of the HTTP server: a headless caller that spreads ChatDeps and cannot
+  // see this field runs its turn outside the ledger, which is how the wake / report / discussion turns came to
+  // leave no evidence at all. The report shape has ONE definition (usage.ts).
+  reportRunEvent?: (input: AgentRunEventReport) => Promise<void>;
   // Waiting (LESSON 051): the event kinds THIS host can resume a conversation on. Present → the agent gets the
   // `wait_for` tool and a turn may end parked ("waiting") with a durable wake intent instead of handing unfinished
   // work back to the member. Absent → no tool: a host with no resume path must not let an agent promise a follow-up
@@ -387,11 +394,26 @@ export interface ChatResult {
   usage?: AgentTurnUsage;
 }
 
+// What a turn that died still knows about itself: the spans it recorded up to the failure (sealed with the
+// reason on the root span) and what it had spent by then. `reason` is always present — even a turn that dies
+// before the recorder exists (no model configured, an unreachable registry) leaves that much.
+export interface FailedTurnEvidence {
+  reason: string;
+  spans?: TraceSpan[];
+  usage?: AgentTurnUsage;
+}
+
 // Streaming hooks (SSE): onEvent forwards the loop's live events (text deltas, tool call/result); onRecord fires
 // as each message (user, assistant, tool) is persisted, so the caller can push the structured record to the client.
 export interface ChatHooks {
   onEvent?: (event: AgentEvent) => void;
   onRecord?: (record: AgentMessageRecord) => void;
+  // The record of a turn that CANNOT return one. A turn that throws has usually already worked — model calls,
+  // retries, tool calls, the upstream failure itself — and all of it lived only in the return value, so the
+  // evidence vanished at exactly the moment a reader needs it (a failed turn left nothing in the ledger while
+  // every succeeded one did). This is the failure path's channel to the same seal; the success path keeps
+  // returning its evidence in `ChatResult`.
+  onFailedTurn?: (evidence: FailedTurnEvidence) => void;
   // Fires as an analysis artifact (chart/table/report) is persisted — the SSE handler pushes it so the web
   // renders the artifact live in the transcript.
   onArtifact?: (record: AnalysisArtifactRecord) => void;
@@ -977,6 +999,16 @@ export async function runChat(
     // configured, an unreachable model registry, a dead tool session) used to leave the member's message sitting
     // there with no answer and no reason — a silent death reads as "the agent ignored me".
     deps.metrics?.counter("everdict_agent_turn_total", "Agent chat turns by stop reason", { outcome: "error" });
+    // Seal what the turn DID before it died and hand it to the caller — the loop's own record (a model call's
+    // latency, the retries around it, a tool that never returned), ended with the reason it stopped. Without
+    // this the recorder was discarded on the throw and the turn left no evidence at all.
+    const reason = signal?.aborted === true ? "the turn was stopped" : err instanceof Error ? err.message : String(err);
+    const failedSpans = spanRecorder?.seal(turnUsage, reason);
+    hooks?.onFailedTurn?.({
+      reason,
+      ...(failedSpans && failedSpans.length > 0 ? { spans: failedSpans } : {}),
+      ...(turnUsage ? { usage: turnUsage } : {}),
+    });
     if (signal?.aborted !== true) {
       const detail = err instanceof Error ? err.message : String(err);
       // The operator's copy of the same failure. The transcript record below is the MEMBER's copy; without this

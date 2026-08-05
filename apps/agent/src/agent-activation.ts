@@ -732,6 +732,17 @@ interface ReconciledEvent {
   createdAt: string;
 }
 
+// The comment a comment fact points at, resolved to the thread's ANCHOR: only a top-level comment can be a
+// parent (single-level threads), so a fact about a reply anchors on that reply's parent — the same rule the
+// control plane's CommentService applies when it nests an @everdict answer.
+function threadAnchorId(payload: Record<string, unknown> | undefined): string | undefined {
+  if (!payload) return undefined;
+  const parent = payload.parentId;
+  if (typeof parent === "string" && parent.length > 0) return parent;
+  const comment = payload.commentId;
+  return typeof comment === "string" && comment.length > 0 ? comment : undefined;
+}
+
 // The run's opening prompt: the crafted agent's standing task first (its job), then the fact that woke it —
 // pointers only; the agent reads detail through its (RBAC-bounded) tools. Exported for the try-drive (B3),
 // which renders the same prompt shape for a shadow activation.
@@ -741,5 +752,15 @@ export function renderActivationPrompt(spec: Pick<AgentSpec, "task">, event: Act
   lines.push(`Platform event — ${event.kind}${event.source ? ` (${event.source})` : ""}:\n${event.message}`);
   if (event.subject) lines.push(`Subject: ${event.subject.type} ${event.subject.id}`);
   if (event.payload && Object.keys(event.payload).length > 0) lines.push(`Details: ${JSON.stringify(event.payload)}`);
+  // A comment fact wakes the agent INSIDE someone's discussion. The payload carries the comment id, but nothing
+  // told the agent what to do with it — so its answer went up as a top-level comment, a second conversation
+  // beside the one it was answering. Say where the reply belongs; the id is right there in Details.
+  const anchor = event.kind.startsWith("comment.") ? threadAnchorId(event.payload) : undefined;
+  if (anchor !== undefined) {
+    const on = event.subject ? event.subject.type : "resource";
+    lines.push(
+      `If you answer in that discussion, reply INSIDE it — create_comment with parent_id "${anchor}". A comment without that parent is a new top-level thread on the ${on}, next to the one you are replying to.`,
+    );
+  }
   return lines.join("\n\n");
 }

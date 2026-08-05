@@ -30,6 +30,7 @@ import {
   priceUsd,
   resolveHarnessSecrets,
   runAudience,
+  runEvidenceIdentity,
   usageFromTrace,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
@@ -831,6 +832,7 @@ export class RunService {
         source: "run",
         spans,
         ...(audience.scope === "member" ? { owner: audience.subject } : {}),
+        ...runEvidenceIdentity(record),
       })
       .catch(() => {});
   }
@@ -849,6 +851,7 @@ export class RunService {
       tenant,
       events,
       ...(audience?.scope === "member" ? { owner: audience.subject } : {}),
+      ...(owned !== undefined ? runEvidenceIdentity(owned.record) : {}),
       ...(owned?.t0 !== undefined ? { t0: owned.t0 } : {}),
     }).catch(() => {});
   }
