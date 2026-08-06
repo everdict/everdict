@@ -11,7 +11,12 @@ import { claudeSessionId, mapClaudeStreamJson } from "./stream-json.js";
 
 export interface ClaudeCodeOptions {
   install?: boolean; // If true, npm-install the CLI into compute (e.g. a sandbox job). LocalDriver uses claude from PATH.
+  // The working directory the CLI runs in (default "work"). A CONVERSATION must keep this stable across turns —
+  // claude keys its session store off the cwd, so a moving workdir silently breaks --resume.
   workDir?: string;
+  // Environment a delegation profile pinned for this adapter (model connection, gateway base URL, free-form
+  // vars). Merged UNDER ctx.apiKeyEnv, so a per-call credential always wins over the profile's default.
+  env?: Record<string, string>;
   clock?: () => number; // Event-time source; defaults to the wall clock (`Date.now`). Injected for deterministic tests.
 }
 
@@ -38,7 +43,9 @@ export class ClaudeCodeHarness implements EvaluableHarness {
     // IS_SANDBOX: the claude binary refuses --dangerously-skip-permissions as root unless it is told it runs
     // inside a sandbox — which is exactly this harness's contract (a Driver-provisioned compute; containers
     // run as root). Live-found in the playground's docker session; forced, not overridable.
-    const env: Record<string, string> = { ...ctx.apiKeyEnv, IS_SANDBOX: "1" };
+    // Profile env first, the call's own auth env on top (a per-call credential must beat a pinned default),
+    // then the forced sandbox flag.
+    const env: Record<string, string> = { ...this.opts.env, ...ctx.apiKeyEnv, IS_SANDBOX: "1" };
     const cwd = this.opts.workDir ?? "work";
     // Conversation continuity: --resume picks up the previous turn's session (token captured from the
     // stream below via onToken). The resumed run mints a NEW session id — onToken keeps the last one.

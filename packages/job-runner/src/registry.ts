@@ -13,6 +13,13 @@ export interface MakeHarnessOptions {
   // A driver-lane sandbox session (the harness playground) boots a bare environment image with no
   // preinstalled CLI — built-ins must install themselves there. The job-runner image path keeps install:false.
   sandboxInstall?: boolean;
+  // The ENVIRONMENT a delegation profile pins for a built-in adapter (docs/architecture/capability-store.md):
+  // resolved env (profile literals + {secretRef} values + the model connection) and the working directory the
+  // conversation lives in. A process harness's own spec is {kind,id,version} and can carry none of this, so
+  // this factory is where a registered environment reaches the adapter — without it, every knob a profile
+  // pins would be discarded right here.
+  env?: Record<string, string>;
+  workDir?: string;
 }
 
 export function makeHarness(
@@ -24,7 +31,11 @@ export function makeHarness(
   if (spec?.kind === "command") return new CommandHarness(spec, { meterUsage: opts.meterUsage });
   switch (id) {
     case "claude-code":
-      return new ClaudeCodeHarness(version, { install: opts.sandboxInstall === true });
+      return new ClaudeCodeHarness(version, {
+        install: opts.sandboxInstall === true,
+        ...(opts.env !== undefined ? { env: opts.env } : {}),
+        ...(opts.workDir !== undefined ? { workDir: opts.workDir } : {}),
+      });
     case "scripted":
       return new ScriptedHarness(version, () => [{ tool: "bash", cmd: "echo hello > out.txt" }]);
     default:

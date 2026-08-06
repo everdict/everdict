@@ -5,11 +5,13 @@ import { ClaudeCodeHarness } from "./claude-code.js";
 // Without actually calling claude, deterministically verify the injected auth env and stream-json parsing.
 class MockCompute implements ComputeHandle {
   lastEnv: Record<string, string> | undefined;
+  lastCwd: string | undefined;
   lastCmd = "";
   constructor(private readonly stdout: string) {}
   async exec(cmd: string, opts?: ExecOpts): Promise<ExecResult> {
     this.lastCmd = cmd;
     this.lastEnv = opts?.env;
+    this.lastCwd = opts?.cwd;
     return { exitCode: 0, stdout: this.stdout, stderr: "" };
   }
   async writeFile(): Promise<void> {}
@@ -190,6 +192,26 @@ describe("ClaudeCodeHarness", () => {
     }
     expect(streaming.lastCmd).not.toContain("--resume"); // first turn — nothing to resume yet
     expect(tokens).toEqual(["sess-live"]);
+  });
+
+  it("takes a delegation profile's env + workDir, with a per-call credential still winning over the profile's default", async () => {
+    // Regression on two counts: `workDir` was a DECLARED-but-dead option (makeHarness never passed it), and a
+    // process harness had nowhere at all to carry an environment — so a pinned profile's model connection and
+    // gateway base URL were discarded before they reached the CLI.
+    const compute = new MockCompute(STREAM);
+    const ctx: RunContext = { apiKeyEnv: { ANTHROPIC_API_KEY: "call-key" }, timeoutSec: 60 };
+    const harness = new ClaudeCodeHarness("cli", {
+      workDir: "conversation/work",
+      env: { ANTHROPIC_BASE_URL: "http://gateway:4000", ANTHROPIC_API_KEY: "profile-key", EXTRA: "1" },
+    });
+    for await (const _ev of harness.run(compute, "do it", ctx)) {
+      // drain
+    }
+    expect(compute.lastCwd).toBe("conversation/work");
+    expect(compute.lastEnv?.ANTHROPIC_BASE_URL).toBe("http://gateway:4000");
+    expect(compute.lastEnv?.EXTRA).toBe("1");
+    expect(compute.lastEnv?.ANTHROPIC_API_KEY).toBe("call-key"); // the call's credential beats the profile's
+    expect(compute.lastEnv?.IS_SANDBOX).toBe("1"); // still forced, never overridable
   });
 
   it("stamps wall-clock event times from the injected clock, not a synthetic 0-based counter", async () => {

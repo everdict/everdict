@@ -43,6 +43,13 @@ session store off the cwd, so per-task cwd rebasing breaks resume structurally. 
 refused conversation mode up front; never silently start fresh. `ClaudeCodeHarness` is the reference
 (`--resume <id>` + `claudeSessionId` capture from the stream-json init/result lines).
 
+**A built-in adapter takes its ENVIRONMENT from the factory, not from its spec.** `MakeHarnessOptions` carries
+`env` + `workDir` into the adapter (`ClaudeCodeOptions`), because a process harness's own spec is
+`{kind,id,version}` and can pin none of it. That is the seam a **delegation profile** (a `delegation`
+capability — the registered environment everdict hands work to) resolves through: profile env + the model's
+connection env reach the CLI here. Precedence inside the adapter: profile `env` < `ctx.apiKeyEnv` (a per-call
+credential always wins) < the forced sandbox flags. See `docs/architecture/capability-store.md` §Fifth kind.
+
 ## Reference impls (`packages/harnesses/src/`, re-exported via `index.ts`)
 - `ClaudeCodeHarness` (`claude-code.ts`) — real Claude Code CLI: runs `claude -p <task> --output-format
   stream-json --verbose --dangerously-skip-permissions` in the sandbox, feeds each JSON line to `mapClaudeStreamJson`.
