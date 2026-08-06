@@ -231,7 +231,20 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     // With defer, observation scoring happens on the control plane — carry the screenshot in the result snapshot (slims the offload).
     if (defer) snapshot = materialized;
     await envRecorder?.final(); // final env delta while the compute is still alive (before teardown)
-    await release(); // The remaining work (platform pull · observation scoring) doesn't need the environment — release the sandbox here
+    // The remaining work (platform pull · observation scoring) doesn't need the environment — release the
+    // sandbox here, and RECORD the teardown as its own placement fact: how long the run held its environment
+    // after the work ended is the fourth phase of a case's lifecycle (queue → placed → run → released), and
+    // it was the one no plane accounted for.
+    const releaseStartedMs = Date.now();
+    await release();
+    const releasedMark: TraceEvent = {
+      ...stamp(() => releaseStartedMs),
+      durationMs: Math.max(0, Date.now() - releaseStartedMs),
+      kind: "infra",
+      scope: "placement",
+      event: "compute_released",
+      message: `sandbox released in ${Date.now() - releaseStartedMs}ms`,
+    };
 
     let collectFailure: CaseFailure | undefined;
     if (!defer) {
@@ -260,6 +273,9 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       }
     }
 
+    // Appended AFTER grading on purpose: the graders read this trace (latency = first↔last event), and the
+    // teardown is evidence about the RUN's lifecycle, not part of the work being scored.
+    trace.push(releasedMark);
     return {
       caseId: evalCase.id,
       harness: `${deps.harness.id}@${deps.harness.version}`,

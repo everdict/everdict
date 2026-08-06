@@ -915,6 +915,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       "drive_submitted",
       "drive_completed",
       "trace_collected",
+      "target_released", // the teardown phase — the fourth lifecycle span, previously unaccounted for
     ]);
     expect(placement.every((e) => e.at !== undefined)).toBe(true);
 

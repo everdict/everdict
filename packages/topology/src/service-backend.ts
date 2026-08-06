@@ -661,7 +661,11 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
       });
       // The observations (trace + snapshot) are in hand, so the target (browser etc.) is no longer needed — release it early
       // so it isn't held during grading (judge LLM etc.). docs/architecture/streaming-case-pipeline.md
+      // Timed and marked: the teardown is the lifecycle phase no plane accounted for (queue → deploy →
+      // drive → release). The warm topology itself stays up by design — this is the per-case half.
+      const releaseStartedMs = Date.now();
       await releaseTarget();
+      mark("target_released", `per-case target released in ${Date.now() - releaseStartedMs}ms`);
 
       // If the case specifies graders, use those (dom-contains/url-matches etc.), otherwise the trace-based defaults.
       const graders =

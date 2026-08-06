@@ -101,6 +101,31 @@ describe("runCase — cooperative cancellation via runCtx.signal", () => {
     expect(result.caseId).toBe("c1");
     expect(compute.disposed).toBe(true);
   });
+
+  it("records the sandbox teardown as a stamped placement fact — the lifecycle phase no plane accounted for", async () => {
+    const compute = fakeComputeHandle();
+    const driver = { id: "fake", provision: async () => compute } as Driver;
+    const harness: EvaluableHarness = {
+      id: "quick",
+      version: "1.0.0",
+      install: async () => {},
+      run: async function* (): AsyncIterable<TraceEvent> {
+        yield { t: 0, kind: "log", text: "done", stream: "stdout" } as TraceEvent;
+      },
+    };
+    const result = await runCase(CASE, {
+      driver,
+      environment: ENVIRONMENT,
+      harness,
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+    const released = result.trace.find((e) => e.kind === "infra" && e.event === "compute_released");
+    if (released?.kind !== "infra") throw new Error("expected the teardown to be recorded");
+    expect(released.scope).toBe("placement");
+    expect(Number.isFinite(Date.parse(released.at ?? ""))).toBe(true); // on the wall clock, like every mark
+    expect(released.durationMs).toBeGreaterThanOrEqual(0);
+  });
 });
 
 // A harness that yields one event and completes (a normal short run) — so runCase reaches snapshot → env-delta final
