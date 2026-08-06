@@ -18,7 +18,11 @@ export const dynamic = 'force-dynamic'
 // (a platform is used to pull traces from and/or export judged results to, chosen per harness); everyone browses the
 // traces + metrics a registered platform holds, like the platform's own UI (also the judge wizard's sample picker).
 // Read = harnesses:read (viewer+); registration form = settings:write (admin).
-export default async function ObservabilityPage() {
+export default async function ObservabilityPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const t = await getTranslations('observabilityPage')
   const { principal, ctx } = await currentPrincipal()
   const header = <PageHeader title={t('title')} description={t('description')} />
@@ -33,6 +37,16 @@ export default async function ObservabilityPage() {
   }
 
   const canWrite = can(principal?.roles, 'settings:write')
+
+  // Deep-link params — each trace detail dialog mirrors its open state into the URL (?trajectory= for the owned
+  // ledger, ?source=&trace= for a platform trace), so a pasted link must open the same dialog: read the pair back
+  // here and hand it to the browsers. Single-value only — a hand-doubled param is ignored.
+  const params = await searchParams
+  const one = (v: string | string[] | undefined) =>
+    typeof v === 'string' && v.length > 0 ? v : undefined
+  const openTrajectory = one(params.trajectory)
+  const openSource = one(params.source)
+  const openTrace = one(params.trace)
 
   let roster: TraceSourcesResponse | undefined
   let error: string | undefined
@@ -65,7 +79,7 @@ export default async function ObservabilityPage() {
       <section className="space-y-3">
         <h2 className="text-sm font-medium">{t('ownStoreTitle')}</h2>
         <p className="text-xs text-muted-foreground">{t('ownStoreDescription')}</p>
-        <TrajectoryBrowser />
+        <TrajectoryBrowser {...(openTrajectory ? { initialOpenId: openTrajectory } : {})} />
       </section>
       {error !== undefined ? (
         <Callout tone="danger">{error}</Callout>
@@ -83,7 +97,13 @@ export default async function ObservabilityPage() {
               {/* Opt out of auto-pull here: registering/listing a source shouldn't fire a slow platform query — the user
                   selects a source and presses Fetch. Each trace's detail dialog can hand it to the agent chat as context
                   ("analyze in chat"). The pick flows (judge wizard, evaluate-traces) keep auto-loading, no mention. */}
-              <ObservabilityTraceBrowser sources={roster?.sources ?? []} />
+              <ObservabilityTraceBrowser
+                sources={roster?.sources ?? []}
+                deepLink={{
+                  ...(openSource ? { source: openSource } : {}),
+                  ...(openTrace ? { traceId: openTrace } : {}),
+                }}
+              />
             </div>
           )}
         </div>

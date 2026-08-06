@@ -381,7 +381,14 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
     already in hand: `applyListView` does filter/search/order/group in memory and a change costs zero round trips.
   Either way the URL follows rather than drives: filters are written with `window.history.replaceState` (no server
   render, still a pasteable link — `replace`, not `push`, so six filter touches are not six back-button steps) and
-  the display preference is written straight to its cookie from the browser.
+  the display preference is written straight to its cookie from the browser. ⚠ The state argument MUST be `null`:
+  passing `window.history.state` carries Next's `__NA` marker, so its history patch treats the call as internal and
+  skips the router-canonical-URL sync — the next server action on the page then silently RESTORES the old address
+  (verified live on the observability deep-links; the infra panel's `?conversation=` strip had this bug).
+  The same replaceState door also makes a DIALOG shareable: the settings Observability trace dialogs mirror their
+  open state into the URL (`?trajectory=` for the owned ledger, `?source=&trace=` for a platform trace — written on
+  open, removed on close), the page reads the params back server-side to self-open, and a `CopyLinkButton` in the
+  dialog header hands out the address.
 - **The list toolbar is ONE grammar** (`shared/ui/list-toolbar`): `FacetFilterMenu` (Linear's two-step menu →
   tokens in the toolbar, each with its own remove) + `ListDisplayMenu` (optional layout segment · grouping ·
   ordering · extra toggles) + `ListSection`/`ListGroup` + `ListToolbar` (search · filter · count · display) for

@@ -22,6 +22,7 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { CopyLinkButton } from '@/shared/ui/copy-link-button'
 import { Dialog } from '@/shared/ui/dialog'
 import { Link } from '@/shared/ui/link'
 
@@ -43,6 +44,7 @@ export function TraceDetailDialog({
   nav,
   onSelect,
   onMention,
+  shareable,
 }: {
   open: boolean
   onClose: () => void
@@ -52,6 +54,9 @@ export function TraceDetailDialog({
   onSelect?: (trace: TraceSummary) => void
   // "Analyze in chat" — when set, a header button hands this trace to the agent chat as context (observability browse).
   onMention?: (trace: TraceSummary, sourceName: string) => void
+  // When the host mirrors this dialog into the URL (the settings observability browse), a copy-link button in the
+  // header shares the address of exactly this trace. The pick flows leave it off — their URL says nothing.
+  shareable?: boolean
 }) {
   const t = useTranslations('traceBrowser')
   const timeZone = useTimeZone()
@@ -128,6 +133,13 @@ export function TraceDetailDialog({
               <Sparkles className="size-4" />
               {t('analyzeInChat')}
             </Button>
+          )}
+          {shareable && (
+            <CopyLinkButton
+              label={t('copyLink')}
+              message={t('linkCopied')}
+              className="rounded-md border border-border p-1.5 text-muted-foreground"
+            />
           )}
           {nav && (
             <div className="flex items-center gap-1 rounded-md border border-border p-0.5">

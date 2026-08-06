@@ -61,9 +61,12 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
 - **Changing a view must not re-render the route.** A filter or grouping change costs ONE list-only server action
   (`loadIssueViewAction`, sharing `loadIssueViewData` with the first paint) or nothing at all when the collection
   is already in hand (`applyListView` for harness/dataset/judge/scorecard). The URL follows via
-  `window.history.replaceState`; the previous rows stay on screen instead of flashing the loading skeleton. Never
-  reintroduce `router.push`/`router.refresh()` for a view change. Toolbar UI comes from `shared/ui/list-toolbar`
-  and the axes from `entities/<x>/model/list-view.ts` — one filter/display grammar for every list.
+  `window.history.replaceState` — with a **`null` state argument**: passing `window.history.state` carries Next's
+  `__NA` marker, its history patch then skips the router-canonical-URL sync, and the next server action on the
+  page silently RESTORES the old address. The previous rows stay on screen instead of flashing the loading
+  skeleton. Never reintroduce `router.push`/`router.refresh()` for a view change. Toolbar UI comes from
+  `shared/ui/list-toolbar` and the axes from `entities/<x>/model/list-view.ts` — one filter/display grammar for
+  every list.
 - **Evaluation collections are workspace-wide, not team paths.** Harness · dataset · judge · scorecard have ONE
   address each and sit in the sidebar's `평가` group; the owning team is the `team` FILTER on that list, not a
   path segment (`TEAM_SECTIONS` is issues/triage/cycles/projects only). Old team addresses 307 in `next.config.ts`.

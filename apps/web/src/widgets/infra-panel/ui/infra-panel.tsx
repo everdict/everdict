@@ -320,8 +320,11 @@ export function InfraPanel({
     openAgentSession(conversation)
     params.delete('conversation')
     const query = params.toString()
+    // State must be null: window.history.state carries Next's __NA marker, which makes its history patch
+    // treat the call as internal and skip the router-canonical-URL sync — the stripped param then came BACK
+    // on the next server action (canonical restore), so a later refresh re-opened the panel (verified live).
     window.history.replaceState(
-      window.history.state,
+      null,
       '',
       `${window.location.pathname}${query.length > 0 ? `?${query}` : ''}${window.location.hash}`
     )

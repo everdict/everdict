@@ -9,6 +9,7 @@ import { fmtDateTimeFull } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { CopyLinkButton } from '@/shared/ui/copy-link-button'
 import { Dialog } from '@/shared/ui/dialog'
 import { Link } from '@/shared/ui/link'
 
@@ -27,12 +28,16 @@ import { TrajectoryView } from './trajectory-view'
 export function TrajectoryDetailDialog({
   open,
   onClose,
+  runId,
   meta,
   nav,
 }: {
   open: boolean
   onClose: () => void
-  meta: TrajectoryMeta
+  runId: string
+  // 목록의 행에서 열릴 때만 실려 온다 — 딥링크(?trajectory=)로 연 다이얼로그는 상세 읽기가 돌려주는 meta 로
+  // 같은 자리를 채운다(그동안 헤더는 id 만으로 선다).
+  meta?: TrajectoryMeta
   nav?: { index: number; total: number; onPrev: () => void; onNext: () => void }
 }) {
   const t = useTranslations('trajectoryBrowser')
@@ -40,19 +45,25 @@ export function TrajectoryDetailDialog({
   const timeZone = useTimeZone()
   const { workspace } = useParams<{ workspace: string }>()
   const [segments, setSegments] = useState<TrajectorySegment[] | undefined>()
+  const [fetchedMeta, setFetchedMeta] = useState<TrajectoryMeta | undefined>()
   const [error, setError] = useState<string | undefined>()
   const [pending, start] = useTransition()
 
   useEffect(() => {
     if (!open) return
     setSegments(undefined)
+    setFetchedMeta(undefined)
     setError(undefined)
     start(async () => {
-      const res = await getTrajectoryAction(meta.runId)
-      if (res.ok) setSegments(res.segments)
-      else setError(res.error)
+      const res = await getTrajectoryAction(runId)
+      if (res.ok) {
+        setSegments(res.segments)
+        setFetchedMeta(res.meta)
+      } else setError(res.error)
     })
-  }, [open, meta.runId])
+  }, [open, runId])
+
+  const shown = meta ?? fetchedMeta
 
   // ←/→ 로 형제 궤적 이동 (외부 트레이스 상세와 동일한 조작).
   const hasPrev = nav !== undefined && nav.index > 0
@@ -81,21 +92,27 @@ export function TrajectoryDetailDialog({
             className="flex items-center gap-2 text-[15px] font-[600]"
           >
             <span className="truncate">{t('detailTitle')}</span>
-            <Badge tone="outline">{t(`source_${meta.source}`)}</Badge>
+            {shown && <Badge tone="outline">{t(`source_${shown.source}`)}</Badge>}
           </h2>
-          <div className="truncate font-mono text-[11px] text-faint">{meta.runId}</div>
+          <div className="truncate font-mono text-[11px] text-faint">{runId}</div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {/* run 소스만 run 레코드를 갖는다 — 없는 페이지로 보내는 링크는 아예 걸지 않는다. */}
-          {meta.source === 'run' && workspace && (
+          {shown?.source === 'run' && workspace && (
             <Link
-              href={`/${workspace}/run/${encodeURIComponent(meta.runId)}`}
+              href={`/${workspace}/run/${encodeURIComponent(runId)}`}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
               <ExternalLink className="size-4" />
               {t('openRun')}
             </Link>
           )}
+          {/* 열림 상태가 ?trajectory= 로 URL 에 미러링되므로, 지금 주소가 곧 이 증거의 공유 링크다. */}
+          <CopyLinkButton
+            label={t('copyLink')}
+            message={t('linkCopied')}
+            className="rounded-md border border-border p-1.5 text-muted-foreground"
+          />
           {nav && (
             <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
               <button
@@ -132,13 +149,16 @@ export function TrajectoryDetailDialog({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-x-7 gap-y-2 border-b border-border bg-card/50 px-5 py-3">
-        <Meta label={t('metaSource')} value={t(`source_${meta.source}`)} />
-        <Meta
-          label={t('metaSealedAt')}
-          value={fmtDateTimeFull(meta.sealedAt, { locale, timeZone })}
-        />
-      </div>
+      {/* 딥링크로 여는 동안 meta 가 아직 없으면 스트립 자체를 접는다(빈 섹션 숨김) — 상세가 도착하면 선다. */}
+      {shown && (
+        <div className="flex flex-wrap gap-x-7 gap-y-2 border-b border-border bg-card/50 px-5 py-3">
+          <Meta label={t('metaSource')} value={t(`source_${shown.source}`)} />
+          <Meta
+            label={t('metaSealedAt')}
+            value={fmtDateTimeFull(shown.sealedAt, { locale, timeZone })}
+          />
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 p-4">
         {error ? (

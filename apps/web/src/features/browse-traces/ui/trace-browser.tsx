@@ -101,6 +101,7 @@ export function TraceBrowser({
   selection,
   autoLoad = true,
   onMention,
+  deepLink,
 }: {
   sources: TraceSourceConfig[]
   onPick?: (trace: TraceSummary, sourceName: string) => void
@@ -114,11 +115,23 @@ export function TraceBrowser({
   // context (the observability browse passes it; the pick/selection flows don't). Kept as a plain callback so the
   // features layer stays free of the widget-layer infra-panel wiring (the widget wrapper supplies the dispatch).
   onMention?: (trace: TraceSummary, sourceName: string) => void
+  // Deep-link wiring (the settings Observability surface): when set, the detail dialog's open state is MIRRORED
+  // into the URL (?source=&trace= via replaceState — written while open, removed on close) so the address bar is
+  // a shareable link to the trace on screen, and the values the page read back from the URL arrive here to
+  // self-open that trace on mount (no list fetch needed — the dialog inspects by id). The pick/selection flows
+  // don't pass it: a wizard step must not rewrite the page address.
+  deepLink?: { source?: string; traceId?: string }
 }) {
   const t = useTranslations('traceBrowser')
   const locale = useLocale()
   const timeZone = useTimeZone()
-  const [sourceName, setSourceName] = useState(sources[0]?.name ?? '')
+  // A deep-linked source must actually be registered — a stale link to a deleted source falls back to the
+  // default pick and opens nothing (the URL sync below then scrubs the dead params).
+  const linkedSource =
+    deepLink?.source !== undefined && sources.some((s) => s.name === deepLink.source)
+      ? deepLink.source
+      : undefined
+  const [sourceName, setSourceName] = useState(linkedSource ?? sources[0]?.name ?? '')
   const source = useMemo(() => sources.find((s) => s.name === sourceName), [sources, sourceName])
   const [scope, setScope] = useState('')
   const [filter, setFilter] = useState('')
@@ -128,7 +141,13 @@ export function TraceBrowser({
   const [error, setError] = useState<string | undefined>()
   const [loaded, setLoaded] = useState(false)
   const [cursor, setCursor] = useState<string | undefined>(undefined) // next page token (undefined = no more / not paginating)
-  const [openTrace, setOpenTrace] = useState<TraceSummary | undefined>()
+  const [openTrace, setOpenTrace] = useState<TraceSummary | undefined>(
+    // Self-open the deep-linked trace before any list exists: a summary of just the id is enough — the dialog
+    // inspects by id, and its meta strip prefers the inspect rollup over the (absent) list summary.
+    linkedSource !== undefined && deepLink?.traceId !== undefined
+      ? { id: deepLink.traceId }
+      : undefined
+  )
   const [pending, start] = useTransition()
   const loadedSource = useRef<string | undefined>(undefined)
   const genRef = useRef(0) // load generation — a newer load bumps it so an in-flight stream drops its stale pages
@@ -200,6 +219,9 @@ export function TraceBrowser({
   // scope / time change / load more).
   useEffect(() => {
     if (!source || loadedSource.current === source.name) return
+    // The very first prime must not clear the dialog: a deep-linked trace opens FROM initial state, and this
+    // effect runs right after mount (openTrace is undefined here anyway when there is no deep link).
+    const firstPrime = loadedSource.current === undefined
     loadedSource.current = source.name
     const defaultScope = source.project ?? source.service ?? ''
     setScope(defaultScope)
@@ -209,7 +231,7 @@ export function TraceBrowser({
       setTraces([])
       setLoaded(false)
       setError(undefined)
-      setOpenTrace(undefined)
+      if (!firstPrime) setOpenTrace(undefined)
       setCursor(undefined)
     }
   }, [source, load, timePreset, autoLoad])
@@ -220,6 +242,32 @@ export function TraceBrowser({
     const first = sources[0]?.name
     if (!sourceName && first) setSourceName(first)
   }, [sources, sourceName])
+
+  // Deep-link mode: mirror the dialog's open state into the URL — the params ARE the open trace's address
+  // (prev/next re-writes them; closing removes them, so a refresh doesn't resurrect a dismissed dialog).
+  // replaceState, never push: paging through twenty siblings must not be twenty back-button steps. Other
+  // params (the sibling trajectory browser's ?trajectory=) are preserved — only our pair is touched.
+  // The state argument MUST be null (as use-list-view writes): Next's history patch treats a state carrying
+  // its own __NA marker (which window.history.state has) as an internal call and skips syncing the router's
+  // canonical URL — the next server action on the page then RESTORES the stale address (verified live).
+  const linked = deepLink !== undefined
+  useEffect(() => {
+    if (!linked) return
+    const params = new URLSearchParams(window.location.search)
+    if (openTrace) {
+      params.set('source', sourceName)
+      params.set('trace', openTrace.id)
+    } else {
+      params.delete('source')
+      params.delete('trace')
+    }
+    const query = params.toString()
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${query.length > 0 ? `?${query}` : ''}${window.location.hash}`
+    )
+  }, [linked, openTrace, sourceName])
 
   // Filter → recent-first order → date groups (header = today/yesterday/date, rows show time only; undated rows
   // form a trailing headerless group). `flat` is the on-screen order the detail dialog's prev/next walks.
@@ -497,6 +545,7 @@ export function TraceBrowser({
           onClose={() => setOpenTrace(undefined)}
           sourceName={sourceName}
           trace={openTrace}
+          shareable={linked}
           nav={
             openIndex >= 0
               ? {
