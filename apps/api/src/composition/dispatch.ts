@@ -5,25 +5,28 @@ import { TraceSourceService } from "@everdict/application-control";
 import type { BrowserProfileStore, WorkspaceImages } from "@everdict/application-control";
 import {
   type BackendRegistry,
+  type CaseRuntimeSample,
   type Dispatcher as CoreDispatcher,
   type Scheduler,
   buildRuntimeBackend,
+  isCaseSampleable,
 } from "@everdict/backends";
-import type { RegistryAuth, RuntimeSpec } from "@everdict/contracts";
+import { BadRequestError, type RegistryAuth, type RuntimeSpec } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { TrustZonePolicy } from "@everdict/domain";
 import { classifyFailure, isRunnerOnline } from "@everdict/domain";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
-import type { EnvRecordSink } from "@everdict/topology";
+import { type EnvRecordSink, ServiceTopologyBackend, type ServiceTopologyBackendOptions } from "@everdict/topology";
 import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveTraceStore } from "../common/live-trace-store.js";
 import { makeProfileSeeder } from "../core/browser-profile/browser-profile-injector.js";
 import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js";
 import { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
 import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";
+import { RuntimeSamplingDispatcher } from "../core/execution/runtime-sampling-dispatcher.js";
 import { SelfHostedBackend } from "../core/execution/self-hosted-backend.js";
 import { StoreCallbackRendezvous } from "../core/execution/store-callback-rendezvous.js";
-import { buildTopologyBackend } from "../core/execution/topology-backend.js";
+import { buildTopologyEnvironment } from "../core/execution/topology-backend.js";
 import { TraceRecordingDispatcher } from "../core/execution/trace-recording-dispatcher.js";
 import { makeRuntimeController } from "../core/ops/runtime-control.js";
 import { makeRuntimeInspector } from "../core/ops/runtime-inspect.js";
@@ -137,30 +140,74 @@ export function buildDispatch(deps: {
     imageRegistry: imageRegistryService,
   });
   const traceSourceForDispatch = new TraceSourceService(settingsStore, { secretsFor: runtimeSecretsFor });
+  // The shared topology ENVIRONMENT memo, keyed exactly like the RuntimeDispatcher's backend cache
+  // (rt:<tenant>:<id>@<version>). One entry = one live TopologyRuntime (+ trace/rendezvous seams) — the eval
+  // lane's ServiceTopologyBackend and the front-door conversation lane both build from it, so a tenant runtime
+  // has ONE warm pool and one idle sweeper (two runtime instances would let one lane's sweeper tear down the
+  // other lane's warm job mid-turn). Invalidated with the backend cache on a secret change.
+  const topologyEnvs = new Map<string, ServiceTopologyBackendOptions>();
+  const topologyEnvironmentFor = (
+    tenant: string,
+    spec: Extract<RuntimeSpec, { kind: "nomad" | "k8s" }>,
+    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[] },
+  ): ServiceTopologyBackendOptions => {
+    const key = `rt:${tenant}:${spec.id}@${spec.version}`;
+    const hit = topologyEnvs.get(key);
+    if (hit) return hit;
+    const env = buildTopologyEnvironment(spec, {
+      harnesses: harnessInstanceRegistry,
+      ...(callbackRendezvous ? { callbackRendezvous } : {}),
+      // Image pull credentials — the topology runtime authenticates when pulling service images (nomad auth / k8s
+      // imagePullSecrets). Baked at FIRST build and reused (the same documented limit the backend cache has).
+      ...(opts.registryAuths ? { registryAuths: opts.registryAuths } : {}),
+      // Resolved tenant secrets — for the runtime traceSource's authSecret (G1, langfuse/authenticated endpoints).
+      ...(opts.secretEnv ? { secretEnv: opts.secretEnv } : {}),
+      // Per-dispatch: the harness's selected workspace trace source (pull from the dev-cluster observability platform).
+      resolveTraceSource: (t, harnessId) => traceSourceForDispatch.resolve(t, harnessId),
+      // Browser-profiles S5 — seed a referenced saved profile's login into the per-case eval browser.
+      ...(seedProfile ? { seedProfile } : {}),
+      // Replay ② — stream the per-case browser's CDP events into the durable recording (managed path).
+      ...(recordSink ? { recordSink } : {}),
+      ...(deps.trustZones ? { trustZones: deps.trustZones } : {}),
+    });
+    topologyEnvs.set(key, env);
+    return env;
+  };
   // RuntimeSpec → live backend. nomad/k8s with a traceSource (= topology-capable) → ServiceTopologyBackend,
   // everything else → buildRuntimeBackend (local/nomad/k8s). (The old topology kind was folded into nomad/k8s + traceSource in slice 5b-2.)
   // Defined in one place so dispatch and the connection test (probe) share the same builder/auth path.
   const runtimeBuildBackend = (
     spec: RuntimeSpec,
-    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[] },
+    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[]; tenant?: string },
   ) =>
     (spec.kind === "nomad" || spec.kind === "k8s") && spec.traceSource
-      ? buildTopologyBackend(spec, {
-          harnesses: harnessInstanceRegistry,
-          ...(callbackRendezvous ? { callbackRendezvous } : {}),
-          // Image pull credentials — the topology runtime authenticates when pulling service images (nomad auth / k8s imagePullSecrets).
-          ...(opts.registryAuths ? { registryAuths: opts.registryAuths } : {}),
-          // Resolved tenant secrets — for the runtime traceSource's authSecret (G1, langfuse/authenticated endpoints).
-          ...(opts.secretEnv ? { secretEnv: opts.secretEnv } : {}),
-          // Per-dispatch: the harness's selected workspace trace source (pull from the dev-cluster observability platform).
-          resolveTraceSource: (tenant, harnessId) => traceSourceForDispatch.resolve(tenant, harnessId),
-          // Browser-profiles S5 — seed a referenced saved profile's login into the per-case eval browser.
-          ...(seedProfile ? { seedProfile } : {}),
-          // Replay ② — stream the per-case browser's CDP events into the durable recording (managed path).
-          ...(recordSink ? { recordSink } : {}),
-          ...(deps.trustZones ? { trustZones: deps.trustZones } : {}),
-        })
+      ? new ServiceTopologyBackend(topologyEnvironmentFor(opts.tenant ?? "default", spec, opts))
       : buildRuntimeBackend(spec, { ...opts, ...(deps.trustZones ? { trustZones: deps.trustZones } : {}) });
+  // The front-door conversation lane's entry to the SAME shared environment: tenant runtime ref → the memoized
+  // topology environment (built here when the eval lane hasn't yet). `imageRefs` = the booting harness's service
+  // images, so a conversation-initiated first build can still mint pull credentials.
+  const topologyConversationEnvironmentFor = async (
+    tenant: string,
+    runtimeId: string,
+    imageRefs: string[],
+  ): Promise<ServiceTopologyBackendOptions> => {
+    const spec = await runtimeRegistry.get(tenant, runtimeId, "latest");
+    if (!(spec.kind === "nomad" || spec.kind === "k8s") || !spec.traceSource)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { runtime: runtimeId, kind: spec.kind },
+        "The topology backend requires a traceSource setting (this runtime is not topology-capable).",
+      );
+    const key = `rt:${tenant}:${spec.id}@${spec.version}`;
+    const hit = topologyEnvs.get(key);
+    if (hit) return hit;
+    const secretEnv = await runtimeSecretsFor(tenant).catch(() => ({}) as Record<string, string>);
+    const registryAuths = (await registryAuthsFor(tenant, imageRefs).catch(() => [])) ?? [];
+    return topologyEnvironmentFor(tenant, spec, {
+      secretEnv,
+      ...(registryAuths.length > 0 ? { registryAuths } : {}),
+    });
+  };
   // Resolve a command harness's {{model}} to a registered Model id (else raw), then delegate to RuntimeDispatcher (placement).
   // run/judge/scorecard share this one dispatcher, so every path runs with the identically-resolved model.
   const runtimeDispatcher = new RuntimeDispatcher({
@@ -211,13 +258,51 @@ export function buildDispatch(deps: {
   // scopedSecretsFor: a harness Model binding injects its baseUrl + underlying model + API key (from the model's
   // apiKeySecret, workspace→personal tiers) into the agent server's env — the same secret seam the judge uses.
   const resolvingDispatcher = new ModelResolvingDispatcher(modelRegistry, judgeAuthDispatcher, scopedSecretsFor);
+  // Replay ③ — the RUNTIME plane's producer: while a managed dispatch is in flight, poll the case's orchestrator
+  // resource stats (CaseSampleable — Nomad's client stats API) and stream the samples onto the recording's
+  // `runtime` lane. Resolves the SAME tenant-runtime build/auth path dispatch uses; a target whose backend cannot
+  // sample (topology/k8s/local) simply produces nothing. Sits outside RuntimeDispatcher for the same reason the
+  // trace recorder does: it needs the user-chosen target name the record carries.
+  const sampleCaseRuntime = async (
+    tenant: string,
+    targetList: string,
+    caseId: string,
+  ): Promise<CaseRuntimeSample | undefined> => {
+    const targets = targetList
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t !== "" && !t.startsWith("self:"));
+    for (const target of targets) {
+      const spec = await runtimeRegistry.get(tenant, target).catch(() => undefined);
+      if (!spec) continue;
+      const secretEnv = await runtimeSecretsFor(tenant).catch(() => ({}) as Record<string, string>);
+      const backend = runtimeBuildBackend(spec, { secretEnv, tenant });
+      if (!isCaseSampleable(backend)) continue;
+      const sample = await backend.sampleCase(caseId).catch(() => undefined);
+      if (sample) return sample;
+    }
+    return undefined;
+  };
+  const samplingDispatcher = caseRecorder
+    ? new RuntimeSamplingDispatcher(resolvingDispatcher, {
+        sample: sampleCaseRuntime,
+        record: (runId, item) => void caseRecorder.recordTrack(runId, item),
+      })
+    : resolvingDispatcher;
   // Control-plane infra-plane recording — the OUTERMOST decorator, so the sealed trajectory's account starts at
   // "the control plane accepted this case → target X" and carries queue wait + waiting diagnostics before the
   // backend's own events. Sits outside ModelResolving/RuntimeDispatcher to see the user-chosen target name.
-  const dispatcher = new TraceRecordingDispatcher(resolvingDispatcher, liveTraces);
+  const dispatcher = new TraceRecordingDispatcher(samplingDispatcher, liveTraces);
   // Workspace secrets feed the cached runtime backends' secretEnv — a secret change must drop that tenant's
   // cache so the next dispatch rebuilds with fresh values (previously only a CP restart picked them up).
-  const invalidateTenantBackends = (tenant: string) => runtimeDispatcher.invalidateTenant(tenant);
+  const invalidateTenantBackends = (tenant: string) => {
+    runtimeDispatcher.invalidateTenant(tenant);
+    // The shared topology environments carry the same baked secrets — drop them with the backends. Live
+    // conversations keep their captured runtime reference (they finish on the old credentials, like the eval
+    // lane's in-flight dispatches); the next boot rebuilds fresh.
+    const prefix = `rt:${tenant}:`;
+    for (const key of topologyEnvs.keys()) if (key.startsWith(prefix)) topologyEnvs.delete(key);
+  };
   // Drop a revoked runner's lazily-registered self:<owner>:<runnerId> backend so runner churn (pair→run→revoke)
   // doesn't leak one Backend per runner in the placement registry. Wired to RunnerService.onRevoke in main.ts.
   const releaseSelfRunnerBackend = (owner: string, runnerId: string) =>
@@ -263,6 +348,7 @@ export function buildDispatch(deps: {
     imageRegistryService,
     registryAuthsFor,
     runtimeBuildBackend,
+    topologyConversationEnvironmentFor,
     dispatcher,
     meteredDispatcher,
     probeRuntime,

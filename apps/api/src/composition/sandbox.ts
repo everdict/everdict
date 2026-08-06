@@ -3,6 +3,7 @@ import type {
   CapabilityStore,
   EnvelopeStore,
   PlatformEventEmitter,
+  ResolvedServiceConversation,
   ResolvedSessionHarness,
   RunStore,
   SandboxSessionServiceDeps,
@@ -10,11 +11,18 @@ import type {
   WorkspaceImages,
 } from "@everdict/application-control";
 import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
-import { NotFoundError, type RegistryAuth } from "@everdict/contracts";
+import { BadRequestError, NotFoundError, type RegistryAuth } from "@everdict/contracts";
 import type { BudgetTracker, TrustZonePolicy, UsageMeter } from "@everdict/domain";
-import { canConsumeCapability, harnessAuthEnv, parseImageRef, resolveHarnessSecrets } from "@everdict/domain";
+import {
+  assertHardenedIsolation,
+  canConsumeCapability,
+  harnessAuthEnv,
+  parseImageRef,
+  resolveHarnessSecrets,
+} from "@everdict/domain";
 import { makeHarness } from "@everdict/job-runner";
 import type { HarnessInstanceRegistry, ModelRegistry } from "@everdict/registry";
+import { FrontDoorSession, type ServiceTopologyBackendOptions } from "@everdict/topology";
 import type { RuntimeCompute } from "../common/runtime-compute.js";
 import { resolveSpecModel } from "../core/execution/model-resolving-dispatcher.js";
 import type { DeploymentCompute } from "./compute-env.js";
@@ -55,6 +63,14 @@ export function buildSandboxSessions(opts: {
   publishLayerSnapshot?: SandboxSessionServiceDeps["publishLayerSnapshot"];
   // The operator's isolation policy — applied to a cluster-placed session exactly as to a dispatched case.
   trustZones?: TrustZonePolicy;
+  // Front-door conversations (service harnesses): tenant runtime ref → the SHARED topology environment (the
+  // same memoized TopologyRuntime + trace/rendezvous seams the eval lane dispatches through — one warm pool).
+  // Absent = service harnesses fall through to the process resolver's honest 404/400.
+  topologyConversationEnvironmentFor?: (
+    tenant: string,
+    runtimeId: string,
+    imageRefs: string[],
+  ) => Promise<ServiceTopologyBackendOptions>;
   // WHERE work runs, for every lane that asks (composition/runtime-compute): the deployment's own compute, and
   // a tenant's registered runtime resolved with its cluster credentials and trust zone. A session can be placed
   // on the workspace's own cluster — the same axis a run's placement.target names.
@@ -106,10 +122,68 @@ export function buildSandboxSessions(opts: {
           return {
             id: ref.id,
             version,
+            // The web's UI branch: "command" = a declarative CLI spec; everything else this resolver serves
+            // (built-ins like claude-code, spec-less refs) is a "process" harness adapter.
+            kind: resolved?.kind === "command" ? ("command" as const) : ("process" as const),
             ...(resolved !== undefined ? { spec: resolved } : {}),
             harness,
             apiKeyEnv: harnessAuthEnv(secrets),
             ...(resolved?.kind === "command" && resolved.image !== undefined ? { image: resolved.image } : {}),
+          };
+        }
+      : undefined;
+  // Front-door conversations: a kind:"service" harness ref → a bootable multi-turn conversation over its
+  // front-door, placed on a REGISTERED workspace runtime (the user decision — no control-plane topology).
+  // Kind is checked FIRST (this is also what fixes the old misleading 404: a service harness used to fall into
+  // makeHarness, throw, and read as "not found"); a non-service ref returns undefined so the process resolver
+  // answers. The spec is secret- AND model-resolved exactly like the dispatch lane, so both lanes deploy a
+  // byte-identical topology into the same warm-pool key.
+  const conversationEnvFor = opts.topologyConversationEnvironmentFor;
+  const resolveServiceConversation =
+    scopedSecretsFor !== undefined && harnesses !== undefined && conversationEnvFor !== undefined
+      ? async (
+          tenant: string,
+          subject: string,
+          ref: { id: string; version?: string },
+          o: { runtime?: string },
+        ): Promise<ResolvedServiceConversation | undefined> => {
+          const spec = harnesses
+            ? await harnesses.get(tenant, ref.id, ref.version ?? "latest").catch(() => undefined)
+            : undefined;
+          if (!spec || spec.kind !== "service") return undefined;
+          if (o.runtime === undefined)
+            throw new BadRequestError(
+              "BAD_REQUEST",
+              { harness: ref.id },
+              "A service-topology harness session runs on a registered runtime — provide `runtime`.",
+            );
+          const secrets = await scopedSecretsFor(tenant, subject);
+          let resolved = resolveHarnessSecrets(spec, secrets);
+          if (models) resolved = await resolveSpecModel(models, tenant, subject, resolved, scopedSecretsFor);
+          if (resolved.kind !== "service") return undefined; // resolution preserves kind — narrow only
+          const resolvedSpec = resolved;
+          const env = await conversationEnvFor(
+            tenant,
+            o.runtime,
+            resolvedSpec.services.map((s) => s.image).filter((image): image is string => image !== undefined),
+          );
+          const zone = opts.trustZones?.resolve(tenant);
+          if (zone) assertHardenedIsolation(zone);
+          const frontDoorImage = resolvedSpec.services.find((s) => s.name === resolvedSpec.frontDoor.service)?.image;
+          const traceSourceFor = env.traceSourceFor;
+          return {
+            harness: { id: ref.id, version: resolvedSpec.version },
+            ...(frontDoorImage !== undefined ? { frontDoorImage } : {}),
+            open: (sessionRunId) =>
+              new FrontDoorSession({
+                spec: resolvedSpec,
+                sessionRunId,
+                runtime: env.runtime,
+                traceSource: env.traceSource,
+                ...(traceSourceFor !== undefined ? { traceSourceFor: () => traceSourceFor(tenant, ref.id) } : {}),
+                ...(env.callbackRendezvous !== undefined ? { callbackRendezvous: env.callbackRendezvous } : {}),
+                ...(zone !== undefined ? { zone } : {}),
+              }),
           };
         }
       : undefined;
@@ -223,6 +297,7 @@ export function buildSandboxSessions(opts: {
     ...(publishWorldVersion ? { publishWorldVersion } : {}),
     ...(pruneWorldVersions ? { pruneWorldVersions } : {}),
     ...(resolveSessionHarness ? { resolveSessionHarness } : {}),
+    ...(resolveServiceConversation ? { resolveServiceConversation } : {}),
     ...(opts.budget ? { budget: opts.budget } : {}),
     ...(opts.envelopes ? { envelopes: opts.envelopes } : {}),
     ...(opts.usage ? { usage: opts.usage } : {}),
@@ -247,6 +322,10 @@ export function buildSandboxSessions(opts: {
     // an autonomous world loop must not be able to starve the person trying to open a shell.
     maxPerAgent: intEnv("EVERDICT_SANDBOX_MAX_PER_AGENT") ?? 1,
     maxTotal: intEnv("EVERDICT_SANDBOX_MAX_TOTAL") ?? 8,
+    // The front-door conversation pool's own caps — a warm-topology slot on a tenant cluster is a different
+    // scarcity than a control-plane container, so the pools never share.
+    frontdoorMaxPerTenant: intEnv("EVERDICT_FRONTDOOR_MAX_PER_TENANT") ?? 2,
+    frontdoorMaxTotal: intEnv("EVERDICT_FRONTDOOR_MAX_TOTAL") ?? 8,
     ...(intEnv("EVERDICT_SANDBOX_TTL_SEC") !== undefined ? { defaultTtlSec: intEnv("EVERDICT_SANDBOX_TTL_SEC") } : {}),
   });
 }

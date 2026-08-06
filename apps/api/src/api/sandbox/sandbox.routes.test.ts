@@ -226,7 +226,9 @@ describe("sandbox playground routes — a harness in the session, test cases thr
       trajectories,
       newId: () => `sbx-${++n}`,
       resolveSessionHarness: async (_tenant, _subject, ref) =>
-        ref.id === "cc" ? { id: "cc", version: "1.0.0", harness, apiKeyEnv: {}, image: "cc-img:1" } : undefined,
+        ref.id === "cc"
+          ? { id: "cc", version: "1.0.0", kind: "process" as const, harness, apiKeyEnv: {}, image: "cc-img:1" }
+          : undefined,
     });
     const app = buildServer({
       service: new RunService({ dispatcher: unusedDispatcher, store, trajectories }),
@@ -378,6 +380,33 @@ describe("sandbox playground routes — a harness in the session, test cases thr
         })
       ).statusCode,
     ).toBe(400);
+  });
+
+  it("conversation fields traverse the transport: conversation boot on a non-resuming harness 400s, fresh on an independent-cases session 400s", async () => {
+    const { app } = buildPlayground(); // its fake harness has no `conversational` marker
+    const refused = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { harness: { id: "cc", conversation: true } },
+    });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().message).toContain("conversation");
+
+    const session = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { harness: { id: "cc" } },
+    });
+    const fresh = await app.inject({
+      method: "POST",
+      url: `/sandboxes/${session.json().id}/tasks`,
+      headers: H,
+      payload: { task: "hello", fresh: true },
+    });
+    expect(fresh.statusCode).toBe(400);
+    expect(fresh.json().message).toContain("fresh");
   });
 });
 

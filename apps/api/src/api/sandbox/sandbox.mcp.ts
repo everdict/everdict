@@ -56,10 +56,13 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
             id: z.string(),
             version: z.string().optional(),
             image: z.string().optional(),
+            conversation: z.boolean().optional(),
           })
           .optional()
           .describe(
-            "A registered harness to boot for test cases; image is required when the spec declares none (process kind)",
+            "A registered harness to boot for test cases; image is required when the spec declares none " +
+              "(process kind). conversation:true boots a CONVERSATION session — each submitted task continues " +
+              "one conversation (stable workdir + the harness's resume mechanism); 400 when the harness cannot resume",
           ),
         world: z
           .object({ id: z.string() })
@@ -100,7 +103,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
     }: {
       image?: string;
       environment?: { source?: string; id: string; version?: string };
-      harness?: { id: string; version?: string; image?: string };
+      harness?: { id: string; version?: string; image?: string; conversation?: boolean };
       world?: { id: string };
       hibernate?: boolean;
       repo?: { git: string; ref?: string; dir?: string };
@@ -252,18 +255,29 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
     {
       description:
         "Submit one ad-hoc test case into a live harness session (the playground): the session's harness runs " +
-        "the task prompt in a fresh working directory of the warm container — no dataset, no graders. Returns " +
-        "the child run (kind eval, grouped to the session) immediately; poll read_sandbox_task_trace for live " +
-        "events. One task at a time per session (409 while busy). Creator-or-admin.",
+        "the task prompt in a fresh working directory of the warm container — no dataset, no graders. On a " +
+        "CONVERSATION session (created with harness.conversation) each submit is one more turn of the same " +
+        "conversation instead. Returns the child run (kind eval, grouped to the session) immediately; poll " +
+        "read_sandbox_task_trace for live events. One task at a time per session (409 while busy). Creator-or-admin.",
       inputSchema: {
         id: z.string().describe("The sandbox session's run id"),
         task: z.string().describe("The test-case prompt for the harness"),
         timeoutSec: z.number().int().positive().max(3600).optional().describe("Per-case timeout (default 600s)"),
+        fresh: z
+          .boolean()
+          .optional()
+          .describe("Conversation sessions only: start a new conversation thread (same workdir); 400 otherwise"),
       },
     },
-    ({ id, task, timeoutSec }: { id: string; task: string; timeoutSec?: number }) =>
+    ({ id, task, timeoutSec, fresh }: { id: string; task: string; timeoutSec?: number; fresh?: boolean }) =>
       run(principal, "runs:submit", async () =>
-        ok(await sessions.submitTask(actor(), id, { task, ...(timeoutSec !== undefined ? { timeoutSec } : {}) })),
+        ok(
+          await sessions.submitTask(actor(), id, {
+            task,
+            ...(timeoutSec !== undefined ? { timeoutSec } : {}),
+            ...(fresh !== undefined ? { fresh } : {}),
+          }),
+        ),
       ),
   );
 

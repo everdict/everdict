@@ -424,6 +424,7 @@ async function main(): Promise<void> {
     imageRegistryService,
     registryAuthsFor,
     runtimeBuildBackend,
+    topologyConversationEnvironmentFor,
     dispatcher,
     meteredDispatcher,
     probeRuntime,
@@ -1017,6 +1018,9 @@ async function main(): Promise<void> {
     // W4: a cluster-placed session is isolated by the same policy a dispatched case is, and a workspace can
     // place one on ITS OWN registered runtime rather than borrowing the deployment's compute.
     ...(trustZones ? { trustZones } : {}),
+    // Front-door conversations: a kind:"service" harness session drives its warm topology on a REGISTERED
+    // workspace runtime, through the SAME shared topology environment the eval lane dispatches with.
+    topologyConversationEnvironmentFor,
     // W5: compute comes from the one resolver — the eval lane's OWN nomad where one is registered (so the
     // cluster has one owner, one credential, one capacity envelope that counts held-open sessions), and the
     // workspace's registered runtimes on the same axis a run's placement.target names.

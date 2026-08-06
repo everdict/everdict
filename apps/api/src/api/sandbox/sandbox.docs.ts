@@ -26,9 +26,11 @@ export const sandboxDocs: Record<string, FastifySchema> = {
       "running) on the activity ledger. Exactly one of image (ad-hoc), environment (an adopted environment " +
       "capability, resolved through the consume gate), or harness (a registered harness warm-installed into the " +
       "session for interactive test cases — the playground; harness.image supplies the container image for specs " +
-      "that declare none) is required. The session carries a hard TTL (session.expiresAt on the record) and is " +
-      "torn down on close or expiry; every exec lands on the session's trajectory, sealed at teardown. " +
-      "Per-tenant/global capacity is enforced (429).",
+      "that declare none) is required. harness.conversation boots a CONVERSATION session: every submitted task " +
+      "continues one conversation (stable workdir + the harness's resume mechanism) instead of running " +
+      "independent cases — refused (400) when the harness cannot resume. The session carries a hard TTL " +
+      "(session.expiresAt on the record) and is torn down on close or expiry; every exec lands on the session's " +
+      "trajectory, sealed at teardown. Per-tenant/global capacity is enforced (429).",
     tags: ["sandboxes"],
     body: toJsonSchema(CreateSandboxBodySchema),
     response: {
@@ -66,7 +68,9 @@ export const sandboxDocs: Record<string, FastifySchema> = {
       "Runs the session's harness on the given task prompt — no dataset, no graders. The child Run (kind eval, " +
       "class interactive, grouped to the session) is returned immediately (202, born running); poll its trace " +
       "via GET /sandboxes/:id/tasks/:taskId/trace. Each case gets a fresh working directory inside the warm " +
-      "container. One task at a time per session (409 while one runs); tenant budget admission applies (402). " +
+      "container; on a CONVERSATION session each submit is one more turn of the same conversation (shared " +
+      "workdir, group role 'turn'), and `fresh` starts a new thread (400 on a non-conversation session). One " +
+      "task at a time per session (409 while one runs); tenant budget admission applies (402). " +
       "Creator-or-admin, checked before anything runs.",
     tags: ["sandboxes"],
     params: idParams,

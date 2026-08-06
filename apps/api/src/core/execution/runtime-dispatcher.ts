@@ -33,7 +33,9 @@ export interface RuntimeDispatcherDeps {
   // can't depend on (cycle), like topology, are handled by apps/api injecting this (falls back to buildRuntimeBackend).
   buildBackend?: (
     spec: RuntimeSpec,
-    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[] },
+    // `tenant` keys the shared topology-environment memo (rt:<tenant>:<id>@<version>) so the eval lane and
+    // the front-door conversation lane hold ONE TopologyRuntime per tenant runtime (one warm pool, one sweeper).
+    opts: { secretEnv?: Record<string, string>; registryAuths?: RegistryAuth[]; tenant?: string },
   ) => Backend;
   // Image pull credentials for the job's images (best-effort) — carried into the topology backend build for
   // authenticated service-image pulls. Image-scoped for the same reason executeCase's is: a managed grant is
@@ -233,7 +235,7 @@ export class RuntimeDispatcher implements Dispatcher {
           const build = this.deps.buildBackend ?? buildRuntimeBackend;
           this.deps.backends.register(
             name,
-            build(spec, { secretEnv, ...(registryAuths.length > 0 ? { registryAuths } : {}) }),
+            build(spec, { secretEnv, tenant, ...(registryAuths.length > 0 ? { registryAuths } : {}) }),
           );
         }
         routed = { ...job, evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } } };

@@ -22,6 +22,9 @@ export const CreateSandboxBodySchema = z
         id: z.string().min(1),
         version: z.string().min(1).optional(), // default "latest"
         image: z.string().min(1).max(400).optional(), // required when the spec declares no image (process kind)
+        // Conversation mode: every submitted task continues ONE conversation (stable workdir + the harness's
+        // resume mechanism) instead of running independent cases. Refused (400) when the harness cannot resume.
+        conversation: z.boolean().optional(),
       })
       .optional(),
     world: z.object({ id: z.string().min(1).max(128) }).optional(),

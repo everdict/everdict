@@ -14,6 +14,7 @@ import {
   K8sTopologyRuntime,
   NomadTopologyRuntime,
   ServiceTopologyBackend,
+  type ServiceTopologyBackendOptions,
   type TopologyRuntime,
 } from "@everdict/topology";
 import { buildTraceSource } from "@everdict/trace";
@@ -22,7 +23,12 @@ import { buildTraceSource } from "@everdict/trace";
 // (cycle), so this wiring lives in apps/api, which depends on both. When we encounter a nomad/k8s runtime that has a traceSource
 // (in place of the old topology kind — slice 5b-2), build the backend with this and put it in the Scheduler registry.
 // The orchestrator is now implied by the runtime kind (nomad|k8s). Cluster startup is live (the tenant's Nomad/K8s + browser-use image).
-export function buildTopologyBackend(
+//
+// Split in two: `buildTopologyEnvironment` yields the live TopologyRuntime + trace/rendezvous seams (the
+// SHARED per-(tenant, runtime@version) environment — the front-door conversation lane holds the same
+// instance, so both lanes share ONE warm pool and one idle sweeper), and `buildTopologyBackend` wraps it as
+// the eval lane's Backend.
+export function buildTopologyEnvironment(
   spec: Extract<RuntimeSpec, { kind: "nomad" | "k8s" }>,
   deps: {
     harnesses: HarnessInstanceRegistry;
@@ -47,7 +53,7 @@ export function buildTopologyBackend(
     // (so two tenants never share a pool) and each service runs under the zone's runtime + namespace.
     trustZones?: TrustZonePolicy;
   },
-): Backend {
+): ServiceTopologyBackendOptions {
   const ts = spec.traceSource;
   if (!ts) {
     throw new BadRequestError(
@@ -92,7 +98,7 @@ export function buildTopologyBackend(
         return cfg ? buildTraceSource(cfg) : undefined;
       }
     : undefined;
-  return new ServiceTopologyBackend({
+  return {
     runtime,
     traceSource,
     ...(deps.trustZones ? { trustZones: deps.trustZones } : {}),
@@ -113,5 +119,12 @@ export function buildTopologyBackend(
       }
       return h;
     },
-  });
+  };
+}
+
+export function buildTopologyBackend(
+  spec: Extract<RuntimeSpec, { kind: "nomad" | "k8s" }>,
+  deps: Parameters<typeof buildTopologyEnvironment>[1],
+): Backend {
+  return new ServiceTopologyBackend(buildTopologyEnvironment(spec, deps));
 }
