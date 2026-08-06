@@ -684,8 +684,143 @@ const POSTGRES_MCP: CapabilityRecord = {
 // gone: nothing is auto-attached, so there is nothing to gate. The copy tells the agent to use the GitHub tools, and
 // those are gated on their own.
 export function firstPartySkillExamples(): CapabilityRecord[] {
-  return [SCORECARD_FIX_PR, TRACE_ANALYSIS, MEMORY_CONSOLIDATION];
+  return [SCORECARD_FIX_PR, TRACE_ANALYSIS, MEMORY_CONSOLIDATION, DELEGATE_WORK];
 }
+
+// The DELEGATOR's side of a delegation. The delegation profile (CODE_DELEGATE below) is written in the
+// delegate's voice — "you are a delegate, here is how to report". Nothing told the other half of the loop how
+// to RUN one: which environment to hand work to, what makes a brief answerable, how to supervise turns, and —
+// the part that separates delegation from wishful thinking — how to verify the result yourself before
+// reporting it as done. The system prompt says nothing about sandboxes, so without this the agent learns
+// delegation from tool descriptions alone.
+const DELEGATE_WORK_INSTRUCTIONS = `
+# Delegate work to a registered environment
+
+Hand a piece of work to another agent environment, supervise it, verify what comes back, and report with
+evidence. The discipline: **you own the outcome**. The delegate does the work; you decide it is done, and you
+never report "done" on the delegate's word alone.
+
+Everdict's tools load on demand. Before anything else:
+\`ToolSearch\` with \`select:list_public_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,close_sandbox\`
+(add \`sandbox_git_push\`, \`snapshot_sandbox\` or \`run_scorecard\` when the job needs them).
+
+## 1. Decide WHO does the work
+- A delegation profile is a registered work environment (\`delegation\` capability): which agent runs, in which
+  image, against which model, under which standing instructions. Find one with \`list_public_capabilities\` or
+  \`list_capabilities\`; the member's own workspace profiles come first.
+- If more than one could fit, or none obviously does, ASK the member rather than guessing. Delegating to the
+  wrong environment wastes the whole loop, and the member usually knows which one they trust.
+- Do not delegate what you can do directly in a few tool calls. Delegation is for work that needs a real
+  workspace: reading a repository, running tests, iterating on code.
+
+## 2. Decide WHERE it happens
+The profile says who works; the target says where. They are independent — pick the one that fits:
+- nothing — the delegate works in its own image (a clean room).
+- \`repo:{git,ref?}\` — clone the code in; the usual choice for code work.
+- \`world:{id}\` — a persistent world the delegate continues, so its work survives the session (it hibernates
+  into the world's next version). Use this when the job spans more than one sitting.
+- \`environment:{id}\` / \`image\` — a specific environment the job needs.
+
+## 3. Write the brief
+The brief is the handoff, and it lands in the delegate's working directory as \`BRIEF.md\`. Load
+\`references/brief.md\` (via \`read_skill_file\`) for the quality bar. In short:
+- \`goal\` — what must be TRUE when this is done, in one sentence. Not a task list.
+- \`context\` — what happened, what has been tried, what you already know is NOT the cause.
+- \`references\` — the evidence you are handing over (\`{type,id,note}\`): the scorecard that regressed, the run
+  whose trace shows the failure, the issue that asked for it. Name why each one is in the brief.
+- \`constraints\` — what must not change. Say the reason; a constraint whose reason is missing gets worked around.
+- \`doneWhen\` — the checks YOU will apply. If you cannot write these, you are not ready to delegate.
+
+## 4. Open the session and supervise
+- \`create_sandbox\` with \`profile\` + \`brief\` (+ the target from step 2). It is always a conversation.
+- \`submit_sandbox_task\` — one message at a time (a second while one runs is refused). Poll
+  \`read_sandbox_task_trace\` until \`done:true\`; read what the delegate actually did, not just its last message.
+- Keep talking. Ask for the reasoning when a result looks thin, push back when it drifts from the brief, and
+  answer its questions — a delegate that asks is a delegate worth having.
+- If the delegate reports the goal itself was wrong (the real fault is elsewhere), BELIEVE IT: stop, take the
+  finding back to the member, and re-scope. Do not push it to satisfy a brief you now know is wrong.
+
+## 5. Verify before you believe
+- Run the \`doneWhen\` checks YOURSELF with \`sandbox_exec\` — the tests, the command, the file that should exist.
+  "It should work now" is not a result.
+- Where the work is an eval fix, re-evaluate: \`run_scorecard\`, then \`diff_scorecards\` against the baseline to
+  show the regression is gone and nothing else broke.
+- If verification fails, say so to the delegate and keep going. Reporting an unverified fix is the one failure
+  that costs the member more than doing nothing.
+
+## 6. Land it, then report
+- Code: commit inside the session with \`sandbox_exec\`, then \`sandbox_git_push\` (optionally opening a pull
+  request). That push is a GUARDED action — it will pause for the member's approval, so tell them what is
+  about to land before you call it.
+- A world: \`snapshot_sandbox\` so the next delegation starts where this one stopped.
+- \`close_sandbox\` when the work is done — the session holds real compute, and its trajectory (brief, turns,
+  evidence) stays on the ledger after the container is gone.
+- Report to the member: what changed, how you verified it (the exact check and its outcome), and what is still
+  open. Link the session run and the pull request.
+
+## Constraints
+- Never report work as done that you did not verify yourself.
+- One task at a time per session; open a second session for genuinely parallel work.
+- The delegate cannot see your tools or the workspace — everything it needs must be in the brief or in the
+  environment you gave it.
+- Do not paste secrets into a brief or a message. The profile already carries the delegate's credentials.
+`.trim();
+
+const DELEGATE_WORK_BRIEF_REFERENCE = `
+# What makes a brief answerable
+
+A delegate can only be as good as its brief. These are the failure modes, and the fix for each.
+
+## goal — one sentence, stated as a condition
+- Bad: "look at the failing tests and fix stuff" (no finish line).
+- Bad: "edit src/parser.ts line 88" (that is your solution, not their goal — you may be wrong).
+- Good: "the two spreadsheet cases that regressed after judge v3 pass again, without changing the dataset".
+
+## context — what you already know
+Say what happened, when it started, what you have ruled out, and what you suspect but have not confirmed.
+A delegate that has to re-derive your investigation spends its budget repeating you.
+
+## references — the evidence, each with a reason
+Every reference carries a \`note\` saying WHY it is here: "the batch that regressed", "the trace showing the
+timeout", "the issue that asked for this". A bare id makes the delegate guess what to look at first.
+
+## constraints — with the reason attached
+- Bad: "do not touch the dataset" (a delegate under pressure will find a way around it).
+- Good: "do not touch the dataset — it is the benchmark's ground truth, changing it invalidates every past run".
+State only real constraints. A brief full of invented rules gets treated as noise, and the real one goes with it.
+
+## doneWhen — the checks you will actually run
+Write them as things you can execute: "\`pnpm test parser\` passes", "the two cases in scorecard sc-9 pass on a
+re-run", "no new lint error". If a criterion cannot be checked, it is a wish — either make it checkable or drop
+it. These are also what you run in step 5, so writing them badly costs you twice.
+
+## What NOT to put in a brief
+- Secrets or tokens — the profile carries the delegate's credentials already.
+- Your tool names — the delegate has its own environment and cannot call everdict's tools.
+- A solution you have not verified. Say what you suspect, marked as a suspicion.
+`.trim();
+
+const DELEGATE_WORK: CapabilityRecord = {
+  id: "delegate-work",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "delegate_work",
+  description:
+    "Hand a piece of work to a registered delegation profile and own the outcome: pick the environment, write " +
+    "a brief that can be answered, supervise the turns, verify the result yourself, then land it (push/PR or a " +
+    "world snapshot) and report with evidence. Use when a job needs a real workspace — reading a repository, " +
+    "running tests, iterating on code — rather than a few tool calls.",
+  spec: {
+    type: "skill",
+    instructions: DELEGATE_WORK_INSTRUCTIONS,
+    files: [{ path: "references/brief.md", content: DELEGATE_WORK_BRIEF_REFERENCE }],
+  },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["delegation", "sandbox", "workflow", "example"],
+  createdBy: "everdict",
+  createdAt: "2026-08-06T00:00:00.000Z",
+};
 
 // The first-party CATALOG-only entries — public + adoptable in the store, but absent from the default-enabled set
 // (they need per-user config). Merged into listPublic alongside the defaults' records. Containerized MCP servers

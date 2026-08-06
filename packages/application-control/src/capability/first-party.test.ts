@@ -126,6 +126,40 @@ describe("firstPartySkillExamples", () => {
     // Scheduling guidance is the description's job — the store card is where a member decides how to run it.
     expect(skill.description).toContain("schedule.fired");
   });
+
+  it("the delegate-work example names the real delegation tools, the deferred-tool step, and the verify-before-report rule", () => {
+    const skill = examples.find((r) => r.id === "delegate-work");
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    // Tool names are the one thing nothing else validates — a typo here ships a skill that tells the agent to
+    // call something that does not exist. Every name below is a registered MCP tool (apps/api/src/api/**.mcp.ts).
+    for (const anchor of [
+      "ToolSearch", // MCP tools are deferred — without this step the agent cannot call any of them
+      "list_public_capabilities",
+      "create_sandbox",
+      "submit_sandbox_task",
+      "read_sandbox_task_trace",
+      "sandbox_exec",
+      "sandbox_git_push",
+      "snapshot_sandbox",
+      "close_sandbox",
+      "run_scorecard",
+      "diff_scorecards", // NOT get_scorecard_diff — that tool does not exist
+      "references/brief.md",
+    ]) {
+      expect(skill.spec.instructions, anchor).toContain(anchor);
+    }
+    // The discipline the skill exists to install: the delegator owns the outcome and verifies it.
+    expect(skill.spec.instructions).toContain("Never report work as done that you did not verify yourself");
+    // The guarded action is called out — the agent must warn the member before the approval prompt appears.
+    expect(skill.spec.instructions).toContain("GUARDED");
+    // The brief's quality bar is progressive-disclosure (loaded at the step that writes one).
+    const brief = skill.spec.files.find((f) => f.path === "references/brief.md");
+    expect(brief).toBeDefined();
+    for (const anchor of ["goal", "context", "references", "constraints", "doneWhen"]) {
+      expect(brief?.content, anchor).toContain(anchor);
+    }
+  });
 });
 
 describe("firstPartyDelegationExamples", () => {
