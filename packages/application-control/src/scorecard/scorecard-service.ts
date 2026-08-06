@@ -16,6 +16,7 @@ import {
   CircuitBreaker,
   type Leaderboard,
   type Principal,
+  Run,
   ScorecardBatch,
   type ScorecardDiff,
   type ScorecardTrend,
@@ -562,12 +563,20 @@ export class ScorecardService {
     await this.cancelWorkflowIfAny(rec);
     this.deps.cancelQueued?.((j) => j.batchId === rec.id);
     this.deps.cancelLeased?.((j) => j.batchId === rec.id);
-    if (this.deps.killCase && this.deps.runStore) {
-      const children = await this.deps.runStore.list(rec.tenant, { scorecardId: rec.id }).catch(() => []);
-      for (const c of children) {
-        if (c.status !== "running") continue;
+    if (!this.deps.runStore) return;
+    const children = await this.deps.runStore.list(rec.tenant, { scorecardId: rec.id }).catch(() => []);
+    for (const c of children) {
+      if (c.status !== "running" && c.status !== "queued") continue;
+      if (c.status === "running" && this.deps.killCase)
         void this.deps.killCase(rec.tenant, c.runtime ?? rec.runtime, c.caseId).catch(() => {});
-      }
+      // Settle the child's LEDGER row here, not just its compute: the drain path (dispatch rejection → the
+      // batch loop's catch) is in-process and best-effort — after a control-plane restart, under a Temporal
+      // worker, or when a kill misses, nobody else ever flips the record, and a forever-"running" child both
+      // lies to the reader and holds its envelope slot (countActiveByEnvelope counts non-terminal runs).
+      // failed{CANCELLED} is the run lifecycle's cancellation shape (settleAgent precedent — no status widening);
+      // scorecard children carry no terminal facts by domain law (flood prevention), so the patch is the whole write.
+      const stop = Run.from(c).fail({ code: "CANCELLED", message: `Scorecard ${rec.id} was stopped.` }, this.now());
+      await this.deps.runStore.update(c.id, stop.patch).catch(() => {});
     }
   }
 

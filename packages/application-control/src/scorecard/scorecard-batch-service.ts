@@ -506,10 +506,12 @@ export class ScorecardBatchService {
 
   async runBatchCase(id: string, caseId: string): Promise<{ settled: boolean; skipped?: boolean }> {
     const ctx = this.batchContexts.get(id) ?? (await this.buildBatchContext(id));
-    // Superseded mid-flight (a newer fire reclaimed this batch) — don't spend more compute/LLM on it. The workflow
-    // is cancelled cooperatively by supersede; this guard covers activities already in the queue.
+    // Aborted mid-flight (a newer fire superseded this batch, or the user cancelled it) — don't spend more
+    // compute/LLM on it. The workflow is cancelled cooperatively; this guard covers activities already in the
+    // queue, and it keys on TERMINAL (not just superseded): a user-cancelled batch's queued activities would
+    // otherwise run whole cases — and mint fresh queued child runs — for a batch that is already dead.
     const current = await this.deps.store.get(id);
-    if (current && ScorecardBatch.from(current).isSuperseded()) return { settled: true, skipped: true };
+    if (current && ScorecardBatch.from(current).isTerminal()) return { settled: true, skipped: true };
     if (ctx.doneIds.has(caseId)) return { settled: true, skipped: true };
     // Concurrent-dispatch guard (gap 12): a Temporal retry can re-invoke runBatchCase for the SAME caseId (same worker)
     // while the original is still in-flight — before doneIds is set — so both used to execute the harness (wasted
@@ -643,11 +645,11 @@ export class ScorecardBatchService {
           .catch(() => {});
       }
       if (runStore && child)
-        await runStore.update(child.id, {
-          ...Run.from(child).succeed(result, this.now()).patch,
+        await this.settleChild(child.id, (cur) => ({
+          ...Run.from(cur).succeed(result, this.now()).patch,
           // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
           ...(ranOn ? { runtime: ranOn } : {}),
-        });
+        }));
       ctx.doneIds.add(caseId);
       const v = caseVerdict(result);
       const reason = caseReason(result);
@@ -958,6 +960,18 @@ export class ScorecardBatchService {
   // Flip a fan-out child run queued→running when its case actually begins executing (the onStarted hook fires on
   // managed dispatch / self-hosted lease). Best-effort and idempotent: acts only on a still-queued child (a re-fire
   // from spillover/speculation, or a race with settlement, is a no-op), and a store error never disturbs the run.
+  // First terminal write wins: a child settled by cancel (failed{CANCELLED} via stopInFlight) must not be
+  // resurrected or rewritten by a late-landing drain — the killed dispatch's rejection, or a case that was
+  // already past the point of no return when the user stopped the batch. The transition is built from the
+  // CURRENT record (never the creation-time snapshot) so the domain's terminal guard sees the truth.
+  private async settleChild(childId: string, settle: (current: RunRecord) => Partial<RunRecord>): Promise<void> {
+    const store = this.deps.runStore;
+    if (!store) return;
+    const current = await store.get(childId);
+    if (!current || Run.from(current).isTerminal()) return;
+    await store.update(childId, settle(current));
+  }
+
   private async markChildRunning(childId: string): Promise<void> {
     const store = this.deps.runStore;
     if (!store) return;
@@ -1179,10 +1193,10 @@ export class ScorecardBatchService {
             }).catch(() => {});
         // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         if (runStore && child)
-          await runStore.update(child.id, {
-            ...Run.from(child).succeed(result, this.now()).patch,
+          await this.settleChild(child.id, (cur) => ({
+            ...Run.from(cur).succeed(result, this.now()).patch,
             ...(ranOn ? { runtime: ranOn } : {}),
-          });
+          }));
         return result;
       } catch (err) {
         if (runStore && child) {
@@ -1190,7 +1204,7 @@ export class ScorecardBatchService {
             err instanceof AppError
               ? { code: err.code, message: err.message }
               : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-          await runStore.update(child.id, Run.from(child).fail(error, this.now()).patch);
+          await this.settleChild(child.id, (cur) => Run.from(cur).fail(error, this.now()).patch);
         }
         throw err; // rethrow so runSuite isolates the case (freezing it into a failed CaseResult)
       }

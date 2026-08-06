@@ -4154,6 +4154,131 @@ describe("ScorecardService.cancel — user stop", () => {
     const service = svc(store);
     await expect(service.cancel({ tenant: "acme", id: "sc-done" })).rejects.toMatchObject({ code: "CONFLICT" });
   });
+
+  it("cancel settles queued AND running child runs as failed{CANCELLED} — the ledger flip does not depend on an in-process drain", async () => {
+    // No killCase and no live track loop wired — models a cancel after a control-plane restart (or a
+    // Temporal-owned batch), where nobody is left to drain a dispatch rejection into the child record.
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    await store.create(record("sc-orphan", { status: "running" }));
+    const child = (id: string, caseId: string, status: RunRecord["status"]): RunRecord => ({
+      id,
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId,
+      status,
+      parentScorecardId: "sc-orphan",
+      trigger: "scorecard",
+      createdAt: "t",
+      updatedAt: "t",
+    });
+    await runs.create(child("r-running", "c1", "running"));
+    await runs.create(child("r-queued", "c2", "queued"));
+    await runs.create({ ...child("r-done", "c3", "succeeded"), result: { ...caseResult(true), caseId: "c3" } });
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      runStore: runs,
+      datasets: new InMemoryDatasetRegistry(),
+    });
+
+    await service.cancel({ tenant: "acme", id: "sc-orphan" });
+
+    // Pre-fix: r-running stayed "running" forever (and r-queued stayed "queued") — the batch read cancelled
+    // while its children still reported live work and held their envelope slots.
+    expect((await runs.get("r-running"))?.status).toBe("failed");
+    expect((await runs.get("r-running"))?.error?.code).toBe("CANCELLED");
+    expect((await runs.get("r-queued"))?.status).toBe("failed");
+    expect((await runs.get("r-queued"))?.error?.code).toBe("CANCELLED");
+    // A finished child's outcome is evidence — cancel never rewrites it.
+    expect((await runs.get("r-done"))?.status).toBe("succeeded");
+  });
+
+  it("a case that lands after the stop cannot resurrect its cancelled child run (first terminal write wins)", async () => {
+    const until = async (cond: () => boolean | Promise<boolean>): Promise<void> => {
+      for (let i = 0; i < 200; i++) {
+        if (await cond()) return;
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      throw new Error("condition not reached");
+    };
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let drained = false;
+    const gatedDispatcher: Dispatcher = {
+      async dispatch(job) {
+        await gate; // held in-flight until after the user stops the batch
+        drained = true;
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "tests-pass", metric: "tests-pass", value: 1, pass: true }],
+        };
+      },
+    };
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: gatedDispatcher,
+      store,
+      datasets,
+      runStore: runs,
+      newId: () => (n++ === 0 ? "sc-late" : `id-${n}`),
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+    });
+    // The case is in-flight (its child run exists) when the user stops the batch.
+    await until(async () => (await runs.list("acme", { scorecardId: "sc-late" })).length === 1);
+    await service.cancel({ tenant: "acme", id: "sc-late" });
+    const stopped = await runs.list("acme", { scorecardId: "sc-late" });
+    expect(stopped[0]?.status).toBe("failed");
+    expect(stopped[0]?.error?.code).toBe("CANCELLED");
+
+    // The held dispatch now lands with a SUCCESS — the drain must not overwrite the settled child.
+    release?.();
+    await until(() => drained);
+    await new Promise((r) => setTimeout(r, 25));
+    const final = await runs.list("acme", { scorecardId: "sc-late" });
+    expect(final[0]?.status).toBe("failed"); // pre-fix: the stale-snapshot drain flipped it back to succeeded
+    expect(final[0]?.error?.code).toBe("CANCELLED");
+    expect((await store.get("sc-late"))?.status).toBe("cancelled");
+  });
+
+  it("runBatchCase skips a CANCELLED batch's queued activity — no fresh compute, no fresh child run (Temporal)", async () => {
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const service = new ScorecardService({ dispatcher, store, datasets, runStore: runs });
+    await store.create({
+      id: "sc-can-act",
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "cancelled",
+      error: { code: "CANCELLED", message: "Stopped by user" },
+      orchestration: { judges: [], concurrency: 2, retries: 0, workflowId: "wf-can" },
+      createdAt: "2026-07-10T00:00:00.000Z",
+      updatedAt: "2026-07-10T00:00:00.000Z",
+    });
+
+    const outcome = await service.runBatchCase("sc-can-act", "c1");
+
+    // Pre-fix: the guard keyed on isSuperseded only, so a user-cancelled batch's queued activities still ran
+    // whole cases and minted fresh queued child runs for a batch that was already dead.
+    expect(outcome).toEqual({ settled: true, skipped: true });
+    expect(await runs.list("acme", { scorecardId: "sc-can-act" })).toEqual([]);
+  });
 });
 
 describe("ScorecardService.delete — hard delete (creator-or-admin, terminal only, child-run cascade)", () => {
