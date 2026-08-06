@@ -67,6 +67,7 @@ import type { BenchmarkService } from "../core/benchmark/benchmark-service.js";
 import type { BrowserProfileCaptureService } from "../core/browser-profile/browser-profile-capture-service.js";
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
 import type { BundleService } from "../core/bundle/bundle-service.js";
+import type { ImageMirrorService } from "../core/image/image-mirror-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { KnowledgeExtractionService } from "../core/knowledge/knowledge-extraction-service.js";
 import type { ModelService } from "../core/model/model-service.js";
@@ -134,6 +135,7 @@ export interface McpDeps {
   spanAttrMappingService?: SpanAttrMappingService; // per-harness span-attr mapping overlay (the conversion layer between a harness and a judge)
   imageRegistryService?: ImageRegistryService; // workspace image registry (classification baseline + push publishing)
   images?: WorkspaceImages; // everdict's OWN managed image store — absent on a BYO-only deployment
+  imageMirror?: ImageMirrorService; // copy an image INTO that store (mirror_image)
   environmentAdoptionService?: EnvironmentAdoptionService; // workspace environment-image adoption inventory + pull verify
   ciLinkService?: CiLinkService; // CI repo link (repo↔harness slot + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster

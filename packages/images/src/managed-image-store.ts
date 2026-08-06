@@ -1,6 +1,6 @@
 import type { ImageManifestInfo, WorkspaceImages } from "@everdict/application-control";
 import { BadRequestError, IMAGE_GRANT_USERNAME, type ImageGrant, type ImageRepo } from "@everdict/contracts";
-import { IMAGE_REPOSITORY_NAME, imageRepoFor, parseImageRef } from "@everdict/domain";
+import { IMAGE_REPOSITORY_NAME, imageRepoFor, isPlatformImagePath, parseImageRef } from "@everdict/domain";
 import type { ManagedRegistryApi } from "./registry-api.js";
 import type { RegistryAccess, RegistryTokenIssuer } from "./token-issuer.js";
 
@@ -118,6 +118,14 @@ export class ManagedImageStore implements WorkspaceImages {
       if (parsed.host !== this.endpoint) continue; // not a managed image at all (BYO/public — another adapter's job)
       // Own namespace → granted outright.
       if (parsed.path === namespace || parsed.path.startsWith(`${namespace}/`)) {
+        repositories.push(parsed.path);
+        continue;
+      }
+      // The PLATFORM's own images (everdict's job-runner and friends, mirrored in so a deployment needs no
+      // public registry) → readable by every workspace. This is not a hole in tenant isolation: the namespace
+      // holds OUR images, nobody's tenant data, it can only be written through the operator path, and a
+      // workspace that cannot pull the job-runner cannot run an eval at all.
+      if (isPlatformImagePath(parsed.path)) {
         repositories.push(parsed.path);
         continue;
       }

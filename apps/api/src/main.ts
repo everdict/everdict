@@ -39,6 +39,7 @@ import {
   firstPartyCatalogExtras,
   firstPartyDefaults,
 } from "@everdict/application-control";
+import type { RegistryAuth } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
@@ -372,12 +373,18 @@ async function main(): Promise<void> {
   // needs the store's coordinates to classify an image. The cycle is real, so the predicate is a thunk over a
   // holder the adoption wiring fills in — until then it denies, which is the same answer as running without M6.
   const imageReach: { resolve?: (tenant: string, ref: string) => Promise<boolean> } = {};
+  // Late-bound for the same reason `imageReach` is: the BYO registry service is built by buildDispatch below,
+  // and mirroring a PRIVATE source needs the credentials it resolves. Until bound, a mirror is anonymous —
+  // which is exactly right for a public base and honestly fails for a private one.
+  const sourcePullAuths: { resolve?: (tenant: string) => Promise<RegistryAuth[]> } = {};
   const {
     images: workspaceImages,
     imageTokenService,
+    imageMirror,
     publishLayerSnapshot,
   } = buildManagedImages(process.env, {
     crossTenantPull: (tenant, ref) => (imageReach.resolve ? imageReach.resolve(tenant, ref) : Promise.resolve(false)),
+    pullAuthsFor: (tenant) => (sourcePullAuths.resolve ? sourcePullAuths.resolve(tenant) : Promise.resolve([])),
   });
   // The workspace's coordinates in that store — what makes classifyImageRef able to answer "managed". One
   // definition, handed to every surface that classifies, so the store and the inventory never disagree.
@@ -926,6 +933,8 @@ async function main(): Promise<void> {
   // Close the cycle: a ref in another workspace's namespace is pullable exactly when this workspace has adopted an
   // environment that declares it AND that capability is still consumable (re-checked on every read).
   imageReach.resolve = adoptedImageReach({ list: (ws, subject) => environmentAdoptionService.list(ws, subject) });
+  // A mirror from a PRIVATE source authenticates with the registry credentials the workspace registered.
+  sourcePullAuths.resolve = (tenant) => imageRegistryService.pullAuths(tenant);
 
   // Sandbox session runs (execution-model P6) — opt-in where the api can reach a container runtime
   // (EVERDICT_SANDBOX_DRIVER=docker). Facts + trajectory ride the same stores as every run; the interval is
@@ -1159,6 +1168,8 @@ async function main(): Promise<void> {
     imageRegistryService,
     imageTokenService,
     ...(workspaceImages ? { images: workspaceImages } : {}),
+    // Copy an image into the managed registry — a workspace's namespace, or the platform's (internal route).
+    ...(imageMirror ? { imageMirror } : {}),
     environmentAdoptionService,
     ciLinkService,
     runnerService,

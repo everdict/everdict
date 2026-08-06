@@ -127,6 +127,7 @@ import {
 import type { BrowserProfileCaptureService } from "../core/browser-profile/browser-profile-capture-service.js";
 import type { BrowserSessionService } from "../core/browser-session/browser-session-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "../core/bundle/bundle-service.js";
+import type { ImageMirrorService } from "../core/image/image-mirror-service.js";
 import type { JudgePreviewService } from "../core/judge/judge-preview-service.js";
 import type { KnowledgeExtractionService } from "../core/knowledge/knowledge-extraction-service.js";
 import type { ModelService } from "../core/model/model-service.js";
@@ -229,6 +230,9 @@ export interface ServerDeps {
   imageTokenService?: ImageTokenService;
   // The store itself (same on/off switch) — push-grant minting + manifest reads for the workspace's namespace.
   images?: WorkspaceImages;
+  // Copy an image the deployment does not own INTO the managed registry (a workspace's namespace, or the
+  // platform's through the internal path). Present wherever the managed store is.
+  imageMirror?: ImageMirrorService;
   environmentAdoptionService?: EnvironmentAdoptionService; // workspace environment-image adoption inventory + pull verify (route disabled if absent)
   ciLinkService?: CiLinkService; // CI repo links (repo↔harness slot + OIDC trust) + picker/setup-PR (route disabled if absent)
   runnerService?: RunnerService; // self-hosted runners (personal device pairing) (route disabled if absent)

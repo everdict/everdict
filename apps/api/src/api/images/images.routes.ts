@@ -1,8 +1,9 @@
 import { grantFromBasicAuth, scopeValues } from "@everdict/images";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { type ServerDeps, constantTimeEq, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { imagesDocs } from "./images.docs.js";
+import { MirrorImageBodySchema } from "./request/mirror-image.js";
 
 // The managed image store's HTTP surface. Design: docs/architecture/managed-image-store.md
 export function registerImagesRoutes(app: FastifyInstance, deps: ServerDeps): void {
@@ -66,6 +67,44 @@ export function registerImagesRoutes(app: FastifyInstance, deps: ServerDeps): vo
   // The workspace's managed repositories — what Settings › Images lists. Read-gated with harnesses:read, the
   // same action the BYO catalog uses: knowing which images a workspace published is provenance, not a credential.
   // Usage rides along because the panel renders both in one header (see ImageCatalogResponseSchema).
+  // Bring an external image INTO this workspace's namespace — the answer to "our evals depend on a public
+  // registry staying up, staying free, and not deleting the tag underneath us". Gated `images:push` like any
+  // other write of bytes into the workspace's own namespace.
+  app.post("/workspace/images/mirror", { schema: imagesDocs.mirror }, async (req, reply) => {
+    if (!deps.imageMirror)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "managed image store not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "images:push");
+      const parsed = MirrorImageBodySchema.safeParse(req.body);
+      if (!parsed.success)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+      return reply.send(await deps.imageMirror.mirrorForWorkspace(principal.workspace, parsed.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // The OPERATOR's mirror: everdict's own images into the platform namespace, so a deployment can run with no
+  // reach to a public registry. Internal-token only — the platform namespace is readable by every workspace,
+  // so a tenant that could write it could hand every other tenant an image of its choosing.
+  app.post("/internal/images/mirror", { schema: imagesDocs.mirrorPlatform }, async (req, reply) => {
+    if (!deps.internalToken || !deps.imageMirror)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const parsed = MirrorImageBodySchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+    try {
+      return reply.send(await deps.imageMirror.mirrorForPlatform(parsed.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.get("/workspace/images", { schema: imagesDocs.catalog }, async (req, reply) => {
     if (!deps.images) return reply.code(404).send({ code: "NOT_FOUND", message: "managed image store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

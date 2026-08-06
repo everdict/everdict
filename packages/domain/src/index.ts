@@ -268,6 +268,7 @@ export { assertHardenedIsolation, isHardenedRuntime } from "./runtime/trust-zone
 // image — image-reference parse/classify/warn rules (from @everdict/core; shapes stay in contracts)
 export {
   IMAGE_REPOSITORY_NAME,
+  PLATFORM_IMAGE_NAMESPACE,
   classifyImageRef,
   collectHarnessImages,
   dockerAuthConfigJson,
@@ -276,6 +277,7 @@ export {
   imageRepositoryOf,
   imageUsesRegistryHost,
   imageWarnings,
+  isPlatformImagePath,
   parseImageRef,
   pickRegistryAuth,
   pinDigest,

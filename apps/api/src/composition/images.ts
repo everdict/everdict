@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { ImageRegistryService, WorkspaceImages } from "@everdict/application-control";
+import type { RegistryAuth as SourceAuth } from "@everdict/contracts";
 import type { RegistryAuth } from "@everdict/contracts";
 import {
   ImageTokenService,
@@ -15,6 +16,7 @@ import {
   remoteImageSource,
   sourceReferenceOf,
 } from "@everdict/images";
+import { ImageMirrorService } from "../core/image/image-mirror-service.js";
 
 // Managed image store wiring. Entirely optional: with no endpoint or signing key configured the deployment is
 // "BYO registries only" and both the store and the token endpoint stay undefined, so nothing pretends a registry
@@ -22,6 +24,10 @@ import {
 export interface ManagedImages {
   images?: WorkspaceImages;
   imageTokenService?: ImageTokenService;
+  // Copy an image the deployment does not own INTO the managed registry — a workspace's namespace (a base or
+  // harness image it no longer wants to depend on a public registry for) or the platform's (everdict's own
+  // images, so a deployment needs no reach to GHCR).
+  imageMirror?: ImageMirrorService;
   // Publish "base image + one captured layer" through the registry API alone (agent worlds W4). Present
   // wherever the managed store is: it is the snapshot path for a session the control plane cannot reach a
   // daemon for — which is every placement except this host.
@@ -53,6 +59,8 @@ function readPem(path: string, what: string): string {
 // store's coordinates to classify an image: a real cycle between the two, resolved in the composition root by
 // binding this late (see main.ts) instead of pretending one of them can be constructed first.
 export interface ManagedImagesOptions {
+  // The workspace's registered pull credentials, for mirroring from a PRIVATE source it already told us about.
+  pullAuthsFor?: (tenant: string) => Promise<SourceAuth[]>;
   crossTenantPull?: (tenant: string, ref: string) => Promise<boolean>;
 }
 
@@ -92,6 +100,14 @@ export function buildManagedImages(
   const writer = fetchRegistryWriter(apiBase, (access) => issuer.mintRegistryToken("everdict-control-plane", access));
   return {
     images,
+    imageMirror: new ImageMirrorService({
+      endpoint,
+      namespaceFor: (tenant) => images.namespaceFor(tenant),
+      writer,
+      // Reading a PRIVATE source uses the workspace's own registered credentials — a mirror must not become a
+      // way to reach a registry the workspace never told us about.
+      ...(opts.pullAuthsFor ? { pullAuthsFor: opts.pullAuthsFor } : {}),
+    }),
     imageTokenService: new ImageTokenService({
       issuer,
       service: env.EVERDICT_IMAGE_STORE_SERVICE ?? "everdict-registry",

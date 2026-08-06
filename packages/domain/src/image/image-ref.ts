@@ -169,6 +169,23 @@ export function dockerAuthConfigJson(auth: RegistryAuth | RegistryAuth[]): strin
 // doubles as its snapshot repository). One authority so the two can never drift.
 export const IMAGE_REPOSITORY_NAME = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 
+// The namespace the PLATFORM's own images live in — everdict's api/web/agent/job-runner, mirrored in so a
+// deployment can run without reaching a public registry at all. Not a tenant: it belongs to the operator, is
+// written only through the internal (operator) path, and is readable by every workspace because pulling the
+// job-runner is what makes a workspace's evals run.
+//
+// Collision-proof against `imageRepoFor` BY CONSTRUCTION, not by luck: a tenant namespace is always
+// `<sanitized>-<sha256:8>`, so it ends in a hyphen plus eight hex characters. `everdict-platform` does not,
+// and no tenant slug can produce it — including a workspace literally named "everdict-platform", which
+// sanitizes to `everdict-platform-<hash>`.
+export const PLATFORM_IMAGE_NAMESPACE = "everdict-platform";
+
+// Is this repository path the platform's rather than some workspace's? Used where the two namespaces must be
+// told apart — a pull grant may cover it for anyone, a push grant never may.
+export function isPlatformImagePath(path: string): boolean {
+  return path === PLATFORM_IMAGE_NAMESPACE || path.startsWith(`${PLATFORM_IMAGE_NAMESPACE}/`);
+}
+
 // A workspace's repository namespace in the MANAGED image store — the image analog of `fsBucketFor`, and deliberately
 // the same collision rule: OCI repository paths are lowercase `[a-z0-9]` plus separators while tenant slugs are not,
 // so a sanitization collision ("Acme" vs "acme", "a.b" vs "a-b") would put two workspaces in one namespace, which IS

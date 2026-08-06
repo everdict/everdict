@@ -15,6 +15,39 @@ export function registerImagesTools(server: McpServer, ctx: McpToolContext): voi
   if (!deps.images) return; // BYO-only deployment: the whole family is absent, matching the routes' 404
   const images = deps.images;
 
+  if (deps.imageMirror) {
+    const mirror = deps.imageMirror;
+    server.registerTool(
+      "mirror_image",
+      {
+        description:
+          "Copy an image into this workspace's namespace in everdict's managed registry, so later pulls stop " +
+          "depending on the registry it came from staying up, staying free, or keeping the tag. Source is a " +
+          "reference as its own registry addresses it (debian:stable-slim, ghcr.io/acme/app:1.2); name and tag " +
+          "default to the source's own. Blobs already present are not re-uploaded, and a multi-platform source " +
+          "resolves to its runnable linux/amd64 child. Returns the DIGEST-PINNED managed ref to use in specs.",
+        inputSchema: {
+          image: z.string().describe("The source image reference"),
+          name: z
+            .string()
+            .optional()
+            .describe("Repository name in this workspace (default: the source's last segment)"),
+          tag: z.string().optional().describe("Tag to publish under (default: the source's tag)"),
+        },
+      },
+      ({ image, name, tag }: { image: string; name?: string; tag?: string }) =>
+        run(principal, "images:push", async () =>
+          ok(
+            await mirror.mirrorForWorkspace(ws, {
+              image,
+              ...(name !== undefined ? { name } : {}),
+              ...(tag !== undefined ? { tag } : {}),
+            }),
+          ),
+        ),
+    );
+  }
+
   server.registerTool(
     "list_workspace_images",
     {

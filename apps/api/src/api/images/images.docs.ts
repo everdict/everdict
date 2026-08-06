@@ -8,10 +8,40 @@ import {
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { MirrorImageBodySchema } from "./request/mirror-image.js";
 
 // Doc-only OpenAPI descriptors for the managed image store (rule api-layer: schemas document, never
 // validate/serialize). Design: docs/architecture/managed-image-store.md
 const docs = {
+  mirror: {
+    summary: "Copy an external image into this workspace's managed namespace",
+    description:
+      "Brings an image from the registry it lives in (Docker Hub, GHCR, a registered BYO registry) into the " +
+      "workspace's own namespace in everdict's managed registry, so later pulls no longer depend on that " +
+      "registry staying up, staying free, or keeping the tag. Blobs the target already holds are not " +
+      "re-uploaded; a multi-platform source resolves to its runnable linux/amd64 child. A private source " +
+      "authenticates with the workspace's registered pull credentials when the host matches. Returns the " +
+      "digest-pinned managed ref — a mirror exists to stop depending on a moving reference.",
+    tags: ["images"],
+    body: toJsonSchema(MirrorImageBodySchema),
+    response: {
+      200: { description: "{ image, repository, tag, layers, copiedBlobs }" },
+      ...errorResponses(400, 401, 403, 404, 502),
+    },
+  },
+  mirrorPlatform: {
+    summary: "Copy an everdict platform image into the platform namespace (internal)",
+    description:
+      "The operator's mirror: everdict's own api/web/agent/job-runner images into the platform namespace, so a " +
+      "deployment can run without reaching a public registry. Internal-token guarded — that namespace is " +
+      "pullable by every workspace, so a tenant able to write it could hand every other tenant an image.",
+    tags: ["internal"],
+    body: toJsonSchema(MirrorImageBodySchema),
+    response: {
+      200: { description: "{ image, repository, tag, layers, copiedBlobs }" },
+      ...errorResponses(400, 403, 404, 502),
+    },
+  },
   token: {
     summary: "Docker Registry v2 token endpoint (the managed registry's auth realm)",
     description:
