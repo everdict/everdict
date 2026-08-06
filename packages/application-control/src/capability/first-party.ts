@@ -518,6 +518,12 @@ scheduled agent) or when the index has grown noisy.
 - \`get_file\` \`memory/MEMORY.md\` (the index) and \`list_files\` \`memory\`. No memory yet → report "nothing to
   consolidate" and stop.
 - Files missing from the index, and index lines whose file is gone, are both defects — fix them in step 4.
+- Memory has TWO scopes and each has its own index. \`memory/\` is the workspace's. \`memory/members/<them>/\` is one
+  member's own — \`list_files\` \`memory/members\` shows you exactly the areas you are allowed to see (another
+  member's simply is not there), and each has its own \`MEMORY.md\`. Consolidate each scope AGAINST ITSELF: never
+  merge a personal memory into the shared index, because that publishes one person's habits to the whole
+  workspace. A shared memory that is really about one person moves the other way — into their area, if you can
+  see it — and is otherwise reported, not moved.
 
 ## 2. Gather
 - Read every memory body (\`get_file\`); for a large set, \`search_files\` (path: memory) to group by topic first.
@@ -536,8 +542,9 @@ scheduled agent) or when the index has grown noisy.
 - Unsure about a memory? It stays as-is — consolidation is reorganization, never invention.
 
 ## 4. Prune the index
-- Rewrite \`memory/MEMORY.md\` to exactly the surviving files — one line each (\`- [Title](file.md) — one-line
-  hook\`), most load-bearing first, well under ~200 lines.
+- Rewrite EACH scope's index to exactly that scope's surviving files — one line each (\`- [Title](file.md) —
+  one-line hook\`), most load-bearing first, well under ~200 lines and ~12,000 characters (both caps are enforced
+  at recall time: past either, entries stop being visible at all).
 - Pass \`base_revision\` on every write: members and other agents edit these files too, and a lost race must
   surface as a merge, not an overwrite.
 
