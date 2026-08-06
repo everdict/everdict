@@ -344,3 +344,53 @@ describe("BrowserSessionService", () => {
     expect(released).toBe(1); // an admit that produced nothing must not consume the tenant's slot
   });
 });
+
+describe("BrowserSessionService — replay recording (the browser-session lane)", () => {
+  it("starts a CDP recorder under the run's derived recording key, stops it and seals at close", async () => {
+    const p = new FakeProvisioner();
+    const started: Array<{ cdpBase: string; runId: string }> = [];
+    const stopped: string[] = [];
+    const sealed: string[] = [];
+    let i = 0;
+    const service = new BrowserSessionService(p, {
+      newId: () => `bs-rec-${i++}`,
+      now: () => 1000,
+      ttlMs: 60_000,
+      recorder: (cdpBase, runId) => {
+        started.push({ cdpBase, runId });
+        return { stop: () => stopped.push(runId) };
+      },
+      sealRecording: async (runId) => {
+        sealed.push(runId);
+      },
+    });
+
+    const view = await service.create({ tenant: "acme", createdBy: "alice" });
+    // The recording key is the SAME derived runId GET /runs/:id/recording reads (evd-run-<sessionId>).
+    expect(started).toEqual([{ cdpBase: p.provisioned[0], runId: `evd-run-${view.id}` }]);
+
+    await service.close(view.id, "alice");
+    expect(stopped).toEqual([`evd-run-${view.id}`]);
+    expect(sealed).toEqual([`evd-run-${view.id}`]); // the settled session replays from the frozen recording
+  });
+
+  it("a throwing recorder factory never blocks the session, and close still seals", async () => {
+    const p = new FakeProvisioner();
+    const sealed: string[] = [];
+    let i = 0;
+    const service = new BrowserSessionService(p, {
+      newId: () => `bs-boom-${i++}`,
+      now: () => 1000,
+      ttlMs: 60_000,
+      recorder: () => {
+        throw new Error("no page target");
+      },
+      sealRecording: async (runId) => {
+        sealed.push(runId);
+      },
+    });
+    const view = await service.create({ tenant: "acme", createdBy: "alice" });
+    await service.close(view.id, "alice");
+    expect(sealed).toEqual([`evd-run-${view.id}`]);
+  });
+});

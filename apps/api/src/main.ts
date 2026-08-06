@@ -43,7 +43,9 @@ import {
 import type { RegistryAuth } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
+import { CdpEnvironmentRecorder } from "@everdict/topology";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
+import { CaseFsRequestHub } from "./common/case-fs-request-hub.js";
 import { CaseRecorder } from "./common/case-recorder.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { LiveLogStore } from "./common/live-log-store.js";
@@ -616,6 +618,9 @@ async function main(): Promise<void> {
   const liveFrames = new LiveFrameStore();
   // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log) → served by RunService.logs().
   const liveLogs = new LiveLogStore();
+  // Run-workbench fs rendezvous (self-hosted lane): fsTree/fsFile PARK here and the runner's in-case servicing
+  // loop answers via the poll_case_fs_requests/answer_case_fs_request lease tools. In-memory, like the default hub.
+  const caseFsRequests = new CaseFsRequestHub();
   // Cascade cancel (§5.5 O8) — late-bound: the scorecard service is built after the run service, so the
   // hook resolves through this holder (fires only at runtime, long after boot completes).
   const cascadeCancel: { fn?: (tenant: string, runId: string) => Promise<number> } = {};
@@ -655,6 +660,7 @@ async function main(): Promise<void> {
     liveFrames,
     liveLogs,
     liveTraces,
+    caseFsRequests,
     ...(recordingStore ? { recordingStore } : {}),
   });
 
@@ -899,6 +905,21 @@ async function main(): Promise<void> {
 
         ...(browserMaxPerTenant !== undefined ? { maxPerTenant: browserMaxPerTenant } : {}),
         ...(browserMaxTotal !== undefined ? { maxTotal: browserMaxTotal } : {}),
+        // Replay ② for the browser-session LANE (docs/architecture/replay.md): stream the session browser's
+        // CDP environment plane (network/console/nav + frames) into the durable recording keyed by the session
+        // run's derived runId, and seal it at close — a settled interactive session then replays like a settled
+        // eval (and scrubs live via peek meanwhile). Both halves are best-effort by contract.
+        recorder: (cdpBase, runId) => {
+          const rec = new CdpEnvironmentRecorder(cdpBase, {
+            track: (item) => void caseRecorder.recordTrack(runId, item),
+            frame: (frameBase64) => void caseRecorder.recordFrame(runId, frameBase64),
+          });
+          rec.start().catch(() => undefined); // a page-less browser records nothing, never a failed session
+          return { stop: () => rec.stop() };
+        },
+        ...(recordingStore
+          ? { sealRecording: (runId: string) => recordingStore.seal(runId, { envKind: "browser" }) }
+          : {}),
       })
     : undefined;
   if (browserSessionService) {
@@ -1070,6 +1091,7 @@ async function main(): Promise<void> {
     liveLogs, // live execution log pushed by self-hosted runners (report_case_log MCP tool)
     liveTraces, // live trajectory per run (dispatch marks + report_case_trace) — served by /runs/:id/trajectory/live
     ...(caseRecorder ? { caseRecorder } : {}), // durable replay tee (opt-in) for the pushed frames/logs
+    caseFsRequests, // run-workbench fs rendezvous (self-hosted lane) — the lease tools drain/answer it
     service,
     scorecardService,
     // Driver ops surface v0 (docs/orchestration.md) — present only when Temporal is configured; reads/controls

@@ -59,6 +59,14 @@ export interface BrowserSessionServiceOptions {
   // The tenant leg of the singular gate (§5). A live browser is a held-open container someone pays for, so
   // it answers the same budget question a case does — it used to answer none at all.
   budget?: BudgetTracker;
+  // Replay ② for the browser-session LANE: start a CDP environment recorder against the session's browser,
+  // streaming network/console/nav/frames into the durable recording keyed by the session run's derived runId
+  // (evd-run-<sessionId> — the same key GET /runs/:id/recording reads). Best-effort by contract: a browser
+  // whose page target can't be reached simply records nothing. Absent = the lane is not recorded.
+  recorder?: (cdpBase: string, runId: string) => { stop: () => void } | undefined;
+  // Seal the session's recording at close (freeze envKind/fidelity) — the settled session then replays like a
+  // settled eval. Best-effort; absent = the tail stays readable via peek only.
+  sealRecording?: (runId: string) => Promise<unknown>;
 }
 
 // Owns the lifecycle of interactive browser sessions: provision a dedicated browser, hold its reachable CDP base
@@ -76,6 +84,8 @@ export class BrowserSessionService {
   private readonly runs?: RunStore;
   private readonly events?: PlatformEventEmitter;
   private readonly budget?: BudgetTracker;
+  private readonly recorder?: (cdpBase: string, runId: string) => { stop: () => void } | undefined;
+  private readonly sealRecording?: (runId: string) => Promise<unknown>;
 
   constructor(
     private readonly provisioner: BrowserSessionProvisioner,
@@ -91,6 +101,8 @@ export class BrowserSessionService {
     this.runs = opts.runs;
     this.events = opts.events;
     this.budget = opts.budget;
+    this.recorder = opts.recorder;
+    this.sealRecording = opts.sealRecording;
   }
 
   // ─── The run ledger ─────────────────────────────────────────────────────────────────────────────────────
@@ -185,6 +197,14 @@ export class BrowserSessionService {
       },
     };
     this.sessions.set(id, entry);
+    // Replay ② — record the session browser's environment plane under the run's derived recording key. The
+    // factory swallows its own start failures (a page-less browser just records nothing, never a failed create).
+    try {
+      const recorder = this.recorder?.(browser.cdpBase, `evd-run-${id}`);
+      if (recorder) entry.recorder = recorder;
+    } catch {
+      // best-effort — a recorder must never block a session
+    }
     await this.openRun(cmd, id, browser);
     return toBrowserSessionView(entry.record);
   }
@@ -330,11 +350,19 @@ export class BrowserSessionService {
     const entry = this.sessions.get(id);
     if (!entry) return;
     this.sessions.delete(id);
+    // The recorder detaches first (its socket dies with the browser anyway — this just makes it orderly).
+    try {
+      entry.recorder?.stop();
+    } catch {
+      // best-effort
+    }
     // The BROWSER goes first. Releasing a scarce resource must not queue behind a bookkeeping write — a slow
     // or failing run store would otherwise hold a live container open, which is the opposite of what the
     // ledger exists to prevent.
     await entry.browser.dispose().catch(() => undefined); // best-effort teardown
     // Then why it ended, as the ledger spells it: a deadline that ran out is `expired`, anything else is `closed`.
     await this.closeRun(id, entry.record.expiresAt < this.now() ? "expired" : "closed");
+    // Seal what streamed in — the settled session's replay is served from the frozen recording (best-effort).
+    if (this.sealRecording) await this.sealRecording(`evd-run-${id}`).catch(() => undefined);
   }
 }

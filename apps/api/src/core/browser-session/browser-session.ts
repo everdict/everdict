@@ -21,6 +21,8 @@ export interface BrowserSessionRecord {
 export interface BrowserSessionEntry {
   record: BrowserSessionRecord;
   browser: ProvisionedBrowser;
+  // Replay ② — the session's CDP environment recorder handle (absent = the lane is not recorded).
+  recorder?: { stop: () => void };
 }
 
 // The client-facing view — deliberately OMITS cdpBase (server-only).

@@ -7,6 +7,7 @@ import { LiveTrace } from '@/widgets/live-trace'
 import { ReplayPlayer } from '@/widgets/replay-player'
 import { RunPlacement } from '@/widgets/run-placement'
 import { RunTopology } from '@/widgets/run-topology'
+import { RunFileWorkbench } from '@/widgets/run-workbench'
 import { LiveScreen, LiveTerminal } from '@/widgets/sandbox-terminal'
 import { asSingleSegment, TrajectoryView, type TrajectorySegment } from '@/features/browse-traces'
 import { CommentsSection } from '@/features/discuss'
@@ -203,10 +204,14 @@ export default async function RunDetailPage({
   }
 
   // Replay is available for any settled run that produced an agent trace (EVERY harness does) or a recording —
-  // not only ones with environment frames. A still-running run shows the live section instead. The agent trace is
-  // the universal replay spine; frames are a per-kind addition. docs/architecture/replay.md (Principle 1).
+  // not only ones with environment frames. The agent trace is the universal replay spine; frames are a per-kind
+  // addition. A still-RUNNING run mounts the player too: 라이브는 "아직 안 끝난 리플레이"라 녹화 tail + 라이브
+  // 궤적을 폴링해 진행 중에도 과거로 스크럽한다(플레이어가 데이터 없으면 self-null). docs/architecture/replay.md.
   const isTerminal = run.status === 'succeeded' || run.status === 'failed'
   const hasReplay = isTerminal && (trace.length > 0 || run.result?.recordingRef != null)
+  // sandbox(브라우저) 세션은 record에 trace/recordingRef가 없어도 세션 동안 CDP 환경 plane이 녹화됐을 수
+  // 있다 — 닫힌 뒤에도 플레이어를 마운트해 두면 봉인 녹화를 스스로 찾아 그리고, 없으면 self-null.
+  const mountsReplay = hasReplay || !isTerminal || runKindOf(run) === 'sandbox'
 
   // Source label — reuse the runs-table's shared source vocabulary (web/mcp/api/scorecard/schedule/front-door).
   const tTable = await getTranslations('runsTable')
@@ -249,6 +254,9 @@ export default async function RunDetailPage({
   const attach = run.attach ?? []
   const showLiveLogs = attach.includes('logs')
   const showTerminal = attach.includes('exec') || attach.includes('terminal')
+  // 파일 워크벤치는 터미널 채널(관리형 exec) 또는 self-hosted 레인에서 열린다 — self:* 는 exec는 못 하지만
+  // 러너의 in-case 서빙 루프가 파킹된 fs 읽기에 응답한다(runnerCaseFs). 리포 없는 샌드박스면 위젯이 self-null.
+  const showFileWorkbench = showTerminal || (run.runtime?.startsWith('self:') ?? false)
 
   // 이 run 을 일으킨 run — 수요 그래프의 간선(에이전트가 제출한 실행이 대표적). 부모 그룹은 스코어카드면
   // 메타 카드가 이미 링크하므로, 여기서는 그 밖의 그룹(플레이그라운드 세션의 케이스)만 세운다.
@@ -446,38 +454,52 @@ export default async function RunDetailPage({
           {/* 토폴로지 헬스(서비스 하네스) — 웜 토폴로지의 서비스별 상태(재시작·OOM·최근 이벤트)+행별 로그 펼침;
               서비스 하네스가 아니면 위젯이 self-null */}
           <RunTopology runId={run.id} initialStatus={run.status} />
-          {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시 프레임으로
-              2초마다 폴링; 라이브 화면이 없는 run이면 위젯이 self-null (빈 섹션 없음) */}
-          <LiveScreen runId={run.id} initialStatus={run.status} />
-          {/* 라이브 트레이스(observability ⑨) — 실행 중 쌓이는 궤적(디스패치 마크 + 러너 푸시 + 매니지드
-              이벤트 센티널)을 3초마다 폴링해 봉인 전 미리보기로 그린다; 아무것도 없으면 위젯이 self-null */}
-          <LiveTrace runId={run.id} initialStatus={run.status} />
-          {/* 로그·터미널은 run 이 선언한 채널(attach)일 때만 — 붙을 곳 없는 run 에서 영원히 비어 있는 패널을
-              띄우지 않는다. 선언이 없는 예전 eval/command run 은 종전대로 둘 다 연다. */}
-          {showLiveLogs && (
-            <div className="space-y-2.5">
-              <SectionHeader title={t('liveLogs')} />
-              <Card className="p-4">
-                <LiveLogs runId={run.id} initialStatus={run.status} />
-              </Card>
+          {/* 라이브 워크벤치 — 넓으면 「환경 메인 패널 + 관측 레일」 2컬럼(좁으면 세로 폴백; 인프라 패널이
+              화면을 쪼개는 순간을 위해 뷰포트가 아닌 컨테이너 기준). 메인 = 환경 kind가 결정: browser/os-use는
+              라이브 화면, repo는 파일 워크벤치 — 둘 다 self-null이라 해당 없는 쪽은 그려지지 않는다.
+              레일 = 트레이스·로그·터미널(관측 축). 모든 위젯이 self-null이라 빈 칸은 생기지 않는다. */}
+          <div className="grid gap-4 @5xl:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
+            <div className="min-w-0 space-y-4">
+              {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시
+                  프레임으로 2초마다 폴링 */}
+              <LiveScreen runId={run.id} initialStatus={run.status} />
+              {/* 라이브 리포 워크벤치 — repo 케이스면 샌드박스 워킹트리를 파일 탐색기(M/A/D 배지)+읽기전용
+                  에디터/diff로 4초마다 폴링, "따라가기"로 에이전트가 방금 바꾼 파일을 자동으로 연다. exec 채널이
+                  선언된 run에서만 시도하고, 리포가 없는 샌드박스면 위젯이 self-null */}
+              {showFileWorkbench && <RunFileWorkbench runId={run.id} initialStatus={run.status} />}
             </div>
-          )}
-          {/* 샌드박스 터미널 — 실행 중인 케이스 컨테이너로 들어가는 대화형 셸(cd·env 유지). 셸은 샌드박스의 실제
-              프로세스라 "셸 열기"를 눌렀을 때만 붙는다 (creator/admin, 컨트롤플레인이 강제) */}
-          {showTerminal && (
-            <div className="space-y-2.5">
-              <SectionHeader title={t('sandbox')} />
-              <Card className="p-4">
-                <LiveTerminal runId={run.id} />
-              </Card>
+            <div className="min-w-0 space-y-4">
+              {/* 라이브 트레이스(observability ⑨) — 실행 중 쌓이는 궤적(디스패치 마크 + 러너 푸시 + 매니지드
+                  이벤트 센티널)을 3초마다 폴링해 봉인 전 미리보기로 그린다 */}
+              <LiveTrace runId={run.id} initialStatus={run.status} />
+              {/* 로그·터미널은 run 이 선언한 채널(attach)일 때만 — 붙을 곳 없는 run 에서 영원히 비어 있는
+                  패널을 띄우지 않는다. 선언이 없는 예전 eval/command run 은 종전대로 둘 다 연다. */}
+              {showLiveLogs && (
+                <div className="space-y-2.5">
+                  <SectionHeader title={t('liveLogs')} />
+                  <Card className="p-4">
+                    <LiveLogs runId={run.id} initialStatus={run.status} />
+                  </Card>
+                </div>
+              )}
+              {/* 샌드박스 터미널 — 실행 중인 케이스 컨테이너로 들어가는 대화형 셸(cd·env 유지). 셸은 샌드박스의
+                  실제 프로세스라 "셸 열기"를 눌렀을 때만 붙는다 (creator/admin, 컨트롤플레인이 강제) */}
+              {showTerminal && (
+                <div className="space-y-2.5">
+                  <SectionHeader title={t('sandbox')} />
+                  <Card className="p-4">
+                    <LiveTerminal runId={run.id} />
+                  </Card>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </section>
       )}
 
       {/* 리플레이 — 종료된 run의 앵커 섹션. agent trace(모든 하네스 공통)를 벽시계로 스크럽하고, 녹화 프레임이
           있으면 그 시점 화면을 오버레이한다. 헤더 "리플레이" 배지가 여기로 점프한다. docs/architecture/replay.md */}
-      {hasReplay && (
+      {mountsReplay && (
         <div id="replay" className="scroll-mt-6">
           <ReplayPlayer runId={run.id} initialStatus={run.status} trace={trace} />
         </div>
