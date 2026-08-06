@@ -18,17 +18,22 @@ import { Link } from '@/shared/ui/link'
 import { SettingsList } from '@/shared/ui/settings-list'
 
 import { createTeamAction } from '../api/manage-team'
+import { TeamJoinControl } from './team-join-control'
 
 // Settings › Teams — 워크스페이스의 팀 목록. 행의 이름이 상세로 들어가는 드릴인이고(설정 목록 관례),
-// 오른쪽은 그 팀의 상태(기본팀 여부·이슈 수)를 읽는 자리다.
+// 오른쪽은 그 팀의 상태(기본팀 여부·이슈 수)를 읽는 자리 + 내 참여/나가기 컨트롤이다(리니어의 Join teams).
 export function TeamsManager({
   teams,
   workspace,
   canWrite,
+  canJoin = false,
+  joinedTeamIds = [],
 }: {
   teams: TeamWithSummary[]
   workspace: string
   canWrite: boolean
+  canJoin?: boolean
+  joinedTeamIds?: string[]
 }) {
   const t = useTranslations('manageTeams')
   const refresh = useRefresh()
@@ -90,18 +95,23 @@ export function TeamsManager({
                 </span>
               )}
             </Link>
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {team.parentId !== undefined && (
-                <span className="mr-2">
-                  {t('rowParent', {
-                    name: teams.find((x) => x.id === team.parentId)?.name ?? team.parentId,
-                  })}
-                </span>
+            <span className="flex shrink-0 items-center gap-3">
+              <span className="text-xs text-muted-foreground">
+                {team.parentId !== undefined && (
+                  <span className="mr-2">
+                    {t('rowParent', {
+                      name: teams.find((x) => x.id === team.parentId)?.name ?? team.parentId,
+                    })}
+                  </span>
+                )}
+                {t('rowSummary', {
+                  members: team.summary.memberCount,
+                  open: team.summary.openIssues,
+                })}
+              </span>
+              {canJoin && (
+                <TeamJoinControl teamId={team.id} joined={joinedTeamIds.includes(team.id)} />
               )}
-              {t('rowSummary', {
-                members: team.summary.memberCount,
-                open: team.summary.openIssues,
-              })}
             </span>
           </li>
         ))}

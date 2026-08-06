@@ -284,6 +284,42 @@ export function registerTeamRoutes(app: FastifyInstance, deps: ServerDeps): void
     }
   });
 
+  // Self-service roster — Linear's "Join teams". Adding YOURSELF is member-level (teams:join); managing
+  // someone else's roster stays admin (teams:write) above. The service answers 404 for a private team the
+  // caller cannot see (joining must not be the probe that confirms it exists) and 409 for a duplicate join.
+  app.post<{ Params: { id: string } }>("/teams/:id/join", { schema: teamDocs.join }, async (req, reply) => {
+    if (!deps.teamService) return reply.code(404).send({ code: "NOT_FOUND", message: "team service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "teams:join");
+      return reply.code(201).send(
+        await deps.teamService.join(principal.workspace, req.params.id, {
+          subject: principal.subject,
+          isAdmin: principal.roles.includes("admin"),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/teams/:id/leave", { schema: teamDocs.leave }, async (req, reply) => {
+    if (!deps.teamService) return reply.code(404).send({ code: "NOT_FOUND", message: "team service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "teams:join");
+      await deps.teamService.leave(principal.workspace, req.params.id, {
+        subject: principal.subject,
+        isAdmin: principal.roles.includes("admin"),
+      });
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.delete<{ Params: { id: string; subject: string } }>(
     "/teams/:id/members/:subject",
     { schema: teamDocs.removeMember },

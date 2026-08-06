@@ -335,6 +335,57 @@ describe("TeamService roster", () => {
   });
 });
 
+describe("TeamService self-service roster — joining and leaving a team yourself", () => {
+  let ctx: ReturnType<typeof service>;
+  beforeEach(() => {
+    ctx = service();
+  });
+
+  it("a member joins a public team, and the ledger says they added themselves", async () => {
+    // Given: a team erin is not on
+    const team = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
+    // When
+    const membership = await ctx.svc.join("acme", team.id, { subject: "erin" });
+    // Then: on the roster, addedBy = the joiner (self-service is honest in the record)
+    expect(membership.subject).toBe("erin");
+    expect(membership.addedBy).toBe("erin");
+    expect(await ctx.svc.teamIdsFor("acme", "erin")).toEqual([team.id]);
+  });
+
+  it("joining accepts the team's key exactly like every other team address", async () => {
+    await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
+    const membership = await ctx.svc.join("acme", "ENG", { subject: "erin" });
+    expect(membership.subject).toBe("erin");
+  });
+
+  it("409s when the caller is already on the team", async () => {
+    const team = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
+    await expect(ctx.svc.join("acme", team.id, { subject: "dana" })).rejects.toThrow(ConflictError);
+  });
+
+  it("a private team the caller cannot see reads as absent — joining is not the probe that confirms it exists", async () => {
+    const hidden = await ctx.svc.create({
+      tenant: "acme",
+      createdBy: "dana",
+      key: "SEC",
+      name: "Secret",
+      isPrivate: true,
+    });
+    await expect(ctx.svc.join("acme", hidden.id, { subject: "erin" })).rejects.toThrow(NotFoundError);
+    // An admin sees every team on purpose, so an admin can put themselves on it.
+    const membership = await ctx.svc.join("acme", hidden.id, { subject: "root", isAdmin: true });
+    expect(membership.subject).toBe("root");
+  });
+
+  it("leaving removes the caller, and leaving a team you are not on 404s", async () => {
+    const team = await ctx.svc.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
+    await ctx.svc.join("acme", team.id, { subject: "erin" });
+    await ctx.svc.leave("acme", team.id, { subject: "erin" });
+    expect(await ctx.svc.teamIdsFor("acme", "erin")).toEqual([]);
+    await expect(ctx.svc.leave("acme", team.id, { subject: "erin" })).rejects.toThrow(NotFoundError);
+  });
+});
+
 describe("TeamService — sub-teams", () => {
   let ctx: ReturnType<typeof service>;
   beforeEach(() => {

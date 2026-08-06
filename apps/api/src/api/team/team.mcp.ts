@@ -183,6 +183,32 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   );
 
   server.registerTool(
+    "join_team",
+    {
+      description:
+        'Join a team YOURSELF (self-service — Linear\'s "Join teams"). Puts the caller on the roster, which ' +
+        "is what makes that team's issues land in their list. Already being on the team is a conflict; a " +
+        "private team you cannot see reads as not found. Member+.",
+      inputSchema: { id: z.string() },
+    },
+    (a) => run(principal, "teams:join", async () => ok(await teams.join(ws, a.id, actor))),
+  );
+
+  server.registerTool(
+    "leave_team",
+    {
+      description:
+        "Leave a team YOURSELF — the mirror of join_team. Not being on the team reads as not found. Member+.",
+      inputSchema: { id: z.string() },
+    },
+    (a) =>
+      run(principal, "teams:join", async () => {
+        await teams.leave(ws, a.id, actor);
+        return ok({ left: a.id });
+      }),
+  );
+
+  server.registerTool(
     "remove_team_member",
     {
       description: "Remove a subject from a team's roster. Requires admin.",

@@ -48,6 +48,7 @@ export type WebAction =
   | 'issues:write'
   | 'teams:read'
   | 'teams:write'
+  | 'teams:join'
   | 'images:push'
 
 const PERMS: Record<string, WebAction[]> = {
@@ -102,6 +103,7 @@ const PERMS: Record<string, WebAction[]> = {
     'issues:read',
     'issues:write', // filing/resolving/linking tracker work → member+ (deletion is creator-or-admin, server-side)
     'teams:read', // 멤버는 팀에 이슈를 넣으므로 목록은 봐야 한다(생성은 admin)
+    'teams:join', // 자기 자신을 공개 팀 로스터에 넣고 빼는 셀프 서비스 — 남의 멤버십은 teams:write(admin)
     'images:push', // publishing/retracting a workspace image is harness authoring → member+ (mirrors the control plane)
   ],
   admin: [
@@ -151,6 +153,7 @@ const PERMS: Record<string, WebAction[]> = {
     'issues:write',
     'teams:read',
     'teams:write', // 팀 생성은 식별자 접두사를 찍고 이슈가 누구 목록에 뜰지 정한다 → 워크스페이스 운영
+    'teams:join',
     'images:push',
   ],
 }

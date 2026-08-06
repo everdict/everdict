@@ -81,6 +81,12 @@ export type Action =
   // knowing the teams is as benign as knowing the members.
   | "teams:read"
   | "teams:write"
+  // Joining/leaving a team YOURSELF (Linear's "Join teams"). Deliberately split from teams:write: managing
+  // someone else's roster is workspace administration, but putting yourself on a public team is how a member
+  // subscribes to a stream of work — honestly named as its own action (like images:push) rather than widening
+  // teams:write to member. The route only ever passes the caller's own subject, so the action cannot reach
+  // anyone else's membership. Viewer stays out: a read-only role does not mutate rosters.
+  | "teams:join"
   // Minting workspace image-registry push credentials — the only member action where a credential 'value' leaves to the caller,
   // so it's honestly named as a separate action instead of reusing harnesses:register (viewer+) (register/unregister = settings:write, read = harnesses:read).
   | "images:push"
@@ -153,6 +159,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "issues:read",
     "issues:write", // filing/resolving/linking tracker work = collaborative content → member+ (deletion = creator-or-admin, service layer)
     "teams:read", // a member files into a team, so it must be able to list them (creating one stays admin)
+    "teams:join", // putting YOURSELF on (or off) a public team's roster — self-service, never someone else's membership
     "images:push", // workspace registry push credential — harness authoring (image publishing) is a member's job
     "mattermost:post", // posting to the workspace Mattermost channel (using the integration) — a member's job, unlike admin-only registration (settings:write)
     "github:write", // creating a GitHub issue/comment via the workspace App (using the integration) — a member's job, unlike admin-only App registration (settings:write)
@@ -209,6 +216,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "issues:write",
     "teams:read",
     "teams:write", // creating a team mints an identifier prefix + decides whose list issues land in → workspace administration
+    "teams:join",
     "images:push",
     "mattermost:post",
     "github:write",
@@ -259,6 +267,7 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "runtimes:write",
   "comments:write",
   "issues:write", // filing/resolving tracker work = content mutation (an agent triaging its own regressions needs it)
+  "teams:join", // joining/leaving a team oneself = subscribing to a stream of work, not roster governance
   "images:push", // image publishing = part of harness authoring (a credential scoped to one's own workspace registry)
   "mattermost:post", // posting to the workspace Mattermost channel = content mutation (using a configured integration)
   "github:write", // creating a GitHub issue/comment via the workspace App = content mutation (using a configured integration)

@@ -1615,6 +1615,7 @@
     "initiatives": "Initiatives",
     "evaluation": "Evaluation",
     "yourTeams": "Your teams",
+    "joinTeams": "Join teams",
     "allIssues": "All issues",
     "workspaceGroup": "Workspace",
     "more": "More",
@@ -5427,7 +5428,11 @@
     "empty": "No teams yet.",
     "emptyHint": "An admin creates teams; issues land in the default one until then.",
     "emptyHintAdmin": "Create one in Settings — its key becomes the prefix of every issue it mints.",
-    "rowSummary": "{members} members · {open} open"
+    "rowSummary": "{members} members · {open} open",
+    "join": "Join",
+    "leave": "Leave",
+    "joinError": "Could not join the team.",
+    "leaveError": "Could not leave the team."
   },
   "membersDirectory": {
     "title": "Members",

@@ -26,7 +26,9 @@ export const teamDocs: Record<
   | "deleteState"
   | "listMembers"
   | "addMember"
-  | "removeMember",
+  | "removeMember"
+  | "join"
+  | "leave",
   FastifySchema
 > = {
   create: {
@@ -165,5 +167,25 @@ export const teamDocs: Record<
     description: "Emits team.member_removed. Requires teams:write.",
     tags: ["team"],
     response: { 204: { description: "Removed" }, ...errorResponses(401, 403, 404) },
+  },
+  join: {
+    summary: "Join a team yourself",
+    description:
+      'Self-service membership — puts the CALLER on the roster (Linear\'s "Join teams"). A private team the ' +
+      "caller cannot see answers 404, never 403; already being on the team is a 409. Emits team.member_added. " +
+      "Requires teams:join (member+).",
+    tags: ["team"],
+    response: {
+      201: { description: "The membership", ...toJsonSchema(TeamMemberRecordSchema) },
+      ...errorResponses(401, 403, 404, 409),
+    },
+  },
+  leave: {
+    summary: "Leave a team yourself",
+    description:
+      "The mirror of join — removes the CALLER from the roster. Not being on the team (or the team being " +
+      "invisible to the caller) answers 404. Emits team.member_removed. Requires teams:join (member+).",
+    tags: ["team"],
+    response: { 204: { description: "Left" }, ...errorResponses(401, 403, 404) },
   },
 };

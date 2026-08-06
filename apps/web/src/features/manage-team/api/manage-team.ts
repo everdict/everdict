@@ -87,6 +87,18 @@ export async function removeTeamMemberAction(
   return mutate(() => controlPlane.removeTeamMember(ctx, id, subject))
 }
 
+// 셀프 서비스 — 자기 자신을 넣고 뺀다(teams:join, member+). 관리자의 로스터 관리(add/remove)와 달리
+// 대상 subject 가 없다: 컨트롤 플레인이 호출자 본인만 움직인다.
+export async function joinTeamAction(id: string): Promise<TeamMutationResult> {
+  const ctx = await authContext()
+  return mutate(() => controlPlane.joinTeam(ctx, id))
+}
+
+export async function leaveTeamAction(id: string): Promise<TeamMutationResult> {
+  const ctx = await authContext()
+  return mutate(() => controlPlane.leaveTeam(ctx, id))
+}
+
 // --- 팀의 보드(워크플로 상태) ---------------------------------------------------------------------------
 // 이름·색·순서를 바꾸는 것은 화장이고, `status` 를 바꾸는 것은 그 컬럼에 있던 이슈들을 실제로 옮긴다(서버가
 // 같은 동작에서 한다). 컬럼을 지우려면 먼저 비워야 한다.

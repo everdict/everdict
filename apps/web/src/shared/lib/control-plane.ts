@@ -632,6 +632,12 @@ export const controlPlane = {
     callVoid(auth, `/teams/${encodeURIComponent(id)}/members/${encodeURIComponent(subject)}`, {
       method: 'DELETE',
     }),
+  // 셀프 서비스 로스터(리니어의 "Join teams") — 자기 자신만 넣고 뺀다. teams:join(member+);
+  // 비공개 팀은 404로, 이미 속한 팀 재가입은 409로 서버가 판정한다.
+  joinTeam: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/teams/${encodeURIComponent(id)}/join`, { method: 'POST' }),
+  leaveTeam: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/teams/${encodeURIComponent(id)}/leave`, { method: 'POST' }),
   // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer over the
   // capabilities. One authz pair for all three (issues:read viewer+ / issues:write member+); delete is
   // additionally creator-or-admin, decided server-side.

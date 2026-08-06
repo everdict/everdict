@@ -83,3 +83,28 @@ describe("can — the team axis (team-owned resources)", () => {
     expect(() => authorize(member, "harnesses:register", { teamId: "mobile" })).toThrow(/team you are not on/);
   });
 });
+
+describe("teams:join — self-service membership is member-level, roster governance stays admin", () => {
+  it("a member may join, a viewer may not, and teams:write stays out of member's reach", () => {
+    const member: Principal = { subject: "u", workspace: "acme", roles: ["member"], via: "oidc" };
+    const viewer: Principal = { subject: "v", workspace: "acme", roles: ["viewer"], via: "oidc" };
+    const admin: Principal = { subject: "a", workspace: "acme", roles: ["admin"], via: "oidc" };
+    expect(can(member, "teams:join")).toBe(true);
+    expect(can(viewer, "teams:join")).toBe(false);
+    expect(can(admin, "teams:join")).toBe(true);
+    expect(can(member, "teams:write")).toBe(false); // joining yourself must not widen roster governance
+  });
+
+  it("rides the write api-key scope — a read-scoped key cannot mutate its own roster", () => {
+    const readKey: Principal = {
+      subject: "k",
+      workspace: "acme",
+      roles: ["member"],
+      via: "api-key",
+      scopes: ["read"],
+    };
+    const writeKey: Principal = { ...readKey, scopes: ["write"] };
+    expect(can(readKey, "teams:join")).toBe(false);
+    expect(can(writeKey, "teams:join")).toBe(true);
+  });
+});

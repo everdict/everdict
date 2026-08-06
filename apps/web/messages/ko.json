@@ -1615,6 +1615,7 @@
     "initiatives": "이니셔티브",
     "evaluation": "평가",
     "yourTeams": "내 팀",
+    "joinTeams": "팀 참여",
     "allIssues": "전체 이슈",
     "workspaceGroup": "워크스페이스",
     "more": "더 보기",
@@ -5427,7 +5428,11 @@
     "empty": "아직 팀이 없습니다.",
     "emptyHint": "팀은 관리자가 만듭니다. 그때까지 이슈는 기본 팀으로 들어갑니다.",
     "emptyHintAdmin": "설정에서 만드세요 — 팀 키가 그 팀이 발번하는 모든 이슈의 접두사가 됩니다.",
-    "rowSummary": "멤버 {members} · 열린 이슈 {open}"
+    "rowSummary": "멤버 {members} · 열린 이슈 {open}",
+    "join": "참여",
+    "leave": "나가기",
+    "joinError": "팀에 참여하지 못했습니다.",
+    "leaveError": "팀에서 나가지 못했습니다."
   },
   "membersDirectory": {
     "title": "멤버",

@@ -30,10 +30,17 @@ export default async function TeamsPage() {
   }
 
   let teams: TeamWithSummary[] = []
+  let joinedTeamIds: string[] = []
   let error: string | undefined
   try {
     // 목록 읽기가 곧 불변식 복구 지점이다 — 팀이 하나도 없던 워크스페이스는 여기서 기본팀을 얻는다.
-    teams = teamsWithSummarySchema.parse(await controlPlane.listTeams(ctx))
+    // 내 로스터도 같이 읽는다 — 행마다 참여/나가기 컨트롤이 joined 를 서버 판정으로 받는다.
+    const [all, mine] = await Promise.all([
+      controlPlane.listTeams(ctx),
+      controlPlane.listTeams(ctx, { mine: true }),
+    ])
+    teams = teamsWithSummarySchema.parse(all)
+    joinedTeamIds = teamsWithSummarySchema.parse(mine).map((team) => team.id)
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -44,7 +51,13 @@ export default async function TeamsPage() {
       {error !== undefined ? (
         <Callout tone="danger">{s('connectError', { error })}</Callout>
       ) : (
-        <TeamsManager teams={teams} workspace={principal.workspace} canWrite={canWrite} />
+        <TeamsManager
+          teams={teams}
+          workspace={principal.workspace}
+          canWrite={canWrite}
+          canJoin={can(principal.roles, 'teams:join')}
+          joinedTeamIds={joinedTeamIds}
+        />
       )}
     </div>
   )

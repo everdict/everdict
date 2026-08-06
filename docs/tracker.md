@@ -85,6 +85,12 @@ One workspace, one rule — public by default, private by choice. See `docs/auth
 AuthZ is its own pair, unlike the rest of the tracker: **`teams:read`** (viewer+) and **`teams:write`**
 (**admin**). Creating a team mints an identifier prefix every future issue inherits and decides whose list issues
 land in — that is workspace administration, not the collaborative eval *content* `issues:write` covers.
+The one deliberate carve-out is **`teams:join`** (member+): putting YOURSELF on (or off) a public team's roster
+is how a member subscribes to a stream of work, not roster governance — `POST /teams/:id/join` / `…/leave`
+(MCP `join_team`/`leave_team`) only ever move the caller, answer 404 for a private team the caller cannot see
+(joining must not be the probe that confirms it exists) and 409 for a duplicate join, and reuse the ordinary
+`team.member_added`/`member_removed` facts with `addedBy` = the joiner. The web offers it in the teams
+directory, Settings › Teams, and the sidebar's "Join teams" entry under "Your teams" (Linear's pattern).
 
 ### The key is the address, and what a team owns lives under it
 

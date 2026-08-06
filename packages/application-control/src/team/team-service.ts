@@ -306,6 +306,30 @@ export class TeamService {
     return member;
   }
 
+  // --- Self-service roster (Linear's "Join teams") ------------------------------------------------------
+  // The one roster mutation a member performs on THEMSELVES (teams:join at the transport). It reuses the
+  // admin paths below — same facts, same history — with `addedBy` = the joiner, which is what self-service
+  // honestly looks like in the ledger.
+
+  async join(tenant: string, ref: string, actor: TeamActor): Promise<TeamMemberRecord> {
+    const record = await this.get(tenant, ref);
+    // A private team you cannot see reads as absent — joining must not be the probe that confirms it exists.
+    if (!(await this.canSeeTeam(tenant, record.id, actor.subject, actor.isAdmin === true)))
+      throw new NotFoundError("NOT_FOUND", { team: ref }, "Team not found.");
+    const roster = await this.deps.store.listMembers(tenant, record.id);
+    if (roster.some((member) => member.subject === actor.subject))
+      throw new ConflictError("CONFLICT", { team: record.id }, "You are already on this team.");
+    return this.addMember(tenant, record.id, actor.subject, actor);
+  }
+
+  async leave(tenant: string, ref: string, actor: TeamActor): Promise<void> {
+    const record = await this.get(tenant, ref);
+    // Same absence answer as join: "you are not on this team" on a hidden team would confirm it exists.
+    if (!(await this.canSeeTeam(tenant, record.id, actor.subject, actor.isAdmin === true)))
+      throw new NotFoundError("NOT_FOUND", { team: ref }, "Team not found.");
+    await this.removeMember(tenant, record.id, actor.subject, actor);
+  }
+
   async removeMember(tenant: string, ref: string, subject: string, actor: TeamActor): Promise<void> {
     const record = await this.get(tenant, ref);
     const now = this.now();

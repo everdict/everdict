@@ -272,3 +272,63 @@ describe("a team is addressed by its key", () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+// Self-service roster — Linear's "Join teams". These tests need a real (fixed) authenticator: the dev-header
+// fallback is admin, and the whole point of teams:join is what a NON-admin may do to their own membership.
+describe("self-service roster — POST /teams/:id/join and /teams/:id/leave", () => {
+  const bearer = { authorization: "Bearer t" };
+
+  function serverAs(teamService: TeamService, roles: string[], subject = "erin") {
+    return buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      teamService,
+      requireAuth: true,
+      authenticator: {
+        async authenticate() {
+          return { subject, workspace: "acme", roles, via: "oidc" as const, teams: [] };
+        },
+      },
+    });
+  }
+
+  it("a member joins and leaves a team themselves", async () => {
+    // Given: a public team erin is not on
+    const { teamService } = build();
+    const eng = await teamService.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
+    const app = serverAs(teamService, ["member"]);
+    // When: they join
+    const joined = await app.inject({ method: "POST", url: `/teams/${eng.id}/join`, headers: bearer });
+    // Then: on the roster, recorded as having added themselves
+    expect(joined.statusCode).toBe(201);
+    expect(joined.json()).toMatchObject({ subject: "erin", addedBy: "erin", teamId: eng.id });
+    // And: joining again conflicts, leaving works once, then 404s
+    expect((await app.inject({ method: "POST", url: `/teams/${eng.id}/join`, headers: bearer })).statusCode).toBe(409);
+    expect((await app.inject({ method: "POST", url: `/teams/${eng.id}/leave`, headers: bearer })).statusCode).toBe(204);
+    expect((await app.inject({ method: "POST", url: `/teams/${eng.id}/leave`, headers: bearer })).statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("a viewer may not join — read-only roles do not mutate rosters", async () => {
+    const { teamService } = build();
+    const eng = await teamService.create({ tenant: "acme", createdBy: "dana", key: "ENG", name: "Eng" });
+    const app = serverAs(teamService, ["viewer"]);
+    expect((await app.inject({ method: "POST", url: `/teams/${eng.id}/join`, headers: bearer })).statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("a private team the caller cannot see answers 404, never 403", async () => {
+    const { teamService } = build();
+    const hidden = await teamService.create({
+      tenant: "acme",
+      createdBy: "dana",
+      key: "SEC",
+      name: "Secret",
+      isPrivate: true,
+    });
+    const app = serverAs(teamService, ["member"]);
+    expect((await app.inject({ method: "POST", url: `/teams/${hidden.id}/join`, headers: bearer })).statusCode).toBe(
+      404,
+    );
+    await app.close();
+  });
+});

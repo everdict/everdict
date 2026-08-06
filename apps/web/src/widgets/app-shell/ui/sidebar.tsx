@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
+import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Plus, Search, Settings, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
@@ -83,10 +83,12 @@ function navItemGroupKey(labelKey: string): string {
 function NavLinks({
   workspace,
   teams,
+  canJoinTeams,
   onNavigate,
 }: {
   workspace: string
   teams: SidebarTeam[]
+  canJoinTeams: boolean
   onNavigate?: () => void
 }) {
   const pathname = usePathname()
@@ -229,6 +231,7 @@ function NavLinks({
                 workspace={workspace}
                 teams={teams}
                 scope={teamScope}
+                canJoin={canJoinTeams}
                 onNavigate={onNavigate}
               />
             )}
@@ -253,6 +256,7 @@ function TeamsNav({
   workspace,
   teams,
   scope,
+  canJoin,
   onNavigate,
 }: {
   workspace: string
@@ -260,11 +264,14 @@ function TeamsNav({
   // 어느 팀의 화면을 보고 있나 — 전부 경로가 말한다(`/{workspace}/teams/ENG/…`). 판정은 위에서 한 번만 하고
   // 내려받는다: 이 그룹과 워크스페이스 나브가 각자 경로를 읽으면 둘 다 자기 것이라 주장할 수 있다.
   scope: TeamPathScope | null
+  // 리니어의 "Join teams" — 로스터에 없는 팀에 스스로 참여할 수 있는 역할(member+)에게만 진입점을 보인다.
+  // viewer 에게는 참여 버튼 없는 디렉터리로 가는 문일 뿐이라 그리지 않는다.
+  canJoin: boolean
   onNavigate?: () => void
 }) {
   const t = useTranslations('nav')
   const [openTeams, setOpenTeams] = useState<Record<string, boolean>>({})
-  if (teams.length === 0) return null
+  if (teams.length === 0 && !canJoin) return null
   return (
     <div className="flex flex-col gap-0.5">
       <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">{t('yourTeams')}</p>
@@ -351,6 +358,17 @@ function TeamsNav({
           </div>
         )
       })}
+      {/* 리니어의 "Join teams" — 목적지는 팀 디렉터리다. 참여는 거기서, 이 줄은 문일 뿐이다. */}
+      {canJoin && (
+        <Link
+          href={`/${workspace}/teams`}
+          onClick={onNavigate}
+          className={cn(rowClass, 'text-muted-foreground')}
+        >
+          <Plus className="size-[17px] shrink-0 text-faint" strokeWidth={1.75} />
+          {t('joinTeams')}
+        </Link>
+      )}
     </div>
   )
 }
@@ -587,7 +605,12 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
 
       {/* Same chromeless rail as the settings nav — the app nav scrolls on short viewports without painting a bar. */}
       <div className="flex-1 overflow-y-auto scrollbar-none">
-        <NavLinks workspace={props.workspace} teams={props.teams ?? []} onNavigate={onNavigate} />
+        <NavLinks
+          workspace={props.workspace}
+          teams={props.teams ?? []}
+          canJoinTeams={can(props.roles, 'teams:join')}
+          onNavigate={onNavigate}
+        />
       </div>
 
       <SidebarFooter
