@@ -1,0 +1,3 @@
+#!/bin/sh
+# The harness installs its CLI into a bare image; this image already has one baked, so the install is a no-op.
+exit 0

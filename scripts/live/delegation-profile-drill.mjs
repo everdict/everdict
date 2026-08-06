@@ -6,16 +6,17 @@
 // comes back in its answer. Then a second turn proves the conversation continued, and the sealed trajectory
 // carries the delegation.brief marker (the ledger alone answers what they were asked to do).
 //
-// Prereqs: pnpm build · a local Docker daemon · an agent image whose CLI is on PATH. The default image is the
-// fake-claude one the conversation drill builds; point EVERDICT_DELEGATE_IMAGE at a real one to drill for real.
+// Prereqs: pnpm build · a local Docker daemon. The delegate image is built from scripts/live/delegate-stub
+// (a scripted claude that speaks stream-json, resumes by session id, and DOES what its brief says), so the
+// drill is self-contained; point EVERDICT_DELEGATE_IMAGE at a real agent image to drill for real.
 // Usage: node scripts/live/delegation-profile-drill.mjs
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import process from "node:process";
 
 const PORT = process.env.EVERDICT_DELEGATION_TEST_PORT ?? "18904";
 const BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = new URL("../..", import.meta.url).pathname;
-const IMAGE = process.env.EVERDICT_DELEGATE_IMAGE ?? "everdict-fake-claude:conv";
+const IMAGE = process.env.EVERDICT_DELEGATE_IMAGE ?? "everdict-delegate-stub:live";
 const PROFILE_ID = `code-delegate-${Date.now().toString(36)}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,6 +33,10 @@ const assert = (cond, label) => {
   if (!cond) throw new Error(`ASSERT FAILED: ${label}`);
   console.log(`✓ ${label}`);
 };
+
+// The stand-in delegate image (skipped when the caller brought their own).
+if (process.env.EVERDICT_DELEGATE_IMAGE === undefined)
+  execFileSync("docker", ["build", "-q", "-t", IMAGE, "scripts/live/delegate-stub"], { cwd: ROOT, stdio: "inherit" });
 
 const cp = spawn(process.execPath, ["apps/api/dist/main.js"], {
   cwd: ROOT,

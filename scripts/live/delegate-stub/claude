@@ -1,0 +1,70 @@
+#!/usr/bin/env node
+// A scripted stand-in for the claude CLI, faithful on the three things a delegation drill depends on:
+//   1. stream-json on stdout (system/init → assistant → result), the shape the harness normalizes;
+//   2. a session store keyed off the CWD, so `--resume <id>` really continues a thread (a resumed run mints a
+//      NEW id, like the real CLI);
+//   3. it READS its own context (CLAUDE.md / BRIEF.md beside it) and DOES what the brief asks — the drill
+//      then verifies a real change on disk rather than a sentence.
+const fs = require("node:fs");
+const path = require("node:path");
+const { execSync } = require("node:child_process");
+
+const args = process.argv.slice(2);
+const task = args[args.indexOf("-p") + 1] ?? "";
+const resumeIndex = args.indexOf("--resume");
+const resume = resumeIndex === -1 ? undefined : args[resumeIndex + 1];
+
+const store = path.join(process.cwd(), ".claude-sessions");
+fs.mkdirSync(store, { recursive: true });
+let memory = [];
+if (resume !== undefined) {
+  try {
+    memory = JSON.parse(fs.readFileSync(path.join(store, `${resume}.json`), "utf8"));
+  } catch {
+    memory = []; // an unknown session id starts fresh, like the real CLI
+  }
+}
+const read = (file) => {
+  try {
+    return fs.readFileSync(path.join(process.cwd(), file), "utf8");
+  } catch {
+    return "";
+  }
+};
+const brief = read("BRIEF.md");
+const standing = read("CLAUDE.md");
+
+// The one instruction this stand-in can act on: a brief line of the form `RUN: <shell command>`. That is
+// enough for a drill to assert the delegate did real work in its sandbox, not that it said it did.
+const runLine = /^RUN:\s*(.+)$/m.exec(brief);
+let did = "";
+if (runLine) {
+  try {
+    execSync(runLine[1], { cwd: process.cwd(), stdio: "pipe" });
+    did = `ran: ${runLine[1]}`;
+  } catch (err) {
+    did = `failed: ${runLine[1]} (${err.status ?? "error"})`;
+  }
+}
+
+const goal = /^## Goal\n(.+)$/m.exec(brief)?.[1] ?? "";
+const answer = [
+  memory.length > 0 ? `Earlier you asked: ${memory.join(" | ")}.` : "",
+  standing.includes("delegate") ? "I read my standing instructions." : "",
+  goal !== "" ? `The brief's goal is: ${goal}` : "I have no brief.",
+  did,
+]
+  .filter((s) => s !== "")
+  .join(" ");
+
+memory.push(task);
+const sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+fs.writeFileSync(path.join(store, `${sessionId}.json`), JSON.stringify(memory));
+
+const line = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
+line({ type: "system", subtype: "init", session_id: sessionId });
+line({
+  type: "assistant",
+  message: { model: "delegate-stub", content: [{ type: "text", text: answer }], usage: { input_tokens: 8, output_tokens: 12 } },
+});
+line({ type: "result", total_cost_usd: 0.001, session_id: sessionId });
