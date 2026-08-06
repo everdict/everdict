@@ -118,6 +118,10 @@ export interface CreateSandboxInput {
   // read credential through the injected git seam; a public one clones anonymously. Combines with any target.
   repo?: { git: string; ref?: string; dir?: string };
   agent?: SandboxAgentAttribution; // stamps causedBy on this session's facts (loop guard #1)
+  // WHERE to place this session (W4): a runtime the workspace registered, the same axis a run's
+  // `placement.target` names. Unset = the deployment's default compute (this host, or the operator's
+  // configured cluster) — a workspace with its own infrastructure should not have to borrow ours.
+  runtime?: string;
   ttlSec?: number;
 }
 
@@ -165,6 +169,9 @@ interface LiveSession {
   world?: string; // agent worlds (W1): the environment capability this session snapshots into
   hibernate: boolean; // auto-snapshot at teardown (world sessions default true)
   bootImage: string; // W4: the image this session started from — the base a captured layer extends
+  // W4: the compute this session actually runs on (the deployment default, or the workspace's own runtime).
+  // Held because teardown must dispose through the SAME driver that provisioned.
+  driver: Driver;
   repo?: { git: string; ref?: string; dir: string }; // W2: what was cloned in, and where
   // The agent behind this session, remembered because teardown and expiry emit facts long after the request
   // that knew who asked — an expiry fact must carry the same causedBy the creation one did.
@@ -304,6 +311,11 @@ export interface SandboxSessionServiceDeps {
   // W4: the ceiling on a placement-independent capture (compressed bytes). Past it the snapshot is refused by
   // name — a truncated capture would publish an image that boots missing files.
   maxCaptureBytes?: number;
+  // Resolve the compute for a session placed on a workspace-REGISTERED runtime (W4). `driver` above stays the
+  // deployment default; this answers "this tenant's own cluster". Returning undefined means the tenant has no
+  // such runtime, which is a 404 naming it — never a silent fall back to the default, because that would run a
+  // tenant's code somewhere they did not choose.
+  driverFor?: (tenant: string, runtime: string) => Promise<Driver | undefined>;
   maxTotal?: number;
   newId?: () => string;
   now?: () => string;
@@ -329,6 +341,21 @@ export class SandboxSessionService {
     });
   }
 
+  // The compute a session runs on: the workspace's OWN registered runtime when it named one, else the
+  // deployment default. A named-but-missing runtime is a 404 that says so — never a quiet fallback to the
+  // default, which would place a tenant's code somewhere they did not choose.
+  private async driverFor(tenant: string, runtime: string | undefined): Promise<Driver> {
+    if (runtime === undefined) return this.deps.driver;
+    const resolved = this.deps.driverFor ? await this.deps.driverFor(tenant, runtime) : undefined;
+    if (!resolved)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { runtime },
+        `No runtime '${runtime}' this workspace can place a session on (register it, or omit runtime to use the default compute).`,
+      );
+    return resolved;
+  }
+
   // Boot a session: capacity → resolve the image → provision → ONLY THEN the ledger record (born running,
   // run.submitted fact via the E0 outbox). The id is minted before the record so the map and the row agree.
   async create(input: CreateSandboxInput): Promise<RunRecord> {
@@ -339,9 +366,10 @@ export class SandboxSessionService {
     const registryAuths = await this.deps
       .resolvePullAuths?.(input.tenant, [resolved.image])
       .catch(() => [] as RegistryAuth[]);
+    const driver = await this.driverFor(input.tenant, input.runtime);
     let handle: ComputeHandle;
     try {
-      handle = await this.deps.driver.provision({
+      handle = await driver.provision({
         os: "linux",
         image: resolved.image,
         needs: ["shell"],
@@ -388,6 +416,7 @@ export class SandboxSessionService {
         ...(resolved.world !== undefined ? { world: resolved.world, hibernate } : {}),
         ...(repo !== undefined ? { repo } : {}),
         ...(input.agent !== undefined ? { agent: input.agent } : {}),
+        ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
         ...(resolved.playground ? { attach: ["exec" as const, "tasks" as const] } : {}),
         now: this.now(),
       });
@@ -406,6 +435,7 @@ export class SandboxSessionService {
         createdBy: input.createdBy,
         label: record.harness.id,
         bootImage: resolved.image,
+        driver,
         ...(resolved.world !== undefined ? { world: resolved.world } : {}),
         hibernate,
         ...(repo !== undefined ? { repo } : {}),
@@ -845,7 +875,10 @@ export class SandboxSessionService {
         ...(record.session.agent !== undefined ? { agent: record.session.agent } : {}),
       }).catch(() => undefined);
     }
-    if (computeId !== undefined && this.deps.driver.reap) await this.deps.driver.reap(computeId).catch(() => undefined);
+    // Reap through the driver that PROVISIONED it: the row records where the session was placed, and a
+    // default-driver reap would silently miss a container living on the workspace's own cluster.
+    const orphanDriver = await this.driverFor(tenant, record.runtime).catch(() => undefined);
+    if (computeId !== undefined && orphanDriver?.reap) await orphanDriver.reap(computeId).catch(() => undefined);
     await this.settle(runId, tenant, "orphaned", record.session?.agent);
     return { reaped: true };
   }
@@ -1016,7 +1049,11 @@ export class SandboxSessionService {
   }): Promise<WorldSnapshotResult> {
     const images = this.deps.images;
     const publish = this.deps.publishWorldVersion;
-    const snapshot = this.deps.driver.snapshot?.bind(this.deps.driver);
+    // The driver that holds THIS session — not the deployment default. A session on a cluster has no daemon
+    // to commit with even where the default driver does, so asking the wrong one would take a path that
+    // cannot reach this container.
+    const sessionDriver = this.sessions.get(input.runId)?.driver ?? this.deps.driver;
+    const snapshot = sessionDriver.snapshot?.bind(sessionDriver);
     const publishLayer = this.deps.publishLayerSnapshot;
     if (!images || !publish || (!snapshot && !publishLayer))
       throw new BadRequestError("BAD_REQUEST", {}, "World snapshots are not configured.");

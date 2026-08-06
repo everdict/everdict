@@ -197,15 +197,28 @@ trajectory — then works off the control-plane host **with no changes at all**.
   dispatch lanes use (namespace + isolation runtime, `assertHardenedIsolation`) — a session runs untrusted
   code exactly as an eval case does and must not be isolated by a second, nearby rule.
 
-`EVERDICT_SANDBOX_DRIVER=nomad` + `EVERDICT_SANDBOX_NOMAD_ADDR` (`_TOKEN`, `_NAMESPACE`) selects it; `docker`
-stays the default and the faster path where the control plane and the container share a host.
+`EVERDICT_SANDBOX_DRIVER=nomad` + `EVERDICT_SANDBOX_NOMAD_ADDR` (`_TOKEN`, `_NAMESPACE`) selects the
+deployment's default compute; `docker` stays the default and the faster path where the control plane and the
+container share a host.
+
+**A workspace can place a session on its OWN runtime.** `create({runtime})` names a registered `RuntimeSpec`
+— the same axis a run's `placement.target` names — and the service resolves a driver for it (cached per
+`tenant:id@version`, cluster-API credentials from the tenant's secret store, never in the alloc env). The
+runtime lands on the run row (`runtime` + `placement.where:"runtime"`), which matters twice over: the console
+can say where a shell actually ran, and the **crash-path reaper resolves the same driver from the row** — a
+default-driver reap would silently miss a container living on the workspace's cluster. Likewise a snapshot
+asks the driver that HOLDS the session, not the deployment default, because a cluster session has no daemon
+to commit with even where the default driver does.
+
+A runtime the workspace does not have is a **404 naming it** — never a quiet fall back to the deployment's
+compute, which would run a tenant's code somewhere they did not choose. A non-nomad runtime is a 400 saying
+which kinds can host a session.
 
 ## Not yet (the rest of the arc)
 
-- **Per-tenant runtime selection for sessions**: the cluster is operator-configured (one address), not
-  resolved from the tenant's registered `RuntimeSpec` the way a dispatched case's is.
 - **A cluster session has not been drilled live** — this host has no Nomad cluster. The unit tests pin the
-  submitted job's shape, the zone application and the exec argv; the round trip is unverified.
+  submitted job's shape, the zone application, the exec argv, the purge paths and the placement/reap routing;
+  the round trip is unverified.
 - **Queueing**: a refused create is a refusal, not a wait.
 - **A credentialed git push has not been drilled live** (W2) — it needs a GitHub App installation, which
   grants real write access and is the workspace owner's call.

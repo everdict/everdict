@@ -10,12 +10,12 @@ import type {
 } from "@everdict/application-control";
 import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
 import { NomadSessionDriver } from "@everdict/backends";
-import { NotFoundError, type RegistryAuth } from "@everdict/contracts";
+import { BadRequestError, type Driver, NotFoundError, type RegistryAuth } from "@everdict/contracts";
 import type { BudgetTracker, TrustZonePolicy, UsageMeter } from "@everdict/domain";
 import { canConsumeCapability, harnessAuthEnv, parseImageRef, resolveHarnessSecrets } from "@everdict/domain";
 import { DockerDriver } from "@everdict/drivers";
 import { makeHarness } from "@everdict/job-runner";
-import type { HarnessInstanceRegistry, ModelRegistry } from "@everdict/registry";
+import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
 import { resolveSpecModel } from "../core/execution/model-resolving-dispatcher.js";
 import type { ScopedSecretsFn } from "./types.js";
 
@@ -53,6 +53,12 @@ export function buildSandboxSessions(opts: {
   publishLayerSnapshot?: SandboxSessionServiceDeps["publishLayerSnapshot"];
   // The operator's isolation policy — applied to a cluster-placed session exactly as to a dispatched case.
   trustZones?: TrustZonePolicy;
+  // The workspace's own registered runtimes (W4): a session can be placed on the tenant's cluster instead of
+  // the deployment default, the same axis a run's placement.target names.
+  runtimes?: RuntimeRegistry;
+  // Cluster-API credentials for that runtime (`spec.authSecret` → the tenant's secret store). Resolved per
+  // build and NEVER placed in the alloc env — the same separation the dispatch lane keeps.
+  runtimeSecretsFor?: (tenant: string) => Promise<Record<string, string>>;
 }): SandboxSessionService | undefined {
   // WHERE a session's container lives. `docker` is this host (dev, and the fastest snapshot — the driver can
   // commit); `nomad` places it on a cluster, which is what takes worlds off the control-plane host. The
@@ -217,9 +223,42 @@ export function buildSandboxSessions(opts: {
           },
         }
       : undefined;
+  // A session placed on the WORKSPACE's runtime. Cached per (tenant, runtime@version) because a driver is a
+  // client, not state — rebuilding one per session would re-resolve secrets on every create. A runtime kind
+  // that cannot host a session is a 400 that says which kinds can, rather than a driver that fails later.
+  const sessionDrivers = new Map<string, Driver>();
+  const { runtimes, runtimeSecretsFor } = opts;
+  const driverFor =
+    runtimes !== undefined
+      ? async (tenant: string, runtime: string): Promise<Driver | undefined> => {
+          const spec = await runtimes.get(tenant, runtime).catch(() => undefined);
+          if (!spec) return undefined;
+          if (spec.kind !== "nomad")
+            throw new BadRequestError(
+              "BAD_REQUEST",
+              { runtime, kind: spec.kind },
+              `Runtime '${runtime}' is a ${spec.kind} runtime — only nomad runtimes can host a sandbox session today.`,
+            );
+          const key = `${tenant}:${spec.id}@${spec.version}`;
+          const cached = sessionDrivers.get(key);
+          if (cached) return cached;
+          const secrets = runtimeSecretsFor ? await runtimeSecretsFor(tenant) : {};
+          const apiToken = spec.authSecret ? secrets[spec.authSecret] : undefined;
+          const built = new NomadSessionDriver({
+            addr: spec.addr,
+            ...(apiToken ? { apiToken } : {}),
+            ...(spec.namespace ? { namespace: spec.namespace } : {}),
+            ...(spec.datacenters ? { datacenters: spec.datacenters } : {}),
+            ...(opts.trustZones ? { trustZones: opts.trustZones } : {}),
+          });
+          sessionDrivers.set(key, built);
+          return built;
+        }
+      : undefined;
   return new SandboxSessionService({
     store: opts.store,
     driver,
+    ...(driverFor ? { driverFor } : {}),
     ...(git ? { git } : {}),
     ...(opts.trajectories ? { trajectories: opts.trajectories } : {}),
     ...(opts.events ? { events: opts.events } : {}),

@@ -1280,3 +1280,75 @@ describe("SandboxSessionService — snapshot without a container daemon", () => 
     expect(record.session?.world).toBe("proj"); // the other session is untouched
   });
 });
+
+// Placement (W4): a workspace with its own cluster runs its worlds there. The axis is the same one a run's
+// placement.target names, and the row records it so a LATER process reaps through the right compute.
+describe("SandboxSessionService — placing a session on the workspace's own runtime", () => {
+  it("provisions on the named runtime, records it, and reaps the orphan through THAT driver", async () => {
+    const tenantDriver = fakeDriver();
+    const asked: Array<{ tenant: string; runtime: string }> = [];
+    const ctx = build({
+      driverFor: async (tenant, runtime) => {
+        asked.push({ tenant, runtime });
+        return runtime === "acme-nomad" ? tenantDriver.driver : undefined;
+      },
+    });
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      image: "img",
+      runtime: "acme-nomad",
+      ttlSec: 60,
+    });
+    expect(asked).toEqual([{ tenant: "acme", runtime: "acme-nomad" }]);
+    expect(tenantDriver.provisioned).toHaveLength(1); // the tenant's cluster, not the default
+    expect(ctx.driver.provisioned).toHaveLength(0);
+    expect(record.runtime).toBe("acme-nomad"); // on the row — the reaper has nothing else to go on
+
+    // A later process: no live handle, only the row. The reap must reach the tenant's cluster.
+    const rebornTenant = fakeDriver();
+    const reborn = new SandboxSessionService({
+      store: ctx.runStore.store,
+      driver: fakeDriver().driver,
+      driverFor: async (_t, runtime) => (runtime === "acme-nomad" ? rebornTenant.driver : undefined),
+      now: () => "2026-07-30T01:00:00.000Z", // past the deadline
+    });
+    await expect(reborn.reap("acme", record.id)).resolves.toEqual({ reaped: true });
+    expect(rebornTenant.reaped).toEqual(["c-1"]);
+  });
+
+  it("a runtime the workspace does not have is a 404 naming it — never a quiet fall back to our compute", async () => {
+    const ctx = build({ driverFor: async () => undefined });
+    await expect(
+      ctx.service.create({ tenant: "acme", createdBy: "alice", image: "img", runtime: "ghost" }),
+    ).rejects.toMatchObject({ status: 404, extra: { runtime: "ghost" } });
+    expect(ctx.driver.provisioned).toHaveLength(0); // the default compute never saw it
+
+    // With no resolver wired at all, naming a runtime is still a 404 rather than silent default placement.
+    const bare = build();
+    await expect(
+      bare.service.create({ tenant: "acme", createdBy: "alice", image: "img", runtime: "acme-nomad" }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("snapshots through the driver that HOLDS the session, not the deployment default", async () => {
+    const committed: string[] = [];
+    const daemonless = fakeDriver(); // the tenant's cluster — no snapshot()
+    const ctx = buildWorld({
+      driver: fakeDriver({ snapshot: (id) => committed.push(id) }).driver, // the default CAN commit
+      driverFor: async () => daemonless.driver,
+      publishLayerSnapshot: async () => ({ digest: "sha256:via-registry" }),
+    });
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "reg.local:5000/acme-ns/proj:v1",
+      runtime: "acme-nomad",
+    });
+    await ctx.service.snapshot(creator, record.id, {});
+    // Asking the default driver would take a path that cannot reach this container at all.
+    expect(committed).toEqual([]);
+    expect(daemonless.execs.some((c) => c.includes("base64"))).toBe(true);
+  });
+});

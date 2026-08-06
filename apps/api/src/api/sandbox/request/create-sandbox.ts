@@ -35,6 +35,9 @@ export const CreateSandboxBodySchema = z
         dir: z.string().min(1).max(512).optional(), // default "work"
       })
       .optional(),
+    // W4: place the session on a runtime this workspace registered (the same axis a run's placement.target
+    // names). Unset = the deployment's default compute.
+    runtime: z.string().min(1).max(200).optional(),
     ttlSec: z
       .number()
       .int()

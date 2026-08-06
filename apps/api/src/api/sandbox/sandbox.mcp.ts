@@ -76,6 +76,12 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
             "Clone a repository into the session (default directory 'work'). A private repo needs the " +
               "workspace GitHub App installed on its owner; commit with sandbox_exec, publish with sandbox_git_push",
           ),
+        runtime: z
+          .string()
+          .optional()
+          .describe(
+            "Place the session on a runtime this workspace registered (nomad); omit for the deployment's default compute",
+          ),
         ttlSec: z.number().int().positive().max(14400).optional().describe("Session TTL (default 900s)"),
       },
     },
@@ -86,6 +92,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       world,
       hibernate,
       repo,
+      runtime,
       ttlSec,
     }: {
       image?: string;
@@ -94,6 +101,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       world?: { id: string };
       hibernate?: boolean;
       repo?: { git: string; ref?: string; dir?: string };
+      runtime?: string;
       ttlSec?: number;
     }) =>
       run(principal, "runs:submit", async () =>
@@ -108,6 +116,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
             ...(hibernate !== undefined ? { hibernate } : {}),
             ...(repo !== undefined ? { repo } : {}),
             ...(agent !== undefined ? { agent } : {}),
+            ...(runtime !== undefined ? { runtime } : {}),
             ...(ttlSec !== undefined ? { ttlSec } : {}),
           }),
         ),

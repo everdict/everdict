@@ -252,6 +252,7 @@ export class Run {
     hibernate?: boolean; // auto-snapshot at teardown instead of losing the filesystem
     repo?: { git: string; ref?: string; dir: string }; // W2: the repository cloned in at create
     agent?: { agentId: string; conversationId?: string }; // W3: whose loop guard key the facts carry
+    runtime?: string; // W4: the workspace runtime this session was placed on; unset = the default compute
     origin?: RunOrigin;
     envelope?: RunEnvelope;
     attach?: RunAttachChannel[]; // default ["exec"]; a harness session adds "tasks" (test-case submissions)
@@ -269,7 +270,14 @@ export class Run {
       class: "interactive", // a person is at the shell
       lifetime: "session", // held open until closed/expired — `running` means "alive", not "in progress"
       origin: input.origin ?? { cause: "member", actor: input.createdBy },
-      placement: { where: "driver", isolation: "container" },
+      ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
+      placement: {
+        // A session on the workspace's own runtime is placed compute, not this host's — the same distinction
+        // the eval lane draws, so the console can say WHERE a shell actually ran.
+        where: input.runtime !== undefined ? "runtime" : "driver",
+        ...(input.runtime !== undefined ? { target: input.runtime } : {}),
+        isolation: "container",
+      },
       attach: input.attach ?? ["exec"],
       ...(input.envelope !== undefined ? { envelope: input.envelope } : {}),
       session: {
