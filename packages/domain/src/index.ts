@@ -192,6 +192,7 @@ export {
   harnessAuthEnv,
   type HarnessSecretMaps,
   referencesUserSecret,
+  resolveEnvValues,
   resolveHarnessSecrets,
 } from "./harness/harness-secrets.js";
 
@@ -312,6 +313,9 @@ export {
   canConsumeCapability,
   filterConsumableCapabilities,
 } from "./capability/capability-visibility.js";
+// delegation — the handoff brief rendered as the markdown the delegate reads (one renderer: the seeded file,
+// the trajectory marker and any later surface must not disagree about what was asked).
+export { renderDelegationBrief } from "./delegation/render-brief.js";
 // capability — the first-party default-toolset selection kernel (which built-in tools apply to a workspace)
 export {
   type DefaultCapabilityInput,

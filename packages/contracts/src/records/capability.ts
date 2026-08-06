@@ -1,10 +1,12 @@
 import { z } from "zod";
 import {
+  EnvValueSchema,
   FrontDoorSpecSchema,
   TopologyDependencySchema,
   TopologyServiceSchema,
   TopologyTargetSchema,
 } from "../harness/harness-spec.js";
+import { ModelBindingSchema } from "../harness/model-spec.js";
 import { SkillFilesSchema } from "./skill.js";
 
 // Capability Store contracts — one discriminated `Capability` entity (kind ∈ mcp|code|skill|environment) that a
@@ -21,7 +23,7 @@ export const CapabilityVisibilitySchema = z.enum(["private", "workspace", "subse
 export type CapabilityVisibility = z.infer<typeof CapabilityVisibilitySchema>;
 
 // The kind discriminant (also stored as an indexed column for browse-by-type). Derived from `spec.type`.
-export const CapabilityTypeSchema = z.enum(["mcp", "code", "skill", "environment"]);
+export const CapabilityTypeSchema = z.enum(["mcp", "code", "skill", "environment", "delegation"]);
 export type CapabilityType = z.infer<typeof CapabilityTypeSchema>;
 
 // The reserved OWNER workspace for FIRST-PARTY (Everdict-authored) capabilities — the default-toolset tier. Mirrors
@@ -153,11 +155,50 @@ export const EnvironmentImageSpecSchema = z.object({
 });
 export type EnvironmentImageSpec = z.infer<typeof EnvironmentImageSpecSchema>;
 
+// delegation — a WORK ENVIRONMENT everdict can hand work TO: which conversational agent runs, in which
+// prebuilt image, against which model, with which env/secrets, under which standing instructions. Registered
+// once, referenced thereafter — the alternative is every delegation re-specifying an image ref, hoping the
+// workspace secret tiers happen to hold the right names, and getting no model binding at all (a process
+// harness spec is `{kind,id,version}` and carries none of it).
+//
+// The delegate is EMPLOYED, not under test — which is why this is a capability and not a harness: a workspace
+// adopts it, shares it, versions it and picks it from the store, exactly like the tools and skills it already
+// keeps there. The profile never re-implements the agent; it pins the environment the agent runs in, so any
+// adapter carrying the `conversational` marker qualifies.
+export const DelegationProfileSpecSchema = z.object({
+  type: z.literal("delegation"),
+  // WHICH conversational agent runs (a built-in id like claude-code, or a registered harness).
+  harness: z.object({ id: z.string().min(1), version: z.string().optional() }),
+  // The prebuilt image the agent runs in — its CLI already installed, so a delegation costs no per-session
+  // install. Fully-qualified + pullable; digest-pinned recommended, like an environment asset.
+  image: z.string().min(1),
+  // A registered Model → baseUrl + underlying model + the key from its apiKeySecret, injected as env (the
+  // same resolution the eval lane does, billing attribution included). ModelRef.env remaps the var NAMES for
+  // a CLI that expects different ones.
+  model: ModelBindingSchema.optional(),
+  // Free-form environment: a literal, or {secretRef, scope} resolved from the workspace/personal tiers at
+  // boot. Values never live on the record.
+  env: z.record(z.string(), EnvValueSchema).default({}),
+  // The conversation's stable working directory (default "work"). Stable because a resuming agent keys its
+  // session store off the cwd — see docs/architecture/harness-playground.md §Conversations.
+  workDir: z.string().optional(),
+  // The STANDING brief — what this environment is, its conventions and its gotchas — seeded into the sandbox
+  // as a file the agent reads by convention. The per-delegation brief (goal/references/constraints) is
+  // separate and arrives per call; this is what is true of every delegation into this profile.
+  instructions: z.string(),
+  // The convention file THIS agent reads on start (CLAUDE.md · AGENTS.md · …). One string, so the profile
+  // generalizes past any single CLI's convention.
+  instructionsFile: z.string().min(1).default("CLAUDE.md"),
+  ttlSec: z.number().int().positive().optional(), // the delegation's default session budget
+});
+export type DelegationProfileSpec = z.infer<typeof DelegationProfileSpecSchema>;
+
 export const CapabilitySpecSchema = z.discriminatedUnion("type", [
   McpToolSpecSchema,
   CodeToolSpecSchema,
   SkillCapabilitySpecSchema,
   EnvironmentImageSpecSchema,
+  DelegationProfileSpecSchema,
 ]);
 export type CapabilitySpec = z.infer<typeof CapabilitySpecSchema>;
 

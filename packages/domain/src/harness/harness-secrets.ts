@@ -31,29 +31,39 @@ export interface HarnessSecretMaps {
   user?: Record<string, string>;
 }
 
+// One env map's {secretRef} values resolved against the tiers. The rule lives HERE so every carrier of an env
+// map — a harness spec's services, a delegation profile's env — resolves references identically; `missing`
+// collects the unresolvable names so the caller can refuse with all of them named at once (never silently
+// dropping a variable the author declared). Callers without their own collector pass a fresh set and check it.
+export function resolveEnvValues(
+  env: Record<string, EnvValue>,
+  secrets: HarnessSecretMaps,
+  missing: Set<string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (typeof v === "string") {
+      out[k] = v;
+      continue;
+    }
+    const isUser = v.scope === "user";
+    const val = (isUser ? (secrets.user ?? {}) : secrets.workspace)[v.secretRef];
+    if (val === undefined) {
+      missing.add(`${isUser ? "user:" : ""}${v.secretRef}`);
+      continue;
+    }
+    out[k] = val;
+  }
+  return out;
+}
+
 // Resolve secret references to their actual values across all env maps of a harness spec (just before dispatch, from SecretStore).
 // command = env, service = each service's env. The reference's scope ("user" | default "workspace") picks the tier.
 // If a referenced secret is missing, throw BadRequestError (stating what/which tier is missing).
 // All env values in the returned spec become strings (no plaintext stored in the registry) so consumption points use them directly.
 export function resolveHarnessSecrets(spec: HarnessSpec, secrets: HarnessSecretMaps): HarnessSpec {
   const missing = new Set<string>();
-  const resolve = (env: Record<string, EnvValue>): Record<string, string> => {
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(env)) {
-      if (typeof v === "string") {
-        out[k] = v;
-        continue;
-      }
-      const isUser = v.scope === "user";
-      const val = (isUser ? (secrets.user ?? {}) : secrets.workspace)[v.secretRef];
-      if (val === undefined) {
-        missing.add(`${isUser ? "user:" : ""}${v.secretRef}`);
-        continue;
-      }
-      out[k] = val;
-    }
-    return out;
-  };
+  const resolve = (env: Record<string, EnvValue>): Record<string, string> => resolveEnvValues(env, secrets, missing);
 
   // command's trace.authSecret (workspace secret name) → transient trace.auth value — in-job (collect=job) pull uses it
   // as the auth header (the agent can't reach SecretStore, so it's resolved just before dispatch like env).
