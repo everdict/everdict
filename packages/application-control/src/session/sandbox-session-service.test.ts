@@ -368,6 +368,43 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
     await expect(reborn.reap("acme", second.id)).resolves.toEqual({ reaped: false });
     await expect(reborn.reap("rival", second.id)).resolves.toEqual({ reaped: false });
   });
+
+  it("sweepOrphans reaps ledger rows past deadline+grace with no live handle here — and only those", async () => {
+    // Regression: a session whose durable reaper never armed (or whose process died holding the handle) sat
+    // `running` on the ledger forever — holding its workspace slot and its cluster capacity with it. The
+    // ledger sweep ends the zombie no matter HOW its timer was lost.
+    const before = build();
+    const zombie = await before.service.create({ tenant: "acme", createdBy: "alice", image: "img", ttlSec: 60 });
+    const fresh = await before.service.create({ tenant: "acme", createdBy: "alice", image: "img", ttlSec: 3600 });
+    // A NEW process finds only the rows: the zombie's deadline (00:01) + grace is long past, fresh is not.
+    const rebornDriver = fakeDriver();
+    const reborn = new SandboxSessionService({
+      store: before.runStore.store,
+      driver: rebornDriver.driver,
+      now: () => "2026-07-30T00:10:00.000Z",
+    });
+    await expect(reborn.sweepOrphans()).resolves.toBe(1);
+    const settled = await before.runStore.store.get(zombie.id);
+    expect(settled?.status).toBe("succeeded");
+    expect(settled?.session?.closedReason).toBe("orphaned");
+    expect(rebornDriver.reaped).toEqual(["c-1"]); // the stray container removed by the recorded compute id
+    expect((await before.runStore.store.get(fresh.id))?.status).toBe("running"); // inside its deadline
+
+    // Inside the grace window past the deadline, the row is left for its owner's normal teardown first.
+    const graced = new SandboxSessionService({
+      store: before.runStore.store,
+      driver: fakeDriver().driver,
+      now: () => "2026-07-30T01:00:30.000Z", // fresh's deadline (01:00) passed 30s ago — within grace
+    });
+    await expect(graced.sweepOrphans()).resolves.toBe(0);
+    expect((await before.runStore.store.get(fresh.id))?.status).toBe("running");
+
+    // A session live IN THIS process is the in-process sweep's business, never the ledger sweep's.
+    const holder = build();
+    await holder.service.create({ tenant: "acme", createdBy: "alice", image: "img", ttlSec: 60 });
+    holder.setNow("2026-07-30T00:10:00.000Z"); // way past deadline+grace, but the handle lives here
+    await expect(holder.service.sweepOrphans()).resolves.toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------

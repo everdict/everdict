@@ -276,6 +276,29 @@ describe("BrowserSessionService", () => {
     expect(await runs.get(view.id)).toMatchObject({ status: "succeeded", session: { closedReason: "expired" } });
   });
 
+  it("sweepOrphans settles ledger rows a dead process left running past their deadline (+grace)", async () => {
+    // Regression: a control plane that died holding the live browser left its run `running` on the ledger
+    // forever — no process was left that knew the session, so nothing ever settled the row.
+    const runs = new InMemoryRunStore();
+    let clock = 1_000;
+    const holder = svc(new FakeProvisioner(), { runs, now: () => clock, ttlMs: 5_000 });
+    const view = await holder.create({ tenant: "acme", createdBy: "alice" }); // deadline at 6_000
+
+    clock = 6_000 + 120_000 + 1; // long past deadline + the grace window
+    // The process that still HOLDS the entry leaves it to its own sweep() — the ledger sweep never
+    // settles a session out from under its live owner.
+    await expect(holder.sweepOrphans()).resolves.toBe(0);
+    expect((await runs.get(view.id))?.status).toBe("running");
+
+    // A NEW process (fresh map) finds only the row — that is the orphan the sweep exists for.
+    const reborn = svc(new FakeProvisioner(), { runs, now: () => clock });
+    await expect(reborn.sweepOrphans()).resolves.toBe(1);
+    expect(await runs.get(view.id)).toMatchObject({ status: "succeeded", session: { closedReason: "expired" } });
+
+    // Idempotent — a settled row is no longer live, so a second pass finds nothing.
+    await expect(reborn.sweepOrphans()).resolves.toBe(0);
+  });
+
   // §5's tenant leg reaches this lane too. A live browser is a held-open container someone pays for, and it
   // used to answer no budget question at all.
   it("refuses past the tenant budget, and no browser is provisioned", async () => {
