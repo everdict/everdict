@@ -171,12 +171,16 @@ const DECISION_TONE = { approved: 'success', denied: 'danger', expired: 'outline
 // (`message`)로 눕는다 — 아무것도 안 보이는 줄보다는 원문이 낫다.
 export function ActivityEventRow({
   event,
+  more = 0,
   workspace,
   directory,
   locale,
   timeZone,
 }: {
   event: PlatformEvent
+  // 이 줄이 대신 서는 같은 행위자의 연속 같은-종류 사건 수(자기 자신 제외). 홈 피드가 버스트를 접을 때
+  // 넘긴다 — 한 턴에 파일 열댓 개를 발행한 에이전트가 피드 전체를 먹지 않게 하는 장치의 반쪽.
+  more?: number
   workspace: string
   directory: MemberDirectory
   locale: string
@@ -226,6 +230,7 @@ export function ActivityEventRow({
       <Badge tone="outline">
         {t.has(`activityVerb.${verb}`) ? t(`activityVerb.${verb}`) : verb}
       </Badge>
+      {more > 0 && <Badge tone="neutral">{t('activityMore', { count: more })}</Badge>}
       {values}
       {cited !== undefined && <MonoChip value={cited} />}
       {quote !== undefined && (

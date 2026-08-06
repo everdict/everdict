@@ -121,6 +121,27 @@ describe('workspace activity row', () => {
     expect(comment).toContain('The judge rewrite slipped a week.')
   })
 
+  it('counts the rest of a collapsed burst on the line', () => {
+    const out = renderToStaticMarkup(
+      <NextIntlClientProvider locale="en" timeZone="UTC" messages={en}>
+        <ActivityEventRow
+          event={evt({
+            kind: 'file.published',
+            actor: 'dana',
+            subject: { type: 'file', id: 'memory/MEMORY.md' },
+            payload: { path: 'memory/MEMORY.md' },
+          })}
+          more={12}
+          workspace="acme"
+          directory={DIRECTORY}
+          locale="en"
+          timeZone="UTC"
+        />
+      </NextIntlClientProvider>
+    )
+    expect(out).toContain('+12 more')
+  })
+
   it('falls back to the recorded message only when the payload offers nothing to read', () => {
     const out = render(
       evt({ kind: 'trace.ingestion_throttled', subject: { type: 'workspace', id: 'acme' } })

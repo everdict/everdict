@@ -1777,7 +1777,8 @@
       "pass": "pass",
       "fail": "fail"
     },
-    "activityCarriedOver": "{count} carried over"
+    "activityCarriedOver": "{count} carried over",
+    "activityMore": "+{count} more"
   },
   "palette": {
     "placeholder": "Go to a page or run an action…",

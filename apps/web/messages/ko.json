@@ -1777,7 +1777,8 @@
       "pass": "통과",
       "fail": "실패"
     },
-    "activityCarriedOver": "{count}건 이월"
+    "activityCarriedOver": "{count}건 이월",
+    "activityMore": "외 {count}건"
   },
   "palette": {
     "placeholder": "페이지로 이동하거나 작업 실행…",
