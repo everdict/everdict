@@ -21,6 +21,13 @@ export class BackendRegistry {
     return this.map.has(name);
   }
 
+  // The registered instance, or undefined — for a caller that wants to REUSE this deployment's target if it
+  // exists and build one otherwise (the sandbox lane: a session and a case must never own the same cluster
+  // twice). `get` is for callers where a missing target is the caller's error.
+  tryGet(name: string): Backend | undefined {
+    return this.map.get(name);
+  }
+
   names(): string[] {
     return [...this.map.keys()];
   }

@@ -9,13 +9,21 @@ import type {
   WorkspaceImages,
 } from "@everdict/application-control";
 import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
-import { type Backend, DockerBackend, NomadBackend, buildRuntimeBackend, isSessionable } from "@everdict/backends";
+import {
+  type Backend,
+  type BackendRegistry,
+  DockerBackend,
+  NomadBackend,
+  buildRuntimeBackend,
+  isSessionable,
+} from "@everdict/backends";
 import { BadRequestError, type Driver, NotFoundError, type RegistryAuth } from "@everdict/contracts";
 import type { BudgetTracker, TrustZonePolicy, UsageMeter } from "@everdict/domain";
 import { canConsumeCapability, harnessAuthEnv, parseImageRef, resolveHarnessSecrets } from "@everdict/domain";
 import { makeHarness } from "@everdict/job-runner";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
 import { resolveSpecModel } from "../core/execution/model-resolving-dispatcher.js";
+import type { DeploymentNomad } from "./nomad-env.js";
 import type { ScopedSecretsFn } from "./types.js";
 
 // Sandbox session runs (execution-model P6) are OPT-IN infrastructure, exactly like file execution: the
@@ -72,10 +80,15 @@ export function buildSandboxSessions(opts: {
   // Cluster-API credentials for that runtime (`spec.authSecret` → the tenant's secret store). Resolved per
   // build and NEVER placed in the alloc env — the same separation the dispatch lane keeps.
   runtimeSecretsFor?: (tenant: string) => Promise<Record<string, string>>;
+  // The eval lane's own placement targets. A `nomad` registered here IS this deployment's cluster, so a
+  // session takes that object rather than a lookalike (W5).
+  backends?: BackendRegistry;
+  // THE deployment's Nomad, read once for both lanes (composition/nomad-env).
+  nomad?: DeploymentNomad;
 }): SandboxSessionService | undefined {
   // WHERE a session's container lives. `docker` is this host (dev, and the fastest snapshot — the driver can
   // commit); `nomad` places it on a cluster, which is what takes worlds off the control-plane host. The
-  // cluster driver cannot reach a daemon, so its snapshots go through the registry layer-append path — which
+  // cluster backend cannot reach a daemon, so its snapshots go through the registry layer-append path — which
   // is why that had to exist first (docs/architecture/agent-worlds.md §W4).
   const driverKind = process.env.EVERDICT_SANDBOX_DRIVER;
   if (driverKind === undefined || driverKind === "") return undefined;
@@ -83,34 +96,37 @@ export function buildSandboxSessions(opts: {
     console.warn(`▶ sandbox sessions: ignoring EVERDICT_SANDBOX_DRIVER='${driverKind}' (expected 'docker' or 'nomad')`);
     return undefined;
   }
-  const nomadAddr = process.env.EVERDICT_SANDBOX_NOMAD_ADDR ?? process.env.NOMAD_ADDR;
-  if (driverKind === "nomad" && (nomadAddr === undefined || nomadAddr === "")) {
-    console.warn("▶ sandbox sessions: EVERDICT_SANDBOX_DRIVER=nomad needs EVERDICT_SANDBOX_NOMAD_ADDR (or NOMAD_ADDR)");
+  if (driverKind === "nomad" && opts.nomad === undefined) {
+    console.warn("▶ sandbox sessions: EVERDICT_SANDBOX_DRIVER=nomad needs NOMAD_ADDR (or EVERDICT_SANDBOX_NOMAD_ADDR)");
     return undefined;
   }
-  // The deployment's default compute. A BACKEND in both cases, narrowed to its session mode: the same object
-  // that dispatches eval cases to this target also holds a session open on it, so placement knowledge, trust
-  // zones and — the part that was actually broken — CAPACITY accounting have one owner instead of two.
+  // The deployment's default compute — the SAME OBJECT the eval lane dispatches to where there is one. A
+  // session and a case are two modes of one placement target, so re-deriving the cluster here would be a
+  // second owner of it: the address, the credential, the namespace and the trust zone would each have to be
+  // remembered twice, and a held-open session would consume a machine the scheduler's `capacity()` never
+  // counted (it only knows the objects in its registry). Where the eval lane registered nothing — the common
+  // `runtime-only` deployment — we build the one target, from the one config block (composition/nomad-env),
+  // so it still cannot be a different cluster.
+  const registered = driverKind === "nomad" ? opts.backends?.tryGet("nomad") : undefined;
   const defaultBackend =
-    driverKind === "nomad" && nomadAddr !== undefined
+    registered ??
+    (driverKind === "nomad" && opts.nomad !== undefined
       ? new NomadBackend({
-          addr: nomadAddr,
+          addr: opts.nomad.addr,
           // The DISPATCH-mode image (what an eval case runs). A session boots the image its ComputeSpec names
           // — the world — so this only matters if the same target is also asked to place a case.
           image: process.env.EVERDICT_AGENT_IMAGE ?? "everdict-job-runner",
-          ...(process.env.EVERDICT_SANDBOX_NOMAD_TOKEN ? { apiToken: process.env.EVERDICT_SANDBOX_NOMAD_TOKEN } : {}),
-          ...(process.env.EVERDICT_SANDBOX_NOMAD_NAMESPACE
-            ? { namespace: process.env.EVERDICT_SANDBOX_NOMAD_NAMESPACE }
-            : {}),
+          ...(opts.nomad.apiToken ? { apiToken: opts.nomad.apiToken } : {}),
+          ...(opts.nomad.namespace ? { namespace: opts.nomad.namespace } : {}),
           // The SAME isolation policy the dispatch lanes use — a session runs untrusted code exactly as an
           // eval case does, so it must not be isolated by a second, nearby rule.
           ...(opts.trustZones ? { trustZones: opts.trustZones } : {}),
         })
-      : new DockerBackend();
+      : new DockerBackend());
   const driver = asSessionCompute(defaultBackend, driverKind);
   console.log(
     driverKind === "nomad"
-      ? `▶ sandbox sessions: nomad at ${nomadAddr} (cluster-placed; snapshots publish through the registry)`
+      ? `▶ sandbox sessions: nomad at ${opts.nomad?.addr} (${registered ? "the eval lane's own backend" : "cluster-placed"}; snapshots publish through the registry)`
       : "▶ sandbox sessions: docker (POST /sandboxes + create_sandbox)",
   );
   const capabilities = opts.capabilities;

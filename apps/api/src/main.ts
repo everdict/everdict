@@ -61,6 +61,7 @@ import { buildFileExecutionService } from "./composition/file-execution.js";
 import { buildManagedImages } from "./composition/images.js";
 import { buildIntegrations } from "./composition/integrations.js";
 import { lateBoundEmitter, lateBoundIssueLinker } from "./composition/late-events.js";
+import { deploymentNomad } from "./composition/nomad-env.js";
 import { makePersistence } from "./composition/persistence.js";
 import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
@@ -144,7 +145,9 @@ async function main(): Promise<void> {
   if (proxy) console.log(`[everdict] outbound proxy: ${proxy.httpsProxy ?? proxy.httpProxy} (NO_PROXY honored)`);
 
   const port = Number(process.env.PORT ?? "8787");
-  const nomadAddr = process.env.NOMAD_ADDR;
+  // THE deployment's Nomad — one block for BOTH lanes (composition/nomad-env). An eval case and a world
+  // session are two modes of one placement target, so they must not be able to name two clusters.
+  const nomad = deploymentNomad();
   const k8sContext = process.env.EVERDICT_K8S_CONTEXT;
   const image = process.env.EVERDICT_AGENT_IMAGE;
 
@@ -327,11 +330,19 @@ async function main(): Promise<void> {
   // (Datasets/runtimes already followed this rule.) The _shared fallback mechanism itself stays, so a real shared
   // entity registered later still shows through; a workspace registers what it needs.
 
+  // Per-tenant isolation for every dispatch — ONE policy for the process, chosen by the operator and
+  // announced at boot (composition/trust-zones.ts). Resolved HERE, above the backends, because the
+  // deployment-wide targets must apply it too: it also feeds the tenant-runtime lane, the sandbox sessions and
+  // the interactive browser sessions below, so a tenant's eval jobs, its worlds and its live browsers are
+  // isolated by the same rule rather than several nearby guesses.
+  const { trustZones } = buildTrustZones();
+
   const { backends, scheduler, schedulingControl, autoscale, scalingTargets, tenantQuotas } = buildExecutionScheduling({
-    nomadAddr,
+    nomad,
     k8sContext,
     image,
     secretStore,
+    ...(trustZones ? { trustZones } : {}),
   });
   // M2 — runtime.circuit_opened rides the breaker's own closed→open transition (late-bound: the platform event
   // service is built after the scheduler). Key format is `${tenant}:${runtimeId}` — split on the FIRST colon
@@ -392,11 +403,6 @@ async function main(): Promise<void> {
     workspaceImages
       ? { host: workspaceImages.endpoint, namespace: workspaceImages.namespaceFor(workspace) }
       : undefined;
-
-  // Per-tenant isolation for every dispatch — ONE policy for the process, chosen by the operator and
-  // announced at boot (composition/trust-zones.ts). Also feeds the interactive browser sessions below, so a
-  // tenant's eval jobs and its live browsers are isolated by the same rule rather than two nearby guesses.
-  const { trustZones } = buildTrustZones();
 
   const {
     runnerHub,
@@ -969,6 +975,10 @@ async function main(): Promise<void> {
     ...(trustZones ? { trustZones } : {}),
     runtimes: runtimeRegistry,
     runtimeSecretsFor,
+    // W5: a session takes the eval lane's OWN nomad where one is registered, so the cluster has one owner —
+    // one credential, one trust zone, one capacity envelope that actually counts held-open sessions.
+    backends,
+    ...(nomad ? { nomad } : {}),
     // T-b: the durable reaper rides the same Temporal driver as approvals — a CP dying with the live
     // handle no longer leaks the container or the row. extend re-arms the deadline on touch (W1).
     ...(approvalTemporal
@@ -1193,7 +1203,7 @@ async function main(): Promise<void> {
 
   await app.listen({ port, host: "0.0.0.0" });
   console.error(
-    `▶ everdict-api on :${port} (backend:${nomadAddr ? "nomad" : k8sContext ? "k8s" : "runtime-only"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.EVERDICT_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"} runtime:required)`,
+    `▶ everdict-api on :${port} (backend:${nomad ? "nomad" : k8sContext ? "k8s" : "runtime-only"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.EVERDICT_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"} runtime:required)`,
   );
 }
 

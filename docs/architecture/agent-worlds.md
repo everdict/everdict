@@ -194,6 +194,10 @@ Both modes submit under the `everdict-` prefix, so **`capacity()` counts a sessi
 case. `DockerBackend` is the same story on a host: it already owned a `DockerDriver` internally, and now says
 so in its type.
 
+One object also means **one isolation policy**: the operator's trust zones are now resolved above the backends
+and applied to the deployment-wide targets as well, not only to tenant-registered runtimes — otherwise reusing
+the eval lane's backend would have quietly handed a session weaker isolation than the case beside it.
+
 Which targets have the mode is a **typed capability, not a feature-detect** — `isSessionable(backend)`, the
 guard shape `.claude/rules/backends.md` prescribes for every other capability (`isObservable`, `isShellable`,
 …). K8s has no session mode and simply does not implement it, so asking for one is a 400 before anything is
@@ -210,9 +214,18 @@ trajectory — then works off the control-plane host **with no changes at all**.
   dispatch lanes use (namespace + isolation runtime, `assertHardenedIsolation`) — a session runs untrusted
   code exactly as an eval case does and must not be isolated by a second, nearby rule.
 
-`EVERDICT_SANDBOX_DRIVER=nomad` + `EVERDICT_SANDBOX_NOMAD_ADDR` (`_TOKEN`, `_NAMESPACE`) selects the
-deployment's default compute; `docker` stays the default and the faster path where the control plane and the
-container share a host.
+`EVERDICT_SANDBOX_DRIVER=nomad` selects the deployment's default compute; `docker` stays the default and the
+faster path where the control plane and the container share a host.
+
+**A session may not look somewhere else.** `nomad` means *this deployment's* Nomad — the one the eval lane
+places cases on, read once as one block (`composition/nomad-env`) and handed to both lanes. Where the eval
+lane registered a `nomad` backend, the sandbox takes **that object**, so the cluster has a single owner: one
+credential, one trust zone, and a `capacity()` that counts held-open sessions instead of a second instance's
+invisible ones. Where it registered none (the ordinary `runtime-only` deployment), the sandbox builds the one
+target from that same block. The `EVERDICT_SANDBOX_NOMAD_*` names survive as aliases, but **a disagreement is
+a boot failure naming both values** — a typo used to split the deployment in half silently, placing sessions
+on a cluster the scheduler never looked at. The same block also carries the ACL token to the eval lane's
+backend, which previously had no way to receive one at all.
 
 **A workspace can place a session on its OWN runtime.** `create({runtime})` names a registered `RuntimeSpec`
 — the same axis a run's `placement.target` names — and the composition turns that spec into compute through

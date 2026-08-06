@@ -2,20 +2,26 @@ import { Metrics } from "@everdict/application-control";
 import { type AutoscaleConfig, parseAutoscale, parseTenantMap } from "@everdict/application-control";
 import { BackendRegistry, K8sBackend, NomadBackend, Scheduler } from "@everdict/backends";
 import type { BudgetStore, SecretStore, UsageStore } from "@everdict/db";
-import { Autoscaler, type BudgetLimit, CircuitBreaker, MutableSlots } from "@everdict/domain";
+import { Autoscaler, type BudgetLimit, CircuitBreaker, MutableSlots, type TrustZonePolicy } from "@everdict/domain";
 import { collectAuthEnv } from "@everdict/job-runner";
 import { persistentBudget } from "../common/budget-tracker.js";
 import { persistentUsageMeter } from "../common/usage-meter.js";
+import type { DeploymentNomad } from "./nomad-env.js";
 
 // Execution scheduling: the global env backends (Nomad/K8s) + their slot-autoscaling targets + the operator
 // fairness dials (quota/weight/queue-depth), feeding the capacity-aware tenant-fair Scheduler.
 export function buildExecutionScheduling(deps: {
-  nomadAddr: string | undefined;
+  // THE deployment's Nomad (composition/nomad-env) — the same value the sandbox lane gets, so an eval case and
+  // a world session cannot be placed on two different clusters.
+  nomad: DeploymentNomad | undefined;
   k8sContext: string | undefined;
   image: string | undefined;
   secretStore: SecretStore;
+  // The operator's isolation policy — the SAME one the tenant-runtime lane and the sandbox lane apply. A
+  // deployment-wide target runs untrusted eval code exactly as a tenant's own runtime does.
+  trustZones?: TrustZonePolicy;
 }) {
-  const { nomadAddr, k8sContext, image, secretStore } = deps;
+  const { nomad, k8sContext, image, secretStore, trustZones } = deps;
   // Inject workspace secrets (model/provider keys) only into that tenant's job env (no leakage). The store is always active.
   const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
 
@@ -31,15 +37,20 @@ export function buildExecutionScheduling(deps: {
     scalingTargets.push(slots);
     return slots;
   };
-  if (nomadAddr && image) {
+  if (nomad && image) {
     const slots = slotsFor("nomad");
     backends.register(
       "nomad",
       new NomadBackend({
-        addr: nomadAddr,
+        addr: nomad.addr,
         image,
+        // Cluster-API auth (X-Nomad-Token) — the deployment's own credential, never the alloc env. It used to
+        // reach only the sandbox lane, so an ACL-enabled cluster answered 403 to every dispatched case.
+        ...(nomad.apiToken ? { apiToken: nomad.apiToken } : {}),
+        ...(nomad.namespace ? { namespace: nomad.namespace } : {}),
         secretEnv: collectAuthEnv(),
         secrets,
+        ...(trustZones ? { trustZones } : {}),
         ...(slots ? { maxConcurrent: slots.get } : {}),
       }),
     );
@@ -52,6 +63,7 @@ export function buildExecutionScheduling(deps: {
         context: k8sContext,
         secretEnv: collectAuthEnv(),
         secrets,
+        ...(trustZones ? { trustZones } : {}),
         ...(slots ? { maxConcurrent: slots.get } : {}),
       }),
     );
