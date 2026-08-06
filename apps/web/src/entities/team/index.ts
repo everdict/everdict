@@ -24,4 +24,6 @@ export {
   type TeamSettingsSection,
 } from './lib/href'
 export { withResolvedTeamFilter } from './lib/team-filter'
+export { ownerChoicesFor, type OwnerChoices } from './lib/owner-choices'
 export { TeamKeyBadge } from './ui/team-key-badge'
+export { TeamPicker, type TeamPickerOption } from './ui/team-picker'

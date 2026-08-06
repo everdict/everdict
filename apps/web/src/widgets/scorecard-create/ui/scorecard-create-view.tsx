@@ -6,6 +6,7 @@ import { harnessesSchema } from '@/entities/harness'
 import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
+import { ownerChoicesFor, teamsSchema, type OwnerChoices } from '@/entities/team'
 import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -16,9 +17,10 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { ScorecardCreate } from './scorecard-create'
 
-// Starting a batch evaluation — one address, `/{workspace}/scorecards/new`. Nothing is team-pinned here: the
-// batch inherits the team that owns the harness chosen, so choosing what to run is also choosing whose result
-// it is. (The team-pinned twin under `…/team/ENG/scorecards/new` is gone with the team eval axis.)
+// Starting a batch evaluation — one address, `/{workspace}/scorecards/new`. By default the batch inherits the
+// team that owns the harness chosen, so choosing what to run is also choosing whose result it is; the form's
+// team field is the explicit override. (The team-pinned twin under `…/team/ENG/scorecards/new` is gone with
+// the team eval axis.)
 export async function ScorecardCreateView({ workspace }: { workspace: string }) {
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('scorecardsPage')
@@ -36,7 +38,15 @@ export async function ScorecardCreateView({ workspace }: { workspace: string }) 
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
   let traceSources: TraceSourceConfig[] = []
+  // Owning-team choices for the batch (only teams the caller can create into). Empty = picker hidden.
+  let ownerChoices: OwnerChoices = { teams: [] }
   if (allowed) {
+    try {
+      const teams = teamsSchema.parse(await controlPlane.listTeams(ctx))
+      ownerChoices = ownerChoicesFor(principal, teams, 'scorecards:run')
+    } catch {
+      ownerChoices = { teams: [] }
+    }
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
@@ -97,6 +107,10 @@ export async function ScorecardCreateView({ workspace }: { workspace: string }) 
           runners={runners}
           hasWorkspaceRunners={hasWorkspaceRunners}
           traceSources={traceSources}
+          teams={ownerChoices.teams}
+          {...(ownerChoices.defaultTeamId !== undefined
+            ? { defaultTeamId: ownerChoices.defaultTeamId }
+            : {})}
         />
       ) : (
         <EmptyState title={t('noRunPermTitle')} hint={t('noPermHint')} />

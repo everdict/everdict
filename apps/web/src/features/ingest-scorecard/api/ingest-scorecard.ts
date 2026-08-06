@@ -9,6 +9,9 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
 // 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export interface IngestScorecardInput {
+  // The owning team — an ingested batch is a result, and a result belongs to a team. Absent = the control
+  // plane's own fallback (the caller's team).
+  teamId?: string
   datasetId: string
   datasetVersion: string
   harnessId: string
@@ -36,6 +39,7 @@ export async function ingestScorecardAction(
     return { ok: false, error: t('tracesParseError') }
   }
   const body = {
+    ...(input.teamId ? { teamId: input.teamId } : {}),
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     traces,
@@ -49,6 +53,8 @@ export async function ingestScorecardAction(
 }
 
 export interface PullScorecardInput {
+  // Same owner rule as the push twin — absent = the control plane's own fallback (the caller's team).
+  teamId?: string
   datasetId: string
   datasetVersion: string
   harnessId: string
@@ -74,6 +80,7 @@ export async function pullScorecardAction(
     return { ok: false, error: t('runsParseError') }
   }
   const body = {
+    ...(input.teamId ? { teamId: input.teamId } : {}),
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     source: {

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 
+import { TeamPicker, type TeamPickerOption } from '@/entities/team'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -36,11 +37,21 @@ type Mode = 'push' | 'pull'
 
 // Trace ingest — two modes: push (uploaded TraceEvent[]) | pull (pull by runId from the tenant's OTel/MLflow).
 // The dataset/judge/harness labels are common. push takes traces JSON; pull takes source + runs JSON.
-export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }) {
+export function IngestScorecardForm({
+  datasets,
+  teams = [],
+  defaultTeamId,
+}: {
+  datasets: { id: string }[]
+  // The owning-team choices for the ingested batch (only teams the caller can create into).
+  teams?: TeamPickerOption[]
+  defaultTeamId?: string
+}) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const t = useTranslations('ingestScorecard')
   const [mode, setMode] = useState<Mode>('push')
+  const [teamId, setTeamId] = useState(defaultTeamId ?? '')
   const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '')
   const [datasetVersion, setDatasetVersion] = useState('latest')
   const [harnessId, setHarnessId] = useState('')
@@ -63,6 +74,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
     const res: IngestScorecardResult =
       mode === 'push'
         ? await ingestScorecardAction({
+            ...(teamId ? { teamId } : {}),
             datasetId,
             datasetVersion,
             harnessId,
@@ -70,6 +82,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
             tracesJson,
           })
         : await pullScorecardAction({
+            ...(teamId ? { teamId } : {}),
             datasetId,
             datasetVersion,
             harnessId,
@@ -153,6 +166,8 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
           />
         </div>
       </div>
+
+      <TeamPicker id="ingest-team" teams={teams} value={teamId} onChange={setTeamId} />
 
       {mode === 'push' ? (
         <div className="space-y-1.5">

@@ -3,6 +3,7 @@ import { getTranslations } from 'next-intl/server'
 
 import { IngestScorecardForm } from '@/features/ingest-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
+import { ownerChoicesFor, teamsSchema, type OwnerChoices } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -24,11 +25,19 @@ export default async function IngestScorecardPage({
   const allowed = can(principal?.roles, 'scorecards:run')
 
   let datasets: { id: string }[] = []
+  // Owning-team choices for the ingested batch (only teams the caller can create into). Empty = picker hidden.
+  let ownerChoices: OwnerChoices = { teams: [] }
   if (allowed) {
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
     } catch {
       // Even if the list fails, the form still works with text input
+    }
+    try {
+      const teams = teamsSchema.parse(await controlPlane.listTeams(ctx))
+      ownerChoices = ownerChoicesFor(principal, teams, 'scorecards:run')
+    } catch {
+      ownerChoices = { teams: [] }
     }
   }
 
@@ -44,7 +53,13 @@ export default async function IngestScorecardPage({
       <PageHeader title={t('ingest')} description={t('ingestDescription')} />
       {allowed ? (
         <Card className="max-w-2xl p-5">
-          <IngestScorecardForm datasets={datasets} />
+          <IngestScorecardForm
+            datasets={datasets}
+            teams={ownerChoices.teams}
+            {...(ownerChoices.defaultTeamId !== undefined
+              ? { defaultTeamId: ownerChoices.defaultTeamId }
+              : {})}
+          />
         </Card>
       ) : (
         <EmptyState title={t('noIngestPermTitle')} hint={t('noPermHint')} />

@@ -7,8 +7,8 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
 // 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export interface RunScorecardInput {
-  // The team this batch belongs to. Set when the form was opened under a team's own address; absent at the
-  // workspace address, where the control plane files the batch under the team that owns the harness.
+  // The team this batch belongs to — the form's explicit pick. Absent = the control plane files the batch
+  // under the team that owns the harness (the "follow the harness" default).
   teamId?: string
   datasetId: string
   datasetVersion: string

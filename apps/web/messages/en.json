@@ -2330,6 +2330,7 @@
     "harnessRequired": "Select a harness",
     "harnessPlaceholder": "Select harness",
     "harnessEmpty": "No harnesses",
+    "teamInheritOption": "Follow the harness's team",
     "judgesLabel": "Judges (optional)",
     "judgesTip": "Model/harness judges that score each case's trace. Picks aggregate as judge metrics (mean + pass-rate). Leave empty to score with the dataset's graders only.",
     "judgesHelp": "Selected judges score each trace and add judge metrics on the scorecard detail.",
@@ -5646,6 +5647,9 @@
     "changeHint": "Change the owning team",
     "moved": "Moved to {team}.",
     "error": "Could not change the team."
+  },
+  "teamPicker": {
+    "label": "Team"
   },
   "listView": {
     "filter": "Filter",

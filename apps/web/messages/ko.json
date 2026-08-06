@@ -2330,6 +2330,7 @@
     "harnessRequired": "하니스를 선택하세요",
     "harnessPlaceholder": "하니스 선택",
     "harnessEmpty": "하니스가 없어요",
+    "teamInheritOption": "하니스의 팀을 따라요",
     "judgesLabel": "평가자 (선택)",
     "judgesTip": "각 케이스의 트레이스를 채점하는 모델·하니스 평가자예요. 고르면 평가자 지표(평균·통과율)로 집계돼요. 안 고르면 데이터셋의 그레이더로만 채점해요.",
     "judgesHelp": "선택한 평가자가 각 트레이스를 채점해 상세 화면의 평가자 지표로 쌓여요.",
@@ -5646,6 +5647,9 @@
     "changeHint": "소유 팀 바꾸기",
     "moved": "{team} 팀으로 넘겼습니다.",
     "error": "팀을 바꾸지 못했습니다."
+  },
+  "teamPicker": {
+    "label": "팀"
   },
   "listView": {
     "filter": "필터",

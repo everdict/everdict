@@ -6,6 +6,7 @@ import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
+import { TeamPicker, type TeamPickerOption } from '@/entities/team'
 import type { TraceSourceConfig } from '@/entities/trace-source'
 import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
@@ -131,18 +132,25 @@ export function RegisterJudgeForm({
   models = [],
   sources = [],
   assignments = {},
+  teams = [],
+  defaultTeamId,
 }: {
   workspace: string
   runtimes?: { id: string }[]
   models?: { id: string; provider: string; model: string }[]
   sources?: TraceSourceConfig[]
   assignments?: Record<string, string>
+  // The owning-team choices (only teams the caller can create into). Empty = no picker, the control
+  // plane's own fallback decides.
+  teams?: TeamPickerOption[]
+  defaultTeamId?: string
 }) {
   const router = useRouter()
   const refresh = useRefresh()
   const t = useTranslations('registerJudge')
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
+  const [teamId, setTeamId] = useState(defaultTeamId ?? '')
   const [description, setDescription] = useState('')
   const [language, setLanguage] = useState<Language>('python')
   const [code, setCode] = useState<string>(PYTHON_STARTER)
@@ -207,7 +215,10 @@ export function RegisterJudgeForm({
   function onSubmit() {
     if (!precheck()) return
     startSave(async () => {
-      const r = await createJudgeAction(buildSpec())
+      // The owning team rides BESIDE the spec (the route reads it, the spec schema strips it) — kept out of
+      // buildSpec so validate/preview/try keep sending the pure spec.
+      const spec = buildSpec() as Record<string, unknown>
+      const r = await createJudgeAction(teamId ? { ...spec, teamId } : spec)
       if (r.ok) {
         toast.success(t('registered', { id: r.id ?? '', version: r.version ?? '' }))
         router.push(`/${workspace}/judges`)
@@ -249,6 +260,8 @@ export function RegisterJudgeForm({
           autoComplete="off"
         />
       </Field>
+
+      <TeamPicker id="judge-team" teams={teams} value={teamId} onChange={setTeamId} />
 
       {/* The code — the judge itself. Contract: argv[1] = context JSON path; print Score[] last on stdout. */}
       <div className="space-y-2.5">

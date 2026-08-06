@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl'
 
 import { RunScorecardForm } from '@/features/run-scorecard'
 import type { JudgePickerChoice } from '@/entities/judge'
+import type { TeamPickerOption } from '@/entities/team'
 import type { TraceSourceConfig } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
 import { Card } from '@/shared/ui/card'
@@ -25,7 +26,8 @@ export function ScorecardCreate({
   runners,
   hasWorkspaceRunners,
   traceSources,
-  teamId,
+  teams = [],
+  defaultTeamId,
 }: {
   datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
   harnesses: {
@@ -39,8 +41,10 @@ export function ScorecardCreate({
   runners: { id: string; label: string }[]
   hasWorkspaceRunners: boolean
   traceSources: TraceSourceConfig[]
-  // Set when this form lives under a team's address — both modes file the result under that team.
-  teamId?: string
+  // The owning-team choices, threaded into both modes. The run mode defaults to following the harness's team
+  // (so no preselection there); the traces mode has no harness to follow and preselects `defaultTeamId`.
+  teams?: TeamPickerOption[]
+  defaultTeamId?: string
 }) {
   const t = useTranslations('scorecardCreate')
   const [mode, setMode] = useState<Mode>('run')
@@ -85,14 +89,15 @@ export function ScorecardCreate({
             runtimes={runtimes}
             runners={runners}
             hasWorkspaceRunners={hasWorkspaceRunners}
-            {...(teamId ? { teamId } : {})}
+            teams={teams}
           />
         </Card>
       ) : (
         <EvaluateTracesForm
           judges={judges}
           traceSources={traceSources}
-          {...(teamId ? { teamId } : {})}
+          teams={teams}
+          {...(defaultTeamId !== undefined ? { defaultTeamId } : {})}
         />
       )}
     </div>
