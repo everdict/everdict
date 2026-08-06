@@ -156,6 +156,9 @@ export function buildIntegrations(deps: {
         ...(tool !== undefined ? { tool } : {}),
         place: { kind: "discussion", resourceType, resourceId, commentId },
       }),
+    // …and the decision deletes that row again (N8) — a decided ask must not keep saying "approval needed".
+    clearApprovalRequest: async ({ tenant, commentId }) =>
+      notificationService.clearApprovalRequest(tenant, { kind: "discussion", commentId }),
     notifyMention: async ({ tenant, comment, recipients }) => {
       // listMembers already merges in profile names — the mentioner's display name (name > email local-part > default).
       const member = await membershipService

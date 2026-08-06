@@ -75,11 +75,11 @@ export interface AgentServerDeps extends ChatDeps {
   // Comment-lifecycle bridge back to the control plane (/internal/comment-activity) — the discussion turn reports
   // its placeholder comment's progress through it. Absent → POST /internal/discussion-turn is disabled.
   commentActivity?: CommentActivityReporter;
-  // HITL notification grace (N8): a chat turn's parked ask is reported as agent.run.awaiting_approval — which
-  // pings the member's bell — only after this many ms with the ask STILL pending. An attended prompt is
-  // answered before the grace runs out, so the common interactive case stays notification-free. Test seam;
-  // default 10s.
-  approvalNoticeDelayMs?: number;
+  // HITL notification clear (N8): the parked ask this session's bell row announced was decided — ask the
+  // control plane to delete the row. The park pings IMMEDIATELY (agent.run.awaiting_approval) and the
+  // decision cleans up after itself, so an attended prompt costs at most a briefly flashing badge while an
+  // absent member is pinged without delay. Absent = rows are never cleared (they still land correctly).
+  clearApprovalNotice?: (workspace: string, sessionId: string) => Promise<void>;
 }
 
 // SSE heartbeat: a comment frame every 15s so intermediary proxies/LBs never see an idle stream and cut it — a
@@ -132,12 +132,6 @@ const idParams = z.object({ id: z.string().min(1) });
 // How long a headless run's parked mutation waits for a member decision before the registry's deny-on-expiry
 // settles it (same window as the discussion turn's park).
 const ACTIVATION_APPROVAL_TIMEOUT_MS = 10 * 60_000;
-
-// How long a chat turn's parked ask stays unanswered before the park is reported to the control plane — which
-// pings the member's bell (N8). Just long enough that an attended prompt (the common case: the member is
-// looking at the panel and clicks within seconds) never pings; anything longer only delays the ping the
-// absent member is waiting on, so this errs short.
-const APPROVAL_NOTICE_DELAY_MS = 10_000;
 
 // Project the parsed event-body fields into an ActivationEvent tail (workspace is supplied by the caller).
 function eventOf(data: {
@@ -310,6 +304,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
               const settled = registered.id;
               void bridge.settle(settled, ctx.workspace, decision === "allow" ? "approve" : "deny").catch(() => {});
             }
+            // N8: the decision deletes the ask's bell row (the awaiting report pinged at the park). The
+            // human's decision latency dwarfs the report's round trip, so no ordering chain is needed here.
+            void deps.clearApprovalNotice?.(ctx.workspace, ctx.sessionId).catch(() => {});
             return decision;
           },
           now: deps.now,
@@ -625,37 +622,37 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // withRules so a standing "always allow/deny" rule for the tool answers without prompting. In "auto" mode,
     // routine mutations run without asking — only the guarded (destructive/governance/credential) actions park.
     //
-    // N8: an ask nobody answered within the grace is an ask nobody is WATCHING — the member closed the panel or
-    // is in another of their conversations. Report the park to the control plane (agent.run.awaiting_approval,
-    // cause "chat"), which pings their bell with a link that opens THIS conversation; a decision inside the
-    // grace (the attended case) reports nothing. Best-effort like every ledger report.
-    const noticeParkedApproval = (requestId: string, tool?: string): void => {
+    // N8: a park is a turn WAITING ON A HUMAN who may be in another of their conversations (or gone) — report
+    // it IMMEDIATELY (agent.run.awaiting_approval, cause "chat"), which pings the member's bell with a link
+    // that opens THIS conversation; the decision then clears the row again, so an attended prompt costs at
+    // most a briefly flashing badge. The clear chains AFTER the notice so an instant decision can never
+    // overtake the row it deletes. Best-effort on both legs, like every ledger report.
+    const noticeParkedApproval = (tool?: string): Promise<void> => {
       const report = deps.reportRunEvent;
-      if (!report || !session) return;
-      const timer = setTimeout(() => {
-        if (!permissions.pendingFor(id).some((p) => p.requestId === requestId)) return;
-        void report({
-          workspace: principal.workspace,
-          kind: "agent.run.awaiting_approval",
-          sessionId: id,
-          agentId: session.origin?.agentId ?? "default",
-          eventKind: "chat",
-          message:
-            tool !== undefined
-              ? `Chat turn is waiting for approval to run ${tool} in conversation ${id}.`
-              : `Chat turn is waiting for plan approval in conversation ${id}.`,
-          creator: principal.subject,
-          cause: "chat",
-          ...(tool !== undefined ? { tool } : {}),
-        }).catch(() => {});
-      }, deps.approvalNoticeDelayMs ?? APPROVAL_NOTICE_DELAY_MS);
-      timer.unref?.();
+      if (!report || !session) return Promise.resolve();
+      return report({
+        workspace: principal.workspace,
+        kind: "agent.run.awaiting_approval",
+        sessionId: id,
+        agentId: session.origin?.agentId ?? "default",
+        eventKind: "chat",
+        message:
+          tool !== undefined
+            ? `Chat turn is waiting for approval to run ${tool} in conversation ${id}.`
+            : `Chat turn is waiting for plan approval in conversation ${id}.`,
+        creator: principal.subject,
+        cause: "chat",
+        ...(tool !== undefined ? { tool } : {}),
+      }).catch(() => {});
+    };
+    const clearAfter = (noticed: Promise<void>): void => {
+      void noticed.then(() => deps.clearApprovalNotice?.(principal.workspace, id)).catch(() => {});
     };
     const ask = (request: { name: string; input: unknown }): Promise<PermissionDecision> => {
       const requestId = deps.newId();
       write("permission", { requestId, name: request.name, input: request.input });
-      noticeParkedApproval(requestId, request.name);
-      return permissions.wait(requestId, id, controller.signal, request);
+      const noticed = noticeParkedApproval(request.name);
+      return permissions.wait(requestId, id, controller.signal, request).finally(() => clearAfter(noticed));
     };
     // The hook consults the CURRENT mode per ask (liveMode) — bypass auto-allows, auto asks only for guarded
     // (destructive/governance/credential) actions, default/plan ask. Wired unconditionally (see below): a turn
@@ -670,8 +667,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const onPlan = async (plan: string): Promise<boolean> => {
       const requestId = deps.newId();
       write("plan", { requestId, plan });
-      noticeParkedApproval(requestId); // no tool = the CP words the ping as a plan review
-      const decision = await permissions.wait(requestId, id, controller.signal);
+      const noticed = noticeParkedApproval(); // no tool = the CP words the ping as a plan review
+      const decision = await permissions.wait(requestId, id, controller.signal).finally(() => clearAfter(noticed));
       return decision === "allow";
     };
     try {

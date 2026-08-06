@@ -711,15 +711,18 @@ describe("agent server", () => {
       await app.close();
     });
 
-    it("a park unanswered past the grace is reported as awaiting_approval — the CP pings the member's bell (N8)", async () => {
+    it("a park is reported immediately (the CP pings the bell) and the decision clears the row again (N8)", async () => {
       const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
       const reported: AgentRunEventReport[] = [];
+      const cleared: [string, string][] = [];
       const app = buildServer(
         makeDeps({
           ...writeToolDeps(writeCall),
-          approvalNoticeDelayMs: 20,
           reportRunEvent: async (r) => {
             reported.push(r);
+          },
+          clearApprovalNotice: async (workspace, sessionId) => {
+            cleared.push([workspace, sessionId]);
           },
         }),
       );
@@ -732,15 +735,7 @@ describe("agent server", () => {
         headers: { ...auth, accept: "text/event-stream" },
         payload: { message: "write it" },
       });
-      let requestId = "";
-      await vi.waitFor(async () => {
-        const res = await app.inject({ method: "GET", url: `/agent/sessions/${s.id}/pending`, headers: auth });
-        const pending = (res.json() as { pending: { requestId: string; name: string }[] }).pending;
-        expect(pending).toHaveLength(1);
-        requestId = pending[0]?.requestId ?? "";
-      });
-      // Nobody answers within the grace → the park is reported (cause=chat, the tool named, the typist as
-      // recipient) so the control plane can bring the ask to their bell.
+      // The park is reported the moment it exists — cause=chat, the tool named, the typist as recipient.
       await vi.waitFor(() => {
         expect(reported.some((r) => r.kind === "agent.run.awaiting_approval")).toBe(true);
       });
@@ -750,27 +745,35 @@ describe("agent server", () => {
         sessionId: s.id,
         tool: "do_write",
       });
-      // Answer so the turn settles normally.
+      expect(cleared).toHaveLength(0); // undecided — the row must still be ringing
+      // The decision resolves the ask AND deletes the bell row (chained after the notice, so an instant
+      // decision can never overtake the row it deletes).
+      const pendingRes = await app.inject({ method: "GET", url: `/agent/sessions/${s.id}/pending`, headers: auth });
+      const pending = (pendingRes.json() as { pending: { requestId: string }[] }).pending;
+      expect(pending).toHaveLength(1);
       await app.inject({
         method: "POST",
         url: `/agent/sessions/${s.id}/permission`,
         headers: auth,
-        payload: { requestId, decision: "allow" },
+        payload: { requestId: pending[0]?.requestId, decision: "allow" },
       });
       await turn;
       expect(writeCall).toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(cleared).toEqual([["acme", s.id]]);
+      });
       await app.close();
     });
 
-    it("a decision inside the grace reports no park — the attended prompt stays notification-free (N8)", async () => {
+    it("a denied park clears its bell row too — any decision ends the ask (N8)", async () => {
       const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
-      const reported: AgentRunEventReport[] = [];
+      const cleared: [string, string][] = [];
       const app = buildServer(
         makeDeps({
           ...writeToolDeps(writeCall),
-          approvalNoticeDelayMs: 50,
-          reportRunEvent: async (r) => {
-            reported.push(r);
+          reportRunEvent: async () => {},
+          clearApprovalNotice: async (workspace, sessionId) => {
+            cleared.push([workspace, sessionId]);
           },
         }),
       );
@@ -789,14 +792,14 @@ describe("agent server", () => {
           method: "POST",
           url: `/agent/sessions/${s.id}/permission`,
           headers: auth,
-          payload: { requestId: pending[0]?.requestId, decision: "allow" },
+          payload: { requestId: pending[0]?.requestId, decision: "deny" },
         });
       });
       await turn;
-      // Let the grace timer fire — the ask is no longer pending, so nothing is reported.
-      await new Promise((resolve) => setTimeout(resolve, 120));
-      expect(reported.some((r) => r.kind === "agent.run.awaiting_approval")).toBe(false);
-      expect(writeCall).toHaveBeenCalled();
+      expect(writeCall).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(cleared).toEqual([["acme", s.id]]);
+      });
       await app.close();
     });
 

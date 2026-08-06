@@ -9,7 +9,7 @@ describe("NotificationService — the channel poster after the full E1 re-base",
     const add = vi.fn(async () => undefined);
     const svc = new NotificationService({
       settingsFor: async () => undefined,
-      feed: { add, list: vi.fn(async () => []), markRead: vi.fn(async () => 0) },
+      feed: { add, list: vi.fn(async () => []), markRead: vi.fn(async () => 0), remove: vi.fn(async () => undefined) },
     });
     await svc.postChannelMessage("acme", "✅ **Scorecard `sc_9`** succeeded");
     expect(add).not.toHaveBeenCalled();
@@ -28,7 +28,7 @@ describe("NotificationService — the channel poster after the full E1 re-base",
     const add = vi.fn(async () => undefined);
     const svc = new NotificationService({
       settingsFor: async () => undefined,
-      feed: { add, list: vi.fn(async () => []), markRead: vi.fn(async () => 0) },
+      feed: { add, list: vi.fn(async () => []), markRead: vi.fn(async () => 0), remove: vi.fn(async () => undefined) },
     });
     await svc.notifyApprovalRequested("acme", {
       recipient: "alice",
@@ -37,6 +37,7 @@ describe("NotificationService — the channel poster after the full E1 re-base",
     });
     expect(add).toHaveBeenCalledWith(
       expect.objectContaining({
+        id: "nf-approval-sess-1", // deterministic — a re-reported park deduplicates, the decision can clear it
         workspace: "acme",
         recipient: "alice",
         kind: "agent_approval_requested",
@@ -46,11 +47,23 @@ describe("NotificationService — the channel poster after the full E1 re-base",
     );
   });
 
+  it("the decision deletes the ask's row by the same deterministic key (a decided ask must not linger)", async () => {
+    const remove = vi.fn(async () => undefined);
+    const svc = new NotificationService({
+      settingsFor: async () => undefined,
+      feed: { add: vi.fn(async () => undefined), list: vi.fn(async () => []), markRead: vi.fn(async () => 0), remove },
+    });
+    await svc.clearApprovalRequest("acme", { kind: "conversation", sessionId: "sess-1" });
+    await svc.clearApprovalRequest("acme", { kind: "discussion", commentId: "c9" });
+    expect(remove).toHaveBeenNthCalledWith(1, "acme", "nf-approval-sess-1");
+    expect(remove).toHaveBeenNthCalledWith(2, "acme", "nf-approval-c9");
+  });
+
   it("an approval park in a discussion links the resource + agent comment, and no tool reads as a plan review", async () => {
     const add = vi.fn(async () => undefined);
     const svc = new NotificationService({
       settingsFor: async () => undefined,
-      feed: { add, list: vi.fn(async () => []), markRead: vi.fn(async () => 0) },
+      feed: { add, list: vi.fn(async () => []), markRead: vi.fn(async () => 0), remove: vi.fn(async () => undefined) },
     });
     await svc.notifyApprovalRequested("acme", {
       recipient: "bob",
@@ -58,6 +71,7 @@ describe("NotificationService — the channel poster after the full E1 re-base",
     });
     expect(add).toHaveBeenCalledWith(
       expect.objectContaining({
+        id: "nf-approval-c1",
         recipient: "bob",
         kind: "agent_approval_requested",
         title: "Plan review needed",

@@ -36,6 +36,19 @@ export interface ChannelPoster {
   postChannelMessage(tenant: string, message: string, rerun?: { dataset: string; harness: string }): Promise<void>;
 }
 
+// Where an approval ask parked (N8) — the two surfaces a HITL park can live on. The KEY is what identifies
+// the row (clearing needs only that); notifying additionally carries the discussion's link coordinates.
+export type ApprovalPlaceKey = { kind: "conversation"; sessionId: string } | { kind: "discussion"; commentId: string };
+export type ApprovalPlace =
+  | { kind: "conversation"; sessionId: string }
+  | { kind: "discussion"; resourceType: string; resourceId: string; commentId: string };
+
+// One live ask per session/comment (asks are sequential), so the place IS the row's identity: notify and
+// clear derive the same id, and a re-notified park deduplicates in the store.
+function approvalNotificationId(place: ApprovalPlaceKey): string {
+  return place.kind === "conversation" ? `nf-approval-${place.sessionId}` : `nf-approval-${place.commentId}`;
+}
+
 export class NotificationService implements ChannelPoster {
   private readonly newId: () => string;
   private readonly nowIso: () => string;
@@ -164,18 +177,22 @@ export class NotificationService implements ChannelPoster {
   // the bell with a link that lands ON that surface: the conversation opens in the side panel
   // (`conversationId`), the discussion lands on the resource page anchored to the agent comment. Feed-only
   // (the bell's native firing already covers "not looking"), best-effort like every notification.
+  //
+  // The row's id is DETERMINISTIC (one live ask per session/comment — asks are sequential), which buys two
+  // things: a re-reported park never duplicates (the store ignores an existing id), and the decision can
+  // clear the exact row (`clearApprovalRequest`) — an approval ask stops being true the moment it is decided,
+  // so it is deleted rather than left as misleading read-history.
   async notifyApprovalRequested(
     tenant: string,
     input: {
       recipient: string; // whoever the agent is waiting for — the turn's creator / the discussion's asker
       tool?: string; // the parked tool; absent = a plan review
-      place:
-        | { kind: "conversation"; sessionId: string }
-        | { kind: "discussion"; resourceType: string; resourceId: string; commentId: string };
+      place: ApprovalPlace;
     },
   ): Promise<void> {
     const title = input.tool !== undefined ? `Approval needed — ${input.tool}` : "Plan review needed";
     await this.pushFeed({
+      id: approvalNotificationId(input.place),
       workspace: tenant,
       recipient: input.recipient,
       kind: "agent_approval_requested",
@@ -195,11 +212,24 @@ export class NotificationService implements ChannelPoster {
     });
   }
 
-  // Feed write — swallows failures independently of Mattermost (so one channel's outage doesn't block the other).
-  private async pushFeed(row: Omit<NotificationRecord, "id" | "createdAt">): Promise<void> {
+  // The ask was decided (allow/deny/expiry) — delete its row. Unlike a completion, a decided approval ask has
+  // no residual value: "approval needed" that is no longer needed only misleads, and freeing the deterministic
+  // id lets the session's NEXT ask ping again. Best-effort like every notification.
+  async clearApprovalRequest(tenant: string, place: ApprovalPlaceKey): Promise<void> {
     if (!this.deps.feed) return;
     try {
-      await this.deps.feed.add({ ...row, id: this.newId(), createdAt: this.nowIso() });
+      await this.deps.feed.remove(tenant, approvalNotificationId(place));
+    } catch {
+      // A row that could not be cleared is at worst a stale bell entry — never the caller's failure.
+    }
+  }
+
+  // Feed write — swallows failures independently of Mattermost (so one channel's outage doesn't block the other).
+  // A caller may pin the id (deterministic natural keys — approval asks); the store ignores an existing id.
+  private async pushFeed(row: Omit<NotificationRecord, "id" | "createdAt"> & { id?: string }): Promise<void> {
+    if (!this.deps.feed) return;
+    try {
+      await this.deps.feed.add({ ...row, id: row.id ?? this.newId(), createdAt: this.nowIso() });
     } catch {
       // Feed failure never affects the result.
     }

@@ -302,6 +302,45 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
     });
     expect(anonymous.statusCode).toBe(200);
     expect(await feed.list("alice", "acme")).toHaveLength(2);
+
+    // A re-reported park deduplicates — the row's id is the session (one live ask at a time), so at-least-once
+    // reporting never stacks duplicate asks in the bell.
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: {
+        tenant: "acme",
+        kind: "agent.run.awaiting_approval",
+        sessionId: "sess-9",
+        agentId: "default",
+        eventKind: "chat",
+        message: "parked again",
+        creator: "alice",
+        cause: "chat",
+        tool: "write_file",
+      },
+    });
+    expect(await feed.list("alice", "acme")).toHaveLength(2);
+
+    // The decision clears the exact row (the agent's clear bridge) — a decided ask must not linger.
+    const wrongToken = await app.inject({
+      method: "POST",
+      url: "/internal/notifications/approval-clear",
+      headers: { "x-internal-token": "nope" },
+      payload: { tenant: "acme", sessionId: "sess-9" },
+    });
+    expect(wrongToken.statusCode).toBe(403);
+    const cleared = await app.inject({
+      method: "POST",
+      url: "/internal/notifications/approval-clear",
+      headers: { "x-internal-token": "itok" },
+      payload: { tenant: "acme", sessionId: "sess-9" },
+    });
+    expect(cleared.statusCode).toBe(200);
+    const remaining = await feed.list("alice", "acme");
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.link?.conversationId).toBe("sess-1"); // the activation's ask survives
     await app.close();
   });
 

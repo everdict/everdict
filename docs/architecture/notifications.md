@@ -132,12 +132,12 @@ in-place (the panel's PermissionPrompt, the thread's ApprovalStrip), so a member
 turn into its deny-on-expiry. The kind `agent_approval_requested` brings the ask to the bell.
 
 - **Three lanes, one choke point each — never per-call-site:**
-  - **Chat conversations** (`apps/agent/src/server.ts` `noticeParkedApproval`): a parked ask unanswered after a
-    **grace** (`approvalNoticeDelayMs`, default 10 s) is reported as `agent.run.awaiting_approval`
-    (`cause: "chat"`, the parked `tool` named, plan asks tool-less). An attended prompt is answered inside the
-    grace, so the common interactive case stays notification-free. Best-effort, like every ledger report.
-  - **Headless activations** already report `agent.run.awaiting_approval` at the park — unattended by
-    definition, so no grace.
+  - **Chat conversations** (`apps/agent/src/server.ts` `noticeParkedApproval`): the park is reported
+    IMMEDIATELY as `agent.run.awaiting_approval` (`cause: "chat"`, the parked `tool` named, plan asks
+    tool-less). Best-effort, like every ledger report. (An earlier revision debounced this behind a grace so
+    the attended prompt stayed notification-free; the auto-clear below made that unnecessary — the absent
+    member gets pinged without delay, the attended one sees a badge that erases itself.)
+  - **Headless activations** already report `agent.run.awaiting_approval` at the park.
   - Both land in the ONE hook in `POST /internal/agent-run-events` (`apps/api/src/api/ops/internal.routes.ts`):
     `kind = awaiting_approval` + a `creator` → `NotificationService.notifyApprovalRequested` with
     `link.conversationId = sessionId`. Recipient = the run's **creator** (the member the turn works for — for
@@ -146,6 +146,15 @@ turn into its deny-on-expiry. The kind `agent_approval_requested` brings the ask
     "awaiting_approval"` pings `agentAskedBy` with the resource + `?comment=` link that lands on the
     ApprovalStrip. Transition-guarded like the terminal ping — parked re-reports never re-ping; a second park
     in the same turn is a new decision and does.
+- **The decision erases the ask.** An approval notification stops being TRUE the moment somebody decides
+  (allow/deny/expiry/sweep), so it is DELETED — not marked read: read-history would keep saying "approval
+  needed", and the row's id must be free for the session's next ask to ping again. The row's id is
+  **deterministic** (`nf-approval-<sessionId>` / `nf-approval-<commentId>` — one live ask per place, asks are
+  sequential), which also deduplicates at-least-once park reports. Clear paths mirror the notify lanes: the
+  agent's `clearApprovalNotice` bridge (`POST /internal/notifications/approval-clear`) after the in-process
+  wait resolves — chained AFTER the notice on the chat lane so an instant decision cannot overtake the row it
+  deletes — and `CommentService.applyProgress` on the transition OUT of awaiting for discussions. Best-effort:
+  a clear that fails leaves a stale row whose click still lands on the (now decided) surface.
 - **A conversation's only address is the panel** (N7 corollary). `link.conversationId` resolves to
   `/{ws}?conversation=<id>`: the infra panel consumes and strips the parameter on load (desktop OS click,
   pasted link), while the web bell short-circuits — a click posts `everdict:open-agent-session` and the panel

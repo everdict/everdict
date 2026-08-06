@@ -62,7 +62,7 @@ import {
 import { installProxyDispatcher } from "./proxy-dispatcher.js";
 import { buildServer } from "./server.js";
 import { EVERDICT_AGENT_SYSTEM_PROMPT } from "./system-prompt.js";
-import { admissionBridge, approvalBridge, runEventReporter, usageReporter } from "./usage.js";
+import { admissionBridge, approvalBridge, approvalNoticeClearer, runEventReporter, usageReporter } from "./usage.js";
 
 function envModelFallback(config: AgentConfig): ModelResolver {
   if (config.AGENT_LLM_API_KEY === undefined || config.AGENT_LLM_MODEL === undefined) {
@@ -227,6 +227,10 @@ async function main(): Promise<void> {
     // Durable approvals (A6) — the park registers on the control plane so it survives our restart.
     ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
       ? { approvalBridge: approvalBridge(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
+      : {}),
+    // HITL notice cleanup (N8) — a decided approval deletes its bell row again. Same token pair.
+    ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
+      ? { clearApprovalNotice: approvalNoticeClearer(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
       : {}),
     // Discussion-turn lifecycle bridge (@everdict in a comment thread) — reports the placeholder comment's
     // progress to /internal/comment-activity. Same token pair as the usage meter; off without it.

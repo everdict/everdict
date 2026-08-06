@@ -67,6 +67,10 @@ function feedStore() {
     async markRead() {
       return 0;
     },
+    async remove(_workspace, id) {
+      const at = rows.findIndex((r) => r.id === id);
+      if (at >= 0) rows.splice(at, 1);
+    },
   };
   return { store, rows };
 }

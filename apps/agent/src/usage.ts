@@ -134,6 +134,24 @@ export function admissionBridge(
   };
 }
 
+// Approval-notice clear bridge (N8): the parked ask this session's bell row announced was decided
+// (allow/deny/expiry) — ask the control plane to delete the row. A decided ask must not keep saying
+// "approval needed". Best-effort at the call site (a stale row is the worst case, never a broken turn).
+export function approvalNoticeClearer(
+  controlPlaneUrl: string,
+  internalToken: string,
+): (workspace: string, sessionId: string) => Promise<void> {
+  const url = `${controlPlaneUrl.replace(/\/$/, "")}/internal/notifications/approval-clear`;
+  return async (workspace, sessionId) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-internal-token": internalToken },
+      body: JSON.stringify({ tenant: workspace, sessionId }),
+    });
+    if (!res.ok) throw new Error(`approval-notice clear failed: ${res.status}`);
+  };
+}
+
 // Durable-approval bridge (A6): register a park on the control plane (POST /internal/approvals — the ask
 // survives an agent-service restart) and settle the ledger after the in-process wait resolves (the legacy
 // fleet channel and local expiry converge through the same settle; an already-decided record skips there).

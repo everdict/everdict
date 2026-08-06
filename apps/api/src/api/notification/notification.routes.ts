@@ -1,7 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import { z } from "zod";
+import { type ServerDeps, constantTimeEq, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { notificationDocs } from "./notification.docs.js";
 import { ReadNotificationsBodySchema } from "./request/read-notifications.js";
+
+const approvalClearBody = z.object({ tenant: z.string().min(1), sessionId: z.string().min(1) });
 
 // notifications (personal feed — bell inbox; self-scoped, no role gate).
 export function registerNotificationRoutes(app: FastifyInstance, deps: ServerDeps): void {
@@ -46,5 +49,26 @@ export function registerNotificationRoutes(app: FastifyInstance, deps: ServerDep
     }
   });
 
-  // Workspace runner roster — runners paired in this workspace (metadata only, no tokens). Read-only (members:read).
+  // --- internal bridge (agent service → CP; x-internal-token, fail-closed like the other bridges) ---
+  // A conversation's parked approval was decided (allow/deny/expiry) — delete its bell row (N8): the ask
+  // stops being true the moment it is decided, and the freed deterministic id lets the session's next ask
+  // ping again. Discussion asks clear through the comment-activity lifecycle instead (CommentService).
+  app.post("/internal/notifications/approval-clear", { schema: notificationDocs.approvalClear }, async (req, reply) => {
+    if (!deps.internalToken || !deps.notificationService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const body = approvalClearBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      await deps.notificationService.clearApprovalRequest(body.data.tenant, {
+        kind: "conversation",
+        sessionId: body.data.sessionId,
+      });
+      return reply.send({ ok: true });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 }

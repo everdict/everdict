@@ -114,6 +114,9 @@ class FakeFeed implements NotificationStore {
   async markRead(): Promise<number> {
     return 0;
   }
+  async remove(_workspace: string, id: string): Promise<void> {
+    this.rows.delete(id);
+  }
   async countUnread(): Promise<number> {
     return 0;
   }

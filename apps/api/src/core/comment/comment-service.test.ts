@@ -357,6 +357,7 @@ describe("CommentService discussion agent (askAgent)", () => {
     const calls: RunnerInput[] = [];
     const pings: AnswerPing[] = [];
     const parkPings: { recipient: string; commentId: string; tool?: string }[] = [];
+    const parkClears: string[] = [];
     const runner: DiscussionTurnRunner = {
       run: async (input) => {
         calls.push(input);
@@ -375,6 +376,9 @@ describe("CommentService discussion agent (askAgent)", () => {
       notifyApprovalRequested: async ({ recipient, commentId, tool }) => {
         parkPings.push({ recipient, commentId, ...(tool !== undefined ? { tool } : {}) });
       },
+      clearApprovalRequest: async ({ commentId }) => {
+        parkClears.push(commentId);
+      },
       newId: () => `c${++n}`,
       now: () => new Date(Date.parse("2026-07-04T00:00:00.000Z") + clock).toISOString(),
     });
@@ -384,6 +388,7 @@ describe("CommentService discussion agent (askAgent)", () => {
       calls,
       pings,
       parkPings,
+      parkClears,
       advance: (ms: number) => {
         clock += ms;
       },
@@ -585,7 +590,7 @@ describe("CommentService discussion agent (askAgent)", () => {
   });
 
   it("entering the approval park pings the asker once — parked ticks don't re-ping, a second park does (N8)", async () => {
-    const { service, store, parkPings } = agentSvc();
+    const { service, store, parkPings, parkClears } = agentSvc();
     await service.create({
       tenant: "acme",
       resourceType: "harness",
@@ -605,11 +610,16 @@ describe("CommentService discussion agent (askAgent)", () => {
     await service.applyProgress("acme", placeholder.id, { status: "awaiting_approval", activity: "tool:add_tag" });
     expect(parkPings).toHaveLength(1);
 
-    // Approved → running → a SECOND park is a new decision and pings again.
+    // Approved → running: leaving the park DELETES the ask's bell row (a decided ask must not linger)…
     await service.applyProgress("acme", placeholder.id, { status: "running", activity: "writing" });
+    expect(parkClears).toEqual([placeholder.id]);
+    // …and a SECOND park is a new decision: it pings again.
     await service.applyProgress("acme", placeholder.id, { status: "awaiting_approval", activity: "tool:retry_run" });
     expect(parkPings).toHaveLength(2);
     expect(parkPings[1]).toEqual({ recipient: "u-b", commentId: placeholder.id, tool: "retry_run" });
+    // A terminal settle out of the park clears too (the sweep path).
+    await service.applyProgress("acme", placeholder.id, { status: "failed" });
+    expect(parkClears).toEqual([placeholder.id, placeholder.id]);
   });
 
   it("a failed answer pings the asker with ok:false and no preview", async () => {

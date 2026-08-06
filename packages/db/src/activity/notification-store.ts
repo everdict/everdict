@@ -37,6 +37,11 @@ export class InMemoryNotificationStore implements NotificationStore {
     }
     return count;
   }
+
+  async remove(workspace: string, id: string): Promise<void> {
+    const at = this.rows.findIndex((r) => r.workspace === workspace && r.id === id);
+    if (at >= 0) this.rows.splice(at, 1);
+  }
 }
 
 interface NotificationRow {
@@ -111,5 +116,9 @@ export class PgNotificationStore implements NotificationStore {
       params,
     );
     return res.rows.length;
+  }
+
+  async remove(workspace: string, id: string): Promise<void> {
+    await this.client.query("DELETE FROM everdict_notifications WHERE workspace = $1 AND id = $2", [workspace, id]);
   }
 }

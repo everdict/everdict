@@ -84,6 +84,9 @@ export interface CommentServiceDeps {
     commentId: string;
     tool?: string;
   }) => Promise<void>;
+  // The park was decided (the status left awaiting_approval) — delete the ask's bell row (N8): a decided
+  // approval ask stops being true, so it is cleared rather than left as misleading history. Best-effort.
+  clearApprovalRequest?: (input: { tenant: string; commentId: string }) => Promise<void>;
   newId?: () => string;
   now?: () => string;
 }
@@ -323,6 +326,20 @@ export class CommentService {
         });
       } catch {
         // Ignore notification failure (the lifecycle is already persisted).
+      }
+    }
+    // Leaving the park (approved/denied/swept — the status moved OFF awaiting_approval) deletes the ask's
+    // bell row: a decided ask is no longer true, and the freed id lets a later park in this thread ping again.
+    if (
+      existing.agentStatus === "awaiting_approval" &&
+      patch.status !== undefined &&
+      patch.status !== "awaiting_approval" &&
+      this.deps.clearApprovalRequest
+    ) {
+      try {
+        await this.deps.clearApprovalRequest({ tenant, commentId });
+      } catch {
+        // A stale bell row at worst — never the lifecycle's failure.
       }
     }
     // Reaching a terminal state pings the asker (they may have left the page while the turn ran). Best-effort —
