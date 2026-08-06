@@ -5,6 +5,10 @@ import type { CaseResult, Score, Scorecard } from "@everdict/contracts";
 // if the state grader confirmed the file, the case is PASS even if the judge FAILs it from the screenshot alone). The basis for the integrated/scorecard pass rate.
 const AUTHORITATIVE_METRICS = ["state", "tests_pass"]; // real state/test verification (ground-truth)
 const OBJECTIVE_METRICS = ["answer_match", "url_matches", "dom_contains"]; // deterministic comparison
+// Top-level judge VERDICT metrics: legacy "judge" or "judge:<id>" (the multi-criteria weighted overall).
+// Deeper metrics ("judge:<id>:<criterion>", "judge:<id>:milestone:<m>") are diagnostic localization — they
+// explain WHERE a verdict came from and never decide the case themselves.
+const JUDGE_VERDICT_METRIC_RE = /^judge(?::[^:]+)?$/;
 export function caseVerdict(result: Pick<CaseResult, "scores">): boolean | undefined {
   const byMetric = new Map(result.scores.map((s) => [s.metric, s] as const));
   for (const m of AUTHORITATIVE_METRICS) {
@@ -13,8 +17,11 @@ export function caseVerdict(result: Pick<CaseResult, "scores">): boolean | undef
   }
   const objs = OBJECTIVE_METRICS.map((m) => byMetric.get(m)).filter((s): s is Score => s?.pass !== undefined);
   if (objs.length > 0) return objs.every((s) => s.pass); // all objective grader(s) pass
-  const judge = byMetric.get("judge");
-  if (judge?.pass !== undefined) return judge.pass; // the judge decides only when there is no objective grader
+  // The judge decides only when there is no objective grader. Real judge scores land under `judge:<id>`
+  // (packages/graders JudgeGrader) — matching the literal "judge" alone left this rung dead and every judge
+  // verdict fell through to the all-scores fallback below (an unchosen unanimous vote over unrelated scores).
+  const judges = result.scores.filter((s) => JUDGE_VERDICT_METRIC_RE.test(s.metric) && s.pass !== undefined);
+  if (judges.length > 0) return judges.every((s) => s.pass);
   const withPass = result.scores.filter((s) => s.pass !== undefined);
   return withPass.length > 0 ? withPass.every((s) => s.pass) : undefined;
 }

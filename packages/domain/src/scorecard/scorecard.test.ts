@@ -150,6 +150,50 @@ describe("caseVerdict (authority-based)", () => {
   it("with no objective/ground-truth, the judge decides", () => {
     expect(caseVerdict(sc([{ metric: "judge", pass: true }, { metric: "tool_calls" }]))).toBe(true);
   });
+  it("a real judge:<id> metric decides on the judge rung, not the all-scores fallback", () => {
+    // Regression: the judge rung matched the literal "judge" while JudgeGrader emits `judge:<id>`, so every
+    // real judge verdict fell through to the fallback, where an unrelated pass-bearing score could veto it.
+    expect(
+      caseVerdict(
+        sc([
+          { metric: "judge:relevance", pass: true },
+          { metric: "custom_check", pass: false }, // unranked observational score must not veto the judge
+        ]),
+      ),
+    ).toBe(true);
+  });
+  it("multi-criteria sub-scores (judge:<id>:<criterion>) are diagnostic and never decide the case", () => {
+    // The weighted overall (judge:<id>) is the judge's verdict; a failing criterion only localizes why.
+    expect(
+      caseVerdict(
+        sc([
+          { metric: "judge:quality", pass: true },
+          { metric: "judge:quality:helpfulness", pass: false },
+          { metric: "judge:quality:milestone:login", pass: false },
+        ]),
+      ),
+    ).toBe(true);
+  });
+  it("with multiple judges and no policy, the verdict is the explicit unanimous vote over judges only", () => {
+    expect(
+      caseVerdict(
+        sc([
+          { metric: "judge:a", pass: true },
+          { metric: "judge:b", pass: false },
+        ]),
+      ),
+    ).toBe(false);
+  });
+  it("an objective grader still overrules a real judge:<id>", () => {
+    expect(
+      caseVerdict(
+        sc([
+          { metric: "answer_match", pass: false },
+          { metric: "judge:quality", pass: true },
+        ]),
+      ),
+    ).toBe(false);
+  });
   it("undefined when there is no pass-deciding grader", () => {
     expect(caseVerdict(sc([{ metric: "tool_calls", value: 5 }]))).toBeUndefined();
   });
