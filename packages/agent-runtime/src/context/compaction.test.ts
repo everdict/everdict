@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../messages.js";
-import { capMedia, compactMessages, microcompact, summarizeAndCompact } from "./compaction.js";
+import { capMedia, compactMessages, compactStep, microcompact, summarizeAndCompact } from "./compaction.js";
 
 const big = (n = 600): string => "R".repeat(n);
 
@@ -133,6 +133,51 @@ describe("compactMessages (structural fallback)", () => {
     const out = compactMessages(m);
     expect(out).toHaveLength(1);
     expect(out[0]?.content).toBe("u1");
+  });
+});
+
+describe("microcompact — stale images", () => {
+  const shotTurn = (n: number): ChatMessage => ({
+    role: "user",
+    content: [
+      { type: "text", text: `The tool call(s) above returned 1 image(s):` },
+      { type: "image_url", image_url: { url: `data:image/png;base64,SHOT${n}` } },
+    ],
+  });
+
+  it("clears images older than the recent window, keeping the newest ones intact", () => {
+    // Given a screenshot-driven run: 12 image turns, of which only the last few are what the agent is acting on
+    const messages = Array.from({ length: 12 }, (_, i) => shotTurn(i));
+    // When rung 1 runs with a keep-window of 4
+    const { messages: out, cleared } = microcompact(messages, 4);
+    // Then the old screenshots' bytes are gone from the run's own history — not just from one request
+    expect(cleared).toBe(8);
+    const remaining = out.flatMap((m) =>
+      (m.content as { image_url?: { url?: string } }[]).filter((p) => p.image_url).map((p) => p.image_url?.url),
+    );
+    expect(remaining).toEqual([
+      "data:image/png;base64,SHOT8",
+      "data:image/png;base64,SHOT9",
+      "data:image/png;base64,SHOT10",
+      "data:image/png;base64,SHOT11",
+    ]);
+    // …and each cleared one says how to get it back, so the model does not reason from an image it can no longer see
+    const first = out[0]?.content as { type: string; text?: string }[];
+    expect(first[1]?.text).toContain("take a fresh one");
+    expect(first[0]?.text).toContain("returned 1 image(s)"); // surrounding text untouched
+  });
+
+  it("counts cleared images as reclaimed work, so the ladder stops at rung 1", async () => {
+    // Given a context whose only bulk is old images (every tool result is small)
+    const messages: ChatMessage[] = [
+      ...Array.from({ length: 10 }, (_, i) => shotTurn(i)),
+      { role: "user", content: "what changed?" },
+    ];
+    // When the loop escalates
+    const step = await compactStep(messages, async () => "SUMMARY");
+    // Then it stops at the cheapest rung instead of summarising or dropping turns
+    expect(step.mode).toBe("microcompact");
+    expect(step.dropped).toBe(0);
   });
 });
 

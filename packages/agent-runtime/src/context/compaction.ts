@@ -24,6 +24,9 @@ const SKILL_TOOL_NAMES: ReadonlySet<string> = new Set([USE_SKILL_TOOL_NAME, READ
 // because the images live in the durable history the retry fails identically — the run cannot get out.
 const MAX_MEDIA_PER_REQUEST = 100;
 const DROPPED_IMAGE_MARK = "[older image dropped to stay under the provider's per-request media limit]";
+// Cleared at rung 1, unlike the wire-level cap above: this one edits the run's own history, because an image
+// older than the recent window is stale output whose bytes stay resident for the rest of the run.
+const STALE_IMAGE_MARK = "[earlier image cleared to reclaim context — take a fresh one if you still need to see it]";
 
 function imagePartCount(m: ChatMessage): number {
   if (!Array.isArray(m.content)) return 0;
@@ -138,7 +141,19 @@ export function microcompact(
   }
   let cleared = 0;
   const out = messages.map((m, i): ChatMessage => {
-    if (i >= cutoff || m.role !== "tool" || keptSkillIndexes.has(i)) return m;
+    if (i >= cutoff) return m;
+    // An old screenshot is stale output exactly like an old tool result — and unlike one, it also holds a
+    // megabyte of base64 in the live array for the rest of the run. The images arrive on their own `user` turn
+    // (the loop surfaces them after the batch is answered), so this is where they are reachable; clearing them
+    // at rung 1 frees the same context that rung 3 would otherwise pay for by dropping whole turns of text.
+    if (m.role === "user" && imagePartCount(m) > 0) {
+      const parts = (m.content as unknown[]).map((p) =>
+        typeof p === "object" && p !== null && "image_url" in p ? { type: "text", text: STALE_IMAGE_MARK } : p,
+      );
+      cleared += imagePartCount(m);
+      return { ...m, content: parts } as ChatMessage;
+    }
+    if (m.role !== "tool" || keptSkillIndexes.has(i)) return m;
     const content = typeof m.content === "string" ? m.content : "";
     if (content.length < MIN_CLEAR_CHARS || content.startsWith(CLEARED_MARK)) return m;
     cleared++;
