@@ -186,6 +186,46 @@ describe("Run — playground session cases (a test case inside a live harness se
     expect(failed.patch.status).toBe("failed");
     expect(failed.facts.map((f) => f.kind)).toEqual(["run.failed"]);
   });
+
+  it("a conversation turn groups with role 'turn' and can carry the session's runtime placement", () => {
+    const turn = Run.newSessionCase({
+      id: "run-t1",
+      tenant: "acme",
+      harness: { id: "aegra", version: "1.0.0" },
+      sessionRunId: "sess-run-9",
+      caseId: "turn-2",
+      task: "and what did I ask before?",
+      timeoutSec: 120,
+      createdBy: "user-1",
+      role: "turn",
+      placement: { where: "runtime", target: "nomad-seoul", isolation: "container" },
+      now: "2026-08-06T00:00:00.000Z",
+    });
+    expect(turn.group).toEqual({ id: "sess-run-9", role: "turn" });
+    expect(turn.placement).toEqual({ where: "runtime", target: "nomad-seoul", isolation: "container" });
+    expect(() => RunRecordSchema.parse(turn)).not.toThrow();
+  });
+
+  it("a runtime-placed conversation turn is NEVER re-dispatched by boot recovery", () => {
+    // Regression guard: turns escaped the driver-placement exclusion once they carried the session's runtime
+    // placement — but a turn's continuity (resume token / session wiring) lives in the session process, so
+    // recovery re-driving it standalone would replay one turn against a dead conversation. Orphan-settle instead.
+    const turn = Run.newSessionCase({
+      id: "run-t2",
+      tenant: "acme",
+      harness: { id: "aegra", version: "1.0.0" },
+      sessionRunId: "sess-run-9",
+      caseId: "turn-3",
+      task: "continue",
+      timeoutSec: 120,
+      createdBy: "user-1",
+      role: "turn",
+      placement: { where: "runtime", target: "nomad-seoul", isolation: "container" },
+      now: "2026-08-06T00:00:00.000Z",
+    });
+    expect(Run.from(turn).canRedispatch()).toBe(false);
+    expect(() => Run.from(turn).redispatch("t")).toThrow(ConflictError);
+  });
 });
 
 describe("Run — agent activations on the ledger (P3)", () => {
@@ -331,6 +371,27 @@ describe("Run — agent worlds (W1): session snapshots and touch", () => {
     const record = world();
     expect(record.session).toMatchObject({ world: "proj", hibernate: true });
     expect(RunRecordSchema.parse(record)).toBeTruthy(); // the wire schema knows the new fields
+  });
+
+  it("a session can join a different pool (trigger) and declare conversation mode on its session half", () => {
+    const record = Run.newSandboxSession({
+      id: "fd1",
+      tenant: "acme",
+      harness: { id: "aegra", version: "1.0.0" },
+      image: "aegra@1.0.0",
+      ttlSec: 900,
+      createdBy: "alice",
+      trigger: "frontdoor",
+      conversation: true,
+      runtime: "nomad-seoul",
+      attach: ["tasks"],
+      now: "2026-08-06T00:00:00.000Z",
+    });
+    expect(record.trigger).toBe("frontdoor"); // its own capacity pool — never counted against shell sandboxes
+    expect(record.session).toMatchObject({ conversation: true });
+    expect(record.session?.computeId).toBeUndefined(); // nothing for Driver.reap — the reaper settles row-only
+    expect(record.placement).toEqual({ where: "runtime", target: "nomad-seoul", isolation: "container" });
+    expect(RunRecordSchema.parse(record)).toBeTruthy();
   });
 
   it("recordSnapshot appends to session.snapshots and announces run.snapshotted (subject run, actor = creator)", () => {

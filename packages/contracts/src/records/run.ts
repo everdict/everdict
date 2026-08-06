@@ -117,6 +117,9 @@ export const RunSessionSchema = z.object({
   // process (the crash-path reaper), and a fact emitted there must carry the same `causedBy` the creation
   // one did — otherwise an orphaned autonomous session's hibernate becomes an event its own agent wakes on.
   agent: z.object({ agentId: z.string(), conversationId: z.string().optional() }).optional(),
+  // Playground conversation mode: the session's turns continue ONE conversation (stable workdir + harness
+  // resume / session-stable front-door wiring) instead of running independent cases. Set at boot, never flips.
+  conversation: z.boolean().optional(),
 });
 export type RunSession = z.infer<typeof RunSessionSchema>;
 

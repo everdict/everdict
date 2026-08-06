@@ -352,6 +352,11 @@ export class Run {
     origin?: RunOrigin;
     envelope?: RunEnvelope;
     attach?: RunAttachChannel[]; // default ["exec"]; a harness session adds "tasks" (test-case submissions)
+    // Session-pool discriminator (the ledger counts capacity per trigger). Default "sandbox" = the
+    // container-holding pool; "frontdoor" = service-harness conversation sessions (a warm-topology slot on a
+    // workspace runtime — different scarcity, its own caps).
+    trigger?: string;
+    conversation?: boolean; // playground conversation mode — the session's turns continue one conversation
     now: string;
   }): RunRecord {
     return {
@@ -360,7 +365,7 @@ export class Run {
       harness: input.harness,
       caseId: input.image,
       status: "running",
-      trigger: "sandbox", // the activity view's legacy source axis (dual-stamped, like eval runs)
+      trigger: input.trigger ?? "sandbox", // the activity view's legacy source axis (dual-stamped, like eval runs)
       createdBy: input.createdBy,
       kind: "sandbox",
       class: "interactive", // a person is at the shell
@@ -385,6 +390,7 @@ export class Run {
         ...(input.hibernate !== undefined ? { hibernate: input.hibernate } : {}),
         ...(input.repo !== undefined ? { repo: input.repo } : {}),
         ...(input.agent !== undefined ? { agent: input.agent } : {}),
+        ...(input.conversation === true ? { conversation: true } : {}),
       },
       createdAt: input.now,
       updatedAt: input.now,
@@ -401,10 +407,15 @@ export class Run {
     tenant: string;
     harness: { id: string; version: string };
     sessionRunId: string;
-    caseId: string; // "task-<n>" within the session
+    caseId: string; // "task-<n>" within the session ("turn-<n>" for conversation turns)
     task: string;
     timeoutSec: number;
     createdBy: string;
+    // "case" (default) = an independent test case; "turn" = one dependent turn of the session's conversation
+    // — aggregations that treat role:"case" children as independent eval cases must not ingest turns.
+    role?: "case" | "turn";
+    // Front-door turns run on the session's workspace runtime, not this host's driver; unset = today's driver placement.
+    placement?: RunRecord["placement"];
     now: string;
   }): RunRecord {
     return {
@@ -427,8 +438,8 @@ export class Run {
       class: "interactive", // a person is at the composer, watching
       lifetime: "task",
       origin: { cause: "member", actor: input.createdBy },
-      group: { id: input.sessionRunId, role: "case" },
-      placement: { where: "driver", isolation: "container" },
+      group: { id: input.sessionRunId, role: input.role ?? "case" },
+      placement: input.placement ?? { where: "driver", isolation: "container" },
       createdAt: input.now,
       updatedAt: input.now,
     };
@@ -560,7 +571,14 @@ export class Run {
   // path). A driver-placed run (a playground session case) has NO backend to re-dispatch to — its compute
   // was this process's docker container; recovery must tombstone it, never send a prompt case to a backend.
   canRedispatch(): boolean {
-    return !this.isTerminal() && this.record.caseSpec !== undefined && this.record.placement?.where !== "driver";
+    return (
+      !this.isTerminal() &&
+      this.record.caseSpec !== undefined &&
+      this.record.placement?.where !== "driver" &&
+      // A conversation turn is dependent evidence — its continuity (resume token / session wiring) lives in the
+      // session process, so boot recovery must orphan-settle it with the session, never re-drive it standalone.
+      this.record.group?.role !== "turn"
+    );
   }
 
   // queued → running — compute actually began (managed: the backend dispatched it; self-hosted: a runner leased it).

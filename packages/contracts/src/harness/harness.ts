@@ -25,6 +25,18 @@ export interface RunContext {
   // control plane's live-trace store; the managed job prints EVENT_SENTINEL stdout lines instead. Best-effort: a
   // report failure is swallowed and the sealed CaseResult.trace stays the durable record. Absent = no live trace.
   liveTrace?: LiveTraceReport;
+  // Multi-turn conversation state (opt-in, in-process only — never crosses the wire, like `signal`). Only harnesses
+  // marked `conversational` honor it; others ignore it and each run stays independent. Absent = one-shot run.
+  conversation?: ConversationTurn;
+}
+
+// One conversational turn's continuity contract, carried on RunContext. `resume` is the provider-native token that
+// continues the previous turn (e.g. a claude session id); absent = this turn starts the conversation. The harness
+// reports the token that continues THIS turn via `onToken` — possibly more than once (a resumed claude run mints a
+// NEW session id, so the caller keeps the last-reported token for the next turn).
+export interface ConversationTurn {
+  resume?: string;
+  onToken?: (token: string) => void;
 }
 
 // The in-process live-screen capture hook carried on RunContext. captureCmd is exec'd in the case compute and must
@@ -65,6 +77,10 @@ export interface HarnessTraceSource {
 export interface EvaluableHarness {
   readonly id: string;
   readonly version: string; // the unit of versioning
+  // Capability marker: run() honors RunContext.conversation (multi-turn continuity). Callers that need a
+  // conversation check this BEFORE provisioning compute, so an unsupported harness is refused up front
+  // instead of silently starting fresh every turn. Absent = one-shot only.
+  readonly conversational?: true;
   install(compute: ComputeHandle): Promise<void>;
   run(compute: ComputeHandle, task: string, ctx: RunContext): AsyncIterable<TraceEvent>;
   // Implemented only by harnesses whose trace is stored on an external platform (OTel/MLflow) (command otel/mlflow etc.).
