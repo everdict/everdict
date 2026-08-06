@@ -100,8 +100,13 @@ weighted overall (`judge:<id>`). See `docs/judges.md` + `docs/architecture/eval-
   samples (<30 trials) by **Fisher's exact test** (z is overconfident at eval-scale n; 3/3→0/3 is honestly
   p=0.1) and applies the `minDelta` practical floor — statistically-significant-but-negligible dips stay out;
   skipped cases ride `missing`. Route `GET /scorecards/diff`.
-- `leaderboard(cards, opts)` (`packages/suite/src/leaderboard.ts`) — groups by `(harness@version × model.primary)`,
-  ranks by passRate→mean, `window: latest|best`, per-`metric` axis, optional `judgeModel` fair-compare filter.
+- `leaderboard(cards, opts)` (`packages/domain/src/scorecard/leaderboard.ts`) — groups by
+  `(harness@version × model.primary)`, ranks by passRate→mean **under the metric's policy-declared direction**
+  (rank 1 = BEST: `?metric=cost_usd` puts the cheapest first, not the most expensive), `window: latest|best`,
+  optional `judgeModel` fair-compare filter. `trendSeries` likewise flags `regressed` direction-aware and
+  serves `direction` (absent = unknown ⇒ nothing flagged, deltas uncolored) — never interpret a delta's sign
+  alone. The **served `headlinePassRate` rides list AND detail** (`serveScorecardListItem`); a client never
+  re-derives a representative metric from summary order.
 - Model axis (`packages/suite/src/models.ts` `scorecardModels`): **observed** (distinct `llm_call.model` from the
   trace) + **declared** (command harness `spec.model`) both kept; `primary` = mode observed → declared fallback.
   Persisted as `models` jsonb (mig `0028_add_scorecard_models.sql`); judge models mig `0030`.
