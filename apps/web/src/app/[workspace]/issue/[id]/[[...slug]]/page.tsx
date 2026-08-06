@@ -17,6 +17,7 @@ import {
   IssueAssigneeControl,
   IssueCycleControl,
   IssueLabelControl,
+  IssueMilestoneControl,
   IssueParentControl,
   IssuePriorityControl,
   IssueProjectControl,
@@ -320,6 +321,15 @@ export default async function IssueDetailPage({
     current.status !== 'cancelled' &&
     isPastDue(current.dueDate, timeZone)
   const project = current.projectId ? projects.find((p) => p.id === current.projectId) : undefined
+  // 체크포인트는 프로젝트 안에서만 산다 — 고를 수 있는 것은 이 이슈가 들어가 있는 프로젝트의 것뿐이고(제어
+  // 평면이 그렇게 판정한다), 프로젝트를 읽을 때 이미 함께 온다(읽기가 하나도 늘지 않는다). 순서는 프로젝트
+  // 상세가 그리는 순서와 같아야 한다 — 같은 목록이 두 화면에서 다른 차례로 보이면 안 된다.
+  const milestoneOptions = [...(project?.milestones ?? [])]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((m) => ({ id: m.id, name: m.name, ...(m.targetDate ? { targetDate: m.targetDate } : {}) }))
+  const milestone = current.milestoneId
+    ? milestoneOptions.find((m) => m.id === current.milestoneId)
+    : undefined
   // 이터레이션. 주소는 팀 아래의 번호(`…/teams/ENG/cycles/7`)이고, 팀을 못 읽었을 때만 예전 주소로 보낸다
   // (그 주소가 팀을 찾아 정식 주소로 넘겨 준다) — 링크가 죽는 경우는 만들지 않는다.
   const today = todayIso()
@@ -575,6 +585,20 @@ export default async function IssueDetailPage({
                       : undefined
                   }
                   projects={projects.map((p) => ({ id: p.id, name: p.name, status: p.status }))}
+                  canWrite={canWrite}
+                />
+              </PropertyRow>
+            )}
+            {/* 프로젝트 체크포인트 — 프로젝트 바로 아래 줄이다. 마일스톤은 프로젝트 안에서만 의미가 있어
+                (제어 평면이 "이 이슈 프로젝트의 것인가"를 판정한다) 프로젝트가 없거나 체크포인트를 하나도
+                두지 않은 프로젝트에서는 줄을 내지 않는다(빈 섹션 숨김). 프로젝트 상세는 체크포인트별 이슈
+                수를 세는데, 이슈를 체크포인트에 걸 자리가 화면 어디에도 없어 그 수는 늘 0이었다. */}
+            {(milestone !== undefined || (canWrite && milestoneOptions.length > 0)) && (
+              <PropertyRow label={t('fieldMilestone')}>
+                <IssueMilestoneControl
+                  id={current.id}
+                  milestone={milestone}
+                  milestones={milestoneOptions}
                   canWrite={canWrite}
                 />
               </PropertyRow>

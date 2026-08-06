@@ -1,4 +1,5 @@
 import {
+  CycleService,
   GithubIssueSync,
   InitiativeService,
   IssueService,
@@ -10,6 +11,7 @@ import type { GithubRepoWriter, GithubRepoWriterFactory, OutboxEvent } from "@ev
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import {
+  InMemoryCycleStore,
   InMemoryInitiativeStore,
   InMemoryInitiativeUpdateStore,
   InMemoryIssueStore,
@@ -56,17 +58,23 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
   // project its own team is on, and a fake allocator naming a team the project store never heard of would make
   // every tool that puts an issue in a project fail for a reason production does not have.
   const teamService = new TeamService({ store: teamStore, issues: issueStore });
+  const cycleStore = new InMemoryCycleStore();
   const issueService = new IssueService({
     teams: teamService,
     store: issueStore,
     scorecards: new InMemoryScorecardStore(),
     projects: projectStore,
+    // "Does this cycle exist, and whose is it" — production's wiring, so an agent moving an issue into an
+    // iteration meets the same team check a member does.
+    cycles: cycleStore,
     events,
   });
   return {
     deps: {
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
       issueService,
+      teamService,
+      cycleService: new CycleService({ store: cycleStore, teams: teamStore, issues: issueStore }),
       issueSync: new GithubIssueSync({
         teams: teamService,
         store: issueStore,
@@ -194,6 +202,29 @@ describe("eval tracker MCP tools", () => {
       causedBy: "agent:triage-bot:conv-1",
       payload: { from: "todo", to: "done", cause: "manual" },
     });
+  });
+
+  // The edit that puts work in an iteration — parity with PATCH /issues/:id, where the same field was missing
+  // from the body schema. A tool that lists the field in its description but not its inputSchema is worse than
+  // one that never offered it: the agent sends it and the SDK strips it.
+  it("pulls an issue into its team's iteration through the ordinary edit", async () => {
+    const client = await connect(makeDeps().deps);
+    const issue = JSON.parse(
+      textOf(await client.callTool({ name: "create_issue", arguments: { title: "Retry drops tool results" } })),
+    );
+    const cycle = JSON.parse(
+      textOf(await client.callTool({ name: "create_cycle", arguments: { teamId: issue.teamId } })),
+    );
+
+    const moved = JSON.parse(
+      textOf(await client.callTool({ name: "update_issue", arguments: { id: issue.id, cycleId: cycle.id } })),
+    );
+    expect(moved.cycleId).toBe(cycle.id);
+
+    const cleared = JSON.parse(
+      textOf(await client.callTool({ name: "update_issue", arguments: { id: issue.id, cycleId: null } })),
+    );
+    expect(cleared.cycleId).toBeUndefined();
   });
 
   it("reaches the same completion gate the HTTP surface does — a 409 arrives as a tool error", async () => {

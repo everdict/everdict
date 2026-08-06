@@ -212,10 +212,13 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
     "update_issue",
     {
       description:
-        "Edit an issue's content (title, description, labels, assignee, project, priority, estimate, due date, " +
-        "parent). Status moves use set_issue_status instead, and team moves use move_issue. Pass null to clear " +
-        "assignee/projectId/description/estimate/dueDate/parentId. Re-parenting an issue under one of its own " +
-        "sub-issues is refused — that would close the loop.",
+        "Edit an issue's content (title, description, labels, assignee, project, milestone, cycle, priority, " +
+        "estimate, due date, parent). Status moves use set_issue_status instead, and team moves use " +
+        "move_issue. Pass null to clear assignee/projectId/milestoneId/cycleId/description/estimate/dueDate/" +
+        "parentId. Pulling an issue into an iteration is a plan change, not a transition, so it rides this " +
+        "edit — and only into one of the issue's OWN team's cycles; a milestone likewise has to be one of the " +
+        "issue's own project's checkpoints. Re-parenting an issue under one of its own sub-issues is refused " +
+        "— that would close the loop.",
       inputSchema: {
         id: z.string(),
         title: z.string().min(1).max(300).optional(),
@@ -223,6 +226,12 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         labelIds: z.array(z.string()).max(50).optional(),
         assignee: z.string().nullable().optional(),
         projectId: z.string().nullable().optional(),
+        cycleId: z.string().nullable().optional().describe("one of the issue's own team's cycles; null takes it out"),
+        milestoneId: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("a checkpoint on the issue's own project; null detaches it"),
         priority: IssuePrioritySchema.optional(),
         estimate: z.number().int().nonnegative().max(1000).nullable().optional(),
         dueDate: z.string().nullable().optional(),

@@ -695,3 +695,105 @@ describe("issue list — the grouped screen's query", () => {
     await app.close();
   });
 });
+
+// A project's checkpoints, on the issues that are supposed to reach them. The project screen has counted the
+// issues on each milestone since it existed and every count was zero — not because nobody used them, but
+// because `milestoneId` was missing from the edit body, so zod stripped it before the service could store it
+// (the same omission `cycleId` had, one level up).
+describe("PATCH /issues/:id — the project checkpoint", () => {
+  async function projectWithMilestone(app: ReturnType<typeof build>["app"], name = "conversation quality") {
+    const project = (await app.inject({ method: "POST", url: "/projects", headers: H, payload: { name } })).json();
+    const milestone = (
+      await app.inject({
+        method: "POST",
+        url: `/projects/${project.id}/milestones`,
+        headers: H,
+        payload: { name: "beta", targetDate: "2026-09-01" },
+      })
+    ).json();
+    return { projectId: project.id, milestoneId: milestone.milestones.at(-1).id };
+  }
+
+  it("puts an issue on one of its project's checkpoints, so the count on that milestone can be non-zero", async () => {
+    const { app } = build();
+    const { projectId, milestoneId } = await projectWithMilestone(app);
+    const issue = await createIssue(app, { title: "Judge disagrees with the rubric", projectId });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/issues/${issue.id}`,
+      headers: H,
+      payload: { milestoneId },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().milestoneId).toBe(milestoneId);
+    const listed = await app.inject({ method: "GET", url: `/issues?project=${projectId}`, headers: H });
+    expect(listed.json().items.map((i: { milestoneId?: string }) => i.milestoneId)).toEqual([milestoneId]);
+  });
+
+  it("joins the project and its checkpoint in one edit", async () => {
+    const { app } = build();
+    const { projectId, milestoneId } = await projectWithMilestone(app);
+    const issue = await createIssue(app, { title: "Retry loses the tool result" });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/issues/${issue.id}`,
+      headers: H,
+      payload: { projectId, milestoneId },
+    });
+
+    expect(res.json()).toMatchObject({ projectId, milestoneId });
+  });
+
+  it("refuses a checkpoint that belongs to another project — the pointer would dangle", async () => {
+    const { app } = build();
+    const mine = await projectWithMilestone(app, "mine");
+    const theirs = await projectWithMilestone(app, "theirs");
+    const issue = await createIssue(app, { title: "Trace ingest drops spans", projectId: mine.projectId });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/issues/${issue.id}`,
+      headers: H,
+      payload: { milestoneId: theirs.milestoneId },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/not on this issue's project/i);
+  });
+
+  it("refuses a checkpoint on an issue that is in no project, and names what to do first", async () => {
+    const { app } = build();
+    const { milestoneId } = await projectWithMilestone(app);
+    const issue = await createIssue(app, { title: "Runner never leases again" });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/issues/${issue.id}`,
+      headers: H,
+      payload: { milestoneId },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/put the issue in the project first/i);
+  });
+
+  it("detaches the checkpoint when the picker clears it", async () => {
+    const { app } = build();
+    const { projectId, milestoneId } = await projectWithMilestone(app);
+    const issue = await createIssue(app, { title: "Scorecard diff hides an improvement", projectId });
+    await app.inject({ method: "PATCH", url: `/issues/${issue.id}`, headers: H, payload: { milestoneId } });
+
+    const cleared = await app.inject({
+      method: "PATCH",
+      url: `/issues/${issue.id}`,
+      headers: H,
+      payload: { milestoneId: null },
+    });
+
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().milestoneId).toBeUndefined();
+  });
+});

@@ -65,6 +65,9 @@ export async function updateIssueAction(
     // 이터레이션에 넣고 빼기. 일을 주기로 끌어오는 것은 워크플로 전이가 아니라 계획 변경이라 평범한 편집이다
     // (제어 평면도 그렇게 본다). 자기 팀의 사이클만 받는다 — 다른 팀 것은 거절된다.
     cycleId?: string | null
+    // 프로젝트 체크포인트. 사이클과 같은 규칙이 한 단계 위에 있다 — 자기 프로젝트의 마일스톤만 받는다
+    // (프로젝트가 없는 이슈에 걸면 "먼저 프로젝트에 넣으라"고 거절된다).
+    milestoneId?: string | null
     // null 은 비운다: 추정치 없음·기한 없음·부모에서 떼기.
     estimate?: number | null
     dueDate?: string | null

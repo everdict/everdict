@@ -140,10 +140,12 @@ export const issueDocs: Record<
   update: {
     summary: "Edit an issue's content",
     description:
-      "Title, description, labels, assignee, project, priority, estimate, due date, parent. Status moves go " +
-      "through POST /issues/:id/status and team moves through POST /issues/:id/team, so neither is ever a side " +
-      "effect of a rename. null clears an optional field; re-parenting an issue under one of its own " +
-      "sub-issues is a 409. Requires issues:write.",
+      "Title, description, labels, assignee, project, milestone, cycle, priority, estimate, due date, parent. " +
+      "Status moves go through POST /issues/:id/status and team moves through POST /issues/:id/team, so " +
+      "neither is ever a side effect of a rename — but joining an iteration is a plan change, so cycleId rides " +
+      "this edit (the issue's own team's cycles only), as does milestoneId (its own project's checkpoints " +
+      "only). null clears an optional field; re-parenting an issue under one of its own sub-issues is a 409. " +
+      "Requires issues:write.",
     tags: ["issue"],
     body: toJsonSchema(UpdateIssueBodySchema),
     response: {
