@@ -2,6 +2,7 @@ import {
   BadRequestError,
   type ComputeHandle,
   ConflictError,
+  type DelegationBrief,
   type Driver,
   type EvaluableHarness,
   ForbiddenError,
@@ -19,7 +20,14 @@ import {
   gitAuthEnv,
   shq,
 } from "@everdict/contracts";
-import { type BudgetTracker, IMAGE_REPOSITORY_NAME, Run, type UsageMeter, pinDigest } from "@everdict/domain";
+import {
+  type BudgetTracker,
+  IMAGE_REPOSITORY_NAME,
+  Run,
+  type UsageMeter,
+  pinDigest,
+  renderDelegationBrief,
+} from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
@@ -149,6 +157,16 @@ export interface CreateSandboxInput {
   // conversation (stable workdir + the harness's own resume mechanism) instead of running independent cases.
   // The session picks its mode at boot and never flips; a harness without the `conversational` capability
   // marker refuses the flag up front (silently-fresh turns would be a lie).
+  // A DELEGATION PROFILE (a `delegation` capability) is the fifth target and the one everdict delegates
+  // through: one reference resolves the whole environment a registered work-agent needs (image · which
+  // conversational harness · model binding · env/secrets · standing instructions), so a delegation is a
+  // reference plus a brief instead of a pile of re-specified knobs. A profile session is ALWAYS a
+  // conversation — that is what delegating means.
+  profile?: { source?: string; id: string; version?: string };
+  // The per-delegation handoff (goal · context · references · constraints · done-criteria). Materialized into
+  // the delegate's working directory as a file it reads, and sealed on the session trajectory as evidence.
+  // Only meaningful with `profile`.
+  brief?: DelegationBrief;
   environment?: { source?: string; id: string; version?: string };
   image?: string;
   harness?: { id: string; version?: string; image?: string; conversation?: boolean };
@@ -186,6 +204,19 @@ export interface ResolvedSessionHarness {
   image?: string; // the spec's image (command kind); undefined = the caller must provide harness.image
 }
 
+// A delegation profile resolved for session use — the registered environment (image + a harness whose adapter
+// already carries the profile's env/workDir) plus what the session must seed and stamp. Built by the
+// composition root behind the same injected-closure seam as resolveSessionHarness.
+export interface ResolvedDelegationProfile {
+  ref: { source: string; id: string; version: string }; // what was delegated to, for the record + the evidence
+  harness: ResolvedSessionHarness;
+  image: string;
+  workDir: string; // the conversation's stable cwd — also where the brief lands
+  instructions: string; // the profile's STANDING brief (what is true of every delegation into it)
+  instructionsFile: string; // the convention file this agent reads (CLAUDE.md · AGENTS.md · …)
+  ttlSec?: number;
+}
+
 // One submitted test case: its child run id + the live cursor buffer the web polls. Kept until the
 // session closes (short-lived by TTL); after settle the sealed trajectory serves the same events.
 interface TaskEntry {
@@ -212,6 +243,10 @@ interface PlaygroundState {
   tasks: TaskEntry[];
   active?: { runId: string; abort: AbortController; done: Promise<void> };
   conversation?: ConversationState;
+  // Present when this session was booted from a DELEGATION PROFILE: who was delegated to (for the read model)
+  // and the working directory its context was seeded into — the same cwd every turn must run in, or the
+  // delegate loses both its instructions and its conversation.
+  delegation?: { ref: { source: string; id: string; version: string }; workDir: string };
 }
 
 // A front-door conversation session's live half (the service-harness sibling of PlaygroundState): the bound
@@ -272,6 +307,9 @@ export interface SandboxSessionView {
     busy: boolean;
     harness?: { id: string; version: string; kind: "process" | "command" | "service" };
     conversation: boolean; // true = the task feed is one conversation (turns), not independent cases
+    // Who this session delegates to, when it was booted from a delegation profile — so a surface can say
+    // WHOSE environment is doing the work, not just which harness binary is running.
+    profile?: { source: string; id: string; version: string };
     tasks: SandboxTaskSummary[];
   };
 }
@@ -316,6 +354,14 @@ export interface SandboxSessionServiceDeps {
     subject: string,
     ref: { id: string; version?: string },
   ) => Promise<ResolvedSessionHarness | undefined>;
+  // delegation-profile ref → the registered work environment (capability get + consume gate + secrets + model
+  // binding + makeHarness with the profile's env/workDir). apps/api wires it; absent = delegation profiles are
+  // not configured (a `profile` boot 400s). Undefined RESULT = no such profile for this workspace (404).
+  resolveDelegationProfile?: (
+    tenant: string,
+    subject: string,
+    ref: { source?: string; id: string; version?: string },
+  ) => Promise<ResolvedDelegationProfile | undefined>;
   // harness ref → a bootable front-door CONVERSATION, when the ref is a kind:"service" harness (registry get
   // + secret resolution + the topology environment for the named runtime). Returns undefined for any other
   // kind — the process resolver above then answers. The resolver itself refuses a service harness with no
@@ -517,7 +563,11 @@ export class SandboxSessionService {
       this.deps.budget?.release(input.tenant);
       throw err;
     }
-    const ttlSec = Math.min(input.ttlSec ?? this.deps.defaultTtlSec ?? DEFAULT_TTL_SEC, this.maxTtl());
+    // A delegation profile carries its own default budget — the caller's explicit ttlSec still wins.
+    const ttlSec = Math.min(
+      input.ttlSec ?? resolved.delegation?.ttlSec ?? this.deps.defaultTtlSec ?? DEFAULT_TTL_SEC,
+      this.maxTtl(),
+    );
     let handle: ComputeHandle;
     try {
       handle = await driver.provision({
@@ -541,9 +591,10 @@ export class SandboxSessionService {
     try {
       // Warm install BEFORE the record exists (the provision-before-record rule, extended): a harness whose
       // install fails leaves no row and no leaked container — the thrown error is the whole story.
+      const delegation = resolved.delegation;
       if (resolved.playground) {
         try {
-          await handle.exec("mkdir -p work");
+          await handle.exec(`mkdir -p ${shq(delegation?.workDir ?? "work")}`);
           await resolved.playground.harness.install(handle);
         } catch (err) {
           throw new UpstreamError(
@@ -553,11 +604,28 @@ export class SandboxSessionService {
           );
         }
       }
+      // The delegation's CONTEXT, seeded before the record for the same reason the install is: a delegate that
+      // silently never received its brief is a failure the delegator would only discover from the answer.
+      const briefMarkdown = input.brief !== undefined ? renderDelegationBrief(input.brief) : undefined;
+      if (delegation) {
+        try {
+          await handle.writeFile(`${delegation.workDir}/${delegation.instructionsFile}`, delegation.instructions);
+          if (briefMarkdown !== undefined) await handle.writeFile(`${delegation.workDir}/BRIEF.md`, briefMarkdown);
+        } catch (err) {
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { profile: delegation.ref.id },
+            `Could not seed the delegation context into the session: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
       // Clone BEFORE the record too, and for the same reason: a session handed over without the repo it was
       // asked for is a lie the member would only discover by looking.
       const repo = input.repo !== undefined ? await this.cloneRepo(input.tenant, handle, input.repo) : undefined;
       const hibernate = resolved.world !== undefined ? (input.hibernate ?? true) : false;
-      const conversation = resolved.playground !== undefined && input.harness?.conversation === true;
+      // A delegation is a conversation by definition — you do not hand work over one message at a time.
+      const conversation =
+        delegation !== undefined || (resolved.playground !== undefined && input.harness?.conversation === true);
       const record = Run.newSandboxSession({
         id: this.newId(),
         tenant: input.tenant,
@@ -622,8 +690,27 @@ export class SandboxSessionService {
               ...(repo !== undefined ? { repo: repo.git, dir: repo.dir } : {}),
               ...(resolved.playground ? { harness: `${resolved.harness.id}@${resolved.harness.version}` } : {}),
               ...(conversation ? { conversation: true } : {}),
+              ...(delegation
+                ? { profile: `${delegation.ref.source}/${delegation.ref.id}@${delegation.ref.version}` }
+                : {}),
             },
           },
+          // The handoff, on the ledger: WHAT this delegate was actually asked to do, in the same rendering it
+          // received as a file. Member-authored text — the profile's resolved env/secrets never come here.
+          ...(delegation !== undefined && briefMarkdown !== undefined
+            ? [
+                {
+                  t: 0,
+                  kind: "env_action" as const,
+                  action: "delegation.brief",
+                  detail: {
+                    profile: `${delegation.ref.source}/${delegation.ref.id}@${delegation.ref.version}`,
+                    seededTo: `${delegation.workDir}/BRIEF.md`,
+                    brief: briefMarkdown,
+                  },
+                },
+              ]
+            : []),
         ],
         t: 1,
         execCount: 0,
@@ -634,6 +721,9 @@ export class SandboxSessionService {
                 taskSeq: 0,
                 tasks: [],
                 ...(conversation ? { conversation: { threadSeq: 1 } } : {}),
+                ...(delegation !== undefined
+                  ? { delegation: { ref: delegation.ref, workDir: delegation.workDir } }
+                  : {}),
               },
             }
           : {}),
@@ -1047,8 +1137,12 @@ export class SandboxSessionService {
         record,
         harness: playground.resolved.harness,
         // A conversation lives in ONE stable workdir (the harness keys its session store off the cwd —
-        // per-task rebasing would break resume structurally); independent cases keep their tasks/<n> isolation.
-        compute: scopedComputeHandle(handle, conversation !== undefined ? "conversation" : `tasks/${seq}`),
+        // per-task rebasing would break resume structurally); independent cases keep their tasks/<n>
+        // isolation. A delegation runs where its context was seeded — the profile's own working directory.
+        compute:
+          playground.delegation !== undefined
+            ? handle // the profile's workDir is already the adapter's cwd; scoping it again would move the delegate away from its brief
+            : scopedComputeHandle(handle, conversation !== undefined ? "conversation" : `tasks/${seq}`),
         apiKeyEnv: playground.resolved.apiKeyEnv,
         task: input.task,
         timeoutSec,
@@ -1258,6 +1352,7 @@ export class SandboxSessionService {
               version: live.playground.resolved.version,
               kind: live.playground.resolved.kind,
             },
+            ...(live.playground.delegation !== undefined ? { profile: live.playground.delegation.ref } : {}),
             tasks: summaries(live.playground.tasks),
           }
         : live.frontdoor !== undefined
@@ -1715,7 +1810,31 @@ export class SandboxSessionService {
     harness: { id: string; version: string };
     playground?: ResolvedSessionHarness;
     world?: string;
+    delegation?: ResolvedDelegationProfile;
   }> {
+    if (input.profile) {
+      if (!this.deps.resolveDelegationProfile)
+        throw new BadRequestError("BAD_REQUEST", {}, "Delegation profiles are not configured.");
+      const resolved = await this.deps.resolveDelegationProfile(input.tenant, input.createdBy, input.profile);
+      if (!resolved)
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { profile: input.profile.id },
+          "Delegation profile not found (or not consumable by this workspace).",
+        );
+      return {
+        image: resolved.image,
+        harness: resolved.harness,
+        playground: resolved.harness,
+        delegation: resolved,
+      };
+    }
+    if (input.brief !== undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        {},
+        "A brief is the handoff to a delegation profile — boot with profile:{id} to send one.",
+      );
     if (input.world) {
       // A world session is snapshot-bound by definition — refuse at CREATE when the deployment cannot
       // snapshot, not at the first snapshot hours of work later.

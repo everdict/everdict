@@ -145,6 +145,17 @@ recovery never re-dispatches a turn, and aggregations over `role:"case"` childre
 - Known v1 leak: a crash-orphaned held target (the per-session browser) is not reaped by the row-only settle
   — it is bounded by the target job's own lifecycle on the cluster.
 
+### Delegation profiles — booting a conversation from a registered environment
+
+The conversation lane's third entry (beside a process harness and a service harness): `POST /sandboxes
+{profile:{id}, brief}` boots a **delegation capability** — a registered work environment (image · which
+conversational agent · model binding · env/secrets · standing instructions) referenced once instead of
+re-specified per call. The session is a conversation by definition; the profile's `workDir` is the stable cwd
+(turns run there directly — no `tasks/<n>`, no `conversation/` rescoping, or the delegate walks away from the
+context seeded beside it); the standing instructions and the rendered brief are written into that directory
+BEFORE the ledger row exists, and the brief is sealed on the trajectory as a `delegation.brief` marker.
+Design + the env-precedence rule: `docs/architecture/capability-store.md` §Fifth kind.
+
 ## Agent worlds (W1) ride the same session
 
 A sandbox session opened with `world:{id}` becomes a PERSISTENT environment: its filesystem is

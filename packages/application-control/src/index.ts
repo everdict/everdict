@@ -228,6 +228,7 @@ export {
   type FirstPartyDefault,
   firstPartyCatalogExtras,
   firstPartyDefaults,
+  firstPartyDelegationExamples,
   firstPartySkillExamples,
   WEBSEARCH_SECRET_NAME,
 } from "./capability/first-party.js";
@@ -346,6 +347,7 @@ export { withTracePerception } from "./observability/trace-perception.js";
 export {
   SandboxSessionService,
   type CreateSandboxInput,
+  type ResolvedDelegationProfile,
   type ResolvedSessionHarness,
   type SandboxActor,
   type SandboxSessionServiceDeps,

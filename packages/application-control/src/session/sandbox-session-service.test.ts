@@ -114,6 +114,7 @@ function fakeTrajectories() {
 function fakeDriver(
   opts: {
     failProvision?: boolean;
+    failWrite?: boolean; // writeFile throws — the delegation context-seed failure path
     emptyStdout?: boolean; // every command answers with empty output (a directory with no remote, say)
     snapshot?: (id: string, ref: string, auth?: RegistryAuth) => void;
   } = {},
@@ -122,6 +123,7 @@ function fakeDriver(
   const disposed: string[] = [];
   const reaped: string[] = [];
   const execs: string[] = [];
+  const written: Array<{ path: string; data: string }> = [];
   const execEnvs: Array<Record<string, string> | undefined> = [];
   let seq = 0;
   const snapshotFn = opts.snapshot;
@@ -151,7 +153,10 @@ function fakeDriver(
             ? { stdout: "", stderr: "", exitCode: 0 }
             : { stdout: `ran:${command}`, stderr: "", exitCode: 0 };
         },
-        async writeFile() {},
+        async writeFile(path: string, data: string) {
+          if (opts.failWrite) throw new Error("read-only filesystem");
+          written.push({ path, data });
+        },
         async readFile() {
           return "";
         },
@@ -162,7 +167,7 @@ function fakeDriver(
       return handle;
     },
   };
-  return { driver, provisioned, disposed, reaped, execs, execEnvs };
+  return { driver, provisioned, disposed, reaped, execs, execEnvs, written };
 }
 
 function build(over: Partial<SandboxSessionServiceDeps> = {}) {
@@ -1964,5 +1969,114 @@ describe("SandboxSessionService — front-door conversation sessions (service ha
     expect(after.runStore.rows.get(session.id)?.status).toBe("succeeded");
     expect(after.runStore.rows.get(session.id)?.session?.closedReason).toBe("orphaned");
     expect(after.driver.reaped).toEqual([]); // no computeId → nothing for Driver.reap
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Delegation profiles: a registered work environment everdict hands work TO, with a structured brief.
+// ---------------------------------------------------------------------------------------------------
+
+import type { ResolvedDelegationProfile } from "./sandbox-session-service.js";
+
+function fakeDelegationProfile(over: Partial<ResolvedDelegationProfile> = {}) {
+  const fake = fakeConversationalHarness();
+  const resolved: ResolvedDelegationProfile = {
+    ref: { source: "acme", id: "fixer", version: "1.0.0" },
+    harness: fake.resolved,
+    image: "reg/claude-preinstalled:1",
+    workDir: "delegation",
+    instructions: "You are the workspace's repair agent.",
+    instructionsFile: "CLAUDE.md",
+    ttlSec: 1800,
+    ...over,
+  };
+  return { resolved, resumes: fake.resumes };
+}
+
+describe("SandboxSessionService — delegation profiles (a registered environment to hand work to)", () => {
+  const brief = {
+    goal: "make the regressed cases pass",
+    references: [{ type: "scorecard" as const, id: "sc-9", note: "the batch that regressed" }],
+    constraints: ["do not touch the dataset"],
+    doneWhen: ["the two cases pass"],
+  };
+
+  it("boots the profile's environment, IS a conversation, and seeds instructions + brief before the record", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, driver, runStore } = build({ resolveDelegationProfile: async () => fake.resolved });
+    const session = await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, brief });
+
+    expect(session.session?.image).toBe("reg/claude-preinstalled:1");
+    expect(session.session?.conversation).toBe(true); // delegating IS conversing — never per-message
+    expect(session.session?.ttlSec).toBe(1800); // the profile's own budget, since the caller named none
+    // The context physically landed in the delegate's working directory, BEFORE the row existed.
+    expect(driver.written.map((w) => w.path)).toEqual(["delegation/CLAUDE.md", "delegation/BRIEF.md"]);
+    expect(driver.written[1]?.data).toContain("make the regressed cases pass");
+    expect(driver.written[1]?.data).toContain("- scorecard `sc-9` — the batch that regressed");
+    expect(runStore.rows.size).toBe(1);
+  });
+
+  it("seals the handoff on the session trajectory — the ledger alone answers what they were asked to do", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, trajectories } = build({ resolveDelegationProfile: async () => fake.resolved });
+    const session = await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, brief });
+    await service.close(creator, session.id);
+
+    const sealed = trajectories.sealed.get(session.id);
+    const marker = sealed?.events.find((e) => e.kind === "env_action" && e.action === "delegation.brief");
+    const detail = (marker?.kind === "env_action" ? marker.detail : undefined) as Record<string, unknown> | undefined;
+    expect(detail?.profile).toBe("acme/fixer@1.0.0");
+    expect(String(detail?.brief ?? "")).toContain("make the regressed cases pass");
+  });
+
+  it("a failed context seed disposes the container and leaves NO row (a delegate without its brief is the failure this prevents)", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, runStore, driver } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      driver: fakeDriver({ failWrite: true }).driver,
+    });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, brief }),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(runStore.rows.size).toBe(0);
+    expect(driver.disposed.length).toBe(0); // this driver instance never provisioned — the injected one did
+  });
+
+  it("turns run in the profile's OWN working directory, so the delegate never walks away from its brief", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, runStore, driver } = build({ resolveDelegationProfile: async () => fake.resolved });
+    const session = await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, brief });
+    const turn = await service.submitTask(creator, session.id, { task: "read BRIEF.md and start" });
+    await until(() => runStore.rows.get(turn.id)?.status === "succeeded");
+
+    expect(turn.caseId).toBe("turn-1");
+    expect(turn.group?.role).toBe("turn");
+    // No tasks/<n> and no `conversation/` rebasing — the harness's own workDir (the profile's) is the cwd.
+    expect(driver.execs.some((c) => c.includes("mkdir -p 'tasks/") || c.includes("conversation/"))).toBe(false);
+  });
+
+  it("the live view names WHO was delegated to", async () => {
+    const fake = fakeDelegationProfile();
+    const { service } = build({ resolveDelegationProfile: async () => fake.resolved });
+    const session = await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+    const view = await service.getSession(creator, session.id);
+    expect(view.live?.profile).toEqual({ source: "acme", id: "fixer", version: "1.0.0" });
+    expect(view.live?.conversation).toBe(true);
+  });
+
+  it("an unknown profile is 404, an unconfigured deployment 400, and a brief without a profile 400", async () => {
+    const { service: noProfile } = build({});
+    await expect(
+      noProfile.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    const { service } = build({ resolveDelegationProfile: async () => undefined });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", profile: { id: "ghost" } }),
+    ).rejects.toMatchObject({ status: 404 });
+    // A brief is the handoff TO a profile — attaching one to a plain image boot is a caller mistake, said so.
+    await expect(service.create({ tenant: "acme", createdBy: "alice", image: "img", brief })).rejects.toMatchObject({
+      status: 400,
+    });
   });
 });
