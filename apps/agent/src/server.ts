@@ -78,7 +78,7 @@ export interface AgentServerDeps extends ChatDeps {
   // HITL notification grace (N8): a chat turn's parked ask is reported as agent.run.awaiting_approval — which
   // pings the member's bell — only after this many ms with the ask STILL pending. An attended prompt is
   // answered before the grace runs out, so the common interactive case stays notification-free. Test seam;
-  // default 20s.
+  // default 10s.
   approvalNoticeDelayMs?: number;
 }
 
@@ -134,9 +134,10 @@ const idParams = z.object({ id: z.string().min(1) });
 const ACTIVATION_APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
 // How long a chat turn's parked ask stays unanswered before the park is reported to the control plane — which
-// pings the member's bell (N8). Long enough that an attended prompt (the common case: the member is looking at
-// the panel and clicks within seconds) never pings; short beside every park window above.
-const APPROVAL_NOTICE_DELAY_MS = 20_000;
+// pings the member's bell (N8). Just long enough that an attended prompt (the common case: the member is
+// looking at the panel and clicks within seconds) never pings; anything longer only delays the ping the
+// absent member is waiting on, so this errs short.
+const APPROVAL_NOTICE_DELAY_MS = 10_000;
 
 // Project the parsed event-body fields into an ActivationEvent tail (workspace is supplied by the caller).
 function eventOf(data: {

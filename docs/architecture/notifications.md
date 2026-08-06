@@ -133,7 +133,7 @@ turn into its deny-on-expiry. The kind `agent_approval_requested` brings the ask
 
 - **Three lanes, one choke point each — never per-call-site:**
   - **Chat conversations** (`apps/agent/src/server.ts` `noticeParkedApproval`): a parked ask unanswered after a
-    **grace** (`approvalNoticeDelayMs`, default 20 s) is reported as `agent.run.awaiting_approval`
+    **grace** (`approvalNoticeDelayMs`, default 10 s) is reported as `agent.run.awaiting_approval`
     (`cause: "chat"`, the parked `tool` named, plan asks tool-less). An attended prompt is answered inside the
     grace, so the common interactive case stays notification-free. Best-effort, like every ledger report.
   - **Headless activations** already report `agent.run.awaiting_approval` at the park — unattended by
