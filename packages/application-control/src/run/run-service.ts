@@ -35,11 +35,11 @@ import {
   parseFsFile,
   parseFsTree,
   priceUsd,
-  validRepoPath,
   resolveHarnessSecrets,
   runAudience,
   runEvidenceIdentity,
   usageFromTrace,
+  validRepoPath,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";

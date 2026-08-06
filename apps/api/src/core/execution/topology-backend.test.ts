@@ -48,9 +48,7 @@ describe("buildTopologyBackend (topology RuntimeSpec → ServiceTopologyBackend)
     const withGateway = { ...nomadSpec, hostGatewayAddr: "172.17.0.1" };
     expect(RuntimeSpecSchema.parse(withGateway).hostGatewayAddr).toBe("172.17.0.1"); // pre-fix the schema stripped it
     const env = buildTopologyEnvironment(withGateway, { harnesses: harnessesReturning("service") });
-    expect((env.runtime as unknown as { opts: { hostGatewayAddr?: string } }).opts.hostGatewayAddr).toBe(
-      "172.17.0.1",
-    );
+    expect((env.runtime as unknown as { opts: { hostGatewayAddr?: string } }).opts.hostGatewayAddr).toBe("172.17.0.1");
     const k8sEnv = buildTopologyEnvironment(
       { ...k8sSpec, hostGatewayAddr: "172.17.0.1" },
       { harnesses: harnessesReturning("service") },

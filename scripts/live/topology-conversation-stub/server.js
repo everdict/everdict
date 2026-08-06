@@ -19,9 +19,7 @@ http
         const thread = String(payload.thread_id ?? "");
         const memory = threads.get(thread) ?? [];
         const reply =
-          memory.length > 0
-            ? `I remember: ${memory.join(" | ")}`
-            : "starting fresh - nothing remembered yet.";
+          memory.length > 0 ? `I remember: ${memory.join(" | ")}` : "starting fresh - nothing remembered yet.";
         memory.push(String(payload.task ?? ""));
         threads.set(thread, memory);
         console.log(`POST /runs thread=${thread} turns=${memory.length}`);

@@ -83,8 +83,9 @@ for (;;) {
   const { done, value } = await reader.read().catch(() => ({ done: true }));
   if (done) break;
   buf += decoder.decode(value, { stream: true });
-  let at;
-  while ((at = buf.indexOf("\n\n")) >= 0) {
+  for (;;) {
+    const at = buf.indexOf("\n\n");
+    if (at < 0) break;
     const chunk = buf.slice(0, at);
     buf = buf.slice(at + 2);
     const ev = /^event: (\w+)$/m.exec(chunk)?.[1];
