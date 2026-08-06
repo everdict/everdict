@@ -543,6 +543,46 @@ image** (pullable ref + composition preset + instructions) into the same store �
 (template pins / service images), not adopted as an agent tool. Full design + slices:
 `docs/architecture/environment-image-store.md`.
 
+## Fifth kind — `delegation` (a work environment everdict hands work TO)
+
+The other four kinds describe what an agent USES. `type:'delegation'` describes an environment everdict
+**employs**: a registered work-agent it can hand a job to and converse with until the job is done.
+
+**Why a capability and not a harness.** A harness is the agent *under test* — the eval lane's subject. A
+delegate is the opposite role: it is the worker. What a workspace needs of it is exactly what the store
+already provides — versioning, the four reach tiers, cross-tenant sharing, adopt-and-edit, and a first-party
+EXAMPLE to start from. (The harness registry could not carry it anyway: `ProcessHarnessSpec` is
+`{kind,id,version}`, `makeHarness` discarded everything else, and model resolution skipped process kind
+entirely — so a "claude-code with THIS image, model and env" had no representation at all.)
+
+**What it pins** — one reference collapses what a delegation otherwise re-specifies per call:
+`harness` (which conversational agent runs — any adapter carrying the `conversational` marker) · `image`
+(prebuilt, so a delegation costs no per-session install) · `model` (a registered Model → baseUrl + underlying
+model + key, `ModelRef.env` remapping included) · `env` (literal or `{secretRef, scope}`) · `workDir` (the
+conversation's stable cwd) · `instructions` + `instructionsFile` (the STANDING brief, seeded as the file that
+agent reads by convention — CLAUDE.md · AGENTS.md · …) · `ttlSec`.
+
+**Env precedence, stated once**: `harnessAuthEnv` (workspace→personal tiers) < the profile's own `env` < the
+model's connection env. Same "model wins" rule the eval lane applies, so a profile and a harness never
+disagree about who owns the endpoint.
+
+**The handoff is a contract, not a prose blob.** `POST /sandboxes {profile, brief}` — the brief (goal ·
+context · references · constraints · done-criteria; the reference TYPE vocabulary is the agent's own) is
+rendered once (`renderDelegationBrief`, `@everdict/domain`), written into the delegate's working directory as
+`BRIEF.md` **before the ledger row exists** (a delegate that silently never got its context is the failure
+this ordering prevents), and sealed on the session trajectory as a `delegation.brief` marker — so the ledger
+alone answers what they were actually asked to do. A profile session is always a conversation; turns run in
+the profile's own `workDir`, never a per-task scope, or the delegate walks away from its brief.
+
+Refused by name: a brief without a profile, a profile combined with another target, a profile whose harness
+cannot converse, and a profile naming a secret the workspace has not set.
+
+**Scope note (live-verified)**: the profile's `env` is the DELEGATE's environment — it reaches the agent
+adapter, not the session's `exec` channel (which is the operator's own shell, and has never carried
+`apiKeyEnv` either). If a delegation needs a variable present for hand-run commands too, bake it into the
+image; making `exec` inherit the agent's environment would quietly hand an operator shell the delegate's
+credentials.
+
 ## Non-goals (this iteration)
 - No org/group tenancy layer — `subset` is an explicit `sharedWith[]`.
 - No accept/invite handshake for `subset` — the owner shares unilaterally (revocable).

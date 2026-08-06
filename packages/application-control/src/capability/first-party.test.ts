@@ -4,6 +4,7 @@ import {
   WEBSEARCH_SECRET_NAME,
   firstPartyCatalogExtras,
   firstPartyDefaults,
+  firstPartyDelegationExamples,
   firstPartySkillExamples,
 } from "./first-party.js";
 
@@ -124,6 +125,26 @@ describe("firstPartySkillExamples", () => {
     }
     // Scheduling guidance is the description's job — the store card is where a member decides how to run it.
     expect(skill.description).toContain("schedule.fired");
+  });
+});
+
+describe("firstPartyDelegationExamples", () => {
+  const examples = firstPartyDelegationExamples();
+
+  it("ships a delegation profile as an ADOPTABLE example — the environment a workspace delegates into is theirs to define", () => {
+    expect(examples.length).toBeGreaterThan(0);
+    for (const rec of examples) {
+      const parsed = CapabilityRecordSchema.parse(rec);
+      expect(parsed.spec.type).toBe("delegation");
+      expect(parsed.visibility).toBe("public");
+      expect(parsed.tags).toContain("example"); // copied and repointed, never silently authoritative
+      if (parsed.spec.type !== "delegation") continue;
+      // The three things a delegation cannot resolve without: who runs, where, and the standing brief.
+      expect(parsed.spec.harness.id).toBeTruthy();
+      expect(parsed.spec.image).toBeTruthy();
+      expect(parsed.spec.instructions).toContain("BRIEF.md"); // it must point the delegate at its own brief
+      expect(parsed.spec.instructionsFile).toBeTruthy();
+    }
   });
 });
 

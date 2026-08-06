@@ -77,6 +77,20 @@ async function resolveBinding(
   };
 }
 
+// A binding's CONNECTION ENV alone — for a carrier that is not a HarnessSpec at all (a delegation profile
+// pins a model the same way a harness does, but has no spec to rewrite). Same resolver, so "which endpoint,
+// which key, under which var names, and who is billed" has one answer everywhere. Unresolvable bare-string
+// binding → {} (the legacy best-effort rule); a ModelRef that names nothing still throws.
+export async function resolveModelConnectionEnv(
+  models: ModelRegistry,
+  tenant: string,
+  submittedBy: string | undefined,
+  binding: ModelBinding,
+  secretsFor?: SecretsFor,
+): Promise<Record<string, string>> {
+  return (await resolveBinding(models, tenant, submittedBy, binding, secretsFor))?.env ?? {};
+}
+
 // Resolve a SPEC's Model binding(s) — the per-spec half of the job rewrite, shared with the driver-lane
 // session resolver (the playground resolves a harness OUTSIDE any CaseJob). Returns the same spec object
 // when nothing changed, so callers can cheaply detect a no-op.

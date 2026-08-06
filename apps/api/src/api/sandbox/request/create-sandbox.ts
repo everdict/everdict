@@ -1,3 +1,4 @@
+import { DelegationBriefSchema } from "@everdict/contracts";
 import { z } from "zod";
 
 // Boot a sandbox session (execution-model P6): exactly one of `image` (ad-hoc, must be pullable by the
@@ -9,6 +10,17 @@ import { z } from "zod";
 // teardown. ttlSec bounds the session's life; the service clamps it to its max.
 export const CreateSandboxBodySchema = z
   .object({
+    // A DELEGATION PROFILE (a `delegation` capability): the registered work environment everdict hands work to
+    // — one reference instead of re-specifying the image, the model connection, the env and the instructions
+    // every time. Always a conversation; `brief` is the structured handoff that comes with it.
+    profile: z
+      .object({
+        source: z.string().min(1).optional(), // the owning workspace (default: this one, then the shared tiers)
+        id: z.string().min(1),
+        version: z.string().min(1).optional(), // default "latest"
+      })
+      .optional(),
+    brief: DelegationBriefSchema.optional(),
     image: z.string().min(1).max(400).optional(),
     environment: z
       .object({
@@ -49,6 +61,20 @@ export const CreateSandboxBodySchema = z
       .optional(),
   })
   .superRefine((body, ctx) => {
+    if (body.profile !== undefined) {
+      // A profile IS the whole environment — combining it with another target would ask which one wins.
+      if (body.image !== undefined || body.environment !== undefined || body.harness !== undefined || body.world)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "profile is the whole environment — it does not combine with image, environment, harness or world.",
+        });
+      return;
+    }
+    if (body.brief !== undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "brief is the handoff to a delegation profile — also provide profile:{id}.",
+      });
     if (
       body.repo !== undefined &&
       body.image === undefined &&

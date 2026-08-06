@@ -20,10 +20,15 @@ const taskParams = {
 // universal ledger (kind "sandbox", lifetime "session") with its trajectory sealed at teardown.
 export const sandboxDocs: Record<string, FastifySchema> = {
   create: {
-    summary: "Open a sandbox session (an environment image to shell into, or a harness to drive)",
+    summary: "Open a sandbox session (a delegation profile, an environment image to shell into, or a harness to drive)",
     description:
       "Boots the image as a long-lived container and records it as a Run (kind sandbox, lifetime session, born " +
-      "running) on the activity ledger. Exactly one of image (ad-hoc), environment (an adopted environment " +
+      "running) on the activity ledger. `profile` hands work to a DELEGATION PROFILE — a registered work " +
+      "environment (image · which conversational agent runs · model connection · env/secrets · standing " +
+      "instructions) referenced once instead of re-specified per call; it is always a conversation, and the " +
+      "optional `brief` (goal · context · references · constraints · done-criteria) is written into the " +
+      "delegate's working directory as BRIEF.md and sealed on the session trajectory as evidence. Otherwise " +
+      "exactly one of image (ad-hoc), environment (an adopted environment " +
       "capability, resolved through the consume gate), or harness (a registered harness warm-installed into the " +
       "session for interactive test cases — the playground; harness.image supplies the container image for specs " +
       "that declare none) is required. harness.conversation boots a CONVERSATION session: every submitted task " +

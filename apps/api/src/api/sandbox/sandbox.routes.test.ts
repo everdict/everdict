@@ -382,6 +382,36 @@ describe("sandbox playground routes — a harness in the session, test cases thr
     ).toBe(400);
   });
 
+  it("delegation fields traverse the transport: a profile boot reaches the service, and a brief without a profile is refused", async () => {
+    const { app } = buildPlayground(); // no delegation resolver wired → the honest "not configured" 400
+    const unconfigured = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { profile: { id: "fixer" }, brief: { goal: "fix the regression" } },
+    });
+    expect(unconfigured.statusCode).toBe(400);
+    expect(unconfigured.json().message).toContain("Delegation profiles");
+
+    // A brief is the handoff TO a profile — the DTO refuses it on any other target before the service sees it.
+    const orphanBrief = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { image: "img", brief: { goal: "fix it" } },
+    });
+    expect(orphanBrief.statusCode).toBe(400);
+
+    // A profile is the WHOLE environment — combining it with another target would ask which one wins.
+    const combined = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { profile: { id: "fixer" }, image: "img" },
+    });
+    expect(combined.statusCode).toBe(400);
+  });
+
   it("conversation fields traverse the transport: conversation boot on a non-resuming harness 400s, fresh on an independent-cases session 400s", async () => {
     const { app } = buildPlayground(); // its fake harness has no `conversational` marker
     const refused = await app.inject({

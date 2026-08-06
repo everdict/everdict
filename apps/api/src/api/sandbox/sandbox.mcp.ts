@@ -1,3 +1,4 @@
+import { DelegationBriefSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
@@ -33,7 +34,10 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
     "create_sandbox",
     {
       description:
-        "Open a sandbox session: boot an environment image as a long-lived container (shell in), boot a " +
+        "Open a sandbox session: hand work to a DELEGATION PROFILE (profile:{id} + brief — a registered work " +
+        "environment: its image, agent, model connection, env and standing instructions pinned once; always a " +
+        "conversation, so keep talking to it with submit_sandbox_task), boot an environment image as a " +
+        "long-lived container (shell in), boot a " +
         "registered HARNESS for interactive test cases (the playground — warm-installed once, then " +
         "submit_sandbox_task drives it), or open a WORLD — a persistent environment whose versions are " +
         "filesystem snapshots: world:{id} boots its latest snapshot (or founds it from `image` when it has " +
@@ -42,6 +46,37 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
         "extends it); every exec lands on its trajectory, sealed at close. Provide exactly one of image, " +
         "environment, or harness — or world (optionally with image as its genesis base).",
       inputSchema: {
+        profile: z
+          .object({ source: z.string().optional(), id: z.string(), version: z.string().optional() })
+          .optional()
+          .describe(
+            "A DELEGATION PROFILE (a `delegation` capability) — the registered work environment to hand work " +
+              "to: its image, which conversational agent runs, the model connection, env/secrets and standing " +
+              "instructions, all pinned once. Always a conversation; pair it with `brief`. Combines with nothing else",
+          ),
+        brief: z
+          .object({
+            goal: z.string(),
+            context: z.string().optional(),
+            references: z
+              .array(
+                z.object({
+                  type: z.string(),
+                  id: z.string(),
+                  version: z.string().optional(),
+                  note: z.string().optional(),
+                }),
+              )
+              .optional(),
+            constraints: z.array(z.string()).optional(),
+            doneWhen: z.array(z.string()).optional(),
+          })
+          .optional()
+          .describe(
+            "The handoff: what must be true when this is done, the evidence you are handing over, what the " +
+              "delegate must not do, and the checks you will apply. Written into the delegate's working " +
+              "directory as BRIEF.md and sealed on the session's trajectory. Requires `profile`",
+          ),
         image: z.string().optional().describe("Ad-hoc container image ref (must be pullable)"),
         environment: z
           .object({
@@ -92,6 +127,8 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       },
     },
     ({
+      profile,
+      brief,
       image,
       environment,
       harness,
@@ -101,6 +138,14 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       runtime,
       ttlSec,
     }: {
+      profile?: { source?: string; id: string; version?: string };
+      brief?: {
+        goal: string;
+        context?: string;
+        references?: Array<{ type: string; id: string; version?: string; note?: string }>;
+        constraints?: string[];
+        doneWhen?: string[];
+      };
       image?: string;
       environment?: { source?: string; id: string; version?: string };
       harness?: { id: string; version?: string; image?: string; conversation?: boolean };
@@ -115,6 +160,10 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
           await sessions.create({
             tenant: ws,
             createdBy: principal.subject,
+            ...(profile !== undefined ? { profile } : {}),
+            // The tool's loose reference shape is validated into the contract here — one parse, so a bad
+            // reference kind is refused by name instead of reaching the delegate as a broken brief.
+            ...(brief !== undefined ? { brief: DelegationBriefSchema.parse(brief) } : {}),
             ...(image !== undefined ? { image } : {}),
             ...(environment !== undefined ? { environment } : {}),
             ...(harness !== undefined ? { harness } : {}),

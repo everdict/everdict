@@ -693,7 +693,69 @@ export function firstPartySkillExamples(): CapabilityRecord[] {
 // image (ClickHouse, Qdrant, Chroma, …) are left for members to self-author via the wizard's container-image transport.
 // The skill examples ride along: to a browser they are catalog entries like any other.
 export function firstPartyCatalogExtras(): CapabilityRecord[] {
-  return [GRAFANA_MCP, PLAYWRIGHT_MCP, POSTGRES_MCP, ...firstPartySkillExamples()];
+  return [GRAFANA_MCP, PLAYWRIGHT_MCP, POSTGRES_MCP, ...firstPartySkillExamples(), ...firstPartyDelegationExamples()];
+}
+
+// The standing brief a delegate reads on start — what this environment is and how the delegator expects to be
+// answered. Deliberately about the WORKING RELATIONSHIP, not about any one task: the per-delegation brief
+// (goal/references/constraints) arrives separately as BRIEF.md.
+const CODE_DELEGATE_INSTRUCTIONS = `
+# You are a delegate
+
+Everdict handed you this sandbox to do one piece of work and report back. Everything specific to THIS job is in
+\`BRIEF.md\` beside this file — read it first.
+
+## How to work here
+- The sandbox is yours: install what you need, run the tests, iterate. Nothing here is shared with anyone.
+- Stay inside the brief's constraints. If following them makes the goal impossible, SAY SO instead of working
+  around them — the delegator can change the constraints, you cannot.
+- Verify before you report. "It should work now" is not a result; the brief's done-criteria are.
+
+## How to report
+Answer in the conversation, in this order:
+1. **What you changed** — files and the mechanism, not a diff dump.
+2. **How you verified it** — the exact command and its outcome. If you could not verify, say what stopped you.
+3. **What is still open** — anything you decided not to do, and why.
+
+If the brief's goal turns out to be the wrong goal (the real fault is elsewhere), report THAT and stop. A
+delegate that quietly redefines its task is worse than one that comes back with a question.
+`.trim();
+
+// A delegation profile is an EXAMPLE, like the skills: the image ref is deployment-specific (a workspace mirrors
+// or builds its own agent image), so this exists to be adopted and repointed, never to be silently authoritative.
+const CODE_DELEGATE: CapabilityRecord = {
+  id: "code-delegate",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "code_delegate",
+  description:
+    "Example delegation profile: a Claude Code environment to hand coding work to — repair a failing case, " +
+    "implement a fix, verify it. Adopt it and repoint `image` at your own agent image (and `model` at a " +
+    "registered model) before using it.",
+  spec: {
+    type: "delegation",
+    harness: { id: "claude-code" },
+    // The deployment's own platform namespace holds everdict's images; a workspace that mirrors its own agent
+    // image repoints this on adoption. Left as a plain tag on purpose — an example must be readable.
+    image: "everdict-platform/job-runner:latest",
+    env: {},
+    workDir: "work",
+    instructions: CODE_DELEGATE_INSTRUCTIONS,
+    instructionsFile: "CLAUDE.md",
+    ttlSec: 3600,
+  },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["delegation", "claude-code", "example"],
+  createdBy: "everdict",
+  createdAt: "2026-08-06T00:00:00.000Z",
+};
+
+// Delegation profiles ship as store EXAMPLES for the same reason skills do: the environment a workspace
+// delegates into is theirs to define (their image, their model, their keys, their house rules), so everdict
+// offers a working starting point rather than a default nobody can edit.
+export function firstPartyDelegationExamples(): CapabilityRecord[] {
+  return [CODE_DELEGATE];
 }
 
 // The first-party default TOOLSET, in the order they are offered — the web-reading trio: web search (find;

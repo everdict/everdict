@@ -3,6 +3,7 @@ import type {
   CapabilityStore,
   EnvelopeStore,
   PlatformEventEmitter,
+  ResolvedDelegationProfile,
   ResolvedServiceConversation,
   ResolvedSessionHarness,
   RunStore,
@@ -18,13 +19,14 @@ import {
   canConsumeCapability,
   harnessAuthEnv,
   parseImageRef,
+  resolveEnvValues,
   resolveHarnessSecrets,
 } from "@everdict/domain";
 import { makeHarness } from "@everdict/job-runner";
 import type { HarnessInstanceRegistry, ModelRegistry } from "@everdict/registry";
 import { FrontDoorSession, type ServiceTopologyBackendOptions } from "@everdict/topology";
 import type { RuntimeCompute } from "../common/runtime-compute.js";
-import { resolveSpecModel } from "../core/execution/model-resolving-dispatcher.js";
+import { resolveModelConnectionEnv, resolveSpecModel } from "../core/execution/model-resolving-dispatcher.js";
 import type { DeploymentCompute } from "./compute-env.js";
 import type { ScopedSecretsFn } from "./types.js";
 
@@ -129,6 +131,67 @@ export function buildSandboxSessions(opts: {
             harness,
             apiKeyEnv: harnessAuthEnv(secrets),
             ...(resolved?.kind === "command" && resolved.image !== undefined ? { image: resolved.image } : {}),
+          };
+        }
+      : undefined;
+  // Delegation profiles: a `delegation` capability ref → the registered WORK ENVIRONMENT everdict hands work
+  // to. One reference collapses what a delegation otherwise re-specifies every time — the image, which
+  // conversational agent runs, the model connection, the env/secrets and the standing instructions — because a
+  // process harness's own spec is {kind,id,version} and can carry none of it. Env precedence, stated once:
+  // harnessAuthEnv(workspace→personal tiers) < the profile's own env < the model's connection env.
+  const { models: modelRegistry } = opts;
+  const resolveDelegationProfile =
+    capabilities !== undefined && scopedSecretsFor !== undefined
+      ? async (
+          tenant: string,
+          subject: string,
+          ref: { source?: string; id: string; version?: string },
+        ): Promise<ResolvedDelegationProfile | undefined> => {
+          const record = await capabilities.get(ref.source ?? tenant, ref.id, ref.version).catch(() => undefined);
+          if (!record || record.spec.type !== "delegation") return undefined;
+          if (!canConsumeCapability(record, { tenant, subject })) return undefined; // no existence leak
+          const profile = record.spec;
+          const secrets = await scopedSecretsFor(tenant, subject);
+          const missing = new Set<string>();
+          const profileEnv = resolveEnvValues(profile.env, secrets, missing);
+          if (missing.size > 0)
+            throw new BadRequestError(
+              "BAD_REQUEST",
+              { profile: record.id, missing: [...missing] },
+              `Delegation profile '${record.id}' needs secret(s) this workspace has not set: ${[...missing].join(", ")}.`,
+            );
+          // The model's connection wins over a profile literal — the same "model wins" rule the eval lane's
+          // spec resolution applies, so a profile and a harness never disagree about who owns the endpoint.
+          const modelEnv =
+            modelRegistry !== undefined && profile.model !== undefined
+              ? await resolveModelConnectionEnv(modelRegistry, tenant, subject, profile.model, scopedSecretsFor)
+              : {};
+          const workDir = profile.workDir ?? "work";
+          const harness = makeHarness(profile.harness.id, profile.harness.version ?? "latest", undefined, {
+            sandboxInstall: true,
+            env: { ...profileEnv, ...modelEnv },
+            workDir,
+          });
+          if (harness.conversational !== true)
+            throw new BadRequestError(
+              "BAD_REQUEST",
+              { profile: record.id, harness: profile.harness.id },
+              `Delegation profile '${record.id}' runs '${profile.harness.id}', which cannot hold a conversation — a delegate you can only message once cannot be handed work.`,
+            );
+          return {
+            ref: { source: record.tenant, id: record.id, version: record.version },
+            harness: {
+              id: profile.harness.id,
+              version: profile.harness.version ?? "latest",
+              kind: "process",
+              harness,
+              apiKeyEnv: harnessAuthEnv(secrets),
+            },
+            image: profile.image,
+            workDir,
+            instructions: profile.instructions,
+            instructionsFile: profile.instructionsFile,
+            ...(profile.ttlSec !== undefined ? { ttlSec: profile.ttlSec } : {}),
           };
         }
       : undefined;
@@ -298,6 +361,7 @@ export function buildSandboxSessions(opts: {
     ...(pruneWorldVersions ? { pruneWorldVersions } : {}),
     ...(resolveSessionHarness ? { resolveSessionHarness } : {}),
     ...(resolveServiceConversation ? { resolveServiceConversation } : {}),
+    ...(resolveDelegationProfile ? { resolveDelegationProfile } : {}),
     ...(opts.budget ? { budget: opts.budget } : {}),
     ...(opts.envelopes ? { envelopes: opts.envelopes } : {}),
     ...(opts.usage ? { usage: opts.usage } : {}),
