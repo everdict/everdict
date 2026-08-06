@@ -1,8 +1,8 @@
 import { getTranslations } from 'next-intl/server'
 
-import { TeamRoster } from '@/features/manage-team'
+import { TeamRoster, type TeamRosterGroup } from '@/features/manage-team'
 import { memberDirectoryOf, membersSchema, type Member } from '@/entities/member'
-import { teamMembersSchema, type TeamMember } from '@/entities/team'
+import { teamMembersSchema, teamsSchema, type TeamMember } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Callout } from '@/shared/ui/callout'
@@ -26,11 +26,30 @@ export default async function TeamMembersSettingsPage({
 
   let members: TeamMember[] = []
   let workspaceMembers: Member[] = []
+  let teamGroups: TeamRosterGroup[] = []
   let error: string | undefined
   try {
     members = teamMembersSchema.parse(await controlPlane.listTeamMembers(ctx, team.id))
     if (can(principal.roles, 'members:read'))
       workspaceMembers = membersSchema.parse(await controlPlane.listMembers(ctx))
+    if (canWrite) {
+      // 빠른 선택("저 팀 전체를 이 팀에도")의 재료 — 다른 팀들의 로스터를 병렬로 읽는다. 비공개 팀은
+      // 목록 읽기에서 이미 걸러져 온다.
+      const otherTeams = teamsSchema
+        .parse(await controlPlane.listTeams(ctx))
+        .filter((other) => other.id !== team.id)
+      teamGroups = (
+        await Promise.all(
+          otherTeams.map(async (other) => ({
+            id: other.id,
+            name: other.name,
+            subjects: teamMembersSchema
+              .parse(await controlPlane.listTeamMembers(ctx, other.id))
+              .map((m) => m.subject),
+          }))
+        )
+      ).filter((g) => g.subjects.length > 0)
+    }
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -52,6 +71,7 @@ export default async function TeamMembersSettingsPage({
           value: m.subject,
           label: m.name ?? m.email ?? m.subject,
         }))}
+        teamGroups={teamGroups}
         directory={memberDirectoryOf(workspaceMembers)}
         canWrite={canWrite}
       />

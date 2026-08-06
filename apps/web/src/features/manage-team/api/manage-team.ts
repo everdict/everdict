@@ -71,12 +71,32 @@ export async function deleteTeamAction(id: string): Promise<TeamMutationResult> 
   return mutate(() => controlPlane.deleteTeam(ctx, id))
 }
 
-export async function addTeamMemberAction(
+// 여러 명을 한 번에 — 컨트롤 플레인의 추가는 한 명 단위라 여기서 순회한다. 일부만 실패해도 성공한
+// 추가는 이미 로스터에 반영됐으므로, 실패한 subject 만 돌려줘 호출 쪽이 선택을 그만큼만 남기게 한다.
+export interface TeamMembersAddResult {
+  ok: boolean
+  error?: string
+  failed?: string[]
+}
+
+export async function addTeamMembersAction(
   id: string,
-  subject: string
-): Promise<TeamMutationResult> {
+  subjects: string[]
+): Promise<TeamMembersAddResult> {
   const ctx = await authContext()
-  return mutate(() => controlPlane.addTeamMember(ctx, id, subject))
+  const failed: string[] = []
+  const messages: string[] = []
+  for (const subject of subjects) {
+    try {
+      await controlPlane.addTeamMember(ctx, id, subject)
+    } catch (e) {
+      failed.push(subject)
+      const message = e instanceof Error ? e.message : String(e)
+      if (!messages.includes(message)) messages.push(message)
+    }
+  }
+  if (failed.length === 0) return { ok: true }
+  return { ok: false, error: messages.join(' · '), failed }
 }
 
 export async function removeTeamMemberAction(

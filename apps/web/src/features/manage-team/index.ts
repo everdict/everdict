@@ -2,7 +2,7 @@ export {
   createWorkflowStateAction,
   deleteWorkflowStateAction,
   updateWorkflowStateAction,
-  addTeamMemberAction,
+  addTeamMembersAction,
   createTeamAction,
   deleteTeamAction,
   joinTeamAction,
@@ -10,12 +10,13 @@ export {
   removeTeamMemberAction,
   setDefaultTeamAction,
   updateTeamAction,
+  type TeamMembersAddResult,
   type TeamMutationResult,
 } from './api/manage-team'
 export { TeamCyclesForm } from './ui/team-cycles-form'
 export { TeamGeneralForm } from './ui/team-general-form'
 export { TeamJoinControl } from './ui/team-join-control'
-export { TeamRoster } from './ui/team-roster'
+export { TeamRoster, type TeamRosterGroup } from './ui/team-roster'
 export { TeamTriageForm } from './ui/team-triage-form'
 export { TeamsManager } from './ui/teams-manager'
 export { WorkflowStatesEditor } from './ui/workflow-states-editor'
