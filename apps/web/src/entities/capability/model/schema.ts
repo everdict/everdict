@@ -2,6 +2,7 @@ import type {
   CapabilityRecord as ContractCapabilityRecord,
   CapabilitySpecDiff as ContractCapabilitySpecDiff,
   EnvironmentPreset,
+  ModelBinding,
 } from '@everdict/contracts'
 import { z } from 'zod'
 
@@ -13,7 +14,7 @@ import { z } from 'zod'
 export const capabilityVisibilitySchema = z.enum(['private', 'workspace', 'subset', 'public'])
 export type CapabilityVisibility = z.infer<typeof capabilityVisibilitySchema>
 
-export const capabilityTypeSchema = z.enum(['mcp', 'code', 'skill', 'environment'])
+export const capabilityTypeSchema = z.enum(['mcp', 'code', 'skill', 'environment', 'delegation'])
 export type CapabilityType = z.infer<typeof capabilityTypeSchema>
 
 // 채택자가 자기 시크릿으로 채워야 하는 값 — 이름 + 설명만(값 아님).
@@ -74,17 +75,45 @@ const environmentImageSpecSchema = z.object({
   instructions: z.string(),
 })
 
+// delegation — 에버딕트가 일을 맡기는 작업 환경. 어떤 대화형 에이전트가 · 어떤 이미지에서 · 어떤 모델/env로 ·
+// 어떤 상시 지시(instructions) 아래 도는지를 한 번 정의해두고 참조로만 위임한다(capability-store.md §Fifth kind).
+// env 값은 리터럴 또는 {secretRef} — 컨트롤플레인 EnvValueSchema 미러(웹은 표시만 하고 재구성하지 않는다).
+const delegationEnvValueSchema = z.union([
+  z.string(),
+  z.object({ secretRef: z.string(), scope: z.enum(['user', 'workspace']).optional() }),
+])
+const delegationProfileSpecSchema = z.object({
+  type: z.literal('delegation'),
+  harness: z.object({ id: z.string(), version: z.string().optional() }),
+  image: z.string(),
+  model: z
+    .custom<ModelBinding>((v) => typeof v === 'string' || (typeof v === 'object' && v !== null))
+    .optional(),
+  env: z.record(z.string(), delegationEnvValueSchema),
+  workDir: z.string().optional(),
+  instructions: z.string(),
+  instructionsFile: z.string(),
+  ttlSec: z.number().optional(),
+})
+
 export const capabilitySpecSchema = z.discriminatedUnion('type', [
   mcpToolSpecSchema,
   codeToolSpecSchema,
   skillCapabilitySpecSchema,
   environmentImageSpecSchema,
+  delegationProfileSpecSchema,
 ])
 export type CapabilitySpec = z.infer<typeof capabilitySpecSchema>
 
 // GET /capabilities · /capabilities/public · /capabilities/:id — 전체 CapabilityRecord
 // + (environment kind 만) 뷰어 워크스페이스 레지스트리 기준 imageClass 주석(컨트롤플레인 계산·비영속, P1g 선례).
-export const capabilityImageClassSchema = z.enum(['managed', 'workspace', 'external', 'local', 'unqualified'])
+export const capabilityImageClassSchema = z.enum([
+  'managed',
+  'workspace',
+  'external',
+  'local',
+  'unqualified',
+])
 export type CapabilityImageClass = z.infer<typeof capabilityImageClassSchema>
 export const capabilitySchema = z.object({
   id: z.string(),

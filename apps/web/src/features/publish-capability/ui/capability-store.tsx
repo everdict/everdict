@@ -208,6 +208,7 @@ export function CapabilityStore({
     { value: 'code', label: t('type_code') },
     { value: 'skill', label: t('type_skill') },
     { value: 'environment', label: t('type_environment') },
+    { value: 'delegation', label: t('type_delegation') },
   ]
   const statusOptions = [
     { value: 'all', label: t('statusLabel') },

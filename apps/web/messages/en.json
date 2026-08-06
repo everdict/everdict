@@ -4235,6 +4235,7 @@
     "type_code": "Code tool",
     "type_skill": "Skill",
     "type_environment": "Environment",
+    "type_delegation": "Delegation profile",
     "imgClass_managed": "Everdict store",
     "imgClass_workspace": "Workspace registry",
     "imgClass_external": "External registry",

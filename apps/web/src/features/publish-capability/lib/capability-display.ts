@@ -1,4 +1,14 @@
-import { Boxes, Code2, Container, Globe, Lock, Share2, Sparkles, Users } from 'lucide-react'
+import {
+  Boxes,
+  Code2,
+  Container,
+  Globe,
+  Lock,
+  Share2,
+  Sparkles,
+  UserRoundCog,
+  Users,
+} from 'lucide-react'
 
 import type {
   Capability,
@@ -25,6 +35,7 @@ export const TYPE_ICON: Record<CapabilityType, typeof Boxes> = {
   code: Code2,
   skill: Sparkles,
   environment: Container,
+  delegation: UserRoundCog, // 일을 맡기는 상대 — 도구가 아니라 우리가 고용하는 작업 환경이다
 }
 
 export const VIS_ICON: Record<CapabilityVisibility, typeof Lock> = {
