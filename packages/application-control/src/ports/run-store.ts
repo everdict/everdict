@@ -37,6 +37,26 @@ export type OutboxEvent = Omit<PlatformEventRecord, "seq">;
 // `events` (optional) is the E0 outbox: implementations persist them ATOMICALLY with the write (Postgres: one
 // data-modifying-CTE statement; in-memory: same-process append). Callers stamp id/tenant/createdAt; consumers
 // dedup on the event id, so the same id may safely also travel the push path.
+// A live SESSION as the LEDGER sees it — the fact every hold-open lane must share. A per-process map counts
+// only what THIS replica happens to hold, so a control plane running more than one instance admits its cap
+// once per replica; the ledger is the single place that knows what a workspace is actually holding open.
+// Kept deliberately thin: session caps are single digits, so callers read the whole set and count in memory
+// rather than asking the store one question per policy dimension.
+export interface LiveSessionRow {
+  id: string;
+  tenant: string;
+  createdBy?: string;
+  agentId?: string; // session.agent.agentId — the per-agent session cap
+  expiresAt?: string; // the hard deadline; what a capacity refusal reports as `freesAt`
+}
+
+export interface LiveSessionQuery {
+  tenant?: string; // unset = the whole fleet (the global cap)
+  // WHICH pool. Sessions share `kind: "sandbox"` (held-open isolated compute) but not their caps: an agent
+  // world and a login browser are bounded separately, and the run's `trigger` is what tells them apart.
+  trigger?: string;
+}
+
 export interface RunStore {
   create(record: RunRecord, events?: OutboxEvent[]): Promise<void>;
   update(id: string, patch: Partial<RunRecord>, events?: OutboxEvent[]): Promise<RunRecord | undefined>;
@@ -48,4 +68,9 @@ export interface RunStore {
   // O7's third knob (the in-flight cap): how many NON-TERMINAL runs currently draw from this envelope.
   // Read from the ledger itself — never a counter to reconcile — so a tombstoned run can't leak a slot.
   countActiveByEnvelope(tenant: string, envelopeId: string): Promise<number>;
+  // Session runs that have not settled. Deliberately NO time predicate: whether a deadline has passed is a
+  // question about a clock, and the clock that wrote `expiresAt` belongs to the service, not to the store —
+  // the caller drops the overdue rows (and must: a crashed writer's row would otherwise hold a workspace's
+  // session slot forever, which no member can recover from).
+  liveSessions(query?: LiveSessionQuery): Promise<LiveSessionRow[]>;
 }

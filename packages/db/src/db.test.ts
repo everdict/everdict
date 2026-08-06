@@ -363,6 +363,52 @@ describe("InMemoryRunStore — usage derivation", () => {
   });
 });
 
+describe("InMemoryRunStore — the live session pool", () => {
+  const session = (id: string, extra: Partial<RunRecord>, expiresAt: string): RunRecord => ({
+    id,
+    tenant: "acme",
+    harness: { id: "world", version: "1" },
+    caseId: "img",
+    status: "running",
+    kind: "sandbox",
+    lifetime: "session",
+    trigger: "sandbox",
+    session: { image: "img", ttlSec: 900, expiresAt },
+    createdAt: "t",
+    updatedAt: "t",
+    ...extra,
+  });
+  const soon = (): string => new Date(Date.now() + 600_000).toISOString();
+
+  it("counts what the WORKSPACE is holding open, across whatever process opened it", async () => {
+    const store = new InMemoryRunStore();
+    await store.create(session("s1", {}, soon()));
+    await store.create(session("s2", { tenant: "other" }, soon()));
+    await store.create(session("s3", { trigger: "browser" }, soon())); // a different pool
+    await store.create(session("s4", { status: "succeeded" }, soon())); // already closed
+    await store.create(session("s5", { lifetime: "task", trigger: "file" }, soon())); // not a session at all
+
+    expect((await store.liveSessions({ tenant: "acme", trigger: "sandbox" })).map((r) => r.id)).toEqual(["s1"]);
+    expect((await store.liveSessions({ trigger: "sandbox" })).map((r) => r.id).sort()).toEqual(["s1", "s2"]);
+  });
+
+  it("carries what a refusal needs to be actionable: whose it is, which agent, and when it frees", async () => {
+    const store = new InMemoryRunStore();
+    const at = soon();
+    await store.create(
+      session(
+        "s1",
+        { createdBy: "alice", session: { image: "i", ttlSec: 900, expiresAt: at, agent: { agentId: "a1" } } },
+        at,
+      ),
+    );
+
+    expect(await store.liveSessions({ tenant: "acme" })).toEqual([
+      { id: "s1", tenant: "acme", createdBy: "alice", agentId: "a1", expiresAt: at },
+    ]);
+  });
+});
+
 describe("InMemoryRunStore — scorecard child-run filter", () => {
   const mk = (id: string, extra: Partial<RunRecord>): RunRecord => ({
     id,

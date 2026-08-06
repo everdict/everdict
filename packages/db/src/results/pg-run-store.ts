@@ -1,4 +1,10 @@
-import type { OutboxEvent, RunListOptions, RunStore } from "@everdict/application-control";
+import type {
+  LiveSessionQuery,
+  LiveSessionRow,
+  OutboxEvent,
+  RunListOptions,
+  RunStore,
+} from "@everdict/application-control";
 import { type RunRecord, RunRecordSchema } from "@everdict/contracts";
 import { PERSONAL_RUN_KINDS } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
@@ -258,5 +264,38 @@ export class PgRunStore implements RunStore {
       [tenant, envelopeId],
     );
     return Number(res.rows[0]?.n ?? 0);
+  }
+
+  // The session pool as the LEDGER knows it — every replica's held-open compute, not just this process's.
+  // No time predicate here on purpose (see the port): the deadline is judged by the clock that wrote it.
+  async liveSessions(query: LiveSessionQuery = {}): Promise<LiveSessionRow[]> {
+    const params: unknown[] = [];
+    const where = ["lifetime = 'session'", "status IN ('queued', 'running')"];
+    if (query.tenant !== undefined) {
+      params.push(query.tenant);
+      where.push(`tenant = $${params.length}`);
+    }
+    if (query.trigger !== undefined) {
+      params.push(query.trigger);
+      where.push(`trigger = $${params.length}`);
+    }
+    const res = await this.client.query<{
+      id: string;
+      tenant: string;
+      created_by: string | null;
+      agent_id: string | null;
+      expires_at: string | null;
+    }>(
+      `SELECT id, tenant, created_by, session->'agent'->>'agentId' AS agent_id, session->>'expiresAt' AS expires_at
+       FROM everdict_runs WHERE ${where.join(" AND ")}`,
+      params,
+    );
+    return res.rows.map((r) => ({
+      id: r.id,
+      tenant: r.tenant,
+      ...(r.created_by !== null ? { createdBy: r.created_by } : {}),
+      ...(r.agent_id !== null ? { agentId: r.agent_id } : {}),
+      ...(r.expires_at !== null ? { expiresAt: r.expires_at } : {}),
+    }));
   }
 }

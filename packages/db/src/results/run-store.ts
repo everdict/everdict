@@ -15,7 +15,14 @@ export function withRunUsage(r: RunRecord): RunRecord {
   };
 }
 
-import type { OutboxEvent, PlatformEventStore, RunListOptions, RunStore } from "@everdict/application-control";
+import type {
+  LiveSessionQuery,
+  LiveSessionRow,
+  OutboxEvent,
+  PlatformEventStore,
+  RunListOptions,
+  RunStore,
+} from "@everdict/application-control";
 
 // Apply offset/limit to an already-sorted (newest-first) slice — mirrors the Pg `OFFSET $6 LIMIT $5`.
 // offset unset/0 = from the newest; limit unset = to the end.
@@ -97,5 +104,24 @@ export class InMemoryRunStore implements RunStore {
       if (r.status === "queued" || r.status === "running") active++;
     }
     return active;
+  }
+
+  async liveSessions(query: LiveSessionQuery = {}): Promise<LiveSessionRow[]> {
+    const rows: LiveSessionRow[] = [];
+    for (const r of this.runs.values()) {
+      if (r.lifetime !== "session") continue;
+      if (r.status !== "queued" && r.status !== "running") continue;
+      if (query.tenant !== undefined && r.tenant !== query.tenant) continue;
+      if (query.trigger !== undefined && r.trigger !== query.trigger) continue;
+      const expiresAt = r.session?.expiresAt;
+      rows.push({
+        id: r.id,
+        tenant: r.tenant,
+        ...(r.createdBy !== undefined ? { createdBy: r.createdBy } : {}),
+        ...(r.session?.agent?.agentId !== undefined ? { agentId: r.session.agent.agentId } : {}),
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+      });
+    }
+    return rows;
   }
 }

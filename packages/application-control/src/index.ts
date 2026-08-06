@@ -61,7 +61,13 @@ export {
   subscriptionReactionConsumer,
 } from "./platform-event/subscription-reaction-consumer.js";
 export type { BudgetStore } from "./ports/budget-store.js";
-export type { OutboxEvent, RunListOptions, RunStore } from "./ports/run-store.js";
+export type {
+  LiveSessionQuery,
+  LiveSessionRow,
+  OutboxEvent,
+  RunListOptions,
+  RunStore,
+} from "./ports/run-store.js";
 export type { RecordingSeal, RecordingStore } from "./ports/recording-store.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
 export type { ScorecardListFilter, ScorecardStore } from "./ports/scorecard-store.js";

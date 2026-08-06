@@ -1,7 +1,7 @@
 import type { ComputeHandle, ComputeSpec, Driver, RegistryAuth, RunRecord, TraceEvent } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import type { OutboxEvent, RunStore } from "../ports/run-store.js";
+import type { LiveSessionQuery, OutboxEvent, RunStore } from "../ports/run-store.js";
 import type { TrajectoryMeta, TrajectoryStore } from "../ports/trajectory-store.js";
 import { SandboxSessionService, type SandboxSessionServiceDeps } from "./sandbox-session-service.js";
 
@@ -42,6 +42,23 @@ function fakeRunStore() {
     },
     async countActiveByEnvelope() {
       return 0;
+    },
+    // The ledger IS the session pool now — a per-process map counts only one replica's sessions. The real
+    // stores additionally drop rows past their deadline (a crashed writer must not hold a slot forever);
+    // that rule is the STORE's and is tested in @everdict/db, so this fake leaves it out rather than
+    // fighting the frozen clock these tests run on.
+    async liveSessions(query: LiveSessionQuery = {}) {
+      return [...rows.values()]
+        .filter((r) => r.lifetime === "session" && (r.status === "queued" || r.status === "running"))
+        .filter((r) => query.tenant === undefined || r.tenant === query.tenant)
+        .filter((r) => query.trigger === undefined || r.trigger === query.trigger)
+        .map((r) => ({
+          id: r.id,
+          tenant: r.tenant,
+          ...(r.createdBy !== undefined ? { createdBy: r.createdBy } : {}),
+          ...(r.session?.agent?.agentId !== undefined ? { agentId: r.session.agent.agentId } : {}),
+          ...(r.session?.expiresAt !== undefined ? { expiresAt: r.session.expiresAt } : {}),
+        }));
     },
   };
   return { store, rows, events };
@@ -1486,5 +1503,75 @@ describe("SandboxSessionService — the singular admission gate", () => {
       service.create({ ...creator, createdBy: "alice", image: "debian:stable-slim" }),
     ).rejects.toBeInstanceOf(PaymentRequiredError);
     expect(driver.provisioned).toHaveLength(0);
+  });
+});
+
+// The pool is the LEDGER's, not this process's (a control plane may run more than one instance).
+describe("SandboxSessionService — capacity counted from the ledger", () => {
+  it("counts a session THIS process never opened — otherwise every replica hands out the cap again", async () => {
+    const { service, runStore } = build({ maxPerTenant: 1 });
+    // A session another replica opened: in the ledger, absent from this instance's map.
+    await runStore.store.create({
+      id: "held-elsewhere",
+      tenant: "acme",
+      harness: { id: "world", version: "1" },
+      caseId: "img",
+      status: "running",
+      kind: "sandbox",
+      lifetime: "session",
+      trigger: "sandbox",
+      session: { image: "img", ttlSec: 900, expiresAt: "2999-01-01T00:00:00.000Z" },
+      createdAt: "t",
+      updatedAt: "t",
+    });
+
+    await expect(service.create({ ...creator, createdBy: "alice", image: "debian:stable-slim" })).rejects.toMatchObject(
+      { status: 429 },
+    );
+  });
+
+  it("does NOT count a row past its deadline — a crashed writer must not hold a slot forever", async () => {
+    // The row still says `running` because whoever opened it never got to settle it. Counting it would take
+    // a session slot from the workspace permanently, with nothing the member could do about it; it is due
+    // for teardown either way, so the pool stops reserving room for it.
+    const { service, runStore } = build({ maxPerTenant: 1 });
+    await runStore.store.create({
+      id: "orphan",
+      tenant: "acme",
+      harness: { id: "world", version: "1" },
+      caseId: "img",
+      status: "running",
+      kind: "sandbox",
+      lifetime: "session",
+      trigger: "sandbox",
+      session: { image: "img", ttlSec: 900, expiresAt: "2000-01-01T00:00:00.000Z" },
+      createdAt: "t",
+      updatedAt: "t",
+    });
+
+    await expect(
+      service.create({ ...creator, createdBy: "alice", image: "debian:stable-slim" }),
+    ).resolves.toBeDefined();
+  });
+
+  it("does not count another POOL's session — a live browser must not consume a world's slot", async () => {
+    const { service, runStore } = build({ maxPerTenant: 1 });
+    await runStore.store.create({
+      id: "a-browser",
+      tenant: "acme",
+      harness: { id: "browser", version: "1" },
+      caseId: "direct",
+      status: "running",
+      kind: "sandbox", // same family — held-open isolated compute
+      lifetime: "session",
+      trigger: "browser", // different pool
+      session: { image: "chrome", ttlSec: 900, expiresAt: "2999-01-01T00:00:00.000Z" },
+      createdAt: "t",
+      updatedAt: "t",
+    });
+
+    await expect(
+      service.create({ ...creator, createdBy: "alice", image: "debian:stable-slim" }),
+    ).resolves.toBeDefined();
   });
 });

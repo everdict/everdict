@@ -24,7 +24,7 @@ import { admitCausedWork } from "../admission/admission.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
-import type { RunStore } from "../ports/run-store.js";
+import type { LiveSessionRow, RunStore } from "../ports/run-store.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
 import type { WorkspaceImages } from "../ports/workspace-images.js";
 import { scopedComputeHandle } from "./scoped-compute.js";
@@ -89,6 +89,32 @@ export interface SandboxAgentAttribution {
   // The agent's CURRENT ledger run — what this session stamps as origin.causedByRunId so it draws from that
   // turn's delegated envelope and is counted by the depth / in-flight guards (§5.1). Never client-supplied.
   runId?: string;
+}
+
+// The run `trigger` that names THIS pool. Session runs share `kind: "sandbox"` (held-open isolated compute)
+// but not their caps — a login browser is bounded separately — and the trigger is what tells them apart.
+const SANDBOX_TRIGGER = "sandbox";
+
+// The rows that are actually holding a slot right now. A row past its deadline is due for teardown either
+// way, and counting it would let one crashed writer consume a workspace's session pool permanently — a state
+// no member can recover from. Judged with the SERVICE's clock, the same one that wrote `expiresAt`.
+function holding(rows: LiveSessionRow[], nowIso: string): LiveSessionRow[] {
+  const now = Date.parse(nowIso);
+  return rows.filter((r) => r.expiresAt === undefined || Date.parse(r.expiresAt) > now);
+}
+
+// When the earliest-expiring session frees its slot — the one fact that makes a capacity refusal actionable
+// (wait this long, or go close something). Computed from the rows the caller already read, so a refusal costs
+// one ledger query, not one per message.
+function nextFreeSlot(rows: LiveSessionRow[]): { freesAt?: string } {
+  const deadlines = rows.map((r) => r.expiresAt).filter((at): at is string => at !== undefined);
+  if (deadlines.length === 0) return {};
+  return { freesAt: deadlines.reduce((a, b) => (Date.parse(a) <= Date.parse(b) ? a : b)) };
+}
+
+function freesAtSuffix(rows: LiveSessionRow[]): string {
+  const { freesAt } = nextFreeSlot(rows);
+  return freesAt === undefined ? "" : ` — the next slot frees at ${freesAt}`;
 }
 
 function causedByOf(agent: SandboxAgentAttribution | undefined): string | undefined {
@@ -369,7 +395,7 @@ export class SandboxSessionService {
   // run.submitted fact via the E0 outbox). The id is minted before the record so the map and the row agree.
   async create(input: CreateSandboxInput): Promise<RunRecord> {
     this.sweep();
-    this.enforceCapacity(input.tenant, input.agent);
+    await this.enforceCapacity(input.tenant, input.agent);
     // The singular gate (§5.1 order), before any compute is taken: caused work draws from its causer's
     // envelope and answers the depth / in-flight guards, then the tenant's own budget. A session that an
     // agent opens used to answer neither — an agent loop could hold sessions open spending against nobody.
@@ -1330,21 +1356,26 @@ export class SandboxSessionService {
   //   2. agents never take the LAST tenant slot — one stays reserved for a member.
   // Both refusals name what is holding the capacity and when it frees, because "retry shortly" is not
   // something a caller — human or agent — can act on.
-  private enforceCapacity(tenant: string, agent: SandboxAgentAttribution | undefined): void {
-    if (this.deps.maxTotal !== undefined && this.sessions.size >= this.deps.maxTotal)
+  // Counted from the LEDGER, not from this process's map. A control plane running more than one replica used
+  // to admit its cap once per replica — each instance could only see the sessions it happened to hold — so a
+  // 3-instance deployment gave every workspace three times the session pool it was configured for. The ledger
+  // is the one place that knows what a workspace is actually holding open.
+  private async enforceCapacity(tenant: string, agent: SandboxAgentAttribution | undefined): Promise<void> {
+    const live = holding(await this.deps.store.liveSessions({ trigger: SANDBOX_TRIGGER }), this.now());
+    if (this.deps.maxTotal !== undefined && live.length >= this.deps.maxTotal)
       throw new RateLimitError(
         "RATE_LIMITED",
-        { scope: "global", limit: this.deps.maxTotal, ...this.nextFreeSlot() },
-        `Sandbox session capacity is full (${this.deps.maxTotal} across all workspaces)${this.freesAtSuffix()}.`,
+        { scope: "global", limit: this.deps.maxTotal, ...nextFreeSlot(live) },
+        `Sandbox session capacity is full (${this.deps.maxTotal} across all workspaces)${freesAtSuffix(live)}.`,
       );
-    const owned = [...this.sessions.values()].filter((live) => live.tenant === tenant);
+    const owned = live.filter((row) => row.tenant === tenant);
     if (agent !== undefined) {
       const maxPerAgent = this.deps.maxPerAgent ?? DEFAULT_MAX_PER_AGENT;
-      const mine = owned.filter((live) => live.agent?.agentId === agent.agentId).length;
+      const mine = owned.filter((row) => row.agentId === agent.agentId).length;
       if (mine >= maxPerAgent)
         throw new RateLimitError(
           "RATE_LIMITED",
-          { scope: "agent", agent: agent.agentId, limit: maxPerAgent, ...this.nextFreeSlot(tenant) },
+          { scope: "agent", agent: agent.agentId, limit: maxPerAgent, ...nextFreeSlot(owned) },
           `Agent '${agent.agentId}' already holds ${mine} sandbox session(s) — close one (or snapshot the world and close it) before opening another.`,
         );
     }
@@ -1356,26 +1387,11 @@ export class SandboxSessionService {
     if (owned.length >= agentCeiling)
       throw new RateLimitError(
         "RATE_LIMITED",
-        { scope: "tenant", limit: agentCeiling, ...this.nextFreeSlot(tenant) },
+        { scope: "tenant", limit: agentCeiling, ...nextFreeSlot(owned) },
         agent !== undefined && agentCeiling < this.deps.maxPerTenant
-          ? `This workspace has ${owned.length} of ${this.deps.maxPerTenant} sandbox session(s) open, and the last slot is reserved for a member${this.freesAtSuffix(tenant)}.`
-          : `This workspace already has ${owned.length} open sandbox session(s) — close one first${this.freesAtSuffix(tenant)}.`,
+          ? `This workspace has ${owned.length} of ${this.deps.maxPerTenant} sandbox session(s) open, and the last slot is reserved for a member${freesAtSuffix(owned)}.`
+          : `This workspace already has ${owned.length} open sandbox session(s) — close one first${freesAtSuffix(owned)}.`,
       );
-  }
-
-  // When the earliest-expiring session frees its slot — the one fact that makes a capacity refusal
-  // actionable (wait this long, or go close something).
-  private nextFreeSlot(tenant?: string): { freesAt?: string } {
-    const deadlines = [...this.sessions.values()]
-      .filter((live) => tenant === undefined || live.tenant === tenant)
-      .map((live) => live.expiresAtMs);
-    if (deadlines.length === 0) return {};
-    return { freesAt: new Date(Math.min(...deadlines)).toISOString() };
-  }
-
-  private freesAtSuffix(tenant?: string): string {
-    const { freesAt } = this.nextFreeSlot(tenant);
-    return freesAt === undefined ? "" : ` — the next slot frees at ${freesAt}`;
   }
 
   private maxTtl(): number {

@@ -14,6 +14,10 @@ export interface CreateBrowserSessionCommand {
   runtime?: string; // runtime binding (browser-profiles S9) — the tenant-registered runtime that hosts the browser
 }
 
+// The run `trigger` that names this pool. Session runs share `kind: "sandbox"` (held-open isolated compute)
+// but not their caps — an agent world is bounded separately — and the trigger is what tells them apart.
+const BROWSER_TRIGGER = "browser";
+
 // A live summary of what a capture WOULD remember right now — per-domain cookie NAMES + non-secret attributes.
 // Cookie VALUES are the login credential and never leave the control plane; names/flags/expiry are safe metadata
 // the web uses to auto-select the auth cookies and show each one's expiry. Polled while the owner logs into sites.
@@ -144,7 +148,7 @@ export class BrowserSessionService {
   async create(cmd: CreateBrowserSessionCommand): Promise<BrowserSessionView> {
     this.sweep();
     await this.closeOwned(cmd.createdBy); // frees the owner's own live session first, so caps count only the peers
-    this.enforceCapacity(cmd.tenant);
+    await this.enforceCapacity(cmd.tenant);
     this.budget?.admit(cmd.tenant); // 402 past the tenant cap — before a browser exists
     const proxyServer = cmd.country && this.resolveProxy ? await this.resolveProxy(cmd.tenant, cmd.country) : undefined;
     // Id is minted BEFORE provisioning so a runtime provisioner can key + rediscover the browser by session id
@@ -268,16 +272,25 @@ export class BrowserSessionService {
   // Reject a new session that would exceed the per-tenant or fleet-wide live-session cap (browser-profiles S8).
   // Counted AFTER sweep + the owner's own session is freed, so the caller never trips their own limit. Throws
   // RateLimitError (429) — a transient capacity signal, not a permanent denial (the client can retry later).
-  private enforceCapacity(tenant: string): void {
+  private async enforceCapacity(tenant: string): Promise<void> {
     if (this.maxTotal !== undefined && this.sessions.size >= this.maxTotal)
       throw new RateLimitError(
         "RATE_LIMITED",
         { scope: "global", limit: this.maxTotal },
         "Too many live browser sessions on this node — try again once one frees up.",
       );
+    // The GLOBAL cap above stays local on purpose: it bounds THIS node's browser processes, which is a fact
+    // about this machine. A WORKSPACE's cap is not — it is a quota, and counting it from one process's map let
+    // a multi-replica control plane hand out that quota once per replica. The ledger is the one place that
+    // knows what the workspace is actually holding open.
     if (this.maxPerTenant !== undefined) {
-      let owned = 0;
-      for (const entry of this.sessions.values()) if (entry.record.tenant === tenant) owned++;
+      const now = this.now();
+      const owned = this.runs
+        ? // A row past its deadline is due for teardown; counting it would hold the workspace's slot forever.
+          (await this.runs.liveSessions({ tenant, trigger: BROWSER_TRIGGER })).filter(
+            (r) => r.expiresAt === undefined || Date.parse(r.expiresAt) > now,
+          ).length
+        : [...this.sessions.values()].filter((entry) => entry.record.tenant === tenant).length;
       if (owned >= this.maxPerTenant)
         throw new RateLimitError(
           "RATE_LIMITED",

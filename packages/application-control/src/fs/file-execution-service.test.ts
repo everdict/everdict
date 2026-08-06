@@ -113,6 +113,9 @@ class FakeRuns implements RunStore {
   async countActiveByEnvelope(): Promise<number> {
     return 0;
   }
+  async liveSessions(): Promise<[]> {
+    return [];
+  }
 }
 
 describe("FileExecutionService — running one workspace file", () => {
