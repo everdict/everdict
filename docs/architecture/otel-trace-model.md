@@ -148,6 +148,23 @@ real nested work. Those spans travel to the control plane on the agent report be
 projection, which stays as the fallback for a turn with no run to hang under. Observed spans carry no
 `everdict.assembled` marker — that distinction is the point of having one.
 
+The recorder also carries the CONTENT of the exchange, because the kernel's event stream carries it (this
+was closed as a defect: a first cut recorded intervals with empty hands). Per model call, the kernel emits a
+`usage` event — `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` land on the `chat` span they
+describe, not only as a turn aggregate on the root. A `tool_result` event carries a capped slice of what the
+tool answered (`everdict.output` on the tool span). The member's message rides the root span
+(`gen_ai.input.messages` + the dual `everdict.input`), the assistant's answer rides the chat span
+(`gen_ai.output.messages` + `everdict.output`). And a chat span whose turn answered ONLY in tool calls is
+closed at the first tool call / next turn instead of being overwritten — overwriting silently dropped most
+model calls of an agentic turn.
+
+Projection **v2** (`SPANS_TO_EVENTS_VERSION = 2`) makes that content readable on the event side:
+an `invoke_agent` span projects as a structural `span` (its attribute bag stays visible) plus its recorded
+input as a `message` — never as an `llm_call`, so the root's aggregate tokens cannot be double-counted next
+to the per-call chat spans (records sealed before per-call usage existed keep their aggregate as the one
+`llm_call` there is); and a chat span's captured output text projects as the assistant `message` a judge's
+`kind === "message"` filter reads, beside the `llm_call` that carries its tokens.
+
 Harnesses keep yielding `TraceEvent` from `run()`. That is deliberate, not a leftover: a harness is a
 **black box over a process boundary**, a CLI reports points as they happen, and the live playground needs
 those points before any span could close. `eventsToSpans` (domain) assembles them — a `tool_call` and its

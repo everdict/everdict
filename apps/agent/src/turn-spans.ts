@@ -34,6 +34,9 @@ export interface TurnSpanContext {
   agentName: string;
   conversationId?: string;
   model?: string;
+  // What the turn was ASKED — the member's message (or the activation's task). Recorded on the root span so
+  // the evidence carries both halves of the exchange; without it a trace showed answers to invisible questions.
+  input?: string;
   newSpanId?: () => string;
   now?: () => number;
 }
@@ -79,6 +82,10 @@ export class TurnSpanRecorder {
     const at = this.now();
     switch (event.type) {
       case "turn_start":
+        // A tool-calls-only turn emits no assistant_message, so its chat span is still open when the next
+        // turn starts. Close it here rather than overwrite it — overwriting silently dropped every
+        // intermediate model call of an agentic turn, which is MOST of them.
+        this.closeChat(at);
         // Each turn is one model call plus the tools it asked for. The chat span opens here and closes when
         // the model has spoken — which is the latency the old evidence never carried.
         this.chat = {
@@ -94,14 +101,35 @@ export class TurnSpanRecorder {
           events: [],
         };
         break;
+      case "usage":
+        // The call's own token spend, stamped on the call it belongs to. The volatile content-capture half of
+        // the GenAI conventions is dual-keyed (semconv.ts); tokens are the stable half, standard key only.
+        if (this.chat) {
+          this.chat.attributes[GEN_AI.responseModel] = event.model;
+          this.chat.attributes[GEN_AI.inputTokens] = event.inputTokens;
+          this.chat.attributes[GEN_AI.outputTokens] = event.outputTokens;
+        } else {
+          this.point(at, "usage", {
+            [GEN_AI.responseModel]: event.model,
+            [GEN_AI.inputTokens]: event.inputTokens,
+            [GEN_AI.outputTokens]: event.outputTokens,
+          });
+        }
+        break;
       case "assistant_message":
         if (this.chat) {
+          // Both keys on purpose: readers prefer the standard one, and `everdict.output` holds the line if the
+          // still-`development` GenAI content key moves again (see semconv.ts).
+          this.chat.attributes[GEN_AI.outputMessages] = event.content;
           this.chat.attributes[EVERDICT_ATTR.output] = event.content;
           this.close(this.chat, at);
           this.chat = undefined;
         }
         break;
       case "tool_call": {
+        // The model has spoken (in tool calls) — a tool-calls-only turn ends its chat span here, so the span's
+        // duration is the model call rather than the model call plus every tool it triggered.
+        this.closeChat(at);
         const key = event.id ?? event.name;
         this.openTools.set(key, {
           spanId: this.newSpanId(),
@@ -123,6 +151,8 @@ export class TurnSpanRecorder {
         const open = this.openTools.get(key);
         if (!open) break;
         this.openTools.delete(key);
+        // The result's content (the kernel caps it) — the other half of the exchange the tool span records.
+        if (event.output !== undefined) open.attributes[EVERDICT_ATTR.output] = event.output;
         this.close(open, at, event.isError ? "tool reported an error" : undefined);
         break;
       }
@@ -190,10 +220,7 @@ export class TurnSpanRecorder {
   // dropped on the floor.
   seal(usage?: AgentTurnUsage, failure?: string): TraceSpan[] {
     const endMs = this.now();
-    if (this.chat) {
-      this.close(this.chat, endMs);
-      this.chat = undefined;
-    }
+    this.closeChat(endMs);
     for (const open of this.openTools.values()) this.close(open, endMs, "the turn ended before this returned");
     this.openTools.clear();
     for (const open of this.openSubagents.values()) this.close(open, endMs, "the turn ended before this returned");
@@ -219,6 +246,15 @@ export class TurnSpanRecorder {
         ...this.common,
         [GEN_AI.operationName]: GEN_AI_OPERATION.invokeAgent,
         [GEN_AI.agentName]: this.ctx.agentName,
+        // The turn's own input, dual-keyed like every content capture (semconv.ts). The role travels on our
+        // round-trip key so the projection can put the speaker back.
+        ...(this.ctx.input !== undefined
+          ? {
+              [GEN_AI.inputMessages]: this.ctx.input,
+              [EVERDICT_ATTR.input]: this.ctx.input,
+              [EVERDICT_ATTR.messageRole]: "user",
+            }
+          : {}),
         ...(this.stopReason !== undefined ? { [GEN_AI.responseFinishReasons]: [this.stopReason] } : {}),
         // The turn's model spend. The agent counts tokens; the control plane prices them (one pricing table,
         // the same one the meter uses) — so no `everdict.cost.usd` is written here.
@@ -239,6 +275,14 @@ export class TurnSpanRecorder {
       status: failure !== undefined ? { code: "error", message: failure } : { code: "ok" },
     };
     return [root, ...this.closed];
+  }
+
+  // Close the open chat span wherever the model call factually ended — the next turn's start, the first tool
+  // call, or the seal. One place, so no path can leak (= silently drop) a model call again.
+  private closeChat(endMs: number): void {
+    if (!this.chat) return;
+    this.close(this.chat, endMs);
+    this.chat = undefined;
   }
 
   private close(open: Open, endMs: number, error?: string): void {

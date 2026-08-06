@@ -34,6 +34,10 @@ import { type WaitRequest, buildWaitForTool } from "../tools/wait-for-tool.js";
 import { normalizeHistory, wellFormedArguments } from "./normalize.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 
+// The slice of a tool result the `tool_result` EVENT carries — evidence, not the transcript (the model's own
+// copy stays full / offload-previewed). Sized so a trace of a hundred tool calls stays a record, not a dump.
+const TOOL_RESULT_EVENT_CHARS = 4_000;
+
 // How a run ended. "waiting" is deliberately distinct from "end_turn": end_turn means the agent is DONE and the ball
 // is the member's, while waiting means the work continues elsewhere and the agent still owes an answer — the host
 // keeps the conversation armed (AgentLoopResult.waitRequest) and resumes it when the world moves.
@@ -63,7 +67,21 @@ export type AgentEvent =
   // `id` is the model's own call id — it PAIRS a result with its call. Without it an observer has to guess
   // by name, which mis-pairs the moment two calls to the same tool run in parallel.
   | { type: "tool_call"; name: string; args: string; id?: string }
-  | { type: "tool_result"; name: string; isError: boolean; id?: string }
+  // `output` is what the model saw (an offloaded result carries its preview), capped for the evidence stream —
+  // without it a recorded tool span can only say a result EXISTED, never what it said.
+  | { type: "tool_result"; name: string; isError: boolean; id?: string; output?: string }
+  // One model call's own token spend, emitted when the call returns — the per-call fact that `onUsage` (a
+  // metering aggregate) reports but the EVENT stream never carried, so a span recorder listening on events
+  // could not put tokens on the call it was timing. `model` is the model that actually answered (the fallback
+  // may differ from the model the run was configured with).
+  | {
+      type: "usage";
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+    }
   | { type: "permission"; name: string; decision: PermissionDecision }
   | { type: "plan"; plan: string }
   | { type: "input"; messages: number } // user messages injected mid-run via drainInput (steering)
@@ -822,7 +840,19 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     }
 
     // Meter this turn's token usage (the host prices it into USD). Fired before the budget bookkeeping below.
-    if (result.usage) opts.onUsage?.(result.usage);
+    // The same numbers also go out as an EVENT so an observer can attach them to the model call they belong
+    // to — `onUsage` is the meter's aggregate channel, the event is the per-call record.
+    if (result.usage) {
+      opts.onUsage?.(result.usage);
+      emit({
+        type: "usage",
+        model: activeModel,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        ...(result.usage.cacheReadTokens !== undefined ? { cacheReadTokens: result.usage.cacheReadTokens } : {}),
+        ...(result.usage.cacheWriteTokens !== undefined ? { cacheWriteTokens: result.usage.cacheWriteTokens } : {}),
+      });
+    }
 
     // The turn hit the output-token cap — the text (or a tool call's JSON args) may be cut off mid-way. Surfaced
     // as an event so the host can show/log it; a truncated tool arg then fails JSON parsing below and comes back
@@ -1009,7 +1039,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       produced.push(toolMessage);
       toolCalls.push({ name: tc.name, ok: !output.isError });
       if (output.images && output.images.length > 0) turnImages.push(...output.images);
-      emit({ type: "tool_result", name: tc.name, isError: output.isError, id: tc.id });
+      emit({
+        type: "tool_result",
+        name: tc.name,
+        isError: output.isError,
+        id: tc.id,
+        output: content.slice(0, TOOL_RESULT_EVENT_CHARS),
+      });
       await opts.onMessage?.(toolMessage);
     }
 

@@ -93,6 +93,55 @@ describe("runAgentLoop", () => {
     expect(seen).toEqual([{ inputTokens: 7, outputTokens: 0 }]); // usage7 from the fake transport
   });
 
+  it("emits each model call's usage as an EVENT, so an observer can put tokens on the call it timed", async () => {
+    const { transport } = fakeTransport([toolCallResult("call_1", "echo", '{"x":1}'), textResult("done")]);
+    const echo: ToolDefinition = {
+      name: "echo",
+      description: "echo",
+      parametersJsonSchema: { type: "object" },
+      isReadOnly: true,
+      call: async () => ({ content: "ok", isError: false }),
+    };
+    const events: AgentEvent[] = [];
+    await runAgentLoop({
+      transport,
+      model: "test-model",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([echo]),
+      onEvent: (e) => events.push(e),
+    });
+    const usage = events.filter((e) => e.type === "usage");
+    expect(usage).toHaveLength(2); // one per model call, not one per turn's aggregate
+    expect(usage[0]).toMatchObject({ model: "test-model", inputTokens: 7, outputTokens: 0 });
+    // Ordering is the contract the span recorder leans on: the call's usage arrives while its span is open —
+    // after turn_start, before the tool calls that end it.
+    const types = events.map((e) => e.type);
+    expect(types.indexOf("usage")).toBeGreaterThan(types.indexOf("turn_start"));
+    expect(types.indexOf("usage")).toBeLessThan(types.indexOf("tool_call"));
+  });
+
+  it("carries what the tool answered on the tool_result event — capped evidence, not just a verdict", async () => {
+    const echo: ToolDefinition = {
+      name: "echo",
+      description: "echo",
+      parametersJsonSchema: { type: "object" },
+      isReadOnly: true,
+      call: async () => ({ content: "3 files", isError: false }),
+    };
+    const { transport } = fakeTransport([toolCallResult("call_1", "echo", "{}"), textResult("done")]);
+    const events: AgentEvent[] = [];
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([echo]),
+      onEvent: (e) => events.push(e),
+    });
+    expect(events.find((e) => e.type === "tool_result")).toMatchObject({ id: "call_1", output: "3 files" });
+  });
+
   it("emits reasoning_delta and attaches the turn's reasoning (text + blocks) to the assistant message", async () => {
     const events: AgentEvent[] = [];
     const persisted: ChatMessage[] = [];

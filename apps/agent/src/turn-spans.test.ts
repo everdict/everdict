@@ -10,7 +10,7 @@ import { TurnSpanRecorder } from "./turn-spans.js";
 const TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
 const T0 = Date.parse("2026-08-04T09:00:00.000Z");
 
-function recorder(ticks: number[]) {
+function recorder(ticks: number[], input?: string) {
   let i = 0;
   let n = 0;
   return new TurnSpanRecorder({
@@ -18,6 +18,7 @@ function recorder(ticks: number[]) {
     agentName: "triage",
     conversationId: "conv-1",
     model: "claude-opus-5",
+    ...(input !== undefined ? { input } : {}),
     newSpanId: () => (++n).toString(16).padStart(16, "0"),
     now: () => T0 + (ticks[i++] ?? ticks[ticks.length - 1] ?? 0),
   });
@@ -71,6 +72,61 @@ describe("recording a turn's spans live", () => {
     expect(chat?.events?.map((e) => e.name)).toEqual(["retry", "model_fallback", "compaction"]);
     expect(chat?.events?.[0]?.attributes).toMatchObject({ attempt: 1, delayMs: 2_000, persistent: true });
     expect(chat?.events?.[2]?.attributes).toMatchObject({ droppedMessages: 12, mode: "summarize" });
+  });
+
+  it("stamps each model call's own token spend on the chat span it belongs to", () => {
+    // The kernel's `usage` event fires when the call returns, before the assistant speaks — so the numbers
+    // land on the OPEN chat span, which is the call they describe.
+    const rec = recorder([0, 0, 800, 1_200, 1_300]);
+    rec.observe({ type: "turn_start", turn: 1 });
+    rec.observe({ type: "usage", model: "claude-opus-5", inputTokens: 320, outputTokens: 55 });
+    rec.observe({ type: "assistant_message", content: "done" });
+    const chat = rec.seal().find((s) => s.name.startsWith(GEN_AI_OPERATION.chat));
+
+    expect(chat?.attributes[GEN_AI.responseModel]).toBe("claude-opus-5");
+    expect(chat?.attributes[GEN_AI.inputTokens]).toBe(320);
+    expect(chat?.attributes[GEN_AI.outputTokens]).toBe(55);
+    // Content capture is dual-keyed while the GenAI convention is still moving (semconv.ts).
+    expect(chat?.attributes[GEN_AI.outputMessages]).toBe("done");
+    expect(chat?.attributes[EVERDICT_ATTR.output]).toBe("done");
+  });
+
+  it("keeps the model call of a tool-calls-only turn — the span the overwrite used to drop", () => {
+    // Turn 1 answers ONLY in tool calls (no assistant_message), so nothing closed its chat span; opening
+    // turn 2's span used to overwrite it, silently dropping most model calls of an agentic turn.
+    const rec = recorder([0, 0, 700, 900, 1_000, 2_000, 2_100]);
+    rec.observe({ type: "turn_start", turn: 1 });
+    rec.observe({ type: "tool_call", name: "Bash", args: "{}", id: "c1" });
+    rec.observe({ type: "tool_result", name: "Bash", isError: false, id: "c1" });
+    rec.observe({ type: "turn_start", turn: 2 });
+    rec.observe({ type: "assistant_message", content: "done" });
+    const chats = rec.seal().filter((s) => s.name.startsWith(GEN_AI_OPERATION.chat));
+
+    expect(chats).toHaveLength(2);
+    // Turn 1's model call ended when it asked for the tool — its span is the call, not the call plus the tool.
+    expect(Date.parse(chats[0]?.endedAt ?? "") - Date.parse(chats[0]?.startedAt ?? "")).toBe(700);
+  });
+
+  it("records what a tool answered, not just that it answered", () => {
+    const rec = recorder([0, 0, 10, 900, 1_000]);
+    rec.observe({ type: "turn_start", turn: 1 });
+    rec.observe({ type: "tool_call", name: "Bash", args: '{"cmd":"ls"}', id: "c1" });
+    rec.observe({ type: "tool_result", name: "Bash", isError: false, id: "c1", output: "3 files" });
+    const tool = rec.seal().find((s) => s.attributes[GEN_AI.toolCallId] === "c1");
+
+    expect(tool?.attributes[EVERDICT_ATTR.input]).toBe('{"cmd":"ls"}');
+    expect(tool?.attributes[EVERDICT_ATTR.output]).toBe("3 files");
+  });
+
+  it("carries the member's message on the root span — answers need their question", () => {
+    const rec = recorder([0, 0, 100, 200], "why did run 7 fail?");
+    rec.observe({ type: "turn_start", turn: 1 });
+    rec.observe({ type: "assistant_message", content: "because…" });
+    const root = rec.seal()[0];
+
+    expect(root?.attributes[GEN_AI.inputMessages]).toBe("why did run 7 fail?");
+    expect(root?.attributes[EVERDICT_ATTR.input]).toBe("why did run 7 fail?");
+    expect(root?.attributes[EVERDICT_ATTR.messageRole]).toBe("user");
   });
 
   it("makes a subagent real nested work — a span, not a note on the parent", () => {
@@ -162,7 +218,8 @@ it("survives every AgentEvent shape the kernel can emit", () => {
     { type: "reasoning_delta", delta: "x" },
     { type: "assistant_message", content: "x" },
     { type: "tool_call", name: "t", args: "{}" },
-    { type: "tool_result", name: "t", isError: false },
+    { type: "tool_result", name: "t", isError: false, output: "ok" },
+    { type: "usage", model: "m", inputTokens: 1, outputTokens: 1 },
     { type: "permission", name: "t", decision: "allow" },
     { type: "plan", plan: "p" },
     { type: "input", messages: 1 },

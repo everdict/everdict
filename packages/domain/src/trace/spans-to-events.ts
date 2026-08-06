@@ -23,7 +23,10 @@ import {
 
 // Bump when a change to this file could produce different events for the same spans. Read by the scoring
 // path and stamped on the record — never inferred from the package version, which moves for other reasons.
-export const SPANS_TO_EVENTS_VERSION = 1;
+// v2: an `invoke_agent` span projects as a structural span (+ its recorded input as a user message) instead
+// of an llm_call, and a chat span's captured output text projects as an assistant message — the recorder's
+// evidence used to vanish into an llm_call that has no room for text.
+export const SPANS_TO_EVENTS_VERSION = 2;
 
 // The attribute dialects a span can arrive in. Ours is the GenAI convention (semconv.ts); the rest are the
 // conventions the platforms that push to our door actually emit — OpenInference (Phoenix/Arize), MLflow
@@ -134,6 +137,19 @@ export function spansToEvents(spans: TraceSpan[], opts: SpansToEventsOptions = {
   const base = sorted.length > 0 ? (msOf(sorted[0]?.startedAt ?? "") ?? 0) : 0;
   const out: TraceEvent[] = [];
 
+  // Whether any chat span in this batch carries its own token counts. Decides how an `invoke_agent` span's
+  // aggregate tokens project: per-call tokens present → the aggregate is a duplicate a cost-summing reader
+  // must not see twice; absent (a record sealed before the recorder stamped per-call usage) → the aggregate
+  // is the only token evidence there is and still projects as the one llm_call.
+  const perCallTokens = sorted.some((s) => {
+    const sa = readable(s);
+    return (
+      str(sa[GEN_AI.operationName]) === GEN_AI_OPERATION.chat &&
+      (pickNum(sa, DEFAULT_SPAN_ATTR_KEYS.inputTokens) !== undefined ||
+        pickNum(sa, DEFAULT_SPAN_ATTR_KEYS.outputTokens) !== undefined)
+    );
+  });
+
   for (const span of sorted) {
     const startMs = msOf(span.startedAt);
     const endMs = msOf(span.endedAt);
@@ -194,6 +210,38 @@ export function spansToEvents(spans: TraceSpan[], opts: SpansToEventsOptions = {
           ? { node: asText(a["k8s.node.name"] ?? a["host.name"]) }
           : {}),
       });
+    } else if (operation === GEN_AI_OPERATION.invokeAgent) {
+      // The agent root (or a nested subagent): a structural span, so its attribute bag — the aggregate
+      // usage, the finish reasons, the semconv stamp — stays readable. Never an llm_call: with per-call
+      // tokens on the chat spans beneath it, projecting the aggregate as another llm_call double-counts
+      // every reader that sums cost (the `perCallTokens` fallback above covers older records).
+      out.push({ ...structure, kind: "span", name: span.name, attributes: span.attributes });
+      const inputText = str(a[GEN_AI.inputMessages]) ?? str(a[EVERDICT_ATTR.input]);
+      if (inputText !== undefined) {
+        // What the turn was asked — the recorder stamps it on the root with the speaker on our round-trip key.
+        const role = str(a[EVERDICT_ATTR.messageRole]) === "assistant" ? "assistant" : "user";
+        out.push({
+          t: structure.t,
+          at: span.startedAt,
+          kind: "message",
+          role,
+          text: inputText,
+          parentId: span.spanId,
+        });
+      }
+      if (!perCallTokens && (inTok !== undefined || outTok !== undefined)) {
+        out.push({
+          ...structure,
+          kind: "llm_call",
+          model: model ?? "",
+          cost: {
+            inputTokens: inTok ?? 0,
+            outputTokens: outTok ?? 0,
+            usd: pickNum(a, keys.costUsd) ?? num(llmCost.total_cost) ?? 0,
+          },
+          latencyMs: durationMs,
+        });
+      }
     } else if (
       operation === GEN_AI_OPERATION.chat ||
       model !== undefined ||
@@ -211,6 +259,22 @@ export function spansToEvents(spans: TraceSpan[], opts: SpansToEventsOptions = {
         },
         latencyMs: durationMs,
       });
+      // The captured answer itself. An llm_call has no room for text, so a chat span that recorded its output
+      // (our own recorder dual-keys it; only string-shaped captures qualify) also projects the message a
+      // judge's `kind === "message"` filter reads — the transcript projection used to provide it, and a turn
+      // sealed from spans lost it entirely.
+      const outputText = str(a[GEN_AI.outputMessages]) ?? str(a[EVERDICT_ATTR.output]);
+      if (outputText !== undefined) {
+        const role = str(a[EVERDICT_ATTR.messageRole]) === "user" ? "user" : "assistant";
+        out.push({
+          t: (endMs ?? startMs) - base,
+          at: span.endedAt,
+          kind: "message",
+          role,
+          text: outputText,
+          parentId: span.spanId,
+        });
+      }
     } else if (toolName !== undefined || pickStr(a, keys.toolName) !== undefined || declaredKindIsTool(a)) {
       const name = toolName ?? pickStr(a, keys.toolName) ?? span.name;
       const id = pickStr(a, keys.toolCallId) ?? span.spanId;

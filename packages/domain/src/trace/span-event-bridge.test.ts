@@ -164,6 +164,118 @@ describe("projecting spans back to the events judges read", () => {
     ]);
   });
 
+  it("projects a recorded chat span as the llm_call AND the message it captured — tokens and text both read", () => {
+    // The agent's live recorder (turn-spans) stamps per-call usage and the answer's text on the chat span.
+    // v1 classified it as an llm_call and stopped — the text vanished, and the waterfall showed a model call
+    // with 0/0 tokens and no output. Both facts must project.
+    const chat: TraceSpan = {
+      traceId: TRACE_ID,
+      spanId: "00f067aa0ba902b1",
+      name: "chat claude-opus-5",
+      kind: "internal",
+      startedAt: at(0),
+      endedAt: at(1_200),
+      attributes: {
+        [GEN_AI.operationName]: "chat",
+        [GEN_AI.requestModel]: "claude-opus-5",
+        [GEN_AI.inputTokens]: 320,
+        [GEN_AI.outputTokens]: 55,
+        [GEN_AI.outputMessages]: "fixed the race",
+        [EVERDICT_ATTR.output]: "fixed the race",
+      },
+      status: { code: "ok" },
+    };
+    const events = spansToEvents([chat]);
+    expect(events.find((e) => e.kind === "llm_call")).toMatchObject({
+      model: "claude-opus-5",
+      cost: { inputTokens: 320, outputTokens: 55 },
+    });
+    expect(events.find((e) => e.kind === "message")).toMatchObject({
+      role: "assistant",
+      text: "fixed the race",
+      parentId: "00f067aa0ba902b1",
+    });
+  });
+
+  it("projects the agent root as structure plus its question — and never double-counts the aggregate", () => {
+    const root: TraceSpan = {
+      traceId: TRACE_ID,
+      spanId: "00f067aa0ba902b2",
+      name: "invoke_agent triage",
+      kind: "internal",
+      startedAt: at(0),
+      endedAt: at(2_000),
+      attributes: {
+        [GEN_AI.operationName]: "invoke_agent",
+        [GEN_AI.inputMessages]: "why did run 7 fail?",
+        [EVERDICT_ATTR.input]: "why did run 7 fail?",
+        [EVERDICT_ATTR.messageRole]: "user",
+        // The turn's AGGREGATE spend, also on the root — with per-call tokens below it, this must not
+        // become a second llm_call a cost-summing reader adds again.
+        [GEN_AI.responseModel]: "claude-opus-5",
+        [GEN_AI.inputTokens]: 320,
+        [GEN_AI.outputTokens]: 55,
+      },
+      status: { code: "ok" },
+    };
+    const chat: TraceSpan = {
+      traceId: TRACE_ID,
+      spanId: "00f067aa0ba902b3",
+      parentSpanId: "00f067aa0ba902b2",
+      name: "chat claude-opus-5",
+      kind: "internal",
+      startedAt: at(100),
+      endedAt: at(1_200),
+      attributes: {
+        [GEN_AI.operationName]: "chat",
+        [GEN_AI.requestModel]: "claude-opus-5",
+        [GEN_AI.inputTokens]: 320,
+        [GEN_AI.outputTokens]: 55,
+      },
+      status: { code: "ok" },
+    };
+    const events = spansToEvents([root, chat]);
+    const llmCalls = events.filter((e) => e.kind === "llm_call");
+    expect(llmCalls).toHaveLength(1); // the per-call span, not the aggregate
+    expect(events.find((e) => e.kind === "message")).toMatchObject({ role: "user", text: "why did run 7 fail?" });
+    expect(events.find((e) => e.kind === "span")).toMatchObject({ name: "invoke_agent triage" });
+  });
+
+  it("still projects the aggregate as the one llm_call for a record sealed before per-call usage existed", () => {
+    // Older recorder output: tokens only on the root, chat spans bare. The aggregate is the only token
+    // evidence there is — dropping it would zero the cost of every already-sealed turn.
+    const root: TraceSpan = {
+      traceId: TRACE_ID,
+      spanId: "00f067aa0ba902b4",
+      name: "invoke_agent triage",
+      kind: "internal",
+      startedAt: at(0),
+      endedAt: at(2_000),
+      attributes: {
+        [GEN_AI.operationName]: "invoke_agent",
+        [GEN_AI.responseModel]: "claude-opus-5",
+        [GEN_AI.inputTokens]: 320,
+        [GEN_AI.outputTokens]: 55,
+      },
+      status: { code: "ok" },
+    };
+    const bareChat: TraceSpan = {
+      traceId: TRACE_ID,
+      spanId: "00f067aa0ba902b5",
+      parentSpanId: "00f067aa0ba902b4",
+      name: "chat claude-opus-5",
+      kind: "internal",
+      startedAt: at(100),
+      endedAt: at(1_200),
+      attributes: { [GEN_AI.operationName]: "chat", [GEN_AI.requestModel]: "claude-opus-5" },
+      status: { code: "ok" },
+    };
+    const events = spansToEvents([root, bareChat]);
+    const withTokens = events.filter((e) => e.kind === "llm_call" && (e.cost?.inputTokens ?? 0) > 0);
+    expect(withTokens).toHaveLength(1);
+    expect(withTokens[0]).toMatchObject({ cost: { inputTokens: 320, outputTokens: 55 } });
+  });
+
   it("surfaces a failed span as an error event — the union has no status field to carry it", () => {
     const failed: TraceSpan = {
       traceId: TRACE_ID,
