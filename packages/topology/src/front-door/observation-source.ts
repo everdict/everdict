@@ -48,8 +48,9 @@ function parseSnapshot(raw: unknown, label: string): EnvSnapshot {
 }
 
 // Result-channel body → prompt output text: a string as-is, other shapes as JSON. The response is evidence for
-// judges/graders, not a structured EnvSnapshot (that's what sentinel is for).
-function responseText(response: unknown): string {
+// judges/graders, not a structured EnvSnapshot (that's what sentinel is for). Exported: the front-door
+// conversation session reads the same channel as the assistant's reply.
+export function responseText(response: unknown): string {
   if (response == null) return "";
   return typeof response === "string" ? response : JSON.stringify(response);
 }

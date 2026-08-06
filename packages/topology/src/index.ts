@@ -112,6 +112,11 @@ export {
   interpolateTemplate,
 } from "./front-door/front-door-driver.js";
 export { applyImagePins } from "./image-pins.js";
+export {
+  FrontDoorSession,
+  type FrontDoorSessionOptions,
+  type FrontDoorTurnOutcome,
+} from "./front-door/front-door-session.js";
 export { InProcessCallbackRendezvous, type CallbackSink } from "./front-door/callback-rendezvous.js";
 export {
   type TargetAcquirer,

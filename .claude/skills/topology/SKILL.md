@@ -276,6 +276,23 @@ touching `service-backend.ts`'s driving logic.
   (`frontDoor.request.headers`, `{{var}}`-interpolated; method from `submit`'s verb). Follow-ups: store-backed
   callback rendezvous (multi-process), live A2A stream/callback e2e — see `docs/architecture/front-door-generalization.md`.
 
+## Front-door conversations — `FrontDoorSession` (multi-turn, the playground's service lane)
+`FrontDoorSession` (`front-door/front-door-session.ts`) is the MULTI-TURN sibling of `dispatch`'s one-case
+drive slice: a member converses with a deployed service harness through its front-door. The continuity
+contract — SESSION-stable (derived from the session run id): isolateBy wiring (`thread_id`/`key_prefix`/
+`object_prefix`/`schema`), `stream_channel`/`minio_prefix`, and the target acquired ONCE at boot and held to
+close (one browser per conversation); PER-TURN fresh: `run_id`, the trace correlation key, `callback_url`
+(the rendezvous holds one waiter per key). One `thread_id` across submits is what makes a checkpointing agent
+(LangGraph) resume — proven by `service-topology-aegra`. Rules: the session NEVER owns the runtime (it holds
+the SHARED per-`rt:<tenant>:<id>@<version>` instance the eval lane dispatches with — one warm pool, one idle
+sweeper; two instances would let one lane's sweeper kill the other's warm job mid-turn) and never calls
+`teardown`; every turn re-calls `ensureTopology` (touch-on-use + heal); a session-stable `contextId` pulls the
+CUMULATIVE trace, so turns return the delta past what was already seen; fixtures/observe/grade/recording are
+deliberately absent (a conversation has no grading stage); trace-completion harnesses are refused (no reply to
+converse with). apps/api binds it behind application-control's structural `ServiceConversation` port
+(`composition/sandbox.ts` `resolveServiceConversation` → `topologyConversationEnvironmentFor` in
+`composition/dispatch.ts`). See `docs/architecture/harness-playground.md` §Conversations.
+
 ## Target axis (round 2) — `TargetAcquirer` (B1+B2 DONE)
 Round 1 left the **target** assumed to be "a CDP browser Everdict provisions." Round 2 generalizes it — the WHAT-target
 seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`. Read
