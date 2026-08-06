@@ -9,20 +9,16 @@ import {
 } from "@everdict/contracts";
 import {
   type BudgetTracker,
-  Run,
+  type Run,
   type RunTransition,
   type UsageMeter,
   billingCharges,
   runEvidenceIdentity,
 } from "@everdict/domain";
-import { stampFacts } from "../platform-event/outbox.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
-
-// The live buffer cap: a runaway harness can't grow the process without bound. The cap is on the CURSOR
-// buffer (what the web polls); when hit, one error marker records the truncation and further events drop.
-const MAX_TASK_EVENTS = 5000;
+import { appendCapped, finalizeRun } from "./turn-finalize.js";
 
 export interface SessionTaskRunnerDeps {
   store: RunStore;
@@ -52,6 +48,9 @@ export class SessionTaskRunner {
     timeoutSec: number;
     events: TraceEvent[]; // the task's live cursor buffer — appended in place as the harness yields
     signal: AbortSignal;
+    // Conversation continuity (playground conversation sessions): the previous turn's resume token in, this
+    // turn's out via onToken. Forwarded verbatim — the harness owns the token's meaning, the facade its life.
+    conversation?: { resume?: string; onToken: (token: string) => void };
   }): Promise<"succeeded" | "failed"> {
     const { record, events } = input;
     let failure: { code: string; message: string } | undefined;
@@ -61,6 +60,7 @@ export class SessionTaskRunner {
         timeoutSec: input.timeoutSec,
         runId: record.id,
         signal: input.signal,
+        ...(input.conversation !== undefined ? { conversation: input.conversation } : {}),
       };
       for await (const ev of input.harness.run(input.compute, input.task, ctx)) {
         appendCapped(events, ev);
@@ -117,33 +117,8 @@ export class SessionTaskRunner {
     return status;
   }
 
-  // First terminal write wins — mirrors RunService.finalize. Returns whether the transition applied.
-  private async finalize(runId: string, tenant: string, fn: (run: Run) => RunTransition): Promise<boolean> {
-    const current = await this.deps.store.get(runId);
-    if (!current || Run.from(current).isTerminal()) return false;
-    const transition = fn(Run.from(current));
-    const stamped = stampFacts(tenant, transition.facts, { newId: this.deps.newId, now: this.deps.now });
-    await this.deps.store.update(
-      runId,
-      transition.patch,
-      stamped.map((f) => f.record),
-    );
-    if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
-    return true;
-  }
-}
-
-function appendCapped(events: TraceEvent[], ev: TraceEvent): void {
-  if (events.length < MAX_TASK_EVENTS) {
-    events.push(ev);
-    return;
-  }
-  if (events.length === MAX_TASK_EVENTS) {
-    events.push({
-      t: ev.t,
-      kind: "error",
-      message: `[everdict] event buffer full (${MAX_TASK_EVENTS}) — further events dropped`,
-    });
+  private finalize(runId: string, tenant: string, fn: (run: Run) => RunTransition): Promise<boolean> {
+    return finalizeRun(this.deps, runId, tenant, fn);
   }
 }
 

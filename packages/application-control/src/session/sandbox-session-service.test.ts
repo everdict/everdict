@@ -450,6 +450,7 @@ function fakePlaygroundHarness(opts: { hold?: boolean; image?: string | undefine
   const resolved: ResolvedSessionHarness = {
     id: "cc",
     version: "1.0.0",
+    kind: "process",
     harness,
     apiKeyEnv: { ANTHROPIC_API_KEY: "sk-test" },
     ...("image" in opts ? (opts.image !== undefined ? { image: opts.image } : {}) : { image: "harness-img:1" }),
@@ -649,7 +650,7 @@ describe("SandboxSessionService — the harness playground (test cases in a live
     await service.submitTask(creator, session.id, { task: "a very long task ".repeat(30) });
     const mine = await service.listSessions(creator);
     expect(mine.map((v) => v.record.id)).toEqual([session.id]);
-    expect(mine[0]?.live?.harness).toEqual({ id: "cc", version: "1.0.0" });
+    expect(mine[0]?.live?.harness).toEqual({ id: "cc", kind: "process", version: "1.0.0" });
     expect(mine[0]?.live?.tasks[0]?.taskPreview.length).toBeLessThanOrEqual(201);
     const other = await service.listSessions({ tenant: "zeta", subject: "bob", isAdmin: false });
     expect(other).toEqual([]);
@@ -1610,5 +1611,358 @@ describe("SandboxSessionService — capacity counted from the ledger", () => {
     await expect(
       service.create({ ...creator, createdBy: "alice", image: "debian:stable-slim" }),
     ).resolves.toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Conversation sessions: the playground's multi-turn mode (one conversation, the harness resumes it).
+// ---------------------------------------------------------------------------------------------------
+
+// A conversational harness double: records the resume token each turn RECEIVED, reports a fresh token
+// per turn (tok-1, tok-2, …) — the last-reported one is what the next turn must get back.
+function fakeConversationalHarness() {
+  const resumes: Array<string | undefined> = [];
+  let n = 0;
+  const harness: EvaluableHarness = {
+    id: "cc",
+    version: "1.0.0",
+    conversational: true,
+    async install(compute) {
+      await compute.exec("npm i -g cc");
+    },
+    async *run(compute, task, ctx) {
+      resumes.push(ctx.conversation?.resume);
+      ctx.conversation?.onToken?.(`tok-${++n}`);
+      await compute.exec(`agent ${task}`, { cwd: "work" });
+      yield { t: 1, kind: "message" as const, role: "assistant" as const, text: `did: ${task}` };
+    },
+  };
+  const resolved: ResolvedSessionHarness = {
+    id: "cc",
+    version: "1.0.0",
+    kind: "process",
+    harness,
+    apiKeyEnv: {},
+    image: "harness-img:1",
+  };
+  return { resolved, resumes };
+}
+
+describe("SandboxSessionService — conversation sessions (multi-turn playground)", () => {
+  const bootConversation = async (over: Partial<SandboxSessionServiceDeps> = {}) => {
+    const fake = fakeConversationalHarness();
+    const ctx = build({ resolveSessionHarness: async () => fake.resolved, ...over });
+    const session = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      harness: { id: "cc", conversation: true },
+    });
+    return { ...ctx, fake, session };
+  };
+
+  it("boot stamps conversation on the row and the live view (the web's one branch signal)", async () => {
+    const { service, session } = await bootConversation();
+    expect(session.session?.conversation).toBe(true);
+    const view = await service.getSession(creator, session.id);
+    expect(view.live?.conversation).toBe(true);
+    expect(view.live?.harness).toEqual({ id: "cc", version: "1.0.0", kind: "process" });
+  });
+
+  it("a non-conversational harness refuses conversation mode BEFORE any container is provisioned, and releases the budget reservation", async () => {
+    const fake = fakePlaygroundHarness(); // no `conversational` marker
+    const budget = fakeBudget();
+    const { service, driver, runStore } = build({
+      resolveSessionHarness: async () => fake.resolved,
+      budget: budget.budget,
+    });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc", conversation: true } }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(driver.provisioned.length).toBe(0); // refused up front — no container was ever spent
+    expect(runStore.rows.size).toBe(0);
+    // Regression: a post-admit resolution failure used to leak the budget reservation it had just taken.
+    expect(budget.releases()).toBe(1);
+  });
+
+  it("an unknown harness after budget admission also releases the reservation (the same leak, 404 path)", async () => {
+    const budget = fakeBudget();
+    const { service } = build({ resolveSessionHarness: async () => undefined, budget: budget.budget });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", harness: { id: "ghost" } }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(budget.releases()).toBe(1);
+  });
+
+  it("turns thread the resume token (turn 2 receives what turn 1 reported) and share ONE stable workdir", async () => {
+    const { service, runStore, driver, fake, session } = await bootConversation();
+    const turn1 = await service.submitTask(creator, session.id, { task: "remember the number 7" });
+    await until(() => runStore.rows.get(turn1.id)?.status === "succeeded");
+    const turn2 = await service.submitTask(creator, session.id, { task: "what number did I say?" });
+    await until(() => runStore.rows.get(turn2.id)?.status === "succeeded");
+
+    // Continuity: turn 1 started fresh; turn 2 resumed with the token turn 1 reported.
+    expect(fake.resumes).toEqual([undefined, "tok-1"]);
+    // Dependent evidence: turns group with role "turn" and count turn-<n>, never task-<n>.
+    expect(turn1.caseId).toBe("turn-1");
+    expect(turn2.group).toEqual({ id: session.id, role: "turn" });
+    // One conversation = one workdir: both turns ran under conversation/work, no tasks/<n> rebasing.
+    expect(driver.execs.filter((c) => c.includes("mkdir -p 'conversation/work'")).length).toBe(2);
+    expect(driver.execs.some((c) => c.includes("tasks/"))).toBe(false);
+  });
+
+  it("fresh starts a new thread — drops the resume token, keeps the workdir — and marks the turn", async () => {
+    const { service, runStore, fake, session } = await bootConversation();
+    const turn1 = await service.submitTask(creator, session.id, { task: "hello" });
+    await until(() => runStore.rows.get(turn1.id)?.status === "succeeded");
+    const turn2 = await service.submitTask(creator, session.id, { task: "start over", fresh: true });
+    await until(() => runStore.rows.get(turn2.id)?.status === "succeeded");
+
+    expect(fake.resumes).toEqual([undefined, undefined]); // the reset really forgot the thread
+    const view = await service.getSession(creator, session.id);
+    expect(view.live?.tasks.map((t) => t.fresh)).toEqual([undefined, true]);
+  });
+
+  it("fresh on a non-conversation session is a 400 (independent cases have no thread to reset)", async () => {
+    const fake = fakePlaygroundHarness();
+    const { service } = build({ resolveSessionHarness: async () => fake.resolved });
+    const session = await service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } });
+    await expect(service.submitTask(creator, session.id, { task: "hi", fresh: true })).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Front-door conversation sessions: a kind:"service" harness driven multi-turn over its front-door.
+// ---------------------------------------------------------------------------------------------------
+
+import type { ResolvedServiceConversation, ServiceConversation } from "../ports/service-conversation.js";
+
+function fakeServiceConversation(opts: { failBoot?: boolean } = {}) {
+  const turns: Array<{ task: string; turnRunId: string }> = [];
+  const openedFor: string[] = [];
+  let closes = 0;
+  const conversation: ServiceConversation = {
+    async boot() {
+      if (opts.failBoot) throw new NotFoundError("NOT_FOUND", {}, "no such runtime cluster");
+      return { frontDoorBase: "http://fd:8000", cdpBase: "http://127.0.0.1:9222" };
+    },
+    async turn({ task, turnRunId }) {
+      turns.push({ task, turnRunId });
+      return {
+        status: "done" as const,
+        responseText: `reply to: ${task}`,
+        trace: [{ t: 1, kind: "tool_call" as const, id: "c1", name: "search", args: {} }],
+        infraMarks: [
+          {
+            t: 0,
+            kind: "infra" as const,
+            scope: "placement" as const,
+            event: "drive_submitted",
+            message: "front-door agent: POST /runs",
+            at: "2026-07-30T00:00:00.000Z",
+          },
+        ],
+      };
+    },
+    async close() {
+      closes += 1;
+    },
+  };
+  const resolved: ResolvedServiceConversation = {
+    harness: { id: "aegra", version: "1.0.0" },
+    frontDoorImage: "reg/aegra:1",
+    open: (sessionRunId) => {
+      openedFor.push(sessionRunId);
+      return conversation;
+    },
+  };
+  return { conversation, resolved, turns, openedFor, closes: () => closes };
+}
+
+describe("SandboxSessionService — front-door conversation sessions (service harnesses)", () => {
+  const bootFrontdoor = async (over: Partial<SandboxSessionServiceDeps> = {}) => {
+    const fake = fakeServiceConversation();
+    const ctx = build({ resolveServiceConversation: async () => fake.resolved, ...over });
+    const session = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      harness: { id: "aegra" },
+      runtime: "nomad-seoul",
+    });
+    return { ...ctx, fake, session };
+  };
+
+  it("boots on the 'frontdoor' pool with NO container: trigger, conversation, runtime placement, no computeId", async () => {
+    const { session, driver, fake } = await bootFrontdoor();
+    expect(session).toMatchObject({
+      kind: "sandbox",
+      trigger: "frontdoor",
+      harness: { id: "aegra", version: "1.0.0" },
+      runtime: "nomad-seoul",
+      attach: ["tasks"],
+      placement: { where: "runtime", target: "nomad-seoul" },
+      session: { image: "reg/aegra:1", conversation: true },
+    });
+    expect(session.session?.computeId).toBeUndefined(); // nothing for Driver.reap — row-only settle
+    expect(driver.provisioned.length).toBe(0); // no container was ever provisioned
+    expect(fake.openedFor).toEqual([session.id]); // the session id is the continuity key
+  });
+
+  it("a failed boot leaves NO row, releases the budget, and closes the half-acquired target", async () => {
+    const fake = fakeServiceConversation({ failBoot: true });
+    const budget = fakeBudget();
+    const { service, runStore } = build({
+      resolveServiceConversation: async () => fake.resolved,
+      budget: budget.budget,
+    });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", harness: { id: "aegra" }, runtime: "nomad-seoul" }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(runStore.rows.size).toBe(0);
+    expect(budget.releases()).toBe(1);
+    expect(fake.closes()).toBe(1);
+  });
+
+  it("refuses a service session without a runtime, and container-only asks (world/repo) by name", async () => {
+    const fake = fakeServiceConversation();
+    const { service } = build({ resolveServiceConversation: async () => fake.resolved });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", harness: { id: "aegra" } }),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("runtime") });
+    await expect(
+      service.create({
+        tenant: "acme",
+        createdBy: "alice",
+        harness: { id: "aegra" },
+        runtime: "nomad-seoul",
+        repo: { git: "https://github.com/acme/x.git" },
+      }),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("no container") });
+  });
+
+  it("a non-service harness falls through to the process resolver untouched", async () => {
+    const playgroundFake = fakePlaygroundHarness();
+    const { service } = build({
+      resolveServiceConversation: async () => undefined, // "not a service harness"
+      resolveSessionHarness: async () => playgroundFake.resolved,
+    });
+    const session = await service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } });
+    expect(session.trigger).toBe("sandbox"); // the container pool, exactly as before
+  });
+
+  it("a turn drives the conversation and settles a 'turn' child whose evidence is marks + trace + the reply", async () => {
+    const { service, runStore, trajectories, fake, session } = await bootFrontdoor();
+    const turn = await service.submitTask(creator, session.id, { task: "remember the number 7" });
+    await until(() => runStore.rows.get(turn.id)?.status === "succeeded");
+
+    expect(turn).toMatchObject({
+      kind: "eval",
+      caseId: "turn-1",
+      group: { id: session.id, role: "turn" },
+      placement: { where: "runtime", target: "nomad-seoul" },
+    });
+    expect(fake.turns).toEqual([{ task: "remember the number 7", turnRunId: turn.id }]);
+    const settled = runStore.rows.get(turn.id);
+    expect(settled?.result?.snapshot).toEqual({ kind: "prompt", output: "reply to: remember the number 7" });
+    // Evidence order: infra marks → the agent's trace → the assistant reply as a message event.
+    const kinds = settled?.result?.trace.map((e) => e.kind);
+    expect(kinds).toEqual(["infra", "tool_call", "message"]);
+    await until(() => trajectories.sealed.has(turn.id)); // the seal lands right after the settle
+    // The trace poll serves the same buffer with a cursor.
+    const page = await service.readTaskTrace(creator, session.id, turn.id, 0);
+    expect(page.events.length).toBe(3);
+    expect(page.done).toBe(true);
+  });
+
+  it("one turn at a time (409 naming the active run), same as the playground", async () => {
+    const fake = fakeServiceConversation();
+    let release: (() => void) | undefined;
+    fake.conversation.turn = async ({ task, turnRunId }) => {
+      await new Promise<void>((r) => {
+        release = r;
+      });
+      return { status: "done", responseText: `ok ${task} ${turnRunId}`, trace: [], infraMarks: [] };
+    };
+    const { service } = build({ resolveServiceConversation: async () => fake.resolved });
+    const session = await service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      harness: { id: "aegra" },
+      runtime: "nomad-seoul",
+    });
+    const first = await service.submitTask(creator, session.id, { task: "one" });
+    await expect(service.submitTask(creator, session.id, { task: "two" })).rejects.toMatchObject({
+      status: 409,
+      extra: { activeRun: first.id },
+    });
+    release?.();
+  });
+
+  it("fresh is refused — a service conversation's thread IS its session", async () => {
+    const { service, session } = await bootFrontdoor();
+    await expect(service.submitTask(creator, session.id, { task: "again", fresh: true })).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it("exec/snapshot/git-push refuse by name — there is no container behind a conversation", async () => {
+    const { service, session } = await bootFrontdoor();
+    await expect(service.exec(creator, session.id, { command: "ls" })).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("no container"),
+    });
+    await expect(service.gitPush(creator, session.id, {})).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("conversation"),
+    });
+  });
+
+  it("the live view says conversation + service kind, and close disposes the conversation's target", async () => {
+    const { service, fake, session } = await bootFrontdoor();
+    const view = await service.getSession(creator, session.id);
+    expect(view.live?.conversation).toBe(true);
+    expect(view.live?.harness).toEqual({ id: "aegra", version: "1.0.0", kind: "service" });
+    await service.close(creator, session.id);
+    expect(fake.closes()).toBe(1);
+    expect((await service.getSession(creator, session.id)).record.status).toBe("succeeded");
+  });
+
+  it("the frontdoor pool has its OWN caps — a conversation neither consumes nor borrows the sandbox pool", async () => {
+    const fake = fakeServiceConversation();
+    const playgroundFake = fakePlaygroundHarness();
+    const { service } = build({
+      resolveServiceConversation: async (_t, _s, ref) => (ref.id === "aegra" ? fake.resolved : undefined),
+      resolveSessionHarness: async () => playgroundFake.resolved,
+      maxPerTenant: 1,
+      frontdoorMaxPerTenant: 1,
+    });
+    await service.create({ tenant: "acme", createdBy: "alice", harness: { id: "aegra" }, runtime: "nomad-seoul" });
+    // The sandbox pool still has its slot — the conversation lives in the other pool.
+    await service.create({ tenant: "acme", createdBy: "alice", image: "img" });
+    // But a second conversation is refused by the frontdoor pool's own cap.
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", harness: { id: "aegra" }, runtime: "nomad-seoul" }),
+    ).rejects.toMatchObject({ status: 429 });
+  });
+
+  it("the orphan sweep settles an expired frontdoor row from the ledger alone (crash case, row-only teardown)", async () => {
+    const fake = fakeServiceConversation();
+    const before = build({ resolveServiceConversation: async () => fake.resolved });
+    const session = await before.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      harness: { id: "aegra" },
+      runtime: "nomad-seoul",
+      ttlSec: 60,
+    });
+    // A NEW service instance sharing the store (the restarted control plane) — no live handle, no conversation.
+    const after = build();
+    for (const [id, row] of before.runStore.rows) after.runStore.rows.set(id, row);
+    after.setNow("2026-07-30T01:00:00.000Z"); // far past deadline + grace
+    await expect(after.service.sweepOrphans()).resolves.toBe(1);
+    expect(after.runStore.rows.get(session.id)?.status).toBe("succeeded");
+    expect(after.runStore.rows.get(session.id)?.session?.closedReason).toBe("orphaned");
+    expect(after.driver.reaped).toEqual([]); // no computeId → nothing for Driver.reap
   });
 });

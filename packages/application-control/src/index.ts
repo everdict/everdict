@@ -353,6 +353,11 @@ export {
   type SandboxTaskSummary,
   type SandboxTaskTrace,
 } from "./session/sandbox-session-service.js";
+export type {
+  ConversationTurnOutcome,
+  ResolvedServiceConversation,
+  ServiceConversation,
+} from "./ports/service-conversation.js";
 export { scopedComputeHandle } from "./session/scoped-compute.js";
 export { FIRST_PARTY_AGENT_TEMPLATES, seedFirstPartyAgents } from "./agent/first-party-agents.js";
 export type {

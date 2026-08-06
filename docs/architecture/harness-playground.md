@@ -8,8 +8,10 @@
 ## The shape
 
 ```
-POST /sandboxes {harness:{id,version?,image?}}      boot: provision image → warm-install harness → session run
-POST /sandboxes/:id/tasks {task}                    one test case → its own child Run (kind eval, group→session)
+POST /sandboxes {harness:{id,version?,image?,conversation?}, runtime?}
+                                                    boot: provision image → warm-install harness → session run
+                                                    (service harness: ensure warm topology on the named runtime)
+POST /sandboxes/:id/tasks {task, fresh?}            one test case / conversation turn → its own child Run
 GET  /sandboxes/:id/tasks/:taskId/trace?since=N     the 2s live cursor (append-only buffer; sealed fallback)
 GET  /sandboxes  ·  GET /sandboxes/:id              the reattach surface (record + live meta + task summaries)
 POST /sandboxes/:id/close                           teardown: abort in-flight task → seal → settle → dispose
@@ -86,10 +88,62 @@ MCP twins: `create_sandbox` (harness branch) · `submit_sandbox_task` · `read_s
   rule).
 - The synchronous warm install can hold `POST /sandboxes` for tens of seconds (npm/pip). An async
   "warming" state is a later rung.
-- No conversational continuity between test cases (claude `--resume` has no plumbing) — cases share the
-  container, not the harness's memory. A harness-contract extension if ever wanted.
+- Conversational continuity exists (see the Conversations section) for `conversational` process harnesses
+  (claude-code) and service harnesses; `CommandHarness`/other CLIs still refuse conversation mode by name.
 - No envelope admission on session create (no `causedByRunId` input today); tenant budget only.
 - `CommandHarness` events arrive at settle (buffered); `ClaudeCodeHarness` streams.
+
+## Conversations — multi-turn against the harness under test
+
+The playground's second mode: instead of independent test cases, every submitted task continues ONE
+conversation. The session picks its mode at boot and never flips; the web renders the same feed chat-shaped
+(turn bubbles, the reply as the prominent message). Both flavors share the routes above, the one-at-a-time
+409, budget admission, and the child-run-as-monitoring-handle — a conversation turn is
+`Run.newSessionCase(role:"turn")` (caseId `turn-<n>`, `group.role:"turn"` = dependent evidence; boot
+recovery never re-dispatches a turn, and aggregations over `role:"case"` children must not ingest turns).
+
+**Process harnesses (`harness.conversation: true`)** — continuity is the harness's own resume mechanism:
+- The contract is `RunContext.conversation: {resume?, onToken?}` (in-process only, like `signal`) plus the
+  `EvaluableHarness.conversational` capability marker. A harness without the marker refuses conversation
+  mode at create, BEFORE any container is provisioned — silently-fresh turns would be a lie. `CommandHarness`
+  has no marker in v1.
+- `ClaudeCodeHarness` implements it: `claude --resume <session-id>` continues the thread, and the session id
+  is captured from the stream-json init AND result lines (`claudeSessionId`, last-wins — a resumed run mints
+  a NEW id). The token lives only on the process-local session state (a CP restart orphans the session
+  anyway — the existing honest-failure stance).
+- One stable workdir: conversation turns share `scopedComputeHandle(handle, "conversation")` (claude keys
+  its session store off the cwd — `tasks/<n>` rebasing would break resume structurally). `fresh: true` on a
+  submit starts a new thread while deliberately keeping the workdir — "reset the chat, keep the environment".
+
+**Service harnesses (front-door conversations)** — continuity is session-stable wiring:
+- A `kind:"service"` harness ref routes to the front-door branch (this is also what fixed the old misleading
+  404): the spec is secret- and model-resolved exactly like the dispatch lane, the topology environment comes
+  from the SHARED per-`rt:<tenant>:<id>@<version>` memo (one `TopologyRuntime` instance for the eval lane AND
+  conversations — one warm pool, one idle sweeper), and `FrontDoorSession` (`@everdict/topology`) drives it
+  behind the structural `ServiceConversation` port. Boot = `ensureTopology` + the front-door endpoint (+ the
+  per-SESSION target when the spec declares one — one browser for the whole conversation); each turn re-calls
+  `ensureTopology` (touch-on-use — an active conversation cannot idle out).
+- The wiring split IS the conversation: session-stable = the isolateBy vars (`thread_id`/`key_prefix`/
+  `object_prefix`/`schema`, derived from the SESSION run id — one `thread_id` across submits is what makes a
+  checkpointing agent resume) + `stream_channel`/`minio_prefix` + target coordinates; per-turn fresh =
+  `run_id`, the trace correlation key, `callback_url` (the rendezvous holds one waiter per key). A
+  session-stable `contextId` (e.g. `{{thread_id}}`) pulls the conversation's CUMULATIVE trace, so the session
+  slices each turn's delta past what earlier turns already returned. `fresh` is refused (400) — a service
+  conversation's thread is its session; open a new session to start over.
+- The ledger row: `trigger:"frontdoor"` (its OWN capacity pool, `EVERDICT_FRONTDOOR_MAX_PER_TENANT`/
+  `_MAX_TOTAL` — a warm-topology slot on a tenant cluster is a different scarcity than a CP container),
+  `session.conversation:true`, `session.image` = the front-door service's image, NO `computeId` (the
+  crash-path reaper settles row-only; the orphan sweep scans both pools). `exec`/`snapshot`/`git-push` refuse
+  by name — there is no container. Placement is a REGISTERED workspace runtime only (`runtime` required,
+  nomad/k8s with a `traceSource` = topology-capable) — the control plane deliberately hosts no topology.
+- The assistant's reply is the front-door result channel (`responseText`); the turn's evidence buffer is
+  infra marks → the agent's trace (inline or pulled delta) → the reply as a `message` event, so
+  `lastAssistantText`, the chat UI and the sealed trajectory all read it like any harness turn. A turn past
+  its budget fails with `completion-timeout` (+ `runtime.diagnose` naming a sick service); the SESSION stays
+  alive for the next message. Trace-completion (`completion.mode:"trace"`) harnesses are refused — their
+  front-door returns no reply to converse with.
+- Known v1 leak: a crash-orphaned held target (the per-session browser) is not reaped by the row-only settle
+  — it is bounded by the target job's own lifecycle on the cluster.
 
 ## Agent worlds (W1) ride the same session
 

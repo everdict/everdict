@@ -25,8 +25,10 @@ import { stampFacts } from "../platform-event/outbox.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { LiveSessionRow, RunStore } from "../ports/run-store.js";
+import type { ResolvedServiceConversation, ServiceConversation } from "../ports/service-conversation.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
 import type { WorkspaceImages } from "../ports/workspace-images.js";
+import { FrontDoorTurnRunner } from "./frontdoor-turn-runner.js";
 import { scopedComputeHandle } from "./scoped-compute.js";
 import { SessionTaskRunner } from "./session-task-runner.js";
 
@@ -98,6 +100,10 @@ export interface SandboxAgentAttribution {
 // The run `trigger` that names THIS pool. Session runs share `kind: "sandbox"` (held-open isolated compute)
 // but not their caps — a login browser is bounded separately — and the trigger is what tells them apart.
 const SANDBOX_TRIGGER = "sandbox";
+// Front-door conversation sessions hold a tenant-cluster warm-topology slot (+ optionally a browser), not a
+// control-plane container — different scarcity, so a separate pool with its own caps: chat sessions must not
+// starve shell sandboxes, and vice versa.
+const FRONTDOOR_TRIGGER = "frontdoor";
 
 // The rows that are actually holding a slot right now. A row past its deadline is due for teardown either
 // way, and counting it would let one crashed writer consume a workspace's session pool permanently — a state
@@ -139,9 +145,13 @@ export interface CreateSandboxInput {
   createdBy: string;
   // What to boot: an adopted environment capability (resolved to its image via the injected resolver), an
   // ad-hoc image ref, or a HARNESS to drive test cases through (the playground). Exactly one is required.
+  // `harness.conversation` boots the playground in CONVERSATION mode: every submitted task continues one
+  // conversation (stable workdir + the harness's own resume mechanism) instead of running independent cases.
+  // The session picks its mode at boot and never flips; a harness without the `conversational` capability
+  // marker refuses the flag up front (silently-fresh turns would be a lie).
   environment?: { source?: string; id: string; version?: string };
   image?: string;
-  harness?: { id: string; version?: string; image?: string };
+  harness?: { id: string; version?: string; image?: string; conversation?: boolean };
   // Agent worlds (W1): open the session AS a world — boot the world's latest snapshot (its environment
   // capability), or found the world from `image` when it has no versions yet (the genesis base). The world
   // id doubles as the snapshot repository name, so it must be a valid single-segment repository.
@@ -166,6 +176,10 @@ export interface CreateSandboxInput {
 export interface ResolvedSessionHarness {
   id: string;
   version: string;
+  // What SHAPE of harness this is — the web branches its playground UI on it ("process" = a built-in CLI
+  // adapter like claude-code, "command" = a declarative CLI spec). Service harnesses never reach this
+  // resolver (they boot through the front-door conversation seam instead).
+  kind: "process" | "command";
   spec?: HarnessSpec; // fully resolved ({secretRef} + model binding already substituted to strings)
   harness: EvaluableHarness;
   apiKeyEnv: Record<string, string>;
@@ -181,6 +195,15 @@ interface TaskEntry {
   submittedAt: string;
   status: RunStatus;
   events: TraceEvent[];
+  fresh?: boolean; // conversation sessions only: this turn deliberately started a new thread
+}
+
+// Conversation mode (set at boot, never flips): `resume` is the harness's provider-native token that
+// continues the previous turn — process-local by design (a CP restart orphans the session anyway, and its
+// container died with the token's context). `threadSeq` counts `fresh` resets for the trajectory.
+interface ConversationState {
+  resume?: string;
+  threadSeq: number;
 }
 
 interface PlaygroundState {
@@ -188,10 +211,25 @@ interface PlaygroundState {
   taskSeq: number;
   tasks: TaskEntry[];
   active?: { runId: string; abort: AbortController; done: Promise<void> };
+  conversation?: ConversationState;
+}
+
+// A front-door conversation session's live half (the service-harness sibling of PlaygroundState): the bound
+// conversation + the same one-at-a-time turn feed. Always conversational — a service session that runs
+// independent cases is the eval lane's job, not this one's.
+interface FrontdoorState {
+  resolved: ResolvedServiceConversation;
+  conversation: ServiceConversation;
+  runtime: string; // the workspace runtime the topology runs on — stamped as each turn's placement target
+  taskSeq: number;
+  tasks: TaskEntry[];
+  active?: { runId: string; abort: AbortController; done: Promise<void> };
 }
 
 interface LiveSession {
-  handle: ComputeHandle;
+  // The container handle + the driver that provisioned it. Absent for front-door conversation sessions —
+  // their compute is a warm topology on a workspace runtime, reached over HTTP, with nothing to exec into.
+  handle?: ComputeHandle;
   tenant: string;
   createdBy: string;
   // What the browse row calls this session's evidence — the environment the member asked for. Kept here
@@ -203,15 +241,16 @@ interface LiveSession {
   execCount: number;
   world?: string; // agent worlds (W1): the environment capability this session snapshots into
   hibernate: boolean; // auto-snapshot at teardown (world sessions default true)
-  bootImage: string; // W4: the image this session started from — the base a captured layer extends
+  bootImage?: string; // W4: the image this session started from — the base a captured layer extends
   // W4: the compute this session actually runs on (the deployment default, or the workspace's own runtime).
   // Held because teardown must dispose through the SAME driver that provisioned.
-  driver: Driver;
+  driver?: Driver;
   repo?: { git: string; ref?: string; dir: string }; // W2: what was cloned in, and where
   // The agent behind this session, remembered because teardown and expiry emit facts long after the request
   // that knew who asked — an expiry fact must carry the same causedBy the creation one did.
   agent?: SandboxAgentAttribution;
   playground?: PlaygroundState; // present only for harness-target sessions
+  frontdoor?: FrontdoorState; // present only for service-harness conversation sessions
 }
 
 // The reattach/monitor read model (GET /sandboxes, GET /sandboxes/:id).
@@ -222,6 +261,7 @@ export interface SandboxTaskSummary {
   taskPreview: string;
   submittedAt: string;
   eventCount: number;
+  fresh?: boolean; // conversation sessions only: this turn started a new thread
 }
 
 export interface SandboxSessionView {
@@ -230,7 +270,8 @@ export interface SandboxSessionView {
   live?: {
     expiresAt: string;
     busy: boolean;
-    harness?: { id: string; version: string };
+    harness?: { id: string; version: string; kind: "process" | "command" | "service" };
+    conversation: boolean; // true = the task feed is one conversation (turns), not independent cases
     tasks: SandboxTaskSummary[];
   };
 }
@@ -255,7 +296,10 @@ export interface WorldSnapshotResult {
 
 export interface SandboxSessionServiceDeps {
   store: RunStore;
-  driver: Driver;
+  // The deployment's default container compute. Optional since front-door conversations: a deployment with
+  // registered runtimes but no local compute still serves conversations — the container lanes then refuse
+  // by name at create.
+  driver?: Driver;
   trajectories?: TrajectoryStore; // sealed at teardown — the session's evidence
   events?: PlatformEventEmitter; // E0 facts ride the store writes; this is the latency nudge
   // environment ref → the concrete image + resolved version. apps/api wires the capability store + the
@@ -272,6 +316,18 @@ export interface SandboxSessionServiceDeps {
     subject: string,
     ref: { id: string; version?: string },
   ) => Promise<ResolvedSessionHarness | undefined>;
+  // harness ref → a bootable front-door CONVERSATION, when the ref is a kind:"service" harness (registry get
+  // + secret resolution + the topology environment for the named runtime). Returns undefined for any other
+  // kind — the process resolver above then answers. The resolver itself refuses a service harness with no
+  // `runtime` (the user decision: conversations run on registered workspace runtimes only) and one whose
+  // runtime is not topology-capable. apps/api wires it; absent = service harnesses fall through to the
+  // process resolver's honest 404/400.
+  resolveServiceConversation?: (
+    tenant: string,
+    subject: string,
+    ref: { id: string; version?: string },
+    opts: { runtime?: string },
+  ) => Promise<ResolvedServiceConversation | undefined>;
   budget?: BudgetTracker; // admission (402 before a container or a child run exists) + cost settle
   // The causal leg of the same gate: an agent's session draws from its turn's delegated envelope.
   envelopes?: EnvelopeStore;
@@ -356,6 +412,10 @@ export interface SandboxSessionServiceDeps {
   // tenant's code somewhere they did not choose.
   driverFor?: (tenant: string, runtime: string) => Promise<Driver | undefined>;
   maxTotal?: number;
+  // The front-door conversation pool's own caps (the "frontdoor" trigger) — a warm-topology slot is a
+  // different scarcity than a control-plane container, so the pools never share caps.
+  frontdoorMaxPerTenant?: number;
+  frontdoorMaxTotal?: number;
   newId?: () => string;
   now?: () => string;
 }
@@ -365,11 +425,12 @@ export class SandboxSessionService {
   private readonly newId: () => string;
   private readonly now: () => string;
   private readonly taskRunner: SessionTaskRunner;
+  private readonly frontdoorRunner: FrontDoorTurnRunner;
 
   constructor(private readonly deps: SandboxSessionServiceDeps) {
     this.newId = deps.newId ?? (() => crypto.randomUUID());
     this.now = deps.now ?? (() => new Date().toISOString());
-    this.taskRunner = new SessionTaskRunner({
+    const runnerDeps = {
       store: deps.store,
       ...(deps.trajectories !== undefined ? { trajectories: deps.trajectories } : {}),
       ...(deps.events !== undefined ? { events: deps.events } : {}),
@@ -377,14 +438,24 @@ export class SandboxSessionService {
       ...(deps.usage !== undefined ? { usage: deps.usage } : {}),
       newId: this.newId,
       now: this.now,
-    });
+    };
+    this.taskRunner = new SessionTaskRunner(runnerDeps);
+    this.frontdoorRunner = new FrontDoorTurnRunner(runnerDeps);
   }
 
   // The compute a session runs on: the workspace's OWN registered runtime when it named one, else the
   // deployment default. A named-but-missing runtime is a 404 that says so — never a quiet fallback to the
   // default, which would place a tenant's code somewhere they did not choose.
   private async driverFor(tenant: string, runtime: string | undefined): Promise<Driver> {
-    if (runtime === undefined) return this.deps.driver;
+    if (runtime === undefined) {
+      if (!this.deps.driver)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          {},
+          "This deployment has no default sandbox compute — name a runtime this workspace registered.",
+        );
+      return this.deps.driver;
+    }
     const resolved = this.deps.driverFor ? await this.deps.driverFor(tenant, runtime) : undefined;
     if (!resolved)
       throw new NotFoundError(
@@ -399,6 +470,21 @@ export class SandboxSessionService {
   // run.submitted fact via the E0 outbox). The id is minted before the record so the map and the row agree.
   async create(input: CreateSandboxInput): Promise<RunRecord> {
     this.sweep();
+    // A kind:"service" harness ref routes to the front-door conversation branch (a warm topology on a
+    // workspace runtime, driven over HTTP). Resolution is a read — no slot, no compute — so probing it before
+    // the capacity gate is safe, and it is what lets each branch enforce ITS OWN pool.
+    if (input.harness && this.deps.resolveServiceConversation) {
+      const resolved = await this.deps.resolveServiceConversation(
+        input.tenant,
+        input.createdBy,
+        {
+          id: input.harness.id,
+          ...(input.harness.version !== undefined ? { version: input.harness.version } : {}),
+        },
+        { ...(input.runtime !== undefined ? { runtime: input.runtime } : {}) },
+      );
+      if (resolved) return this.createFrontdoorSession(input, resolved);
+    }
     await this.enforceCapacity(input.tenant, input.agent);
     // The singular gate (§5.1 order), before any compute is taken: caused work draws from its causer's
     // envelope and answers the depth / in-flight guards, then the tenant's own budget. A session that an
@@ -418,12 +504,20 @@ export class SandboxSessionService {
         )
       : undefined;
     this.deps.budget?.admit(input.tenant); // 402 past the tenant cap — before a container exists
-    const resolved = await this.resolveTarget(input);
+    let resolved: Awaited<ReturnType<SandboxSessionService["resolveTarget"]>>;
+    let registryAuths: RegistryAuth[] | undefined;
+    let driver: Driver;
+    try {
+      resolved = await this.resolveTarget(input);
+      registryAuths = await this.deps.resolvePullAuths?.(input.tenant, [resolved.image]).catch(() => []);
+      driver = await this.driverFor(input.tenant, input.runtime);
+    } catch (err) {
+      // Regression (found alongside the conversation refusal): a post-admit resolution failure — unknown
+      // harness/runtime, a refused conversation — used to leak the budget reservation it had just taken.
+      this.deps.budget?.release(input.tenant);
+      throw err;
+    }
     const ttlSec = Math.min(input.ttlSec ?? this.deps.defaultTtlSec ?? DEFAULT_TTL_SEC, this.maxTtl());
-    const registryAuths = await this.deps
-      .resolvePullAuths?.(input.tenant, [resolved.image])
-      .catch(() => [] as RegistryAuth[]);
-    const driver = await this.driverFor(input.tenant, input.runtime);
     let handle: ComputeHandle;
     try {
       handle = await driver.provision({
@@ -463,6 +557,7 @@ export class SandboxSessionService {
       // asked for is a lie the member would only discover by looking.
       const repo = input.repo !== undefined ? await this.cloneRepo(input.tenant, handle, input.repo) : undefined;
       const hibernate = resolved.world !== undefined ? (input.hibernate ?? true) : false;
+      const conversation = resolved.playground !== undefined && input.harness?.conversation === true;
       const record = Run.newSandboxSession({
         id: this.newId(),
         tenant: input.tenant,
@@ -480,6 +575,7 @@ export class SandboxSessionService {
         ...(input.agent !== undefined ? { agent: input.agent } : {}),
         ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
         ...(resolved.playground ? { attach: ["exec" as const, "tasks" as const] } : {}),
+        ...(conversation ? { conversation: true } : {}),
         now: this.now(),
       });
       const stamped = stampFacts(input.tenant, attributed(Run.creationFacts(record), input.agent), {
@@ -525,12 +621,22 @@ export class SandboxSessionService {
               ...(resolved.world !== undefined ? { world: resolved.world } : {}),
               ...(repo !== undefined ? { repo: repo.git, dir: repo.dir } : {}),
               ...(resolved.playground ? { harness: `${resolved.harness.id}@${resolved.harness.version}` } : {}),
+              ...(conversation ? { conversation: true } : {}),
             },
           },
         ],
         t: 1,
         execCount: 0,
-        ...(resolved.playground ? { playground: { resolved: resolved.playground, taskSeq: 0, tasks: [] } } : {}),
+        ...(resolved.playground
+          ? {
+              playground: {
+                resolved: resolved.playground,
+                taskSeq: 0,
+                tasks: [],
+                ...(conversation ? { conversation: { threadSeq: 1 } } : {}),
+              },
+            }
+          : {}),
       });
       // Durable expiry (T-b): best-effort — a Temporal outage never blocks the session (the in-process
       // sweep still bounds the TTL while this process lives). Best-effort is not silent: a session whose
@@ -551,6 +657,134 @@ export class SandboxSessionService {
     }
   }
 
+  // Boot a front-door CONVERSATION session (a kind:"service" harness on a workspace runtime): its own
+  // capacity pool → the same admission spine (caused-work gate → budget) → boot the conversation (warm
+  // topology + optional per-session target = the provision-before-record step) → ONLY THEN the ledger
+  // record. No container, no computeId — the crash-path reaper settles row-only, and the warm topology's
+  // lifecycle stays the cluster idle TTL's.
+  private async createFrontdoorSession(
+    input: CreateSandboxInput,
+    resolved: ResolvedServiceConversation,
+  ): Promise<RunRecord> {
+    if (input.runtime === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { harness: resolved.harness.id },
+        "A service-topology harness session runs on a registered runtime — provide `runtime`.",
+      );
+    if (input.world !== undefined || input.repo !== undefined || input.hibernate !== undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { harness: resolved.harness.id },
+        "A service-harness conversation has no container — world, repo and hibernate do not apply.",
+      );
+    await this.enforceCapacity(input.tenant, input.agent, {
+      trigger: FRONTDOOR_TRIGGER,
+      ...(this.deps.frontdoorMaxPerTenant !== undefined ? { maxPerTenant: this.deps.frontdoorMaxPerTenant } : {}),
+      ...(this.deps.frontdoorMaxTotal !== undefined ? { maxTotal: this.deps.frontdoorMaxTotal } : {}),
+    });
+    const causedByRunId = input.agent?.runId;
+    const envelope = causedByRunId
+      ? await admitCausedWork(
+          {
+            runStore: this.deps.store,
+            ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
+            ...(this.deps.events ? { events: this.deps.events } : {}),
+            ...(this.deps.admissionMaxInFlight !== undefined ? { maxInFlight: this.deps.admissionMaxInFlight } : {}),
+          },
+          input.tenant,
+          causedByRunId,
+          1,
+        )
+      : undefined;
+    this.deps.budget?.admit(input.tenant); // 402 past the tenant cap — before any topology work
+    const ttlSec = Math.min(input.ttlSec ?? this.deps.defaultTtlSec ?? DEFAULT_TTL_SEC, this.maxTtl());
+    const id = this.newId();
+    const conversation = resolved.open(id);
+    let booted: { frontDoorBase: string; cdpBase?: string };
+    try {
+      booted = await conversation.boot(); // the provision-before-record step: a failed boot leaves no row
+    } catch (err) {
+      this.deps.budget?.release(input.tenant);
+      await conversation.close().catch(() => undefined); // a half-acquired target must not leak
+      throw err;
+    }
+    try {
+      const image = resolved.frontDoorImage ?? `${resolved.harness.id}@${resolved.harness.version}`;
+      const record = Run.newSandboxSession({
+        id,
+        tenant: input.tenant,
+        ...(causedByRunId !== undefined
+          ? { origin: { cause: "member" as const, actor: input.createdBy, causedByRunId } }
+          : {}),
+        ...(envelope !== undefined ? { envelope } : {}),
+        harness: resolved.harness,
+        image,
+        ttlSec,
+        createdBy: input.createdBy,
+        ...(input.agent !== undefined ? { agent: input.agent } : {}),
+        runtime: input.runtime,
+        trigger: FRONTDOOR_TRIGGER,
+        conversation: true,
+        attach: ["tasks"],
+        now: this.now(),
+      });
+      const stamped = stampFacts(input.tenant, attributed(Run.creationFacts(record), input.agent), {
+        newId: this.newId,
+        now: this.now,
+      });
+      await this.deps.store.create(
+        record,
+        stamped.map((f) => f.record),
+      );
+      if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+      this.sessions.set(record.id, {
+        tenant: input.tenant,
+        createdBy: input.createdBy,
+        label: record.harness.id,
+        hibernate: false,
+        ...(input.agent !== undefined ? { agent: input.agent } : {}),
+        expiresAtMs: new Date(this.now()).getTime() + ttlSec * 1000,
+        trace: [
+          {
+            t: 0,
+            kind: "infra",
+            scope: "placement",
+            event: "provisioned",
+            message: `front-door conversation on runtime ${input.runtime} (${booted.frontDoorBase})`,
+            at: this.now(),
+          },
+          {
+            t: 0,
+            kind: "env_action",
+            action: "session.start",
+            detail: {
+              harness: `${resolved.harness.id}@${resolved.harness.version}`,
+              runtime: input.runtime,
+              conversation: true,
+              ...(booted.cdpBase !== undefined ? { cdpBase: booted.cdpBase } : {}),
+            },
+          },
+        ],
+        t: 1,
+        execCount: 0,
+        frontdoor: { resolved, conversation, runtime: input.runtime, taskSeq: 0, tasks: [] },
+      });
+      if (record.session !== undefined) {
+        const expiresAt = record.session.expiresAt;
+        void this.deps.reaper?.start({ runId: record.id, tenant: input.tenant, expiresAt }).catch((err) => {
+          console.warn(
+            `[sandbox] durable reaper start failed for session ${record.id} (in-process sweep + orphan sweep still bound the TTL): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
+      return record;
+    } catch (err) {
+      await conversation.close().catch(() => undefined); // no record → the held target must not leak
+      throw err;
+    }
+  }
+
   // Exec into the live session. Attach is not a read: creator-or-admin, checked BEFORE anything runs.
   // Every exec lands on the session's trajectory (the evidence a judge or a teammate later reads).
   async exec(
@@ -564,12 +798,19 @@ export class SandboxSessionService {
       throw new NotFoundError("NOT_FOUND", { run: runId }, "No live sandbox session with that id.");
     if (live.createdBy !== actor.subject && !actor.isAdmin)
       throw new ForbiddenError("FORBIDDEN", { run: runId }, "Only the session's creator or an admin can exec.");
+    const handle = live.handle;
+    if (!handle)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId },
+        "This session is a service-harness conversation — it has no container to exec into.",
+      );
     if (typeof input.command !== "string" || input.command.trim() === "")
       throw new BadRequestError("BAD_REQUEST", {}, "command is required.");
     const timeoutSec = Math.min(input.timeoutSec ?? DEFAULT_EXEC_TIMEOUT_SEC, MAX_EXEC_TIMEOUT_SEC);
     let result: { stdout: string; stderr: string; exitCode: number };
     try {
-      result = await live.handle.exec(input.command, { timeoutSec });
+      result = await handle.exec(input.command, { timeoutSec });
     } catch (err) {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
@@ -627,21 +868,27 @@ export class SandboxSessionService {
       throw new NotFoundError("NOT_FOUND", { run: runId }, "No live sandbox session with that id.");
     if (live.createdBy !== actor.subject && !actor.isAdmin)
       throw new ForbiddenError("FORBIDDEN", { run: runId }, "Only the session's creator or an admin can push.");
+    const handle = live.handle;
+    if (!handle)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId },
+        "This session is a service-harness conversation — it has no working tree to push from.",
+      );
     const git = this.deps.git;
     if (!git) throw new BadRequestError("BAD_REQUEST", {}, "Git access is not configured for this deployment.");
     const dir = input.dir ?? live.repo?.dir ?? DEFAULT_REPO_DIR;
     const remote = input.remote ?? "origin";
     // The remote URL comes from the CONTAINER, not from the create-time record: the working tree is the truth
     // about what is being pushed, and a session may have cloned or re-pointed a second repo through exec.
-    const remoteUrl = (await live.handle.exec(`git remote get-url ${shq(remote)}`, { cwd: dir })).stdout.trim();
+    const remoteUrl = (await handle.exec(`git remote get-url ${shq(remote)}`, { cwd: dir })).stdout.trim();
     if (remoteUrl === "")
       throw new BadRequestError(
         "BAD_REQUEST",
         { run: runId, dir, remote },
         `No git remote '${remote}' in '${dir}' — clone a repository into the session first.`,
       );
-    const branch =
-      input.branch ?? (await live.handle.exec("git rev-parse --abbrev-ref HEAD", { cwd: dir })).stdout.trim();
+    const branch = input.branch ?? (await handle.exec("git rev-parse --abbrev-ref HEAD", { cwd: dir })).stdout.trim();
     if (branch === "" || branch === "HEAD")
       throw new BadRequestError(
         "BAD_REQUEST",
@@ -649,7 +896,7 @@ export class SandboxSessionService {
         "The working tree is on no branch (detached HEAD) — name a branch to push.",
       );
     const token = await git.writeToken(actor.tenant, remoteUrl);
-    const push = await live.handle.exec(`git push ${shq(remote)} HEAD:refs/heads/${shq(branch)}`, {
+    const push = await handle.exec(`git push ${shq(remote)} HEAD:refs/heads/${shq(branch)}`, {
       cwd: dir,
       env: gitAuthEnv(token),
       timeoutSec: GIT_TIMEOUT_SEC,
@@ -712,7 +959,7 @@ export class SandboxSessionService {
   async submitTask(
     actor: SandboxActor,
     runId: string,
-    input: { task: string; timeoutSec?: number },
+    input: { task: string; timeoutSec?: number; fresh?: boolean },
   ): Promise<RunRecord> {
     this.sweep();
     const live = this.sessions.get(runId);
@@ -720,8 +967,10 @@ export class SandboxSessionService {
       throw new NotFoundError("NOT_FOUND", { run: runId }, "No live sandbox session with that id.");
     if (live.createdBy !== actor.subject && !actor.isAdmin)
       throw new ForbiddenError("FORBIDDEN", { run: runId }, "Only the session's creator or an admin can submit tasks.");
+    if (live.frontdoor) return this.submitTurn(actor, runId, live, live.frontdoor, input);
     const playground = live.playground;
-    if (!playground)
+    const handle = live.handle;
+    if (!playground || !handle)
       throw new BadRequestError(
         "BAD_REQUEST",
         { run: runId },
@@ -729,6 +978,13 @@ export class SandboxSessionService {
       );
     if (typeof input.task !== "string" || input.task.trim() === "")
       throw new BadRequestError("BAD_REQUEST", {}, "task is required.");
+    const conversation = playground.conversation;
+    if (input.fresh === true && conversation === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId },
+        "This session runs independent test cases — fresh applies only to conversation sessions.",
+      );
     if (playground.active)
       throw new ConflictError(
         "CONFLICT",
@@ -737,8 +993,14 @@ export class SandboxSessionService {
       );
     this.deps.budget?.admit(actor.tenant); // 402 before any child record exists
     const timeoutSec = Math.min(input.timeoutSec ?? DEFAULT_TASK_TIMEOUT_SEC, MAX_TASK_TIMEOUT_SEC);
+    // "Reset the chat, keep the environment": fresh drops the resume token (the next turn starts a new
+    // provider thread) while the workdir — the files the conversation produced — deliberately stays.
+    if (conversation !== undefined && input.fresh === true) {
+      conversation.resume = undefined;
+      conversation.threadSeq += 1;
+    }
     const seq = ++playground.taskSeq;
-    const caseId = `task-${seq}`;
+    const caseId = conversation !== undefined ? `turn-${seq}` : `task-${seq}`;
     const id = this.newId();
     const record = Run.newSessionCase({
       id,
@@ -749,6 +1011,114 @@ export class SandboxSessionService {
       task: input.task,
       timeoutSec,
       createdBy: actor.subject,
+      ...(conversation !== undefined ? { role: "turn" as const } : {}),
+      now: this.now(),
+    });
+    const stamped = stampFacts(actor.tenant, attributed(Run.creationFacts(record), actor.agent), {
+      newId: this.newId,
+      now: this.now,
+    });
+    try {
+      await this.deps.store.create(
+        record,
+        stamped.map((f) => f.record),
+      );
+    } catch (err) {
+      this.deps.budget?.release(actor.tenant); // the admit reservation must not leak on a failed create
+      throw err;
+    }
+    if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    const entry: TaskEntry = {
+      runId: id,
+      caseId,
+      task: input.task,
+      submittedAt: this.now(),
+      status: "running",
+      events: [],
+      ...(conversation !== undefined && input.fresh === true ? { fresh: true } : {}),
+    };
+    playground.tasks.push(entry);
+    // The session's own trajectory keeps POINTERS (task boundaries), never the events — the child run owns its trace.
+    live.trace.push({ t: live.t++, kind: "env_action", action: "task.start", detail: { run: id, caseId } });
+    const abort = new AbortController();
+    const done = (async () => {
+      const status = await this.taskRunner.drive({
+        tenant: actor.tenant,
+        record,
+        harness: playground.resolved.harness,
+        // A conversation lives in ONE stable workdir (the harness keys its session store off the cwd —
+        // per-task rebasing would break resume structurally); independent cases keep their tasks/<n> isolation.
+        compute: scopedComputeHandle(handle, conversation !== undefined ? "conversation" : `tasks/${seq}`),
+        apiKeyEnv: playground.resolved.apiKeyEnv,
+        task: input.task,
+        timeoutSec,
+        events: entry.events,
+        signal: abort.signal,
+        ...(conversation !== undefined
+          ? {
+              conversation: {
+                ...(conversation.resume !== undefined ? { resume: conversation.resume } : {}),
+                onToken: (token: string) => {
+                  conversation.resume = token;
+                },
+              },
+            }
+          : {}),
+      });
+      entry.status = status;
+      live.trace.push({ t: live.t++, kind: "env_action", action: "task.end", detail: { run: id, status } });
+    })()
+      .catch(() => {
+        entry.status = "failed";
+      })
+      .finally(() => {
+        if (playground.active?.runId === id) playground.active = undefined;
+      });
+    playground.active = { runId: id, abort, done };
+    return record;
+  }
+
+  // Submit one TURN into a live front-door conversation session — the service-harness twin of the playground
+  // submit: same one-at-a-time 409, same budget admission, same child-run-as-monitoring-handle, but the drive
+  // is a front-door HTTP turn (FrontDoorTurnRunner) instead of a container harness run, and the child records
+  // its runtime placement (group role "turn").
+  private async submitTurn(
+    actor: SandboxActor,
+    runId: string,
+    live: LiveSession,
+    frontdoor: FrontdoorState,
+    input: { task: string; timeoutSec?: number; fresh?: boolean },
+  ): Promise<RunRecord> {
+    if (typeof input.task !== "string" || input.task.trim() === "")
+      throw new BadRequestError("BAD_REQUEST", {}, "task is required.");
+    if (input.fresh === true)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId },
+        "A service conversation's thread is its session — open a new session to start over.",
+      );
+    if (frontdoor.active)
+      throw new ConflictError(
+        "CONFLICT",
+        { run: runId, activeRun: frontdoor.active.runId },
+        "A turn is already running in this session — wait for it to finish.",
+      );
+    this.deps.budget?.admit(actor.tenant); // 402 before any child record exists
+    const timeoutSec = Math.min(input.timeoutSec ?? DEFAULT_TASK_TIMEOUT_SEC, MAX_TASK_TIMEOUT_SEC);
+    const seq = ++frontdoor.taskSeq;
+    const caseId = `turn-${seq}`;
+    const id = this.newId();
+    const record = Run.newSessionCase({
+      id,
+      tenant: actor.tenant,
+      harness: frontdoor.resolved.harness,
+      sessionRunId: runId,
+      caseId,
+      task: input.task,
+      timeoutSec,
+      createdBy: actor.subject,
+      role: "turn",
+      placement: { where: "runtime", target: frontdoor.runtime, isolation: "container" },
       now: this.now(),
     });
     const stamped = stampFacts(actor.tenant, attributed(Run.creationFacts(record), actor.agent), {
@@ -773,17 +1143,15 @@ export class SandboxSessionService {
       status: "running",
       events: [],
     };
-    playground.tasks.push(entry);
-    // The session's own trajectory keeps POINTERS (task boundaries), never the events — the child run owns its trace.
+    frontdoor.tasks.push(entry);
+    // The session's own trajectory keeps POINTERS (turn boundaries), never the events — the child run owns its trace.
     live.trace.push({ t: live.t++, kind: "env_action", action: "task.start", detail: { run: id, caseId } });
     const abort = new AbortController();
     const done = (async () => {
-      const status = await this.taskRunner.drive({
+      const status = await this.frontdoorRunner.drive({
         tenant: actor.tenant,
         record,
-        harness: playground.resolved.harness,
-        compute: scopedComputeHandle(live.handle, `tasks/${seq}`),
-        apiKeyEnv: playground.resolved.apiKeyEnv,
+        conversation: frontdoor.conversation,
         task: input.task,
         timeoutSec,
         events: entry.events,
@@ -796,9 +1164,9 @@ export class SandboxSessionService {
         entry.status = "failed";
       })
       .finally(() => {
-        if (playground.active?.runId === id) playground.active = undefined;
+        if (frontdoor.active?.runId === id) frontdoor.active = undefined;
       });
-    playground.active = { runId: id, abort, done };
+    frontdoor.active = { runId: id, abort, done };
     return record;
   }
 
@@ -839,7 +1207,9 @@ export class SandboxSessionService {
     this.sweep();
     const live = this.sessions.get(sessionRunId);
     if (live && live.tenant === actor.tenant) {
-      const entry = live.playground?.tasks.find((t) => t.runId === taskRunId);
+      const entry =
+        live.playground?.tasks.find((t) => t.runId === taskRunId) ??
+        live.frontdoor?.tasks.find((t) => t.runId === taskRunId);
       if (entry) {
         const events = entry.events.slice(since);
         return {
@@ -866,22 +1236,40 @@ export class SandboxSessionService {
   }
 
   private liveView(live: LiveSession): NonNullable<SandboxSessionView["live"]> {
+    const summaries = (tasks: TaskEntry[]): SandboxTaskSummary[] =>
+      tasks.map((t) => ({
+        runId: t.runId,
+        caseId: t.caseId,
+        status: t.status,
+        taskPreview: t.task.length > TASK_PREVIEW_CHARS ? `${t.task.slice(0, TASK_PREVIEW_CHARS)}…` : t.task,
+        submittedAt: t.submittedAt,
+        eventCount: t.events.length,
+        ...(t.fresh === true ? { fresh: true } : {}),
+      }));
     return {
       expiresAt: new Date(live.expiresAtMs).toISOString(),
-      busy: live.playground?.active !== undefined,
+      busy: (live.playground?.active ?? live.frontdoor?.active) !== undefined,
+      // A front-door session is ALWAYS a conversation; a playground session is one when it booted that way.
+      conversation: live.frontdoor !== undefined || live.playground?.conversation !== undefined,
       ...(live.playground !== undefined
         ? {
-            harness: { id: live.playground.resolved.id, version: live.playground.resolved.version },
-            tasks: live.playground.tasks.map((t) => ({
-              runId: t.runId,
-              caseId: t.caseId,
-              status: t.status,
-              taskPreview: t.task.length > TASK_PREVIEW_CHARS ? `${t.task.slice(0, TASK_PREVIEW_CHARS)}…` : t.task,
-              submittedAt: t.submittedAt,
-              eventCount: t.events.length,
-            })),
+            harness: {
+              id: live.playground.resolved.id,
+              version: live.playground.resolved.version,
+              kind: live.playground.resolved.kind,
+            },
+            tasks: summaries(live.playground.tasks),
           }
-        : { tasks: [] }),
+        : live.frontdoor !== undefined
+          ? {
+              harness: {
+                id: live.frontdoor.resolved.harness.id,
+                version: live.frontdoor.resolved.harness.version,
+                kind: "service" as const,
+              },
+              tasks: summaries(live.frontdoor.tasks),
+            }
+          : { tasks: [] }),
     };
   }
 
@@ -969,7 +1357,13 @@ export class SandboxSessionService {
   // session down through its own sweep — give its normal close a head start before declaring the row orphaned.
   async sweepOrphans(): Promise<number> {
     const nowMs = new Date(this.now()).getTime();
-    const rows = await this.deps.store.liveSessions({ trigger: SANDBOX_TRIGGER });
+    // Both pools this service owns: container sandboxes AND front-door conversation sessions — a crashed
+    // writer's conversation row must settle exactly like a container one (its warm topology is the cluster
+    // idle TTL's business; the row-only settle is the whole teardown).
+    const rows = [
+      ...(await this.deps.store.liveSessions({ trigger: SANDBOX_TRIGGER })),
+      ...(await this.deps.store.liveSessions({ trigger: FRONTDOOR_TRIGGER })),
+    ];
     let reaped = 0;
     for (const row of rows) {
       if (this.sessions.has(row.id)) continue; // live here — the in-process sweep owns its deadline
@@ -1048,7 +1442,15 @@ export class SandboxSessionService {
         { run: runId },
         "This session has no world — create it with world:{id} to snapshot.",
       );
-    const computeId = live.handle.id;
+    const handle = live.handle;
+    const bootImage = live.bootImage;
+    if (!handle || bootImage === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId },
+        "This session holds no container — nothing to snapshot.",
+      );
+    const computeId = handle.id;
     if (computeId === undefined)
       throw new BadRequestError(
         "BAD_REQUEST",
@@ -1062,7 +1464,7 @@ export class SandboxSessionService {
       computeId,
       actor,
       // The compute itself — the capture path reads through it, and it must survive teardown's map delete.
-      compute: { handle: live.handle, bootImage: live.bootImage },
+      compute: { handle, bootImage },
       ...(live.agent !== undefined ? { agent: live.agent } : {}),
       ...input,
     });
@@ -1154,7 +1556,7 @@ export class SandboxSessionService {
     // to commit with even where the default driver does, so asking the wrong one would take a path that
     // cannot reach this container.
     const sessionDriver = this.sessions.get(input.runId)?.driver ?? this.deps.driver;
-    const snapshot = sessionDriver.snapshot?.bind(sessionDriver);
+    const snapshot = sessionDriver?.snapshot !== undefined ? sessionDriver.snapshot.bind(sessionDriver) : undefined;
     const publishLayer = this.deps.publishLayerSnapshot;
     if (!images || !publish || (!snapshot && !publishLayer))
       throw new BadRequestError("BAD_REQUEST", {}, "World snapshots are not configured.");
@@ -1242,7 +1644,7 @@ export class SandboxSessionService {
       // child (failed{CANCELLED}) BEFORE the session seals and the container dies. If the drive is stuck on
       // an exec, the dispose below kills the container, the exec settles, and the child still settles late —
       // the grace only bounds how long teardown waits, never whether the child gets its terminal write.
-      const active = live.playground?.active;
+      const active = live.playground?.active ?? live.frontdoor?.active;
       if (active) {
         active.abort.abort();
         await Promise.race([active.done, new Promise((r) => setTimeout(r, TEARDOWN_TASK_GRACE_MS))]);
@@ -1282,7 +1684,10 @@ export class SandboxSessionService {
       void this.deps.reaper?.signalClosed(runId).catch(() => {});
       return settled;
     } finally {
-      await live.handle.dispose().catch(() => undefined); // the reaper IS the finally
+      // The reaper IS the finally — whichever compute this session holds: the container handle, or the
+      // conversation's per-session target (the warm topology deliberately survives, on its own idle TTL).
+      await live.handle?.dispose().catch(() => undefined);
+      await live.frontdoor?.conversation.close().catch(() => undefined);
     }
   }
 
@@ -1316,7 +1721,7 @@ export class SandboxSessionService {
       // snapshot, not at the first snapshot hours of work later.
       if (input.harness)
         throw new BadRequestError("BAD_REQUEST", {}, "world and harness are mutually exclusive on one session.");
-      const canSnapshot = this.deps.driver.snapshot !== undefined || this.deps.publishLayerSnapshot !== undefined;
+      const canSnapshot = this.deps.driver?.snapshot !== undefined || this.deps.publishLayerSnapshot !== undefined;
       if (!this.deps.images || !this.deps.publishWorldVersion || !canSnapshot)
         throw new BadRequestError(
           "BAD_REQUEST",
@@ -1354,6 +1759,14 @@ export class SandboxSessionService {
       });
       if (!resolved)
         throw new NotFoundError("NOT_FOUND", { harness: input.harness.id }, "Harness not found in this workspace.");
+      // Conversation mode needs the harness's cooperation (its own resume mechanism). Refused HERE — before
+      // any container is provisioned — because the alternative is every turn silently starting fresh.
+      if (input.harness.conversation === true && resolved.harness.conversational !== true)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { harness: input.harness.id },
+          `Harness '${input.harness.id}' does not support multi-turn conversation — each message would silently start fresh. Boot without conversation to run independent test cases.`,
+        );
       const image = resolved.image ?? input.harness.image;
       if (image === undefined || image.trim() === "")
         throw new BadRequestError(
@@ -1397,13 +1810,22 @@ export class SandboxSessionService {
   // to admit its cap once per replica — each instance could only see the sessions it happened to hold — so a
   // 3-instance deployment gave every workspace three times the session pool it was configured for. The ledger
   // is the one place that knows what a workspace is actually holding open.
-  private async enforceCapacity(tenant: string, agent: SandboxAgentAttribution | undefined): Promise<void> {
-    const live = holding(await this.deps.store.liveSessions({ trigger: SANDBOX_TRIGGER }), this.now());
-    if (this.deps.maxTotal !== undefined && live.length >= this.deps.maxTotal)
+  private async enforceCapacity(
+    tenant: string,
+    agent: SandboxAgentAttribution | undefined,
+    pool?: { trigger: string; maxPerTenant?: number; maxTotal?: number },
+  ): Promise<void> {
+    // Default pool = the container sandboxes; the front-door conversation branch passes its own trigger +
+    // caps (a warm-topology slot is a different scarcity — the pools never share).
+    const trigger = pool?.trigger ?? SANDBOX_TRIGGER;
+    const maxTotal = pool !== undefined ? pool.maxTotal : this.deps.maxTotal;
+    const maxPerTenant = pool !== undefined ? pool.maxPerTenant : this.deps.maxPerTenant;
+    const live = holding(await this.deps.store.liveSessions({ trigger }), this.now());
+    if (maxTotal !== undefined && live.length >= maxTotal)
       throw new RateLimitError(
         "RATE_LIMITED",
-        { scope: "global", limit: this.deps.maxTotal, ...nextFreeSlot(live) },
-        `Sandbox session capacity is full (${this.deps.maxTotal} across all workspaces)${freesAtSuffix(live)}.`,
+        { scope: "global", limit: maxTotal, ...nextFreeSlot(live) },
+        `Sandbox session capacity is full (${maxTotal} across all workspaces)${freesAtSuffix(live)}.`,
       );
     const owned = live.filter((row) => row.tenant === tenant);
     if (agent !== undefined) {
@@ -1416,17 +1838,16 @@ export class SandboxSessionService {
           `Agent '${agent.agentId}' already holds ${mine} sandbox session(s) — close one (or snapshot the world and close it) before opening another.`,
         );
     }
-    if (this.deps.maxPerTenant === undefined) return;
+    if (maxPerTenant === undefined) return;
     // The member reserve: only when the cap leaves room for one (a 1-slot deployment would otherwise ban
     // agents outright, which is a different decision than "keep a slot for people").
-    const agentCeiling =
-      agent !== undefined && this.deps.maxPerTenant >= 2 ? this.deps.maxPerTenant - 1 : this.deps.maxPerTenant;
+    const agentCeiling = agent !== undefined && maxPerTenant >= 2 ? maxPerTenant - 1 : maxPerTenant;
     if (owned.length >= agentCeiling)
       throw new RateLimitError(
         "RATE_LIMITED",
         { scope: "tenant", limit: agentCeiling, ...nextFreeSlot(owned) },
-        agent !== undefined && agentCeiling < this.deps.maxPerTenant
-          ? `This workspace has ${owned.length} of ${this.deps.maxPerTenant} sandbox session(s) open, and the last slot is reserved for a member${freesAtSuffix(owned)}.`
+        agent !== undefined && agentCeiling < maxPerTenant
+          ? `This workspace has ${owned.length} of ${maxPerTenant} sandbox session(s) open, and the last slot is reserved for a member${freesAtSuffix(owned)}.`
           : `This workspace already has ${owned.length} open sandbox session(s) — close one first${freesAtSuffix(owned)}.`,
       );
   }
