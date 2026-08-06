@@ -132,6 +132,58 @@ describe("RevisionedWorkspaceFs", () => {
     fs = new RevisionedWorkspaceFs(inner, ledger, () => "2026-07-29T00:00:00.000Z");
   });
 
+  // The memory secret guard sits on the decorator because every writer — the HTTP route, the agent's write_file,
+  // the turn-end extractor, a content projection — publishes through this one instance. It used to sit in
+  // FsService, which is only ONE of them.
+  describe("the memory secret guard", () => {
+    // Low-entropy fixtures on purpose: they match OUR conservative patterns but not gitleaks' rules (which want
+    // real-shaped tokens), so the repo's own secret scan stays quiet about its regression tests.
+    const fakeGithubToken = `ghp_${"x".repeat(24)}`;
+    const fakeWorkspaceKey = `ak_${"a".repeat(18)}`;
+
+    it("refuses a credential-looking token in a memory file, naming what it found and publishing nothing", async () => {
+      // When a write into memory/ carries a token
+      await expect(
+        fs.write("acme", "memory/github-setup.md", utf8(`Use ${fakeGithubToken} to clone.`)),
+      ).rejects.toThrow(/never store credentials.*GitHub token/);
+      await expect(fs.write("acme", "memory/keys.md", utf8(fakeWorkspaceKey))).rejects.toThrow(/workspace API key/);
+      // Then nothing reached the filesystem OR the ledger — a refused write is not a revision
+      expect(inner.files.size).toBe(0);
+      expect(await ledger.head("acme", "memory/github-setup.md")).toBeUndefined();
+    });
+
+    it("guards a writer that never goes through FsService — the reason the check moved here", async () => {
+      // Given a service holding the WorkspaceFs port directly (content projections and task outputs do)
+      const port: WorkspaceFs = fs;
+      await expect(port.write("acme", "memory/notes.md", utf8(fakeWorkspaceKey))).rejects.toThrow(/credentials/);
+    });
+
+    it("guards a MOVE into memory/ — the way around a write-only check", async () => {
+      // Given a token sitting somewhere the guard allows it
+      await fs.write("acme", "scratch/setup.md", utf8(`Use ${fakeGithubToken} to clone.`));
+      // When it is renamed into the memory area
+      await expect(fs.move("acme", "scratch/setup.md", "memory/setup.md")).rejects.toThrow(/GitHub token/);
+      // Then the move did not happen — the file is still at its original path
+      expect(inner.files.has("acme scratch/setup.md")).toBe(true);
+      // …and moving WITHIN memory/, or out of it, is untouched
+      await fs.write("acme", "memory/cadence.md", utf8("Friday reports."));
+      await fs.move("acme", "memory/cadence.md", "memory/rituals.md");
+      expect(inner.files.has("acme memory/rituals.md")).toBe(true);
+    });
+
+    it("guards ONLY memory/, and skips bytes that are not text", async () => {
+      // The same content elsewhere on the tree is a normal write (a fixture, a doc about token formats)
+      await fs.write("acme", "notes/github-setup.md", utf8(fakeGithubToken));
+      expect(inner.files.has("acme notes/github-setup.md")).toBe(true);
+      // A binary body under memory/ decodes to nothing a credential scan can read, so it publishes
+      await fs.write("acme", "memory/diagram.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe]));
+      expect(inner.files.has("acme memory/diagram.png")).toBe(true);
+      // …and ordinary memory prose is never in the way
+      await fs.write("acme", "memory/cadence.md", utf8("Reference the GitHub secret by NAME, not value."));
+      expect(inner.files.has("acme memory/cadence.md")).toBe(true);
+    });
+  });
+
   it("publishes a numbered revision per write, recording who published it", async () => {
     // Given a member writing a file twice
     const first = await fs.write("acme", "reports/q3.md", utf8("draft"), undefined, {

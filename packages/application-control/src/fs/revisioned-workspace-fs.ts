@@ -10,6 +10,7 @@ import {
 import type { FsRevisionStore } from "../ports/fs-revision-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { FsFile, FsWriteOptions, WorkspaceFs } from "../ports/workspace-fs.js";
+import { assertNoSecretsInMemory, isMemoryPath } from "./memory-secret-guard.js";
 
 // The workspace filesystem, versioned — a WorkspaceFs that publishes a REVISION on every write and refuses a
 // write that lost a race. It decorates any underlying filesystem, so versioning is a single composition-root
@@ -77,6 +78,9 @@ export class RevisionedWorkspaceFs implements WorkspaceFs {
     contentType?: string,
     opts?: FsWriteOptions,
   ): Promise<FsEntry> {
+    // Credentials never enter memory/ — checked here, on the bytes, because this decorator is what EVERY writer
+    // goes through (see the composition note above). A per-service check would miss the next service.
+    assertNoSecretsInMemory(path, data);
     const type = contentType ?? guessFsContentType(path);
     const hash = createHash("sha256").update(data).digest("hex");
     const declaredBase = opts?.baseRevision;
@@ -159,7 +163,13 @@ export class RevisionedWorkspaceFs implements WorkspaceFs {
     return this.inner.remove(tenant, path, opts);
   }
 
+  // Moving a file INTO memory/ publishes its content to memory just as surely as writing it there, so it faces the
+  // same guard — the one round trip is worth it because this was the way around a write-only check.
   async move(tenant: string, from: string, to: string): Promise<FsEntry> {
+    if (isMemoryPath(to) && !isMemoryPath(from)) {
+      const file = await this.inner.read(tenant, from);
+      if (file) assertNoSecretsInMemory(to, file.data);
+    }
     const entry = await this.inner.move(tenant, from, to);
     await this.revisions.rename(tenant, from, to); // history follows the file — a rename is not a new file
     return entry;
