@@ -75,6 +75,11 @@ export interface AgentServerDeps extends ChatDeps {
   // Comment-lifecycle bridge back to the control plane (/internal/comment-activity) — the discussion turn reports
   // its placeholder comment's progress through it. Absent → POST /internal/discussion-turn is disabled.
   commentActivity?: CommentActivityReporter;
+  // HITL notification grace (N8): a chat turn's parked ask is reported as agent.run.awaiting_approval — which
+  // pings the member's bell — only after this many ms with the ask STILL pending. An attended prompt is
+  // answered before the grace runs out, so the common interactive case stays notification-free. Test seam;
+  // default 20s.
+  approvalNoticeDelayMs?: number;
 }
 
 // SSE heartbeat: a comment frame every 15s so intermediary proxies/LBs never see an idle stream and cut it — a
@@ -127,6 +132,11 @@ const idParams = z.object({ id: z.string().min(1) });
 // How long a headless run's parked mutation waits for a member decision before the registry's deny-on-expiry
 // settles it (same window as the discussion turn's park).
 const ACTIVATION_APPROVAL_TIMEOUT_MS = 10 * 60_000;
+
+// How long a chat turn's parked ask stays unanswered before the park is reported to the control plane — which
+// pings the member's bell (N8). Long enough that an attended prompt (the common case: the member is looking at
+// the panel and clicks within seconds) never pings; short beside every park window above.
+const APPROVAL_NOTICE_DELAY_MS = 20_000;
 
 // Project the parsed event-body fields into an ActivationEvent tail (workspace is supplied by the caller).
 function eventOf(data: {
@@ -613,9 +623,37 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // denies — the ask survives for a re-attaching panel (GET /stream replays it via pendingFor). Wrapped by
     // withRules so a standing "always allow/deny" rule for the tool answers without prompting. In "auto" mode,
     // routine mutations run without asking — only the guarded (destructive/governance/credential) actions park.
+    //
+    // N8: an ask nobody answered within the grace is an ask nobody is WATCHING — the member closed the panel or
+    // is in another of their conversations. Report the park to the control plane (agent.run.awaiting_approval,
+    // cause "chat"), which pings their bell with a link that opens THIS conversation; a decision inside the
+    // grace (the attended case) reports nothing. Best-effort like every ledger report.
+    const noticeParkedApproval = (requestId: string, tool?: string): void => {
+      const report = deps.reportRunEvent;
+      if (!report || !session) return;
+      const timer = setTimeout(() => {
+        if (!permissions.pendingFor(id).some((p) => p.requestId === requestId)) return;
+        void report({
+          workspace: principal.workspace,
+          kind: "agent.run.awaiting_approval",
+          sessionId: id,
+          agentId: session.origin?.agentId ?? "default",
+          eventKind: "chat",
+          message:
+            tool !== undefined
+              ? `Chat turn is waiting for approval to run ${tool} in conversation ${id}.`
+              : `Chat turn is waiting for plan approval in conversation ${id}.`,
+          creator: principal.subject,
+          cause: "chat",
+          ...(tool !== undefined ? { tool } : {}),
+        }).catch(() => {});
+      }, deps.approvalNoticeDelayMs ?? APPROVAL_NOTICE_DELAY_MS);
+      timer.unref?.();
+    };
     const ask = (request: { name: string; input: unknown }): Promise<PermissionDecision> => {
       const requestId = deps.newId();
       write("permission", { requestId, name: request.name, input: request.input });
+      noticeParkedApproval(requestId, request.name);
       return permissions.wait(requestId, id, controller.signal, request);
     };
     // The hook consults the CURRENT mode per ask (liveMode) — bypass auto-allows, auto asks only for guarded
@@ -631,6 +669,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const onPlan = async (plan: string): Promise<boolean> => {
       const requestId = deps.newId();
       write("plan", { requestId, plan });
+      noticeParkedApproval(requestId); // no tool = the CP words the ping as a plan review
       const decision = await permissions.wait(requestId, id, controller.signal);
       return decision === "allow";
     };

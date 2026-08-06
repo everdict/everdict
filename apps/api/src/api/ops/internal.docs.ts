@@ -176,6 +176,11 @@ const internal = {
         agentVersion: z.string().min(1).optional(),
         eventId: z.string().min(1).optional(),
         creator: z.string().min(1).optional().describe("the member the activation acts as"),
+        tool: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("the parked tool behind an awaiting_approval report (N8) — absent = a plan review"),
         budgetUsd: z.number().positive().optional().describe("the delegated envelope slice (A7/§5.2)"),
         trace: z
           .array(z.record(z.string(), z.unknown()))

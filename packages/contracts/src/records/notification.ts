@@ -21,6 +21,11 @@ export const NotificationKindSchema = z.enum([
   // link says which record, and the title carries the health. Two kinds would fork the bell's icon table
   // without forking any decision the reader makes.
   "tracker_update_posted",
+  // An agent parked on a human decision (HITL): a write-tool/plan approval is waiting and the turn cannot
+  // continue until somebody answers. The park may live in any of many conversations or a resource's
+  // discussion thread — surfaces nobody is necessarily watching — so the ask has to come find the person
+  // the agent is waiting for (docs/architecture/notifications.md N8).
+  "agent_approval_requested",
 ]);
 export type NotificationKind = z.infer<typeof NotificationKindSchema>;
 
@@ -46,6 +51,10 @@ export const NotificationRecordSchema = z.object({
       resourceId: z.string().optional(),
       commentId: z.string().optional(),
       artifactId: z.string().optional(), // report notifications anchor the view's report artifact (analysis-studio V4)
+      // An agent conversation has no page of its own — it opens in the side panel. The click lands on the
+      // workspace home with `?conversation=<id>` (the panel consumes and strips the parameter), and the web
+      // bell short-circuits to opening the panel in place without navigating at all.
+      conversationId: z.string().optional(),
     })
     .optional(),
   createdAt: z.string(),

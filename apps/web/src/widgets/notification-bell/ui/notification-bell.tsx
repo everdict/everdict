@@ -15,6 +15,7 @@ import {
   ClipboardCheck,
   ClipboardX,
   Megaphone,
+  ShieldQuestion,
   TriangleAlert,
   type LucideIcon,
 } from 'lucide-react'
@@ -41,6 +42,18 @@ import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-
 const POLL_MS = 25_000
 const NATIVE_FIRE_CAP = 3 // max native notifications fired per poll (flood prevention)
 
+// postMessage `type` that opens an agent conversation in the shell's agent chat panel — pairs with
+// widgets/infra-panel (OPEN_AGENT_SESSION_MESSAGE; a sibling widget cannot import it, keep the literal in
+// sync — same idiom as features/discuss). An approval notification's conversation has no page of its own,
+// so its click opens the panel IN PLACE instead of navigating; the `?conversation=` href stays the fallback
+// for surfaces that can only navigate (the desktop watcher's OS click, a pasted link).
+const OPEN_AGENT_SESSION = 'everdict:open-agent-session'
+
+function openConversationInShell(sessionId: string): void {
+  if (typeof window === 'undefined') return
+  window.postMessage({ type: OPEN_AGENT_SESSION, sessionId }, window.location.origin)
+}
+
 // Per-kind icon + outcome tone — the row leads with a tinted icon chip so "what happened" reads at a glance
 // (glyph = the notification type, tint = the outcome: success/danger/warning/info). Language-independent — no catalog.
 type KindTone = 'success' | 'danger' | 'info'
@@ -56,6 +69,8 @@ const KIND_META: Record<NotificationKind, { Icon: LucideIcon; tone: KindTone }> 
   issue_regressed: { Icon: TriangleAlert, tone: 'danger' }, // 닫힌 이슈가 다시 열렸다 — 경보로 읽혀야 한다
   // 사람이 올린 판정 — 성패가 아니라 보고다. 색으로 결론을 내지 않고(제목이 health 를 말한다) 정보 톤을 쓴다.
   tracker_update_posted: { Icon: Megaphone, tone: 'info' },
+  // 에이전트가 내 결정을 기다리며 파킹됐다(HITL, N8) — 실패는 아니지만 내가 풀어줘야 진행되는 상태.
+  agent_approval_requested: { Icon: ShieldQuestion, tone: 'info' },
 }
 const TONE_CHIP: Record<KindTone, string> = {
   success: 'bg-[var(--color-success)]/12 text-[var(--color-success)]',
@@ -122,7 +137,9 @@ export function NotificationBell({ workspace }: { workspace: string }) {
           const note = new Notification(n.title, { ...(n.body ? { body: n.body } : {}), tag: n.id })
           note.onclick = () => {
             window.focus()
-            router.push(notificationHref(workspace, n))
+            const conversationId = n.link?.conversationId
+            if (conversationId !== undefined) openConversationInShell(conversationId)
+            else router.push(notificationHref(workspace, n))
           }
         }
       }
@@ -178,6 +195,8 @@ export function NotificationBell({ workspace }: { workspace: string }) {
   function onItemClick(n: NotificationItem) {
     if (n.readAt === undefined) void markRead({ ids: [n.id] })
     setOpen(false)
+    const conversationId = n.link?.conversationId
+    if (conversationId !== undefined) return openConversationInShell(conversationId)
     router.push(notificationHref(workspace, n))
   }
 

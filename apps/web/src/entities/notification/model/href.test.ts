@@ -100,6 +100,14 @@ describe('notificationHref', () => {
     ).toBe('/acme/dataset/a%2Fb')
   })
 
+  // An agent conversation opens in the side panel, so its only ADDRESS is the workspace home with
+  // `?conversation=` — the landing for surfaces that can only navigate (desktop OS click, pasted link).
+  it('opens a parked agent conversation through the workspace home ?conversation= parameter', () => {
+    expect(
+      notificationHref('acme', row('agent_approval_requested', { conversationId: 'sess-1' }))
+    ).toBe('/acme?conversation=sess-1')
+  })
+
   it('falls back to the workspace when there is nothing to open', () => {
     expect(notificationHref('acme', row('run_completed'))).toBe('/acme')
     expect(

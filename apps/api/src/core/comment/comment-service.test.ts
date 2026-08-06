@@ -356,6 +356,7 @@ describe("CommentService discussion agent (askAgent)", () => {
     const store = new InMemoryCommentStore();
     const calls: RunnerInput[] = [];
     const pings: AnswerPing[] = [];
+    const parkPings: { recipient: string; commentId: string; tool?: string }[] = [];
     const runner: DiscussionTurnRunner = {
       run: async (input) => {
         calls.push(input);
@@ -371,6 +372,9 @@ describe("CommentService discussion agent (askAgent)", () => {
       notifyAgentAnswer: async ({ recipient, commentId, preview, ok }) => {
         pings.push({ recipient, commentId, preview, ok });
       },
+      notifyApprovalRequested: async ({ recipient, commentId, tool }) => {
+        parkPings.push({ recipient, commentId, ...(tool !== undefined ? { tool } : {}) });
+      },
       newId: () => `c${++n}`,
       now: () => new Date(Date.parse("2026-07-04T00:00:00.000Z") + clock).toISOString(),
     });
@@ -379,6 +383,7 @@ describe("CommentService discussion agent (askAgent)", () => {
       store,
       calls,
       pings,
+      parkPings,
       advance: (ms: number) => {
         clock += ms;
       },
@@ -577,6 +582,34 @@ describe("CommentService discussion agent (askAgent)", () => {
     // the agent re-reports the same terminal state (retry) — no duplicate ping
     await service.applyProgress("acme", placeholder.id, { status: "complete", body: "**answer**" });
     expect(pings).toHaveLength(1);
+  });
+
+  it("entering the approval park pings the asker once — parked ticks don't re-ping, a second park does (N8)", async () => {
+    const { service, store, parkPings } = agentSvc();
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u-b",
+      body: "@everdict tag it",
+      askAgent: true,
+    });
+    const placeholder = (await store.list("acme", "harness", "h")).find((c) => c.authorKind === "agent");
+    if (!placeholder) throw new Error("no agent placeholder");
+
+    // The turn parks on a write tool — exactly one ping, naming the parked tool.
+    await service.applyProgress("acme", placeholder.id, { status: "awaiting_approval", activity: "tool:add_tag" });
+    expect(parkPings).toEqual([{ recipient: "u-b", commentId: placeholder.id, tool: "add_tag" }]);
+
+    // Re-reports while STILL parked never re-ping (the decision hasn't been made, not a new ask).
+    await service.applyProgress("acme", placeholder.id, { status: "awaiting_approval", activity: "tool:add_tag" });
+    expect(parkPings).toHaveLength(1);
+
+    // Approved → running → a SECOND park is a new decision and pings again.
+    await service.applyProgress("acme", placeholder.id, { status: "running", activity: "writing" });
+    await service.applyProgress("acme", placeholder.id, { status: "awaiting_approval", activity: "tool:retry_run" });
+    expect(parkPings).toHaveLength(2);
+    expect(parkPings[1]).toEqual({ recipient: "u-b", commentId: placeholder.id, tool: "retry_run" });
   });
 
   it("a failed answer pings the asker with ok:false and no preview", async () => {

@@ -24,6 +24,48 @@ describe("NotificationService — the channel poster after the full E1 re-base",
     await expect(svc.postChannelMessage("acme", "boom test")).resolves.toBeUndefined();
   });
 
+  it("an approval park in a conversation writes a feed row whose link is the conversation itself (N8)", async () => {
+    const add = vi.fn(async () => undefined);
+    const svc = new NotificationService({
+      settingsFor: async () => undefined,
+      feed: { add, list: vi.fn(async () => []), markRead: vi.fn(async () => 0) },
+    });
+    await svc.notifyApprovalRequested("acme", {
+      recipient: "alice",
+      tool: "write_file",
+      place: { kind: "conversation", sessionId: "sess-1" },
+    });
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: "acme",
+        recipient: "alice",
+        kind: "agent_approval_requested",
+        title: "Approval needed — write_file",
+        link: { conversationId: "sess-1" },
+      }),
+    );
+  });
+
+  it("an approval park in a discussion links the resource + agent comment, and no tool reads as a plan review", async () => {
+    const add = vi.fn(async () => undefined);
+    const svc = new NotificationService({
+      settingsFor: async () => undefined,
+      feed: { add, list: vi.fn(async () => []), markRead: vi.fn(async () => 0) },
+    });
+    await svc.notifyApprovalRequested("acme", {
+      recipient: "bob",
+      place: { kind: "discussion", resourceType: "harness", resourceId: "h1", commentId: "c1" },
+    });
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipient: "bob",
+        kind: "agent_approval_requested",
+        title: "Plan review needed",
+        link: { resourceType: "harness", resourceId: "h1", commentId: "c1" },
+      }),
+    );
+  });
+
   it("posts to the workspace channel when the transport, host, channel and bot token are all configured", async () => {
     const post = vi.fn(async () => undefined);
     const svc = new NotificationService({

@@ -62,6 +62,11 @@ export function notificationHref(workspace: string, n: NotificationItem): string
     if (segment !== undefined)
       return `/${workspace}/${segment}/${encodeURIComponent(link.resourceId)}${sectionFor(n.kind, link.resourceType)}${anchorOf(n)}`
   }
+  // An agent conversation has no page of its own — it opens in the side panel. The address is the workspace
+  // home with `?conversation=` (the panel consumes and strips it); the bell short-circuits to opening the
+  // panel in place, so this href is the fallback for surfaces that can only navigate (desktop OS click, paste).
+  if (link.conversationId !== undefined)
+    return `/${workspace}?conversation=${encodeURIComponent(link.conversationId)}`
   if (link.runId !== undefined) return `/${workspace}/run/${encodeURIComponent(link.runId)}`
   if (link.scorecardId !== undefined)
     return `/${workspace}/scorecard/${encodeURIComponent(link.scorecardId)}`

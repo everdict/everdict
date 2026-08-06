@@ -158,6 +158,43 @@ export class NotificationService implements ChannelPoster {
     });
   }
 
+  // An agent parked on a human decision (HITL, notifications.md N8) — a write-tool or plan approval is
+  // waiting and the turn cannot continue until the recipient answers. The park lives on a surface nobody is
+  // necessarily watching (one of many conversations, or a resource's discussion thread), so the ask comes to
+  // the bell with a link that lands ON that surface: the conversation opens in the side panel
+  // (`conversationId`), the discussion lands on the resource page anchored to the agent comment. Feed-only
+  // (the bell's native firing already covers "not looking"), best-effort like every notification.
+  async notifyApprovalRequested(
+    tenant: string,
+    input: {
+      recipient: string; // whoever the agent is waiting for — the turn's creator / the discussion's asker
+      tool?: string; // the parked tool; absent = a plan review
+      place:
+        | { kind: "conversation"; sessionId: string }
+        | { kind: "discussion"; resourceType: string; resourceId: string; commentId: string };
+    },
+  ): Promise<void> {
+    const title = input.tool !== undefined ? `Approval needed — ${input.tool}` : "Plan review needed";
+    await this.pushFeed({
+      workspace: tenant,
+      recipient: input.recipient,
+      kind: "agent_approval_requested",
+      title,
+      body:
+        input.place.kind === "discussion"
+          ? "Everdict is waiting for your approval in the discussion."
+          : "The conversation is parked until you decide.",
+      link:
+        input.place.kind === "discussion"
+          ? {
+              resourceType: input.place.resourceType,
+              resourceId: input.place.resourceId,
+              commentId: input.place.commentId,
+            }
+          : { conversationId: input.place.sessionId },
+    });
+  }
+
   // Feed write — swallows failures independently of Mattermost (so one channel's outage doesn't block the other).
   private async pushFeed(row: Omit<NotificationRecord, "id" | "createdAt">): Promise<void> {
     if (!this.deps.feed) return;

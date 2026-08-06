@@ -1,7 +1,12 @@
-import { PlatformEventService, RunService } from "@everdict/application-control";
+import { NotificationService, PlatformEventService, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import { PaymentRequiredError } from "@everdict/contracts";
-import { InMemoryPlatformEventStore, InMemoryRunStore, InMemoryTrajectoryStore } from "@everdict/db";
+import {
+  InMemoryNotificationStore,
+  InMemoryPlatformEventStore,
+  InMemoryRunStore,
+  InMemoryTrajectoryStore,
+} from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 
@@ -234,6 +239,70 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
     const run = await runStore.get("run-a1");
     expect(run?.status).toBe("failed");
     expect(run?.error).toEqual({ code: "CANCELLED", message: "stopped by member" });
+  });
+
+  it("awaiting_approval pings the run's creator — the bell row links the parked conversation (N8)", async () => {
+    const feed = new InMemoryNotificationStore();
+    const notificationService = new NotificationService({ settingsFor: async () => undefined, feed });
+    const platformEvents = new PlatformEventService({ store: new InMemoryPlatformEventStore() });
+    const app = buildServer({ service: svc(), platformEvents, notificationService, internalToken: "itok" });
+
+    // A chat turn's park (reported after the agent-side grace found the ask still pending) — no runId, off
+    // the event log, but the member's bell gets the row that opens THEIR parked conversation.
+    const chat = await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: {
+        tenant: "acme",
+        kind: "agent.run.awaiting_approval",
+        sessionId: "sess-9",
+        agentId: "default",
+        eventKind: "chat",
+        message: "Chat turn is waiting for approval to run write_file in conversation sess-9.",
+        creator: "alice",
+        cause: "chat",
+        tool: "write_file",
+      },
+    });
+    expect(chat.statusCode).toBe(200);
+    const rows = await feed.list("alice", "acme");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kind: "agent_approval_requested",
+      title: "Approval needed — write_file",
+      link: { conversationId: "sess-9" },
+    });
+
+    // A headless activation's park (cause=event, reported immediately) pings its creator the same way.
+    await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: report({ kind: "agent.run.awaiting_approval", message: "parked", tool: "retry_scorecard" }),
+    });
+    const activationRows = await feed.list("alice", "acme");
+    expect(activationRows).toHaveLength(2);
+    expect(activationRows.map((r) => r.kind)).toEqual(["agent_approval_requested", "agent_approval_requested"]);
+
+    // A report with no creator has nobody to ping — tolerated, never an error (legacy reporters).
+    const anonymous = await app.inject({
+      method: "POST",
+      url: "/internal/agent-run-events",
+      headers: { "x-internal-token": "itok" },
+      payload: {
+        tenant: "acme",
+        kind: "agent.run.awaiting_approval",
+        sessionId: "sess-9",
+        agentId: "default",
+        eventKind: "chat",
+        message: "parked",
+        cause: "chat",
+      },
+    });
+    expect(anonymous.statusCode).toBe(200);
+    expect(await feed.list("alice", "acme")).toHaveLength(2);
+    await app.close();
   });
 
   it("a terminal report's transcript trace seals as the run's OWN trajectory (O2) — first write wins", async () => {

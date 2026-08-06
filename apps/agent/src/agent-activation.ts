@@ -587,6 +587,8 @@ export class AgentActivator {
         sessionId,
         `Agent ${agentId} is waiting for approval to run ${request.name}.`,
         run,
+        undefined,
+        request.name, // the parked tool — what the CP's approval notification (N8) names
       );
       try {
         return await wait({ workspace: event.workspace, sessionId, agentId }, request, signal);
@@ -613,6 +615,7 @@ export class AgentActivator {
     message: string,
     run?: { runId: string; creator?: string; agentVersion?: string; eventId?: string; budgetUsd?: number },
     evidence?: { trace?: TraceEvent[]; spans?: TraceSpan[] },
+    tool?: string,
   ): Promise<void> {
     return (
       this.deps.reportRunEvent?.({
@@ -625,6 +628,7 @@ export class AgentActivator {
         ...(run !== undefined ? run : {}),
         ...(evidence?.trace !== undefined ? { trace: evidence.trace } : {}),
         ...(evidence?.spans !== undefined ? { spans: evidence.spans } : {}),
+        ...(tool !== undefined ? { tool } : {}),
       }) ?? Promise.resolve()
     ).catch(() => {});
   }

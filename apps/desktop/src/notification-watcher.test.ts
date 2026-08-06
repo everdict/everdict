@@ -152,6 +152,10 @@ describe("notificationPathOf", () => {
     );
   });
 
+  it("opens a parked agent conversation through the workspace home's ?conversation= parameter", () => {
+    expect(notificationPathOf(link({ conversationId: "sess-1" }))).toBe("/acme?conversation=sess-1");
+  });
+
   it("sends a posted goal update to the update timeline", () => {
     const row: WatcherNotification = {
       id: "n2",

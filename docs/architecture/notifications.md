@@ -123,6 +123,37 @@ the thread isn't, and every resource link lost its `#comment-…` anchor on the 
   that silently stripped `resourceType`/`resourceId`, so every mention/tracker/regression notification was a
   dead click; the schema now mirrors the record.
 
+## N8 — a parked agent comes to find you (HITL approval requests, 2026-08-06)
+
+An agent that parks on a human decision (a write-tool approval, a plan review) cannot continue until somebody
+answers — and the park lives on exactly the surfaces nobody is necessarily watching: one of the member's many
+conversations, a resource's discussion thread, or a headless activation. Before N8 the only signals were
+in-place (the panel's PermissionPrompt, the thread's ApprovalStrip), so a member who navigated away starved the
+turn into its deny-on-expiry. The kind `agent_approval_requested` brings the ask to the bell.
+
+- **Three lanes, one choke point each — never per-call-site:**
+  - **Chat conversations** (`apps/agent/src/server.ts` `noticeParkedApproval`): a parked ask unanswered after a
+    **grace** (`approvalNoticeDelayMs`, default 20 s) is reported as `agent.run.awaiting_approval`
+    (`cause: "chat"`, the parked `tool` named, plan asks tool-less). An attended prompt is answered inside the
+    grace, so the common interactive case stays notification-free. Best-effort, like every ledger report.
+  - **Headless activations** already report `agent.run.awaiting_approval` at the park — unattended by
+    definition, so no grace.
+  - Both land in the ONE hook in `POST /internal/agent-run-events` (`apps/api/src/api/ops/internal.routes.ts`):
+    `kind = awaiting_approval` + a `creator` → `NotificationService.notifyApprovalRequested` with
+    `link.conversationId = sessionId`. Recipient = the run's **creator** (the member the turn works for — for
+    a workspace-visible session that is whoever typed the turn, not the session owner).
+  - **Discussion threads** (`CommentService.applyProgress`): the transition INTO `agentStatus =
+    "awaiting_approval"` pings `agentAskedBy` with the resource + `?comment=` link that lands on the
+    ApprovalStrip. Transition-guarded like the terminal ping — parked re-reports never re-ping; a second park
+    in the same turn is a new decision and does.
+- **A conversation's only address is the panel** (N7 corollary). `link.conversationId` resolves to
+  `/{ws}?conversation=<id>`: the infra panel consumes and strips the parameter on load (desktop OS click,
+  pasted link), while the web bell short-circuits — a click posts `everdict:open-agent-session` and the panel
+  opens IN PLACE, no navigation.
+- The park itself is not a new platform-event kind: `agent.run.awaiting_approval` and `approval.requested`
+  already exist; N8 only adds the personal-feed reaction (and `cause: "chat"` awaiting reports stay off the
+  event log, per the O1 narrowing).
+
 ## See also
 [connections.md](../connections.md) (Mattermost notify) · [desktop-app.md](./desktop-app.md) (D1/D4) ·
 [scheduled-evals.md](./scheduled-evals.md) (schedule fire/finalize).

@@ -7,6 +7,7 @@ import { INTERRUPTED_BY_USER } from "./chat.js";
 import type { ToolProvider } from "./mcp-tools.js";
 import type { ModelResolver } from "./model.js";
 import { type AgentServerDeps, buildServer } from "./server.js";
+import type { AgentRunEventReport } from "./usage.js";
 
 // A fake transport that always returns a fixed assistant reply and no tool calls (end_turn), so the server route can
 // be exercised without a provider.
@@ -707,6 +708,95 @@ describe("agent server", () => {
         payload: { tool: "do_write", decision: "allow" },
       });
       expect(res.statusCode).toBe(404);
+      await app.close();
+    });
+
+    it("a park unanswered past the grace is reported as awaiting_approval — the CP pings the member's bell (N8)", async () => {
+      const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+      const reported: AgentRunEventReport[] = [];
+      const app = buildServer(
+        makeDeps({
+          ...writeToolDeps(writeCall),
+          approvalNoticeDelayMs: 20,
+          reportRunEvent: async (r) => {
+            reported.push(r);
+          },
+        }),
+      );
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      // The park only exists on the SSE branch (the JSON branch has no human channel and auto-allows) —
+      // drive it detached: the inject stays open while the ask waits.
+      const turn = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "write it" },
+      });
+      let requestId = "";
+      await vi.waitFor(async () => {
+        const res = await app.inject({ method: "GET", url: `/agent/sessions/${s.id}/pending`, headers: auth });
+        const pending = (res.json() as { pending: { requestId: string; name: string }[] }).pending;
+        expect(pending).toHaveLength(1);
+        requestId = pending[0]?.requestId ?? "";
+      });
+      // Nobody answers within the grace → the park is reported (cause=chat, the tool named, the typist as
+      // recipient) so the control plane can bring the ask to their bell.
+      await vi.waitFor(() => {
+        expect(reported.some((r) => r.kind === "agent.run.awaiting_approval")).toBe(true);
+      });
+      expect(reported.find((r) => r.kind === "agent.run.awaiting_approval")).toMatchObject({
+        cause: "chat",
+        creator: "alice",
+        sessionId: s.id,
+        tool: "do_write",
+      });
+      // Answer so the turn settles normally.
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/permission`,
+        headers: auth,
+        payload: { requestId, decision: "allow" },
+      });
+      await turn;
+      expect(writeCall).toHaveBeenCalled();
+      await app.close();
+    });
+
+    it("a decision inside the grace reports no park — the attended prompt stays notification-free (N8)", async () => {
+      const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+      const reported: AgentRunEventReport[] = [];
+      const app = buildServer(
+        makeDeps({
+          ...writeToolDeps(writeCall),
+          approvalNoticeDelayMs: 50,
+          reportRunEvent: async (r) => {
+            reported.push(r);
+          },
+        }),
+      );
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const turn = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "write it" },
+      });
+      await vi.waitFor(async () => {
+        const res = await app.inject({ method: "GET", url: `/agent/sessions/${s.id}/pending`, headers: auth });
+        const pending = (res.json() as { pending: { requestId: string }[] }).pending;
+        expect(pending).toHaveLength(1);
+        await app.inject({
+          method: "POST",
+          url: `/agent/sessions/${s.id}/permission`,
+          headers: auth,
+          payload: { requestId: pending[0]?.requestId, decision: "allow" },
+        });
+      });
+      await turn;
+      // Let the grace timer fire — the ask is no longer pending, so nothing is reported.
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      expect(reported.some((r) => r.kind === "agent.run.awaiting_approval")).toBe(false);
+      expect(writeCall).toHaveBeenCalled();
       await app.close();
     });
 

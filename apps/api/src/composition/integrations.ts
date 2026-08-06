@@ -148,6 +148,14 @@ export function buildIntegrations(deps: {
     },
     // The agent's answer landed/failed → ping the asker's bell (they may have left the page while the turn ran).
     notifyAgentAnswer: async ({ tenant, ...input }) => notificationService.notifyAgentAnswer(tenant, input),
+    // The discussion turn PARKED on an approval (N8) → ping the asker's bell with a link that lands on the
+    // thread's ApprovalStrip — a parked turn nobody notices is a turn that times out to deny.
+    notifyApprovalRequested: async ({ tenant, recipient, resourceType, resourceId, commentId, tool }) =>
+      notificationService.notifyApprovalRequested(tenant, {
+        recipient,
+        ...(tool !== undefined ? { tool } : {}),
+        place: { kind: "discussion", resourceType, resourceId, commentId },
+      }),
     notifyMention: async ({ tenant, comment, recipients }) => {
       // listMembers already merges in profile names — the mentioner's display name (name > email local-part > default).
       const member = await membershipService

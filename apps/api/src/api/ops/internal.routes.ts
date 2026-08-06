@@ -184,6 +184,9 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
         // itself, and human typing volume would drown the log. (Same deliberate narrowing as ingest
         // completions — widening it is an E2 decision, not a default.)
         cause: z.enum(["event", "chat"]).default("event"),
+        // The parked tool behind an awaiting_approval report (N8) — what the approval notification names.
+        // Absent on an awaiting report = a plan review; ignored for every other kind.
+        tool: z.string().min(1).optional(),
         agentVersion: z.string().min(1).optional(),
         eventId: z.string().min(1).optional(),
         creator: z.string().min(1).optional(),
@@ -219,6 +222,21 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
         causedBy: `agent:${agentId}:${sessionId}`,
         message,
       });
+    // HITL (N8): a park is a turn WAITING ON A HUMAN — the one lifecycle report that must come find its
+    // person, because the surface it parked on (one of many conversations, a headless activation) is exactly
+    // the one nobody is necessarily watching. One choke point for every lane that reports the park: an
+    // activation reports it immediately (headless = unattended by definition), a chat turn only after the
+    // agent-side grace found the ask still pending (an attended prompt is answered before the grace runs
+    // out). Recipient = the run's creator — the member the turn works for. Best-effort like the ledger.
+    if (kind === "agent.run.awaiting_approval" && creator !== undefined && deps.notificationService) {
+      await deps.notificationService
+        .notifyApprovalRequested(tenant, {
+          recipient: creator,
+          ...(body.data.tool !== undefined ? { tool: body.data.tool } : {}),
+          place: { kind: "conversation", sessionId },
+        })
+        .catch(() => {});
+    }
     // The universal ledger (execution-model P3, O4): started opens Run{kind:"agent"}, a terminal report
     // settles it. Both idempotent (at-least-once reporting); awaiting_approval is event-only.
     if (runId !== undefined) {

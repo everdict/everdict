@@ -21,6 +21,8 @@ export const notificationKinds = [
   'issue_regressed',
   // 프로젝트/목표에 판정이 올라왔다 — 그 일에 답할 사람에게 간다(docs/tracker.md).
   'tracker_update_posted',
+  // 에이전트가 승인(HITL)에 파킹됐다 — 파킹된 대화/디스커션은 아무도 안 보고 있을 수 있어, 요청이 사람을 찾아온다(N8).
+  'agent_approval_requested',
 ] as const
 export const notificationKindSchema = z.enum(notificationKinds)
 
@@ -39,6 +41,7 @@ export const notificationSchema = z.object({
       resourceId: z.string().optional(),
       commentId: z.string().optional(),
       artifactId: z.string().optional(), // report notifications anchor the view's report artifact
+      conversationId: z.string().optional(), // an agent conversation — opens in the side panel, not a page
     })
     .optional(),
   createdAt: z.string(),

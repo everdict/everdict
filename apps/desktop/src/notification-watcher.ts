@@ -23,6 +23,7 @@ const WatcherRowSchema = z
         resourceId: z.string().optional(),
         commentId: z.string().optional(),
         artifactId: z.string().optional(),
+        conversationId: z.string().optional(), // an agent conversation — opens in the web's side panel
       })
       .optional(),
     createdAt: z.string(),
@@ -68,6 +69,9 @@ export function notificationPathOf(row: WatcherNotification): string | null {
       return `/${workspace}/${segment}/${encodeURIComponent(link.resourceId)}${section}${anchor}`;
     }
   }
+  // An agent conversation has no page of its own — the workspace home's `?conversation=` parameter opens it
+  // in the web's side panel (the infra panel consumes and strips the parameter on load).
+  if (link.conversationId !== undefined) return `/${workspace}?conversation=${encodeURIComponent(link.conversationId)}`;
   if (link.runId !== undefined) return `/${workspace}/run/${encodeURIComponent(link.runId)}`;
   if (link.scorecardId !== undefined) return `/${workspace}/scorecard/${encodeURIComponent(link.scorecardId)}`;
   return null;

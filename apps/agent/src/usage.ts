@@ -58,6 +58,9 @@ export interface AgentRunEventReport {
   // What opened this run (O1): an activation woken by a platform event (default), or a chat turn a member
   // typed. A chat turn is recorded on the ledger but stays OFF the event log — see the CP route.
   cause?: "event" | "chat";
+  // The parked tool behind an awaiting_approval report (N8) — the CP names it in the approval notification.
+  // Absent on an awaiting report = a plan review; meaningless for every other kind.
+  tool?: string;
   // O2 (transcripts are traces): a terminal report's transcript projection — the CP seals it as the run's
   // own trajectory (source "run", first write wins).
   trace?: TraceEvent[];
@@ -89,6 +92,7 @@ export function runEventReporter(
         ...(input.creator !== undefined ? { creator: input.creator } : {}),
         ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}),
         ...(input.cause !== undefined ? { cause: input.cause } : {}),
+        ...(input.tool !== undefined ? { tool: input.tool } : {}),
         ...(input.trace !== undefined ? { trace: input.trace } : {}),
         // The spans ARE the evidence for a turn that recorded them (N6), and a settle that carries spans
         // deliberately carries no transcript projection — so dropping this field here dropped the turn's

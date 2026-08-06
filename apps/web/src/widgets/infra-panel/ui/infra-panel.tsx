@@ -309,6 +309,24 @@ export function InfraPanel({
     toRelative,
   ])
 
+  // `?conversation=<id>` — an agent conversation's only ADDRESS (it opens in this panel, not on a page of its
+  // own): an approval notification's landing for surfaces that can only navigate (the desktop watcher's OS
+  // click, a pasted link). Consumed once on mount — every in-app entry (bell, comment thread) reaches
+  // openAgentSession directly via postMessage — and stripped so a refresh does not re-open the panel.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const conversation = params.get('conversation')
+    if (conversation === null || conversation.length === 0) return
+    openAgentSession(conversation)
+    params.delete('conversation')
+    const query = params.toString()
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${query.length > 0 ? `?${query}` : ''}${window.location.hash}`
+    )
+  }, [openAgentSession])
+
   // A server-resolved per-device preference (locale / timezone) changed in the parent. The mounted iframes read
   // it server-side off the cookie and stay frozen, so refresh() in the switcher never reaches their
   // separate browsing context. Signal each frame to soft-refresh IN PLACE (everdict:refresh → EmbedShell calls

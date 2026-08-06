@@ -73,6 +73,17 @@ export interface CommentServiceDeps {
     preview: string;
     ok: boolean;
   }) => Promise<void>;
+  // Tell the asker the discussion turn PARKED on a write-tool approval (HITL, notifications.md N8) — the turn
+  // cannot continue until somebody answers, and the asker may have left the page the ApprovalStrip renders on.
+  // Best-effort; unset = no ping.
+  notifyApprovalRequested?: (input: {
+    tenant: string;
+    recipient: string;
+    resourceType: string;
+    resourceId: string;
+    commentId: string;
+    tool?: string;
+  }) => Promise<void>;
   newId?: () => string;
   now?: () => string;
 }
@@ -290,6 +301,30 @@ export class CommentService {
       },
       this.now(),
     );
+    // ENTERING the approval park pings the asker (N8) — the turn is now waiting on a human, and nobody may be
+    // on the page the ApprovalStrip renders on. Transition-guarded like the terminal ping below, so the turn's
+    // repeated activity ticks while parked never re-ping; a second park in the same turn (approve → run →
+    // park again) is a new decision and pings again. The parked tool rides the activity token (`tool:<name>`).
+    if (
+      patch.status === "awaiting_approval" &&
+      existing.agentStatus !== "awaiting_approval" &&
+      existing.agentAskedBy &&
+      this.deps.notifyApprovalRequested
+    ) {
+      const tool = patch.activity?.startsWith("tool:") ? patch.activity.slice("tool:".length) : undefined;
+      try {
+        await this.deps.notifyApprovalRequested({
+          tenant,
+          recipient: existing.agentAskedBy,
+          resourceType: existing.resourceType,
+          resourceId: existing.resourceId,
+          commentId,
+          ...(tool !== undefined && tool.length > 0 ? { tool } : {}),
+        });
+      } catch {
+        // Ignore notification failure (the lifecycle is already persisted).
+      }
+    }
     // Reaching a terminal state pings the asker (they may have left the page while the turn ran). Best-effort —
     // a notification failure never fails the lifecycle write; re-reports of the same terminal state don't re-ping.
     if (terminal && existing.agentStatus !== patch.status && existing.agentAskedBy && this.deps.notifyAgentAnswer) {
