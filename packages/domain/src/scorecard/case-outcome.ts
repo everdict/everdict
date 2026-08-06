@@ -1,5 +1,6 @@
 import type { CaseFailure, CaseResult, Scorecard } from "@everdict/contracts";
-import { PRE_OUTCOME_STAGES, caseVerdict } from "./scorecard.js";
+import { caseVerdict } from "./scorecard.js";
+import { PRE_OUTCOME_STAGES } from "./verdict-policy.js";
 
 // Case outcome — the case's fate as a first-class value, so "the agent failed the task" and "the platform
 // failed the case" can never share a denominator. A result carrying a PRE-OUTCOME failure (it never

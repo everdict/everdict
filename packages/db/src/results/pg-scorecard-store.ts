@@ -24,6 +24,7 @@ interface ScorecardRow {
   scorecard: unknown;
   analysis_ref: string | null;
   trace_projection_version: number | string | null;
+  verdict_policy: unknown; // {id, version, digest} — which policy produced the verdicts (mig 0125)
   sink_export: unknown;
   error: unknown;
   steps: unknown;
@@ -60,6 +61,9 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     ...(row.trace_projection_version !== null && row.trace_projection_version !== undefined
       ? { traceProjectionVersion: Number(row.trace_projection_version) }
       : {}),
+    // Which verdict policy the verdicts resolve under — lightweight, so it rides the list too: diff/
+    // comparability flags a cross-policy comparison before anyone reads a delta.
+    verdictPolicy: row.verdict_policy ?? undefined,
     export: hasDetail ? (row.sink_export ?? undefined) : undefined, // for detail (get only, like steps). Column name is sink_export (reserved-word avoidance)
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
@@ -178,6 +182,12 @@ export class PgScorecardStore implements ScorecardStore {
       sets.push(`trace_projection_version = $${i++}`);
       vals.push(patch.traceProjectionVersion);
     }
+    if (patch.verdictPolicy !== undefined) {
+      // stamped by the domain's terminal transition (judgedUnder) — dropping it would leave historical
+      // verdicts undated and silently re-derived under whatever policy the code ships next.
+      sets.push(`verdict_policy = $${i++}`);
+      vals.push(JSON.stringify(patch.verdictPolicy));
+    }
     if (patch.export !== undefined) {
       sets.push(`sink_export = $${i++}`);
       vals.push(JSON.stringify(patch.export));
@@ -281,7 +291,7 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(filter.kind === "experiment" ? "kind = 'experiment'" : "(kind IS NULL OR kind <> 'experiment')");
     }
     const res = await this.client.query<ScorecardRow>(
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

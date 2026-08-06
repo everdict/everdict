@@ -1,8 +1,16 @@
 import { BadRequestError, type CaseResult, ConflictError } from "@everdict/contracts";
 import type { PlatformFact, RunOrigin } from "@everdict/contracts";
-import type { RunEnvelope, RunRecord, ScorecardOrigin, ScorecardRecord, ScorecardSubset } from "@everdict/contracts";
+import type {
+  RunEnvelope,
+  RunRecord,
+  ScorecardOrigin,
+  ScorecardRecord,
+  ScorecardSubset,
+  VerdictPolicyRef,
+} from "@everdict/contracts";
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
 import { summarizeTrials } from "./trials.js";
+import { verdictPolicyRef } from "./verdict-policy.js";
 
 // The domain model for a scorecard batch's lifecycle (queued → running → succeeded | failed | superseded | cancelled).
 // Wraps the persistence record (@everdict/db ScorecardRecord — shapes unchanged); guard methods are the SSOT
@@ -25,8 +33,10 @@ export type ScorecardRunError = NonNullable<ScorecardRecord["error"]>;
 // The span→event projection this batch's verdicts were computed under (N6, otel-trace-model.md). Stamped by
 // the DOMAIN rather than by a caller, so no settle path can forget it: spans are immutable, but the
 // projection is code, and an undated interpretation makes an old verdict impossible to re-derive.
-function judgedUnder(): { traceProjectionVersion: number } {
-  return { traceProjectionVersion: SPANS_TO_EVENTS_VERSION };
+// Also stamps WHICH verdict policy the batch's verdicts resolve under (id + version + content digest) —
+// verdicts are derived on read, so the stamp is what keeps them stable when the policy evolves (mig 0125).
+function judgedUnder(): { traceProjectionVersion: number; verdictPolicy: VerdictPolicyRef } {
+  return { traceProjectionVersion: SPANS_TO_EVENTS_VERSION, verdictPolicy: verdictPolicyRef() };
 }
 
 export type ScorecardOutcomeExtras = Partial<

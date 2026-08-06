@@ -46,6 +46,13 @@ describe("serveScorecard (P1g served derivations — the client mirrors are dele
     expect(served.scorecard?.results.map((r) => r.verdict)).toEqual([true, false, undefined]);
     expect(served.casePass).toEqual({ pass: 1, total: 2 });
     expect(served.headlinePassRate).toBeCloseTo(2 / 3);
+    // The verdict explains itself: which rung decided, from which measurements — b's ground truth overruled
+    // its judge, and the basis says so.
+    expect(served.scorecard?.results[1]?.verdictBasis).toEqual({
+      authority: "ground_truth",
+      aggregation: "priority",
+      deciders: [{ metric: "tests_pass", graderId: "tests_pass", pass: false }],
+    });
     expect(served.outcomes).toEqual({
       executed: 3,
       gradeable: 3,

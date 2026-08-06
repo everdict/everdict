@@ -16,6 +16,16 @@ export const ServedCaseResultSchema = CaseResultSchema.extend({
     .describe(
       "Server-computed case verdict (state/tests_pass > answer_match/url_matches/dom_contains > judge); absent = no pass-deciding score",
     ),
+  verdictBasis: z
+    .object({
+      authority: z.enum(["ground_truth", "objective", "judge", "observational", "fallback"]),
+      aggregation: z.enum(["priority", "all", "any", "majority"]),
+      deciders: z.array(z.object({ metric: z.string(), graderId: z.string(), pass: z.boolean() })),
+    })
+    .optional()
+    .describe(
+      "How the verdict was decided: the rung that settled it, its aggregation rule, and the exact measurements that voted — a verdict that cannot explain itself cannot be defended",
+    ),
 });
 export type ServedCaseResult = z.infer<typeof ServedCaseResultSchema>;
 

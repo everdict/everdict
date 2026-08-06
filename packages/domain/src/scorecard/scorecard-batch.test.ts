@@ -3,6 +3,7 @@ import { RunRecordSchema, type ScorecardRecord, ScorecardRecordSchema } from "@e
 import { describe, expect, it } from "vitest";
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
 import { ScorecardBatch } from "./scorecard-batch.js";
+import { verdictPolicyRef } from "./verdict-policy.js";
 
 const NOW = "2026-07-10T00:00:00.000Z";
 
@@ -252,6 +253,7 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
       summary,
       runIds: ["r1"],
       traceProjectionVersion: SPANS_TO_EVENTS_VERSION,
+      verdictPolicy: verdictPolicyRef(), // the terminal patch also dates WHICH policy decided its verdicts
       updatedAt: "t2",
     });
     expect(live.fail({ code: "INTERNAL", message: "boom", phase: "judges" }, { steps: [] }, "t2").patch).toEqual({
@@ -259,6 +261,7 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
       error: { code: "INTERNAL", message: "boom", phase: "judges" },
       steps: [],
       traceProjectionVersion: SPANS_TO_EVENTS_VERSION,
+      verdictPolicy: verdictPolicyRef(),
       updatedAt: "t2",
     });
   });

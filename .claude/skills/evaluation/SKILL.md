@@ -45,12 +45,21 @@ Grader families (`packages/graders/src/index.ts`): outcome `tests-pass`/`command
 (need `ctx.compute` — guard, it's optional); trace `steps`/`cost`/`latency` (`trace-graders.ts`, read ONLY
 `ctx.trace`); browser `dom-contains`/`url-matches`/`answer-match`; model `judge`. No-dep graders reconstruct
 from `GraderSpec` in `makeGraders` (`packages/graders/src/make-graders.ts`); `judge` throws there (needs a `Judge`).
-Case verdict is **authority-ranked** (`packages/suite/src/scorecard.ts` `caseVerdict`): ground-truth
-(`state`/`tests_pass`) > objective (`answer_match`/`url_matches`/`dom_contains`) > `judge` — a VLM/LLM judge
-never overturns an objective grader. **The ranking has exactly one implementation and is SERVED, never
-recomputed by a client**: a scorecard's per-case `verdict` and `RunRecord.verdict` (derived on read next to
-`usage`, in `withRunUsage`) both come from this function, and the web's client-side mirrors were deleted in
-re-architecture P1g. A surface that needs "did this pass" reads the served field.
+Case verdict is **authority-ranked and POLICY-DRIVEN** (`packages/domain/src/scorecard/verdict-policy.ts`):
+the ladder — ground-truth (`state`/`tests_pass`, priority-ordered) > objective (`answer_match`/`url_matches`/
+`dom_contains`, unanimous) > judge (`judge` + top-level `judge:<id>`, unanimous; criterion/milestone metrics
+are diagnostic and never decide) — is DATA (`DEFAULT_VERDICT_POLICY`, versioned + FNV digest), not metric-name
+string arrays. `evaluateVerdict(result, policy)` returns `{verdict, basis}` — the basis names the deciding
+rung/aggregation/measurements (served as `verdictBasis` per case); `caseVerdict` is its boolean view. Duplicate
+metrics combine unanimously (never Map last-wins); a pre-outcome failure (dispatch/install/run) yields NO
+verdict (`caseOutcome` = completed|unmeasured|infra_failed; `scorecardOutcomes` serves the denominators).
+**Every settled batch stamps `verdictPolicy{id,version,digest}`** (domain `judgedUnder`, mig 0125) and readers
+resolve the STAMPED policy (`resolveVerdictPolicy`) — evolving the policy never rewrites historical verdicts;
+new policy versions are APPENDED to `KNOWN_VERDICT_POLICIES`, never edited. **The ranking has exactly one
+implementation and is SERVED, never recomputed by a client**: a scorecard's per-case `verdict` and
+`RunRecord.verdict` (derived on read next to `usage`, in `withRunUsage`) both come from this engine, and the
+web's client-side mirrors were deleted in re-architecture P1g. A surface that needs "did this pass" reads the
+served field.
 `scorecardPassRate` aggregates over `caseVerdict`; `summarizeScorecard`
 gives per-metric count/mean/passRate (auto) — plus, for a metric whose scores carry `label`, a
 `distribution` (label→count; ordinal order for an ordered enum, else by frequency) + `mode` instead of a

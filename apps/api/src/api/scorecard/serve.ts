@@ -1,6 +1,6 @@
 import type { ScorecardResponse } from "@everdict/contracts/wire";
 import type { ScorecardRecord } from "@everdict/db";
-import { caseVerdict, headlinePassRate, scorecardOutcomes } from "@everdict/domain";
+import { evaluateVerdict, headlinePassRate, resolveVerdictPolicy, scorecardOutcomes } from "@everdict/domain";
 
 // Serve-time enrichment of a scorecard detail (re-architecture P1g): computed derivations ride the
 // wire (per-case verdict, casePass rollup, headline pass rate) so no client re-implements the domain
@@ -10,14 +10,18 @@ import { caseVerdict, headlinePassRate, scorecardOutcomes } from "@everdict/doma
 export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
   const headline = headlinePassRate(record);
   if (!record.scorecard) return { ...record, headlinePassRate: headline };
+  // Verdicts resolve under the batch's STAMPED policy (absent = the default ladder those records were judged
+  // under) — evolving the policy never silently rewrites a historical verdict.
+  const policy = resolveVerdictPolicy(record.verdictPolicy);
   let pass = 0;
   let total = 0;
   const results = record.scorecard.results.map((r) => {
-    const verdict = caseVerdict(r);
+    const { verdict, basis } = evaluateVerdict(r, policy);
     if (verdict === undefined) return r;
     total += 1;
     if (verdict) pass += 1;
-    return { ...r, verdict };
+    // The verdict carries its own basis — which rung decided, under which aggregation, from which measurements.
+    return { ...r, verdict, ...(basis ? { verdictBasis: basis } : {}) };
   });
   return {
     ...record,

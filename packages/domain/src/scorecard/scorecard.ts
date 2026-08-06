@@ -1,50 +1,18 @@
-import {
-  type CaseFailure,
-  type CaseResult,
-  type Score,
-  type Scorecard,
-  isMeasured,
-  measuredScores,
-} from "@everdict/contracts";
+import { type CaseResult, type Score, type Scorecard, isMeasured, measuredScores } from "@everdict/contracts";
+import { evaluateVerdict } from "./verdict-policy.js";
 
-// Stages at/before which a failure means the case never produced a legitimate outcome (no product verdict).
-// A collect/grade-stage failure is different BY DESIGN: the run completed and compute-bound measurements
-// still stand — partial results are preserved, the failure only marks the missing evidence plane.
-export const PRE_OUTCOME_STAGES: ReadonlySet<CaseFailure["stage"]> = new Set(["dispatch", "install", "run"]);
+export { PRE_OUTCOME_STAGES } from "./verdict-policy.js";
 
 // Case pass verdict — authority-first. Decided in the order ground-truth (real-state verification) > objective comparison > model opinion.
 // The VLM/LLM judge is *auxiliary*: if an objective/ground-truth grader exists, the judge cannot override it (e.g. OSWorld file save —
 // if the state grader confirmed the file, the case is PASS even if the judge FAILs it from the screenshot alone). The basis for the integrated/scorecard pass rate.
-const AUTHORITATIVE_METRICS = ["state", "tests_pass"]; // real state/test verification (ground-truth)
-const OBJECTIVE_METRICS = ["answer_match", "url_matches", "dom_contains"]; // deterministic comparison
-// Top-level judge VERDICT metrics: legacy "judge" or "judge:<id>" (the multi-criteria weighted overall).
-// Deeper metrics ("judge:<id>:<criterion>", "judge:<id>:milestone:<m>") are diagnostic localization — they
-// explain WHERE a verdict came from and never decide the case themselves.
-const JUDGE_VERDICT_METRIC_RE = /^judge(?::[^:]+)?$/;
+// The ladder itself is DATA now (DEFAULT_VERDICT_POLICY in verdict-policy.ts, versioned + digested); this is
+// the plain boolean view of evaluateVerdict — use evaluateVerdict directly when the basis (which rung decided,
+// from which measurements) must ride along.
 export function caseVerdict(
   result: Pick<CaseResult, "scores"> & Pick<Partial<CaseResult>, "failure">,
 ): boolean | undefined {
-  // A case that never legitimately executed (dispatch/install/run failure) has NO product verdict — the
-  // platform failing the case must not read as the agent failing the task. Collect/grade failures keep their
-  // partial measurements (the run itself completed). caseOutcome() is the full three-way fate.
-  if (result.failure && PRE_OUTCOME_STAGES.has(result.failure.stage)) return undefined;
-  // Only MEASUREMENTS can decide a case — an unmeasured/invalid score (grader error, judge skip) carries a
-  // placeholder value/pass that must never masquerade as a verdict input.
-  const scores = measuredScores(result.scores);
-  const byMetric = new Map(scores.map((s) => [s.metric, s] as const));
-  for (const m of AUTHORITATIVE_METRICS) {
-    const s = byMetric.get(m);
-    if (s?.pass !== undefined) return s.pass; // if ground-truth exists, it is authoritative
-  }
-  const objs = OBJECTIVE_METRICS.map((m) => byMetric.get(m)).filter((s): s is Score => s?.pass !== undefined);
-  if (objs.length > 0) return objs.every((s) => s.pass); // all objective grader(s) pass
-  // The judge decides only when there is no objective grader. Real judge scores land under `judge:<id>`
-  // (packages/graders JudgeGrader) — matching the literal "judge" alone left this rung dead and every judge
-  // verdict fell through to the all-scores fallback below (an unchosen unanimous vote over unrelated scores).
-  const judges = scores.filter((s) => JUDGE_VERDICT_METRIC_RE.test(s.metric) && s.pass !== undefined);
-  if (judges.length > 0) return judges.every((s) => s.pass);
-  const withPass = scores.filter((s) => s.pass !== undefined);
-  return withPass.length > 0 ? withPass.every((s) => s.pass) : undefined;
+  return evaluateVerdict(result).verdict;
 }
 
 // Per-case pass rate of a scorecard (aggregated via the authority-based caseVerdict). Cases with no pass-deciding grader are excluded.

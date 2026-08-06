@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { JudgeRunConfigSchema } from "../execution/case-job.js";
 import { GraderSpecSchema, ScorecardSchema } from "../execution/eval-case.js";
+import { VerdictPolicyRefSchema } from "../execution/verdict-policy.js";
 
 // Scorecard run lifecycle: accept a dataset×harness batch eval → run → success/failure.
 // superseded = a terminal state where a newer fire of the same (origin.repo, prNumber, harness, dataset) reclaimed (cancelled·replaced) this batch.
@@ -235,6 +236,11 @@ export const ScorecardRecordSchema = z.object({
   // absent when no ArtifactStore is configured or the offload failed.
   analysisRef: z.string().optional(),
   export: ScorecardExportSchema.optional(), // trace-sink export result (for detail — get only, like steps)
+  // WHICH verdict policy produced this batch's verdicts (id + version + content digest). Verdicts are derived
+  // on read, so this stamp is what keeps a historical verdict stable when the policy evolves: readers resolve
+  // the STAMPED policy (resolveVerdictPolicy), never silently the newest one. Absent on batches settled before
+  // the stamp existed — those were judged under the authority ladder the default policy encodes. mig 0125.
+  verdictPolicy: VerdictPolicyRefSchema.optional(),
   // Which version of the span→event PROJECTION this batch was judged under (N6,
   // docs/architecture/otel-trace-model.md). Spans are immutable once ended, so the record is stable — but the
   // projection is code, and a verdict nobody can re-derive is a verdict nobody can defend. Storing the version

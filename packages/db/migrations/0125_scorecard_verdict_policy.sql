@@ -1,0 +1,11 @@
+-- Trust-kernel contract ③ (verdict policy): WHICH policy document produced this batch's verdicts.
+--
+-- Verdicts are derived at read time from the persisted scores, so the deciding policy is code — and code
+-- changes. Without a stamp, evolving the authority ladder would silently rewrite every historical verdict;
+-- with it, readers resolve the STAMPED policy (id + version + content digest) and old records keep the
+-- verdicts they were settled under. The diff/comparability layer also refuses to compare two batches judged
+-- under different policy digests as if they were the same experiment.
+--
+-- NULL = settled before the stamp existed (judged under the authority ladder the default policy encodes).
+-- Additive; no backfill.
+ALTER TABLE everdict_scorecards ADD COLUMN IF NOT EXISTS verdict_policy jsonb;

@@ -18,6 +18,15 @@ export {
 } from "./scorecard/scorecard.js";
 export { type CaseOutcome, caseOutcome, type ScorecardOutcomes, scorecardOutcomes } from "./scorecard/case-outcome.js";
 export {
+  DEFAULT_VERDICT_POLICY,
+  evaluateVerdict,
+  resolveVerdictPolicy,
+  type VerdictBasis,
+  type VerdictEvaluation,
+  verdictPolicyDigest,
+  verdictPolicyRef,
+} from "./scorecard/verdict-policy.js";
+export {
   type CaseTrialStats,
   caseTrialStats,
   diffTrials,
