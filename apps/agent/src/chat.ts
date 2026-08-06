@@ -127,29 +127,109 @@ async function recallKnowledge(call: McpInvoke, references: AgentReference[]): P
 // injected every turn so the agent knows what past conversations learned; bodies stay out of context until the
 // agent get_file's one it judges relevant (index + body split — only the index pays rent in every window).
 export { MEMORY_DIRECTORY, MEMORY_INDEX_PATH } from "./memory-extraction.js";
+// TWO caps, because either alone is gameable and both failure shapes are real: a byte cap alone admits 300 useless
+// one-liners, and a line cap alone admits an index of essays (Claude Code measured a 197KB index that was still
+// UNDER its 200-line cap). Truncation then NAMES the cap that fired and prescribes the fix, because "shorten it"
+// does not tell the agent whether it wrote too many entries or entries that are too long.
+const MAX_MEMORY_INDEX_LINES = 200;
 const MAX_MEMORY_INDEX_CHARS = 12_000;
+const DAY_MS = 86_400_000;
 
-export async function workspaceMemoryPreamble(call: McpInvoke): Promise<string | undefined> {
+// Age in whole days, rendered the way a model can actually reason about it. An ISO timestamp does not trigger
+// staleness reasoning — "47 days ago" does — and day precision keeps the injected block byte-identical across a
+// day's turns (the same prompt-cache discipline as the environment date).
+function daysAgo(iso: string, now: number): number | undefined {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return undefined;
+  return Math.max(0, Math.floor((now - then) / DAY_MS));
+}
+
+function renderAge(days: number): string {
+  return days === 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+// Annotate each index line with the age of the memory it points at. The ages come from ONE `list_files` on the
+// memory directory (every FsEntry carries modifiedAt), never a per-file stat: the index is the manifest, so the
+// only thing missing from it is time. A line whose target we cannot resolve is left exactly as the agent wrote it.
+function withAges(index: string, ages: Map<string, number>): string {
+  return index
+    .split("\n")
+    .map((line) => {
+      const target = /\]\(([^)]+\.md)\)/.exec(line)?.[1];
+      if (target === undefined) return line;
+      const days = ages.get(target.replace(/^\.?\//, ""));
+      return days === undefined ? line : `${line} _(${renderAge(days)})_`;
+    })
+    .join("\n");
+}
+
+// Truncate on BOTH caps, cutting at a line boundary, and report which cap fired with its own remedy.
+function capIndex(content: string): { index: string; warning?: string } {
+  const lines = content.split("\n");
+  const overLines = lines.length > MAX_MEMORY_INDEX_LINES;
+  const overChars = content.length > MAX_MEMORY_INDEX_CHARS;
+  if (!overLines && !overChars) return { index: content };
+  let kept = overLines ? lines.slice(0, MAX_MEMORY_INDEX_LINES) : lines;
+  if (kept.join("\n").length > MAX_MEMORY_INDEX_CHARS) {
+    const out: string[] = [];
+    let used = 0;
+    for (const line of kept) {
+      if (used + line.length + 1 > MAX_MEMORY_INDEX_CHARS) break;
+      used += line.length + 1;
+      out.push(line);
+    }
+    kept = out;
+  }
+  // Both caps are judged against the ORIGINAL size: a long-line index that only breaches bytes must be told so,
+  // and measuring after line-truncation would understate it.
+  const reason = overLines
+    ? overChars
+      ? `${lines.length} lines and ${content.length} characters (limits: ${MAX_MEMORY_INDEX_LINES} lines, ${MAX_MEMORY_INDEX_CHARS} characters) — there are too many entries AND they are too long`
+      : `${lines.length} lines (limit: ${MAX_MEMORY_INDEX_LINES}) — there are too many entries`
+    : `${content.length} characters (limit: ${MAX_MEMORY_INDEX_CHARS}) — the entries are too long`;
+  return {
+    index: kept.join("\n"),
+    warning: `WARNING: ${MEMORY_INDEX_PATH} is ${reason}. Only part of it was loaded, so some memories are invisible to you right now. Keep each index entry to ONE line under ~150 characters and move detail into its topic file; merge or delete memories that overlap (the memory_consolidation skill does this pass).`,
+  };
+}
+
+export async function workspaceMemoryPreamble(call: McpInvoke, now = Date.now()): Promise<string | undefined> {
   try {
     const r = await call("get_file", { path: MEMORY_INDEX_PATH });
     if (r.isError) return undefined; // no memory yet (NOT_FOUND) or an unreachable fs — recall nothing
     const file = JSON.parse(r.content) as { content?: unknown; encoding?: unknown; entry?: { modifiedAt?: unknown } };
     if (typeof file.content !== "string" || file.content.trim().length === 0 || file.encoding === "base64")
       return undefined;
-    // Day precision, and only re-rendered when the index actually changes — a stable header keeps the injected
-    // block byte-identical across turns (the same cache discipline as the environment date).
-    const updatedAt = typeof file.entry?.modifiedAt === "string" ? file.entry.modifiedAt.slice(0, 10) : undefined;
-    const index =
-      file.content.length > MAX_MEMORY_INDEX_CHARS
-        ? `${file.content.slice(0, MAX_MEMORY_INDEX_CHARS)}\n… [index truncated — read ${MEMORY_INDEX_PATH} in full, and shorten its entries]`
-        : file.content;
+    const { index: capped, warning } = capIndex(file.content);
+
+    // Per-entry ages — one directory read, best-effort (an unreachable listing just means no ages, never no recall).
+    const ages = new Map<string, number>();
+    try {
+      const listed = await call("list_files", { path: MEMORY_DIRECTORY });
+      if (!listed.isError) {
+        for (const e of JSON.parse(listed.content) as { name?: unknown; modifiedAt?: unknown }[]) {
+          if (typeof e.name !== "string" || typeof e.modifiedAt !== "string") continue;
+          const days = daysAgo(e.modifiedAt, now);
+          if (days !== undefined) ages.set(e.name, days);
+        }
+      }
+    } catch {
+      // no ages this turn — the index still recalls
+    }
+
     const discipline = [
       `Read a listed memory's body with get_file (${MEMORY_DIRECTORY}/<file>) when it bears on THIS task, or grep across memories with search_files (path: ${MEMORY_DIRECTORY}).`,
-      "A memory reflects when it was written (each body's get_file result carries its modifiedAt): before recommending from one that names a file, resource, or version, verify it against the live workspace.",
+      "The age beside each entry is when it was last written — a memory is a claim about the workspace AS IT WAS THEN, so verify an old one before acting on it.",
       "If the user asks you to ignore memory, proceed as if this index were empty.",
     ].join(" ");
-    const age = updatedAt !== undefined ? `; index last updated ${updatedAt}` : "";
-    return `Workspace memory index (${MEMORY_INDEX_PATH} — what agents learned in PAST conversations; persists across conversations${age}):\n\n${index}\n\n${discipline}`;
+    return [
+      `Workspace memory index (${MEMORY_INDEX_PATH} — what agents learned in PAST conversations; persists across conversations):`,
+      "",
+      withAges(capped, ages),
+      ...(warning ? ["", warning] : []),
+      "",
+      discipline,
+    ].join("\n");
   } catch {
     return undefined; // best-effort — memory must never fail a turn
   }
@@ -943,6 +1023,7 @@ export async function runChat(
             agentName: session.origin?.agentId ?? "agent",
             conversationId: sessionId,
             model: model.model,
+            input: userText,
           })
         : undefined;
 

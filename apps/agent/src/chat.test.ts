@@ -307,19 +307,55 @@ describe("workspace memory recall", () => {
     isError: false,
   });
 
+  const listing = (entries: { name: string; modifiedAt: string }[]) => ({
+    content: JSON.stringify(entries.map((e) => ({ path: `memory/${e.name}`, kind: "file", ...e }))),
+    isError: false,
+  });
+
   it("builds the index preamble with the read-side discipline (verify, ignore-on-request)", async () => {
+    const seen: string[] = [];
     const call = async (name: string, args: Record<string, unknown>) => {
-      expect(name).toBe("get_file");
+      seen.push(name);
+      if (name === "list_files") {
+        expect(args.path).toBe("memory");
+        return listing([]);
+      }
       expect(args.path).toBe("memory/MEMORY.md");
       return indexFile("- [Billing quirk](billing-quirk.md) — cache reads bill at 0.1x");
     };
     const preamble = await workspaceMemoryPreamble(call);
     expect(preamble).toContain("Workspace memory index");
     expect(preamble).toContain("Billing quirk");
-    expect(preamble).toContain("verify it against the live workspace");
+    expect(preamble).toContain("verify an old one before acting on it");
     expect(preamble).toContain("ignore memory");
-    // Staleness at a glance — day precision so the injected block stays byte-identical across a day's turns.
-    expect(preamble).toContain("index last updated 2026-08-05");
+    expect(seen).toEqual(["get_file", "list_files"]);
+  });
+
+  it("dates each entry by its own file, in days — an index-level timestamp cannot say which memory is stale", async () => {
+    // Given two memories written six weeks apart, both listed by one index
+    const now = Date.parse("2026-08-06T00:00:00.000Z");
+    const call = async (name: string) =>
+      name === "get_file"
+        ? indexFile("- [Cadence](cadence.md) — Friday reports\n- [Owner](owner.md) — Jin owns judges")
+        : listing([
+            { name: "cadence.md", modifiedAt: "2026-08-05T00:00:00.000Z" },
+            { name: "owner.md", modifiedAt: "2026-06-20T00:00:00.000Z" },
+          ]);
+    // When the index is recalled
+    const preamble = await workspaceMemoryPreamble(call, now);
+    // Then each line carries its OWN age, phrased the way a model reasons about staleness (not an ISO timestamp)
+    expect(preamble).toContain("- [Cadence](cadence.md) — Friday reports _(yesterday)_");
+    expect(preamble).toContain("- [Owner](owner.md) — Jin owns judges _(47 days ago)_");
+    expect(preamble).not.toContain("2026-06-20");
+    expect(preamble).toContain("a claim about the workspace AS IT WAS THEN");
+  });
+
+  it("still recalls when the listing fails — ages are a bonus, never a precondition for recall", async () => {
+    const preamble = await workspaceMemoryPreamble(async (name) =>
+      name === "get_file" ? indexFile("- [Cadence](cadence.md) — Friday reports") : { content: "boom", isError: true },
+    );
+    expect(preamble).toContain("Cadence");
+    expect(preamble).not.toContain("_(");
   });
 
   it("recalls nothing when the workspace has no memory yet, an fs error, or a binary index", async () => {
@@ -332,10 +368,24 @@ describe("workspace memory recall", () => {
     expect(await workspaceMemoryPreamble(async () => indexFile("QkFE", { encoding: "base64" }))).toBeUndefined();
   });
 
-  it("truncates an oversized index and tells the agent to shorten it", async () => {
-    const preamble = await workspaceMemoryPreamble(async () => indexFile("x".repeat(20_000)));
-    expect(preamble).toContain("[index truncated");
-    expect(preamble?.length).toBeLessThan(14_000);
+  it("names WHICH cap the index breached, because the two have different remedies", async () => {
+    // Given an index of many SHORT entries — the line cap is what it breaches
+    const many = Array.from({ length: 250 }, (_, i) => `- [M${i}](m${i}.md) — hook`).join("\n");
+    const byLines = await workspaceMemoryPreamble(async (name) =>
+      name === "get_file" ? indexFile(many) : listing([]),
+    );
+    expect(byLines).toContain("too many entries");
+    expect(byLines).toContain("memory_consolidation");
+    expect(byLines).not.toContain("the entries are too long");
+    // Given instead a handful of ENORMOUS entries — the same truncation, the opposite remedy. Claude Code's real
+    // incident was exactly this shape: a 197KB index that never crossed the line count anyone was watching.
+    const long = Array.from({ length: 5 }, (_, i) => `- [L${i}](l${i}.md) — ${"x".repeat(4_000)}`).join("\n");
+    const byChars = await workspaceMemoryPreamble(async (name) =>
+      name === "get_file" ? indexFile(long) : listing([]),
+    );
+    expect(byChars).toContain("the entries are too long");
+    expect(byChars).not.toContain("too many entries");
+    expect(byChars?.length).toBeLessThan(14_000);
   });
 
   it("runs the turn-end extraction on the SMALL tier when opted in, publishing the memory it decided on", async () => {
