@@ -205,14 +205,15 @@ export function registerFsTools(server: McpServer, ctx: McpToolContext): void {
     {
       description:
         "Run a file from the workspace filesystem (.py/.sh/.js/.ts) in an isolated sandbox and get back its stdout, stderr and exit code. Files the script writes are carried back NEXT TO it — that is how you produce a chart, a converted document or a generated dataset: write it to the working directory and it lands in the same folder (an existing path is reported as `skipped`, never overwritten). " +
-        "A non-zero exit is a RESULT to read, not a failure to retry blindly. `image` swaps the container (pass a workspace environment image to get its dependencies); the interpreter still follows the extension. `timeout_sec` caps it inside the sandbox — on expiry you get exit 124 and `timedOut`. Requires files:write.",
+        "A non-zero exit is a RESULT to read, not a failure to retry blindly. `image` swaps the container (pass a workspace environment image to get its dependencies); the interpreter still follows the extension. `timeout_sec` caps it inside the sandbox — on expiry you get exit 124 and `timedOut`. `runtime` places the run on one of the workspace's registered runtimes (list_runtimes) instead of the deployment's own compute. Requires files:write.",
       inputSchema: {
         path: z.string().min(1).max(600),
         image: z.string().min(1).max(512).optional(),
         timeout_sec: z.number().int().min(1).max(FILE_EXECUTION_MAX_TIMEOUT_SEC).optional(),
+        runtime: z.string().min(1).max(128).optional(),
       },
     },
-    ({ path, image, timeout_sec }) =>
+    ({ path, image, timeout_sec, runtime }) =>
       run(principal, "files:write", async () =>
         ok(
           await execution.run(
@@ -221,6 +222,7 @@ export function registerFsTools(server: McpServer, ctx: McpToolContext): void {
               path,
               ...(image !== undefined ? { image } : {}),
               ...(timeout_sec !== undefined ? { timeoutSec: timeout_sec } : {}),
+              ...(runtime !== undefined ? { runtime } : {}),
             },
             actor,
           ),

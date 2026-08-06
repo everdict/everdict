@@ -33,8 +33,30 @@ const DRIVER_GRACE_SEC = 10;
 export class FileExecutionService {
   constructor(
     private readonly fs: WorkspaceFs,
-    private readonly driver: Driver,
+    // WHERE the script runs. `compute` is the deployment's own; `computeFor` resolves one of the workspace's
+    // registered runtimes — the same resolver agent worlds and browser sessions go through, so a member's
+    // script lands inside the tenant's own trust zone instead of on the control-plane host by default.
+    private readonly compute: Driver | undefined,
+    private readonly computeFor?: (tenant: string, runtime: string) => Promise<Driver | undefined>,
   ) {}
+
+  // A named runtime the workspace does not have is a 404 NAMING it — never a quiet fall back to the
+  // deployment's compute, which would run a member's code somewhere they did not choose.
+  private async computeIn(tenant: string, runtime?: string): Promise<Driver> {
+    if (runtime === undefined) {
+      if (!this.compute)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          {},
+          "This deployment has no compute of its own — name one of the workspace's runtimes to run a file.",
+        );
+      return this.compute;
+    }
+    const resolved = this.computeFor ? await this.computeFor(tenant, runtime) : undefined;
+    if (!resolved)
+      throw new NotFoundError("NOT_FOUND", { runtime }, `Runtime '${runtime}' is not registered in this workspace.`);
+    return resolved;
+  }
 
   async run(tenant: string, input: FileExecutionRequest, actor?: FsActor): Promise<FileExecutionResult> {
     const plan = fileRunPlanFor(input.path, input.image);
@@ -53,7 +75,8 @@ export class FileExecutionService {
     const timeoutSec = Math.min(input.timeoutSec ?? FILE_EXECUTION_DEFAULT_TIMEOUT_SEC, FILE_EXECUTION_MAX_TIMEOUT_SEC);
     const command = `timeout ${timeoutSec} sh -c ${shq(plan.command)}`;
 
-    const compute = await this.driver.provision({ os: "linux", image: plan.image, needs: ["shell"] });
+    const target = await this.computeIn(tenant, input.runtime);
+    const compute = await target.provision({ os: "linux", image: plan.image, needs: ["shell"] });
     const startedAt = Date.now();
     try {
       await compute.writeFile(name, source);

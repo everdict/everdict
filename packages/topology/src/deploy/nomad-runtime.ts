@@ -61,7 +61,7 @@ export interface NomadExec {
   ): Promise<string>;
 }
 
-function nomadCliExec(addr: string, bin = "nomad"): NomadExec {
+function nomadCliExec(addr: string, bin = "nomad", apiToken?: string): NomadExec {
   return {
     exec(allocId, task, command, opts) {
       return new Promise<string>((resolve, reject) => {
@@ -74,7 +74,9 @@ function nomadCliExec(addr: string, bin = "nomad"): NomadExec {
           allocId,
           ...command,
         ];
-        const proc = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, NOMAD_ADDR: addr } });
+        const env: Record<string, string | undefined> = { ...process.env, NOMAD_ADDR: addr };
+        if (apiToken) env.NOMAD_TOKEN = apiToken; // the CLI's own name for the same cluster credential
+        const proc = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], env });
         let out = "";
         let err = "";
         proc.stdout.on("data", (d) => {
@@ -96,13 +98,20 @@ function nomadCliExec(addr: string, bin = "nomad"): NomadExec {
   };
 }
 
-function fetchNomadHttp(addr: string): NomadHttp {
+// Control-plane↔Nomad API auth. A cluster with ACLs on answers 403 to every request without it, and this
+// client had no way to carry one — so a tenant runtime's `authSecret` reached the eval backend and neither the
+// service topologies nor the interactive browser sessions built here. The token is a CLUSTER credential: it
+// authenticates us to the API and never enters an alloc env.
+function fetchNomadHttp(addr: string, apiToken?: string): NomadHttp {
   const base = addr.replace(/\/$/, "");
   return {
     async request(method, path, body) {
+      const headers: Record<string, string> = {};
+      if (body) headers["content-type"] = "application/json";
+      if (apiToken) headers["x-nomad-token"] = apiToken;
       const res = await fetch(`${base}${path}`, {
         method,
-        headers: body ? { "content-type": "application/json" } : undefined,
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
         body: body ? JSON.stringify(body) : undefined,
       });
       return { status: res.status, text: await res.text() };
@@ -113,6 +122,7 @@ function fetchNomadHttp(addr: string): NomadHttp {
 export interface NomadTopologyRuntimeOptions {
   addr: string; // Nomad HTTP endpoint
   http?: NomadHttp;
+  apiToken?: string; // Nomad ACL token (X-Nomad-Token) — control-plane↔Nomad API auth. Never enters an alloc env.
   exec?: NomadExec; // alloc exec (pool DDL/ACL); default = nomad CLI
   consul?: ConsulClient; // when set, create Consul Connect intentions from zone.network (network isolation)
   datacenters?: string[];
@@ -214,8 +224,8 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   private readonly sharedStores = new Map<string, { hostPort: string; allocId: string; task: string }>();
 
   constructor(private readonly opts: NomadTopologyRuntimeOptions) {
-    this.http = opts.http ?? fetchNomadHttp(opts.addr);
-    this.execImpl = opts.exec ?? nomadCliExec(opts.addr);
+    this.http = opts.http ?? fetchNomadHttp(opts.addr, opts.apiToken);
+    this.execImpl = opts.exec ?? nomadCliExec(opts.addr, "nomad", opts.apiToken);
   }
 
   async ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle> {

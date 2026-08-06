@@ -1,20 +1,20 @@
-import { BadRequestError, NotFoundError, type RuntimeSpec, type TrustZone } from "@everdict/contracts";
+import { BadRequestError, NotFoundError } from "@everdict/contracts";
 import type {
   BrowserSessionProvisioner,
   ProvisionBrowserOptions,
   ProvisionedBrowser,
 } from "../../common/browser-session-provisioner.js";
+import type { ResolvedRuntime } from "../../common/runtime-compute.js";
 
 export interface RuntimeBrowserProvisionerDeps {
-  // Resolve the tenant's registered runtime by id (RuntimeRegistry.get). undefined ⇒ the session 404s (no such runtime).
-  resolveSpec: (tenant: string, runtimeId: string) => Promise<RuntimeSpec | undefined>;
-  // Tenant → trust zone (TrustZonePolicy.resolve) — the browser stands up in this zone (namespace + isolation
-  // runtime + cross-tenant network deny), so one tenant's live session can't reach another's CDP over the network.
-  zoneFor: (tenant: string) => TrustZone;
-  // Stand up a browser on the given runtime keyed by session id, returning its control-plane-reachable CDP + disposer.
+  // The tenant's registered runtime, resolved to its spec + cluster credentials + trust zone — the SAME
+  // resolver world sessions and file runs go through, so "which cluster, which credential, which zone" has one
+  // answer for every lane. undefined ⇒ the session 404s (no such runtime).
+  resolve: (tenant: string, runtimeId: string) => Promise<ResolvedRuntime | undefined>;
+  // Stand up a browser on that runtime keyed by session id, returning its control-plane-reachable CDP + disposer.
   // Injected by the composition (it builds the orchestrator-specific TopologyRuntime); this keeps apps/api's topology
-  // wiring out of the provisioner so the resolution/isolation logic here is unit-testable with a fake.
-  provisionOnRuntime: (spec: RuntimeSpec, sessionId: string, zone: TrustZone) => Promise<ProvisionedBrowser>;
+  // wiring out of the provisioner so the resolution logic here is unit-testable with a fake.
+  provisionOnRuntime: (runtime: ResolvedRuntime, sessionId: string) => Promise<ProvisionedBrowser>;
 }
 
 // Hosts an interactive browser session on the tenant's REGISTERED runtime (browser-profiles S9) instead of the
@@ -33,14 +33,13 @@ export class RuntimeBrowserProvisioner implements BrowserSessionProvisioner {
         { need: ["tenant", "runtime", "sessionId"] },
         "A runtime-hosted browser session requires a tenant, a runtime, and a session id.",
       );
-    const spec = await this.deps.resolveSpec(opts.tenant, opts.runtime);
-    if (!spec)
+    const runtime = await this.deps.resolve(opts.tenant, opts.runtime);
+    if (!runtime)
       throw new NotFoundError(
         "NOT_FOUND",
         { runtime: opts.runtime },
         "Runtime not found — register it (or pick another) before hosting a browser session on it.",
       );
-    const zone = this.deps.zoneFor(opts.tenant);
-    return this.deps.provisionOnRuntime(spec, opts.sessionId, zone);
+    return this.deps.provisionOnRuntime(runtime, opts.sessionId);
   }
 }

@@ -9,42 +9,20 @@ import type {
   WorkspaceImages,
 } from "@everdict/application-control";
 import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
-import {
-  type Backend,
-  type BackendRegistry,
-  DockerBackend,
-  NomadBackend,
-  buildRuntimeBackend,
-  isSessionable,
-} from "@everdict/backends";
-import { BadRequestError, type Driver, NotFoundError, type RegistryAuth } from "@everdict/contracts";
+import { NotFoundError, type RegistryAuth } from "@everdict/contracts";
 import type { BudgetTracker, TrustZonePolicy, UsageMeter } from "@everdict/domain";
 import { canConsumeCapability, harnessAuthEnv, parseImageRef, resolveHarnessSecrets } from "@everdict/domain";
 import { makeHarness } from "@everdict/job-runner";
-import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
+import type { HarnessInstanceRegistry, ModelRegistry } from "@everdict/registry";
+import type { RuntimeCompute } from "../common/runtime-compute.js";
 import { resolveSpecModel } from "../core/execution/model-resolving-dispatcher.js";
-import type { DeploymentNomad } from "./nomad-env.js";
+import type { DeploymentCompute } from "./compute-env.js";
 import type { ScopedSecretsFn } from "./types.js";
 
-// Sandbox session runs (execution-model P6) are OPT-IN infrastructure, exactly like file execution: the
-// service exists only where the control plane can reach a container runtime (EVERDICT_SANDBOX_DRIVER=docker,
-// which needs the docker socket mounted into the api container). Everywhere else the routes and the tools
-// are simply absent. Caps default CLOSED-ish (2 per tenant / 8 total) — a session is a scarcer resource than
+// Sandbox session runs (execution-model P6) are OPT-IN infrastructure, exactly like file execution: the lane
+// exists only where the operator asked for compute (`EVERDICT_COMPUTE`, or this lane's own
+// `EVERDICT_SANDBOX_DRIVER`). Everywhere else the routes and the tools are simply absent. Caps default CLOSED-ish (2 per tenant / 8 total) — a session is a scarcer resource than
 // an eval case because nothing ends it but the clock.
-// A placement target, narrowed to its SESSION mode. Dispatching a case and holding a session open are two
-// modes of one object here (docs/architecture/agent-worlds.md §W5) — `isSessionable` is the same compiler-
-// checked guard the backends layer uses for every other capability, so a target that only runs a job to
-// completion is refused up front by name instead of failing somewhere inside the first exec.
-function asSessionCompute(backend: Backend, kind: string, runtime?: string): Driver {
-  if (!isSessionable(backend))
-    throw new BadRequestError(
-      "BAD_REQUEST",
-      { ...(runtime !== undefined ? { runtime } : {}), kind },
-      `A ${kind} target runs a job to completion and cannot hold a sandbox session open — register a nomad runtime for sessions.`,
-    );
-  return backend;
-}
-
 export function buildSandboxSessions(opts: {
   store: RunStore;
   trajectories?: TrajectoryStore;
@@ -74,61 +52,24 @@ export function buildSandboxSessions(opts: {
   publishLayerSnapshot?: SandboxSessionServiceDeps["publishLayerSnapshot"];
   // The operator's isolation policy — applied to a cluster-placed session exactly as to a dispatched case.
   trustZones?: TrustZonePolicy;
-  // The workspace's own registered runtimes (W4): a session can be placed on the tenant's cluster instead of
-  // the deployment default, the same axis a run's placement.target names.
-  runtimes?: RuntimeRegistry;
-  // Cluster-API credentials for that runtime (`spec.authSecret` → the tenant's secret store). Resolved per
-  // build and NEVER placed in the alloc env — the same separation the dispatch lane keeps.
-  runtimeSecretsFor?: (tenant: string) => Promise<Record<string, string>>;
-  // The eval lane's own placement targets. A `nomad` registered here IS this deployment's cluster, so a
-  // session takes that object rather than a lookalike (W5).
-  backends?: BackendRegistry;
-  // THE deployment's Nomad, read once for both lanes (composition/nomad-env).
-  nomad?: DeploymentNomad;
+  // WHERE work runs, for every lane that asks (composition/runtime-compute): the deployment's own compute, and
+  // a tenant's registered runtime resolved with its cluster credentials and trust zone. A session can be placed
+  // on the workspace's own cluster — the same axis a run's placement.target names.
+  compute: RuntimeCompute;
+  // Whether THIS lane is on, from the one compute block (composition/compute-env) rather than an env read here.
+  deployment?: DeploymentCompute;
 }): SandboxSessionService | undefined {
   // WHERE a session's container lives. `docker` is this host (dev, and the fastest snapshot — the driver can
   // commit); `nomad` places it on a cluster, which is what takes worlds off the control-plane host. The
   // cluster backend cannot reach a daemon, so its snapshots go through the registry layer-append path — which
   // is why that had to exist first (docs/architecture/agent-worlds.md §W4).
-  const driverKind = process.env.EVERDICT_SANDBOX_DRIVER;
-  if (driverKind === undefined || driverKind === "") return undefined;
-  if (driverKind !== "docker" && driverKind !== "nomad") {
-    console.warn(`▶ sandbox sessions: ignoring EVERDICT_SANDBOX_DRIVER='${driverKind}' (expected 'docker' or 'nomad')`);
+  if (!opts.deployment?.sandboxes) return undefined;
+  const driver = opts.compute.defaultCompute;
+  if (driver === undefined) {
+    console.warn("▶ sandbox sessions: compute is configured but this deployment has none it can hold open");
     return undefined;
   }
-  if (driverKind === "nomad" && opts.nomad === undefined) {
-    console.warn("▶ sandbox sessions: EVERDICT_SANDBOX_DRIVER=nomad needs NOMAD_ADDR (or EVERDICT_SANDBOX_NOMAD_ADDR)");
-    return undefined;
-  }
-  // The deployment's default compute — the SAME OBJECT the eval lane dispatches to where there is one. A
-  // session and a case are two modes of one placement target, so re-deriving the cluster here would be a
-  // second owner of it: the address, the credential, the namespace and the trust zone would each have to be
-  // remembered twice, and a held-open session would consume a machine the scheduler's `capacity()` never
-  // counted (it only knows the objects in its registry). Where the eval lane registered nothing — the common
-  // `runtime-only` deployment — we build the one target, from the one config block (composition/nomad-env),
-  // so it still cannot be a different cluster.
-  const registered = driverKind === "nomad" ? opts.backends?.tryGet("nomad") : undefined;
-  const defaultBackend =
-    registered ??
-    (driverKind === "nomad" && opts.nomad !== undefined
-      ? new NomadBackend({
-          addr: opts.nomad.addr,
-          // The DISPATCH-mode image (what an eval case runs). A session boots the image its ComputeSpec names
-          // — the world — so this only matters if the same target is also asked to place a case.
-          image: process.env.EVERDICT_AGENT_IMAGE ?? "everdict-job-runner",
-          ...(opts.nomad.apiToken ? { apiToken: opts.nomad.apiToken } : {}),
-          ...(opts.nomad.namespace ? { namespace: opts.nomad.namespace } : {}),
-          // The SAME isolation policy the dispatch lanes use — a session runs untrusted code exactly as an
-          // eval case does, so it must not be isolated by a second, nearby rule.
-          ...(opts.trustZones ? { trustZones: opts.trustZones } : {}),
-        })
-      : new DockerBackend());
-  const driver = asSessionCompute(defaultBackend, driverKind);
-  console.log(
-    driverKind === "nomad"
-      ? `▶ sandbox sessions: nomad at ${opts.nomad?.addr} (${registered ? "the eval lane's own backend" : "cluster-placed"}; snapshots publish through the registry)`
-      : "▶ sandbox sessions: docker (POST /sandboxes + create_sandbox)",
-  );
+  console.log(`▶ sandbox sessions: ${driver.id} (POST /sandboxes + create_sandbox)`);
   const capabilities = opts.capabilities;
   const { harnesses, models, scopedSecretsFor } = opts;
   // harness ref → a session-ready harness: registry spec (a built-in like claude-code has none — undefined
@@ -259,36 +200,13 @@ export function buildSandboxSessions(opts: {
           },
         }
       : undefined;
-  // A session placed on the WORKSPACE's runtime. Cached per (tenant, runtime@version) because a driver is a
-  // client, not state — rebuilding one per session would re-resolve secrets on every create. A runtime kind
-  // that cannot host a session is a 400 that says which kinds can, rather than a driver that fails later.
-  const sessionDrivers = new Map<string, Driver>();
-  const { runtimes, runtimeSecretsFor } = opts;
-  const driverFor =
-    runtimes !== undefined
-      ? async (tenant: string, runtime: string): Promise<Driver | undefined> => {
-          const spec = await runtimes.get(tenant, runtime).catch(() => undefined);
-          if (!spec) return undefined;
-          const key = `${tenant}:${spec.id}@${spec.version}`;
-          const cached = sessionDrivers.get(key);
-          if (cached) return cached;
-          // Built through the SAME path a dispatched case takes — one place that turns a RuntimeSpec into live
-          // compute, so a session inherits the cluster credentials, the trust zone and the capacity envelope
-          // instead of a second construction that has to remember all three.
-          const secrets = runtimeSecretsFor ? await runtimeSecretsFor(tenant) : {};
-          const backend = buildRuntimeBackend(spec, {
-            secretEnv: secrets,
-            ...(opts.trustZones ? { trustZones: opts.trustZones } : {}),
-          });
-          const built = asSessionCompute(backend, spec.kind, runtime);
-          sessionDrivers.set(key, built);
-          return built;
-        }
-      : undefined;
+  // A session on the WORKSPACE's own runtime — the resolver shared with file execution and the browser lane,
+  // so which cluster, which credential and which trust zone have one answer for all of them.
+  const driverFor = (tenant: string, runtime: string) => opts.compute.computeFor(tenant, runtime);
   return new SandboxSessionService({
     store: opts.store,
     driver,
-    ...(driverFor ? { driverFor } : {}),
+    driverFor,
     ...(git ? { git } : {}),
     ...(opts.trajectories ? { trajectories: opts.trajectories } : {}),
     ...(opts.events ? { events: opts.events } : {}),

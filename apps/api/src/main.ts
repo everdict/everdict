@@ -49,6 +49,7 @@ import { LiveLogStore } from "./common/live-log-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
+import { deploymentCompute } from "./composition/compute-env.js";
 import { buildDispatch } from "./composition/dispatch.js";
 import { artifactStoreFromEnv, meterUsagePolicyFromEnv, workspaceFsFromEnv } from "./composition/env-policy.js";
 import {
@@ -65,6 +66,7 @@ import { deploymentNomad } from "./composition/nomad-env.js";
 import { makePersistence } from "./composition/persistence.js";
 import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
+import { buildRuntimeCompute } from "./composition/runtime-compute.js";
 import { buildSandboxSessions } from "./composition/sandbox.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
 import { buildScorecard } from "./composition/scorecard.js";
@@ -148,6 +150,9 @@ async function main(): Promise<void> {
   // THE deployment's Nomad — one block for BOTH lanes (composition/nomad-env). An eval case and a world
   // session are two modes of one placement target, so they must not be able to name two clusters.
   const nomad = deploymentNomad();
+  // WHAT this deployment can hold open, and where (composition/compute-env) — one answer for agent worlds, the
+  // harness playground and "Run this file", which used to ask separately and could disagree.
+  const compute = deploymentCompute();
   const k8sContext = process.env.EVERDICT_K8S_CONTEXT;
   const image = process.env.EVERDICT_AGENT_IMAGE;
 
@@ -437,6 +442,20 @@ async function main(): Promise<void> {
     cipher, // browser-profiles S5 — decrypt the profile's captured storageState
     caseRecorder, // replay ② — managed topology backend records the per-case browser's CDP events into the recording
   });
+  // WHERE anything runs, answered once (composition/runtime-compute): the deployment's own compute, and any
+  // workspace-registered runtime resolved with its cluster credentials and trust zone. Agent worlds, the
+  // harness playground, "Run this file" and interactive browser sessions all come through here — four lanes
+  // that each used to resolve a cluster themselves, and disagreed about credentials while doing it.
+  const runtimeCompute = buildRuntimeCompute({
+    runtimes: runtimeRegistry,
+    secretsFor: runtimeSecretsFor,
+    ...(trustZones ? { trustZones } : {}),
+    backends,
+    ...(compute ? { compute } : {}),
+    ...(nomad ? { nomad } : {}),
+    ...(image ? { jobImage: image } : {}),
+  });
+
   // Revoking a runner drops its lazily-registered self:<owner>:<runnerId> placement backend (runner churn hygiene —
   // built here because the dispatcher is created after the workspace/runner services).
   runnerService.onRevoke = (owner, id) => releaseSelfRunnerBackend(owner, id);
@@ -843,10 +862,10 @@ async function main(): Promise<void> {
   // Runtime binding (browser-profiles S9) — a session with a `runtime` runs the browser on the tenant's registered
   // runtime inside that tenant's trust zone (per-tenant network isolation; reachable from a containerized control
   // plane), else the host provisioner above. Nomad ships first; K8s / self-hosted are follow-ups.
-  const sessionTrustZones = trustZones ?? perTenantTrustZones();
   const runtimeBrowserProvisioner = new RuntimeBrowserProvisioner({
-    resolveSpec: (tenant, id) => runtimeRegistry.get(tenant, id).catch(() => undefined),
-    zoneFor: (tenant) => sessionTrustZones.resolve(tenant),
+    // The SAME resolver world sessions and file runs go through — one answer to which cluster, which cluster
+    // credential and which trust zone, instead of one per lane.
+    resolve: (tenant, id) => runtimeCompute.resolve(tenant, id),
     provisionOnRuntime: runtimeSessionProvision(),
   });
   const routingBrowserProvisioner = new RoutingBrowserProvisioner(browserProvisioner, runtimeBrowserProvisioner);
@@ -973,12 +992,11 @@ async function main(): Promise<void> {
     // W4: a cluster-placed session is isolated by the same policy a dispatched case is, and a workspace can
     // place one on ITS OWN registered runtime rather than borrowing the deployment's compute.
     ...(trustZones ? { trustZones } : {}),
-    runtimes: runtimeRegistry,
-    runtimeSecretsFor,
-    // W5: a session takes the eval lane's OWN nomad where one is registered, so the cluster has one owner —
-    // one credential, one trust zone, one capacity envelope that actually counts held-open sessions.
-    backends,
-    ...(nomad ? { nomad } : {}),
+    // W5: compute comes from the one resolver — the eval lane's OWN nomad where one is registered (so the
+    // cluster has one owner, one credential, one capacity envelope that counts held-open sessions), and the
+    // workspace's registered runtimes on the same axis a run's placement.target names.
+    compute: runtimeCompute,
+    ...(compute ? { deployment: compute } : {}),
     // T-b: the durable reaper rides the same Temporal driver as approvals — a CP dying with the live
     // handle no longer leaks the container or the row. extend re-arms the deadline on touch (W1).
     ...(approvalTemporal
@@ -1144,7 +1162,7 @@ async function main(): Promise<void> {
     fsService: new FsService(workspaceFs, fsRevisionStore),
     // "Run" for a workspace file — a sandbox per run, disposed after it. Opt-in: absent unless the deployment
     // gave the control plane a container runtime (EVERDICT_FILE_EXECUTION_DRIVER=docker).
-    fileExecutionService: buildFileExecutionService(workspaceFs),
+    fileExecutionService: buildFileExecutionService(workspaceFs, runtimeCompute, compute),
     capabilityService,
     // Instance policy surfaced to the web (GET /me → config): does a plain member — not only an admin — get to
     // publish a capability to the instance-wide `public` catalog? Operator opt-in for a community-style deployment.

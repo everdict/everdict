@@ -1,12 +1,8 @@
-import {
-  BadRequestError,
-  type RuntimeSpec,
-  ServiceHarnessSpecSchema,
-  type TrustZone,
-  UpstreamError,
-} from "@everdict/contracts";
+import { BadRequestError, ServiceHarnessSpecSchema, UpstreamError } from "@everdict/contracts";
+import { perTenantTrustZones } from "@everdict/domain";
 import { NomadTopologyRuntime } from "@everdict/topology";
 import type { ProvisionedBrowser } from "../../common/browser-session-provisioner.js";
+import type { ResolvedRuntime } from "../../common/runtime-compute.js";
 
 // A synthetic service spec for a bare interactive-session browser (no eval, no warm topology). The Nomad browser
 // job only reads `target` (image/engine) and the session id, so an empty-services spec is enough; the trust zone
@@ -28,11 +24,14 @@ function sessionSpec(): ReturnType<typeof ServiceHarnessSpecSchema.parse> {
 // (namespace + isolation runtime + cross-tenant network deny). K8s (per-session port-forward) and self-hosted
 // (reverse relay) are follow-ups. See docs/architecture/browser-profiles.md.
 export function runtimeSessionProvision(): (
-  spec: RuntimeSpec,
+  runtime: ResolvedRuntime,
   sessionId: string,
-  zone: TrustZone,
 ) => Promise<ProvisionedBrowser> {
-  return async (spec, sessionId, zone) => {
+  return async ({ tenant, spec, apiToken, zone: resolvedZone }, sessionId) => {
+    // This lane REFUSES to run unzoned. A live browser publishes CDP on a reachable port, so without a
+    // per-tenant namespace + network deny one tenant's session can drive another's browser — the specific gap
+    // S9 closed. Where the operator declared no policy we still isolate here rather than inherit "none".
+    const zone = resolvedZone ?? perTenantTrustZones().resolve(tenant);
     if (spec.kind !== "nomad")
       throw new BadRequestError(
         "BAD_REQUEST",
@@ -41,6 +40,9 @@ export function runtimeSessionProvision(): (
       );
     const runtime = new NomadTopologyRuntime({
       addr: spec.addr,
+      // Control-plane↔cluster auth from the tenant's own secret store (spec.authSecret). This lane could not
+      // carry one at all before, so a browser session on an ACL-enabled Nomad simply 403'd.
+      ...(apiToken ? { apiToken } : {}),
       ...(spec.namespace ? { namespace: spec.namespace } : {}),
       ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
     });

@@ -243,11 +243,17 @@ read the file → provision a container (the language's image, or a caller-chose
   makes a run productive rather than merely observable: a chart, a converted document, a generated dataset. An
   existing path is reported as `skipped`, **never overwritten** — a run is not an edit.
 - **A non-zero exit is a RESULT**, rendered like a terminal would (the traceback is the point), not an error toast.
-- **Opt-in by deployment.** The service is composed only when `EVERDICT_FILE_EXECUTION_DRIVER=docker` (which
-  needs the docker socket mounted into the api container). Absent, the route 404s, the MCP tool does not exist,
-  and `GET /me` reports `config.fileExecution: false` so the web hides Run instead of offering a button whose
-  only possible answer is 404. There is **no local-process fallback**: `LocalDriver` is for code already inside a
-  sandbox (the agent, the job runner) — the control plane is not one.
+- **Opt-in by deployment.** The lane is composed only when the operator asked for it —
+  `EVERDICT_FILE_EXECUTION_DRIVER`, or the deployment-wide `EVERDICT_COMPUTE`. Absent, the route 404s, the MCP
+  tool does not exist, and `GET /me` reports `config.fileExecution: false` so the web hides Run instead of
+  offering a button whose only possible answer is 404. There is **no local-process fallback**: `LocalDriver` is
+  for code already inside a sandbox (the agent, the job runner) — the control plane is not one.
+- **WHERE it runs is the member's choice** (`runtime` on `POST /fs/executions` / `run_file`): one of the
+  workspace's REGISTERED runtimes — their own cluster, inside their own trust zone — resolved by the same
+  resolver agent worlds and browser sessions go through (`docs/runtimes.md`). Absent, it runs on the
+  deployment's own compute. A runtime the workspace does not have is a 404 naming it, never a quiet fall back
+  to ours: a script is arbitrary code, so "on whose machine" is an answer, not a default. A control plane with
+  no docker socket can still offer Run — it has runtimes.
 
 ### Where each type can go next
 

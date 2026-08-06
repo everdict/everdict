@@ -10,5 +10,8 @@ export const RunFsFileBodySchema = z.object({
   path: z.string().min(1).max(600),
   image: z.string().min(1).max(512).optional(),
   timeoutSec: z.number().int().min(1).max(FILE_EXECUTION_MAX_TIMEOUT_SEC).optional(),
+  // WHERE it runs — one of the workspace's registered runtimes (the same axis a run's placement.target and a
+  // sandbox session name). Absent = the deployment's own compute.
+  runtime: z.string().min(1).max(128).optional(),
 });
 export type RunFsFileBody = z.infer<typeof RunFsFileBodySchema>;

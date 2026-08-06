@@ -173,4 +173,34 @@ describe("FileExecutionService — running one workspace file", () => {
     expect(driver.provisioned?.image).toBe("ghcr.io/acme/analysis:2.1.0");
     expect(result.command).toContain("python");
   });
+
+  // WHERE a script runs is the member's choice, on the same axis a run's placement.target names.
+  it("runs on the WORKSPACE's own runtime when one is named — not the deployment's compute", async () => {
+    const fs = new FakeFs({ "analyze.py": "..." });
+    const deployment = new FakeDriver(() => ok());
+    const theirs = new FakeDriver((cmd) => (cmd.startsWith("find") ? ok("./analyze.py\n") : ok()));
+    const service = new FileExecutionService(fs, deployment, async (tenant, runtime) =>
+      tenant === "acme" && runtime === "nomad-eu" ? theirs : undefined,
+    );
+
+    await service.run("acme", { path: "analyze.py", runtime: "nomad-eu" });
+
+    expect(theirs.provisioned).toBeDefined();
+    expect(deployment.provisioned).toBeUndefined(); // never quietly on ours
+  });
+
+  it("404s a runtime the workspace does not have, instead of falling back to the deployment's compute", async () => {
+    // A silent fallback would run a member's arbitrary code somewhere they did not choose — the whole reason
+    // the axis exists is that "on whose machine" is an answer, not a default.
+    const deployment = new FakeDriver(() => ok());
+    const service = new FileExecutionService(new FakeFs({ "analyze.py": "..." }), deployment, async () => undefined);
+
+    await expect(service.run("acme", { path: "analyze.py", runtime: "ghost" })).rejects.toBeInstanceOf(NotFoundError);
+    expect(deployment.provisioned).toBeUndefined();
+  });
+
+  it("asks for a runtime by name when the deployment has no compute of its own", async () => {
+    const service = new FileExecutionService(new FakeFs({ "analyze.py": "..." }), undefined, async () => undefined);
+    await expect(service.run("acme", { path: "analyze.py" })).rejects.toBeInstanceOf(BadRequestError);
+  });
 });

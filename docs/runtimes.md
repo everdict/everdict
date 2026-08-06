@@ -76,6 +76,32 @@ The `RuntimeDispatcher` wraps the global `Scheduler` (a `Dispatcher`):
 A scorecard run selects a runtime: `POST /scorecards` `{…, runtime }` sets `placement.target` on every case.
 (Single runs carry `placement.target` on the `EvalCase`.)
 
+## A runtime is not only where evals run
+
+Everything this control plane can put in a container goes through the same resolver
+(`apps/api/src/composition/runtime-compute.ts`), so "which cluster, which cluster credential, which trust zone"
+has ONE answer:
+
+| lane | names a runtime as |
+| --- | --- |
+| eval case | `placement.target` (`POST /runs`, `POST /scorecards {runtime}`) |
+| agent world / harness playground | `POST /sandboxes {runtime}` |
+| run a workspace file | `POST /fs/executions {runtime}` · `run_file {runtime}` |
+| interactive browser session | the session's `runtime` (browser-profiles S9) |
+
+Each of these used to resolve a cluster for itself, and they disagreed about credentials while doing it: two of
+the four never read `spec.authSecret` at all, so an ACL-enabled Nomad refused their work for a reason that
+looked like something else. They now share `resolve(tenant, runtime)` → spec + cluster credential + zone. A
+lane that provisions and execs takes the resolved target as a `Driver` (narrowed by `isSessionable`); the
+browser lane takes the resolution one step earlier, because it needs a **published CDP port** rather than an
+exec channel, and that is not something the `Driver` contract says.
+
+A runtime the workspace does not have is a **404 naming it** in every lane — never a quiet fall back to the
+deployment's own compute, which would run a tenant's code somewhere they did not choose. The deployment's own
+compute is declared once (`EVERDICT_COMPUTE=docker|nomad`; the older `EVERDICT_SANDBOX_DRIVER` /
+`EVERDICT_FILE_EXECUTION_DRIVER` still work and still gate their own lane, but they cannot name different
+kinds — that is a boot failure).
+
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |
 |---|---|---|

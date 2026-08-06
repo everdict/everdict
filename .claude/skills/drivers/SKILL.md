@@ -38,9 +38,13 @@ paths in (e.g. the runner's `~/.codex` login). Consumed by the managed `DockerBa
 `FileExecutionService` (`@everdict/application-control` `fs/file-execution-service.ts`) provisions a Driver per
 RUN of a workspace file (the Files viewer's "Run" / `run_file`): write the file in → `timeout <sec> sh -c
 '<interpreter> ./<name>'` → collect stdout/stderr + the files it produced → `dispose()` in a `finally`. Composed
-only where a container runtime exists (`EVERDICT_FILE_EXECUTION_DRIVER=docker`); **never LocalDriver** — that one
-is for code already inside a sandbox (agent, job runner), and the control plane is not one. Interpreter/image
-policy is pure domain (`fileRunPlanFor`). See `docs/architecture/workspace-filesystem.md` (Running a file).
+only where the operator asked for compute (`EVERDICT_COMPUTE`, or the lane's own `EVERDICT_FILE_EXECUTION_DRIVER`);
+**never LocalDriver** — that one is for code already inside a sandbox (agent, job runner), and the control plane
+is not one. The Driver it provisions on comes from the SHARED resolver (`apps/api/src/composition/runtime-compute.ts`),
+so a run can name one of the workspace's registered runtimes (`runtime` on the request) and land on the tenant's
+own cluster inside their trust zone — a runtime the workspace lacks is a 404 naming it, never a fall back to
+ours. Interpreter/image policy is pure domain (`fileRunPlanFor`). See
+`docs/architecture/workspace-filesystem.md` (Running a file) + `docs/runtimes.md`.
 
 ## Streaming exec (`execStream`) — one spawn core
 
