@@ -33,6 +33,7 @@ import type { CodeToolRuntime } from "./code-tools.js";
 import type { ToolProvider } from "./mcp-tools.js";
 import {
   MEMORY_DIRECTORY,
+  MEMORY_INDEX_FILE,
   MEMORY_INDEX_PATH,
   buildMemoryExtractor,
   maintainMemoryExtraction,
@@ -163,6 +164,23 @@ function withAges(index: string, ages: Map<string, number>): string {
     .join("\n");
 }
 
+// Memories the index does not point at. A memory is only recalled through the index, so a body with no line is
+// invisible no matter how good it is — and we KNOW how they get there: the turn-end extractor publishes the body
+// first and then the index, so a lost index race (or a failed second write) leaves exactly this. Nothing noticed
+// until now, which is what made "the consolidation pass reconciles it" a comment rather than a behaviour.
+function unlistedMemories(index: string, files: readonly string[]): string | undefined {
+  const listed = new Set<string>();
+  for (const m of index.matchAll(/\]\(([^)]+\.md)\)/g)) {
+    const target = m[1];
+    if (target !== undefined) listed.add(target.replace(/^\.?\//, ""));
+  }
+  const orphans = files.filter((name) => name.endsWith(".md") && name !== MEMORY_INDEX_FILE && !listed.has(name));
+  if (orphans.length === 0) return undefined;
+  const shown = orphans.slice(0, 5).join(", ");
+  const rest = orphans.length > 5 ? `, and ${orphans.length - 5} more` : "";
+  return `NOTE: ${orphans.length} file(s) under ${MEMORY_DIRECTORY}/ are not listed in the index (${shown}${rest}) — they were saved but their index line never landed, so nobody can recall them. Read each one and either add its line to ${MEMORY_INDEX_PATH} or delete it if it no longer holds.`;
+}
+
 // Truncate on BOTH caps, cutting at a line boundary, and report which cap fired with its own remedy.
 function capIndex(content: string): { index: string; warning?: string } {
   const lines = content.split("\n");
@@ -202,20 +220,27 @@ export async function workspaceMemoryPreamble(call: McpInvoke, now = Date.now())
       return undefined;
     const { index: capped, warning } = capIndex(file.content);
 
-    // Per-entry ages — one directory read, best-effort (an unreachable listing just means no ages, never no recall).
+    // One directory read serves two purposes, and neither is a precondition for recall: per-entry ages, and the
+    // files that exist but no index line points at. Best-effort — an unreachable listing just means neither.
     const ages = new Map<string, number>();
+    const files: string[] = [];
     try {
       const listed = await call("list_files", { path: MEMORY_DIRECTORY });
       if (!listed.isError) {
         for (const e of JSON.parse(listed.content) as { name?: unknown; modifiedAt?: unknown }[]) {
-          if (typeof e.name !== "string" || typeof e.modifiedAt !== "string") continue;
+          if (typeof e.name !== "string") continue;
+          files.push(e.name);
+          if (typeof e.modifiedAt !== "string") continue;
           const days = daysAgo(e.modifiedAt, now);
           if (days !== undefined) ages.set(e.name, days);
         }
       }
     } catch {
-      // no ages this turn — the index still recalls
+      // no ages and no orphan check this turn — the index still recalls
     }
+    // Judged against the FULL index, never the capped one: a truncated index would otherwise report everything
+    // past the cut as unlisted.
+    const orphans = unlistedMemories(file.content, files);
 
     const discipline = [
       `Read a listed memory's body with get_file (${MEMORY_DIRECTORY}/<file>) when it bears on THIS task, or grep across memories with search_files (path: ${MEMORY_DIRECTORY}).`,
@@ -227,6 +252,7 @@ export async function workspaceMemoryPreamble(call: McpInvoke, now = Date.now())
       "",
       withAges(capped, ages),
       ...(warning ? ["", warning] : []),
+      ...(orphans ? ["", orphans] : []),
       "",
       discipline,
     ].join("\n");

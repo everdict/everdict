@@ -5,7 +5,8 @@ import type { LlmTransport } from "@everdict/llm";
 // The agents' cross-conversation memory area on the workspace filesystem. Owned here (not chat.ts) so the
 // extraction below and the recall preamble share one definition without an import cycle.
 export const MEMORY_DIRECTORY = "memory";
-export const MEMORY_INDEX_PATH = "memory/MEMORY.md";
+export const MEMORY_INDEX_FILE = "MEMORY.md";
+export const MEMORY_INDEX_PATH = `${MEMORY_DIRECTORY}/${MEMORY_INDEX_FILE}`;
 
 // Turn-end auto extraction (Claude Code's extractMemories reinterpreted): after a successful turn, a SMALL-model
 // pass decides whether the turn produced ONE durable workspace memory the inline discipline missed, and the HOST

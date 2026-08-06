@@ -368,6 +368,40 @@ describe("workspace memory recall", () => {
     expect(await workspaceMemoryPreamble(async () => indexFile("QkFE", { encoding: "base64" }))).toBeUndefined();
   });
 
+  it("reports memories the index does not point at — a saved body with no line is unrecallable", async () => {
+    // Given a directory holding a memory whose index line never landed (the extractor's second write can lose)
+    const preamble = await workspaceMemoryPreamble(async (name) =>
+      name === "get_file"
+        ? indexFile("- [Cadence](cadence.md) — Friday reports")
+        : listing([
+            { name: "MEMORY.md", modifiedAt: "2026-08-05T00:00:00.000Z" },
+            { name: "cadence.md", modifiedAt: "2026-08-05T00:00:00.000Z" },
+            { name: "owner.md", modifiedAt: "2026-08-05T00:00:00.000Z" },
+            { name: "notes.txt", modifiedAt: "2026-08-05T00:00:00.000Z" },
+          ]),
+    );
+    // Then the orphan is named with what to do about it — the index itself is never counted as one
+    expect(preamble).toContain("1 file(s) under memory/ are not listed");
+    expect(preamble).toContain("owner.md");
+    expect(preamble).not.toContain("MEMORY.md are not listed");
+    expect(preamble).not.toContain("notes.txt"); // only memories, not whatever else shares the directory
+  });
+
+  it("does not call a TRUNCATED index's tail an orphan — the check reads the full index", async () => {
+    // Given an index over the line cap whose last entries are cut from the injected block
+    const many = Array.from({ length: 250 }, (_, i) => `- [M${i}](m${i}.md) — hook`).join("\n");
+    const preamble = await workspaceMemoryPreamble(async (name) =>
+      name === "get_file"
+        ? indexFile(many)
+        : listing(
+            Array.from({ length: 250 }, (_, i) => ({ name: `m${i}.md`, modifiedAt: "2026-08-05T00:00:00.000Z" })),
+          ),
+    );
+    // Then truncation is reported, and none of the cut entries is mistaken for an unlisted memory
+    expect(preamble).toContain("too many entries");
+    expect(preamble).not.toContain("not listed in the index");
+  });
+
   it("names WHICH cap the index breached, because the two have different remedies", async () => {
     // Given an index of many SHORT entries — the line cap is what it breaches
     const many = Array.from({ length: 250 }, (_, i) => `- [M${i}](m${i}.md) — hook`).join("\n");
