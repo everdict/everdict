@@ -871,7 +871,7 @@ export class ScorecardService {
     baselineId: string,
     candidateId: string,
     opts: { zThreshold?: number; visibleTeams?: string[] } = {},
-  ): Promise<ScorecardDiff & { trials?: TrialDiff }> {
+  ): ReturnType<ScorecardAnalyticsService["diff"]> {
     return this.analytics.diff(tenant, baselineId, candidateId, opts);
   }
 

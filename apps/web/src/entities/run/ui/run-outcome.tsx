@@ -106,7 +106,8 @@ function EvalOutcome({ run }: { run: OutcomeRun }) {
   if (scores.length === 0) return null
 
   const siblings = scores.map((s) => s.metric)
-  const decided = scores.filter((s) => s.pass !== undefined)
+  // Measurements only — an unmeasured row smuggling a pass flag must not enter the "n/m graders passed" line.
+  const decided = scores.filter((s) => s.pass !== undefined && !isUnmeasuredScore(s))
   const passed = decided.filter((s) => s.pass === true)
 
   return (

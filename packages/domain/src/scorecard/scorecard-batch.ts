@@ -9,6 +9,7 @@ import type {
   VerdictPolicyRef,
 } from "@everdict/contracts";
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
+import { headlinePassRate } from "./headline.js";
 import { summarizeTrials } from "./trials.js";
 import { verdictPolicyRef } from "./verdict-policy.js";
 
@@ -129,8 +130,10 @@ function batchTerminalFact(
   const { dataset, harness } = batchLabels(record);
   // passRate from the summary this terminal write persists (extras wins; a bare failure keeps the record's) —
   // the pointer an agent trigger can filter on (`passRate < 1`) without re-reading the full results.
+  // Authority-ranked (headlinePassRate), NOT first-metric-with-a-passRate: summary order is not authority,
+  // and a trigger acting on `custom_check`'s rate while `tests_pass` disagrees acts on the wrong number.
   const summary = extras.summary ?? record.summary;
-  const passRate = summary?.find((row) => row.passRate !== undefined)?.passRate;
+  const passRate = headlinePassRate({ ...(summary ? { summary } : {}) }) ?? undefined;
   return [
     {
       kind: status === "succeeded" ? "scorecard.completed" : "scorecard.failed",
