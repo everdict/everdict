@@ -22,6 +22,7 @@ interface Principal {
   roles: string[];        // everdict roles: viewer | member | admin
   via: "oidc" | "api-key";
   email?: string;         // oidc email/preferred_username — display only (member list), never authz/identity; absent for api keys
+  name?: string;          // oidc name claim (given+family fallback) — display only; seeds the user profile on login (fill-if-absent, a self-set profile name wins)
 }
 ```
 

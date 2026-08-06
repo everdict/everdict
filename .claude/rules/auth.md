@@ -6,11 +6,13 @@ paths: "packages/auth/**,apps/api/src/server.ts,apps/api/src/main.ts,deploy/keyc
 The **control plane owns all auth** — `@everdict/auth` resolves identity, `apps/api` enforces it. The web is a
 token courier, never an auth authority. See `docs/auth.md`.
 
-- **One identity type:** every credential resolves to a `Principal{ subject, workspace, roles, via, email? }`.
+- **One identity type:** every credential resolves to a `Principal{ subject, workspace, roles, via, email?, name? }`.
   `workspace === tenant === trust-zone key` — never introduce a second tenancy axis; scope every read/write to
-  `principal.workspace`. `email` is the OIDC `email`/`preferred_username` claim (optional; absent for API keys) —
-  **display metadata only** (captured into the membership row for a human-readable member list), never an
-  authz/identity input; the opaque `sub` remains the identity key.
+  `principal.workspace`. `email` is the OIDC `email`/`preferred_username` claim and `name` the OIDC `name`
+  (given+family fallback) claim (optional; absent for API keys) — **display metadata only** (email is captured
+  into the membership row, name seeds the user profile on login fill-if-absent so member lists / "created by"
+  surfaces show a real name; a self-set profile name always wins), never an authz/identity input; the opaque
+  `sub` remains the identity key.
 - **Multi-workspace membership.** A subject may belong to several workspaces (SSOT = `@everdict/db`
   `WorkspaceStore`: `everdict_workspaces` + `everdict_workspace_members`). The **active** one is resolved per request in
   `apps/api` (`applyActiveWorkspace`): the `x-everdict-workspace` header selects a membership (`roles` come from it);
