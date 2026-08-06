@@ -104,6 +104,7 @@ describe("run audience — a member's agent turns and shell sessions are their o
     for (const url of [
       "/runs/turn-alice",
       "/runs/turn-alice/trajectory",
+      "/runs/turn-alice/trajectory/live",
       "/runs/shell-alice",
       "/runs/shell-alice/logs",
     ]) {

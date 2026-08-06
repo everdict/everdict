@@ -1,4 +1,10 @@
-import { type CaseJob, type CaseResult, InternalError, RUNNER_PROTOCOL_VERSION } from "@everdict/contracts";
+import {
+  type CaseJob,
+  type CaseResult,
+  InternalError,
+  RUNNER_PROTOCOL_VERSION,
+  type TraceEvent,
+} from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { runLeaseWorkers } from "./runner-loop.js";
 
@@ -385,6 +391,65 @@ describe("runLeaseWorkers — live execution log stream (report_case_log)", () =
   it("does NOT stream when the job carries no runId (best-effort — control-plane dispatch only)", async () => {
     const lines = await runOnce(jobWith(undefined), async () => ({}) as CaseResult);
     expect(lines).toEqual([]);
+  });
+});
+
+// Live trace (observability ⑨) — the loop hands runJob a reportTrace that pushes drained-event batches to
+// report_case_trace under the CP-minted runId; without a runId there is no key, so no hook is passed at all.
+describe("runLeaseWorkers — live trace push (report_case_trace)", () => {
+  const jobWith = (runId?: string): Record<string, unknown> => ({
+    jobId: "j1",
+    job: {
+      ...(runId ? { runId } : {}),
+      harness: { id: "h", version: "1" },
+      evalCase: { id: "c1", env: { kind: "prompt" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    },
+  });
+
+  const runOnce = async (
+    firstJob: Record<string, unknown>,
+  ): Promise<{ pushed: Array<Record<string, unknown>>; sawHook: boolean | undefined }> => {
+    const pushed: Array<Record<string, unknown>> = [];
+    let sawHook: boolean | undefined;
+    let stop = false;
+    const queue = [firstJob];
+    const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (name === "lease_job") {
+        const next = queue.shift();
+        if (!next) stop = true;
+        return next ?? {};
+      }
+      if (name === "report_case_trace") pushed.push(args);
+      if (name === "submit_job_result") stop = true;
+      return {};
+    };
+    const runJob = async (
+      _job: CaseJob,
+      opts?: { reportTrace?: (events: TraceEvent[]) => Promise<void> },
+    ): Promise<CaseResult> => {
+      sawHook = opts?.reportTrace !== undefined;
+      await opts?.reportTrace?.([{ t: 0, kind: "message", role: "assistant", text: "step" }]);
+      return {} as CaseResult;
+    };
+    await runLeaseWorkers(
+      { callJson, runJob, setHeartbeat: () => () => {}, sleep: async () => {} },
+      { maxConcurrent: 1, waitMs: 0, heartbeatMs: 10_000, pollMs: 0, capabilities: ["repo"], shouldStop: () => stop },
+    );
+    return { pushed, sawHook };
+  };
+
+  it("pushes the batch under the job's runId", async () => {
+    const { pushed, sawHook } = await runOnce(jobWith("evd-run-1"));
+    expect(sawHook).toBe(true);
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]?.runId).toBe("evd-run-1");
+    expect(pushed[0]?.events).toHaveLength(1);
+  });
+
+  it("passes no hook at all without a runId (nothing to key the push by)", async () => {
+    const { pushed, sawHook } = await runOnce(jobWith(undefined));
+    expect(sawHook).toBe(false);
+    expect(pushed).toEqual([]);
   });
 });
 

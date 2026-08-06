@@ -1,4 +1,4 @@
-import type { CaseJob, CaseResult, RegistryAuth, ServiceHarnessSpec } from "@everdict/contracts";
+import type { CaseJob, CaseResult, RegistryAuth, ServiceHarnessSpec, TraceEvent } from "@everdict/contracts";
 import { pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
 import { type DriverMount, pullWithRegistryAuth, runCaseJob } from "@everdict/job-runner";
 import {
@@ -46,6 +46,7 @@ export async function runLeasedJob(
         mounts?: DriverMount[];
         signal?: AbortSignal;
         reportScreen?: (frameBase64: string) => Promise<void>;
+        reportTrace?: (events: TraceEvent[]) => Promise<void>;
       },
     ) => Promise<CaseResult>;
     runtimeOptions?: DockerTopologyRuntimeOptions; // service topology runtime tuning (readiness timeout etc.)
@@ -62,6 +63,9 @@ export async function runLeasedJob(
     // Environment-plane record sink (replay ②) — a service (topology) case's CDP recorder streams the per-case browser's
     // network/console/nav (+ frames) through here to the durable recorder. Only used by the topology branch below.
     recordSink?: EnvRecordSink;
+    // Live-trace batch reporter (observability ⑨) — passed through to runCaseJob unconditionally (the trace is
+    // universal, unlike the screen): host-native and containerized runs both tee their drained TraceEvents out.
+    reportTrace?: (events: TraceEvent[]) => Promise<void>;
   } = {},
 ): Promise<CaseResult> {
   const spec = job.harnessSpec;
@@ -91,6 +95,7 @@ export async function runLeasedJob(
     ...(containerize && opts.mounts?.length ? { mounts: opts.mounts } : {}),
     ...(opts.signal ? { signal: opts.signal } : {}),
     ...(containerize && opts.reportScreen ? { reportScreen: opts.reportScreen } : {}),
+    ...(opts.reportTrace ? { reportTrace: opts.reportTrace } : {}),
   });
 }
 

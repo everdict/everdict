@@ -35,6 +35,9 @@ export interface RunnerLoopDeps {
       // Environment-plane record sink (replay ②) — a topology (browser) case's CDP recorder streams the browser's own
       // network/console/nav (+ screencast frames) through here to the durable recorder. Only for control-plane dispatch.
       recordSink?: EnvRecordSink;
+      // Live-trace batch reporter (observability ⑨) — the run tees drained TraceEvents here; the loop pushes them to
+      // the control plane's live-trace store so the run detail shows the trajectory accumulating. Best-effort.
+      reportTrace?: (events: TraceEvent[]) => Promise<void>;
     },
   ) => Promise<CaseResult>;
   log?: (msg: string) => void; // default no-op (tests stay quiet)
@@ -201,6 +204,12 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
             frame: (frame) => void deps.callJson("report_case_screen", { runId, frame }).catch(() => {}),
           }
         : undefined;
+      // Live trace (observability ⑨): push the drained TraceEvent batches to the control plane's live-trace store,
+      // keyed by the CP-minted runId — the run detail page shows the trajectory accumulating while the case runs.
+      // Best-effort like every push; the sealed result stays the durable record. Only wired with a runId.
+      const reportTrace = runId
+        ? (events: TraceEvent[]): Promise<void> => deps.callJson("report_case_trace", { runId, events }).then(() => {})
+        : undefined;
       reportLog?.("▶ Started — running the case on this self-hosted runner.");
       // M1 — the self-hosted lane's infra-plane record: no orchestrator sees this case, so the RUNNER (the layer
       // that does) stamps the host identity onto the result's trace. The runner id itself is already on the run
@@ -227,6 +236,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
           signal: controller.signal,
           ...(reportScreen ? { reportScreen } : {}),
           ...(recordSink ? { recordSink } : {}),
+          ...(reportTrace ? { reportTrace } : {}),
         });
         // Best-effort append — the infra record must never fail a job (a test double may return a bare object).
         result.trace = [...(result.trace ?? []), leasedMark, hostInfra("finished", "case finished on this runner")];

@@ -1,6 +1,6 @@
 import { CaseRecordingSchema } from "@everdict/contracts";
 import { RunExecResponseSchema } from "@everdict/contracts/wire";
-import { RunLogsResponseSchema } from "@everdict/contracts/wire";
+import { RunLiveTraceResponseSchema, RunLogsResponseSchema } from "@everdict/contracts/wire";
 import { RunPlacementResponseSchema } from "@everdict/contracts/wire";
 import { RunScreenResponseSchema } from "@everdict/contracts/wire";
 import { RunTopologyResponseSchema, ServiceLogsResponseSchema } from "@everdict/contracts/wire";
@@ -34,6 +34,23 @@ const docs = {
     querystring: logStreamQuery,
     response: {
       200: { description: "Log snapshot", ...toJsonSchema(RunLogsResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  liveTrace: {
+    summary: "Get a run's live trajectory while it runs",
+    description:
+      "The run's own TraceEvents accumulating BEFORE anything seals (live-observability ⑨): the dispatch " +
+      "account's placement marks, a self-hosted runner's pushed event batches, and the managed job's " +
+      "event-sentinel stdout lines — everything collected so far on each read (snapshot semantics, " +
+      "poll-and-replace). The sealed trajectory (GET /runs/:id/trajectory) is the durable record; this is its " +
+      "preview and empties once the run settles. Workspace-scoped (other workspace = 404); requires runs:read; " +
+      "personal runs (agent/sandbox) answer only to their owner (404 otherwise). found=false means nothing has " +
+      "arrived yet.",
+    tags: ["run"],
+    params: runIdParams,
+    response: {
+      200: { description: "Live trajectory snapshot", ...toJsonSchema(RunLiveTraceResponseSchema) },
       ...errorResponses(401, 403, 404),
     },
   },

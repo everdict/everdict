@@ -19,6 +19,12 @@ export interface RunContext {
   // store, keyed by runId); runCaseJob supplies `captureCmd` from the harness's declared liveScreen. Best-effort:
   // capture/report failures are swallowed and never affect the eval result. Absent = no live screen.
   liveScreen?: LiveScreenCapture;
+  // Live in-run trace tee (opt-in, in-process only — never crosses the wire, like `signal`). When set, runCase hands
+  // every TraceEvent it drains from the harness to `report` in batches on a short cadence, so an observer can watch
+  // the trajectory accumulate while the case still runs. The self-hosted runner supplies a report that pushes to the
+  // control plane's live-trace store; the managed job prints EVENT_SENTINEL stdout lines instead. Best-effort: a
+  // report failure is swallowed and the sealed CaseResult.trace stays the durable record. Absent = no live trace.
+  liveTrace?: LiveTraceReport;
 }
 
 // The in-process live-screen capture hook carried on RunContext. captureCmd is exec'd in the case compute and must
@@ -27,6 +33,13 @@ export interface RunContext {
 export interface LiveScreenCapture {
   captureCmd: string;
   report: (frameBase64: string) => Promise<void>;
+  intervalMs?: number;
+}
+
+// The in-process live-trace tee carried on RunContext. runCase buffers drained TraceEvents and flushes them to
+// `report` every intervalMs (default 1000) — batched so a chatty harness costs one report per tick, not per event.
+export interface LiveTraceReport {
+  report: (events: TraceEvent[]) => Promise<void>;
   intervalMs?: number;
 }
 

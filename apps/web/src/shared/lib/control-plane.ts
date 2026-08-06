@@ -305,6 +305,9 @@ export const controlPlane = {
       auth,
       `/runs/${encodeURIComponent(id)}/logs${stream ? `?stream=${encodeURIComponent(stream)}` : ''}`
     ),
+  // 라이브 궤적 스냅숏 (LiveTrace 위젯이 폴링) — 실행 중 쌓이는 TraceEvent 전량(봉인 전 미리보기).
+  getRunLiveTrace: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/trajectory/live`),
   // 케이스 배치 조회(런타임 디버깅) — 케이스 잡이 클러스터 안에서 어디까지 갔는지(blocked 용량 판정·노드·이벤트 피드).
   getRunPlacement: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/placement`),

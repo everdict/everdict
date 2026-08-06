@@ -13,7 +13,13 @@ import { AppError, type CaseJob, type CaseResult, type TraceEvent } from "@everd
 // composition/dispatch.ts, OUTSIDE RuntimeDispatcher so the recorded target is the name the user chose
 // (the runtime id / self:<runner>), not the rewritten internal backend name.
 export class TraceRecordingDispatcher implements Dispatcher {
-  constructor(private readonly inner: Dispatcher) {}
+  constructor(
+    private readonly inner: Dispatcher,
+    // Live tee (observability ⑨, optional): each mark ALSO lands in the live-trace buffer keyed by the CP-minted
+    // job.runId, so the run detail's live view opens with the dispatch account before any agent event arrives.
+    // The prepend below stays the durable record; this is the same events' preview.
+    private readonly live?: { append: (runId: string, events: TraceEvent[]) => void },
+  ) {}
 
   async dispatch(job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
     const t0 = Date.now();
@@ -22,14 +28,16 @@ export class TraceRecordingDispatcher implements Dispatcher {
     const mark = (event: string, message: string): void => {
       const now = Date.now();
       messages.push(message);
-      events.push({
+      const traceEvent: TraceEvent = {
         t: Math.max(0, now - t0),
         kind: "infra",
         scope: "placement",
         event,
         message,
         at: new Date(now).toISOString(),
-      });
+      };
+      events.push(traceEvent);
+      if (job.runId) this.live?.append(job.runId, [traceEvent]);
     };
     const target = job.evalCase.placement?.target ?? "default";
     mark("accepted", `case accepted by the control plane — target ${target}`);

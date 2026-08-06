@@ -119,6 +119,7 @@ export * from "./run/case-placement.js";
 export * from "./run/run-detail.js";
 export * from "./run/run-exec.js";
 export * from "./run/run-list.js";
+export * from "./run/run-live-trace.js";
 export * from "./run/run-logs.js";
 export * from "./run/run-screen.js";
 export * from "./run/run.js";

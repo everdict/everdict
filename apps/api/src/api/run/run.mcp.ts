@@ -112,6 +112,24 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   );
 
   server.registerTool(
+    "get_run_live_trace",
+    {
+      description:
+        "The run's own TraceEvents accumulating while it runs (live trajectory — poll while running, each read " +
+        "returns everything collected so far): dispatch placement marks, runner-pushed batches, and the managed " +
+        "job's event-sentinel lines. A preview of the evidence get_run_trajectory serves once sealed. " +
+        "found=false = nothing has arrived yet",
+      inputSchema: { id: z.string().describe("run id") },
+    },
+    ({ id }: { id: string }) =>
+      run(principal, "runs:read", async () => {
+        const out = await deps.service.liveTrace(id);
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
+        return ok({ status: out.record.status, found: out.events.length > 0, events: out.events });
+      }),
+  );
+
+  server.registerTool(
     "get_run_screen",
     {
       description:

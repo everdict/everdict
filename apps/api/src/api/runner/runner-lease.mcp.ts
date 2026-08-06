@@ -1,5 +1,5 @@
 import { type SelfHostedKey, runnerUpdateRequired } from "@everdict/application-control";
-import { CaseResultSchema, RUNNER_PROTOCOL_VERSION, TrackEntrySchema } from "@everdict/contracts";
+import { CaseResultSchema, RUNNER_PROTOCOL_VERSION, TraceEventSchema, TrackEntrySchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain } from "../mcp-context.js";
@@ -158,6 +158,29 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
             logs.append(runId, line);
             // Durable replay tee (best-effort) — persist the log line onto the recording's logs lane.
             await deps.caseRecorder?.recordLog(runId, line);
+            return ok({ ok: true });
+          }),
+      );
+    }
+
+    // Live trace push (observability ⑨) — the trajectory twin of report_case_log. The runner tees the TraceEvents
+    // runCase drains from the harness into short-cadence batches and pushes them here, keyed by the CP-minted
+    // runId; RunService.liveTrace() serves the accumulated events on the run detail page's live-trace panel. The
+    // sealed result stays the durable record. Runner token only, best-effort (a push failure never affects the run).
+    if (deps.liveTraces) {
+      const traces = deps.liveTraces;
+      server.registerTool(
+        "report_case_trace",
+        {
+          description:
+            "Push a batch of drained TraceEvents for a running case, keyed by its runId — the run detail page shows the trajectory accumulating live. Only meaningful for a self-hosted runner (managed jobs print event-sentinel stdout lines instead); best-effort (drop failures).",
+          inputSchema: { runId: z.string().min(1), events: z.array(TraceEventSchema).min(1).max(500) },
+        },
+        ({ runId, events }) =>
+          plain(async () => {
+            const key = runnerKey();
+            if (!key) return fail(NEED_RUNNER);
+            traces.append(runId, events);
             return ok({ ok: true });
           }),
       );

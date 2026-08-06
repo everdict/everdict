@@ -22,7 +22,9 @@ whole `runCase` inside an isolated unit → emits CaseResult (`__EVERDICT_RESULT
 capability interface it *also* implements, narrowed by a guard — so the compiler tracks who can do what, instead of
 a runtime `backend.logs?.()` returning `undefined` on backends that never had it:
 - `Recoverable` (`adopt` + `kill`) — jobs that outlive the control plane (Nomad/K8s). In-process/pull backends omit it.
-- `Observable` (`logs` + `exec`) — live-progress read + one-shot exec (Nomad + K8s).
+- `Observable` (`logs` + `caseEvents` + `exec`) — live-progress read + one-shot exec (Nomad + K8s). `logs` is the
+  human view (result sentinel AND live-event lines stripped); `caseEvents` decodes the job's `EVENT_SENTINEL`
+  stdout lines to `TraceEvent[]` (live-observability ⑨ — the managed lane's live trajectory, snapshot semantics).
 - `Shellable` (`execStream`) — interactive PTY-over-WS. **Nomad only** (`nomad alloc exec -i`); K8s has no stream exec.
 - `ScreenCapturable` (`captureScreen(runId)`) — topology backends' per-RUN browser frame (keyed by runId, not caseId).
 - `Probeable` (`probe`) — connection test without a job.

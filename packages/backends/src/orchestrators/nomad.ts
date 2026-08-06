@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { parseResult, stripSentinel } from "@everdict/contracts";
+import { extractLiveEvents, parseResult, stripSentinel } from "@everdict/contracts";
 import {
   AppError,
   BadRequestError,
@@ -1018,38 +1018,56 @@ export class NomadBackend
     }
   }
 
-  // Current output of the case's newest job — live-progress tail (no waiting: a job with no alloc yet reads as
-  // undefined and the caller polls again). Sentinel payload stripped (it's the machine result, not progress).
-  // stream=stderr reads the alloc's stderr file — harnesses often log progress there while stdout carries only
-  // the final result block (stripSentinel is a no-op on stderr, harmless).
+  // The case's newest job's current raw output — the shared fetch behind logs() (human view, sentinel-stripped)
+  // and caseEvents() (live-event lines, decoded). No waiting: a job with no alloc yet reads as undefined and the
+  // caller polls again.
+  private async rawCaseLogs(caseId: string, stream: LogStream): Promise<string | undefined> {
+    const prefix = `everdict-${caseId}-`;
+    const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
+    if (res.status >= 300) return undefined;
+    const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
+    const newest = jobs
+      .filter((j) => j.ID?.startsWith(prefix))
+      .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+    if (!newest?.ID) return undefined;
+    const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
+    const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+    const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
+    if (allocsRes.status >= 300) return undefined;
+    // The CURRENT alloc's log file — a stale terminal alloc's file used to be tailed as "live progress".
+    const alloc = currentAlloc(
+      JSON.parse(allocsRes.text) as Array<{ ID: string; CreateIndex?: number; DesiredStatus?: string }>,
+    );
+    if (!alloc?.ID) return undefined; // still queued — nothing to tail yet
+    const nsq2 = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
+    const logs = await this.http.request(
+      "GET",
+      `/v1/client/fs/logs/${alloc.ID}?task=agent&type=${stream}&plain=true${nsq2}`,
+    );
+    if (logs.status >= 300) return undefined;
+    return logs.text;
+  }
+
+  // Current output of the case's newest job — live-progress tail. Sentinel payloads stripped (the machine result
+  // and live-event lines are not progress). stream=stderr reads the alloc's stderr file — harnesses often log
+  // progress there while stdout carries only the result block (stripSentinel is a no-op on stderr, harmless).
   async logs(caseId: string, stream: LogStream = "stdout"): Promise<string | undefined> {
     try {
-      const prefix = `everdict-${caseId}-`;
-      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
-      if (res.status >= 300) return undefined;
-      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
-      const newest = jobs
-        .filter((j) => j.ID?.startsWith(prefix))
-        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
-      if (!newest?.ID) return undefined;
-      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
-      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
-      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
-      if (allocsRes.status >= 300) return undefined;
-      // The CURRENT alloc's log file — a stale terminal alloc's file used to be tailed as "live progress".
-      const alloc = currentAlloc(
-        JSON.parse(allocsRes.text) as Array<{ ID: string; CreateIndex?: number; DesiredStatus?: string }>,
-      );
-      if (!alloc?.ID) return undefined; // still queued — nothing to tail yet
-      const nsq2 = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
-      const logs = await this.http.request(
-        "GET",
-        `/v1/client/fs/logs/${alloc.ID}?task=agent&type=${stream}&plain=true${nsq2}`,
-      );
-      if (logs.status >= 300) return undefined;
-      return stripSentinel(logs.text);
+      const text = await this.rawCaseLogs(caseId, stream);
+      return text === undefined ? undefined : stripSentinel(text);
     } catch {
       return undefined; // best-effort — observability must never fail a run
+    }
+  }
+
+  // The live trajectory of the case's running job (live-observability ⑨): the EVENT_SENTINEL lines the in-job
+  // agent printed to stdout, decoded to TraceEvents. Snapshot semantics like logs(). Best-effort, never throws.
+  async caseEvents(caseId: string): Promise<TraceEvent[] | undefined> {
+    try {
+      const text = await this.rawCaseLogs(caseId, "stdout");
+      return text === undefined ? undefined : extractLiveEvents(text);
+    } catch {
+      return undefined;
     }
   }
 

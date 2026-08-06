@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseResult, stripSentinel } from "@everdict/contracts";
+import { extractLiveEvents, parseResult, stripSentinel } from "@everdict/contracts";
 import {
   BadRequestError,
   type CaseJob,
@@ -1003,21 +1003,38 @@ export class K8sBackend
   // per-dispatch materialized kubeconfig, so a long-lived interactive stream needs the temp file kept open for the
   // stream's lifetime — a follow-up. One-shot exec above already works. The WS route degrades gracefully.)
 
-  // Current output of the case's newest job pod — live-progress tail (a pending pod reads as undefined and the
-  // caller polls again). Sentinel payload stripped. Best-effort, never throws. The stream parameter is accepted
-  // but ignored: a K8s pod log interleaves stdout and stderr in one stream (kubelet doesn't separate them), so
-  // both selections read the same combined text.
+  // The case's newest job pod's current raw output — the shared fetch behind logs() and caseEvents(). A pending
+  // pod reads as undefined and the caller polls again.
+  private async rawCaseLogs(caseId: string): Promise<string | undefined> {
+    return await this.withApi(async (api) => {
+      const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+      const newest = (jobs ?? []).sort((a, b) =>
+        (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
+      )[0];
+      if (!newest) return undefined;
+      return await api.podLogs(newest.name, newest.namespace);
+    });
+  }
+
+  // Current output of the case's newest job pod — live-progress tail. Sentinel payloads stripped (machine result +
+  // live-event lines). Best-effort, never throws. The stream parameter is accepted but ignored: a K8s pod log
+  // interleaves stdout and stderr in one stream (kubelet doesn't separate them), so both selections read the same
+  // combined text.
   async logs(caseId: string, _stream?: LogStream): Promise<string | undefined> {
     try {
-      return await this.withApi(async (api) => {
-        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
-        const newest = (jobs ?? []).sort((a, b) =>
-          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
-        )[0];
-        if (!newest) return undefined;
-        const text = await api.podLogs(newest.name, newest.namespace);
-        return stripSentinel(text);
-      });
+      const text = await this.rawCaseLogs(caseId);
+      return text === undefined ? undefined : stripSentinel(text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  // The live trajectory of the case's running job (live-observability ⑨): the EVENT_SENTINEL lines the in-job
+  // agent printed, decoded to TraceEvents. Snapshot semantics like logs(). Best-effort, never throws.
+  async caseEvents(caseId: string): Promise<TraceEvent[] | undefined> {
+    try {
+      const text = await this.rawCaseLogs(caseId);
+      return text === undefined ? undefined : extractLiveEvents(text);
     } catch {
       return undefined;
     }

@@ -3,6 +3,7 @@ import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { MentionInChatButton, OpenConversationButton } from '@/widgets/infra-panel'
 import { LiveLogs } from '@/widgets/live-logs'
+import { LiveTrace } from '@/widgets/live-trace'
 import { ReplayPlayer } from '@/widgets/replay-player'
 import { RunPlacement } from '@/widgets/run-placement'
 import { RunTopology } from '@/widgets/run-topology'
@@ -448,6 +449,9 @@ export default async function RunDetailPage({
           {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시 프레임으로
               2초마다 폴링; 라이브 화면이 없는 run이면 위젯이 self-null (빈 섹션 없음) */}
           <LiveScreen runId={run.id} initialStatus={run.status} />
+          {/* 라이브 트레이스(observability ⑨) — 실행 중 쌓이는 궤적(디스패치 마크 + 러너 푸시 + 매니지드
+              이벤트 센티널)을 3초마다 폴링해 봉인 전 미리보기로 그린다; 아무것도 없으면 위젯이 self-null */}
+          <LiveTrace runId={run.id} initialStatus={run.status} />
           {/* 로그·터미널은 run 이 선언한 채널(attach)일 때만 — 붙을 곳 없는 run 에서 영원히 비어 있는 패널을
               띄우지 않는다. 선언이 없는 예전 eval/command run 은 종전대로 둘 다 연다. */}
           {showLiveLogs && (

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { CaseResult } from "./execution/eval-case.js";
-import { RESULT_SENTINEL, encodeResult, parseResult, stripSentinel } from "./job-result-wire.js";
+import type { TraceEvent } from "./execution/trace.js";
+import {
+  EVENT_SENTINEL,
+  RESULT_SENTINEL,
+  encodeLiveEvent,
+  encodeResult,
+  extractLiveEvents,
+  parseResult,
+  stripSentinel,
+} from "./job-result-wire.js";
 
 const RESULT: CaseResult = {
   caseId: "c1",
@@ -36,5 +45,40 @@ describe("sentinel wire format", () => {
 
   it("leaves logs unchanged when there is no sentinel", () => {
     expect(stripSentinel("just logs")).toBe("just logs");
+  });
+});
+
+describe("live-event wire format", () => {
+  const EVENT: TraceEvent = { t: 1, kind: "message", role: "assistant", text: "working on it" };
+
+  it("round-trips a TraceEvent through encode → extract, interleaved with harness output", () => {
+    const stdout = `harness line\n${encodeLiveEvent(EVENT)}\nmore harness output\n`;
+    expect(extractLiveEvents(stdout)).toEqual([EVENT]);
+  });
+
+  it("keeps event order across many lines and skips torn/invalid ones", () => {
+    const second: TraceEvent = { t: 2, kind: "tool_call", id: "t1", name: "bash", args: { cmd: "ls" } };
+    const torn = `${EVENT_SENTINEL}{"t":3,"kind":"mess`; // snapshot raced the writer mid-line
+    const notAnEvent = `${EVENT_SENTINEL}{"hello":"world"}`;
+    const stdout = [encodeLiveEvent(EVENT), torn, notAnEvent, encodeLiveEvent(second)].join("\n");
+    expect(extractLiveEvents(stdout)).toEqual([EVENT, second]);
+  });
+
+  it("returns nothing when the log has no event lines", () => {
+    expect(extractLiveEvents("plain progress\nno events here")).toEqual([]);
+  });
+
+  it("truncates an oversized event's text instead of emitting a broken line", () => {
+    const big: TraceEvent = { t: 1, kind: "message", role: "assistant", text: "x".repeat(50_000) };
+    const line = encodeLiveEvent(big);
+    expect(line).toBeDefined();
+    const [decoded] = extractLiveEvents(line ?? "");
+    expect(decoded?.kind).toBe("message");
+    if (decoded?.kind === "message") expect(decoded.text).toMatch(/\[truncated\]$/);
+  });
+
+  it("strips live-event lines from the human log view along with the result line", () => {
+    const stdout = `progress 1\n${encodeLiveEvent(EVENT)}\nprogress 2\n${encodeResult(RESULT)}`;
+    expect(stripSentinel(stdout)).toBe("progress 1\nprogress 2\n");
   });
 });

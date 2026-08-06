@@ -115,6 +115,7 @@ import { type BudgetAdmin, BudgetLimitInputSchema } from "../common/budget-track
 import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
+import type { LiveTraceStore } from "../common/live-trace-store.js";
 import type { TerminalTicketStore } from "../common/terminal-ticket.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import type { AgentMemberToolingService } from "../core/agent/agent-member-tooling-service.js";
@@ -284,6 +285,7 @@ export interface ServerDeps {
   terminalTickets?: TerminalTicketStore; // WS terminal (observability ⑥) — mints/consumes short-lived tickets (WS routes disabled if absent)
   liveFrames?: LiveFrameStore; // live-screen frames pushed by a self-hosted runner (report_case_screen) — served by RunService.screen()
   liveLogs?: LiveLogStore; // live execution log pushed by a self-hosted runner (report_case_log) — served by RunService.logs()
+  liveTraces?: LiveTraceStore; // live trajectory per run (runner report_case_trace + dispatch marks) — served by RunService.liveTrace()
   caseRecorder?: CaseRecorder; // durable replay tee — persists the pushed frames/logs (docs/architecture/replay.md)
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped (routes disabled if absent)
   sandboxSessions?: SandboxSessionService; // sandbox session runs (execution-model P6) — absent = no container runtime here

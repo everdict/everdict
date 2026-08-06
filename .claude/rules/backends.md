@@ -33,7 +33,7 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   (`./backend`, `@everdict/contracts`). `capacity()` is what the `Scheduler` gates on — report a configured
   `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap (else `used: 0`).
 - **Capabilities are typed, not optional methods.** `Backend` is the CORE (`dispatch`+`capacity`+`id`) — anything
-  beyond it (`Recoverable`=adopt/kill, `Observable`=logs/exec, `Shellable`=execStream, `ScreenCapturable`=
+  beyond it (`Recoverable`=adopt/kill, `Observable`=logs/caseEvents/exec, `Shellable`=execStream, `ScreenCapturable`=
   captureScreen, `Probeable`=probe, `Inspectable`=inspect [read-only live cluster view: nodes/capacity/workload/
   stores, best-effort→`warnings`], `CaseInspectable`=inspectCase [case-scoped placement: phase queued|blocked|
   starting|running|dead + blocked capacity verdict + unit/node/events — wire SSOT `CasePlacement`],

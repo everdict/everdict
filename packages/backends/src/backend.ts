@@ -1,4 +1,4 @@
-import { type CaseJob, type CaseResult, type Driver, InternalError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, type Driver, InternalError, type TraceEvent } from "@everdict/contracts";
 // Type-only reuse of the inspection wire schemas as the SSOT for Inspectable.inspect's / CaseInspectable.
 // inspectCase's returns (no drift, no runtime edge). backends → contracts is the allowed direction; /wire is the
 // same package's DTO surface.
@@ -104,10 +104,16 @@ export interface Recoverable {
 // already untrusted+isolated, so the control plane gates WHO may call these (run creator / workspace admin).
 export interface Observable {
   // Current output of the case's newest orchestrator job (live-progress observability). Raw text with the result
-  // sentinel stripped; undefined = no job / logs unreadable. Snapshot semantics — callers poll and diff for a tail.
-  // stream selects stdout (default) or stderr — agents/harnesses often log progress to stderr while stdout carries
-  // only the final result block. K8s merges both streams in the pod log, so it accepts and ignores the parameter.
+  // sentinel and live-event lines stripped; undefined = no job / logs unreadable. Snapshot semantics — callers poll
+  // and diff for a tail. stream selects stdout (default) or stderr — agents/harnesses often log progress to stderr
+  // while stdout carries only the final result block. K8s merges both streams in the pod log, so it accepts and
+  // ignores the parameter.
   logs(caseId: string, stream?: LogStream): Promise<string | undefined>;
+  // The live-event lines of that same job stdout, decoded (live-observability ⑨): the TraceEvents the in-job agent
+  // printed as EVENT_SENTINEL lines while the case runs — the managed lane's live trajectory. Snapshot semantics
+  // like logs() (each read returns everything printed so far). undefined = no job / logs unreadable; [] = a job
+  // that hasn't printed any events yet. Best-effort, never throws.
+  caseEvents(caseId: string): Promise<TraceEvent[] | undefined>;
   // Run a one-shot command INSIDE the case's live sandbox container (web terminal / live-screen capture). The
   // command is passed to `sh -c`. undefined = no live container to exec into. Best-effort.
   exec(caseId: string, command: string): Promise<ExecInContainer | undefined>;
@@ -207,7 +213,7 @@ export function isRecoverable(backend: Backend): backend is Backend & Recoverabl
 
 export function isObservable(backend: Backend): backend is Backend & Observable {
   const b = backend as Partial<Observable>;
-  return typeof b.logs === "function" && typeof b.exec === "function";
+  return typeof b.logs === "function" && typeof b.exec === "function" && typeof b.caseEvents === "function";
 }
 
 export function isShellable(backend: Backend): backend is Backend & Shellable {

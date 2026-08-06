@@ -11,6 +11,7 @@ import type {
   EvaluableHarness,
   Grader,
   LiveScreenCapture,
+  LiveTraceReport,
   RunContext,
   Score,
   TraceEvent,
@@ -95,6 +96,41 @@ function startLiveScreenCapture(compute: ComputeHandle, hook: LiveScreenCapture)
   };
 }
 
+// Live-trace tee (opt-in) — buffer every TraceEvent the drain loop yields and flush the batch to the reporter on a
+// short cadence (the self-hosted runner pushes it to the control plane; the managed job prints sentinel lines).
+// Mirrors startLiveScreenCapture: overlap-guarded, entirely best-effort — a report failure never touches the eval.
+// stop() fires one final best-effort flush so the tail of the trajectory reaches the observer before settle.
+function startLiveTraceReport(hook: LiveTraceReport): { push: (event: TraceEvent) => void; stop: () => void } {
+  const intervalMs = hook.intervalMs ?? 1000;
+  const buffer: TraceEvent[] = [];
+  let stopped = false;
+  let inFlight = false;
+  const flush = async (): Promise<void> => {
+    if (inFlight || buffer.length === 0) return;
+    inFlight = true;
+    const batch = buffer.splice(0, buffer.length);
+    try {
+      await hook.report(batch);
+    } catch {
+      // best-effort — live reporting never affects the run
+    } finally {
+      inFlight = false;
+    }
+  };
+  const timer = setInterval(() => void flush(), intervalMs);
+  (timer as { unref?: () => void }).unref?.();
+  return {
+    push: (event) => {
+      if (!stopped) buffer.push(event);
+    },
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+      void flush(); // final fire-and-forget drain — the sealed result is the durable record either way
+    },
+  };
+}
+
 // In-run environment recorder (docs/architecture/replay.md, Principle 1) — the ENVIRONMENT plane, universal across any
 // environment kind that exposes a non-intrusive sampleDelta (today: repo → git-diff checkpoints). Polls it into `out`,
 // deduped (an unchanged delta is skipped) and capped (a long run keeps the first N; the final snapshot still holds the
@@ -167,11 +203,15 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
   // harness's replay. Started after install, stopped inside release(); a final sample is taken before release. replay.md.
   const envDeltas: EnvDelta[] = [];
   let envRecorder: { stop: () => void; final: () => Promise<void> } | undefined;
+  // Live-trace tee (opt-in) — batches drained TraceEvents out to the observer while the harness still runs.
+  // Started before the drain, stopped inside release() (with a final flush) like the other capture loops.
+  const liveTrace = deps.runCtx.liveTrace ? startLiveTraceReport(deps.runCtx.liveTrace) : undefined;
   const release = async (): Promise<void> => {
     if (released) return;
     released = true;
     stopLiveScreen?.();
     envRecorder?.stop();
+    liveTrace?.stop();
     await compute.dispose();
   };
   try {
@@ -193,6 +233,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       for await (const ev of deps.harness.run(compute, evalCase.task, runCtx)) {
         if (signal?.aborted) return; // about to dispose the compute out from under the run — stop accumulating
         trace.push(ev);
+        liveTrace?.push(ev); // tee to the live observer (batched flush) — the array above stays the record
       }
     })();
     if (signal) {

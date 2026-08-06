@@ -16,6 +16,7 @@ import { classifyFailure, isRunnerOnline } from "@everdict/domain";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
 import type { EnvRecordSink } from "@everdict/topology";
 import type { CaseRecorder } from "../common/case-recorder.js";
+import type { LiveTraceStore } from "../common/live-trace-store.js";
 import { makeProfileSeeder } from "../core/browser-profile/browser-profile-injector.js";
 import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js";
 import { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
@@ -54,6 +55,7 @@ export function buildDispatch(deps: {
   trustZones?: TrustZonePolicy;
   cipher?: SecretCipher; // browser-profiles S5 — decrypt the profile's captured storageState blob
   caseRecorder?: CaseRecorder; // replay ② — durable recorder the managed topology backend streams browser CDP events into
+  liveTraces?: LiveTraceStore; // observability ⑨ — the dispatch account's placement marks tee into the live-trace buffer
 }) {
   const {
     callbackStore,
@@ -70,6 +72,7 @@ export function buildDispatch(deps: {
     browserProfileStore,
     cipher,
     caseRecorder,
+    liveTraces,
   } = deps;
   // Saved-profile injection for browser evals (browser-profiles S5) — seed a referenced profile's login into the
   // per-case topology browser before the agent connects. Only when both the store + cipher are wired.
@@ -211,7 +214,7 @@ export function buildDispatch(deps: {
   // Control-plane infra-plane recording — the OUTERMOST decorator, so the sealed trajectory's account starts at
   // "the control plane accepted this case → target X" and carries queue wait + waiting diagnostics before the
   // backend's own events. Sits outside ModelResolving/RuntimeDispatcher to see the user-chosen target name.
-  const dispatcher = new TraceRecordingDispatcher(resolvingDispatcher);
+  const dispatcher = new TraceRecordingDispatcher(resolvingDispatcher, liveTraces);
   // Workspace secrets feed the cached runtime backends' secretEnv — a secret change must drop that tenant's
   // cache so the next dispatch rebuilds with fresh values (previously only a CP restart picked them up).
   const invalidateTenantBackends = (tenant: string) => runtimeDispatcher.invalidateTenant(tenant);

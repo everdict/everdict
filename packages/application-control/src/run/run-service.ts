@@ -173,6 +173,17 @@ export interface RunServiceDeps {
   // lifecycle lines (started / completed / failed [class/stage]: reason). Takes precedence over readCaseLogs for the
   // default (stdout) view: a self-hosted runner has no backend the control plane can tail, so it pushes instead.
   pushLogs?: (runId: string) => string | undefined;
+  // Live trajectory PUSHED to the control plane while the run executes (observability ⑨), by CP-minted runId —
+  // the dispatch account's placement marks plus a self-hosted runner's drained-event batches (report_case_trace).
+  // Ephemeral (TTL/cap); the sealed trajectory is the durable record.
+  liveTraceEvents?: (runId: string) => TraceEvent[] | undefined;
+  // The managed twin of liveTraceEvents: decode the EVENT_SENTINEL lines the case job printed to its stdout —
+  // resolves the run's runtime lane to a live backend (Backend.caseEvents). Best-effort — absent/miss = no events.
+  readCaseEvents?: (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+  ) => Promise<TraceEvent[] | undefined>;
   // One-shot exec inside the case's live sandbox (observability ④ web terminal / ⑤ screen capture). Resolves the
   // run's runtime to a live backend and runs `sh -c command`. undefined = no live container.
   execInSandbox?: (
@@ -499,6 +510,23 @@ export class RunService {
     // otherwise switching streams on a self-hosted run reads as "this run wrote nothing to stderr", which is a
     // statement about the run rather than the truth, which is that this lane has no second stream to offer.
     return { record, text: text ?? pushed };
+  }
+
+  // Live trajectory (observability ⑨) — the run's own TraceEvents accumulating BEFORE anything seals: the events
+  // the control plane collected live (the dispatch account's placement marks + runner-pushed batches, keyed by the
+  // CP-minted runId) plus the events the managed job printed to its stdout as EVENT_SENTINEL lines (pulled from
+  // the orchestrator log, snapshot semantics). events=[] when nothing has arrived yet; the record still
+  // scopes/authorizes. The sealed trajectory is the durable record — this read is a preview.
+  async liveTrace(id: string): Promise<{ record: RunRecord; events: TraceEvent[] } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    const pushed = this.deps.liveTraceEvents?.(RunService.runIdFor(record)) ?? [];
+    const pulled = this.deps.readCaseEvents
+      ? ((await this.deps.readCaseEvents(record.tenant, record.runtime, record.caseId).catch(() => undefined)) ?? [])
+      : [];
+    // Disjoint sources (a runner pushes, a managed job prints — never both), so concatenation is the merge; the
+    // dispatch marks lead, mirroring the sealed layout (TraceRecordingDispatcher prepends the placement plane).
+    return { record, events: [...pushed, ...pulled] };
   }
 
   // Persisted replay recording (docs/architecture/replay.md) — the sealed screen frames + logs + env/runtime tracks of a

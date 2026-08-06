@@ -159,6 +159,42 @@ Live-verified against real MLflow: mid-run `GET /runs/:id` returned
 `my-correlation=evd-run-<id>` from INSIDE the job (`$EVERDICT_RUN_ID` — zero coordination), and the
 field disappeared once the run settled.
 
+## ⑨ Live trace — the run's own TraceEvents while it runs
+
+②/⑤ show the job's stdout and its screen; ③ points at an EXTERNAL platform. What none of them showed is the
+run's own normalized trajectory — the `TraceEvent` stream every judge/grader/viewer reads — before it seals:
+`runCase` drains `harness.run()` (an `AsyncIterable`) into an array that only crosses to the control plane
+inside the final `CaseResult`, so the run detail's trace section stayed empty for the whole execution.
+
+The tee: `RunContext.liveTrace` (contracts, in-process like `signal`/`liveScreen`) — `runCase` buffers every
+drained event and flushes batches to `report` on a short cadence (default 1s, overlap-guarded, best-effort;
+a final flush fires in `release()`). Who supplies `report` is per lane:
+
+- **Managed (Nomad/K8s)** — the job's only channel back is its own stdout, so the job-runner entry prints each
+  event as an `__EVERDICT_EVENT__` line (`encodeLiveEvent`: byte-heavy fields trimmed to a 4 KB cap, oversized
+  events dropped rather than emitted broken; the sealed trace keeps the full text). `Observable.caseEvents(caseId)`
+  (Nomad + K8s, beside `logs()`) re-reads the job log and decodes the lines (`extractLiveEvents` — torn tail
+  lines skipped); `stripSentinel` now drops event lines too, so the human log views stay clean. Snapshot
+  semantics, same as the log tail.
+- **Self-hosted runner** — pushes the batches over its MCP session (`report_case_trace`, the trajectory twin of
+  `report_case_log`), keyed by the CP-minted runId, into the CP's `LiveTraceStore` (in-memory, 15 min TTL,
+  2000-event ring cap — the live twin of the sealed ledger, losing it loses nothing).
+- **The control plane itself** — `TraceRecordingDispatcher.mark()` tees its accepted/waiting/started placement
+  marks into the same store as they happen, so every dispatched run has a live spine before the agent's first
+  event arrives.
+
+Read: `GET /runs/:id/trajectory/live` (+ MCP `get_run_live_trace`) → `{status, found, events}` — the pushed
+buffer first (dispatch marks lead, mirroring the sealed layout), then the managed pull; the sources are
+disjoint by construction so concatenation is the merge. runs:read + the run-audience rule, like every run
+read. The web run detail mounts a `LiveTrace` widget in the running section (3 s poll-and-replace, the
+LiveLogs idiom) rendering the SAME `TrajectoryView` the sealed evidence section uses — self-null until the
+first event, stops at a terminal status. The sealed trajectory remains the durable record; this surface is
+its preview.
+
+Deliberately NOT live-fed: the agent-conversation lane (its live surface is the conversation panel's SSE
+stream; the turn seals at settle) and the topology drive (the front-door drives externally — its services
+already stream OTel into the sealed store mid-run).
+
 ## ⑧ Runtime debugging — placement · topology health · failure evidence
 
 The reads above answer "what is the AGENT doing"; this trio answers "what is the RUNTIME doing WITH MY

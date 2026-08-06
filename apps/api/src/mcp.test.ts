@@ -53,6 +53,7 @@ import { persistentBudget } from "./common/budget-tracker.js";
 import { CaseRecorder } from "./common/case-recorder.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { LiveLogStore } from "./common/live-log-store.js";
+import { LiveTraceStore } from "./common/live-trace-store.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
@@ -383,6 +384,37 @@ describe("MCP — live execution log (report_case_log)", () => {
   });
 });
 
+describe("MCP — live trace push (report_case_trace)", () => {
+  const withTraces = (traces: LiveTraceStore) => ({ ...harness(), liveTraces: traces });
+  const EVENTS = [
+    { t: 0, kind: "message", role: "assistant", text: "step one" },
+    { t: 1, kind: "tool_call", id: "t1", name: "bash", args: { cmd: "ls" } },
+  ];
+
+  it("a runner pushes drained-event batches under the run id (cumulative; served by RunService.liveTrace())", async () => {
+    const traces = new LiveTraceStore();
+    const runner = await connectRunner(withTraces(traces), "laptop");
+    await runner.callTool({ name: "report_case_trace", arguments: { runId: "evd-run-42", events: [EVENTS[0]] } });
+    const res = await runner.callTool({
+      name: "report_case_trace",
+      arguments: { runId: "evd-run-42", events: [EVENTS[1]] },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(traces.get("evd-run-42")).toHaveLength(2); // append, not overwrite
+  });
+
+  it("regular (non-runner) credentials cannot push trace events — FORBIDDEN", async () => {
+    const traces = new LiveTraceStore();
+    const admin = await connect(withTraces(traces), ["admin"]); // via=oidc, no runnerId
+    const res = await admin.callTool({
+      name: "report_case_trace",
+      arguments: { runId: "evd-run-42", events: EVENTS },
+    });
+    expect(res.isError).toBe(true);
+    expect(traces.get("evd-run-42")).toBeUndefined();
+  });
+});
+
 describe("MCP — deep track push (report_case_track)", () => {
   const withRecorder = (recordings: InMemoryRecordingStore) => ({
     ...harness(),
@@ -497,6 +529,7 @@ describe("MCP tools", () => {
       "get_model",
       "get_rubric",
       "get_run",
+      "get_run_live_trace",
       "get_run_logs",
       "get_run_placement",
       "get_run_recording",

@@ -4,7 +4,7 @@ import type { NotificationService, PlatformEventService } from "@everdict/applic
 import { RunService } from "@everdict/application-control";
 import type { RecordingStore } from "@everdict/application-control";
 import type { Dispatcher as CoreDispatcher, ExecStreamHandle } from "@everdict/backends";
-import type { GradeContext, JudgeSpec, RegistryAuth } from "@everdict/contracts";
+import type { GradeContext, JudgeSpec, RegistryAuth, TraceEvent } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, WorkspaceSettingsStore } from "@everdict/db";
 import type { UsageMeter } from "@everdict/domain";
@@ -15,6 +15,7 @@ import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
+import type { LiveTraceStore } from "../common/live-trace-store.js";
 import { buildCodeJudgeJob, defaultJudgeRunner } from "../core/execution/judge-runner.js";
 import type { PlacementPreflight } from "../core/execution/placement-preflight.js";
 import type { RuntimeSecretsFn, ScopedSecretsFn } from "./types.js";
@@ -27,6 +28,11 @@ export interface RuntimeAccessReaders {
     caseId: string,
     stream?: "stdout" | "stderr",
   ) => Promise<string | undefined>;
+  readCaseEventsFn: (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+  ) => Promise<TraceEvent[] | undefined>;
   execInSandboxFn: (
     tenant: string,
     runtimeList: string | undefined,
@@ -93,6 +99,8 @@ export function buildRun(deps: {
   liveFrames: LiveFrameStore;
   // Accumulated live execution log per run, pushed by a self-hosted runner (report_case_log). RunService.logs() serves it.
   liveLogs: LiveLogStore;
+  // Accumulated live trajectory per run (dispatch marks + report_case_trace pushes). RunService.liveTrace() serves it.
+  liveTraces: LiveTraceStore;
   // Durable replay recording (optional) — RunService seals it at finalize and attaches the ref to the result.
   recordingStore?: RecordingStore;
 }) {
@@ -118,10 +126,12 @@ export function buildRun(deps: {
     readers,
     liveFrames,
     liveLogs,
+    liveTraces,
     recordingStore,
   } = deps;
   const {
     readCaseLogsFn,
+    readCaseEventsFn,
     execInSandboxFn,
     captureBrowserScreenFn,
     screenEndpointFn,
@@ -145,6 +155,10 @@ export function buildRun(deps: {
     liveFrame: (runId) => liveFrames.get(runId)?.frameBase64,
     // Pushed log (self-hosted) — RunService.logs() prefers this over the backend tail for unreachable runners.
     pushLogs: (runId) => liveLogs.get(runId),
+    // Live trajectory (observability ⑨) — the dispatch marks + runner-pushed batches, plus the managed lane's
+    // event-sentinel pull. RunService.liveTrace() merges both.
+    liveTraceEvents: (runId) => liveTraces.get(runId),
+    readCaseEvents: (tenant, runtimeList, caseId) => readCaseEventsFn(tenant, runtimeList, caseId),
     openTerminalStream: (tenant, runtimeList, caseId) => openTerminalStreamFn(tenant, runtimeList, caseId),
     // Case-scoped placement read (runtime debugging) — where the case's job stands inside its cluster.
     inspectCasePlacement: (tenant, runtimeList, caseId) => inspectCasePlacementFn(tenant, runtimeList, caseId),

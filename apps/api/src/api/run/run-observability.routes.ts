@@ -35,6 +35,27 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
     },
   );
 
+  // Live trajectory (observability ⑨) — the run's own TraceEvents accumulating while it runs: dispatch placement
+  // marks + runner-pushed batches + the managed job's event-sentinel stdout lines. A preview of the evidence that
+  // seals at settle; snapshot semantics (poll-and-replace). Same visibility as every run read (runVisible → 404).
+  app.get<{ Params: { id: string } }>(
+    "/runs/:id/trajectory/live",
+    { schema: runObservabilityDocs.liveTrace },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        const out = await deps.service.liveTrace(req.params.id);
+        if (!out || !runVisible(out.record, principal))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+        return reply.send({ status: out.record.status, found: out.events.length > 0, events: out.events });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // Case-scoped placement (runtime debugging): where the run's case job stands INSIDE its runtime cluster —
   // queued / blocked (with the scheduler's capacity verdict) / starting / running / dead, the node, and the
   // orchestrator event feed. found=false = nothing to describe (pre-dispatch / GC'd / no backend support).

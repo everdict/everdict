@@ -3962,6 +3962,11 @@
     "stdoutHint": "Job stdout — the result stream",
     "stderrHint": "Job stderr — harness progress logs"
   },
+  "liveTraceView": {
+    "title": "Live trace",
+    "streaming": "Running — the trajectory is accumulating live",
+    "finished": "Finished — the sealed trace appears in the trace section below after a refresh"
+  },
   "liveScreen": {
     "label": "Live screen",
     "waiting": "Waiting for the first frame…",

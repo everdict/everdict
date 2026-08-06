@@ -59,6 +59,7 @@ import type { BudgetAdmin } from "../common/budget-tracker.js";
 import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
+import type { LiveTraceStore } from "../common/live-trace-store.js";
 import { teamForNew } from "../common/team-scope.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import type { AgentMemberToolingService } from "../core/agent/agent-member-tooling-service.js";
@@ -148,6 +149,7 @@ export interface McpDeps {
   runnerHub?: RunnerHubLike; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
   liveFrames?: LiveFrameStore; // latest live-screen frame per run, pushed by a self-hosted runner (report_case_screen)
   liveLogs?: LiveLogStore; // accumulated live execution log per run, pushed by a self-hosted runner (report_case_log)
+  liveTraces?: LiveTraceStore; // accumulated live trajectory per run — runner pushes (report_case_trace) + dispatch marks
   caseRecorder?: CaseRecorder; // durable replay tee — persists pushed frames/logs so a run can be replayed after it settles
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // benchmark preview + import (source → dataset)

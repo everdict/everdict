@@ -3962,6 +3962,11 @@
     "stdoutHint": "잡 stdout — 최종 결과 스트림",
     "stderrHint": "잡 stderr — 하네스 진행 로그"
   },
+  "liveTraceView": {
+    "title": "라이브 트레이스",
+    "streaming": "실행 중 — 궤적이 실시간으로 쌓이고 있어요",
+    "finished": "실행 종료 — 봉인된 트레이스는 새로고침 후 아래 트레이스 섹션에서 볼 수 있어요"
+  },
   "liveScreen": {
     "label": "라이브 화면",
     "waiting": "첫 프레임을 기다리는 중…",

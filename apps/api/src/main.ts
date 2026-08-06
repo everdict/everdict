@@ -47,6 +47,7 @@ import type { BrowserSessionProvisioner } from "./common/browser-session-provisi
 import { CaseRecorder } from "./common/case-recorder.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { LiveLogStore } from "./common/live-log-store.js";
+import { LiveTraceStore } from "./common/live-trace-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
@@ -384,6 +385,11 @@ async function main(): Promise<void> {
   // Built before buildDispatch so the managed topology backend can record into it. docs/architecture/replay.md.
   const caseRecorder = new CaseRecorder(recordingStore, artifacts);
 
+  // Accumulated live trajectory per run (observability ⑨) — fed by the dispatch account's placement marks
+  // (TraceRecordingDispatcher, so built before buildDispatch) and by self-hosted runner pushes
+  // (report_case_trace) → served by RunService.liveTrace(). Ephemeral; the sealed trajectory is the record.
+  const liveTraces = new LiveTraceStore();
+
   // Managed image store (optional) — the workspace's own image namespace + the registry's authorization server.
   // Unset env = a BYO-only deployment: both stay undefined and /v2/token answers 404.
   // Cross-tenant pull reach (M6) is bound AFTER the adoption service exists: the store needs reach, and reach
@@ -442,6 +448,7 @@ async function main(): Promise<void> {
     browserProfileStore, // browser-profiles S5 — eval-browser profile injection (resolve + owner-gate)
     cipher, // browser-profiles S5 — decrypt the profile's captured storageState
     caseRecorder, // replay ② — managed topology backend records the per-case browser's CDP events into the recording
+    liveTraces, // observability ⑨ — the dispatch account's placement marks tee into the live-trace buffer
   });
   // WHERE anything runs, answered once (composition/runtime-compute): the deployment's own compute, and any
   // workspace-registered runtime resolved with its cluster credentials and trust zone. Agent worlds, the
@@ -585,6 +592,7 @@ async function main(): Promise<void> {
   const {
     adoptCaseFn,
     readCaseLogsFn,
+    readCaseEventsFn,
     openTerminalStreamFn,
     captureBrowserScreenFn,
     screenEndpointFn,
@@ -634,6 +642,7 @@ async function main(): Promise<void> {
     preflightPlacement,
     readers: {
       readCaseLogsFn,
+      readCaseEventsFn,
       execInSandboxFn,
       captureBrowserScreenFn,
       screenEndpointFn,
@@ -644,6 +653,7 @@ async function main(): Promise<void> {
     },
     liveFrames,
     liveLogs,
+    liveTraces,
     ...(recordingStore ? { recordingStore } : {}),
   });
 
@@ -1054,6 +1064,7 @@ async function main(): Promise<void> {
     proxyService, // workspace BYO egress proxies (browser-profiles S4) — per-country pool + session geo
     liveFrames, // live-screen frames pushed by self-hosted runners (report_case_screen MCP tool)
     liveLogs, // live execution log pushed by self-hosted runners (report_case_log MCP tool)
+    liveTraces, // live trajectory per run (dispatch marks + report_case_trace) — served by /runs/:id/trajectory/live
     ...(caseRecorder ? { caseRecorder } : {}), // durable replay tee (opt-in) for the pushed frames/logs
     service,
     scorecardService,

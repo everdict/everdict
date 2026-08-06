@@ -934,6 +934,23 @@ describe("NomadBackend.logs (live tail stream selection)", () => {
     expect(text).toBe("INFO progress line");
     expect(calls.some((c) => c.includes("type=stderr"))).toBe(true);
   });
+
+  it("caseEvents decodes the job's EVENT_SENTINEL lines while logs() strips them from the human view", async () => {
+    const event = { t: 1, kind: "message", role: "assistant", text: "step one" };
+    const http: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-abc", SubmitTime: 1 }]) };
+        if (path.includes("/allocations")) return { status: 200, text: JSON.stringify([{ ID: "a1" }]) };
+        if (path.includes("/logs/"))
+          return { status: 200, text: `progress line\n__EVERDICT_EVENT__${JSON.stringify(event)}\nmore progress` };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
+    expect(await backend.caseEvents("c1")).toEqual([event]);
+    expect(await backend.logs("c1")).toBe("progress line\nmore progress");
+  });
 });
 
 describe("NomadBackend.inspectCase (case-scoped placement view)", () => {

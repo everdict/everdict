@@ -74,6 +74,25 @@ describe("TraceRecordingDispatcher", () => {
     expect(waits).toHaveLength(1);
   });
 
+  it("tees each mark into the live-trace buffer keyed by the CP-minted job.runId (observability ⑦)", async () => {
+    const live = new Map<string, unknown[]>();
+    const inner: Dispatcher = {
+      dispatch: async (_job, opts) => {
+        opts?.onWaiting?.("no capacity");
+        opts?.onStarted?.();
+        return okResult;
+      },
+    };
+    const dispatcher = new TraceRecordingDispatcher(inner, {
+      append: (runId, events) => live.set(runId, [...(live.get(runId) ?? []), ...events]),
+    });
+    await dispatcher.dispatch({ ...job("nomad-prod"), runId: "evd-run-r1" });
+    expect(live.get("evd-run-r1")).toHaveLength(3); // accepted → waiting → started, live as they happen
+    // A job without a runId (no correlation key) never touches the buffer.
+    await dispatcher.dispatch(job());
+    expect(live.size).toBe(1);
+  });
+
   it("attaches the control-plane account to a thrown AppError's placement evidence", async () => {
     const inner: Dispatcher = {
       dispatch: async (_job, opts) => {

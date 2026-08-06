@@ -12,7 +12,7 @@ import {
   isShellable,
   isTopologyInspectable,
 } from "@everdict/backends";
-import type { CaseResult, RegistryAuth, RuntimeSpec } from "@everdict/contracts";
+import type { CaseResult, RegistryAuth, RuntimeSpec, TraceEvent } from "@everdict/contracts";
 import type { CasePlacement, TopologyStatus } from "@everdict/contracts/wire";
 import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { RuntimeRegistry } from "@everdict/registry";
@@ -91,6 +91,22 @@ export function buildRuntimeAccess(deps: {
       return text !== undefined;
     });
     return text;
+  };
+
+  // The managed live trajectory (observability ⑨) — decode the case job's EVENT_SENTINEL stdout lines via the
+  // first backend that can read them. Same lane resolution as logs; best-effort.
+  const readCaseEventsFn = async (
+    tenant: string,
+    runtimeList: string | undefined,
+    caseId: string,
+  ): Promise<TraceEvent[] | undefined> => {
+    let events: TraceEvent[] | undefined;
+    await eachRuntimeBackend(tenant, runtimeList, async (backend) => {
+      if (!isObservable(backend)) return false;
+      events = await backend.caseEvents(caseId).catch(() => undefined);
+      return events !== undefined;
+    });
+    return events;
   };
 
   // Open an interactive shell stream on a case's live sandbox (observability ⑥) — same lane resolution as logs.
@@ -213,6 +229,7 @@ export function buildRuntimeAccess(deps: {
     eachRuntimeBackend,
     adoptCaseFn,
     readCaseLogsFn,
+    readCaseEventsFn,
     openTerminalStreamFn,
     captureBrowserScreenFn,
     screenEndpointFn,

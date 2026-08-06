@@ -8,6 +8,7 @@ import {
   type Environment,
   type Grader,
   type LiveScreenCapture,
+  type TraceEvent,
   judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
@@ -113,6 +114,10 @@ export async function runCaseJob(
     // Live-screen frame reporter (self-hosted runner). When present AND the command harness declares liveScreen,
     // runCase execs the harness's captureCmd periodically and pushes each base64 PNG frame here. Absent = no live screen.
     reportScreen?: (frameBase64: string) => Promise<void>;
+    // Live-trace batch reporter (live-observability ⑨). When present, runCase tees every drained TraceEvent here in
+    // short-cadence batches — the self-hosted runner pushes them to the control plane, the managed entry prints
+    // EVENT_SENTINEL stdout lines. Unconditional (no spec opt-in): the trace is universal across harnesses.
+    reportTrace?: (events: TraceEvent[]) => Promise<void>;
   } = {},
 ): Promise<CaseResult> {
   // Usage metering (BYO + Everdict-owned budget): the control plane decides from workspace/request policy and sends it via job.meterUsage.
@@ -177,6 +182,7 @@ export async function runCaseJob(
       ...(job.runId ? { runId: job.runId } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(liveScreen ? { liveScreen } : {}),
+      ...(opts.reportTrace ? { liveTrace: { report: opts.reportTrace } } : {}),
     },
   });
 }

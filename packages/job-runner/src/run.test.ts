@@ -1,6 +1,6 @@
-import { type CaseJob, InternalError } from "@everdict/contracts";
+import { type CaseJob, InternalError, type TraceEvent } from "@everdict/contracts";
 import { DockerDriver, LocalDriver } from "@everdict/drivers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { failureResult, resolveMeterUsage, runCaseJob } from "./run.js";
 
 describe("runCaseJob", () => {
@@ -24,6 +24,30 @@ describe("runCaseJob", () => {
     const pass = result.scores.find((s) => s.graderId === "tests-pass");
     expect(pass?.pass).toBe(true);
     expect(result.snapshot.changedFiles).toContain("out.txt");
+  });
+
+  it("tees drained TraceEvents to opts.reportTrace while the case runs (live-observability ⑦)", async () => {
+    const job: CaseJob = {
+      harness: { id: "scripted", version: "0.0.0" },
+      evalCase: {
+        id: "agent-live",
+        env: { kind: "repo", source: { files: { "seed.txt": "x\n" } } },
+        task: "create out.txt",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+    const reported: TraceEvent[] = [];
+    const result = await runCaseJob(job, {
+      reportTrace: async (events) => {
+        reported.push(...events);
+      },
+    });
+    // The final release() flush is fire-and-forget — waitFor absorbs its scheduling. The tee is a preview of the
+    // same events the sealed result carries.
+    await vi.waitFor(() => expect(reported.length).toBeGreaterThan(0));
+    expect(result.trace.map((e) => e.kind)).toEqual(expect.arrayContaining([reported[0]?.kind]));
   });
 });
 
