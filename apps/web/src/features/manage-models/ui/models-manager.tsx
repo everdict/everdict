@@ -88,6 +88,7 @@ export function ModelsManager({
         <ModelForm
           mode={editing ? 'edit' : 'add'}
           secretNames={secretNames}
+          companionOptions={models.map((m) => m.id).filter((id) => id !== editing?.id)}
           {...(editing ? { initialId: editing.id } : {})}
           {...(editing?.spec ? { initial: editing.spec } : {})}
           onDone={closeForm}
@@ -313,6 +314,15 @@ function ModelHint({ entry, secretNames }: { entry: ModelEntry; secretNames: str
       ) : (
         <span className="text-faint">{t('keyDefault')}</span>
       )}
+      {/* 컴패니언 티어 요약 — 설정된 슬롯만(hide-empty). */}
+      {spec.companions &&
+        (['small', 'fallback', 'subagent'] as const)
+          .filter((slot) => spec.companions?.[slot])
+          .map((slot) => (
+            <span key={slot} className="text-faint">
+              {t(`companionChip.${slot}`, { id: spec.companions?.[slot] ?? '' })}
+            </span>
+          ))}
     </span>
   )
 }
@@ -332,11 +342,13 @@ function connectionOf(spec: {
   }
 }
 
-// 등록/편집 통합 폼 — provider · id(편집 시 고정) · 모델식별자 · baseUrl · apiKeySecret(SecretPicker) · 설명.
-// 버전 입력 없음(내부 자동 배정). 저장은 반드시 "연결 테스트"가 성공한 뒤에만 활성화되고, 커넥션 필드를 바꾸면 테스트가 무효화된다.
+// 등록/편집 통합 폼 — provider · id(편집 시 고정) · 모델식별자 · baseUrl · apiKeySecret(SecretPicker) · 설명 +
+// 컴패니언 티어(small/fallback/subagent — 같은 카탈로그의 다른 등록 모델을 고르는 콤보). 버전 입력 없음(내부 자동 배정).
+// 저장은 반드시 "연결 테스트"가 성공한 뒤에만 활성화되고, 커넥션 필드를 바꾸면 테스트가 무효화된다(컴패니언은 커넥션이 아니라 무효화 없음).
 function ModelForm({
   mode,
   secretNames,
+  companionOptions,
   initial,
   initialId,
   onDone,
@@ -344,6 +356,7 @@ function ModelForm({
 }: {
   mode: 'add' | 'edit'
   secretNames: string[]
+  companionOptions: string[]
   initial?: ModelSpec
   initialId?: string
   onDone: () => void
@@ -358,6 +371,9 @@ function ModelForm({
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '')
   const [apiKeySecret, setApiKeySecret] = useState(initial?.apiKeySecret ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
+  const [companionSmall, setCompanionSmall] = useState(initial?.companions?.small ?? '')
+  const [companionFallback, setCompanionFallback] = useState(initial?.companions?.fallback ?? '')
+  const [companionSubagent, setCompanionSubagent] = useState(initial?.companions?.subagent ?? '')
   const [test, setTest] = useState<{ ok: boolean; text?: string; error?: string }>()
   const [testing, startTest] = useTransition()
   const [saving, startSave] = useTransition()
@@ -389,13 +405,25 @@ function ModelForm({
     })
   }
 
+  // 선택된 컴패니언만 모아 스펙 필드로 — 셋 다 비면 필드 자체를 보내지 않는다(스펙에 빈 객체를 남기지 않기).
+  function companions(): Record<string, string> | undefined {
+    const picked = {
+      ...(companionSmall ? { small: companionSmall } : {}),
+      ...(companionFallback ? { fallback: companionFallback } : {}),
+      ...(companionSubagent ? { subagent: companionSubagent } : {}),
+    }
+    return Object.keys(picked).length > 0 ? picked : undefined
+  }
+
   function onSave() {
     if (!tested || saving) return
     setError(undefined)
     startSave(async () => {
+      const picked = companions()
       const body = {
         ...connection(),
         ...(description.trim() ? { description: description.trim() } : {}),
+        ...(picked ? { companions: picked } : {}),
       }
       const r = await saveModelAction(id.trim(), body)
       if (!r.ok) {
@@ -476,6 +504,41 @@ function ModelForm({
         </Field>
       </div>
 
+      {/* 컴패니언 티어 — 이 모델이 에이전트를 구동할 때 함께 뛰는 등록 모델(스펙이 배포 env 기본값을 이긴다).
+          커넥션과 무관하므로 테스트를 무효화하지 않고, 고를 수 있는 후보는 이 워크스페이스의 다른 등록 모델뿐. */}
+      <div className="space-y-2 border-t border-border pt-3">
+        <div className="flex items-center gap-1.5">
+          <h4 className="text-[12.5px] font-[560] text-foreground">{t('companionsTitle')}</h4>
+          <InfoTip content={t('companionsHelp')} />
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label={t('companionSmall')} hint={t('companionSmallHint')}>
+            <CompanionPicker
+              value={companionSmall}
+              onChange={setCompanionSmall}
+              options={companionOptions}
+              ariaLabel={t('companionSmall')}
+            />
+          </Field>
+          <Field label={t('companionFallback')} hint={t('companionFallbackHint')}>
+            <CompanionPicker
+              value={companionFallback}
+              onChange={setCompanionFallback}
+              options={companionOptions}
+              ariaLabel={t('companionFallback')}
+            />
+          </Field>
+          <Field label={t('companionSubagent')} hint={t('companionSubagentHint')}>
+            <CompanionPicker
+              value={companionSubagent}
+              onChange={setCompanionSubagent}
+              options={companionOptions}
+              ariaLabel={t('companionSubagent')}
+            />
+          </Field>
+        </div>
+      </div>
+
       {/* 연결 테스트 결과 — 성공 시 응답 프리뷰, 실패 시 사유. */}
       {test?.ok === true && (
         <Callout tone="info" className="py-2">
@@ -531,6 +594,29 @@ function ModelForm({
         </button>
       </div>
     </div>
+  )
+}
+
+// 컴패니언 한 슬롯의 콤보 — 후보는 워크스페이스의 다른 등록 모델 + "없음"(빈 값 = 슬롯 미지정 → 배포 기본값으로 폴백).
+function CompanionPicker({
+  value,
+  onChange,
+  options,
+  ariaLabel,
+}: {
+  value: string
+  onChange: (v: string) => void
+  options: string[]
+  ariaLabel: string
+}) {
+  const t = useTranslations('manageModels')
+  return (
+    <Combobox
+      value={value}
+      onChange={onChange}
+      options={[{ value: '', label: t('companionNone') }, ...options.map((id) => ({ value: id }))]}
+      aria-label={ariaLabel}
+    />
   )
 }
 

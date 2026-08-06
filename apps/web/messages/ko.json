@@ -1495,7 +1495,21 @@
     "checkConnection": "{id} 연결 확인",
     "checkHint": "테스트 호출로 이 연결을 확인합니다.",
     "checkOk": "연결 성공: {text}",
-    "checkFailed": "연결 실패: {error}"
+    "checkFailed": "연결 실패: {error}",
+    "companionsTitle": "에이전트 컴패니언 티어",
+    "companionsHelp": "이 모델이 에이전트를 구동할 때 함께 쓰는 등록 모델입니다. 지정하면 배포 기본값(AGENT_*_MODEL)보다 우선하고, 해석에 실패하면 해당 티어 없이 계속합니다.",
+    "companionSmall": "소형(다이제스트)",
+    "companionSmallHint": "컴팩션 요약·세션 메모리·턴말미 메모리 추출에 쓰는 저비용 모델.",
+    "companionFallback": "폴백",
+    "companionFallbackHint": "주 모델이 일시 장애를 반복하면 이 모델로 전환해 런을 이어갑니다.",
+    "companionSubagent": "서브에이전트",
+    "companionSubagentHint": "spawn_agent 하위 작업을 돌리는 모델.",
+    "companionNone": "(없음 — 배포 기본값)",
+    "companionChip": {
+      "small": "소형 {id}",
+      "fallback": "폴백 {id}",
+      "subagent": "서브에이전트 {id}"
+    }
   },
   "manageWorkspaceSecrets": {
     "workspace": {

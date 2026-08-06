@@ -1495,7 +1495,21 @@
     "checkConnection": "Check connection for {id}",
     "checkHint": "Send a test call to check this connection.",
     "checkOk": "Connection OK: {text}",
-    "checkFailed": "Connection failed: {error}"
+    "checkFailed": "Connection failed: {error}",
+    "companionsTitle": "Agent companion tiers",
+    "companionsHelp": "Registered models this one runs alongside when it powers the agent. A companion overrides the deployment default (AGENT_*_MODEL); one that fails to resolve just loses that tier.",
+    "companionSmall": "Small (digests)",
+    "companionSmallHint": "Low-cost model for compaction summaries, session memory, and turn-end memory extraction.",
+    "companionFallback": "Fallback",
+    "companionFallbackHint": "Takes over the run when the main model keeps failing transiently.",
+    "companionSubagent": "Subagent",
+    "companionSubagentHint": "Powers spawn_agent sub-tasks.",
+    "companionNone": "(none — deployment default)",
+    "companionChip": {
+      "small": "small {id}",
+      "fallback": "fallback {id}",
+      "subagent": "subagent {id}"
+    }
   },
   "manageWorkspaceSecrets": {
     "workspace": {

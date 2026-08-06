@@ -36,6 +36,15 @@ export const modelSpecSchema = z.object({
       maxTokens: z.number().optional(),
     })
     .optional(),
+  // 이 모델이 에이전트를 구동할 때 함께 뛰는 컴패니언 티어 — 같은 카탈로그의 다른 등록 모델 ref.
+  // small=다이제스트/메모리 추출, fallback=지속 장애 시 전환, subagent=하위 에이전트. 스펙이 배포 env 기본값을 이긴다.
+  companions: z
+    .object({
+      small: z.string().optional(),
+      fallback: z.string().optional(),
+      subagent: z.string().optional(),
+    })
+    .optional(),
   tags: z.array(z.string()).default([]),
 })
 export type ModelSpec = z.infer<typeof modelSpecSchema>
