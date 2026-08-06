@@ -9,12 +9,14 @@ export {
   caseVerdict,
   diffScorecards,
   type MetricSummary,
+  PRE_OUTCOME_STAGES,
   type RetryableUnmeasured,
   retryableUnmeasured,
   type ScorecardDiff,
   scorecardPassRate,
   summarizeScorecard,
 } from "./scorecard/scorecard.js";
+export { type CaseOutcome, caseOutcome, type ScorecardOutcomes, scorecardOutcomes } from "./scorecard/case-outcome.js";
 export {
   type CaseTrialStats,
   caseTrialStats,

@@ -1,4 +1,16 @@
-import { type CaseResult, type Score, type Scorecard, isMeasured, measuredScores } from "@everdict/contracts";
+import {
+  type CaseFailure,
+  type CaseResult,
+  type Score,
+  type Scorecard,
+  isMeasured,
+  measuredScores,
+} from "@everdict/contracts";
+
+// Stages at/before which a failure means the case never produced a legitimate outcome (no product verdict).
+// A collect/grade-stage failure is different BY DESIGN: the run completed and compute-bound measurements
+// still stand — partial results are preserved, the failure only marks the missing evidence plane.
+export const PRE_OUTCOME_STAGES: ReadonlySet<CaseFailure["stage"]> = new Set(["dispatch", "install", "run"]);
 
 // Case pass verdict — authority-first. Decided in the order ground-truth (real-state verification) > objective comparison > model opinion.
 // The VLM/LLM judge is *auxiliary*: if an objective/ground-truth grader exists, the judge cannot override it (e.g. OSWorld file save —
@@ -9,7 +21,13 @@ const OBJECTIVE_METRICS = ["answer_match", "url_matches", "dom_contains"]; // de
 // Deeper metrics ("judge:<id>:<criterion>", "judge:<id>:milestone:<m>") are diagnostic localization — they
 // explain WHERE a verdict came from and never decide the case themselves.
 const JUDGE_VERDICT_METRIC_RE = /^judge(?::[^:]+)?$/;
-export function caseVerdict(result: Pick<CaseResult, "scores">): boolean | undefined {
+export function caseVerdict(
+  result: Pick<CaseResult, "scores"> & Pick<Partial<CaseResult>, "failure">,
+): boolean | undefined {
+  // A case that never legitimately executed (dispatch/install/run failure) has NO product verdict — the
+  // platform failing the case must not read as the agent failing the task. Collect/grade failures keep their
+  // partial measurements (the run itself completed). caseOutcome() is the full three-way fate.
+  if (result.failure && PRE_OUTCOME_STAGES.has(result.failure.stage)) return undefined;
   // Only MEASUREMENTS can decide a case — an unmeasured/invalid score (grader error, judge skip) carries a
   // placeholder value/pass that must never masquerade as a verdict input.
   const scores = measuredScores(result.scores);

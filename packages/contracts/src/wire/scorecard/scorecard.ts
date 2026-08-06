@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CaseResultSchema, ScorecardSchema } from "../../execution/eval-case.js";
-import { ScorecardRecordSchema } from "../../records/scorecard.js";
+import { ScorecardOutcomesSchema, ScorecardRecordSchema } from "../../records/scorecard.js";
 
 // Response DTO — a scorecard record (batch eval). The @everdict/db ScorecardRecordSchema is the SSOT shape.
 // get() also carries the heavy detail fields (scorecard/steps/runIds/export) — all optional on the record.
@@ -32,5 +32,8 @@ export const ScorecardResponseSchema = ScorecardRecordSchema.extend({
     .describe(
       "Single headline pass rate — trial-aware (passAt1), else highest-authority metric pass rate; null = nothing pass-deciding",
     ),
+  outcomes: ScorecardOutcomesSchema.optional().describe(
+    "Case-fate denominators (server-computed; present when per-case results are present): executed/gradeable/verdicted + passed/failed/infraFailed/unmeasured — an infra-failed case has no product verdict and never enters pass rate",
+  ),
 });
 export type ScorecardResponse = z.infer<typeof ScorecardResponseSchema>;

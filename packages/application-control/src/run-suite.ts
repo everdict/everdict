@@ -5,7 +5,10 @@ import { classifyFailure } from "@everdict/domain";
 export type Dispatch = (job: CaseJob) => Promise<CaseResult>;
 
 // If dispatch throws, don't stop the whole batch (case isolation) — capture it as a failed CaseResult.
-// Record the reason as a trace=error event and put one pass:false score so the pass rate/summary counts this case as a failure.
+// Record the reason as a trace=error event and one UNMEASURED diagnostic score (the reason stays visible per
+// case). The case's fate is carried by `failure` alone: a dispatch death is infra_failed (caseOutcome) with NO
+// product verdict — the platform failing the case must never read as the agent failing the task, so it lands in
+// the infraFailed denominator, never in pass rate.
 // The classified failure (stage × class × retryable) rides on the result so recovery can act by WHERE it died
 // (retry ?class=infra re-runs only infra casualties; agent FAILs are legitimate outcomes and carry no failure).
 // Exported: RunService settles a SINGLE run's dispatch failure with the same synthesis, so the evidence
@@ -37,7 +40,19 @@ export function failedCaseResult(job: CaseJob, error: unknown): CaseResult {
     ],
     snapshot: { kind: "prompt", output: "" },
     // Carry the reason in detail — the web/CLI surface score.detail as-is, so "why it failed" is visible per case.
-    scores: [{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: `[${failure.class}] ${message}` }],
+    // UNMEASURED: this is a diagnostic, not a measurement — the case produced no evidence to grade, and the
+    // placeholder must never enter a mean/passRate (isMeasured gate) or decide a verdict (failure already does).
+    scores: [
+      {
+        graderId: "dispatch",
+        metric: "error",
+        value: 0,
+        status: "unmeasured",
+        reason: "missing_evidence",
+        retryable: failure.retryable,
+        detail: `[${failure.class}] ${message}`,
+      },
+    ],
     failure,
   };
 }

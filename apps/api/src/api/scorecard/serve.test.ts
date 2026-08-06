@@ -46,6 +46,41 @@ describe("serveScorecard (P1g served derivations — the client mirrors are dele
     expect(served.scorecard?.results.map((r) => r.verdict)).toEqual([true, false, undefined]);
     expect(served.casePass).toEqual({ pass: 1, total: 2 });
     expect(served.headlinePassRate).toBeCloseTo(2 / 3);
+    expect(served.outcomes).toEqual({
+      executed: 3,
+      gradeable: 3,
+      verdicted: 2,
+      passed: 1,
+      failed: 1,
+      infraFailed: 0,
+      unmeasured: 1,
+    });
+  });
+
+  it("an infra-failed case gets no verdict and lands only in the infraFailed denominator", () => {
+    const dead: CaseResult = {
+      ...caseResult("z", []),
+      failure: {
+        stage: "dispatch",
+        class: "infra",
+        code: "UPSTREAM_ERROR",
+        message: "placement blip",
+        retryable: true,
+      },
+    };
+    const served = serveScorecard(
+      record({
+        scorecard: {
+          suiteId: "d@1.0.0",
+          harness: "h@1.0.0",
+          results: [caseResult("a", [{ metric: "tests_pass", value: 1, pass: true }]), dead],
+        },
+      }),
+    );
+    // The platform failing the case never reads as the agent failing the task
+    expect(served.scorecard?.results.find((r) => r.caseId === "z")?.verdict).toBeUndefined();
+    expect(served.casePass).toEqual({ pass: 1, total: 1 });
+    expect(served.outcomes).toMatchObject({ executed: 2, gradeable: 1, verdicted: 1, infraFailed: 1 });
   });
 
   it("prefers the trial-aware passAt1 for the headline", () => {

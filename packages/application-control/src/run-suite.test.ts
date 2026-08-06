@@ -1,5 +1,5 @@
 import { BadRequestError, type CaseJob, type CaseResult, type Suite, UpstreamError } from "@everdict/contracts";
-import { caseTrialStats, caseVerdict } from "@everdict/domain";
+import { caseOutcome, caseTrialStats, caseVerdict } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { runSuite } from "./run-suite.js";
 
@@ -76,15 +76,26 @@ describe("runSuite", () => {
     };
     // When: running the suite
     const sc = await runSuite(SUITE, "1.0.0", dispatch, { concurrency: 2 });
-    // Then: both cases have results, and a is captured with an error trace + pass:false
+    // Then: both cases have results; a carries the error trace, the classified failure, and an UNMEASURED
+    // diagnostic score — a dispatch death is infra_failed, never a product FAIL
     expect(sc.results.map((r) => r.caseId).sort()).toEqual(["a", "b"]);
     const failed = sc.results.find((r) => r.caseId === "a");
     expect(failed?.harness).toBe("claude-code@1.0.0");
     expect(failed?.trace).toEqual([{ t: 0, kind: "error", message: "boom" }]);
     expect(failed?.scores).toEqual([
-      { graderId: "dispatch", metric: "error", value: 0, pass: false, detail: "[infra] boom" },
+      {
+        graderId: "dispatch",
+        metric: "error",
+        value: 0,
+        status: "unmeasured",
+        reason: "missing_evidence",
+        retryable: true,
+        detail: "[infra] boom",
+      },
     ]);
-    expect(caseVerdict(failed ?? { scores: [] })).toBe(false);
+    // the platform failing the case is NOT the agent failing the task: no product verdict
+    expect(caseVerdict(failed ?? { scores: [] })).toBeUndefined();
+    expect(caseOutcome(failed ?? { scores: [] })).toMatchObject({ status: "infra_failed" });
     // the successful case aggregates normally
     expect(caseVerdict(sc.results.find((r) => r.caseId === "b") ?? { scores: [] })).toBe(true);
   });
@@ -142,7 +153,8 @@ describe("runSuite transient retry", () => {
     };
     const sc = await runSuite(suite, "1", dispatch, { retries: 2, retryBackoffMs: 1 });
     expect(calls).toBe(3);
-    expect(sc.results[0]?.scores[0]).toMatchObject({ graderId: "dispatch", pass: false });
+    expect(sc.results[0]?.scores[0]).toMatchObject({ graderId: "dispatch", status: "unmeasured" });
+    expect(sc.results[0]?.failure).toBeDefined(); // the fate rides on the classified failure, not a fake FAIL score
   });
 
   it("a result with failing scores is a legitimate outcome — exactly one dispatch, no retry", async () => {
@@ -252,10 +264,12 @@ describe("runSuite N-trial fan-out", () => {
     };
     // When: running 3 trials per case
     const sc = await runSuite(SUITE, "1.0.0", dispatch, { concurrency: 4, trials: 3 });
-    // Then: case a still has all 3 trials, one the isolated dispatch failure, and the trial math sees 2/3 (flaky)
+    // Then: case a still has all 3 trials with the dead one captured as infra_failed — and the trial math sees
+    // 2/2 scored trials, NOT 2/3: a dispatch death is the platform flaking, never the agent flaking
     const aResults = sc.results.filter((r) => r.caseId === "a").sort((x, y) => (x.trial ?? 0) - (y.trial ?? 0));
     expect(aResults.map((r) => r.trial)).toEqual([0, 1, 2]);
-    expect(aResults[1]?.scores[0]).toMatchObject({ graderId: "dispatch", pass: false });
-    expect(caseTrialStats("a", aResults)).toMatchObject({ trials: 3, passes: 2, flaky: true });
+    expect(aResults[1]?.scores[0]).toMatchObject({ graderId: "dispatch", status: "unmeasured" });
+    expect(aResults[1]?.failure).toBeDefined();
+    expect(caseTrialStats("a", aResults)).toMatchObject({ trials: 2, passes: 2, flaky: false });
   });
 });

@@ -209,6 +209,20 @@ export const scorecardRecordSchema = z.object({
   scorecard: fullScorecardSchema.optional(),
   // Server-computed rollup of per-case verdicts (detail only) — replaces the deleted client-side casePass mirror.
   casePass: z.object({ pass: z.number().int(), total: z.number().int() }).optional(),
+  // Server-computed case-fate denominators (detail only): an infra-failed case carries NO product verdict — it is
+  // recovery work, never a product failure — so pass rate reads passed/verdicted, never passed/executed.
+  outcomes: z
+    .object({
+      executed: z.number().int(),
+      gradeable: z.number().int(),
+      verdicted: z.number().int(),
+      passed: z.number().int(),
+      failed: z.number().int(),
+      infraFailed: z.number().int(),
+      unmeasured: z.number().int(),
+      requested: z.number().int().optional(),
+    })
+    .optional(),
   // Object-store ref to the self-contained analysis artifact (summary + per-case verdict/scores) — downloadable/shareable
   // independent of the DB. Best-effort at finalize; absent when no object store is configured.
   analysisRef: z.string().optional(),

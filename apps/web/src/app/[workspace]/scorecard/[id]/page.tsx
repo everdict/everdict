@@ -935,6 +935,20 @@ export default async function ScorecardDetailPage({
             ) : undefined
           }
         />
+        {/* Case-fate denominators — shown when platform failures / unmeasured cases exist, so the pass count is
+            never silently read against the wrong denominator (841/970 vs 841/1000 are different claims). */}
+        {record.outcomes && (record.outcomes.infraFailed > 0 || record.outcomes.unmeasured > 0) && (
+          <p className="text-[12px] text-muted-foreground">
+            {t('caseOutcomesStrip', {
+              executed: record.outcomes.executed,
+              verdicted: record.outcomes.verdicted,
+              passed: record.outcomes.passed,
+              failed: record.outcomes.failed,
+              infraFailed: record.outcomes.infraFailed,
+              unmeasured: record.outcomes.unmeasured,
+            })}
+          </p>
+        )}
         {results.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">
             {record.status === 'failed'

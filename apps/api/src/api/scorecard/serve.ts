@@ -1,6 +1,6 @@
 import type { ScorecardResponse } from "@everdict/contracts/wire";
 import type { ScorecardRecord } from "@everdict/db";
-import { caseVerdict, headlinePassRate } from "@everdict/domain";
+import { caseVerdict, headlinePassRate, scorecardOutcomes } from "@everdict/domain";
 
 // Serve-time enrichment of a scorecard detail (re-architecture P1g): computed derivations ride the
 // wire (per-case verdict, casePass rollup, headline pass rate) so no client re-implements the domain
@@ -24,5 +24,8 @@ export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
     scorecard: { ...record.scorecard, results },
     casePass: { pass, total },
     headlinePassRate: headline,
+    // Case-fate denominators — 841/970 (verdicted) and 841/1000 (requested) are different claims; an
+    // infra-failed case is recovery work with NO product verdict, so it never enters pass/total above either.
+    outcomes: scorecardOutcomes(record.scorecard),
   };
 }

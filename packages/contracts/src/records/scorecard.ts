@@ -34,6 +34,21 @@ export const MetricSummarySchema = z.object({
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 
+// The scorecard's denominators (isomorphic to @everdict/domain scorecardOutcomes) — served next to casePass so
+// no client conflates 841/970 (verdicted) with 841/1000 (requested). infraFailed cases carry NO product verdict;
+// they are recovery work, never product failures. DERIVED on read, never persisted.
+export const ScorecardOutcomesSchema = z.object({
+  executed: z.number().int().nonnegative(),
+  gradeable: z.number().int().nonnegative(),
+  verdicted: z.number().int().nonnegative(),
+  passed: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  infraFailed: z.number().int().nonnegative(),
+  unmeasured: z.number().int().nonnegative(),
+  requested: z.number().int().nonnegative().optional(),
+});
+export type ScorecardOutcomes = z.infer<typeof ScorecardOutcomesSchema>;
+
 // Trial-based verdict roll-up (pass@k / flakiness) — isomorphic to @everdict/domain summarizeTrials's result (shape
 // mirror only; db depends on core, not suite). DERIVED on read from the scorecard's repeated trials (like
 // RunRecord.usage from the trace) — never persisted; present only on a multi-trial batch's detail. docs/architecture/trial-based-verdict.md

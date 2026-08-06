@@ -2713,6 +2713,7 @@
     "deleteSelected": "삭제"
   },
   "scorecardsPage": {
+    "caseOutcomesStrip": "실행 {executed}건 중 — 판정 {verdicted} · 통과 {passed} · 실패 {failed} · 인프라 실패 {infraFailed} · 미측정 {unmeasured}",
     "scoreUnmeasured": "미측정",
     "title": "스코어카드",
     "description": "벤치마크로 하니스를 한 번에 평가하고 점수를 모아 봐요.",
