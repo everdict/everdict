@@ -1,6 +1,6 @@
 import { type ChatMessage, ToolRegistry, extractTodosFromHistory } from "@everdict/agent-runtime";
 import { Metrics } from "@everdict/application-control";
-import type { AgentMessageRecord } from "@everdict/contracts";
+import { type AgentMessageRecord, NotFoundError } from "@everdict/contracts";
 import { InMemoryAgentSessionStore } from "@everdict/db";
 import type { LlmTransport, StreamRequest } from "@everdict/llm";
 import { describe, expect, it } from "vitest";
@@ -392,6 +392,74 @@ describe("workspace memory recall", () => {
     // Then the safety net published the memory + its index line through the attributed fs tools
     expect(writes).toContain("memory/staging-cluster-address.md");
     expect(writes).toContain("memory/MEMORY.md");
+  });
+
+  it("prefers the resolved model's OWN companion tiers over the deployment defaults", async () => {
+    // Given a main model whose SPEC names its small companion, and a deployment env default that differs
+    const mainTransport: LlmTransport = {
+      provider: "fake",
+      stream: async () => ({
+        content: "noted",
+        toolCalls: [],
+        finishReason: "stop",
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      }),
+    };
+    const smallTransport: LlmTransport = {
+      provider: "fake-small",
+      stream: async () => ({ content: JSON.stringify({ save: false }), toolCalls: [], finishReason: "stop" }),
+    };
+    const resolvedRefs: string[] = [];
+    const { deps } = await seededDeps(mainTransport);
+    const withCompanions: ChatDeps = {
+      ...deps,
+      resolveModel: async () => ({ transport: mainTransport, model: "main", companions: { small: "spec-small" } }),
+      toolProvider: async () => ({
+        registry: new ToolRegistry([]),
+        call: async () => ({ content: "NOT_FOUND", isError: true }),
+        close: async () => {},
+      }),
+      memoryExtraction: true,
+      smallModelRef: "env-small", // the deployment default the spec must beat
+      resolveModelById: async (_p, ref) => {
+        resolvedRefs.push(ref);
+        return { transport: smallTransport, model: "small-model" };
+      },
+    };
+    // When a substantive turn completes (the extraction path resolves the small tier)
+    await runChat(withCompanions, PRINCIPAL, {}, "s-1", `Remember-worthy context riding along. ${"x".repeat(400)}`);
+    // Then the catalog's companion won — the workspace tunes its agent, not the operator env
+    expect(resolvedRefs).toContain("spec-small");
+    expect(resolvedRefs).not.toContain("env-small");
+  });
+
+  it("a companion tier that fails to resolve degrades to no tier instead of killing the turn", async () => {
+    const mainTransport: LlmTransport = {
+      provider: "fake",
+      stream: async () => ({
+        content: "still fine",
+        toolCalls: [],
+        finishReason: "stop",
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      }),
+    };
+    const { deps, sessions } = await seededDeps(mainTransport);
+    const withBrokenCompanion: ChatDeps = {
+      ...deps,
+      resolveModel: async () => ({
+        transport: mainTransport,
+        model: "main",
+        companions: { fallback: "deleted-model", subagent: "also-gone" },
+      }),
+      resolveModelById: async () => {
+        throw new NotFoundError("NOT_FOUND", {}, "model was deleted from the catalog");
+      },
+    };
+    // When the turn runs with companions pointing at deleted catalog entries
+    const result = await runChat(withBrokenCompanion, PRINCIPAL, {}, "s-1", "hello there");
+    // Then the conversation still answers — a lost optimization, never a dead conversation
+    expect(result.messages.some((m) => m.role === "assistant" && m.content === "still fine")).toBe(true);
+    expect((await sessions.listMessages("acme", "s-1")).length).toBeGreaterThan(1);
   });
 
   it("injects the memory index into the model's user turn while the persisted record stays clean", async () => {

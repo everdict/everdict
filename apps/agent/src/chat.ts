@@ -24,7 +24,7 @@ import {
   type TraceSpan,
   traceIdForRun,
 } from "@everdict/contracts";
-import type { ReasoningCarrier } from "@everdict/llm";
+import type { LlmTransport, ReasoningCarrier } from "@everdict/llm";
 import { type AgentDraft, buildAgentDraftTools } from "./agent-draft-tool.js";
 import type { AgentTryEvent, AgentTryResult } from "./agent-try.js";
 import { buildRunAnalysisTool } from "./analysis-script-tool.js";
@@ -893,7 +893,29 @@ export async function runChat(
     // compaction actually fires — so a normal turn pays nothing. The fallback is resolved up front (opt-in per
     // workspace) so it's ready the moment the main model starts failing.
     const byId = deps.resolveModelById;
-    const smallRef = deps.smallModelRef;
+    // Tier precedence: the resolved model's OWN companions first (the workspace's catalog decision — the model
+    // spec is where a workspace tunes the agent it powers), then the deployment AGENT_*_MODEL defaults.
+    const smallRef = model.companions?.small ?? deps.smallModelRef;
+    const fallbackRef = model.companions?.fallback ?? deps.fallbackModelRef;
+    const subagentRef = model.companions?.subagent ?? deps.subagentModelRef;
+    // A tier that fails to resolve degrades to "no tier", never a dead conversation: a companion ref is ordinary
+    // workspace catalog data (a member can delete the model it points at), and a missing fallback/subagent tier
+    // only loses an optimization — failing every turn over it would punish the wrong party.
+    const resolveTier = async (
+      ref: string | undefined,
+      tier: string,
+    ): Promise<{ transport: LlmTransport; model: string } | undefined> => {
+      if (!ref || !byId) return undefined;
+      try {
+        const resolved = await byId(principal, ref);
+        return { transport: resolved.transport, model: resolved.model };
+      } catch (err) {
+        console.error(
+          `[agent] ${tier} model "${ref}" failed to resolve — continuing without it: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return undefined;
+      }
+    };
     const summarize =
       smallRef && byId
         ? async (span: ChatMessage[]): Promise<string> => {
@@ -901,14 +923,8 @@ export async function runChat(
             return buildSummarizer(small.transport, small.model)(span);
           }
         : undefined;
-    const fallback =
-      deps.fallbackModelRef && byId
-        ? await byId(principal, deps.fallbackModelRef).then((fb) => ({ transport: fb.transport, model: fb.model }))
-        : undefined;
-    const subagentModel =
-      deps.subagentModelRef && byId
-        ? await byId(principal, deps.subagentModelRef).then((sm) => ({ transport: sm.transport, model: sm.model }))
-        : undefined;
+    const fallback = await resolveTier(fallbackRef, "fallback");
+    const subagentModel = await resolveTier(subagentRef, "subagent");
 
     // Spawnable sub-agent types: the builtins + the workspace's crafted agents (name collisions keep the
     // builtin — explore/analyze/verify are the stable vocabulary the base prompt teaches). Best-effort.

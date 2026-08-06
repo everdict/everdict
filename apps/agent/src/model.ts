@@ -12,6 +12,9 @@ export interface ResolvedModel {
   // conversation's cost is metered against it (own-pays/personal key or dev fallback → false). Mirrors the harness
   // billing rule (docs/architecture/usage-metering.md).
   billed?: boolean;
+  // The spec's companion tiers (registered-model refs) — the workspace's own tuning of the agent it powers.
+  // chat.ts prefers these over the deployment AGENT_*_MODEL defaults. Absent on the env-fallback model.
+  companions?: { small?: string; fallback?: string; subagent?: string };
 }
 
 export type ModelResolver = (principal: Principal) => Promise<ResolvedModel>;
@@ -49,6 +52,7 @@ async function resolveRegisteredModel(
     model: spec.model,
     ...(spec.params?.temperature !== undefined ? { temperature: spec.params.temperature } : {}),
     billed: fromWorkspace !== undefined, // the workspace secret paid → meter this conversation's cost to the workspace
+    ...(spec.companions !== undefined ? { companions: spec.companions } : {}),
   };
 }
 

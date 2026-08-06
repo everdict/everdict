@@ -19,6 +19,12 @@ secret NAME**, never a plaintext key:
   the value — same discipline as harness env `{secretRef}` and runtime `authSecret`). Unset → the provider default
   key name (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 - `params?` — sampling defaults (`temperature`, `maxTokens`).
+- `companions?` — the tiers this model runs **alongside when it powers an agent**, as refs to other registered
+  models in the same catalog: `small` (compaction digests, session memory, turn-end memory extraction),
+  `fallback` (takes over after sustained transient failures), `subagent` (spawn_agent sub-tasks). This is where a
+  **workspace** tunes its agent's cost/behavior profile; a spec companion overrides the matching deployment-level
+  `AGENT_SMALL_MODEL` / `AGENT_FALLBACK_MODEL` / `AGENT_SUBAGENT_MODEL` default, and a companion that fails to
+  resolve degrades to "no tier" (a lost optimization, never a dead conversation).
 
 The **value** of `apiKeySecret` is resolved from the `SecretStore` just before dispatch (workspace tier first, the
 submitter's personal tier as fallback) — no plaintext is ever stored in the registry.

@@ -24,6 +24,18 @@ export const ModelSpecSchema = z.object({
       maxTokens: z.number().int().positive().optional(),
     })
     .optional(),
+  // Companion tiers this model runs ALONGSIDE when it powers an agent — refs to other registered models in the
+  // same workspace catalog. This is where a workspace tunes its agent's cost/behavior profile instead of the
+  // operator's deployment env: `small` digests (compaction summaries, session memory, turn-end memory
+  // extraction), `fallback` takes over after sustained transient failures, `subagent` powers spawn_agent
+  // sub-tasks. A spec companion overrides the matching AGENT_*_MODEL deployment default; unset falls through.
+  companions: z
+    .object({
+      small: z.string().optional(),
+      fallback: z.string().optional(),
+      subagent: z.string().optional(),
+    })
+    .optional(),
   tags: z.array(z.string()).default([]),
 });
 export type ModelSpec = z.infer<typeof ModelSpecSchema>;
