@@ -1,5 +1,6 @@
 import type { ChatMessage } from "../messages.js";
 import { READ_SKILL_FILE_TOOL_NAME, USE_SKILL_TOOL_NAME } from "../tools/skill-tool.js";
+import { imageOversizeReason, oversizedImageMark } from "./media-limits.js";
 
 // Context compaction — a 3-rung escalation ladder that raises tokens-per-information instead of just discarding the
 // oldest turns (Claude Code parity). The loop applies them in order until it fits:
@@ -37,18 +38,37 @@ function imagePartCount(m: ChatMessage): number {
 // and a later compaction that removes old turns automatically restores the dropped images' budget.
 // The newest images are the ones an agent is acting on, so the oldest go first — with a text mark in their place
 // rather than silent removal, because "there was an image here" is what stops the model re-reading a stale one.
+// The count cap has a twin: an image that is legal to include can still be too big to send. Both are the same
+// failure — a request the provider rejects wholesale with an error that names nothing — so both are answered in
+// this one pass, and an image removed for EITHER reason leaves a line saying which.
 export function capMedia(messages: ChatMessage[], max = MAX_MEDIA_PER_REQUEST): ChatMessage[] {
   let total = 0;
   for (const m of messages) total += imagePartCount(m);
+  const oversized = oversizedParts(messages);
+  // An image dropped for its size never reaches the wire, so it does not spend a slot in the count budget —
+  // otherwise one unsendable screenshot would silently cost the run a second, perfectly good one.
+  for (const perMessage of oversized.values()) total -= perMessage.size;
   let over = total - max;
-  if (over <= 0) return messages;
+  if (over <= 0 && oversized.size === 0) return messages;
   const out = [...messages];
-  for (let i = 0; i < out.length && over > 0; i++) {
+  for (let i = 0; i < out.length; i++) {
     const m = out[i];
     if (!m || imagePartCount(m) === 0) continue;
+    const reasons = oversized.get(i);
+    if (over <= 0 && !reasons) continue;
     const parts: unknown[] = [];
+    let seen = -1;
     for (const p of m.content as unknown[]) {
-      if (over > 0 && typeof p === "object" && p !== null && "image_url" in p) {
+      const isImage = typeof p === "object" && p !== null && "image_url" in p;
+      if (!isImage) {
+        parts.push(p);
+        continue;
+      }
+      seen++;
+      const reason = reasons?.get(seen);
+      if (reason !== undefined) {
+        parts.push({ type: "text", text: oversizedImageMark(reason) });
+      } else if (over > 0) {
         over--;
         parts.push({ type: "text", text: DROPPED_IMAGE_MARK });
       } else {
@@ -58,6 +78,28 @@ export function capMedia(messages: ChatMessage[], max = MAX_MEDIA_PER_REQUEST): 
     out[i] = { ...m, content: parts } as ChatMessage;
   }
   return out;
+}
+
+// message index → (image index within that message → why it cannot be sent). Measured before anything is dropped,
+// so an image removed for size is not also counted against the per-request budget.
+function oversizedParts(messages: ChatMessage[]): Map<number, Map<number, string>> {
+  const found = new Map<number, Map<number, string>>();
+  messages.forEach((m, i) => {
+    if (!Array.isArray(m.content)) return;
+    let seen = -1;
+    for (const p of m.content) {
+      if (typeof p !== "object" || p === null || !("image_url" in p)) continue;
+      seen++;
+      const url = (p as { image_url?: { url?: unknown } }).image_url?.url;
+      if (typeof url !== "string") continue;
+      const reason = imageOversizeReason(url);
+      if (reason === undefined) continue;
+      const perMessage = found.get(i) ?? new Map<number, string>();
+      perMessage.set(seen, reason);
+      found.set(i, perMessage);
+    }
+  });
+  return found;
 }
 
 // tool_call_ids of skill-tool invocations — found on the assistant turns (a tool message carries no tool name).

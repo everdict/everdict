@@ -177,6 +177,50 @@ describe("capMedia — the per-request media cap", () => {
     expect(original.some((p) => p.image_url)).toBe(true);
   });
 
+  it("drops an image the provider would reject WHOLE-request, and says which one and why", () => {
+    // Given a run whose second screenshot came back too tall to send (a full-page capture)
+    const tall = new Uint8Array(33);
+    tall.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    const view = new DataView(tall.buffer);
+    view.setUint32(8, 13);
+    tall.set([0x49, 0x48, 0x44, 0x52], 12);
+    view.setUint32(16, 1200);
+    view.setUint32(20, 14_000);
+    const oversized: ChatMessage = {
+      role: "user",
+      content: [
+        { type: "text", text: "screenshot 1" },
+        { type: "image_url", image_url: { url: `data:image/png;base64,${Buffer.from(tall).toString("base64")}` } },
+      ],
+    };
+    // When the request is built well under the count cap
+    const out = capMedia([shot(0), oversized, shot(2)], 100);
+    // Then only that image is replaced — by a line naming the measurement and the way out
+    const parts = out[1]?.content as { type: string; text?: string; image_url?: unknown }[];
+    expect(parts[1]?.image_url).toBeUndefined();
+    expect(parts[1]?.text).toContain("1200×14000 pixels");
+    expect(parts[1]?.text).toContain("smaller region or a lower resolution");
+    // …and its neighbours are untouched: one bad image must not cost the run its other screenshots
+    const survivors = out.flatMap((m) =>
+      (m.content as { image_url?: { url?: string } }[]).filter((p) => p.image_url).map((p) => p.image_url?.url),
+    );
+    expect(survivors).toEqual(["data:image/png;base64,IMG0", "data:image/png;base64,IMG2"]);
+  });
+
+  it("does not spend the count budget on an image it already dropped for size", () => {
+    const huge: ChatMessage = {
+      role: "user",
+      content: [{ type: "image_url", image_url: { url: `data:image/png;base64,${"A".repeat(7 * 1024 * 1024)}` } }],
+    };
+    // Given a cap of 2 and four images, one of which is oversized
+    const out = capMedia([huge, shot(0), shot(1), shot(2)], 2);
+    // Then the oversized one is gone for its own reason, and the count cap still admits its full 2 newest
+    const survivors = out.flatMap((m) =>
+      (m.content as { image_url?: { url?: string } }[]).filter((p) => p.image_url).map((p) => p.image_url?.url),
+    );
+    expect(survivors).toEqual(["data:image/png;base64,IMG1", "data:image/png;base64,IMG2"]);
+  });
+
   it("leaves image-free transcripts completely alone", () => {
     const plain: ChatMessage[] = [
       { role: "user", content: "hello" },
