@@ -55,12 +55,16 @@ describe("StoreRunnerHub — multi-replica lease over a shared store", () => {
 
   it("a heartbeat keeps a leased job alive past the idle timeout (long-running case isn't rejected)", async () => {
     const store = new InMemoryRunnerJobStore();
-    const hub = new StoreRunnerHub(store, opts({ queueTimeoutMs: 40 }));
+    // Margins are deliberately wide (gap 30ms vs timeout 600ms, 20x): each heartbeat only has to land within one
+    // timeout of the previous extension, and under a loaded parallel test run a timer can easily stretch several
+    // fold — the old 10ms-vs-40ms ratio made this the suite's flake. The heartbeat span still totals ~750ms,
+    // past the naked 600ms timeout, so the test keeps proving extension is what saves a long-running case.
+    const hub = new StoreRunnerHub(store, opts({ queueTimeoutMs: 600 }));
     const d = hub.enqueue(keyA, job("c1"));
     const leased = await hub.leaseWait(keyA, 200, ["repo"]);
     if (!leased) throw new Error("expected a lease");
-    for (let i = 0; i < 8; i++) {
-      await new Promise((r) => setTimeout(r, 10));
+    for (let i = 0; i < 25; i++) {
+      await new Promise((r) => setTimeout(r, 30));
       expect((await hub.heartbeat(keyA, leased.jobId)).extended).toBe(true);
     }
     expect(await hub.complete(keyA, leased.jobId, result)).toBe(true);
