@@ -140,7 +140,7 @@ describe("microcompact — stale images", () => {
   const shotTurn = (n: number): ChatMessage => ({
     role: "user",
     content: [
-      { type: "text", text: `The tool call(s) above returned 1 image(s):` },
+      { type: "text", text: "The tool call(s) above returned 1 image(s):" },
       { type: "image_url", image_url: { url: `data:image/png;base64,SHOT${n}` } },
     ],
   });
