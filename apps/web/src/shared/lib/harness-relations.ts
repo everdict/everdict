@@ -20,8 +20,11 @@ interface ScorecardLike {
   createdAt: string
   status?: string
   summary?: MetricLike[]
+  headlinePassRate?: number | null // server-ranked headline (authority ladder) — rides the list
 }
 
+// Representative metric fallback for rows served before headlinePassRate rode the list — the served
+// headline (authority-ranked) always wins; summary order is not authority.
 function primaryMetric(sc: ScorecardLike): MetricLike | undefined {
   return sc.summary?.find((m) => m.passRate != null) ?? sc.summary?.[0]
 }
@@ -39,7 +42,7 @@ export function buildHarnessRelations(
       rel.lastRunAt = sc.createdAt
       rel.lastStatus = sc.status
       const m = primaryMetric(sc)
-      rel.lastPassRate = m?.passRate ?? null
+      rel.lastPassRate = sc.headlinePassRate ?? m?.passRate ?? null
       rel.lastMean = m?.mean ?? null
     }
   }

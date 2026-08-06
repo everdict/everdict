@@ -364,12 +364,12 @@ export default async function IssueDetailPage({
 
   const linked = new Set(evaluation.linked)
   const entries: IssueEvaluationEntry[] = evaluation.scorecards.map((s) => {
-    const metric = s.summary?.find((m) => m.passRate != null) ?? s.summary?.[0]
+    const metric = s.summary?.find((m) => m.passRate != null) ?? s.summary?.[0] // fallback for pre-headline rows
     return {
       id: s.id,
       dataset: s.dataset,
       harness: s.harness,
-      passRate: metric?.passRate ?? null,
+      passRate: s.headlinePassRate ?? metric?.passRate ?? null,
       status: s.status,
       createdAt: s.createdAt,
       pinned: linked.has(s.id),

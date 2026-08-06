@@ -213,7 +213,7 @@ export default async function DatasetDetailPage({
       actor: resolveActor(summary.createdBy),
     })
   for (const sc of scorecards.filter((s) => s.dataset.id === id)) {
-    const m = sc.summary?.find((x) => x.passRate != null) ?? sc.summary?.[0]
+    const m = sc.summary?.find((x) => x.passRate != null) ?? sc.summary?.[0] // fallback for pre-headline rows
     activity.push({
       kind: 'scorecard',
       at: sc.createdAt,
@@ -222,7 +222,7 @@ export default async function DatasetDetailPage({
       harnessId: sc.harness.id,
       harness: `${sc.harness.id}@${sc.harness.version}`,
       status: sc.status,
-      passRate: m?.passRate ?? null,
+      passRate: sc.headlinePassRate ?? m?.passRate ?? null,
     })
   }
   activity.sort((a, b) => a.at.localeCompare(b.at))

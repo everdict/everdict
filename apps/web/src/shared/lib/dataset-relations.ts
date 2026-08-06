@@ -21,6 +21,7 @@ interface ScorecardLike {
   createdAt: string
   status?: string
   summary?: MetricLike[]
+  headlinePassRate?: number | null // server-ranked headline (authority ladder) — rides the list
 }
 
 // Representative metric — the first metric with a pass rate, else the first metric (the basis for the list's "recent result").
@@ -48,7 +49,7 @@ export function buildDatasetRelations(
       rel.lastRunAt = sc.createdAt
       rel.lastStatus = sc.status
       const m = primaryMetric(sc)
-      rel.lastPassRate = m?.passRate ?? null
+      rel.lastPassRate = sc.headlinePassRate ?? m?.passRate ?? null
       rel.lastMean = m?.mean ?? null
     }
   }

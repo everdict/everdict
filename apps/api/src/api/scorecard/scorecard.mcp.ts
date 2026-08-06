@@ -6,7 +6,7 @@ import { teamCeiling, teamForNew, visibleTeamsFor } from "../../common/team-scop
 import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
 import { moveToolDescription } from "../team-move.js";
 import { AnalysisDimensionSchema } from "./request/analysis-query.js";
-import { serveScorecard } from "./serve.js";
+import { serveScorecard, serveScorecardListItem } from "./serve.js";
 
 // The owning team a JSON body names, if any. The shared body schemas do not carry `teamId` (it is transport
 // metadata, not ingest content), so both transports read it off the raw object before validation.
@@ -313,18 +313,20 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       ({ judge, schedule, dataset, harness, team }) =>
         run(principal, "scorecards:read", async () =>
           ok(
-            await scorecards.list(ws, {
-              ...(schedule
-                ? { scheduleId: schedule }
-                : judge
-                  ? { judge }
-                  : { ...(dataset !== undefined ? { dataset } : {}), ...(harness !== undefined ? { harness } : {}) }),
-              // `team` COMBINES with the narrows above rather than replacing them — "of these, which are ours".
-              ...(team !== undefined ? { teamId: await resolveTeam(ctx, team) } : {}),
-              // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
-              // person's teams and no more. The narrow above never reaches past this ceiling.
-              ...(await teamCeiling(ctx.deps, principal)),
-            }),
+            (
+              await scorecards.list(ws, {
+                ...(schedule
+                  ? { scheduleId: schedule }
+                  : judge
+                    ? { judge }
+                    : { ...(dataset !== undefined ? { dataset } : {}), ...(harness !== undefined ? { harness } : {}) }),
+                // `team` COMBINES with the narrows above rather than replacing them — "of these, which are ours".
+                ...(team !== undefined ? { teamId: await resolveTeam(ctx, team) } : {}),
+                // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
+                // person's teams and no more. The narrow above never reaches past this ceiling.
+                ...(await teamCeiling(ctx.deps, principal)),
+              })
+            ).map(serveScorecardListItem), // BFF parity — the ranked headline rides the MCP list too
           ),
         ),
     );

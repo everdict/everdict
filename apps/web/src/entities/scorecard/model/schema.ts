@@ -207,6 +207,8 @@ export const scorecardRecordSchema = z.object({
     })
     .optional(),
   scorecard: fullScorecardSchema.optional(),
+  // Server-computed authority-ranked headline (list + detail) — prefer this over any summary-order heuristic.
+  headlinePassRate: z.number().nullable().optional(),
   // Server-computed rollup of per-case verdicts (detail only) — replaces the deleted client-side casePass mirror.
   casePass: z.object({ pass: z.number().int(), total: z.number().int() }).optional(),
   // Server-computed case-fate denominators (detail only): an infra-failed case carries NO product verdict — it is

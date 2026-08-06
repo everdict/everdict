@@ -13,6 +13,12 @@ import {
 // rules — this deleted the apps/web verdict mirror and the SDK headline mirror. Enrichment happens at
 // the transport boundary (HTTP route + MCP tool call this one mapper), never persisted — old records
 // get the fields too, and internal readers (analytics/diff/export) keep seeing the raw record.
+// List-item enrichment — the authority-ranked headline rides the LIST too, so no client re-derives a
+// "representative metric" from summary order (summary order is not authority).
+export function serveScorecardListItem(record: ScorecardRecord): ScorecardResponse {
+  return { ...record, headlinePassRate: headlinePassRate(record) };
+}
+
 export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
   const headline = headlinePassRate(record);
   if (!record.scorecard) return { ...record, headlinePassRate: headline };
