@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { LocalDriver } from "./local.js";
 
 describe("LocalDriver", () => {
+  it("refuses a declared world it cannot provide BEFORE execution (injection: windows case on a linux driver)", async () => {
+    // A wrong-world run would produce a normal-looking result — the refusal must be a clear pre-flight error.
+    await expect(new LocalDriver().provision({ os: "windows", needs: ["shell"] })).rejects.toThrow(/linux only/);
+  });
+
   it("creates the directory and runs even when exec is given a nonexistent relative cwd (regression for missing 'work' in prompt QA)", async () => {
     // Regression: previously, in a prompt env that doesn't create a directory, the harness's default cwd ("work")
     // was missing, so spawn died silently with exit 1 + empty output (the case looked like it "succeeded with an empty result").

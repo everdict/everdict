@@ -351,6 +351,29 @@ describe("ScorecardService.diff", () => {
     expect(diff.comparability).toBe("full");
   });
 
+  it("refuses to compare batches judged under different verdict-policy digests (injection: policy changed between runs)", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(
+      record("base", {
+        scorecard: scorecard(true),
+        verdictPolicy: { id: "authority-ladder", version: "1.0.0", digest: "aaa" },
+      }),
+    );
+    await store.create(
+      record("cand", {
+        scorecard: scorecard(false),
+        verdictPolicy: { id: "authority-ladder", version: "2.0.0", digest: "bbb" },
+      }),
+    );
+    const diff = await svc(store).diff("acme", "base", "cand");
+    // Verdicts produced by different rules are not one experiment — "no differences" is not the claim here.
+    expect(diff.comparability).toBe("none");
+    expect(diff.policyMismatch).toEqual({
+      baseline: { id: "authority-ladder", version: "1.0.0", digest: "aaa" },
+      candidate: { id: "authority-ladder", version: "2.0.0", digest: "bbb" },
+    });
+  });
+
   it("missing / other-workspace scorecard → NotFoundError (404)", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(record("base", { scorecard: scorecard(true) }));
