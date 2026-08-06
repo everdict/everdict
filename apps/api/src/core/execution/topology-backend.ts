@@ -68,12 +68,17 @@ export function buildTopologyEnvironment(
           addr: spec.addr,
           ...(spec.namespace ? { namespace: spec.namespace } : {}),
           ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
+          // host.docker.internal → a concrete IP. Live-found gap: the knob existed on the runtime but nothing
+          // threaded it from a REGISTERED runtime, so a Nomad whose docker driver builds /etc/hosts itself
+          // (bridge networking rejects the `host-gateway` keyword) failed every topology alloc.
+          ...(spec.hostGatewayAddr ? { hostGatewayAddr: spec.hostGatewayAddr } : {}),
           ...(deps.registryAuths ? { registryAuths: deps.registryAuths } : {}),
         })
       : new K8sTopologyRuntime({
           ...(spec.context ? { context: spec.context } : {}),
           ...(spec.namespace ? { namespacePrefix: spec.namespace } : {}),
           ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
+          ...(spec.hostGatewayAddr ? { hostGatewayAddr: spec.hostGatewayAddr } : {}),
           ...(deps.registryAuths ? { registryAuths: deps.registryAuths } : {}),
         });
   // Build the full fixed source from the runtime spec (G1: 5 kinds + auth/correlate/scope). authSecret → the verbatim

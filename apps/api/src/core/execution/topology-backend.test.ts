@@ -2,7 +2,7 @@ import { isScreenCapturable } from "@everdict/backends";
 import { AppError, type CaseJob, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/contracts";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
-import { buildTopologyBackend } from "./topology-backend.js";
+import { buildTopologyBackend, buildTopologyEnvironment } from "./topology-backend.js";
 
 // topology kind removed (5b-2) → topology-capable nomad/k8s (= a runtime that has a traceSource). The orchestrator is implied by the kind.
 const nomadSpec: Extract<RuntimeSpec, { kind: "nomad" | "k8s" }> = {
@@ -42,6 +42,22 @@ describe("buildTopologyBackend (topology RuntimeSpec → ServiceTopologyBackend)
   it("RuntimeSpecSchema validates the topology runtime (a tenant can register it via POST /runtimes)", () => {
     expect(RuntimeSpecSchema.safeParse(nomadSpec).success).toBe(true);
     expect(RuntimeSpecSchema.safeParse(k8sSpec).success).toBe(true);
+  });
+
+  it("threads hostGatewayAddr from the RuntimeSpec into BOTH topology runtimes (regression: the knob existed on the runtime but a registered runtime could never set it — every alloc on a keyword-rejecting Nomad failed)", () => {
+    const withGateway = { ...nomadSpec, hostGatewayAddr: "172.17.0.1" };
+    expect(RuntimeSpecSchema.parse(withGateway).hostGatewayAddr).toBe("172.17.0.1"); // pre-fix the schema stripped it
+    const env = buildTopologyEnvironment(withGateway, { harnesses: harnessesReturning("service") });
+    expect((env.runtime as unknown as { opts: { hostGatewayAddr?: string } }).opts.hostGatewayAddr).toBe(
+      "172.17.0.1",
+    );
+    const k8sEnv = buildTopologyEnvironment(
+      { ...k8sSpec, hostGatewayAddr: "172.17.0.1" },
+      { harnesses: harnessesReturning("service") },
+    );
+    expect((k8sEnv.runtime as unknown as { opts: { hostGatewayAddr?: string } }).opts.hostGatewayAddr).toBe(
+      "172.17.0.1",
+    );
   });
 
   it("nomad orchestrator → a ScreenCapturable topology backend", () => {
