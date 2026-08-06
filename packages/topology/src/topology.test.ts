@@ -2598,6 +2598,26 @@ describe("ServiceTopologyBackend — inspectTopology / topologyServiceLogs (Topo
     expect(seen.every((s) => s.zone === "acme")).toBe(true);
   });
 
+  it("tail-caps an oversized runtime log read — the on-demand response stays bounded however chatty the service", async () => {
+    // Regression: the on-demand route used to relay the runtime's read verbatim; a runtime without its own
+    // tail limit shipped an unbounded string through one JSON response and took the API server down.
+    const runtime = observableRuntime([]);
+    runtime.serviceLogs = async () => `${"x".repeat(400_000)}TAIL-END`;
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC,
+    });
+    const logs = await backend.topologyServiceLogs({ id: "x", version: "1" }, "agent-server");
+    expect(logs?.length).toBe(262_144);
+    // The newest output is the inspection value — the cap keeps the END of the log, not the start.
+    expect(logs?.endsWith("TAIL-END")).toBe(true);
+  });
+
   it("a runtime without the optional reads / a failing specFor reads as undefined (never a throw)", async () => {
     const bare = new ServiceTopologyBackend({
       runtime: {

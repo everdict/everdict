@@ -152,6 +152,10 @@ export interface NomadTopologyRuntimeOptions {
 // The store-namespace id used for a no-zone silo (there are no tenants, so one default id names the dedicated store job).
 const NO_ZONE_STORE_ID = "default";
 
+// Per-stream byte cap for the on-demand service-log read (`origin=end` tail). A service that has logged for hours
+// holds an alloc log far larger than any inspection view can use — an unbounded read OOM-killed the control plane.
+const SERVICE_LOG_TAIL_BYTES = 131_072;
+
 // One task event of an alloc's TaskStates — the diagnosis view (A6). Mirrors the backends' NomadTaskEvent shape
 // (topology and backends are sibling packages, so the tiny matcher is kept local rather than cross-imported).
 interface TaskEventLike {
@@ -872,6 +876,9 @@ export class NomadTopologyRuntime implements TopologyRuntime {
 
   // One deployed service's current log tail (topology observability) — the task's stdout, with its stderr appended
   // when non-empty (services commonly log to either). undefined = no live alloc carrying that task.
+  // The read is a TAIL, never the whole file: `origin=end&offset=N` asks Nomad for only the last N bytes (clamped
+  // to the file start for smaller logs) — a chatty service's multi-hundred-MB alloc log must not be pulled into
+  // the control plane's memory for an on-demand inspection view.
   async serviceLogs(spec: ServiceHarnessSpec, service: string, zone?: TrustZone): Promise<string | undefined> {
     try {
       const ns = zone?.namespace ?? this.opts.namespace;
@@ -903,7 +910,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       const read = async (stream: "stdout" | "stderr"): Promise<string> => {
         const logs = await this.http.request(
           "GET",
-          `/v1/client/fs/logs/${alloc.ID}?task=${encodeURIComponent(task)}&type=${stream}&plain=true${this.nsq(ns, "&")}`,
+          `/v1/client/fs/logs/${alloc.ID}?task=${encodeURIComponent(task)}&type=${stream}&plain=true&origin=end&offset=${SERVICE_LOG_TAIL_BYTES}${this.nsq(ns, "&")}`,
         );
         return logs.status < 300 ? logs.text : "";
       };

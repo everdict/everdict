@@ -866,6 +866,35 @@ describe("NomadTopologyRuntime.describeTopology / serviceLogs (topology observab
     // A task no alloc carries → undefined (nothing to read), never a throw.
     expect(await rt.serviceLogs(SPEC, "no-such-service")).toBeUndefined();
   });
+
+  it("serviceLogs asks Nomad for only the log TAIL (origin=end + byte offset) — never the whole alloc log file", async () => {
+    // Regression: the read used to omit origin/offset, so Nomad streamed the ENTIRE stdout+stderr of a
+    // long-lived service into the control plane's memory — large enough logs killed the API server.
+    const logReads: string[] = [];
+    const http: NomadHttp = {
+      async request(_method, path) {
+        if (path.includes("/allocations"))
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { ID: "a1", DesiredStatus: "run", CreateIndex: 1, TaskStates: { "agent-server": { State: "running" } } },
+            ]),
+          };
+        if (path.includes("/logs/a1")) {
+          logReads.push(path);
+          return { status: 200, text: "tail" };
+        }
+        return { status: 404, text: "" };
+      },
+    };
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http });
+    await rt.serviceLogs(SPEC, "agent-server");
+    expect(logReads).toHaveLength(2); // stdout + stderr
+    for (const read of logReads) {
+      expect(read).toContain("origin=end");
+      expect(read).toMatch(/offset=\d+/);
+    }
+  });
 });
 
 // B5 — store probe demotion: over the CLI, "store not ready" and a broken exec path (no nomad binary / no ACL /

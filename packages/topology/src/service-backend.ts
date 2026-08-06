@@ -114,8 +114,13 @@ export interface ServiceTopologyBackendOptions {
 }
 
 // Per-service log-tail cap for the sealed trajectory (half the failure-path FAILURE_LOG_TAIL_CAP) — the tail is
-// evidence, not an archive; the on-demand inspection route still serves the full runtime read.
+// evidence, not an archive.
 const SERVICE_LOG_TAIL_CAP = 8_000;
+
+// Cap for the on-demand inspection read (`topologyServiceLogs`) — generous enough to read a service's recent
+// history, bounded so a runtime without its own tail limit can't ship an unbounded string through the API
+// response into the browser. Runtimes should tail at the source too; this is the runtime-agnostic backstop.
+const SERVICE_LOG_INSPECT_CAP = 262_144;
 
 // A declared pool coordinate that is not a finite number tells us nothing, and reporting a guess as capacity is
 // worse than reporting none — an operator would size batches against it.
@@ -191,7 +196,10 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     try {
       const spec = await this.opts.specFor(tenant ?? "default", harness.id, harness.version);
       const zone = this.opts.trustZones?.resolve(tenant ?? "default");
-      return await this.opts.runtime.serviceLogs?.(spec, service, zone);
+      const text = await this.opts.runtime.serviceLogs?.(spec, service, zone);
+      // Tail-cap whatever the runtime returned — the newest lines are the inspection value, and an uncapped
+      // read has actually taken the control plane down (a huge alloc log serialized into one JSON response).
+      return text !== undefined && text.length > SERVICE_LOG_INSPECT_CAP ? text.slice(-SERVICE_LOG_INSPECT_CAP) : text;
     } catch {
       return undefined; // best-effort — observability must never fail a run
     }
