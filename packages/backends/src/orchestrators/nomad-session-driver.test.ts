@@ -4,18 +4,31 @@ import { describe, expect, it } from "vitest";
 import { NomadSessionDriver, parseSessionComputeId } from "./nomad-session-driver.js";
 import type { NomadHttp } from "./nomad.js";
 
+// The captured submit body, shaped just enough for the assertions below — the cast in `submitted` is the test's
+// own claim about what it sent, narrowed instead of `any` so the checker still watches every access.
+interface SubmittedSessionJob {
+  Job: {
+    Type?: string;
+    Namespace?: string;
+    TaskGroups: Array<{
+      RestartPolicy?: unknown;
+      Tasks: Array<{ Config: { image?: string; entrypoint?: unknown; runtime?: string; args?: unknown[] } }>;
+    }>;
+  };
+}
+
 // A cluster that answers: the job is accepted, then its allocation reaches `running`. Records every request
 // so the shape of the submitted job — the part that decides whether a SESSION survives — can be asserted.
 function fakeCluster(opts: { allocStatuses?: string[]; submitStatus?: number } = {}): {
   http: NomadHttp;
   calls: Array<{ method: string; path: string; body?: unknown }>;
-  submitted: () => any;
+  submitted: () => SubmittedSessionJob;
 } {
   const calls: Array<{ method: string; path: string; body?: unknown }> = [];
   const statuses = [...(opts.allocStatuses ?? ["running"])];
   return {
     calls,
-    submitted: () => calls.find((c) => c.path === "/v1/jobs")?.body,
+    submitted: () => calls.find((c) => c.path === "/v1/jobs")?.body as SubmittedSessionJob,
     http: {
       async request(method, path, body) {
         calls.push({ method, path, ...(body !== undefined ? { body } : {}) });
@@ -49,9 +62,9 @@ describe("NomadSessionDriver — a long-lived session as an allocation", () => {
     const job = cluster.submitted().Job;
     expect(job.Type).toBe("service"); // a batch job would end the moment its command did
     // The container's filesystem IS the session: a silent restart would hand back a fresh one and lose the work.
-    expect(job.TaskGroups[0].RestartPolicy).toMatchObject({ Attempts: 0, Mode: "fail" });
-    expect(job.TaskGroups[0].Tasks[0].Config).toMatchObject({ image: "debian:stable-slim", entrypoint: ["sh"] });
-    expect(String(job.TaskGroups[0].Tasks[0].Config.args[1])).toContain("sleep infinity");
+    expect(job.TaskGroups[0]?.RestartPolicy).toMatchObject({ Attempts: 0, Mode: "fail" });
+    expect(job.TaskGroups[0]?.Tasks[0]?.Config).toMatchObject({ image: "debian:stable-slim", entrypoint: ["sh"] });
+    expect(String(job.TaskGroups[0]?.Tasks[0]?.Config.args?.[1])).toContain("sleep infinity");
     // The id carries what a LATER process needs — the row is all the reaper gets.
     expect(parseSessionComputeId(handle.id ?? "")).toMatchObject({ allocId: "alloc-1" });
   });
@@ -67,7 +80,7 @@ describe("NomadSessionDriver — a long-lived session as an allocation", () => {
     const handle = await driver.provision({ os: "linux", image: "img", needs: ["shell"], tenant: "acme" });
     const job = cluster.submitted().Job;
     expect(job.Namespace).toBe("zone-acme");
-    expect(job.TaskGroups[0].Tasks[0].Config.runtime).toBe("kata");
+    expect(job.TaskGroups[0]?.Tasks[0]?.Config.runtime).toBe("kata");
     expect(parseSessionComputeId(handle.id ?? "").namespace).toBe("zone-acme");
 
     const soft = new NomadSessionDriver({
