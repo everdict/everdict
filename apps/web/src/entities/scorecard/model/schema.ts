@@ -255,7 +255,9 @@ export const trialCaseDeltaSchema = z.object({
   candidateTrials: z.number(),
   delta: z.number(),
   z: z.number(), // two-proportion z of candidate vs baseline (negative = candidate lower)
-  significant: z.boolean(), // |z| >= zThreshold
+  method: z.enum(['z', 'fisher']), // small samples decide by Fisher's exact test, not the z approximation
+  p: z.number().optional(), // Fisher two-sided p-value (method 'fisher')
+  significant: z.boolean(), // statistically significant AND |delta| >= minDelta
 })
 
 // Statistically-gated diff — attached to the diff response when either side ran trials (regressions are the
@@ -264,24 +266,49 @@ export const trialDiffSchema = z.object({
   baseline: z.string(),
   candidate: z.string(),
   zThreshold: z.number(),
+  minDelta: z.number(), // practical-significance floor — significant drops smaller than this stay out of the gate
   cases: z.array(trialCaseDeltaSchema),
   regressions: z.array(trialCaseDeltaSchema),
   improvements: z.array(trialCaseDeltaSchema),
+  missing: z.object({
+    casesOnlyInBaseline: z.array(z.string()),
+    casesOnlyInCandidate: z.array(z.string()),
+    unscoredCases: z.array(z.string()),
+  }),
 })
 
 export const scorecardDiffSchema = z.object({
   baseline: z.string(),
   candidate: z.string(),
+  // Metrics present on BOTH sides only — one-sided metrics are enumerated in `missing`, never zero-filled.
   metrics: z.array(
     z.object({
       metric: z.string(),
       baselineMean: z.number(),
       candidateMean: z.number(),
       delta: z.number(),
+      direction: z.enum(['higher_is_better', 'lower_is_better', 'neutral']).optional(),
+      // The delta interpreted through the declared direction — never generalize delta>0 as improvement.
+      reading: z.enum(['improved', 'regressed', 'unchanged', 'unknown']),
     })
   ),
   regressions: z.array(caseDeltaSchema),
   improvements: z.array(caseDeltaSchema),
+  // What could NOT be compared — a first-class output, never a silent skip.
+  missing: z.object({
+    casesOnlyInBaseline: z.array(z.string()),
+    casesOnlyInCandidate: z.array(z.string()),
+    metricsOnlyInBaseline: z.array(z.string()),
+    metricsOnlyInCandidate: z.array(z.string()),
+  }),
+  // 'none' = the comparison does not hold — a different claim from 'no differences'. Read this FIRST.
+  comparability: z.enum(['full', 'partial', 'none']),
+  policyMismatch: z
+    .object({
+      baseline: z.object({ id: z.string(), version: z.string(), digest: z.string() }),
+      candidate: z.object({ id: z.string(), version: z.string(), digest: z.string() }),
+    })
+    .optional(),
   trials: trialDiffSchema.optional(), // statistical (pass@k) gate — present only when either side ran trials
 })
 

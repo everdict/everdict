@@ -5,6 +5,7 @@ import {
   type Scorecard,
   type ScorecardRecord,
   UpstreamError,
+  type VerdictPolicyRef,
 } from "@everdict/contracts";
 import {
   type AnalysisConfig,
@@ -47,13 +48,34 @@ export class ScorecardAnalyticsService {
     baselineId: string,
     candidateId: string,
     opts: { zThreshold?: number; visibleTeams?: string[] } = {},
-  ): Promise<ScorecardDiff & { trials?: TrialDiff }> {
-    const baseline = await this.requireSucceeded(tenant, baselineId, opts.visibleTeams);
-    const candidate = await this.requireSucceeded(tenant, candidateId, opts.visibleTeams);
+  ): Promise<
+    ScorecardDiff & { trials?: TrialDiff; policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef } }
+  > {
+    const { scorecard: baseline, record: baseRecord } = await this.requireSucceeded(
+      tenant,
+      baselineId,
+      opts.visibleTeams,
+    );
+    const { scorecard: candidate, record: candRecord } = await this.requireSucceeded(
+      tenant,
+      candidateId,
+      opts.visibleTeams,
+    );
     const diff = diffScorecards(baseline, candidate);
+    // Two batches judged under different verdict-policy documents are not the same experiment: their verdicts
+    // (and therefore pass transitions) were produced by different rules. The comparison is flagged as NOT
+    // holding — "no differences" and "incomparable" are different claims. Absent stamps (pre-mig records)
+    // resolve to the default ladder, so only a REAL digest divergence trips this.
+    const bPolicy = baseRecord.verdictPolicy;
+    const cPolicy = candRecord.verdictPolicy;
+    const policyMismatch = bPolicy !== undefined && cPolicy !== undefined && bPolicy.digest !== cPolicy.digest;
+    const withPolicy: ScorecardDiff & { policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef } } =
+      policyMismatch && bPolicy && cPolicy
+        ? { ...diff, comparability: "none", policyMismatch: { baseline: bPolicy, candidate: cPolicy } }
+        : diff;
     const hasTrials =
       baseline.results.some((r) => r.trial !== undefined) || candidate.results.some((r) => r.trial !== undefined);
-    return hasTrials ? { ...diff, trials: diffTrials(baseline, candidate, opts) } : diff;
+    return hasTrials ? { ...withPolicy, trials: diffTrials(baseline, candidate, opts) } : withPolicy;
   }
 
   // Time-range trend / regression-over-time — line up a (dataset, metric)'s scorecards chronologically and flag regressions vs the baseline.
@@ -196,7 +218,11 @@ export class ScorecardAnalyticsService {
 
   // Ensure workspace scope + team scope + completion (scorecard exists). 404 if missing OR owned by a team the
   // caller cannot see (no existence leak — the same answer another workspace's id gets), 400 if incomplete.
-  private async requireSucceeded(tenant: string, id: string, visibleTeams?: string[]): Promise<Scorecard> {
+  private async requireSucceeded(
+    tenant: string,
+    id: string,
+    visibleTeams?: string[],
+  ): Promise<{ scorecard: Scorecard; record: ScorecardRecord }> {
     const record = await this.getRecord(id); // get hydrates dedup storage from child runs — diff works regardless of embed/reference
     if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
@@ -206,6 +232,6 @@ export class ScorecardAnalyticsService {
         { id, status: record.status },
         `scorecard '${id}' is not complete yet (status=${record.status}).`,
       );
-    return record.scorecard;
+    return { scorecard: record.scorecard, record };
   }
 }

@@ -155,11 +155,41 @@ describe("diffTrials (statistical regression gate)", () => {
     expect(diff.cases.map((d) => d.caseId)).toEqual(["a"]); // b skipped (0 scored candidate trials)
   });
 
-  it("respects a stricter confidence threshold", () => {
-    // 5/5 → 2/5: z ≈ -2.07. Significant at 1.96, not at 2.58.
+  it("small samples gate by Fisher's exact test — the z approximation's overconfidence is gone", () => {
+    // 5/5 → 2/5: z ≈ -2.07 LOOKED significant at 95%, but the exact two-sided p is ~0.167 — at n=5 the
+    // honest answer is "not enough evidence", and the gate now says so instead of pretending.
     const base = card("h@1", trials("a", 5, 5));
     const cand = card("h@2", trials("a", 2, 5));
-    expect(diffTrials(base, cand, { zThreshold: 1.96 }).regressions).toHaveLength(1);
-    expect(diffTrials(base, cand, { zThreshold: 2.58 }).regressions).toHaveLength(0);
+    const d = diffTrials(base, cand, { zThreshold: 1.96 });
+    expect(d.cases[0]?.method).toBe("fisher");
+    expect(d.cases[0]?.p).toBeCloseTo(1 / 6, 3);
+    expect(d.regressions).toHaveLength(0);
+    // 5/5 → 0/5 IS exact-significant (p ≈ 0.0079): a real crash on five trials still trips the gate.
+    const crashed = card("h@2", trials("a", 0, 5));
+    const d2 = diffTrials(base, crashed, { zThreshold: 1.96 });
+    expect(d2.cases[0]?.p).toBeCloseTo(2 / 252, 4);
+    expect(d2.regressions).toHaveLength(1);
+    // ...and a stricter confidence (z 3.29 ≈ 99.9%) still filters it.
+    expect(diffTrials(base, crashed, { zThreshold: 3.29 }).regressions).toHaveLength(0);
+  });
+
+  it("the practical threshold keeps a statistically-significant-but-negligible drop out of the gate", () => {
+    // 500 trials each, 100% → 96%: z ≈ -4.5 (highly significant) — but a 4% dip below the declared 5%
+    // practical floor is noise to this gate, not a regression.
+    const base = card("h@1", trials("a", 500, 500));
+    const cand = card("h@2", trials("a", 480, 500));
+    expect(diffTrials(base, cand).cases[0]?.method).toBe("z");
+    expect(diffTrials(base, cand).regressions).toHaveLength(1); // minDelta 0 (default): gated by stats alone
+    expect(diffTrials(base, cand, { minDelta: 0.05 }).regressions).toHaveLength(0);
+  });
+
+  it("reports what could not enter the gate instead of silently dropping it", () => {
+    const base = card("h@1", [...trials("a", 3, 3), ...trials("gone", 3, 3), ...trials("u", 3, 3)]);
+    const cand = card("h@2", [...trials("a", 3, 3), ...trials("new", 3, 3), undecided("u")]);
+    const d = diffTrials(base, cand);
+    expect(d.missing.casesOnlyInBaseline).toEqual(["gone"]);
+    expect(d.missing.casesOnlyInCandidate).toEqual(["new"]);
+    expect(d.missing.unscoredCases).toEqual(["u"]); // present on both sides, but no scored candidate trials
+    expect(d.cases.map((c) => c.caseId)).toEqual(["a"]);
   });
 });

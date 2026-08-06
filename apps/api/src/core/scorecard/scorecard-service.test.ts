@@ -346,7 +346,9 @@ describe("ScorecardService.diff", () => {
       baselineMean: 1,
       candidateMean: 0,
       delta: -1,
+      reading: "unknown", // "tests-pass" (grader-id spelling) has no declared direction — sign is not a verdict
     });
+    expect(diff.comparability).toBe("full");
   });
 
   it("missing / other-workspace scorecard → NotFoundError (404)", async () => {

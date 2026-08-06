@@ -118,6 +118,26 @@ export default async function CompareScorecardsPage({
 
       {error && <Callout tone="danger">{t('compareError', { error })}</Callout>}
 
+      {/* Comparability FIRST — "no differences" and "the comparison does not hold" are different claims, and a
+          reader (or gate) must see which one this page is making before any delta below. */}
+      {diff && diff.comparability !== 'full' && (
+        <Callout tone={diff.comparability === 'none' ? 'danger' : 'warning'}>
+          {diff.policyMismatch
+            ? t('comparePolicyMismatch', {
+                baseline: `${diff.policyMismatch.baseline.id}@${diff.policyMismatch.baseline.version}`,
+                candidate: `${diff.policyMismatch.candidate.id}@${diff.policyMismatch.candidate.version}`,
+              })
+            : diff.comparability === 'none'
+              ? t('compareNotComparable')
+              : t('comparePartial', {
+                  caseCount:
+                    diff.missing.casesOnlyInBaseline.length + diff.missing.casesOnlyInCandidate.length,
+                  metricCount:
+                    diff.missing.metricsOnlyInBaseline.length + diff.missing.metricsOnlyInCandidate.length,
+                })}
+        </Callout>
+      )}
+
       {diff && (
         <div className="space-y-7">
           <section className="space-y-2.5">
@@ -158,14 +178,17 @@ export default async function CompareScorecardsPage({
                     <TD className="text-right font-mono text-[12px] tabular-nums">
                       {m.candidateMean.toFixed(2)}
                     </TD>
+                    {/* Colored by the DECLARED reading, not the delta's sign — cost going up is not green. A
+                        metric with no declared direction stays neutral: its sign means nothing by itself. */}
                     <TD
+                      title={m.reading}
                       className={cn(
                         'text-right font-mono text-[12px] tabular-nums',
-                        m.delta === 0
-                          ? 'text-muted-foreground'
-                          : m.delta > 0
-                            ? 'font-[510] text-[var(--color-success)]'
-                            : 'font-[510] text-destructive'
+                        m.reading === 'improved'
+                          ? 'font-[510] text-[var(--color-success)]'
+                          : m.reading === 'regressed'
+                            ? 'font-[510] text-destructive'
+                            : 'text-muted-foreground'
                       )}
                     >
                       {delta(m.delta)}

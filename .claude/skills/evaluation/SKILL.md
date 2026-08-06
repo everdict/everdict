@@ -90,8 +90,16 @@ multi-criteria: `JudgeSpec.criteria[]` → ONE model call scores each criterion 
 weighted overall (`judge:<id>`). See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
 
 ## Batch aggregation, regression & leaderboard
-- `diffScorecards(baseline, candidate)` (`packages/suite/src/scorecard.ts`) — same-case metric delta +
-  objective `pass` transitions → `regressions`/`improvements`. Route `GET /scorecards/diff`.
+- `diffScorecards(baseline, candidate)` (`packages/domain/src/scorecard/scorecard.ts`) — **comparability
+  FIRST**: `comparability: full|partial|none` ("none" = the comparison does not hold — a different claim from
+  "no differences"; gates read it before any delta), `missing` enumerates one-sided cases/metrics (never a
+  silent skip, never a `?? 0` zero-fill), `metrics` covers BOTH-sided metrics only with `direction`+`reading`
+  (declared in the verdict policy — `delta>0` is never generalized as improvement; cost up = regressed), plus
+  same-case `pass` transitions → `regressions`/`improvements`. The service layer forces `comparability:"none"`
+  + `policyMismatch` when the two batches' stamped verdict-policy digests differ. `diffTrials` gates small
+  samples (<30 trials) by **Fisher's exact test** (z is overconfident at eval-scale n; 3/3→0/3 is honestly
+  p=0.1) and applies the `minDelta` practical floor — statistically-significant-but-negligible dips stay out;
+  skipped cases ride `missing`. Route `GET /scorecards/diff`.
 - `leaderboard(cards, opts)` (`packages/suite/src/leaderboard.ts`) — groups by `(harness@version × model.primary)`,
   ranks by passRate→mean, `window: latest|best`, per-`metric` axis, optional `judgeModel` fair-compare filter.
 - Model axis (`packages/suite/src/models.ts` `scorecardModels`): **observed** (distinct `llm_call.model` from the

@@ -228,6 +228,59 @@ describe("measurement status — an unmeasured score never enters an aggregate",
   });
 });
 
+describe("diffScorecards — comparability first", () => {
+  const one = (caseId: string, metric: string, value: number, pass?: boolean): CaseResult => ({
+    caseId,
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+    scores: [{ graderId: metric, metric, value, ...(pass !== undefined ? { pass } : {}) }],
+  });
+  const cardOf = (results: CaseResult[]): Scorecard => ({ suiteId: "s", harness: "h@1", results });
+
+  it("a metric missing on one side is enumerated, not zero-filled into the aggregate mean", () => {
+    // Regression: the aggregate loop filled a one-sided metric's mean with ?? 0, so a vanished grader read
+    // as a mean that crashed to zero — while the case-level loop silently skipped the same absence.
+    const base = cardOf([one("a", "judge:quality", 0.9, true)]);
+    const cand = cardOf([one("a", "tests_pass", 1, true)]);
+    const diff = diffScorecards(base, cand);
+    expect(diff.metrics).toEqual([]); // no shared metric → NO fabricated 0-mean rows
+    expect(diff.missing.metricsOnlyInBaseline).toEqual(["judge:quality"]);
+    expect(diff.missing.metricsOnlyInCandidate).toEqual(["tests_pass"]);
+    expect(diff.comparability).toBe("none"); // no shared metrics — the comparison does not hold
+  });
+
+  it("one-sided cases are enumerated and downgrade comparability to partial", () => {
+    const base = cardOf([one("a", "tests_pass", 1, true), one("gone", "tests_pass", 1, true)]);
+    const cand = cardOf([one("a", "tests_pass", 0, false), one("new", "tests_pass", 1, true)]);
+    const diff = diffScorecards(base, cand);
+    expect(diff.missing.casesOnlyInBaseline).toEqual(["gone"]);
+    expect(diff.missing.casesOnlyInCandidate).toEqual(["new"]);
+    expect(diff.comparability).toBe("partial");
+  });
+
+  it("deltas are read through the declared direction — a cost increase is a regression, not an improvement", () => {
+    const base = cardOf([one("a", "cost_usd", 0.1)]);
+    const cand = cardOf([one("a", "cost_usd", 0.5)]);
+    const m = diffScorecards(base, cand).metrics.find((x) => x.metric === "cost_usd");
+    expect(m?.delta).toBeCloseTo(0.4);
+    expect(m?.direction).toBe("lower_is_better");
+    expect(m?.reading).toBe("regressed"); // delta > 0 but WORSE — sign alone must never be generalized
+  });
+
+  it("a metric with no declared direction reads unknown, never a sign guess", () => {
+    const base = cardOf([one("a", "custom_metric", 1)]);
+    const cand = cardOf([one("a", "custom_metric", 2)]);
+    expect(diffScorecards(base, cand).metrics[0]?.reading).toBe("unknown");
+  });
+
+  it("identical full-overlap scorecards are fully comparable", () => {
+    const base = cardOf([one("a", "tests_pass", 1, true)]);
+    expect(diffScorecards(base, base).comparability).toBe("full");
+    expect(diffScorecards(base, base).metrics[0]?.reading).toBe("unchanged");
+  });
+});
+
 describe("diffScorecards", () => {
   it("catches regressions/improvements by pass transitions and produces metric deltas", () => {
     const base: Scorecard = {
