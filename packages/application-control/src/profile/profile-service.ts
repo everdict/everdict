@@ -13,6 +13,15 @@ export class ProfileService {
     return this.store.get(subject);
   }
 
+  // Seed the display name from the identity provider's claim (called on login). Fill-if-absent only — a name the
+  // person set on their profile is never overwritten. Claims that don't fit our name rules are skipped, not errors:
+  // this is a best-effort enrichment, and the login must never fail on display metadata.
+  async seedSsoName(subject: string, claim: string): Promise<void> {
+    const name = claim.trim();
+    if (name.length === 0 || name.length > 80) return;
+    await this.store.ensureName(subject, name);
+  }
+
   async update(subject: string, input: { name?: string; username?: string; avatarUrl?: string }): Promise<UserProfile> {
     const patch: UserProfilePatch = {};
     if (input.name !== undefined) patch.name = validateName(clean(input.name));

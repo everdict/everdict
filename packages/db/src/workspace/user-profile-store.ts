@@ -55,6 +55,12 @@ export class InMemoryUserProfileStore implements UserProfileStore {
     this.rows.set(subject, next);
     return next;
   }
+
+  async ensureName(subject: string, name: string): Promise<void> {
+    const cur = this.rows.get(subject);
+    if (cur?.name !== undefined) return; // a self-set name wins over the SSO claim
+    this.rows.set(subject, build(subject, name, cur?.username, cur?.avatarUrl));
+  }
 }
 
 interface ProfileRow {
@@ -103,5 +109,16 @@ export class PgUserProfileStore implements UserProfileStore {
       [subject, name, username, avatarUrl],
     );
     return build(subject, name ?? undefined, username ?? undefined, avatarUrl ?? undefined);
+  }
+
+  async ensureName(subject: string, name: string): Promise<void> {
+    // Fill-if-absent in one statement: a fresh row takes the SSO name; an existing row is only touched while
+    // its name is still NULL (a self-set name wins, and a no-op doesn't bump updated_at).
+    await this.client.query(
+      `INSERT INTO everdict_user_profiles (subject, name) VALUES ($1, $2)
+       ON CONFLICT (subject) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+       WHERE everdict_user_profiles.name IS NULL`,
+      [subject, name],
+    );
   }
 }

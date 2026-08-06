@@ -33,6 +33,30 @@ describe("InMemoryUserProfileStore", () => {
     expect((await s.get("u1"))?.username).toBe("alice");
   });
 
+  it("ensureName seeds the name for a subject with no profile (SSO fill on login)", async () => {
+    const s = new InMemoryUserProfileStore();
+    await s.ensureName("u1", "Alice Kim");
+    expect((await s.get("u1"))?.name).toBe("Alice Kim");
+  });
+
+  it("ensureName never overwrites a name the person set themselves", async () => {
+    const s = new InMemoryUserProfileStore();
+    await s.upsert("u1", { name: "앨리스", username: "alice" });
+    await s.ensureName("u1", "Alice Kim"); // a later SSO claim must not clobber the chosen name
+    const after = await s.get("u1");
+    expect(after?.name).toBe("앨리스");
+    expect(after?.username).toBe("alice");
+  });
+
+  it("ensureName fills a profile that exists but has no name (e.g. only an avatar was set)", async () => {
+    const s = new InMemoryUserProfileStore();
+    await s.upsert("u1", { avatarUrl: "https://x/a.png" });
+    await s.ensureName("u1", "Alice Kim");
+    const after = await s.get("u1");
+    expect(after?.name).toBe("Alice Kim");
+    expect(after?.avatarUrl).toBe("https://x/a.png");
+  });
+
   it("getMany returns only existing profiles (nonexistent subjects omitted, for enriching a member list)", async () => {
     const s = new InMemoryUserProfileStore();
     await s.upsert("u1", { name: "Alice" });

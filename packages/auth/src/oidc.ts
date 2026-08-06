@@ -71,6 +71,18 @@ function extractEmail(payload: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+// The person's display name — the standard `name` claim, else given+family composed. Display only (seeds the
+// user profile so member lists / "created by" surfaces show a real name instead of the opaque sub).
+function extractName(payload: Record<string, unknown>): string | undefined {
+  const name = payload.name;
+  if (typeof name === "string" && name.trim().length > 0) return name.trim();
+  const parts = [payload.given_name, payload.family_name].filter(
+    (p): p is string => typeof p === "string" && p.trim().length > 0,
+  );
+  if (parts.length > 0) return parts.map((p) => p.trim()).join(" ");
+  return undefined;
+}
+
 // Keycloak (OIDC) JWT verification authenticator — verify signature via JWKS, check issuer/audience, extract workspace/roles.
 export function oidcAuthenticator(opts: OidcAuthOptions): Authenticator {
   const jwks =
@@ -93,6 +105,7 @@ export function oidcAuthenticator(opts: OidcAuthOptions): Authenticator {
         // fail-closed applies only to an *unverifiable* token (signature/issuer/audience/expiry failure) — the catch below turns that into undefined.
         const workspace = extractWorkspace(payload as Record<string, unknown>, workspaceClaim, groupPrefix) ?? "";
         const email = extractEmail(payload as Record<string, unknown>);
+        const name = extractName(payload as Record<string, unknown>);
         return {
           subject: String(payload.sub ?? ""),
           workspace,
@@ -101,6 +114,7 @@ export function oidcAuthenticator(opts: OidcAuthOptions): Authenticator {
           roles: [],
           via: "oidc",
           ...(email ? { email } : {}),
+          ...(name ? { name } : {}),
         };
       } catch (err) {
         // Notifies the upper so it can log the verification-failure reason (isolated so a logging failure doesn't break the authentication flow).

@@ -392,6 +392,13 @@ export async function applyActiveWorkspace(base: Principal, req: FastifyRequest,
   if (!store) return base;
   const subject = base.subject;
 
+  // The OIDC name claim seeds the user profile (fill-if-absent — a self-set profile name wins), so member lists
+  // and "created by" surfaces show the person's real name instead of the opaque sub. Best-effort: display
+  // metadata must never fail authentication.
+  if (base.name !== undefined && deps.profileService) {
+    await deps.profileService.seedSsoName(subject, base.name).catch(() => {});
+  }
+
   // If there's a token/dev default workspace, bootstrap it into a membership (only when one doesn't exist).
   // The email claim (if present) is captured/backfilled into the member row on every login — role is preserved (ensureMembership COALESCEs / leaves role unchanged).
   // ⚠️ Role is per-workspace: a new workspace (effectively the creator) or a machine key (issuance is admin-gated) uses the token role, but

@@ -38,7 +38,7 @@ import {
   type DatasetSummary,
 } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
-import { membersSchema } from '@/entities/member'
+import { isMachineSubject, membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
 import { teamsSchema } from '@/entities/team'
 import { can } from '@/shared/auth/can'
@@ -124,6 +124,8 @@ export default async function DatasetDetailPage({
   const relation = buildDatasetRelations(scorecards, liveHarnessIds)[id]
   const currentWorkspace = principal?.workspace ?? workspace
   // Creator — profile name+avatar (if any). Seed/_shared are shown as first-party (no avatar).
+  // A machine subject (`key:<ws>`) has no human name — label it instead of leaking the raw subject as a name.
+  const tMembers = await getTranslations('membersDirectory')
   const author = (() => {
     if (!summary?.createdBy) {
       return {
@@ -132,8 +134,11 @@ export default async function DatasetDetailPage({
       }
     }
     const m = members.find((x) => x.subject === summary?.createdBy)
+    const fallback = isMachineSubject(summary.createdBy)
+      ? tMembers('apiKeyMember')
+      : fmtSubject(summary.createdBy)
     return {
-      name: m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(summary.createdBy),
+      name: m?.name ?? m?.email?.split('@')[0] ?? fallback,
       ...(m?.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
       known: true,
     }

@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import { KeyRound, Search, Users } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
+import { isMachineSubject } from '@/entities/member'
 import { teamHref, TeamKeyBadge } from '@/entities/team'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
@@ -52,11 +53,6 @@ function labelOf(m: MemberRow): string {
   if (m.name) return m.name
   if (m.email) return m.email.split('@')[0] ?? m.email
   return fmtSubject(m.subject)
-}
-
-// API 키 주체(`key:<workspace>`)도 멤버 레코드로 들어온다 — 사람 아바타로 그리면 사람으로 읽히므로 따로 표시한다.
-function isMachine(subject: string): boolean {
-  return subject.startsWith('key:')
 }
 
 export function MemberList({
@@ -204,7 +200,7 @@ export function MemberList({
           </div>
           <ul className="divide-y divide-border/70">
             {visible.map((m) => {
-              const machine = isMachine(m.subject)
+              const machine = isMachineSubject(m.subject)
               const name = labelOf(m)
               return (
                 <li

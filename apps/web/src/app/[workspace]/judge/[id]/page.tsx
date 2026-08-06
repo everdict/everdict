@@ -15,7 +15,7 @@ import {
   judgesSchema,
   type JudgeSpec,
 } from '@/entities/judge'
-import { membersSchema } from '@/entities/member'
+import { isMachineSubject, membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
 import { teamsSchema } from '@/entities/team'
 import { can } from '@/shared/auth/can'
@@ -108,11 +108,14 @@ export default async function JudgeDetailPage({
           .then((r) => membersSchema.parse(r))
           .catch(() => [])
       : []
+  // A machine subject (`key:<ws>`) has no human name — label it instead of leaking the raw subject as a name.
+  const tMembers = await getTranslations('membersDirectory')
   const resolveRunner = (subject?: string) => {
     if (!subject) return undefined
     const m = members.find((x) => x.subject === subject)
+    const fallback = isMachineSubject(subject) ? tMembers('apiKeyMember') : fmtSubject(subject)
     return {
-      name: m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(subject),
+      name: m?.name ?? m?.email?.split('@')[0] ?? fallback,
       ...(m?.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     }
   }

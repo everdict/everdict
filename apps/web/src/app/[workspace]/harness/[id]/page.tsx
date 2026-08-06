@@ -31,7 +31,7 @@ import {
   type HarnessSpec,
   type HarnessTemplateSpec,
 } from '@/entities/harness'
-import { membersSchema } from '@/entities/member'
+import { isMachineSubject, membersSchema } from '@/entities/member'
 import { teamsSchema } from '@/entities/team'
 import { traceSourcesResponseSchema, type TraceSourcesResponse } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
@@ -137,6 +137,8 @@ export default async function HarnessDetailPage({
     .catch(() => [])
   const teamMove = moveDestinationsFor(principal, teams, 'harnesses:register')
   // Creator — profile name+avatar (if any). Seed/_shared (different owner·no createdBy) are shown as first-party.
+  // A machine subject (`key:<ws>`) has no human name — label it instead of leaking the raw subject as a name.
+  const tMembers = await getTranslations('membersDirectory')
   const author = (() => {
     if (!entry?.createdBy) {
       return {
@@ -145,8 +147,11 @@ export default async function HarnessDetailPage({
       }
     }
     const m = members.find((x) => x.subject === entry.createdBy)
+    const fallback = isMachineSubject(entry.createdBy)
+      ? tMembers('apiKeyMember')
+      : fmtSubject(entry.createdBy)
     return {
-      name: m?.name ?? m?.email ?? fmtSubject(entry.createdBy),
+      name: m?.name ?? m?.email ?? fallback,
       ...(m?.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
       known: true as const,
     }

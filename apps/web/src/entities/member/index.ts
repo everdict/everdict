@@ -14,6 +14,7 @@ export {
 } from './model/schema'
 export { useMemberDirectory } from './lib/member-directory'
 export {
+  isMachineSubject,
   memberDirectoryOf,
   memberNameOf,
   type MemberDirectory,

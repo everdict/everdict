@@ -11,6 +11,7 @@ export interface Principal {
   // See docs/architecture/agent-execution-auth.md.
   via: "oidc" | "api-key" | "runner" | "github-actions" | "agent";
   email?: string; // OIDC email/preferred_username claim — for the member list display (display only, unrelated to authz/identity). Absent for api-key.
+  name?: string; // OIDC name claim (given+family fallback) — seeds the user profile so "who did this" surfaces show a real name, never the opaque sub. Display only, unrelated to authz/identity. Absent for api-key.
   scopes?: string[]; // per-api-key permission scope (read|write|admin). If present, narrowed by intersection with role permissions. If absent (OIDC/legacy key), unlimited. See authz.ts can().
   runnerId?: string; // only for a runner token (via=runner) — which device. The lease/result tools use (workspace, subject, runnerId).
   // The teams this subject belongs to IN `workspace` — resolved per request alongside the membership role, because

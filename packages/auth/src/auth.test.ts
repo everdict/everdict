@@ -206,6 +206,17 @@ describe("oidcAuthenticator (Keycloak JWT)", () => {
     expect((await auth.authenticate(await mint({ workspace: "acme" })))?.email).toBeUndefined();
   });
 
+  it("captures the name claim (to seed the user profile display name); falls back to given+family, unset when neither exists", async () => {
+    const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
+    expect((await auth.authenticate(await mint({ workspace: "acme", name: "Alice Kim" })))?.name).toBe("Alice Kim");
+    expect(
+      (await auth.authenticate(await mint({ workspace: "acme", given_name: "Alice", family_name: "Kim" })))?.name,
+    ).toBe("Alice Kim");
+    expect((await auth.authenticate(await mint({ workspace: "acme", given_name: "Alice" })))?.name).toBe("Alice");
+    expect((await auth.authenticate(await mint({ workspace: "acme" })))?.name).toBeUndefined();
+    expect((await auth.authenticate(await mint({ workspace: "acme", name: "   " })))?.name).toBeUndefined();
+  });
+
   it("rejects an issuer-mismatched/forged token (undefined)", async () => {
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
     const wrong = await mint({ workspace: "acme" }, "https://evil/realms/x");

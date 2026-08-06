@@ -24,3 +24,9 @@ export function memberDirectoryOf(members: readonly Member[]): MemberDirectory {
 export function memberNameOf(directory: MemberDirectory, subject: string): string {
   return directory[subject]?.name ?? fmtSubject(subject)
 }
+
+// API 키 주체(`key:<workspace>`)도 멤버 레코드로 들어온다 — 사람 이름이 존재하지 않는 주체라, "누가 만들었나"
+// 화면이 원시 subject 를 사람 이름 자리에 세우면 id 가 노출된다. 이런 주체는 라벨("API key")로 그린다.
+export function isMachineSubject(subject: string): boolean {
+  return subject.startsWith('key:')
+}
