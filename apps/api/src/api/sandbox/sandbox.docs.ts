@@ -23,12 +23,15 @@ export const sandboxDocs: Record<string, FastifySchema> = {
     summary: "Open a sandbox session (a delegation profile, an environment image to shell into, or a harness to drive)",
     description:
       "Boots the image as a long-lived container and records it as a Run (kind sandbox, lifetime session, born " +
-      "running) on the activity ledger. `profile` hands work to a DELEGATION PROFILE — a registered work " +
-      "environment (image · which conversational agent runs · model connection · env/secrets · standing " +
-      "instructions) referenced once instead of re-specified per call; it is always a conversation, and the " +
-      "optional `brief` (goal · context · references · constraints · done-criteria) is written into the " +
-      "delegate's working directory as BRIEF.md and sealed on the session trajectory as evidence. Otherwise " +
-      "exactly one of image (ad-hoc), environment (an adopted environment " +
+      "running) on the activity ledger. `profile` names WHO does the work — a DELEGATION PROFILE: a registered " +
+      "work environment (image · which conversational agent runs · model connection · env/secrets · standing " +
+      "instructions) referenced once instead of re-specified per call. It is an OVERLAY on the target axis, not " +
+      "a boot mode: alone it runs in its own image; with `world` the delegate continues that world (or FOUNDS " +
+      "it, taking the profile's image as the genesis base); with `environment`/`image` it works in that one; " +
+      "`repo` clones in as usual. Only `harness` conflicts, since that also says who runs. A profile session is " +
+      "always a conversation, and the optional `brief` (goal · context · references · constraints · " +
+      "done-criteria) is written into the delegate's working directory as BRIEF.md and sealed on the session " +
+      "trajectory as evidence. Without a profile, exactly one of image (ad-hoc), environment (an adopted environment " +
       "capability, resolved through the consume gate), or harness (a registered harness warm-installed into the " +
       "session for interactive test cases — the playground; harness.image supplies the container image for specs " +
       "that declare none) is required. harness.conversation boots a CONVERSATION session: every submitted task " +

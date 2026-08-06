@@ -402,14 +402,26 @@ describe("sandbox playground routes — a harness in the session, test cases thr
     });
     expect(orphanBrief.statusCode).toBe(400);
 
-    // A profile is the WHOLE environment — combining it with another target would ask which one wins.
-    const combined = await app.inject({
+    // WHO and WHERE are independent: a profile OVERLAYS a target, so profile+image reaches the service (and
+    // fails only because no delegation resolver is wired here), while profile+harness — two answers to "who
+    // runs" — is refused by the DTO before the service is asked.
+    const overlay = await app.inject({
       method: "POST",
       url: "/sandboxes",
       headers: H,
       payload: { profile: { id: "fixer" }, image: "img" },
     });
-    expect(combined.statusCode).toBe(400);
+    expect(overlay.statusCode).toBe(400);
+    expect(overlay.json().message).toContain("Delegation profiles"); // the service's answer, not the DTO's
+
+    const twoAgents = await app.inject({
+      method: "POST",
+      url: "/sandboxes",
+      headers: H,
+      payload: { profile: { id: "fixer" }, harness: { id: "cc" } },
+    });
+    expect(twoAgents.statusCode).toBe(400);
+    expect(twoAgents.json().message).toContain("WHO runs");
   });
 
   it("conversation fields traverse the transport: conversation boot on a non-resuming harness 400s, fresh on an independent-cases session 400s", async () => {

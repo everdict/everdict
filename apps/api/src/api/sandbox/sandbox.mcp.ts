@@ -50,9 +50,12 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
           .object({ source: z.string().optional(), id: z.string(), version: z.string().optional() })
           .optional()
           .describe(
-            "A DELEGATION PROFILE (a `delegation` capability) — the registered work environment to hand work " +
-              "to: its image, which conversational agent runs, the model connection, env/secrets and standing " +
-              "instructions, all pinned once. Always a conversation; pair it with `brief`. Combines with nothing else",
+            "A DELEGATION PROFILE (a `delegation` capability) — WHO does the work: the registered environment " +
+              "(its image, which conversational agent runs, the model connection, env/secrets and standing " +
+              "instructions) pinned once. Always a conversation; pair it with `brief`. It is an OVERLAY, not a " +
+              "boot mode: alone it runs in its own image, with `world` the delegate picks up that world (or " +
+              "FOUNDS it from the profile's image), with `environment`/`image` it works in that one, and " +
+              "`repo` clones in as usual. Only `harness` conflicts (that also says who runs)",
           ),
         brief: z
           .object({

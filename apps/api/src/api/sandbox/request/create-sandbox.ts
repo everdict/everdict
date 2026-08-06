@@ -61,16 +61,15 @@ export const CreateSandboxBodySchema = z
       .optional(),
   })
   .superRefine((body, ctx) => {
-    if (body.profile !== undefined) {
-      // A profile IS the whole environment — combining it with another target would ask which one wins.
-      if (body.image !== undefined || body.environment !== undefined || body.harness !== undefined || body.world)
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "profile is the whole environment — it does not combine with image, environment, harness or world.",
-        });
-      return;
-    }
-    if (body.brief !== undefined)
+    // `profile` is the WHO axis, not a boot mode: it overlays whichever target the caller named (a plain
+    // image, an adopted environment, a world, or a world's genesis) and stands alone when they named none.
+    // The one conflict is `harness`, which also says who runs.
+    if (body.profile !== undefined && body.harness !== undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "profile and harness both say WHO runs — provide one (a profile already pins its own agent).",
+      });
+    if (body.brief !== undefined && body.profile === undefined)
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "brief is the handoff to a delegation profile — also provide profile:{id}.",
@@ -80,24 +79,34 @@ export const CreateSandboxBodySchema = z
       body.image === undefined &&
       body.environment === undefined &&
       body.world === undefined &&
-      body.harness === undefined
+      body.harness === undefined &&
+      body.profile === undefined
     )
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "repo clones INTO a session — also provide image, environment, harness, or world.",
+        message: "repo clones INTO a session — also provide image, environment, harness, profile, or world.",
       });
     if (body.world !== undefined) {
       if (body.environment !== undefined || body.harness !== undefined)
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "world combines only with image (its genesis base) — not with environment or harness.",
+          message: "world combines only with image (its genesis base) or profile — not with environment or harness.",
+        });
+      return;
+    }
+    if (body.profile !== undefined) {
+      // With a profile the target is optional (its own image is the default), but naming two is ambiguous.
+      if (body.image !== undefined && body.environment !== undefined)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Provide at most one of image or environment alongside profile.",
         });
       return;
     }
     if ([body.image, body.environment, body.harness].filter((x) => x !== undefined).length !== 1)
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Provide exactly one of image, environment, or harness.",
+        message: "Provide exactly one of image, environment, harness, or profile.",
       });
   });
 export type CreateSandboxBody = z.infer<typeof CreateSandboxBodySchema>;

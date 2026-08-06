@@ -150,7 +150,9 @@ recovery never re-dispatches a turn, and aggregations over `role:"case"` childre
 The conversation lane's third entry (beside a process harness and a service harness): `POST /sandboxes
 {profile:{id}, brief}` boots a **delegation capability** — a registered work environment (image · which
 conversational agent · model binding · env/secrets · standing instructions) referenced once instead of
-re-specified per call. The session is a conversation by definition; the profile's `workDir` is the stable cwd
+re-specified per call. It is an OVERLAY on the target axis, so a delegate works anywhere a member can — its
+own image, an adopted environment, a world it continues, or a world it founds (the profile's image being the
+genesis base). The session is a conversation by definition; the profile's `workDir` is the stable cwd
 (turns run there directly — no `tasks/<n>`, no `conversation/` rescoping, or the delegate walks away from the
 context seeded beside it); the standing instructions and the rendered brief are written into that directory
 BEFORE the ledger row exists, and the brief is sealed on the trajectory as a `delegation.brief` marker.

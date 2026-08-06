@@ -141,6 +141,26 @@ async function main() {
   const view = await api(`/sandboxes/${session.id}`);
   assert(view.live?.profile?.id === PROFILE_ID, "the live view names the delegate's profile");
 
+  // 6b) WHO and WHERE are independent axes — the same profile delegated onto a DIFFERENT target. (A world
+  // needs a managed image store, so the world/genesis axes are unit-covered; here we prove the image overlay,
+  // which is the same code path with the target resolved elsewhere.)
+  const onImage = await api("/sandboxes", {
+    method: "POST",
+    body: JSON.stringify({
+      profile: { id: PROFILE_ID },
+      image: "node:22-bookworm-slim",
+      brief: { goal: "work in the image the caller chose" },
+    }),
+  });
+  assert(onImage.session?.image === "node:22-bookworm-slim", "the caller's image won; the profile still supplied WHO");
+  assert(onImage.session?.conversation === true, "still a conversation — delegation is not a boot mode");
+  const seededThere = await api(`/sandboxes/${onImage.id}/exec`, {
+    method: "POST",
+    body: JSON.stringify({ command: "cat work/BRIEF.md" }),
+  });
+  assert(seededThere.stdout.includes("work in the image the caller chose"), "the brief landed on the other target too");
+  await api(`/sandboxes/${onImage.id}/close`, { method: "POST" });
+
   // 7) close → the handoff is on the ledger, reproducible without the container.
   await api(`/sandboxes/${session.id}/close`, { method: "POST" });
   const trajectory = await api(`/runs/${session.id}/trajectory`);

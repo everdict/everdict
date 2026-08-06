@@ -574,8 +574,14 @@ this ordering prevents), and sealed on the session trajectory as a `delegation.b
 alone answers what they were actually asked to do. A profile session is always a conversation; turns run in
 the profile's own `workDir`, never a per-task scope, or the delegate walks away from its brief.
 
-Refused by name: a brief without a profile, a profile combined with another target, a profile whose harness
-cannot converse, and a profile naming a secret the workspace has not set.
+**WHO is a separate axis from WHERE.** A profile is an OVERLAY on the session's target, not a boot mode — a
+delegate must be able to work anywhere a member can: alone it runs in its own image; with `world` it continues
+that world (and its work hibernates into the next snapshot) or FOUNDS one, taking the profile's image as the
+genesis base when the caller names none; with `environment`/`image` it works in that one; `repo` clones in as
+usual. The only conflict is `harness`, which also says who runs.
+
+Refused by name: a brief without a profile, `profile` + `harness`, a profile whose harness cannot converse,
+and a profile naming a secret the workspace has not set.
 
 **Scope note (live-verified)**: the profile's `env` is the DELEGATE's environment — it reaches the agent
 adapter, not the session's `exec` channel (which is the operator's own shell, and has never carried

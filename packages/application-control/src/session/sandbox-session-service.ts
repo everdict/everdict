@@ -1812,29 +1812,31 @@ export class SandboxSessionService {
     world?: string;
     delegation?: ResolvedDelegationProfile;
   }> {
-    if (input.profile) {
-      if (!this.deps.resolveDelegationProfile)
-        throw new BadRequestError("BAD_REQUEST", {}, "Delegation profiles are not configured.");
-      const resolved = await this.deps.resolveDelegationProfile(input.tenant, input.createdBy, input.profile);
-      if (!resolved)
-        throw new NotFoundError(
-          "NOT_FOUND",
-          { profile: input.profile.id },
-          "Delegation profile not found (or not consumable by this workspace).",
-        );
-      return {
-        image: resolved.image,
-        harness: resolved.harness,
-        playground: resolved.harness,
-        delegation: resolved,
-      };
-    }
-    if (input.brief !== undefined)
+    // WHO works is a separate axis from WHERE. A delegation profile is resolved FIRST and then overlaid on
+    // whichever target the caller named — a plain image, an adopted environment, a WORLD (the delegate picks
+    // up where the last one left off) or a world's GENESIS (the profile's own image founds it). Delegation is
+    // not a boot mode; refusing to combine it would mean a delegate could never work in a persistent world.
+    const delegation = input.profile ? await this.resolveProfile(input) : undefined;
+    if (input.profile && input.harness)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        {},
+        "profile and harness both say WHO runs — name one (a profile already pins its own agent).",
+      );
+    if (input.brief !== undefined && delegation === undefined)
       throw new BadRequestError(
         "BAD_REQUEST",
         {},
         "A brief is the handoff to a delegation profile — boot with profile:{id} to send one.",
       );
+    // The delegate's own environment when the caller named no other target — and the genesis base when they
+    // founded a world without naming an image.
+    const overlay = (image: string, harness: { id: string; version: string }, world?: string) => ({
+      image,
+      harness,
+      ...(delegation !== undefined ? { playground: delegation.harness, delegation } : {}),
+      ...(world !== undefined ? { world } : {}),
+    });
     if (input.world) {
       // A world session is snapshot-bound by definition — refuse at CREATE when the deployment cannot
       // snapshot, not at the first snapshot hours of work later.
@@ -1859,14 +1861,18 @@ export class SandboxSessionService {
       // founded from. The environment resolver goes through the same consume gate as any capability boot.
       if (this.deps.resolveEnvironmentImage) {
         const resolved = await this.deps.resolveEnvironmentImage(input.tenant, input.createdBy, { id: world });
-        if (resolved) return { image: resolved.image, harness: { id: world, version: resolved.version }, world };
+        if (resolved) return overlay(resolved.image, { id: world, version: resolved.version }, world);
       }
-      if (input.image !== undefined && input.image.trim() !== "")
-        return { image: input.image, harness: { id: world, version: "genesis" }, world };
+      // GENESIS: the base this world is founded from — an explicit image, or the delegate's own environment
+      // when a profile is doing the founding (delegating into a brand-new world must not require the caller
+      // to know which image that profile runs in).
+      const genesis = input.image?.trim() !== "" ? input.image : undefined;
+      const base = genesis ?? delegation?.image;
+      if (base !== undefined) return overlay(base, { id: world, version: "genesis" }, world);
       throw new NotFoundError(
         "NOT_FOUND",
         { world },
-        "World not found — provide image to found it (the genesis base this session starts from).",
+        "World not found — provide image (or a delegation profile) to found it: the genesis base this session starts from.",
       );
     }
     if (input.harness) {
@@ -1909,11 +1915,31 @@ export class SandboxSessionService {
           { environment: input.environment.id },
           "Environment not found (or not consumable by this workspace).",
         );
-      return { image: resolved.image, harness: { id: input.environment.id, version: resolved.version } };
+      return overlay(resolved.image, { id: input.environment.id, version: resolved.version });
     }
     if (input.image !== undefined && input.image.trim() !== "")
-      return { image: input.image, harness: { id: input.image, version: "adhoc" } };
-    throw new BadRequestError("BAD_REQUEST", {}, "Either image, environment, or harness is required.");
+      return overlay(input.image, { id: input.image, version: "adhoc" });
+    // No target named: the delegate's OWN environment is the session (the common case — "hand this job to
+    // that profile" should not also require naming an image).
+    if (delegation) return overlay(delegation.image, delegation.harness);
+    throw new BadRequestError("BAD_REQUEST", {}, "Either image, environment, harness or profile is required.");
+  }
+
+  // The delegation profile behind `input.profile` — resolved through the composition's seam (capability get +
+  // consume gate + secrets + model binding + the adapter that carries them).
+  private async resolveProfile(input: CreateSandboxInput): Promise<ResolvedDelegationProfile> {
+    const ref = input.profile;
+    if (!ref) throw new BadRequestError("BAD_REQUEST", {}, "profile is required.");
+    if (!this.deps.resolveDelegationProfile)
+      throw new BadRequestError("BAD_REQUEST", {}, "Delegation profiles are not configured.");
+    const resolved = await this.deps.resolveDelegationProfile(input.tenant, input.createdBy, ref);
+    if (!resolved)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { profile: ref.id },
+        "Delegation profile not found (or not consumable by this workspace).",
+      );
+    return resolved;
   }
 
   // Who may open a session when slots are scarce (W3). A flat per-tenant cap was written for members

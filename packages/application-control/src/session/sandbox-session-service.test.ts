@@ -2064,6 +2064,83 @@ describe("SandboxSessionService — delegation profiles (a registered environmen
     expect(view.live?.conversation).toBe(true);
   });
 
+  it("delegates INTO a world — the delegate continues where the last one left off, and hibernates at teardown", async () => {
+    const fake = fakeDelegationProfile();
+    const ctx = buildWorld({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveEnvironmentImage: async (_t, _s, ref) =>
+        ref.id === "proj" ? { image: "reg/proj:v3", version: "1.0.2" } : undefined,
+    });
+    const session = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      profile: { id: "fixer" },
+      world: { id: "proj" },
+      brief,
+    });
+    // WHERE is the world's own snapshot; WHO is the profile's agent — the two axes are independent.
+    expect(session.session?.image).toBe("reg/proj:v3");
+    expect(session.session?.world).toBe("proj");
+    expect(session.session?.hibernate).toBe(true); // the delegate's work survives the container
+    expect(session.session?.conversation).toBe(true);
+    expect(session.attach).toEqual(["exec", "tasks"]);
+    // The brief still lands — inside the world this time.
+    expect(ctx.worldDriver.written.map((w) => w.path)).toEqual(["delegation/CLAUDE.md", "delegation/BRIEF.md"]);
+  });
+
+  it("FOUNDS a world from the profile's own image — delegating into a brand-new world needs no image from the caller", async () => {
+    const fake = fakeDelegationProfile();
+    const ctx = buildWorld({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveEnvironmentImage: async () => undefined, // the world has no versions yet
+    });
+    const session = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      profile: { id: "fixer" },
+      world: { id: "proj" },
+    });
+    expect(session.session?.image).toBe("reg/claude-preinstalled:1"); // the genesis base = the delegate's environment
+    expect(session.harness).toEqual({ id: "proj", version: "genesis" });
+    expect(session.session?.world).toBe("proj");
+  });
+
+  it("delegates INTO an adopted environment and into a plain image — WHO and WHERE stay independent", async () => {
+    const fake = fakeDelegationProfile();
+    const { service } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveEnvironmentImage: async () => ({ image: "reg/swe-env:2", version: "2.0.0" }),
+    });
+    const inEnv = await service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      profile: { id: "fixer" },
+      environment: { id: "swe-env" },
+    });
+    expect(inEnv.session?.image).toBe("reg/swe-env:2"); // the environment's image, the profile's agent
+    expect(inEnv.session?.conversation).toBe(true);
+
+    const onImage = await service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      profile: { id: "fixer" },
+      image: "python:3.12-slim",
+    });
+    expect(onImage.session?.image).toBe("python:3.12-slim");
+  });
+
+  it("refuses profile + harness — both say WHO runs", async () => {
+    const fake = fakeDelegationProfile();
+    const playgroundFake = fakePlaygroundHarness();
+    const { service } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveSessionHarness: async () => playgroundFake.resolved,
+    });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, harness: { id: "cc" } }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it("an unknown profile is 404, an unconfigured deployment 400, and a brief without a profile 400", async () => {
     const { service: noProfile } = build({});
     await expect(
