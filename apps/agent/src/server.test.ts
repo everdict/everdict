@@ -1306,6 +1306,53 @@ describe("agent server", () => {
       await app.close();
     });
 
+    it("an ADMIN force-stops another member's private conversation turn; a plain member still reads 404", async () => {
+      // Regression for the force-kill authority: /stop was gated on session visibility, so a runaway agent
+      // in a private conversation could be stopped by nobody but its (possibly absent) owner.
+      const gated = gatedTransport("runaway loop");
+      const byBearer = async (h: { authorization?: string }) =>
+        h.authorization === "Bearer ops"
+          ? { subject: "ops", workspace: "acme", roles: ["admin"] }
+          : h.authorization === "Bearer mallory"
+            ? { subject: "mallory", workspace: "acme", roles: ["member"] }
+            : { subject: "alice", workspace: "acme", roles: ["member"] };
+      const app = buildServer(
+        makeDeps({
+          resolveModel: async () => ({ transport: gated.transport, model: "m" }),
+          authenticate: byBearer,
+        }),
+      );
+      const session = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const turn = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "go" },
+      });
+      await gated.started;
+
+      // Another MEMBER cannot see (or stop) alice's private conversation — visibility keeps answering 404.
+      const denied = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/stop`,
+        headers: { authorization: "Bearer mallory", "x-everdict-workspace": "acme" },
+        payload: {},
+      });
+      expect(denied.statusCode).toBe(404);
+
+      // The workspace ADMIN is the safety authority: the stop lands even though the session is not theirs.
+      const stopped = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${session.id}/stop`,
+        headers: { authorization: "Bearer ops", "x-everdict-workspace": "acme" },
+        payload: {},
+      });
+      expect(stopped.statusCode).toBe(200);
+      expect(stopped.json().ok).toBe(true);
+      expect((await turn).statusCode).toBe(200); // the abort settled the loop
+      await app.close();
+    });
+
     it("POST /stop hands back the queued message it cancelled instead of leaving it for a later turn", async () => {
       // Given: a live turn with a steering message queued behind it — the shape of a redirect the member sends
       // while an answer is streaming.

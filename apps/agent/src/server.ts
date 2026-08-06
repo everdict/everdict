@@ -823,7 +823,12 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!principal) return reply;
     const { id } = idParams.parse(req.params);
     const session = await deps.sessions.getVisibleSession(principal.workspace, principal.subject, id);
-    if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    // Force-kill authority: an ADMIN may stop any conversation's turn in their workspace — the safety
+    // control cannot be gated on visibility (a runaway agent in a private session must be stoppable by
+    // someone other than its owner). The live-turn registry is keyed by (workspace, id), so an admin stop
+    // can never reach across workspaces; for everyone else the visibility rule answers 404 as before.
+    if (!session && !principal.roles.includes("admin"))
+      return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
     if (!liveTurns.stop(principal.workspace, id))
       return reply.code(404).send({ code: "NOT_FOUND", message: "No live turn for that conversation." });
     // A redirect (POST /interrupt with a message) queues into the mailbox and the loop absorbs it at its next
