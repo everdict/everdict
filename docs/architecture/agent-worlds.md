@@ -214,15 +214,30 @@ A runtime the workspace does not have is a **404 naming it** — never a quiet f
 compute, which would run a tenant's code somewhere they did not choose. A non-nomad runtime is a 400 saying
 which kinds can host a session.
 
+**Founding a world needs the base copied in.** A manifest may only reference blobs its own repository holds,
+and a genesis base lives elsewhere (`debian:stable-slim` is on Docker Hub). The daemon path hid this — a
+`docker commit` push uploads the base's layers with the new one — so on a cluster the first snapshot failed
+and no world could be created at all. `copyImage` brings the base in first (blobs before the manifest that
+names them, skipping what the target already has, an index resolved to its runnable linux/amd64 child), and
+`remoteImageSource` speaks the ordinary v2 bearer handshake so a public base needs no configuration.
+
+**Hibernation captures through the compute it was handed, not the live map.** `teardown` removes the session
+from that map first (so a concurrent close stays idempotent) and hibernates after; a capture that re-read the
+map found nothing exactly when hibernation mattered, and the close looked clean —
+`closedReason: closed, snapshots: []`. A crash-orphaned session on a daemonless placement now says plainly
+that it cannot be hibernated rather than skipping silently.
+
+### Drilled live (`nomad agent -dev` + the managed registry)
+
+Found a world from a Docker Hub base → exec → snapshot v1 (base copied in) → re-enter on a fresh allocation
+with the file intact → work → close hibernates v2 → re-enter reads both lines → the Nomad job is purged. The
+whole session service ran unchanged; only the driver differed.
+
 ## Not yet (the rest of the arc)
 
-- **A cluster session has not been drilled live** — this host has no Nomad cluster. The unit tests pin the
-  submitted job's shape, the zone application, the exec argv, the purge paths and the placement/reap routing;
-  the round trip is unverified.
-- **Queueing**: a refused create is a refusal, not a wait.
+- **Queueing**: a refused create is a refusal, not a wait. `freesAt` makes waiting a decision the caller can
+  take, but the platform does not take it for them.
+- **A crash-orphaned session cannot be hibernated on a daemonless placement** — the capture needs an exec
+  channel this control plane no longer has. Rebuilding a handle from the recorded compute id would close it.
 - **A credentialed git push has not been drilled live** (W2) — it needs a GitHub App installation, which
-  grants real write access and is the workspace owner's call.
-- **Queueing**: a refused create is a refusal, not a wait. `freesAt` makes waiting a decision the caller
-  can take, but the platform does not take it for them.
-- **A credentialed push has not been drilled live** (W2) — it needs a GitHub App installation, which grants
-  real write access to a repository and is the workspace owner's call to make.
+  grants real write access to a repository and is the workspace owner's call to make.
