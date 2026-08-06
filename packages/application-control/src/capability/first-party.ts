@@ -501,6 +501,73 @@ const TRACE_ANALYSIS: CapabilityRecord = {
   createdAt: "2026-07-28T00:00:00.000Z",
 };
 
+// The memory-consolidation skill body — the "dream" pass over the workspace's agent memory (memory/ on the
+// workspace filesystem), reinterpreting Claude Code's nightly consolidation as a SKILL a workspace imports and
+// schedules (a crafted agent triggered on schedule.fired). A procedure, not code: it orchestrates the fs tools the
+// agent already has (get_file / search_files / write_file / delete_file) plus the knowledge tools for facts that
+// belong there instead. Consolidation reorganizes what is WRITTEN — it never invents.
+const MEMORY_CONSOLIDATION_INSTRUCTIONS = `
+# Memory consolidation
+
+Consolidate the workspace's agent memory — \`memory/\` on the workspace filesystem — so it stays small, current, and
+trustworthy. You are editing the SHARED memory whose index every agent in this workspace reads at every turn: each
+line you keep costs every future conversation context, and each stale claim misleads one. Run this periodically (a
+scheduled agent) or when the index has grown noisy.
+
+## 1. Orient
+- \`get_file\` \`memory/MEMORY.md\` (the index) and \`list_files\` \`memory\`. No memory yet → report "nothing to
+  consolidate" and stop.
+- Files missing from the index, and index lines whose file is gone, are both defects — fix them in step 4.
+
+## 2. Gather
+- Read every memory body (\`get_file\`); for a large set, \`search_files\` (path: memory) to group by topic first.
+- Look for: OVERLAPS (two files carrying one fact), CONTRADICTIONS (a newer fact an older file denies), relative
+  dates gone stale ("last week"), transient task state that never belonged, facts the workspace already records
+  elsewhere (a knowledge entry, a skill, a spec — memory only holds what is NOT derivable from workspace state),
+  and credential-shaped strings (the write path refuses them today; one that slipped through an old write must be
+  REMOVED and called out in your report).
+
+## 3. Consolidate — update, don't duplicate
+- Merge overlapping files into the strongest one (update its body, then \`delete_file\` the other), keeping the
+  frontmatter honest (name/description/type) and the Why:/How to apply: lines intact for feedback/project types.
+- Convert relative dates to absolute. Delete a wrong fact at the SOURCE file, not just its index line.
+- A durable fact ABOUT a workspace entity belongs in the knowledge layer: record it there
+  (\`create_knowledge_entry\`, refs pinned at the observed version) and remove it from memory.
+- Unsure about a memory? It stays as-is — consolidation is reorganization, never invention.
+
+## 4. Prune the index
+- Rewrite \`memory/MEMORY.md\` to exactly the surviving files — one line each (\`- [Title](file.md) — one-line
+  hook\`), most load-bearing first, well under ~200 lines.
+- Pass \`base_revision\` on every write: members and other agents edit these files too, and a lost race must
+  surface as a merge, not an overwrite.
+
+## 5. Report
+- End with: files merged / deleted / kept, index lines before → after, and everything you removed as wrong or
+  misplaced — every change is an attributed revision, so a member can restore anything you misjudged.
+`.trim();
+
+const MEMORY_CONSOLIDATION: CapabilityRecord = {
+  id: "memory-consolidation",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "memory_consolidation",
+  description:
+    "Consolidate the workspace's agent memory (memory/ on the workspace filesystem): merge overlapping memories, " +
+    "fix contradictions and stale dates, move entity facts to the knowledge layer, and prune the index every " +
+    "conversation pays for. Import it, then schedule a crafted agent on schedule.fired to run it periodically — " +
+    "or use it on demand when the memory index has grown noisy.",
+  spec: {
+    type: "skill",
+    instructions: MEMORY_CONSOLIDATION_INSTRUCTIONS,
+    files: [], // the whole pass fits one body — no progressive-disclosure references needed
+  },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["memory", "maintenance", "example"],
+  createdBy: "everdict",
+  createdAt: "2026-08-06T00:00:00.000Z",
+};
+
 // --- First-party CATALOG (public + adoptable, but NOT auto-enabled defaults) ---
 // A curated store entry a member ADOPTS (it needs per-user config, so it isn't a default). The first containerized
 // stdio MCP capability: the official Grafana MCP server (grafana/mcp-grafana, Apache-2.0), run as
@@ -610,7 +677,7 @@ const POSTGRES_MCP: CapabilityRecord = {
 // gone: nothing is auto-attached, so there is nothing to gate. The copy tells the agent to use the GitHub tools, and
 // those are gated on their own.
 export function firstPartySkillExamples(): CapabilityRecord[] {
-  return [SCORECARD_FIX_PR, TRACE_ANALYSIS];
+  return [SCORECARD_FIX_PR, TRACE_ANALYSIS, MEMORY_CONSOLIDATION];
 }
 
 // The first-party CATALOG-only entries — public + adoptable in the store, but absent from the default-enabled set

@@ -105,6 +105,26 @@ describe("firstPartySkillExamples", () => {
       expect(report?.content).toContain(anchor);
     }
   });
+
+  it("the memory-consolidation example carries the orient→gather→consolidate→prune pass over memory/", () => {
+    const skill = examples.find((r) => r.id === "memory-consolidation");
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    // The pass's load-bearing rules: walk memory/ with the ordinary fs tools, merge instead of duplicating,
+    // move entity facts to the knowledge layer, write with the optimistic lock, and never invent.
+    for (const anchor of [
+      "memory/MEMORY.md",
+      "search_files",
+      "update, don't duplicate",
+      "create_knowledge_entry",
+      "base_revision",
+      "never invention",
+    ]) {
+      expect(skill.spec.instructions).toContain(anchor);
+    }
+    // Scheduling guidance is the description's job — the store card is where a member decides how to run it.
+    expect(skill.description).toContain("schedule.fired");
+  });
 });
 
 describe("firstPartyCatalogExtras", () => {

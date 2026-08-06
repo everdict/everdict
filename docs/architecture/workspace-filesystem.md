@@ -98,7 +98,10 @@ multi-tenant isolation is the bucket, and memory writes get the same attributed 
 (member or agent + conversation) as every other file. Because memory is workspace-shared
 prose replayed into future agent contexts, `FsService.writeFile` refuses credential-shaped
 tokens under `memory/` (a conservative named-pattern guard at the one choke point every
-surface shares) — reference secrets by NAME, never by value.
+surface shares) — reference secrets by NAME, never by value. Upkeep is the
+`memory_consolidation` first-party skill example (store → import → optionally a crafted
+agent triggered on `schedule.fired`): merge overlaps, fix stale dates, move entity facts
+to the knowledge layer, prune the index every conversation pays for.
 
 ## Revisions — who published what, and safe concurrent editing
 
