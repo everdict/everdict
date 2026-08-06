@@ -45,6 +45,10 @@ export interface ScheduleDriver {
   // Optional: the next fire times computed by Temporal (authoritative). Query many ids over one connection → per-id ISO array.
   // If unimplemented (dev/Direct), the service skips enrichment and the web falls back to a cron approximation.
   describeMany?(ids: string[]): Promise<Record<string, string[]>>;
+  // Optional: every everdict-managed schedule the driver's backend currently holds, with the tenant each
+  // fires for. Powers reconcile(): the DB is SSOT, so a held schedule whose record is gone is an orphan the
+  // service deletes (it would otherwise fire a doomed workflow on every tick, forever).
+  listManaged?(): Promise<Array<{ id: string; tenant: string }>>;
 }
 
 // Read response = stored record + (if a driver is present) the next fire times computed by Temporal. Not persisted — attached at read time.
@@ -182,6 +186,30 @@ export class ScheduleService {
     await this.deps.store.remove(tenant, id);
   }
 
+  // Reconcile the driver's held schedules to the DB (the SSOT) — the boot-time sweep for the leaks the
+  // per-request paths could not prevent (a delete whose driver call failed under an older build, a DB reset
+  // under a live Temporal). A held schedule with no record left is deleted; a genuine record is never
+  // touched (ensure() owns keeping its definition in sync). Returns how many orphans were removed.
+  async reconcile(): Promise<number> {
+    const driver = this.deps.driver;
+    if (!driver?.listManaged) return 0;
+    const held = await driver.listManaged();
+    let removed = 0;
+    for (const { id, tenant } of held) {
+      if ((await this.deps.store.get(tenant, id)) !== undefined) continue;
+      try {
+        await driver.remove(id);
+        removed += 1;
+      } catch (err) {
+        console.warn(
+          `[schedule] reconcile could not remove orphan schedule ${id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    if (removed > 0) console.warn(`[schedule] reconcile removed ${removed} orphan Temporal schedule(s)`);
+    return removed;
+  }
+
   // When a creator (createdBy) leaves the workspace, bulk-disable the active schedules they created — the fired run runs
   // under the creator's identity (budget, private-repo connection), so it can no longer be trusted. Also pause in Temporal (driver.ensure). Called from the member-removal hook.
   // Returns = number of schedules disabled.
@@ -203,7 +231,16 @@ export class ScheduleService {
   // Fire (called by the Temporal workflow via an internal route) — submit the schedule's runTemplate under the creator's identity.
   // Records lastFired/last* and returns the submitted scorecard id. If no firer is configured, BadRequest (Temporal-less dev).
   async fire(tenant: string, id: string): Promise<{ scorecardId?: string; artifactId?: string }> {
-    const schedule = await this.getRecord(tenant, id); // 404
+    let schedule: ScheduleRecord;
+    try {
+      schedule = await this.getRecord(tenant, id); // 404
+    } catch (err) {
+      // A fire for a record that no longer exists means the DRIVER still holds a schedule the DB (the SSOT)
+      // has dropped — a leaked delete. Self-heal at the choke point every orphan inevitably reaches: delete
+      // the driver's schedule so it stops firing, then still answer 404 (this fire has nothing to run).
+      if (err instanceof NotFoundError) await this.deps.driver?.remove(id).catch(() => undefined); // best-effort — the next tick retries
+      throw err;
+    }
     const t = schedule.runTemplate;
     // The tick is a FACT: a time-driven agent is just a subscription on schedule.fired (+ a scheduleId
     // filter — filters read the payload, so the id rides there too). The fire never depends on the emit.

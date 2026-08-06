@@ -173,5 +173,11 @@ export function wireScheduleService(
       : {}),
   });
   ref.set(scheduleService);
+  // Boot reconcile — delete any Temporal schedule whose DB record is gone (the DB is SSOT). Without this, a
+  // delete whose driver call was lost keeps firing a doomed workflow on every tick, forever. Background and
+  // best-effort: a Temporal outage at boot must not block the control plane (the next boot retries).
+  void scheduleService.reconcile().catch((err) => {
+    console.warn(`[schedule] boot reconcile skipped: ${err instanceof Error ? err.message : String(err)}`);
+  });
   return scheduleService;
 }

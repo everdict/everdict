@@ -115,6 +115,62 @@ describe("ScheduleService — Temporal driver sync (slice 2)", () => {
     expect(d.removed).toEqual(["sch-1"]);
   });
 
+  it("a failing driver remove leaves the DB row in place — never a record-less schedule still firing", async () => {
+    // The zombie-schedule contract: remove goes driver-first, and a driver failure must ABORT the delete.
+    // (The Temporal driver used to swallow every failure as "already absent", so the DB row died while the
+    // Temporal schedule lived on, firing a doomed workflow daily.)
+    const store = new InMemoryScheduleStore();
+    const driver: ScheduleDriver = {
+      async ensure() {},
+      async remove() {
+        throw new UpstreamError("UPSTREAM_ERROR", {}, "temporal unreachable");
+      },
+    };
+    const s = new ScheduleService({ store, driver, newId: () => "sch-1", now: () => "t" });
+    await s.create(base);
+    await expect(s.remove("acme", "sch-1")).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+    expect((await store.get("acme", "sch-1"))?.id).toBe("sch-1"); // DB untouched — retry deletes both later
+  });
+
+  it("a fire for a record the DB no longer holds self-heals: the driver's orphan schedule is deleted", async () => {
+    // Regression: a leaked delete left Temporal firing `everdict-sched-<id>` forever (404 → retry → Failed
+    // workflow, every tick). The fire path is the choke point every orphan inevitably reaches — it deletes
+    // the driver's schedule and still answers 404.
+    const d = fakeDriver();
+    const s = new ScheduleService({ store: new InMemoryScheduleStore(), driver: d.driver, newId: () => "sch-1" });
+    await expect(s.fire("acme", "ghost")).rejects.toBeInstanceOf(NotFoundError);
+    expect(d.removed).toEqual(["ghost"]);
+  });
+
+  it("reconcile deletes driver-held schedules whose DB record is gone and never touches live ones", async () => {
+    const store = new InMemoryScheduleStore();
+    const removed: string[] = [];
+    const driver: ScheduleDriver = {
+      async ensure() {},
+      async remove(id) {
+        removed.push(id);
+      },
+      async listManaged() {
+        return [
+          { id: "sch-1", tenant: "acme" }, // has a record — stays
+          { id: "ghost", tenant: "acme" }, // record gone — the orphan
+        ];
+      },
+    };
+    const s = new ScheduleService({ store, driver, newId: () => "sch-1", now: () => "t" });
+    await s.create(base);
+    await expect(s.reconcile()).resolves.toBe(1);
+    expect(removed).toEqual(["ghost"]);
+    expect((await store.get("acme", "sch-1"))?.id).toBe("sch-1");
+  });
+
+  it("reconcile without a listManaged-capable driver is a no-op", async () => {
+    const d = fakeDriver(); // no listManaged
+    const s = new ScheduleService({ store: new InMemoryScheduleStore(), driver: d.driver });
+    await expect(s.reconcile()).resolves.toBe(0);
+    expect(d.removed).toEqual([]);
+  });
+
   it("driver ensure failure on create → roll back the DB record (avoid a schedule that exists but never fires)", async () => {
     const store = new InMemoryScheduleStore();
     const driver: ScheduleDriver = {
