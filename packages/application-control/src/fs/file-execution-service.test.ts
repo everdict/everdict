@@ -1,8 +1,15 @@
-import type { ComputeHandle, ComputeSpec, Driver, ExecOpts, ExecResult, FsEntry } from "@everdict/contracts";
+import type { ComputeHandle, ComputeSpec, Driver, ExecOpts, ExecResult, FsEntry, RunRecord } from "@everdict/contracts";
 import { BadRequestError, NotFoundError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import type { RunStore } from "../ports/run-store.js";
 import type { FsFile, WorkspaceFs } from "../ports/workspace-fs.js";
 import { FileExecutionService } from "./file-execution-service.js";
+
+// Deterministic ids so a run row can be asserted without reading it back by a random uuid.
+function seq(prefix: string): () => string {
+  let i = 0;
+  return () => `${prefix}-${i++}`;
+}
 
 // A filesystem that remembers what was written back — the run's productive half.
 class FakeFs implements WorkspaceFs {
@@ -77,11 +84,42 @@ class FakeDriver implements Driver {
 
 const ok = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "" });
 
+// A minimal run ledger. Local rather than @everdict/db's InMemoryRunStore on purpose: db depends on THIS
+// package, so importing it back would be the reverse edge the architecture forbids.
+class FakeRuns implements RunStore {
+  readonly rows = new Map<string, RunRecord>();
+  readonly events: unknown[] = [];
+  async create(record: RunRecord, events?: unknown[]): Promise<void> {
+    this.rows.set(record.id, record);
+    if (events) this.events.push(...events);
+  }
+  async update(id: string, patch: Partial<RunRecord>, events?: unknown[]): Promise<RunRecord | undefined> {
+    const current = this.rows.get(id);
+    if (!current) return undefined;
+    const next = { ...current, ...patch };
+    this.rows.set(id, next);
+    if (events) this.events.push(...events);
+    return next;
+  }
+  async get(id: string): Promise<RunRecord | undefined> {
+    return this.rows.get(id);
+  }
+  async list(tenant?: string): Promise<RunRecord[]> {
+    return [...this.rows.values()].filter((r) => tenant === undefined || r.tenant === tenant);
+  }
+  async deleteByScorecard(): Promise<number> {
+    return 0;
+  }
+  async countActiveByEnvelope(): Promise<number> {
+    return 0;
+  }
+}
+
 describe("FileExecutionService — running one workspace file", () => {
   it("places the file in a sandbox from the language's image and runs it under an in-sandbox timeout", async () => {
     const fs = new FakeFs({ "tasks/t1/report.py": "print('hi')\n" });
     const driver = new FakeDriver((cmd) => (cmd.startsWith("find") ? ok("./report.py\n") : ok("hi\n")));
-    const service = new FileExecutionService(fs, driver);
+    const service = new FileExecutionService(fs, { compute: driver });
 
     const result = await service.run("acme", { path: "tasks/t1/report.py" });
 
@@ -101,7 +139,7 @@ describe("FileExecutionService — running one workspace file", () => {
       if (cmd.startsWith("base64")) return ok(Buffer.from("PNG!").toString("base64"));
       return ok();
     });
-    const service = new FileExecutionService(fs, driver);
+    const service = new FileExecutionService(fs, { compute: driver });
 
     const result = await service.run("acme", { path: "reports/chart.py" });
 
@@ -117,7 +155,7 @@ describe("FileExecutionService — running one workspace file", () => {
       if (cmd.startsWith("base64")) return ok(Buffer.from("PNG!").toString("base64"));
       return ok();
     });
-    const service = new FileExecutionService(fs, driver);
+    const service = new FileExecutionService(fs, { compute: driver });
 
     const result = await service.run("acme", { path: "reports/chart.py" });
 
@@ -130,7 +168,7 @@ describe("FileExecutionService — running one workspace file", () => {
     const driver = new FakeDriver((cmd) =>
       cmd.startsWith("find") ? ok("./loop.sh\n") : { exitCode: 124, stdout: "", stderr: "" },
     );
-    const service = new FileExecutionService(fs, driver);
+    const service = new FileExecutionService(fs, { compute: driver });
 
     const result = await service.run("acme", { path: "loop.sh", timeoutSec: 5 });
 
@@ -144,7 +182,7 @@ describe("FileExecutionService — running one workspace file", () => {
     const driver = new FakeDriver((cmd) =>
       cmd.startsWith("find") ? ok("./boom.py\n") : { exitCode: 2, stdout: "", stderr: "Traceback…" },
     );
-    const service = new FileExecutionService(fs, driver);
+    const service = new FileExecutionService(fs, { compute: driver });
 
     const result = await service.run("acme", { path: "boom.py" });
 
@@ -156,17 +194,17 @@ describe("FileExecutionService — running one workspace file", () => {
 
   it("refuses a format it has no interpreter for, and a file that is not text", async () => {
     const driver = new FakeDriver(() => ok());
-    const notes = new FileExecutionService(new FakeFs({ "notes.md": "# hi" }), driver);
+    const notes = new FileExecutionService(new FakeFs({ "notes.md": "# hi" }), { compute: driver });
     await expect(notes.run("acme", { path: "notes.md" })).rejects.toBeInstanceOf(BadRequestError);
 
-    const missing = new FileExecutionService(new FakeFs({}), driver);
+    const missing = new FileExecutionService(new FakeFs({}), { compute: driver });
     await expect(missing.run("acme", { path: "gone.py" })).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it("runs against a caller-chosen environment image, keeping the interpreter", async () => {
     const fs = new FakeFs({ "analyze.py": "..." });
     const driver = new FakeDriver((cmd) => (cmd.startsWith("find") ? ok("./analyze.py\n") : ok()));
-    const service = new FileExecutionService(fs, driver);
+    const service = new FileExecutionService(fs, { compute: driver });
 
     const result = await service.run("acme", { path: "analyze.py", image: "ghcr.io/acme/analysis:2.1.0" });
 
@@ -179,9 +217,10 @@ describe("FileExecutionService — running one workspace file", () => {
     const fs = new FakeFs({ "analyze.py": "..." });
     const deployment = new FakeDriver(() => ok());
     const theirs = new FakeDriver((cmd) => (cmd.startsWith("find") ? ok("./analyze.py\n") : ok()));
-    const service = new FileExecutionService(fs, deployment, async (tenant, runtime) =>
-      tenant === "acme" && runtime === "nomad-eu" ? theirs : undefined,
-    );
+    const service = new FileExecutionService(fs, {
+      compute: deployment,
+      computeFor: async (tenant, runtime) => (tenant === "acme" && runtime === "nomad-eu" ? theirs : undefined),
+    });
 
     await service.run("acme", { path: "analyze.py", runtime: "nomad-eu" });
 
@@ -193,14 +232,94 @@ describe("FileExecutionService — running one workspace file", () => {
     // A silent fallback would run a member's arbitrary code somewhere they did not choose — the whole reason
     // the axis exists is that "on whose machine" is an answer, not a default.
     const deployment = new FakeDriver(() => ok());
-    const service = new FileExecutionService(new FakeFs({ "analyze.py": "..." }), deployment, async () => undefined);
+    const service = new FileExecutionService(new FakeFs({ "analyze.py": "..." }), {
+      compute: deployment,
+      computeFor: async () => undefined,
+    });
 
     await expect(service.run("acme", { path: "analyze.py", runtime: "ghost" })).rejects.toBeInstanceOf(NotFoundError);
     expect(deployment.provisioned).toBeUndefined();
   });
 
   it("asks for a runtime by name when the deployment has no compute of its own", async () => {
-    const service = new FileExecutionService(new FakeFs({ "analyze.py": "..." }), undefined, async () => undefined);
+    const service = new FileExecutionService(new FakeFs({ "analyze.py": "..." }), {
+      computeFor: async () => undefined,
+    });
     await expect(service.run("acme", { path: "analyze.py" })).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  // The ledger half: a file run is a `command` run. Before this, running a member's script left no trace at
+  // all — and it now runs on the workspace's own cluster, which makes "who ran what, where" a real question.
+  it("records the run, keeps a non-zero exit as a RESULT, and lists what it published", async () => {
+    const runs = new FakeRuns();
+    const fs = new FakeFs({ "analyze.py": "..." });
+    const driver = new FakeDriver((cmd) => {
+      if (cmd.startsWith("find")) return ok("./analyze.py\n./chart.png\n");
+      if (cmd.startsWith("wc -c")) return ok("4\n");
+      if (cmd.startsWith("base64")) return ok(Buffer.from("PNG!").toString("base64"));
+      return { exitCode: 3, stdout: "", stderr: "boom" };
+    });
+    const service = new FileExecutionService(fs, {
+      compute: driver,
+      runs,
+      newId: seq("run"),
+      now: () => 1000,
+    });
+
+    const result = await service.run("acme", { path: "analyze.py" }, { kind: "member", subject: "alice" });
+
+    const [record] = await runs.list("acme");
+    expect(record).toMatchObject({
+      tenant: "acme",
+      kind: "command",
+      lifetime: "task",
+      caseId: "analyze.py",
+      createdBy: "alice",
+      // A script that exits 3 RAN. `failed` is reserved for "we could not run it" — conflating them would
+      // make every failing test script look like broken infrastructure.
+      status: "succeeded",
+      outputs: { exitCode: 3, files: ["chart.png"] },
+    });
+    expect(result.exitCode).toBe(3);
+  });
+
+  it("says WHERE it ran when a runtime was named — the audit question the runtime axis created", async () => {
+    const runs = new FakeRuns();
+    const theirs = new FakeDriver((cmd) => (cmd.startsWith("find") ? ok("") : ok()));
+    const service = new FileExecutionService(new FakeFs({ "a.py": "..." }), {
+      computeFor: async () => theirs,
+      runs,
+      newId: seq("run"),
+      now: () => 1000,
+    });
+
+    await service.run("acme", { path: "a.py", runtime: "nomad-eu" }, { kind: "member", subject: "alice" });
+
+    expect((await runs.list("acme"))[0]).toMatchObject({
+      runtime: "nomad-eu",
+      placement: { where: "runtime", target: "nomad-eu" },
+    });
+  });
+
+  it("marks the run FAILED when we could not run it — a sandbox fault is not the script's verdict", async () => {
+    const runs = new FakeRuns();
+    const broken: Driver = {
+      id: "broken",
+      async provision(): Promise<ComputeHandle> {
+        throw new Error("no compute");
+      },
+      async reap(): Promise<void> {},
+    };
+    const service = new FileExecutionService(new FakeFs({ "a.py": "..." }), {
+      compute: broken,
+      runs,
+      newId: seq("run"),
+      now: () => 1000,
+    });
+
+    await expect(service.run("acme", { path: "a.py" }, { kind: "member", subject: "alice" })).rejects.toThrow();
+    // The row is SETTLED, not left at `running`: a container that never came up is precisely the case the
+    // ledger exists for, and an eternally-running row would be an orphan record of its own.
+    expect((await runs.list("acme"))[0]).toMatchObject({ status: "failed", error: { message: "no compute" } });
   });
 });

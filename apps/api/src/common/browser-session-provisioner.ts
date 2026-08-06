@@ -6,6 +6,9 @@
 export interface ProvisionedBrowser {
   // CDP HTTP base reachable from the control plane (e.g. http://127.0.0.1:<port>) — fed to openBrowserSession.
   cdpBase: string;
+  // WHAT was booted — the container image, or the host binary when this is not a container. Goes on the run
+  // ledger's session half, which requires a concrete answer: "a browser" is not one a later reader can act on.
+  image?: string;
   // Tear the browser down (best-effort). Called on session close and on TTL sweep.
   dispose(): Promise<void>;
 }

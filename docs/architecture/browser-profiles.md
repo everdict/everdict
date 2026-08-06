@@ -298,6 +298,30 @@ short-lived container/pod per active login; self-hosted = the user's own local b
     a web session runtime-picker (the field is API/MCP-settable today, mirroring how S5's `target.profile` shipped),
     and folding the S8 caps into a store alongside the multi-replica session registry.
 
+## The session is a run (master-plan O6)
+
+A live browser is held-open isolated compute, so it belongs in the run ledger for the same reasons an agent
+world does — and until this landed, it existed only in ONE process's memory. A control plane that died left
+the container running on someone's cluster with nothing left that knew about it.
+
+`BrowserSessionService` now writes a `Run` on create and settles it on teardown:
+
+- `kind: "sandbox"` — deliberately the same family as an agent world, not a new one: `sandbox` means held-open
+  isolated compute, and it is already in `PERSONAL_RUN_KINDS`, which is what a browser carrying someone's
+  logged-in cookies has to be (owner-only, per `runAudience`).
+- **The run id IS the session id**, so a later process needs no second identifier to close it.
+- `session.expiresAt` puts the hard deadline on the ROW — the same property that lets a reaper tear down a
+  sandbox session it never created.
+- `closedReason` distinguishes `closed` from `expired`, so "someone finished" and "it ran out of time" stop
+  looking the same in the ledger.
+- `caseId` is the egress country (or `direct`): where the session appears to browse from is the discriminating
+  fact about a browser, and the one an auditor asks about.
+
+**The browser is disposed BEFORE the row is written.** Releasing a scarce resource must never queue behind a
+bookkeeping write — a slow or failing run store would otherwise hold a live container open, which is precisely
+what the ledger exists to prevent. The ledger write is best-effort by contract for the same reason: a store
+that is down must not stop someone from opening a browser.
+
 ## Non-goals / risks
 
 - **Security is the through-line.** A live CDP-driven browser is powerful (navigate anywhere, exec JS) — that is the

@@ -84,7 +84,8 @@ activities pass the gate.
 ## Decision lock (adopted working values)
 
 O1 chat turns are runs (grouped) · O2 transcripts are traces · O3 generalize ScorecardRecord ·
-O4 CP owns the agent-run record · O5 idle sessions bill + short TTL · O6 browser sessions fold later ·
+O4 CP owns the agent-run record · O5 idle sessions bill + short TTL · O6 browser sessions fold later (DONE —
+they are `kind: sandbox` session runs; a file run is a `command` run beside them) ·
 O7 envelope = meter + headroom + in-flight cap · O8 cascade cancel default (non-terminal descendants) ·
 O9 recordings = siblings first · O10 no backfill (dual-read) · N-O1 storage rung-1 default ·
 N-O2 receiver embedded first, sidecar at N2 · N-O3 traces-only v1 · N-O4 raw sinks retire at N4 after

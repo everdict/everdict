@@ -333,6 +333,9 @@ export type {
 export { NotificationService, type NotificationServiceDeps } from "./notification/notification-service.js";
 export { PlatformEventService, type PlatformEventServiceDeps } from "./platform-event/platform-event-service.js";
 export { withRegisteredFact } from "./platform-event/registry-facts.js";
+// Facts → outbox rows. Exported because a control-plane service OUTSIDE this package (the browser lane) also
+// writes run transitions, and every such writer must stamp them the same way — see .claude/rules/events.md.
+export { stampFacts, type StampedFact } from "./platform-event/outbox.js";
 export { withTracePerception } from "./observability/trace-perception.js";
 export {
   SandboxSessionService,

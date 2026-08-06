@@ -1,3 +1,4 @@
+import type { PlatformEventEmitter, RunStore } from "@everdict/application-control";
 import { FileExecutionService, type WorkspaceFs } from "@everdict/application-control";
 import type { RuntimeCompute } from "../common/runtime-compute.js";
 import type { DeploymentCompute } from "./compute-env.js";
@@ -18,9 +19,16 @@ export function buildFileExecutionService(
   fs: WorkspaceFs,
   compute: RuntimeCompute,
   deployment: DeploymentCompute | undefined,
+  // The run ledger — a file run is a `command` run, so who ran what, where, and how it ended is answerable
+  // afterwards instead of living only in the caller's response.
+  ledger?: { runs: RunStore; events?: PlatformEventEmitter },
 ): FileExecutionService | undefined {
   if (!deployment?.fileRuns) return undefined;
   const own = compute.defaultCompute;
   console.log(`▶ file execution: ${own?.id ?? "runtime-only"} (POST /fs/executions + run_file)`);
-  return new FileExecutionService(fs, own, (tenant, runtime) => compute.computeFor(tenant, runtime));
+  return new FileExecutionService(fs, {
+    ...(own ? { compute: own } : {}),
+    computeFor: (tenant, runtime) => compute.computeFor(tenant, runtime),
+    ...(ledger ? { runs: ledger.runs, ...(ledger.events ? { events: ledger.events } : {}) } : {}),
+  });
 }

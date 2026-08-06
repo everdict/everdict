@@ -238,9 +238,11 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     }
   });
 
-  // Run a file. Separate from the eval spine on purpose: no harness, no grading, no run record — a person is
-  // reading a script and wants to see what it does. 404 when no execution driver is composed, because "run it on
-  // the control-plane host" is not a fallback: without a sandbox the capability simply does not exist here.
+  // Run a file. Separate from the eval spine on purpose: no harness, no grading — a person is reading a script
+  // and wants to see what it does. It IS in the run ledger though (a `command` run): the script is arbitrary
+  // code that can now be placed on the workspace's own cluster, so who ran what, where, and how it ended is a
+  // question someone will ask later. 404 when no compute is composed, because "run it on the control-plane
+  // host" is not a fallback: without a sandbox the capability simply does not exist here.
   app.post("/fs/executions", { schema: fsDocs.run }, async (req, reply) => {
     if (!deps.fileExecutionService) {
       return reply.code(404).send({ code: "NOT_FOUND", message: "file execution not configured" });

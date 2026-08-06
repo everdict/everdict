@@ -1,6 +1,6 @@
 import { BadRequestError, ServiceHarnessSpecSchema, UpstreamError } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
-import { NomadTopologyRuntime } from "@everdict/topology";
+import { DEFAULT_BROWSER_IMAGE, NomadTopologyRuntime } from "@everdict/topology";
 import type { ProvisionedBrowser } from "../../common/browser-session-provisioner.js";
 import type { ResolvedRuntime } from "../../common/runtime-compute.js";
 
@@ -56,6 +56,12 @@ export function runtimeSessionProvision(): (
         "The runtime browser session did not become reachable.",
       );
     }
-    return { cdpBase, dispose: () => handle.dispose() };
+    return {
+      cdpBase,
+      // WHAT booted, for the run ledger's session half. The spec's override wins, else the pinned default the
+      // topology builder would have used — the same answer, resolved where it is known.
+      image: spec.browserImage ?? DEFAULT_BROWSER_IMAGE,
+      dispose: () => handle.dispose(),
+    };
   };
 }

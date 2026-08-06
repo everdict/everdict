@@ -223,8 +223,21 @@ values — keep the two in step.
 ## Running a file
 
 The viewer's **Run** — a `.py`/`.sh`/`.js`/`.ts` file executed in a sandbox that exists for that one command.
-Deliberately NOT an eval: no harness, no grading, no run record. `POST /fs/executions` (+ MCP `run_file`,
-`files:write`) → `FileExecutionService` (application-control) over the `Driver` port.
+Deliberately NOT an eval: no harness, no grading. `POST /fs/executions` (+ MCP `run_file`, `files:write`) →
+`FileExecutionService` (application-control) over the `Driver` port.
+
+**It is in the run ledger** as a `command` run (`kind: "command"`, `lifetime: "task"`, `class: "interactive"`).
+It did not used to be — and that was defensible while the only place a script could run was the control-plane
+host. Once a member can place it on the workspace's own cluster, "who ran what, in which image, on whose
+cluster, and how did it end" is a question someone asks later, and nothing could answer it. The row opens
+BEFORE the container does, so a control plane that dies mid-run still leaves a record of what it started and
+where; a container that never came up settles the row `failed` rather than leaving it `running` forever.
+
+What the row keeps: the path, the image, the placement, the exit code (`outputs.exitCode`) and the files it
+published. What it deliberately does NOT keep is **what the script printed** — stdout is the caller's answer,
+and a script that echoes a credential must not turn the run ledger into a second place that credential lives.
+A non-zero exit settles the run `succeeded` with the code recorded: the script ran, and disagreeing with us is
+its prerogative. `failed` means we could not run it at all.
 
 ```
 read the file → provision a container (the language's image, or a caller-chosen one)

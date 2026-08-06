@@ -505,7 +505,7 @@ describe("fs revisions (who published what, and safe concurrent editing)", () =>
       const app = buildServer({
         service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
         fsService: new FsService(fs, ledger),
-        fileExecutionService: new FileExecutionService(fs, scriptedDriver),
+        fileExecutionService: new FileExecutionService(fs, { compute: scriptedDriver }),
       });
       await app.inject({
         method: "PUT",
@@ -538,7 +538,7 @@ describe("fs revisions (who published what, and safe concurrent editing)", () =>
       const app = buildServer({
         service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
         fsService: new FsService(fs, ledger),
-        fileExecutionService: new FileExecutionService(fs, scriptedDriver),
+        fileExecutionService: new FileExecutionService(fs, { compute: scriptedDriver }),
       });
       await app.inject({ method: "PUT", url: "/fs/file", headers: H, payload: { path: "notes.md", content: "# hi" } });
 

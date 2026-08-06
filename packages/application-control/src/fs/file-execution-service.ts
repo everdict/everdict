@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import {
+  AppError,
   BadRequestError,
   type ComputeHandle,
   type Driver,
@@ -12,10 +14,28 @@ import {
   type FileExecutionResult,
   type FsActor,
   NotFoundError,
+  type PlatformFact,
+  type RunRecord,
   shq,
 } from "@everdict/contracts";
-import { fileRunPlanFor } from "@everdict/domain";
+import { Run, fileRunPlanFor } from "@everdict/domain";
+import { stampFacts } from "../platform-event/outbox.js";
+import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
+import type { RunStore } from "../ports/run-store.js";
 import type { WorkspaceFs } from "../ports/workspace-fs.js";
+
+// The member a run belongs to. An agent's `run_file` acts AS the member that delegated it, so the row's owner
+// is that member — WHOSE loop it was rides on the facts instead (`causedBy`), which is what keeps an agent
+// from waking on its own file run.
+function memberBehind(actor: FsActor | undefined): string {
+  return actor?.onBehalfOf ?? actor?.subject ?? "system";
+}
+
+function attributedTo(facts: PlatformFact[], actor: FsActor | undefined): PlatformFact[] {
+  if (actor?.kind !== "agent" || !actor.agentId) return facts;
+  const causedBy = `agent:${actor.agentId}:${actor.conversationId ?? "unknown"}`;
+  return facts.map((fact) => ({ ...fact, causedBy }));
+}
 
 // `timeout` exits 124 when it kills the command (GNU convention, and busybox follows it) — enforcing the limit
 // INSIDE the sandbox makes "it ran too long" a deterministic exit code instead of a guess from wall-clock.
@@ -26,33 +46,47 @@ const DRIVER_GRACE_SEC = 10;
 
 // Run one file from the workspace filesystem and bring back what it printed and what it wrote.
 //
-// This is the viewer's "Run", not an eval: no harness, no grading, no run record. The isolation story is the
+// This is the viewer's "Run", not an eval: no harness, no grading. It does enter the run LEDGER as a `command`
+// run — see openRun below for what the row keeps and what it deliberately does not. The isolation story is the
 // Driver's — a container that exists for this one command and is disposed in a `finally`, whatever happened.
 // The service is composed ONLY where a driver exists (`EVERDICT_FILE_EXECUTION_DRIVER`); everywhere else the
 // route and the tool are simply absent, because "runs on the control-plane host" is not a fallback we offer.
+export interface FileExecutionDeps {
+  // WHERE the script runs. `compute` is the deployment's own; `computeFor` resolves one of the workspace's
+  // registered runtimes — the same resolver agent worlds and browser sessions go through, so a member's
+  // script lands inside the tenant's own trust zone instead of on the control-plane host by default.
+  compute?: Driver;
+  computeFor?: (tenant: string, runtime: string) => Promise<Driver | undefined>;
+  // The run ledger. A file run is a `command` run: absent, the script still runs and nobody can later ask who
+  // ran what, in which image, on whose cluster. Optional only so a unit test can leave it out.
+  runs?: RunStore;
+  events?: PlatformEventEmitter;
+  newId?: () => string;
+  now?: () => number;
+}
+
 export class FileExecutionService {
   constructor(
     private readonly fs: WorkspaceFs,
-    // WHERE the script runs. `compute` is the deployment's own; `computeFor` resolves one of the workspace's
-    // registered runtimes — the same resolver agent worlds and browser sessions go through, so a member's
-    // script lands inside the tenant's own trust zone instead of on the control-plane host by default.
-    private readonly compute: Driver | undefined,
-    private readonly computeFor?: (tenant: string, runtime: string) => Promise<Driver | undefined>,
+    private readonly deps: FileExecutionDeps = {},
   ) {}
+
+  private readonly newId = () => this.deps.newId?.() ?? randomUUID();
+  private readonly now = () => new Date(this.deps.now?.() ?? Date.now()).toISOString();
 
   // A named runtime the workspace does not have is a 404 NAMING it — never a quiet fall back to the
   // deployment's compute, which would run a member's code somewhere they did not choose.
   private async computeIn(tenant: string, runtime?: string): Promise<Driver> {
     if (runtime === undefined) {
-      if (!this.compute)
+      if (!this.deps.compute)
         throw new BadRequestError(
           "BAD_REQUEST",
           {},
           "This deployment has no compute of its own — name one of the workspace's runtimes to run a file.",
         );
-      return this.compute;
+      return this.deps.compute;
     }
-    const resolved = this.computeFor ? await this.computeFor(tenant, runtime) : undefined;
+    const resolved = this.deps.computeFor ? await this.deps.computeFor(tenant, runtime) : undefined;
     if (!resolved)
       throw new NotFoundError("NOT_FOUND", { runtime }, `Runtime '${runtime}' is not registered in this workspace.`);
     return resolved;
@@ -76,12 +110,24 @@ export class FileExecutionService {
     const command = `timeout ${timeoutSec} sh -c ${shq(plan.command)}`;
 
     const target = await this.computeIn(tenant, input.runtime);
-    const compute = await target.provision({ os: "linux", image: plan.image, needs: ["shell"] });
-    const startedAt = Date.now();
+    // The row exists BEFORE the container does. A control plane that dies mid-run then leaves a record saying
+    // what was started and where — which is the only thing that makes an orphaned container findable.
+    const runId = await this.openRun(
+      tenant,
+      { path: input.path, image: plan.image, ...(input.runtime !== undefined ? { runtime: input.runtime } : {}) },
+      actor,
+    );
+    // Provisioning is INSIDE the guarded region: a container that never came up is exactly the case the
+    // ledger exists for, and leaving that row at `running` forever would be an orphan record of its own.
+    let compute: ComputeHandle | undefined;
+    let startedAt = Date.now();
     try {
+      compute = await target.provision({ os: "linux", image: plan.image, needs: ["shell"] });
+      startedAt = Date.now();
       await compute.writeFile(name, source);
       const result = await compute.exec(command, { timeoutSec: timeoutSec + DRIVER_GRACE_SEC });
       const outputs = await this.collectOutputs(compute, tenant, directory, name, actor);
+      await this.settleRun(runId, result.exitCode, outputs, actor);
       return {
         path: input.path,
         image: plan.image,
@@ -96,8 +142,93 @@ export class FileExecutionService {
         durationMs: Date.now() - startedAt,
         outputs,
       };
+    } catch (e) {
+      // We could not run it — not "the script disagreed with us". The row says so with the reason, so a
+      // sandbox that never came up is distinguishable from a test suite that legitimately exits non-zero.
+      await this.failRun(runId, e, actor);
+      throw e;
     } finally {
-      await compute.dispose();
+      await compute?.dispose();
+    }
+  }
+
+  // ─── The run ledger ─────────────────────────────────────────────────────────────────────────────────────
+  // Best-effort by contract: a ledger that is down must not turn a working "Run" into an error the member
+  // cannot act on. It is loud in the log instead, which is where an operator looks for a store that is failing.
+
+  private async openRun(
+    tenant: string,
+    what: { path: string; image: string; runtime?: string },
+    actor?: FsActor,
+  ): Promise<string | undefined> {
+    const runs = this.deps.runs;
+    if (!runs) return undefined;
+    const record = Run.newFileCommand({
+      id: this.newId(),
+      tenant,
+      ...what,
+      createdBy: memberBehind(actor),
+      now: this.now(),
+    });
+    const stamped = stampFacts(tenant, attributedTo(Run.creationFacts(record), actor), {
+      newId: this.newId,
+      now: this.now,
+    });
+    try {
+      await runs.create(
+        record,
+        stamped.map((f) => f.record),
+      );
+      if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+      return record.id;
+    } catch (e) {
+      console.warn(`[fs] file run ledger write failed (${record.id}):`, e);
+      return undefined;
+    }
+  }
+
+  private async settleRun(
+    runId: string | undefined,
+    exitCode: number,
+    outputs: FileExecutionOutput[],
+    actor?: FsActor,
+  ): Promise<void> {
+    await this.closeRun(runId, actor, (run, now) =>
+      run.settleCommand({ exitCode, files: outputs.filter((o) => o.skipped !== true).map((o) => o.path) }, now),
+    );
+  }
+
+  private async failRun(runId: string | undefined, cause: unknown, actor?: FsActor): Promise<void> {
+    const error =
+      cause instanceof AppError
+        ? { code: cause.code, message: cause.message }
+        : { code: "INTERNAL", message: cause instanceof Error ? cause.message : String(cause) };
+    await this.closeRun(runId, actor, (run, now) => run.fail(error, now));
+  }
+
+  private async closeRun(
+    runId: string | undefined,
+    actor: FsActor | undefined,
+    transition: (run: Run, now: string) => { patch: Partial<RunRecord>; facts: PlatformFact[] },
+  ): Promise<void> {
+    const runs = this.deps.runs;
+    if (!runs || runId === undefined) return;
+    try {
+      const record = await runs.get(runId);
+      if (!record) return;
+      const { patch, facts } = transition(Run.from(record), this.now());
+      const stamped = stampFacts(record.tenant, attributedTo(facts, actor), {
+        newId: this.newId,
+        now: this.now,
+      });
+      await runs.update(
+        runId,
+        patch,
+        stamped.map((f) => f.record),
+      );
+      if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+    } catch (e) {
+      console.warn(`[fs] file run settle failed (${runId}):`, e);
     }
   }
 

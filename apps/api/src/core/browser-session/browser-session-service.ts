@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import type { PlatformEventEmitter, RunStore } from "@everdict/application-control";
+import { stampFacts } from "@everdict/application-control";
 import { NotFoundError, RateLimitError } from "@everdict/contracts";
+import { Run } from "@everdict/domain";
 import { type StorageState, captureStorageState } from "@everdict/topology";
-import type { BrowserSessionProvisioner } from "../../common/browser-session-provisioner.js";
+import type { BrowserSessionProvisioner, ProvisionedBrowser } from "../../common/browser-session-provisioner.js";
 import { type BrowserSessionEntry, type BrowserSessionView, toBrowserSessionView } from "./browser-session.js";
 
 export interface CreateBrowserSessionCommand {
@@ -40,6 +43,11 @@ export interface BrowserSessionServiceOptions {
   // undefined ⇒ unlimited (single-tenant / dev default). Exceeding either throws RateLimitError (429).
   maxPerTenant?: number; // max concurrent live sessions per workspace
   maxTotal?: number; // max concurrent live sessions across all workspaces on this control-plane node
+  // The run ledger (master-plan O6). A live browser is held-open isolated compute, so it is a session run like
+  // an agent world — same kind, same personal audience, same close reason. Absent, a browser exists only in
+  // THIS process's memory: a control plane that dies leaves the container running with nothing that knows.
+  runs?: RunStore;
+  events?: PlatformEventEmitter;
 }
 
 // Owns the lifecycle of interactive browser sessions: provision a dedicated browser, hold its reachable CDP base
@@ -54,6 +62,8 @@ export class BrowserSessionService {
   private readonly captureState: (cdpBase: string) => Promise<StorageState>;
   private readonly maxPerTenant?: number;
   private readonly maxTotal?: number;
+  private readonly runs?: RunStore;
+  private readonly events?: PlatformEventEmitter;
 
   constructor(
     private readonly provisioner: BrowserSessionProvisioner,
@@ -66,6 +76,61 @@ export class BrowserSessionService {
     this.captureState = opts.captureState ?? ((cdpBase) => captureStorageState(cdpBase));
     this.maxPerTenant = opts.maxPerTenant;
     this.maxTotal = opts.maxTotal;
+    this.runs = opts.runs;
+    this.events = opts.events;
+  }
+
+  // ─── The run ledger ─────────────────────────────────────────────────────────────────────────────────────
+  // Best-effort by contract: a ledger that is down must not stop someone from opening a browser. It says so in
+  // the log instead — the place an operator looks for a failing store.
+
+  private async openRun(cmd: CreateBrowserSessionCommand, id: string, browser: ProvisionedBrowser): Promise<void> {
+    if (!this.runs) return;
+    const record = Run.newBrowserSession({
+      id,
+      tenant: cmd.tenant,
+      image: browser.image ?? "browser",
+      ttlSec: Math.max(1, Math.round(this.ttlMs / 1000)),
+      createdBy: cmd.createdBy,
+      ...(cmd.runtime !== undefined ? { runtime: cmd.runtime } : {}),
+      ...(cmd.country !== undefined ? { country: cmd.country } : {}),
+      now: new Date(this.now()).toISOString(),
+    });
+    const stamped = stampFacts(cmd.tenant, Run.creationFacts(record), {
+      newId: this.newId,
+      now: () => new Date(this.now()).toISOString(),
+    });
+    try {
+      await this.runs.create(
+        record,
+        stamped.map((f) => f.record),
+      );
+      if (stamped.length > 0) void this.events?.pushPersisted?.(stamped);
+    } catch (e) {
+      console.warn(`[browser] session ledger write failed (${id}):`, e);
+    }
+  }
+
+  // The run id IS the session id, so a close needs nothing but the id it already has.
+  private async closeRun(id: string, reason: "closed" | "expired"): Promise<void> {
+    if (!this.runs) return;
+    try {
+      const record = await this.runs.get(id);
+      if (!record || record.status === "succeeded" || record.status === "failed") return;
+      const { patch, facts } = Run.from(record).closeSession(reason, new Date(this.now()).toISOString());
+      const stamped = stampFacts(record.tenant, facts, {
+        newId: this.newId,
+        now: () => new Date(this.now()).toISOString(),
+      });
+      await this.runs.update(
+        id,
+        patch,
+        stamped.map((f) => f.record),
+      );
+      if (stamped.length > 0) void this.events?.pushPersisted?.(stamped);
+    } catch (e) {
+      console.warn(`[browser] session ledger close failed (${id}):`, e);
+    }
   }
 
   // Bring up a dedicated interactive browser for the owner. Enforces a single active session per owner (the
@@ -100,6 +165,7 @@ export class BrowserSessionService {
       },
     };
     this.sessions.set(id, entry);
+    await this.openRun(cmd, id, browser);
     return toBrowserSessionView(entry.record);
   }
 
@@ -213,6 +279,11 @@ export class BrowserSessionService {
     const entry = this.sessions.get(id);
     if (!entry) return;
     this.sessions.delete(id);
+    // The BROWSER goes first. Releasing a scarce resource must not queue behind a bookkeeping write — a slow
+    // or failing run store would otherwise hold a live container open, which is the opposite of what the
+    // ledger exists to prevent.
     await entry.browser.dispose().catch(() => undefined); // best-effort teardown
+    // Then why it ended, as the ledger spells it: a deadline that ran out is `expired`, anything else is `closed`.
+    await this.closeRun(id, entry.record.expiresAt < this.now() ? "expired" : "closed");
   }
 }

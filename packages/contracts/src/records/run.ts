@@ -86,6 +86,10 @@ export const RunOutputsSchema = z.object({
   artifacts: z.array(z.string()).optional(), // artifact-store refs
   files: z.array(z.string()).optional(), // workspace-filesystem paths the run published
   summary: z.string().optional(),
+  // A `command` run's own verdict. A non-zero exit is a RESULT the row keeps (the standing rule for running a
+  // file), not a failed run — `failed` is reserved for "we could not run it at all". Kept here rather than in
+  // a new column because it is exactly what this kind of run left behind.
+  exitCode: z.number().int().optional(),
 });
 export type RunOutputs = z.infer<typeof RunOutputsSchema>;
 

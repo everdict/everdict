@@ -75,7 +75,7 @@ export class DockerBrowserProvisioner implements BrowserSessionProvisioner {
       await this.waitForCdp(cdpBase);
       // Ensure a page target exists (like the topology per-case browser) so the interactive session has one to drive.
       await this.fetchImpl(`${cdpBase}/json/new?about:blank`, { method: "PUT" }).catch(() => undefined);
-      return { cdpBase, dispose };
+      return { cdpBase, image: this.image, dispose };
     } catch (err) {
       await dispose();
       throw err instanceof UpstreamError

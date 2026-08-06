@@ -879,6 +879,10 @@ async function main(): Promise<void> {
   const browserSessionService = browserSessionsEnabled
     ? new BrowserSessionService(routingBrowserProvisioner, {
         resolveProxy: (ws, country) => proxyService.resolve(ws, country),
+        // O6: a live browser is a session RUN. Same ledger as an agent world, so a control plane that dies
+        // leaves a record of the container it was holding instead of only an orphan on someone's cluster.
+        runs: store,
+        ...(lateEvents ? { events: lateEvents } : {}),
         ...(browserMaxPerTenant !== undefined ? { maxPerTenant: browserMaxPerTenant } : {}),
         ...(browserMaxTotal !== undefined ? { maxTotal: browserMaxTotal } : {}),
       })
@@ -1162,7 +1166,10 @@ async function main(): Promise<void> {
     fsService: new FsService(workspaceFs, fsRevisionStore),
     // "Run" for a workspace file — a sandbox per run, disposed after it. Opt-in: absent unless the deployment
     // gave the control plane a container runtime (EVERDICT_FILE_EXECUTION_DRIVER=docker).
-    fileExecutionService: buildFileExecutionService(workspaceFs, runtimeCompute, compute),
+    fileExecutionService: buildFileExecutionService(workspaceFs, runtimeCompute, compute, {
+      runs: store,
+      ...(lateEvents ? { events: lateEvents } : {}),
+    }),
     capabilityService,
     // Instance policy surfaced to the web (GET /me → config): does a plain member — not only an admin — get to
     // publish a capability to the instance-wide `public` catalog? Operator opt-in for a community-style deployment.

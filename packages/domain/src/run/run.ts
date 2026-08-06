@@ -240,6 +240,93 @@ export class Run {
   // environment capability id@version, or the ad-hoc image@`adhoc`); `session.image` is the concrete
   // container image; caseId carries the image too (the console's "what is this" answer). Disposal is the
   // invariant: `session.expiresAt` lives ON THE ROW, so a reaper can tear down on time from the row alone.
+  // "Run this file" enters the same ledger (execution-model.md P0: the ledger says WHAT ran, WHY and WHERE).
+  // It is a `command` — one activation of an executable that is not an eval — and unlike a sandbox it is NOT
+  // personal: the script publishes files into the SHARED workspace tree, so who ran what, in which image, on
+  // whose cluster is workspace knowledge rather than one member's business.
+  //
+  // What it PRINTED stays off the row on purpose. stdout is the caller's answer, and a script that echoes a
+  // credential must not turn the run ledger into a second place that credential now lives. The row keeps the
+  // decisions (path, image, placement) and the verdict (exit code, published files) — the audit questions.
+  static newFileCommand(input: {
+    id: string;
+    tenant: string;
+    path: string; // WHAT ran, in the workspace filesystem
+    image: string; // the container it ran in (interpreter default, or the caller's environment image)
+    createdBy: string;
+    runtime?: string; // the workspace runtime it was placed on; unset = the deployment's own compute
+    now: string;
+  }): RunRecord {
+    return {
+      id: input.id,
+      tenant: input.tenant,
+      harness: { id: input.image, version: "adhoc" }, // the environment column, as an ad-hoc sandbox states it
+      caseId: input.path,
+      status: "running", // there is no queue in front of it — it starts the moment it is created
+      trigger: "file", // the activity view's legacy source axis (dual-stamped, like every other kind)
+      createdBy: input.createdBy,
+      kind: "command",
+      class: "interactive", // someone clicked Run and is watching the output pane
+      lifetime: "task",
+      // The CAUSE is a member either way: an agent's `run_file` acts AS the member it was delegated by. Whose
+      // loop this was rides on the facts instead (`causedBy: agent:<id>:<conv>`, stamped by the caller) — the
+      // same separation the sandbox lane keeps, and the reason an agent never wakes on its own file run.
+      origin: { cause: "member", actor: input.createdBy },
+      ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
+      placement: {
+        where: input.runtime !== undefined ? "runtime" : "driver",
+        ...(input.runtime !== undefined ? { target: input.runtime } : {}),
+        isolation: "container",
+      },
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+  }
+
+  // A live browser session is a held-open sandbox (master-plan decision O6, "browser sessions fold later" —
+  // this is later). Deliberately the SAME kind as an agent world: `sandbox` is the family of held-open
+  // isolated compute, and it is already PERSONAL (PERSONAL_RUN_KINDS), which is what a browser carrying
+  // someone's logged-in cookies has to be. Before this, a browser lived only in one process's memory: a
+  // control plane that died left the container running with nothing left that knew about it.
+  static newBrowserSession(input: {
+    id: string;
+    tenant: string;
+    image: string; // the browser image (or the host binary's name, when it is not a container)
+    ttlSec: number;
+    createdBy: string;
+    runtime?: string;
+    country?: string; // the egress proxy's country, when the session goes out through one
+    now: string;
+  }): RunRecord {
+    return {
+      id: input.id,
+      tenant: input.tenant,
+      harness: { id: "browser", version: "1" },
+      caseId: input.country ?? "direct", // WHERE it appears to browse from — the discriminating fact
+      status: "running",
+      trigger: "browser",
+      createdBy: input.createdBy,
+      kind: "sandbox",
+      class: "interactive",
+      lifetime: "session",
+      origin: { cause: "member", actor: input.createdBy },
+      ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
+      placement: {
+        where: input.runtime !== undefined ? "runtime" : "driver",
+        ...(input.runtime !== undefined ? { target: input.runtime } : {}),
+        isolation: "container",
+      },
+      attach: ["exec"],
+      session: {
+        image: input.image,
+        ttlSec: input.ttlSec,
+        expiresAt: new Date(new Date(input.now).getTime() + input.ttlSec * 1000).toISOString(),
+      },
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+  }
+
   static newSandboxSession(input: {
     id: string;
     tenant: string;
@@ -433,6 +520,26 @@ export class Run {
   // Terminal = the record's outcome is settled; nothing may rewrite it (first terminal write wins).
   isTerminal(): boolean {
     return this.record.status === "succeeded" || this.record.status === "failed";
+  }
+
+  // A command run settles on HAVING RUN — not on the command agreeing with us. A non-zero exit is the
+  // script's own answer (the standing rule everywhere this surface is described), so the row succeeds and
+  // KEEPS the code; `failed` stays reserved for "we could not run it at all" — no interpreter for the
+  // extension, a sandbox that never came up. Conflating the two would make every failing test script look
+  // like broken infrastructure.
+  settleCommand(outcome: { exitCode: number; files?: string[] }, now: string): RunTransition {
+    this.assertNotTerminal("settleCommand");
+    return {
+      patch: {
+        status: "succeeded",
+        outputs: {
+          exitCode: outcome.exitCode,
+          ...(outcome.files !== undefined && outcome.files.length > 0 ? { files: outcome.files } : {}),
+        },
+        updatedAt: now,
+      },
+      facts: terminalFact(this.record, "succeeded"),
+    };
   }
 
   // Boot recovery may adopt a still-alive backend job's result only while the run is not settled.

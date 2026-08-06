@@ -201,7 +201,8 @@ const docs = {
       "The interpreter follows the extension (.py/.sh/.js/.ts); `image` swaps the container it runs in, e.g. a " +
       "workspace environment image. A non-zero exit is a RESULT, not an error; `timedOut` means the in-sandbox " +
       "limit killed it (exit 124). No interpreter for the extension, or a non-text file, is 400. This is not an " +
-      "eval — no harness, no grading, no run record. `runtime` places the run on one of the workspace's " +
+      "eval — no harness, no grading — though it is recorded in the run ledger as a `command` run. " +
+      "`runtime` places the run on one of the workspace's " +
       "registered runtimes instead of the deployment's own compute (404 naming it when the workspace has no " +
       "such runtime). 404 when the deployment has no compute and no runtime is named. " +
       "Requires files:write (member+).",

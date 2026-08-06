@@ -1,4 +1,6 @@
+import type { RunStore } from "@everdict/application-control";
 import { AppError, RateLimitError } from "@everdict/contracts";
+import { InMemoryRunStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import type {
   BrowserSessionProvisioner,
@@ -26,12 +28,16 @@ class FakeProvisioner implements BrowserSessionProvisioner {
   }
 }
 
-function svc(provisioner: BrowserSessionProvisioner, opts: { now?: () => number; ttlMs?: number } = {}) {
+function svc(
+  provisioner: BrowserSessionProvisioner,
+  opts: { now?: () => number; ttlMs?: number; runs?: RunStore } = {},
+) {
   let i = 0;
   return new BrowserSessionService(provisioner, {
     newId: () => `bs-${i++}`,
     now: opts.now ?? (() => 1000),
     ttlMs: opts.ttlMs ?? 60_000,
+    ...(opts.runs ? { runs: opts.runs } : {}),
   });
 }
 
@@ -230,5 +236,43 @@ describe("BrowserSessionService", () => {
     // and an expired session frees its slot on the next create's sweep too
     clock += 6000;
     await expect(s.create({ tenant: "initech", createdBy: "carol" })).resolves.toMatchObject({ status: "active" });
+  });
+
+  // Master-plan O6: a live browser is held-open compute, so it belongs in the run ledger like an agent world.
+  // Before this it existed only in one process's memory — a control plane that died left the container running
+  // with nothing left that knew about it.
+  it("records the session in the run ledger, and closes that run when the browser goes away", async () => {
+    const runs = new InMemoryRunStore();
+    const p = new FakeProvisioner();
+    const s = svc(p, { runs });
+
+    const view = await s.create({ tenant: "acme", createdBy: "alice", country: "kr" });
+    const opened = await runs.get(view.id);
+    expect(opened).toMatchObject({
+      id: view.id, // the run IS the session — a later process needs no second id to close it
+      tenant: "acme",
+      kind: "sandbox", // the family of held-open isolated compute, and already PERSONAL
+      lifetime: "session",
+      status: "running",
+      createdBy: "alice",
+      caseId: "kr", // where it appears to browse from
+    });
+    expect(opened?.session?.expiresAt).toBeDefined(); // the hard deadline lives on the ROW, for a later reaper
+
+    await s.close(view.id, "alice");
+    expect(await runs.get(view.id)).toMatchObject({ status: "succeeded", session: { closedReason: "closed" } });
+  });
+
+  it("says a session that ran out of time EXPIRED, not that someone closed it", async () => {
+    const runs = new InMemoryRunStore();
+    let clock = 1000;
+    const s = svc(new FakeProvisioner(), { runs, now: () => clock, ttlMs: 60_000 });
+    const view = await s.create({ tenant: "acme", createdBy: "alice" });
+
+    clock += 60_001;
+    s.sweep();
+    await new Promise((r) => setTimeout(r, 0)); // the sweep tears down without awaiting — let it settle
+
+    expect(await runs.get(view.id)).toMatchObject({ status: "succeeded", session: { closedReason: "expired" } });
   });
 });
