@@ -87,3 +87,15 @@ export function mapClaudeStreamJson(obj: unknown, now: () => number): TraceEvent
   }
   return out;
 }
+
+// The conversation token on a Claude Code stream-json line: `session_id` rides both the boot line
+// ({type:"system", subtype:"init"}) and the terminal {type:"result"} line. A --resume'd run mints a NEW
+// session id, so callers keep the LAST id seen — that is the token that resumes the conversation next turn.
+export function claudeSessionId(obj: unknown): string | undefined {
+  const o = rec(obj);
+  if (!o) return undefined;
+  const type = str(o.type);
+  if (type !== "result" && !(type === "system" && str(o.subtype) === "init")) return undefined;
+  const id = str(o.session_id);
+  return id === "" ? undefined : id;
+}

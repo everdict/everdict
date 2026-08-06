@@ -34,6 +34,15 @@ keyless sandbox. The interface lives in `core` (a deliberate inversion of the si
 plugin runtime); impls live in `packages/harnesses`. The dispatch factory `makeHarness(id, version, spec?)`
 (`packages/job-runner/src/registry.ts`) picks the impl: `spec.kind==="command"` → `CommandHarness`, else id-branch.
 
+**Multi-turn conversation (opt-in capability):** `RunContext.conversation?: { resume?, onToken? }` (in-process
+only, like `signal`) + the `readonly conversational?: true` marker on the harness. A conversational harness
+honors `resume` (continue the previous turn) and reports THIS turn's token via `onToken` — possibly more than
+once, last-wins (a resumed claude run mints a NEW session id). The caller (the playground's conversation
+sessions) checks the MARKER before provisioning and keeps ONE stable workdir across turns — claude keys its
+session store off the cwd, so per-task cwd rebasing breaks resume structurally. A harness without the marker is
+refused conversation mode up front; never silently start fresh. `ClaudeCodeHarness` is the reference
+(`--resume <id>` + `claudeSessionId` capture from the stream-json init/result lines).
+
 ## Reference impls (`packages/harnesses/src/`, re-exported via `index.ts`)
 - `ClaudeCodeHarness` (`claude-code.ts`) — real Claude Code CLI: runs `claude -p <task> --output-format
   stream-json --verbose --dangerously-skip-permissions` in the sandbox, feeds each JSON line to `mapClaudeStreamJson`.

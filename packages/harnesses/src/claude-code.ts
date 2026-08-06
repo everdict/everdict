@@ -7,7 +7,7 @@ import {
   stamp,
 } from "@everdict/contracts";
 import { ChunkLineQueue } from "./line-stream.js";
-import { mapClaudeStreamJson } from "./stream-json.js";
+import { claudeSessionId, mapClaudeStreamJson } from "./stream-json.js";
 
 export interface ClaudeCodeOptions {
   install?: boolean; // If true, npm-install the CLI into compute (e.g. a sandbox job). LocalDriver uses claude from PATH.
@@ -19,6 +19,9 @@ export interface ClaudeCodeOptions {
 // and converts the output into normalized TraceEvents. claude uses the machine's subscription login.
 export class ClaudeCodeHarness implements EvaluableHarness {
   readonly id = "claude-code";
+  // run() honors RunContext.conversation: `claude --resume <session-id>` continues the previous turn in the
+  // SAME working directory (claude keys its session store off the cwd — the caller must keep it stable).
+  readonly conversational = true as const;
   constructor(
     readonly version: string,
     private readonly opts: ClaudeCodeOptions = {},
@@ -37,7 +40,13 @@ export class ClaudeCodeHarness implements EvaluableHarness {
     // run as root). Live-found in the playground's docker session; forced, not overridable.
     const env: Record<string, string> = { ...ctx.apiKeyEnv, IS_SANDBOX: "1" };
     const cwd = this.opts.workDir ?? "work";
-    const cmd = `claude -p ${shq(task)} --output-format stream-json --verbose --dangerously-skip-permissions`;
+    // Conversation continuity: --resume picks up the previous turn's session (token captured from the
+    // stream below via onToken). The resumed run mints a NEW session id — onToken keeps the last one.
+    const resume = ctx.conversation?.resume;
+    const cmd = `claude -p ${shq(task)}${
+      resume !== undefined ? ` --resume ${shq(resume)}` : ""
+    } --output-format stream-json --verbose --dangerously-skip-permissions`;
+    const onToken = ctx.conversation?.onToken;
 
     // Stamp real wall-clock event times so the trace aligns to the recording timeline and the latency
     // grader reflects real elapsed time — a synthetic counter made every Claude Code run's latency ≈ the
@@ -59,7 +68,7 @@ export class ClaudeCodeHarness implements EvaluableHarness {
         () => queue.end(),
         () => queue.end(), // an infra fault still unblocks the line loop; the await below propagates it
       );
-      for await (const line of queue) yield* this.mapLine(line, now);
+      for await (const line of queue) yield* this.mapLine(line, now, onToken);
       const res = await settled;
       // The streaming path surfaces a hard CLI failure as a trace-visible error (the buffered eval path
       // parses whatever stdout carries and leaves failure classification to the case pipeline).
@@ -74,10 +83,10 @@ export class ClaudeCodeHarness implements EvaluableHarness {
     }
 
     const res = await compute.exec(cmd, { cwd, env, timeoutSec: ctx.timeoutSec });
-    for (const line of res.stdout.split("\n")) yield* this.mapLine(line, now);
+    for (const line of res.stdout.split("\n")) yield* this.mapLine(line, now, onToken);
   }
 
-  private *mapLine(line: string, now: () => number): Iterable<TraceEvent> {
+  private *mapLine(line: string, now: () => number, onToken?: (token: string) => void): Iterable<TraceEvent> {
     const trimmed = line.trim();
     if (!trimmed) return;
     let obj: unknown;
@@ -85,6 +94,10 @@ export class ClaudeCodeHarness implements EvaluableHarness {
       obj = JSON.parse(trimmed);
     } catch {
       return;
+    }
+    if (onToken) {
+      const sid = claudeSessionId(obj);
+      if (sid !== undefined) onToken(sid);
     }
     yield* mapClaudeStreamJson(obj, now);
   }

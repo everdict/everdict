@@ -144,6 +144,54 @@ describe("ClaudeCodeHarness", () => {
     expect(err?.kind === "error" && err.message).toContain("boom");
   });
 
+  it("runs one-shot with no --resume when the context carries no conversation (regression)", async () => {
+    const compute = new MockCompute(STREAM);
+    const ctx: RunContext = { apiKeyEnv: {}, timeoutSec: 60 };
+    for await (const _ev of new ClaudeCodeHarness("cli").run(compute, "do it", ctx)) {
+      // drain
+    }
+    expect(compute.lastCmd).not.toContain("--resume");
+  });
+
+  it("resumes the previous turn's session and reports this turn's NEW session id (last-wins)", async () => {
+    // Given a stream whose init line and result line carry different session ids — a resumed claude run
+    // mints a new id, so the token that continues the conversation is the LAST one reported.
+    const conversationStream = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "sess-new-1" }),
+      JSON.stringify({
+        type: "assistant",
+        message: { model: "m", content: [{ type: "text", text: "sure" }], usage: {} },
+      }),
+      JSON.stringify({ type: "result", total_cost_usd: 0.01, session_id: "sess-new-2" }),
+    ].join("\n");
+    const compute = new MockCompute(conversationStream);
+    const tokens: string[] = [];
+    const ctx: RunContext = {
+      apiKeyEnv: {},
+      timeoutSec: 60,
+      conversation: { resume: "sess-old", onToken: (t) => tokens.push(t) },
+    };
+
+    for await (const _ev of new ClaudeCodeHarness("cli").run(compute, "continue", ctx)) {
+      // drain
+    }
+
+    expect(compute.lastCmd).toContain("--resume 'sess-old'");
+    expect(tokens).toEqual(["sess-new-1", "sess-new-2"]); // last-wins is the caller's contract
+  });
+
+  it("reports the session token on the streaming path too (the playground's live lane)", async () => {
+    const lines = [JSON.stringify({ type: "system", subtype: "init", session_id: "sess-live" }), ...STREAM.split("\n")];
+    const streaming = new StreamingMockCompute(lines.map((l) => `${l}\n`));
+    const tokens: string[] = [];
+    const ctx: RunContext = { apiKeyEnv: {}, timeoutSec: 60, conversation: { onToken: (t) => tokens.push(t) } };
+    for await (const _ev of new ClaudeCodeHarness("cli").run(streaming, "start", ctx)) {
+      // drain
+    }
+    expect(streaming.lastCmd).not.toContain("--resume"); // first turn — nothing to resume yet
+    expect(tokens).toEqual(["sess-live"]);
+  });
+
   it("stamps wall-clock event times from the injected clock, not a synthetic 0-based counter", async () => {
     // Given a stream and a deterministic wall clock that advances 1s per event
     const compute = new MockCompute(STREAM);

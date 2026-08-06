@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapClaudeStreamJson } from "./stream-json.js";
+import { claudeSessionId, mapClaudeStreamJson } from "./stream-json.js";
 
 describe("mapClaudeStreamJson — stream-json → normalized TraceEvent", () => {
   const clock = () => {
@@ -81,5 +81,20 @@ describe("mapClaudeStreamJson — stream-json → normalized TraceEvent", () => 
       () => 1_700_000_000_000,
     );
     expect(events[0]?.spanId).toBeUndefined();
+  });
+});
+
+describe("claudeSessionId — the conversation token on a stream-json line", () => {
+  it("reads session_id from the init line and the result line", () => {
+    expect(claudeSessionId({ type: "system", subtype: "init", session_id: "s-1" })).toBe("s-1");
+    expect(claudeSessionId({ type: "result", total_cost_usd: 0, session_id: "s-2" })).toBe("s-2");
+  });
+
+  it("ignores every other shape — assistant lines, other system subtypes, junk", () => {
+    expect(claudeSessionId({ type: "assistant", session_id: "s-3" })).toBeUndefined();
+    expect(claudeSessionId({ type: "system", subtype: "status", session_id: "s-4" })).toBeUndefined();
+    expect(claudeSessionId({ type: "system", subtype: "init" })).toBeUndefined(); // no id → no token
+    expect(claudeSessionId("not an object")).toBeUndefined();
+    expect(claudeSessionId(null)).toBeUndefined();
   });
 });
