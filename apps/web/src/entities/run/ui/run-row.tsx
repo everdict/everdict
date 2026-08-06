@@ -3,11 +3,13 @@
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { fmtTimeAgo, fmtTokens, fmtUsd } from '@/shared/lib/format'
+import { displayImageRef } from '@/shared/lib/image-ref'
 import { Badge } from '@/shared/ui/badge'
 import { Link } from '@/shared/ui/link'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { TD, TR } from '@/shared/ui/table'
 
+import { RUN_KIND_META, runKindOf } from '../lib/kind'
 import type { Run, Usage } from '../model/schema'
 
 type Translate = ReturnType<typeof useTranslations<'runsTable'>>
@@ -58,6 +60,12 @@ export function RunRow({
   const locale = useLocale()
   const timeZone = useTimeZone()
   const c = costLabel(run.usage)
+  const kind = runKindOf(run)
+  const KindIcon = RUN_KIND_META[kind].icon
+  const kindLabel = t(RUN_KIND_META[kind].labelKey)
+  // 애드혹 샌드박스의 실행 대상은 이미지 ref 그 자체("adhoc" 버전 표식) — 컨벤션대로 displayImageRef 로
+  // 읽고 원문은 title 로. 그 외 패밀리는 도메인 팩토리가 채운 스펙 참조(id@version)를 그대로 읽는다.
+  const adhocImage = kind === 'sandbox' && run.harness.version === 'adhoc'
   return (
     <TR className="group">
       <TD className={isChild ? 'pl-7' : undefined}>
@@ -69,18 +77,36 @@ export function RunRow({
         </Link>
       </TD>
       <TD>
-        <span className="font-[510]">{run.harness.id}</span>
-        <span className="text-muted-foreground">@{run.harness.version}</span>
+        <span className="inline-flex items-center gap-1.5">
+          {/* 실행 패밀리 아이콘 — 자식 행은 그룹 헤더(스코어카드/대화)가 이미 종류를 말하므로 생략. */}
+          {!isChild && (
+            <span title={kindLabel} className="flex shrink-0">
+              <KindIcon className="size-3.5 text-muted-foreground" aria-label={kindLabel} />
+            </span>
+          )}
+          {adhocImage ? (
+            <span className="font-[510]" title={run.harness.id}>
+              {displayImageRef(run.harness.id)}
+            </span>
+          ) : (
+            <span>
+              <span className="font-[510]">{run.harness.id}</span>
+              <span className="text-muted-foreground">@{run.harness.version}</span>
+            </span>
+          )}
+        </span>
       </TD>
       <TD>
         {isChild ? (
           <span className="font-mono text-[12px] text-muted-foreground">
-            {childKind === 'turn' ? t('turnCell', { cause: run.caseId }) : t('caseCell', { id: run.caseId })}
+            {childKind === 'turn'
+              ? t('turnCell', { cause: run.caseId })
+              : t('caseCell', { id: run.caseId })}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5">
-            {/* Executable family (universal-run P0) — badge only the non-eval kinds; eval rows stay as before. */}
-            {run.kind && run.kind !== 'eval' && <Badge tone="info">{run.kind}</Badge>}
+            {/* Executable family (universal-run P0) — badge only the non-eval kinds; eval rows stay quiet. */}
+            {kind !== 'eval' && <Badge tone="info">{kindLabel}</Badge>}
             <Badge tone="outline">{sourceLabel(t, run.trigger)}</Badge>
           </span>
         )}

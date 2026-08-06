@@ -132,7 +132,7 @@ export function ActivityConsole({ workspace }: { workspace: string }) {
         <THead>
           <tr>
             <TH className="w-[120px]">{tr('colRun')}</TH>
-            <TH>{tr('colHarness')}</TH>
+            <TH>{tr('colExecutable')}</TH>
             <TH>{tr('colSource')}</TH>
             <TH>{tr('colStatus')}</TH>
             <TH className="text-right">{tr('colCost')}</TH>

@@ -11,7 +11,9 @@ import { asSingleSegment, TrajectoryView, type TrajectorySegment } from '@/featu
 import { CommentsSection } from '@/features/discuss'
 import { membersSchema } from '@/entities/member'
 import {
+  RUN_KIND_META,
   runCaseSpecSchema,
+  runKindOf,
   RunOutcome,
   runSchema,
   trajectoryResponseSchema,
@@ -273,7 +275,9 @@ export default async function RunDetailPage({
               />
               {/* 실행 패밀리 — eval 이 아닌 run 만 배지를 단다(활동 콘솔의 행과 같은 규칙). 이게 없으면
                   에이전트 턴과 샌드박스 세션이 하네스 eval 처럼 읽힌다: 컬럼은 같고 의미가 다르다. */}
-              {run.kind && run.kind !== 'eval' && <Badge tone="info">{run.kind}</Badge>}
+              {runKindOf(run) !== 'eval' && (
+                <Badge tone="info">{tTable(RUN_KIND_META[runKindOf(run)].labelKey)}</Badge>
+              )}
               {/* 재생 가능한 run이면 "리플레이" 배지 → 아래 #replay 섹션으로 점프(발견성). agent trace만 있어도
                   재생되므로(하네스 무관) recordingRef 없이 trace만으로도 노출한다. */}
               {hasReplay && (
