@@ -30,6 +30,8 @@ import {
   type Backend,
   type BackendCapacity,
   type CaseInspectable,
+  type CaseRuntimeSample,
+  type CaseSampleable,
   type DispatchOptions,
   type Inspectable,
   type LogStream,
@@ -90,6 +92,9 @@ export interface K8sApi {
   // Namespace events attached to one object (a pod) — FailedScheduling / image-pull failures / kills, the WHY
   // feed behind a stuck placement. undefined when the query itself fails (best-effort).
   objectEvents(name: string, ns: string): Promise<Array<{ reason?: string; message: string; at?: string }> | undefined>;
+  // The job pod's live resource usage from the metrics API (`kubectl top pod`) — the replay runtime plane's
+  // producer read (CaseSampleable). undefined when metrics-server is absent / the pod is gone (best-effort).
+  podTop(name: string, ns: string): Promise<{ cpuMillicores?: number; memoryMb?: number } | undefined>;
   countActiveJobs(): Promise<number | undefined>; // capacity probe (in-flight app=everdict jobs across all namespaces)
   serverVersion(): Promise<string>; // connection test — API server /version (gitVersion). Throws on reachability/auth failure.
   // --- Read-only inspection (runtime detail screen). Each returns undefined when the query itself fails (best-effort). ---
@@ -230,6 +235,22 @@ export function kubectlApi(
       // The job's pod (job/<name> selects it) — one-shot, non-interactive (no -it). sh -c carries the command verbatim.
       const res = await run(bin, [...ctx, "-n", ns, "exec", `job/${name}`, "--", "sh", "-c", command]);
       return { stdout: res.stdout, stderr: res.stderr, exitCode: res.code };
+    },
+    async podTop(name, ns) {
+      // The metrics API's live usage for the job's pod ("<pod> <cpu>m <mem>Mi"). code!=0 covers both "no
+      // metrics-server" and "pod gone" — either way there is no sample, never an error.
+      const res = await run(bin, [...ctx, "-n", ns, "top", "pod", "-l", `job-name=${name}`, "--no-headers"]);
+      if (res.code !== 0) return undefined;
+      const line = res.stdout.split("\n").find((l) => l.trim() !== "");
+      if (!line) return undefined;
+      const [, cpuRaw, memRaw] = line.trim().split(/\s+/);
+      const cpu = cpuRaw?.match(/^(\d+)m$/)?.[1];
+      const mem = memRaw?.match(/^(\d+)Mi$/)?.[1];
+      if (cpu === undefined && mem === undefined) return undefined;
+      return {
+        ...(cpu !== undefined ? { cpuMillicores: Number(cpu) } : {}),
+        ...(mem !== undefined ? { memoryMb: Number(mem) } : {}),
+      };
     },
     async podFailureReason(name, ns) {
       const res = await run(bin, [
@@ -914,7 +935,7 @@ export async function materializeKubeconfig(yaml: string): Promise<{ path: strin
 // Launch the job-runner as a K8s Job, poll for completion, then parse the CaseResult from the sentinel in the pod log.
 // Isolation is namespace (per-tenant) + runtimeClassName (gVisor/kata). The K8s counterpart of NomadBackend.
 export class K8sBackend
-  implements Backend, Recoverable, Observable, Probeable, Inspectable, CaseInspectable, Reclaimable
+  implements Backend, Recoverable, Observable, Probeable, Inspectable, CaseInspectable, CaseSampleable, Reclaimable
 {
   // A long-lived api from an injected api (test) or non-kubeconfig auth (context/server/token).
   // With kubeconfig auth, build a fresh api from a temp kubeconfig per dispatch so the credential isn't left on disk for long (withApi).
@@ -1002,6 +1023,30 @@ export class K8sBackend
   // (Interactive execStream — observability ⑥ — is Nomad-only for now: K8s reaches the pod through kubectl with a
   // per-dispatch materialized kubeconfig, so a long-lived interactive stream needs the temp file kept open for the
   // stream's lifetime — a follow-up. One-shot exec above already works. The WS route degrades gracefully.)
+
+  // One resource sample of the case's live pod (CaseSampleable — the replay runtime plane's producer ③):
+  // `kubectl top pod` via the metrics API. cpuPct reads millicores as percent-of-one-core (1000m = 100%), the
+  // same "share of one CPU" a container's stats read. undefined = no live job / no metrics-server — a cluster
+  // without metrics simply produces no runtime lane, never an error. Best-effort.
+  async sampleCase(caseId: string): Promise<CaseRuntimeSample | undefined> {
+    try {
+      return await this.withApi(async (api) => {
+        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+        const newest = (jobs ?? []).sort((a, b) =>
+          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
+        )[0];
+        if (!newest) return undefined;
+        const top = await api.podTop(newest.name, newest.namespace);
+        if (!top || (top.cpuMillicores === undefined && top.memoryMb === undefined)) return undefined;
+        return {
+          ...(top.cpuMillicores !== undefined ? { cpuPct: top.cpuMillicores / 10 } : {}),
+          ...(top.memoryMb !== undefined ? { memBytes: top.memoryMb * 1024 * 1024 } : {}),
+        };
+      });
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
+    }
+  }
 
   // The case's newest job pod's current raw output — the shared fetch behind logs() and caseEvents(). A pending
   // pod reads as undefined and the caller polls again.

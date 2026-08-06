@@ -31,6 +31,8 @@ import {
   type Backend,
   type BackendCapacity,
   type CaseInspectable,
+  type CaseRuntimeSample,
+  type CaseSampleable,
   type DispatchOptions,
   type ExecStreamHandle,
   type Inspectable,
@@ -576,6 +578,7 @@ export class NomadBackend
     Probeable,
     Inspectable,
     CaseInspectable,
+    CaseSampleable,
     Reclaimable
 {
   // The Driver contract's identity (the session mode) — "which compute is this". Backend placement is named
@@ -1068,6 +1071,44 @@ export class NomadBackend
       return text === undefined ? undefined : extractLiveEvents(text);
     } catch {
       return undefined;
+    }
+  }
+
+  // One resource sample of the case's live alloc (CaseSampleable — the replay runtime plane's producer ③): the
+  // client stats API's CPU percent + resident memory for the case's current alloc. The caller stamps `t` and
+  // streams the sample onto the recording's `runtime` lane. undefined = no live alloc / stats unreadable
+  // (a client whose stats API is unreachable must read as "no sample", never fail a run). Best-effort.
+  async sampleCase(caseId: string): Promise<CaseRuntimeSample | undefined> {
+    try {
+      const prefix = `everdict-${caseId}-`;
+      const res = await this.http.request("GET", `/v1/jobs?prefix=${encodeURIComponent(prefix)}&namespace=*`);
+      if (res.status >= 300) return undefined;
+      const jobs = JSON.parse(res.text) as Array<{ ID?: string; Namespace?: string; SubmitTime?: number }>;
+      const newest = jobs
+        .filter((j) => j.ID?.startsWith(prefix))
+        .sort((a, b) => (b.SubmitTime ?? 0) - (a.SubmitTime ?? 0))[0];
+      if (!newest?.ID) return undefined;
+      const ns = newest.Namespace && newest.Namespace !== "default" ? newest.Namespace : undefined;
+      const nsq = ns ? `?namespace=${encodeURIComponent(ns)}` : "";
+      const allocsRes = await this.http.request("GET", `/v1/job/${encodeURIComponent(newest.ID)}/allocations${nsq}`);
+      if (allocsRes.status >= 300) return undefined;
+      const alloc = currentAlloc(
+        JSON.parse(allocsRes.text) as Array<{ ID: string; CreateIndex?: number; DesiredStatus?: string }>,
+      );
+      if (!alloc?.ID) return undefined;
+      const stats = await this.http.request("GET", `/v1/client/allocation/${alloc.ID}/stats${nsq}`);
+      if (stats.status >= 300) return undefined;
+      const usage = (
+        JSON.parse(stats.text) as {
+          ResourceUsage?: { MemoryStats?: { RSS?: number; Usage?: number }; CpuStats?: { Percent?: number } };
+        }
+      ).ResourceUsage;
+      const cpuPct = usage?.CpuStats?.Percent;
+      const memBytes = usage?.MemoryStats?.RSS ?? usage?.MemoryStats?.Usage;
+      if (cpuPct === undefined && memBytes === undefined) return undefined;
+      return { ...(cpuPct !== undefined ? { cpuPct } : {}), ...(memBytes !== undefined ? { memBytes } : {}) };
+    } catch {
+      return undefined; // best-effort — observability must never fail a run
     }
   }
 

@@ -85,6 +85,7 @@ function mockApi(
     resources?: Record<string, Record<string, unknown>>;
     patchFails?: string;
     purged?: number;
+    podTop?: { cpuMillicores?: number; memoryMb?: number }; // metrics-API usage the sampleCase read returns
   } = {},
 ) {
   const applied: JobManifest[] = [];
@@ -109,6 +110,9 @@ function mockApi(
     },
     async podFailureReason() {
       return opts.failureReason;
+    },
+    async podTop() {
+      return opts.podTop;
     },
     async podsForJob() {
       return opts.jobPods;
@@ -992,5 +996,27 @@ describe("k8s quantity parsers (pure)", () => {
     ];
     expect(usageByNode(rows)).toEqual({ n1: { cpuUsed: 1750, memoryMbUsed: 1792 }, n2: {} });
     expect(usageByNode([])).toEqual({});
+  });
+});
+
+describe("K8sBackend.sampleCase (replay runtime plane producer)", () => {
+  it("reads the case pod's metrics-API usage, mapping millicores to percent-of-one-core", async () => {
+    const { api } = mockApi({
+      labeledJobs: [{ selector: "everdict.dev/case=c1", name: "everdict-c1-x", namespace: "ns" }],
+      podTop: { cpuMillicores: 250, memoryMb: 64 },
+    });
+    const backend = new K8sBackend({ image: "i", api });
+    expect(await backend.sampleCase("c1")).toEqual({ cpuPct: 25, memBytes: 64 * 1024 * 1024 });
+  });
+
+  it("reads as no sample when there is no job or the metrics API is absent — never throws", async () => {
+    const noJob = new K8sBackend({ image: "i", api: mockApi().api });
+    expect(await noJob.sampleCase("c1")).toBeUndefined();
+
+    const noMetrics = new K8sBackend({
+      image: "i",
+      api: mockApi({ labeledJobs: [{ selector: "everdict.dev/case=c1", name: "everdict-c1-x", namespace: "ns" }] }).api,
+    });
+    expect(await noMetrics.sampleCase("c1")).toBeUndefined();
   });
 });

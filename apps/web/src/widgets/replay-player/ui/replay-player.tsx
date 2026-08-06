@@ -55,11 +55,15 @@ function CpuSparkline({ samples }: { samples: { cpuPct?: number }[] }) {
   )
 }
 
-// 리플레이 플레이어 — 종료된 run을 하나의 벽시계(t0) 타임라인에서 재생한다. **agent trace가 척추**다:
+// 리플레이 플레이어 — run을 하나의 벽시계(t0) 타임라인에서 재생한다. **agent trace가 척추**다:
 // 어떤 하네스(Claude Code·Codex·browser-use·직접 만든 확장)든 trace는 항상 있으므로, 프레임이 없어도
 // trace 이벤트 + 로그를 시점 동기로 스크럽할 수 있다(= 코딩 에이전트 replay). 환경이 프레임을 남긴 run
 // (browser/os-use)은 같은 스크러버가 그 시점의 화면까지 오버레이한다. 프레임·트레이스·로그는 모두 같은
 // 클럭(Date.now epoch, D1)을 공유하므로 하나의 재생 헤드로 정렬된다. docs/architecture/replay.md — Principle 1.
+//
+// **라이브 = 아직 안 끝난 리플레이.** 실행 중이면 녹화 tail(peek)과 라이브 궤적을 폴링해 같은 타임라인에
+// 얹는다: 재생 헤드가 끝에 고정(LIVE)되어 새 순간을 따라가고, 뒤로 스크럽하는 순간 고정이 풀린다. run이
+// 종료되면 폴링을 멈추고 그 자리가 그대로 리플레이가 된다 — 뷰 두 개가 아니라 상태 두 개다.
 export function ReplayPlayer({
   runId,
   initialStatus,
@@ -71,28 +75,60 @@ export function ReplayPlayer({
 }) {
   const t = useTranslations('replay')
   const [rec, setRec] = useState<Recording | null>(null)
+  const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([])
+  const [status, setStatus] = useState(initialStatus)
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [pinnedLive, setPinnedLive] = useState(true)
+  const running = status !== undefined && !TERMINAL.has(status)
 
   useEffect(() => {
-    // Only a settled run has a sealed recording; the agent trace (props) replays regardless.
-    if (!initialStatus || !TERMINAL.has(initialStatus)) return
     let cancelled = false
-    void (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const tick = async () => {
+      let nextStatus: string | undefined
       try {
         const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/recording`)
-        if (!res.ok) return
-        const parsed = recordingResponseSchema.safeParse(await res.json())
-        if (!cancelled && parsed.success && parsed.data.found) setRec(parsed.data.recording)
+        if (res.ok) {
+          const parsed = recordingResponseSchema.safeParse(await res.json())
+          if (cancelled) return
+          if (parsed.success) {
+            if (parsed.data.found) setRec(parsed.data.recording)
+            nextStatus = parsed.data.status
+          }
+        }
       } catch {
         // no recording — trace-only replay still works
       }
-    })()
+      // 실행 중엔 라이브 궤적도 같은 박자로 — 봉인 전의 agent lane. 종료 후엔 서버 렌더가 sealed trace를 넘긴다.
+      const wasRunning = initialStatus !== undefined && !TERMINAL.has(nextStatus ?? initialStatus)
+      if (wasRunning) {
+        try {
+          const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/trajectory/live`)
+          if (res.ok) {
+            const body = (await res.json()) as { status?: string; found: boolean; events?: TraceEvent[] }
+            if (cancelled) return
+            if (body.found && body.events) setLiveTrace(body.events)
+            nextStatus = body.status ?? nextStatus
+          }
+        } catch {
+          // transient — keep polling
+        }
+      }
+      if (cancelled) return
+      if (nextStatus) setStatus(nextStatus)
+      const stillRunning = initialStatus !== undefined && !TERMINAL.has(nextStatus ?? initialStatus)
+      if (stillRunning) timer = setTimeout(tick, 3000) // run 종료 = 폴링 종료(마지막 상태가 곧 리플레이)
+    }
+    void tick()
     return () => {
       cancelled = true
+      if (timer) clearTimeout(timer)
     }
   }, [runId, initialStatus])
 
+  // 봉인된 trace(서버 렌더)가 있으면 그것이 정본; 없으면(=실행 중) 라이브 궤적이 agent lane을 채운다.
+  const events = trace.length > 0 ? trace : liveTrace
   const frames = rec?.tracks.frames ?? []
   const logs = rec?.tracks.logs ?? []
   // ② environment plane (browser CDP) — how the world changed underneath the agent: the request track, console
@@ -113,7 +149,7 @@ export function ReplayPlayer({
   // cumulatively up to the playhead but only SEED steps when nothing else does, so a run made only of them still scrubs.
   const stepSet = new Set<number>()
   for (const f of frames) stepSet.add(f.t)
-  for (const e of trace) stepSet.add(e.t)
+  for (const e of events) stepSet.add(e.t)
   for (const d of repoDeltas) stepSet.add(d.t)
   for (const n of nav) stepSet.add(n.t)
   for (const s of runtime) stepSet.add(s.t)
@@ -123,6 +159,13 @@ export function ReplayPlayer({
     for (const l of logs) stepSet.add(l.t)
   }
   const steps = Array.from(stepSet).sort((a, b) => a - b)
+
+  // LIVE 고정 — 실행 중이고 고정돼 있으면 새 순간이 도착할 때마다 재생 헤드를 끝으로 당긴다.
+  // 스크럽/재생을 만지는 순간 고정이 풀리고, LIVE 칩으로 다시 고정한다.
+  const stepCount = steps.length
+  useEffect(() => {
+    if (running && pinnedLive && stepCount > 0) setIndex(stepCount - 1)
+  }, [running, pinnedLive, stepCount])
 
   // Auto-advance one moment at a time; stop at the end.
   useEffect(() => {
@@ -162,7 +205,7 @@ export function ReplayPlayer({
       break
     }
   }
-  const shownTrace = trace.filter((e) => e.t <= playheadT)
+  const shownTrace = events.filter((e) => e.t <= playheadT)
   const shownLogs = logs.filter((l) => l.t <= playheadT)
   // Environment lanes up to the playhead. Network/console are dense — cap the rendered tail (latest N) so a chatty page
   // doesn't blow up the DOM; the count reflects the full total so nothing is silently hidden.
@@ -213,7 +256,15 @@ export function ReplayPlayer({
 
         {/* Scrubber over the wall clock (frame times ∪ trace times). */}
         <div className="flex items-center gap-3">
-          <Button type="button" variant="secondary" size="sm" onClick={() => setPlaying((p) => !p)}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setPinnedLive(false)
+              setPlaying((p) => !p)
+            }}
+          >
             {playing ? t('pause') : t('play')}
           </Button>
           <input
@@ -223,6 +274,7 @@ export function ReplayPlayer({
             value={clamped}
             onChange={(e) => {
               setPlaying(false)
+              setPinnedLive(false) // 뒤로 스크럽 = 라이브 고정 해제 (다시 붙으려면 LIVE 칩)
               setIndex(Number(e.target.value))
             }}
             className="h-1 flex-1 cursor-pointer accent-primary"
@@ -231,10 +283,35 @@ export function ReplayPlayer({
           <span className="shrink-0 text-[11.5px] tabular-nums text-faint">
             {t('stepOf', { i: clamped + 1, n: steps.length })} · {elapsedSec.toFixed(1)}s
           </span>
+          {/* 실행 중일 때만 — 끝 고정이면 점이 맥박 치고, 과거를 보는 중이면 눌러서 라이브 엣지로 복귀. */}
+          {running && (
+            <button
+              type="button"
+              onClick={() => {
+                setPlaying(false)
+                setPinnedLive(true)
+                setIndex(steps.length - 1)
+              }}
+              className={cn(
+                'flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-[600] tracking-wide',
+                pinnedLive
+                  ? 'border-red-500/40 text-red-500'
+                  : 'border-border text-faint hover:text-foreground'
+              )}
+            >
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  pinnedLive ? 'animate-pulse bg-red-500' : 'bg-muted-foreground/50'
+                )}
+              />
+              {t('live')}
+            </button>
+          )}
         </div>
 
         {/* Agent plane — the universal spine: the trace revealed up to the playhead, current event highlighted. */}
-        {trace.length > 0 && (
+        {events.length > 0 && (
           <div className="space-y-1.5">
             <div className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
               {t('agentPlane')}

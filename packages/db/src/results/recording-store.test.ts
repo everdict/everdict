@@ -54,6 +54,27 @@ describe("InMemoryRecordingStore", () => {
     expect((await store.get("run-2"))?.effectiveFidelity).toBe("final");
   });
 
+  it("peek serves the live tail of an unsealed recording with provisional metadata", async () => {
+    // Given a still-running run whose frames/logs are streaming in (nothing sealed yet)
+    const store = new InMemoryRecordingStore();
+    await store.append("run-live", { track: "frames", entry: { t: 3000, ref: "memory://f1" } });
+    await store.append("run-live", { track: "logs", entry: { t: 2500, stream: "stdout", text: "working" } });
+
+    // When the player peeks mid-run
+    const rec = await store.peek("run-live");
+
+    // Then it can scrub what exists so far — t0/fidelity derived, envKind provisional until seal names it
+    expect(rec?.t0).toBe(2500);
+    expect(rec?.envKind).toBe("live");
+    expect(rec?.effectiveFidelity).toBe("frames");
+    expect(rec?.tracks.frames?.[0]?.ref).toBe("memory://f1");
+    // And a run nothing was recorded for peeks as undefined
+    expect(await store.peek("run-none")).toBeUndefined();
+    // And once sealed, peek answers exactly what get answers
+    await store.seal("run-live", { envKind: "browser" });
+    expect(await store.peek("run-live")).toEqual(await store.get("run-live"));
+  });
+
   it("keeps recordings separate per runId", async () => {
     // Given entries for two runs
     const store = new InMemoryRecordingStore();

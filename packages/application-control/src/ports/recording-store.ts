@@ -15,4 +15,8 @@ export interface RecordingStore {
   append(runId: string, item: TrackEntry): Promise<void>;
   seal(runId: string, meta: RecordingSeal): Promise<RecordingRef | undefined>;
   get(runId: string): Promise<CaseRecording | undefined>;
+  // The recording as it stands RIGHT NOW, sealed or not — the live tail behind "replay while it runs"
+  // (live = a replay that has not finished; the player scrubs back mid-run and pins to the live edge).
+  // Unsealed reads derive t0/effectiveFidelity provisionally and report envKind "live" until seal names it.
+  peek(runId: string): Promise<CaseRecording | undefined>;
 }

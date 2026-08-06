@@ -88,4 +88,43 @@ describe("PgRecordingStore", () => {
     const store = new PgRecordingStore(client);
     expect(await store.get("evd-run-x")).toBeUndefined();
   });
+
+  it("peek serves the live tail of an unsealed row with derived provisional metadata", async () => {
+    // Given an unsealed row still accumulating (no t0/env_kind frozen yet)
+    const row = {
+      tracks: { logs: [{ t: 2000, stream: "stdout", text: "x" }], frames: [{ t: 3000, ref: "s3://f" }] },
+      t0: null,
+      env_kind: null,
+      effective_fidelity: null,
+      dispatch: null,
+      sealed: false,
+    };
+    const { client, calls } = fakeClient(() => ({ rows: [row] }));
+    const store = new PgRecordingStore(client);
+
+    // When peeked mid-run
+    const rec = await store.peek("evd-run-1");
+
+    // Then the read carries no sealed filter and the metadata is derived from the tracks
+    expect(calls[0]?.text).not.toContain("sealed = true");
+    expect(rec?.t0).toBe(2000);
+    expect(rec?.envKind).toBe("live");
+    expect(rec?.effectiveFidelity).toBe("frames");
+  });
+
+  it("peek keeps the frozen metadata of a sealed row, and answers undefined for an empty/missing one", async () => {
+    const sealedRow = {
+      tracks: { logs: [{ t: 5, stream: "stdout", text: "done" }] },
+      t0: "5",
+      env_kind: "repo",
+      effective_fidelity: "final",
+      dispatch: null,
+      sealed: true,
+    };
+    const { client } = fakeClient(() => ({ rows: [sealedRow] }));
+    expect((await new PgRecordingStore(client).peek("evd-run-1"))?.envKind).toBe("repo");
+
+    const { client: empty } = fakeClient(() => ({ rows: [] }));
+    expect(await new PgRecordingStore(empty).peek("evd-run-x")).toBeUndefined();
+  });
 });

@@ -1,4 +1,11 @@
-import { type CaseJob, type CaseResult, type Driver, InternalError, type TraceEvent } from "@everdict/contracts";
+import {
+  type CaseJob,
+  type CaseResult,
+  type Driver,
+  InternalError,
+  type RuntimeSample,
+  type TraceEvent,
+} from "@everdict/contracts";
 // Type-only reuse of the inspection wire schemas as the SSOT for Inspectable.inspect's / CaseInspectable.
 // inspectCase's returns (no drift, no runtime edge). backends → contracts is the allowed direction; /wire is the
 // same package's DTO surface.
@@ -166,6 +173,17 @@ export interface CaseInspectable {
   inspectCase(caseId: string): Promise<CasePlacement | undefined>;
 }
 
+// CaseSampleable — a point-in-time resource sample of THIS case's live sandbox, read from the orchestrator's
+// stats API. The producer half of the replay runtime plane (docs/architecture/replay.md ③): the control-plane
+// sampler polls it while the case runs and streams the samples onto the recording's `runtime` lane, so a replay
+// can answer "did it OOM / thrash" alongside the agent trace. The sample is UNstamped — `t` belongs to the
+// caller (the sample instant is when the poll fired). undefined = no live alloc (pre-dispatch / settled / GC'd).
+// Best-effort and MUST NOT throw (observability read).
+export type CaseRuntimeSample = Omit<RuntimeSample, "t">;
+export interface CaseSampleable {
+  sampleCase(caseId: string): Promise<CaseRuntimeSample | undefined>;
+}
+
 // TopologyInspectable — service-topology health introspection: the live roster of a service harness's deployed
 // stack (per-service state/restarts/OOM) + one service's log tail. Keyed by the HARNESS (the topology is a warm
 // per-(harness,version,zone) deployment, not a per-case unit) with the tenant resolving the trust zone. Only
@@ -253,6 +271,10 @@ export function isInspectable(backend: Backend): backend is Backend & Inspectabl
 
 export function isCaseInspectable(backend: Backend): backend is Backend & CaseInspectable {
   return typeof (backend as Partial<CaseInspectable>).inspectCase === "function";
+}
+
+export function isCaseSampleable(backend: Backend): backend is Backend & CaseSampleable {
+  return typeof (backend as Partial<CaseSampleable>).sampleCase === "function";
 }
 
 export function isTopologyInspectable(backend: Backend): backend is Backend & TopologyInspectable {

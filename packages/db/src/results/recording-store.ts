@@ -40,6 +40,21 @@ export class InMemoryRecordingStore implements RecordingStore {
       ...(rec.sealed.dispatch ? { dispatch: rec.sealed.dispatch } : {}),
     };
   }
+
+  // The live tail — whatever has streamed in so far, sealed or not (the player scrubs a still-running run with
+  // this). Unsealed metadata is provisional: t0/fidelity derived from the tracks, envKind "live" until seal.
+  async peek(runId: string): Promise<CaseRecording | undefined> {
+    const rec = this.recordings.get(runId);
+    if (!rec) return undefined;
+    if (rec.sealed) return this.get(runId);
+    return {
+      runId,
+      t0: earliestT(rec.tracks),
+      tracks: rec.tracks,
+      envKind: "live",
+      effectiveFidelity: rec.tracks.frames?.length ? "frames" : "final",
+    };
+  }
 }
 
 // The wall-clock anchor: the earliest event across all lanes (fallback 0 when empty).

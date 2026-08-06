@@ -1497,3 +1497,49 @@ describe("currentAlloc (allocation currency)", () => {
     expect(currentAlloc([first, second])?.ID).toBe("a2");
   });
 });
+
+describe("NomadBackend.sampleCase (replay runtime plane producer)", () => {
+  it("reads the live alloc's CPU/memory from the client stats API", async () => {
+    const http: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix="))
+          return {
+            status: 200,
+            text: JSON.stringify([{ ID: "everdict-c1-a", Namespace: "default", SubmitTime: 1 }]),
+          };
+        if (path.includes("/allocations")) return { status: 200, text: JSON.stringify([{ ID: "a1" }]) };
+        if (path.includes("/v1/client/allocation/a1/stats"))
+          return {
+            status: 200,
+            text: JSON.stringify({
+              ResourceUsage: { CpuStats: { Percent: 12.5 }, MemoryStats: { RSS: 104857600 } },
+            }),
+          };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://n:4646", image: "img", http });
+    expect(await backend.sampleCase("c1")).toEqual({ cpuPct: 12.5, memBytes: 104857600 });
+  });
+
+  it("reads as no sample when there is no job, no alloc, or the stats API fails — never throws", async () => {
+    const noJob: NomadHttp = {
+      async request(_m, path) {
+        return path.startsWith("/v1/jobs?prefix=") ? { status: 200, text: "[]" } : { status: 404, text: "" };
+      },
+    };
+    expect(await new NomadBackend({ addr: "http://n:4646", image: "i", http: noJob }).sampleCase("c1")).toBeUndefined();
+
+    const statsDown: NomadHttp = {
+      async request(_m, path) {
+        if (path.startsWith("/v1/jobs?prefix="))
+          return { status: 200, text: JSON.stringify([{ ID: "everdict-c1-a", SubmitTime: 1 }]) };
+        if (path.includes("/allocations")) return { status: 200, text: JSON.stringify([{ ID: "a1" }]) };
+        return { status: 500, text: "boom" };
+      },
+    };
+    expect(
+      await new NomadBackend({ addr: "http://n:4646", image: "i", http: statsDown }).sampleCase("c1"),
+    ).toBeUndefined();
+  });
+});

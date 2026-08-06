@@ -76,6 +76,28 @@ export class PgRecordingStore implements RecordingStore {
       ...(row.dispatch ? { dispatch: row.dispatch } : {}),
     });
   }
+
+  // The live tail — the row as it stands, sealed or not (the player scrubs a still-running run with this).
+  // Unsealed metadata is provisional: t0/fidelity derived from the tracks, envKind "live" until seal names it.
+  async peek(runId: string): Promise<CaseRecording | undefined> {
+    const { rows } = await this.client.query<RecordingRow & { sealed: boolean }>(
+      "SELECT tracks, t0, env_kind, effective_fidelity, dispatch, sealed FROM everdict_recordings WHERE run_id = $1",
+      [runId],
+    );
+    const row = rows[0];
+    if (!row) return undefined;
+    const times = allEntryTimes(row.tracks);
+    if (times.length === 0) return undefined; // a row with no entries yet has nothing to scrub
+    const sealedMeta = row.sealed && row.t0 != null && row.env_kind != null && row.effective_fidelity != null;
+    return CaseRecordingSchema.parse({
+      runId,
+      t0: sealedMeta ? Number(row.t0) : times.reduce((m, t) => Math.min(m, t), Number.POSITIVE_INFINITY),
+      tracks: row.tracks ?? {},
+      envKind: sealedMeta ? row.env_kind : "live",
+      effectiveFidelity: sealedMeta ? row.effective_fidelity : hasFramesLane(row.tracks) ? "frames" : "final",
+      ...(sealedMeta && row.dispatch ? { dispatch: row.dispatch } : {}),
+    });
+  }
 }
 
 // Every entry's `t` across all lanes — for the t0 anchor (earliest event). Boundary-safe over the raw jsonb.

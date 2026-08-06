@@ -109,6 +109,22 @@ describe("RunService", () => {
     expect(out?.record.status).toBe("succeeded");
   });
 
+  it("recording() serves the live tail while the run still executes (live = a replay that has not finished)", async () => {
+    // Given a run still in flight (the dispatcher never settles) whose frames are streaming in unsealed
+    const store = new InMemoryRunStore();
+    const recordingStore = new InMemoryRecordingStore();
+    const hang: Dispatcher = { dispatch: () => new Promise(() => undefined) };
+    const svc = new RunService({ dispatcher: hang, store, newId: () => "rec-live", recordingStore });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    await recordingStore.append("evd-run-rec-live", { track: "frames", entry: { t: 1000, ref: "memory://f" } });
+
+    // When the player asks mid-run, the unsealed tail scrubs with provisional metadata
+    const out = await svc.recording(rec.id);
+    expect(["queued", "running"]).toContain(out?.record.status); // still in flight either way
+    expect(out?.recording?.envKind).toBe("live");
+    expect(out?.recording?.tracks.frames).toHaveLength(1);
+  });
+
   it("recording() yields an undefined recording when nothing was recorded, and undefined for a missing run", async () => {
     // Given a run with nothing teed
     const store = new InMemoryRunStore();
