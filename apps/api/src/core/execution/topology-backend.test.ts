@@ -46,7 +46,8 @@ describe("buildTopologyBackend (topology RuntimeSpec → ServiceTopologyBackend)
 
   it("threads hostGatewayAddr from the RuntimeSpec into BOTH topology runtimes (regression: the knob existed on the runtime but a registered runtime could never set it — every alloc on a keyword-rejecting Nomad failed)", () => {
     const withGateway = { ...nomadSpec, hostGatewayAddr: "172.17.0.1" };
-    expect(RuntimeSpecSchema.parse(withGateway).hostGatewayAddr).toBe("172.17.0.1"); // pre-fix the schema stripped it
+    const parsed = RuntimeSpecSchema.parse(withGateway); // pre-fix the schema stripped the field entirely
+    expect(parsed.kind === "nomad" && parsed.hostGatewayAddr).toBe("172.17.0.1");
     const env = buildTopologyEnvironment(withGateway, { harnesses: harnessesReturning("service") });
     expect((env.runtime as unknown as { opts: { hostGatewayAddr?: string } }).opts.hostGatewayAddr).toBe("172.17.0.1");
     const k8sEnv = buildTopologyEnvironment(
