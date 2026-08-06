@@ -37,6 +37,44 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     return reply.send(deps.schedulingControl.effective());
   });
 
+  // --- internal: driver workflow inventory + zombie killer (operator surface). The workspace-scoped
+  // /ops/driver wrap addresses workflows by ledger id and hides what a workspace does not own — which is
+  // exactly wrong for the operator hunting LEAKED workflows (a zombie's ledger record is gone by
+  // definition). This surface lists every everdict-* workflow across tenants and terminates by raw
+  // workflowId; both refuse foreign (non-everdict) workflows sharing the namespace. ---
+  app.get("/internal/driver/workflows", { schema: internalDocs.driverWorkflows }, async (req, reply) => {
+    if (!deps.internalToken || !deps.driverOps)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "driver ops not configured" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const query = z
+      .object({ status: z.enum(["running", "all"]).optional(), limit: z.coerce.number().int().positive().optional() })
+      .safeParse(req.query ?? {});
+    if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
+    try {
+      return reply.send({ workflows: await deps.driverOps.list(query.data) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.post("/internal/driver/workflows/terminate", { schema: internalDocs.driverTerminate }, async (req, reply) => {
+    if (!deps.internalToken || !deps.driverOps)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "driver ops not configured" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+    const body = z.object({ workflowId: z.string().min(1), reason: z.string().min(1).optional() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      await deps.driverOps.terminateRaw(body.data.workflowId, body.data.reason);
+      return reply.send({ ok: true });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.post("/internal/tenant-keys", { schema: internalDocs.tenantKeys }, async (req, reply) => {
     if (!deps.internalToken || !deps.keyStore)
       return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });

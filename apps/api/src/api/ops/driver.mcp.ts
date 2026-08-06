@@ -66,4 +66,24 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
         return ok({ ok: true });
       }),
   );
+
+  server.registerTool(
+    "terminate_driver_workflow",
+    {
+      description:
+        "Force-terminate a durable driver workflow by LEDGER id — for the workflow a cooperative cancel " +
+        "cannot reach (a stuck handler, an unbounded-retry activity looping against a gone record). Never " +
+        "writes the ledger; the recovery sweeps settle any row the dead workflow owned. Destructive (admin-only).",
+      inputSchema: {
+        family: z.enum(DRIVER_WORKFLOW_FAMILIES),
+        id: z.string().describe("the scorecard/group id"),
+      },
+    },
+    ({ family, id }: { family: DriverWorkflowFamily; id: string }) =>
+      run(principal, "runtimes:control", async () => {
+        if (!(await owned(family, id))) return fail("NOT_FOUND: no such record in this workspace.");
+        await driverOps.terminate(family, id);
+        return ok({ ok: true });
+      }),
+  );
 }

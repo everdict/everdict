@@ -58,6 +58,20 @@ const docs = {
       ...errorResponses(401, 403, 404, 502),
     },
   },
+  terminate: {
+    summary: "Force-terminate a driver workflow (ops surface)",
+    description:
+      "Server-side termination of the durable driver — for the workflow a cooperative cancel cannot reach " +
+      "(a stuck handler, an unbounded-retry activity looping against a record that no longer exists). Never " +
+      "writes the ledger; the recovery sweeps settle any row the dead workflow was responsible for. " +
+      "Destructive → requires runtimes:control (admin-only).",
+    tags: ["ops"],
+    params: driverParams,
+    response: {
+      200: { description: "Termination requested", ...toJsonSchema(z.object({ ok: z.literal(true) })) },
+      ...errorResponses(400, 401, 403, 404, 502),
+    },
+  },
 } satisfies Record<string, FastifySchema>;
 
 export const driverDocs: Record<keyof typeof docs, FastifySchema> = docs;

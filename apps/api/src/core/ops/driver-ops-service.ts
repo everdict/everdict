@@ -1,4 +1,4 @@
-import { AppError, NotFoundError, UpstreamError } from "@everdict/contracts";
+import { AppError, BadRequestError, NotFoundError, UpstreamError } from "@everdict/contracts";
 import { Client, Connection, WorkflowNotFoundError } from "@temporalio/client";
 
 // Driver ops surface v0 (docs/orchestration.md, the 044 adoption gate): the durable driver's lifecycle is
@@ -27,6 +27,44 @@ export interface DriverWorkflowStatus {
     attempt?: number;
     lastFailure?: string;
   }>;
+}
+
+// One row of the operator's workflow inventory. family/ledgerId are parsed back out of the deterministic
+// workflowId grammar where it applies; a schedule FIRE workflow (whose id Temporal suffixes with the nominal
+// fire time) maps to family "schedule" with the schedule id as its ledger id.
+export interface DriverWorkflowSummary {
+  workflowId: string;
+  type: string;
+  status: string;
+  startTime?: string;
+  closeTime?: string;
+  family?: DriverWorkflowFamily | "schedule";
+  ledgerId?: string;
+}
+
+// The workflowId grammar, inverted (workflowIdFor is the forward direction). Longest prefix first so
+// `everdict-sched-run-` never half-matches a shorter family.
+const WORKFLOW_ID_PREFIXES: Array<{ prefix: string; family: DriverWorkflowFamily | "schedule" }> = [
+  { prefix: "everdict-sched-run-", family: "schedule" },
+  { prefix: "everdict-reaction-", family: "reaction" },
+  { prefix: "everdict-approval-", family: "approval" },
+  { prefix: "everdict-reaper-", family: "reaper" },
+  { prefix: "everdict-batch-", family: "batch" },
+  { prefix: "everdict-score-", family: "score" },
+];
+
+export function parseDriverWorkflowId(
+  workflowId: string,
+): { family: DriverWorkflowFamily | "schedule"; ledgerId: string } | undefined {
+  for (const { prefix, family } of WORKFLOW_ID_PREFIXES) {
+    if (!workflowId.startsWith(prefix)) continue;
+    const rest = workflowId.slice(prefix.length);
+    // A schedule fire's id carries the nominal fire time after the schedule id (Temporal Schedules append
+    // it) — strip it so the ledger id addresses the schedule record: <uuid>-<ISO time>.
+    if (family === "schedule") return { family, ledgerId: rest.length > 36 ? rest.slice(0, 36) : rest };
+    return { family, ledgerId: rest };
+  }
+  return undefined;
 }
 
 export class DriverOpsService {
@@ -80,6 +118,65 @@ export class DriverOpsService {
       await client.workflow.getHandle(workflowId).cancel();
     } catch (err) {
       throw this.remap(err, workflowId);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  // Force-termination — for the workflow cancel cannot reach (a handler stuck before its first await, an
+  // unbounded-retry activity looping against a gone record). The server stops the execution outright; like
+  // cancel, this never writes the ledger — the sweeps settle any row the dead workflow was responsible for.
+  async terminate(family: DriverWorkflowFamily, ledgerId: string, reason?: string): Promise<void> {
+    await this.terminateRaw(this.workflowIdFor(family, ledgerId), reason);
+  }
+
+  // Terminate by RAW workflowId — the operator's zombie killer (a leaked workflow may have no ledger record
+  // left to address it by). Refuses anything outside the everdict- family: this wrap is never a second
+  // control plane for foreign workflows sharing the namespace.
+  async terminateRaw(workflowId: string, reason?: string): Promise<void> {
+    if (!workflowId.startsWith("everdict-"))
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { workflowId },
+        "Only everdict-managed workflows (everdict-*) can be terminated through this surface.",
+      );
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      await client.workflow.getHandle(workflowId).terminate(reason ?? "terminated via the everdict ops surface");
+    } catch (err) {
+      throw this.remap(err, workflowId);
+    } finally {
+      await connection.close();
+    }
+  }
+
+  // Every everdict-managed workflow the driver currently knows (newest first, capped) — the operator's
+  // zombie inventory. `status: "running"` narrows to live executions; "all" includes the recently closed
+  // (retention-bound), whose Failed rows are how a leaked schedule announces itself.
+  async list(opts: { status?: "running" | "all"; limit?: number } = {}): Promise<DriverWorkflowSummary[]> {
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const connection = await Connection.connect({ address: this.opts.address });
+    try {
+      const client = new Client({ connection });
+      const iter = client.workflow.list(opts.status === "running" ? { query: `ExecutionStatus="Running"` } : undefined);
+      const out: DriverWorkflowSummary[] = [];
+      for await (const info of iter) {
+        if (!info.workflowId.startsWith("everdict-")) continue; // foreign workflows sharing the namespace
+        const parsed = parseDriverWorkflowId(info.workflowId);
+        out.push({
+          workflowId: info.workflowId,
+          type: info.type,
+          status: info.status.name,
+          ...(info.startTime ? { startTime: info.startTime.toISOString() } : {}),
+          ...(info.closeTime ? { closeTime: info.closeTime.toISOString() } : {}),
+          ...(parsed !== undefined ? parsed : {}),
+        });
+        if (out.length >= limit) break;
+      }
+      return out;
+    } catch (err) {
+      throw this.remap(err, "list");
     } finally {
       await connection.close();
     }

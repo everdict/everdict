@@ -80,4 +80,31 @@ export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps):
       }
     },
   );
+
+  // Force-termination — for the workflow cancel cannot reach (a stuck handler, an unbounded-retry activity
+  // looping against a gone record). Same authz posture and ledger-ownership scoping as cancel.
+  app.post<{ Params: { family: string; id: string } }>(
+    "/ops/driver/:family/:id/terminate",
+    { schema: driverDocs.terminate },
+    async (req, reply) => {
+      if (!deps.driverOps)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "driver ops not configured (no Temporal address)" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runtimes:control");
+        const family = familySchema.parse(req.params.family) as DriverWorkflowFamily;
+        if (!(await ownershipGuard(principal.workspace, family, req.params.id)))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "no such record in this workspace." });
+        await deps.driverOps.terminate(family, req.params.id);
+        return reply.send({ ok: true });
+      } catch (err) {
+        if (err instanceof z.ZodError)
+          return reply
+            .code(400)
+            .send({ code: "BAD_REQUEST", message: "family must be batch | score | approval | reaper | reaction" });
+        return sendError(reply, err);
+      }
+    },
+  );
 }

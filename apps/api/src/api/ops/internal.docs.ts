@@ -27,7 +27,55 @@ const schedulingBody = z.object({
 // OpenAPI descriptors for the internal control-plane surface — documentation only (no-op compilers;
 // rule api-layer). Every /internal/** route is guarded by the x-internal-token header (constant-time
 // compare, fail-closed 404 when the token is unset); there is no end-user auth context.
+const driverWorkflowSummary = z.object({
+  workflowId: z.string(),
+  type: z.string(),
+  status: z.string(),
+  startTime: z.string().optional(),
+  closeTime: z.string().optional(),
+  family: z.string().optional().describe("parsed workflow family (batch|score|approval|reaper|reaction|schedule)"),
+  ledgerId: z.string().optional().describe("the ledger id parsed back out of the deterministic workflowId"),
+});
+
 const internal = {
+  driverWorkflows: {
+    summary: "List everdict driver workflows (operator surface)",
+    description:
+      "Operator plane: every everdict-* workflow the driver currently knows, across tenants, newest first — " +
+      "the zombie inventory (a leaked workflow announces itself here as Running with no ledger record, or as " +
+      "a repeating Failed row). status=running narrows to live executions; limit caps the page (default 50, " +
+      "max 200). Guarded by x-internal-token.",
+    tags: ["internal"],
+    querystring: toJsonSchema(
+      z.object({ status: z.enum(["running", "all"]).optional(), limit: z.number().int().positive().optional() }),
+    ),
+    response: {
+      200: {
+        description: "The everdict-managed workflow inventory",
+        ...toJsonSchema(z.object({ workflows: z.array(driverWorkflowSummary) })),
+      },
+      ...errorResponses(400, 403, 404, 502),
+    },
+  },
+  driverTerminate: {
+    summary: "Force-terminate a driver workflow by raw workflowId (operator surface)",
+    description:
+      "Operator plane: server-side termination of an everdict-* workflow addressed by its RAW workflowId — " +
+      "the zombie killer (a leaked workflow may have no ledger record left to address it by family/ledger " +
+      "id). Refuses non-everdict workflows sharing the namespace. Never writes the ledger; the recovery " +
+      "sweeps settle any row the dead workflow owned. Guarded by x-internal-token.",
+    tags: ["internal"],
+    body: toJsonSchema(
+      z.object({
+        workflowId: z.string().describe("the raw Temporal workflowId (must start with everdict-)"),
+        reason: z.string().optional().describe("recorded on the termination event"),
+      }),
+    ),
+    response: {
+      200: { description: "Termination requested", ...toJsonSchema(OkResponseSchema) },
+      ...errorResponses(400, 403, 404, 502),
+    },
+  },
   schedulingSet: {
     summary: "Set scheduler fairness dials",
     description:

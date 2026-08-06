@@ -88,7 +88,14 @@ record; the agent loop stays in the agent service — the workflow owns ONLY the
    normally; a handle lost to a CP death settles the row as `orphaned` and removes the stray container by
    the row's `session.computeId` (`Driver.reap`). The reap activity retries UNBOUNDED (capped backoff):
    a CP outage is exactly the case the reaper exists for, so it never gives up while one is down. Ops
-   family `reaper` (ledger id = the run id) on `/ops/driver`.
+   family `reaper` (ledger id = the run id) on `/ops/driver`. **The ledger orphan sweep is the safety
+   net under all of it**: `sweepOrphans` (boot + interval, sandbox and browser lanes alike) reaps any
+   running session row past its deadline + grace whose handle no live process holds — so a reaper that
+   never armed (`startReaper` is best-effort), a wiped namespace, or a row written by a process with no
+   reaper wired can no longer leave a permanent `running` zombie. Boot recovery correspondingly LEAVES
+   session-kind runs alone (they are not resumable work — no caseSpec, no backend job), and a background
+   resume that can neither adopt nor re-dispatch now tombstones the run it claimed (`INTERRUPTED`)
+   instead of silently abandoning it.
 3. **Phase-2 scoring** — `scoreWorkflow(groupId, spec)`: judge N×M with per-case retries → aggregate →
    persist. Done = scored + aggregated. *Unlocks:* execution-model P2 — re-scoring a 500-case group
    survives restarts instead of dying with the process. **SHIPPED (W2)** as `scoreGroupWorkflow` — see
@@ -136,6 +143,16 @@ TTL timer).
   `describe_driver_workflow`/`cancel_driver_workflow` — ledger-vocabulary addressing (a scorecard/group id,
   never a raw workflowId), ledger-ownership scoping, read = `runtimes:read`, cancel = `runtimes:control`.
   `approval:`/`reaper:`/`reaction:` join the family enum as their waves land.
+  **Force-termination + the operator inventory (zombie control)**: `POST /ops/driver/:family/:id/terminate`
+  ↔ MCP `terminate_driver_workflow` (same ownership scoping/gates as cancel) stops the workflow cancel
+  cannot reach; the OPERATOR plane (`x-internal-token`, deliberately outside workspace scoping because a
+  leaked workflow's ledger record is gone by definition) gets `GET /internal/driver/workflows`
+  (every `everdict-*` workflow across tenants, family/ledger parsed back out of the id grammar) +
+  `POST /internal/driver/workflows/terminate` (raw workflowId; refuses non-everdict workflows). Neither
+  writes the ledger — the recovery sweeps settle whatever row a dead workflow owned. The schedule clock
+  self-heals too: a fire whose record is gone deletes the orphan Temporal schedule at the fire choke
+  point, `TemporalScheduleDriver.remove` no longer swallows real failures (the DB row survives a failed
+  driver delete), and boot runs `ScheduleService.reconcile()` (Temporal⟶DB, DB is SSOT).
 - **Workflows never emit facts directly** — their activities' state transitions do (same-tx outbox), so
   the event plane's "transition ⇒ fact" invariant holds inside workflows too.
 - **Activities that create demand pass the §5 gate** — a workflow is not a side door around admission.

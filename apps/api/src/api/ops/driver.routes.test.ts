@@ -34,6 +34,16 @@ function stubOps(calls: string[]): DriverOpsService {
     cancel: async (family: string, id: string) => {
       calls.push(`cancel:${family}:${id}`);
     },
+    terminate: async (family: string, id: string) => {
+      calls.push(`terminate:${family}:${id}`);
+    },
+    terminateRaw: async (workflowId: string) => {
+      calls.push(`terminateRaw:${workflowId}`);
+    },
+    list: async () => {
+      calls.push("list");
+      return [];
+    },
   } as unknown as DriverOpsService;
 }
 
@@ -92,6 +102,22 @@ describe("Driver ops surface v0 (/ops/driver — ledger-vocabulary addressing)",
     expect(calls).toEqual([]); // the guard fires first — no cross-tenant describe
   });
 
+  it("force-terminates through the wrap with the same ownership scoping as cancel", async () => {
+    const { app, calls } = await build();
+    const ok = await app.inject({ method: "POST", url: "/ops/driver/batch/sc-1/terminate", headers: H });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ ok: true });
+    expect(calls).toEqual(["terminate:batch:sc-1"]);
+
+    const rival = await app.inject({
+      method: "POST",
+      url: "/ops/driver/batch/sc-1/terminate",
+      headers: { "x-everdict-tenant": "rival" },
+    });
+    expect(rival.statusCode).toBe(404); // guard first — no cross-tenant terminate
+    expect(calls).toEqual(["terminate:batch:sc-1"]);
+  });
+
   it("rejects an unknown family (400) and answers 404 'not configured' without a Temporal address", async () => {
     const { app } = await build();
     expect((await app.inject({ method: "GET", url: "/ops/driver/nope/sc-1", headers: H })).statusCode).toBe(400);
@@ -99,6 +125,54 @@ describe("Driver ops surface v0 (/ops/driver — ledger-vocabulary addressing)",
     const res = await bare.inject({ method: "GET", url: "/ops/driver/batch/sc-1", headers: H });
     expect(res.statusCode).toBe(404);
     expect(res.json().message).toMatch(/not configured/);
+  });
+});
+
+describe("operator surface (/internal/driver) — the fleet-wide workflow inventory + zombie killer", () => {
+  function buildInternal() {
+    const calls: string[] = [];
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      driverOps: stubOps(calls),
+      internalToken: "sekrit",
+    });
+    return { app, calls };
+  }
+
+  it("is fail-closed behind the internal token (never end-user auth)", async () => {
+    const { app } = buildInternal();
+    expect((await app.inject({ method: "GET", url: "/internal/driver/workflows", headers: H })).statusCode).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/internal/driver/workflows/terminate",
+          headers: H,
+          payload: { workflowId: "everdict-reaper-x" },
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+
+  it("lists the everdict workflow inventory and terminates by RAW workflowId (the leaked-workflow path)", async () => {
+    const { app, calls } = buildInternal();
+    const list = await app.inject({
+      method: "GET",
+      url: "/internal/driver/workflows?status=running",
+      headers: { "x-internal-token": "sekrit" },
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.json()).toEqual({ workflows: [] });
+
+    const terminate = await app.inject({
+      method: "POST",
+      url: "/internal/driver/workflows/terminate",
+      headers: { "x-internal-token": "sekrit" },
+      payload: { workflowId: "everdict-reaper-ghost", reason: "orphaned reaper" },
+    });
+    expect(terminate.statusCode).toBe(200);
+    expect(terminate.json()).toEqual({ ok: true });
+    expect(calls).toEqual(["list", "terminateRaw:everdict-reaper-ghost"]);
   });
 });
 
