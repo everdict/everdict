@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { agentAttributionFrom, fsActorFor } from "./fs-actor.js";
 import { fsDocs } from "./fs.docs.js";
+import { memberFs } from "./member-scope.js";
 import { MakeFsDirectoryBodySchema } from "./request/make-fs-directory.js";
 import { MoveFsEntryBodySchema } from "./request/move-fs-entry.js";
 import { RestoreFsRevisionBodySchema } from "./request/restore-fs-revision.js";
@@ -61,7 +62,7 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     const parsed = ListQuerySchema.safeParse(req.query);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      return reply.send(await deps.fsService.list(principal.workspace, parsed.data.path));
+      return reply.send(await memberFs(deps.fsService, principal).list(principal.workspace, parsed.data.path));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -81,7 +82,7 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     const { pattern, glob, path, limit } = parsed.data;
     try {
       return reply.send(
-        await deps.fsService.search(principal.workspace, {
+        await memberFs(deps.fsService, principal).search(principal.workspace, {
           ...(pattern !== undefined ? { pattern } : {}),
           ...(glob !== undefined ? { glob } : {}),
           ...(path !== undefined ? { path } : {}),
@@ -105,7 +106,7 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     const parsed = FileQuerySchema.safeParse(req.query);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      return reply.send(await deps.fsService.readFile(principal.workspace, parsed.data.path));
+      return reply.send(await memberFs(deps.fsService, principal).readFile(principal.workspace, parsed.data.path));
     } catch (err) {
       return sendError(reply, err); // missing → 404, a directory → 400
     }
@@ -124,7 +125,7 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       const actor = fsActorFor(principal, agentAttributionFrom(req.headers));
-      return reply.send(await deps.fsService.writeFile(principal.workspace, parsed.data, actor));
+      return reply.send(await memberFs(deps.fsService, principal).writeFile(principal.workspace, parsed.data, actor));
     } catch (err) {
       return sendError(reply, err); // over a dir / lost race → 409 (+ the merge kit), oversized/traversal → 400
     }
@@ -145,7 +146,9 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     try {
       const limit = parsed.data.limit !== undefined ? Number(parsed.data.limit) : undefined;
       const before = parsed.data.before !== undefined ? Number(parsed.data.before) : undefined;
-      return reply.send(await deps.fsService.history(principal.workspace, parsed.data.path, limit, before));
+      return reply.send(
+        await memberFs(deps.fsService, principal).history(principal.workspace, parsed.data.path, limit, before),
+      );
     } catch (err) {
       return sendError(reply, err);
     }
@@ -165,7 +168,7 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       return reply.send(
-        await deps.fsService.diffRevisions(
+        await memberFs(deps.fsService, principal).diffRevisions(
           principal.workspace,
           parsed.data.path,
           Number(parsed.data.from),
@@ -191,7 +194,11 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       return reply.send(
-        await deps.fsService.readRevision(principal.workspace, parsed.data.path, Number(parsed.data.revision)),
+        await memberFs(deps.fsService, principal).readRevision(
+          principal.workspace,
+          parsed.data.path,
+          Number(parsed.data.revision),
+        ),
       );
     } catch (err) {
       return sendError(reply, err); // unknown revision → 404
@@ -213,7 +220,12 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     try {
       const actor = fsActorFor(principal, agentAttributionFrom(req.headers));
       return reply.send(
-        await deps.fsService.restoreRevision(principal.workspace, parsed.data.path, parsed.data.revision, actor),
+        await memberFs(deps.fsService, principal).restoreRevision(
+          principal.workspace,
+          parsed.data.path,
+          parsed.data.revision,
+          actor,
+        ),
       );
     } catch (err) {
       return sendError(reply, err); // unknown revision → 404
@@ -232,7 +244,7 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     const parsed = MakeFsDirectoryBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      return reply.send(await deps.fsService.makeDirectory(principal.workspace, parsed.data.path));
+      return reply.send(await memberFs(deps.fsService, principal).makeDirectory(principal.workspace, parsed.data.path));
     } catch (err) {
       return sendError(reply, err); // a file at the path → 409
     }
@@ -279,7 +291,9 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     const parsed = MoveFsEntryBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      return reply.send(await deps.fsService.move(principal.workspace, parsed.data.from, parsed.data.to));
+      return reply.send(
+        await memberFs(deps.fsService, principal).move(principal.workspace, parsed.data.from, parsed.data.to),
+      );
     } catch (err) {
       return sendError(reply, err); // missing source → 404, occupied target → 409, self-nesting → 400
     }
@@ -291,13 +305,15 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     if (!principal) return reply;
     try {
       gate(principal, "files:read");
-      return reply.send(await deps.fsService.usage(principal.workspace));
+      return reply.send(await memberFs(deps.fsService, principal).usage(principal.workspace));
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
   // Empty the whole tree — governance, not content mutation: settings:write (admin), like the knowledge reindex.
+  // Deliberately the UNSCOPED service: emptying a workspace has to mean emptying it, and a member-scoped clear
+  // would silently leave every other member's memory behind for the next tenant of the same workspace.
   app.delete("/fs", { schema: fsDocs.clear }, async (req, reply) => {
     if (!deps.fsService) return reply.code(404).send({ code: "NOT_FOUND", message: "filesystem not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -323,7 +339,11 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       return reply.send(
-        await deps.fsService.remove(principal.workspace, parsed.data.path, parsed.data.recursive === "true"),
+        await memberFs(deps.fsService, principal).remove(
+          principal.workspace,
+          parsed.data.path,
+          parsed.data.recursive === "true",
+        ),
       );
     } catch (err) {
       return sendError(reply, err); // missing → 404, non-empty without recursive → 409

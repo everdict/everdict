@@ -482,3 +482,41 @@ export function fsFileClassOf(contentType: string): FsFileClass {
   if (isFsTextContentType(base)) return "text";
   return "binary";
 }
+
+// --- the memory area: one workspace, two scopes -------------------------------------------------------------
+// Agent memory lives on the workspace filesystem, and it has two scopes that must not be one:
+//   memory/*.md                       — the WORKSPACE's memory: what the team learned, everyone recalls it
+//   memory/members/<slug>/*.md        — one MEMBER's own memory: their preferences, their working habits
+// The tenant's bucket is still the isolation boundary (there is no second store, no second bucket — a workspace
+// is one filesystem). What separates members is this path plus the fs layer's refusal to serve another member's
+// subtree at all: filtered out of listings and searches, NOT FOUND on read. A path convention alone would be a
+// label, not a scope, because list_files/search_files/the web tree all walk the same tree.
+export const MEMORY_ROOT = "memory";
+export const MEMBER_MEMORY_ROOT = `${MEMORY_ROOT}/members`;
+
+// A member's directory name. A subject is an external identifier (a Keycloak uuid, but also `key:<workspace>` or
+// an email), and path segments allow only [A-Za-z0-9._-] — so a subject that is already safe is used verbatim
+// (the uuid case, which keeps the tree readable) and anything else is sanitized and disambiguated with a digest
+// of the ORIGINAL, because sanitizing alone would map two distinct members onto one directory.
+export function memberMemorySlug(subject: string, digest: (input: string) => string): string {
+  if (/^[A-Za-z0-9._-]{1,64}$/.test(subject)) return subject;
+  const safe = subject
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .slice(0, 40)
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return `${safe.length > 0 ? safe : "member"}.${digest(subject).slice(0, 16)}`;
+}
+
+export function memberMemoryDirectory(slug: string): string {
+  return `${MEMBER_MEMORY_ROOT}/${slug}`;
+}
+
+// Which member a path belongs to — undefined for everything that is not inside a member's area. `memory/members`
+// itself is not owned by anyone (it is the container), so listing it is allowed and the LISTING is what filters.
+export function memberMemoryOwnerOf(path: string): string | undefined {
+  const normalized = path.replace(/^\/+/, "").replace(/\/+$/, "");
+  if (!normalized.startsWith(`${MEMBER_MEMORY_ROOT}/`)) return undefined;
+  const rest = normalized.slice(MEMBER_MEMORY_ROOT.length + 1);
+  const slug = rest.split("/")[0];
+  return slug !== undefined && slug.length > 0 ? slug : undefined;
+}

@@ -1,5 +1,13 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { fsFileClassOf, guessFsContentType, isFsTextContentType } from "./workspace-file.js";
+import {
+  fsFileClassOf,
+  guessFsContentType,
+  isFsTextContentType,
+  memberMemoryDirectory,
+  memberMemoryOwnerOf,
+  memberMemorySlug,
+} from "./workspace-file.js";
 
 describe("guessFsContentType — breadth over the office + development long tail", () => {
   it("types office deliverables so they are never mistaken for opaque blobs", () => {
@@ -78,5 +86,40 @@ describe("fsFileClassOf — the presentation axis (how does it want to be render
   it("puts svg on both axes: an image to render, still text to edit", () => {
     expect(fsFileClassOf("image/svg+xml")).toBe("image");
     expect(isFsTextContentType("image/svg+xml")).toBe(true);
+  });
+});
+
+describe("member memory scope", () => {
+  const digest = (input: string) => createHash("sha256").update(input).digest("hex");
+
+  it("keeps a path-safe subject readable and disambiguates one that is not", () => {
+    // A Keycloak uuid is already a legal path segment — the tree stays readable
+    expect(memberMemorySlug("9f1c2e7a-3b40-4d19-9a51-77c6ee0b2f18", digest)).toBe(
+      "9f1c2e7a-3b40-4d19-9a51-77c6ee0b2f18",
+    );
+    // Anything else is sanitized AND digested, because sanitizing alone maps distinct members onto one directory
+    const a = memberMemorySlug("jin@everdict.io", digest);
+    const b = memberMemorySlug("jin+eval@everdict.io", digest);
+    expect(a).toMatch(/^[A-Za-z0-9._-]+$/);
+    expect(b).toMatch(/^[A-Za-z0-9._-]+$/);
+    expect(a).not.toBe(b);
+    // …and it is stable: the same subject always resolves to the same directory
+    expect(memberMemorySlug("jin@everdict.io", digest)).toBe(a);
+  });
+
+  it("names the owner of a path only inside a member's own area", () => {
+    expect(memberMemoryOwnerOf("memory/members/alice/tone.md")).toBe("alice");
+    expect(memberMemoryOwnerOf("memory/members/alice")).toBe("alice");
+    // The container itself is nobody's — listing it is allowed, and the LISTING is what filters
+    expect(memberMemoryOwnerOf("memory/members")).toBeUndefined();
+    expect(memberMemoryOwnerOf("memory/cadence.md")).toBeUndefined();
+    expect(memberMemoryOwnerOf("reports/q3.md")).toBeUndefined();
+    // A path that merely starts with the same characters is not inside it
+    expect(memberMemoryOwnerOf("memory/members-archive/x.md")).toBeUndefined();
+  });
+
+  it("builds the directory the fs will actually serve", () => {
+    expect(memberMemoryDirectory("alice")).toBe("memory/members/alice");
+    expect(memberMemoryOwnerOf(`${memberMemoryDirectory("alice")}/MEMORY.md`)).toBe("alice");
   });
 });

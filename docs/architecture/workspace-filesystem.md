@@ -301,6 +301,51 @@ Two ceilings bound all of it: the **5 MiB per-file cap** and the fact that a rea
 is worth building on. Files also only ever arrive by agent write or the shell today — a browser upload is a
 separate surface, subject to the same cap.
 
+## Memory has two scopes, and one of them is per member
+
+Agent memory lives on this filesystem, and it is not all the same kind of thing:
+
+```
+memory/<slug>.md                      # the WORKSPACE's memory — what the team learned, everyone recalls it
+memory/MEMORY.md                      #   its index
+memory/members/<slug>/<name>.md       # ONE member's own — who they are, how they like to work
+memory/members/<slug>/MEMORY.md       #   their index
+```
+
+There is no second store and no second bucket: a workspace is one filesystem, and the tenant's bucket is still
+the isolation boundary. What separates members is the path **plus the layer that refuses to serve another
+member's subtree** — `MemberScopedWorkspaceFs`, a per-request decorator around the `WorkspaceFs` port
+(`FsService.forMember(slug)`; `memberFs(deps.fsService, principal)` in `apps/api`). A path convention alone
+would be a label rather than a scope, because `list_files`, `search_files` and the web tree all walk the same
+tree.
+
+It is a port decorator rather than a check in each service method for the same reason the revision ledger and
+the memory secret guard are: every read `FsService` performs reaches storage through that object, so `search`,
+`usage` and `clear` — built out of `list` and `read` — are scoped without anyone remembering to scope them, and
+so is the method someone adds next year. The one thing it cannot cover is the revision surfaces, which read the
+ledger instead of storage, so `history` / `readRevision` / `diffRevisions` carry an explicit guard.
+
+Rules that hold at every door:
+
+- **Absence is NOT FOUND, never FORBIDDEN.** "You may not read this" still confirms the file exists, and what a
+  member wrote privately includes the fact that they wrote it. Same rule the private-team reads follow.
+- **Listing `memory/members` shows the viewer their own directory and nothing else** — a name alone already says
+  who has memory here.
+- **A recursive delete from ABOVE the member areas is refused** (`memory/`, the tree root): the scope must not be
+  walkable through a parent. `DELETE /fs` (the admin "empty the filesystem" action) deliberately uses the
+  UNSCOPED service — emptying a workspace has to mean emptying it.
+- **A caller who is nobody in particular** (an unattributed job, a scheduled agent) sees the shared tree and **no**
+  member area. Forgetting to pass an identity must hide memory, not expose it.
+- The slug is the subject when the subject is already a legal path segment (the Keycloak-uuid case, which keeps
+  the tree readable) and a sanitized name plus a digest otherwise — sanitizing alone would map two distinct
+  members onto one directory (`memberMemorySlug`, `@everdict/contracts`).
+
+The agent reaches its member's area because it calls the control plane with **that member's own credential**
+(see `fs-actor.ts`): an agent working for a member reaches exactly their memory, which is the point — it is the
+agent that learned it — and an agent working for nobody reaches none of it. Recall injects both indexes each
+turn, and the turn-end extractor files a `member`-type memory (who they are, how they work) in the member's area
+while everything else stays shared. The recall preamble and the turn-end extractor live in `apps/agent/src/{chat,memory-extraction}.ts`.
+
 ## Skill + knowledge content lives ON the filesystem (content-projection)
 
 `application-control/src/fs/content-projection.ts` — the SSOT layout:

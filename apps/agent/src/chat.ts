@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   type AgentEvent,
   type ChatMessage,
@@ -22,6 +23,8 @@ import {
   type AnalysisArtifactRecord,
   NotFoundError,
   type TraceSpan,
+  memberMemoryDirectory,
+  memberMemorySlug,
   traceIdForRun,
 } from "@everdict/contracts";
 import type { LlmTransport, ReasoningCarrier } from "@everdict/llm";
@@ -168,7 +171,7 @@ function withAges(index: string, ages: Map<string, number>): string {
 // invisible no matter how good it is — and we KNOW how they get there: the turn-end extractor publishes the body
 // first and then the index, so a lost index race (or a failed second write) leaves exactly this. Nothing noticed
 // until now, which is what made "the consolidation pass reconciles it" a comment rather than a behaviour.
-function unlistedMemories(index: string, files: readonly string[]): string | undefined {
+function unlistedMemories(index: string, files: readonly string[], directory: string): string | undefined {
   const listed = new Set<string>();
   for (const m of index.matchAll(/\]\(([^)]+\.md)\)/g)) {
     const target = m[1];
@@ -178,11 +181,11 @@ function unlistedMemories(index: string, files: readonly string[]): string | und
   if (orphans.length === 0) return undefined;
   const shown = orphans.slice(0, 5).join(", ");
   const rest = orphans.length > 5 ? `, and ${orphans.length - 5} more` : "";
-  return `NOTE: ${orphans.length} file(s) under ${MEMORY_DIRECTORY}/ are not listed in the index (${shown}${rest}) — they were saved but their index line never landed, so nobody can recall them. Read each one and either add its line to ${MEMORY_INDEX_PATH} or delete it if it no longer holds.`;
+  return `NOTE: ${orphans.length} file(s) under ${directory}/ are not listed in the index (${shown}${rest}) — they were saved but their index line never landed, so nobody can recall them. Read each one and either add its line to ${directory}/${MEMORY_INDEX_FILE} or delete it if it no longer holds.`;
 }
 
 // Truncate on BOTH caps, cutting at a line boundary, and report which cap fired with its own remedy.
-function capIndex(content: string): { index: string; warning?: string } {
+function capIndex(content: string, indexPath: string): { index: string; warning?: string } {
   const lines = content.split("\n");
   const overLines = lines.length > MAX_MEMORY_INDEX_LINES;
   const overChars = content.length > MAX_MEMORY_INDEX_CHARS;
@@ -207,55 +210,99 @@ function capIndex(content: string): { index: string; warning?: string } {
     : `${content.length} characters (limit: ${MAX_MEMORY_INDEX_CHARS}) — the entries are too long`;
   return {
     index: kept.join("\n"),
-    warning: `WARNING: ${MEMORY_INDEX_PATH} is ${reason}. Only part of it was loaded, so some memories are invisible to you right now. Keep each index entry to ONE line under ~150 characters and move detail into its topic file; merge or delete memories that overlap (the memory_consolidation skill does this pass).`,
+    warning: `WARNING: ${indexPath} is ${reason}. Only part of it was loaded, so some memories are invisible to you right now. Keep each index entry to ONE line under ~150 characters and move detail into its topic file; merge or delete memories that overlap (the memory_consolidation skill does this pass).`,
   };
 }
 
-export async function workspaceMemoryPreamble(call: McpInvoke, now = Date.now()): Promise<string | undefined> {
-  try {
-    const r = await call("get_file", { path: MEMORY_INDEX_PATH });
-    if (r.isError) return undefined; // no memory yet (NOT_FOUND) or an unreachable fs — recall nothing
-    const file = JSON.parse(r.content) as { content?: unknown; encoding?: unknown; entry?: { modifiedAt?: unknown } };
-    if (typeof file.content !== "string" || file.content.trim().length === 0 || file.encoding === "base64")
-      return undefined;
-    const { index: capped, warning } = capIndex(file.content);
+// The acting member's own memory directory. Derived from the SAME rule the control plane scopes by
+// (memberMemorySlug), so the agent asks for the exact path the filesystem will serve it — and if it ever asked
+// for someone else's, it would simply get NOT FOUND.
+function memberMemoryDirectoryFor(subject: string): string {
+  return memberMemoryDirectory(memberMemorySlug(subject, (input) => createHash("sha256").update(input).digest("hex")));
+}
 
-    // One directory read serves two purposes, and neither is a precondition for recall: per-entry ages, and the
-    // files that exist but no index line points at. Best-effort — an unreachable listing just means neither.
-    const ages = new Map<string, number>();
-    const files: string[] = [];
-    try {
-      const listed = await call("list_files", { path: MEMORY_DIRECTORY });
-      if (!listed.isError) {
-        for (const e of JSON.parse(listed.content) as { name?: unknown; modifiedAt?: unknown }[]) {
-          if (typeof e.name !== "string") continue;
-          files.push(e.name);
-          if (typeof e.modifiedAt !== "string") continue;
-          const days = daysAgo(e.modifiedAt, now);
-          if (days !== undefined) ages.set(e.name, days);
-        }
+// ONE memory scope, rendered: its index (capped, aged) plus whatever the directory read has to report. Returns
+// undefined when the scope holds nothing — a member who has never been written about costs no tokens.
+async function memoryScopeBlock(
+  call: McpInvoke,
+  directory: string,
+  heading: string,
+  now: number,
+): Promise<string | undefined> {
+  const indexPath = `${directory}/${MEMORY_INDEX_FILE}`;
+  const r = await call("get_file", { path: indexPath });
+  if (r.isError) return undefined; // nothing here yet (NOT_FOUND), or an unreachable fs — recall nothing
+  const file = JSON.parse(r.content) as { content?: unknown; encoding?: unknown };
+  if (typeof file.content !== "string" || file.content.trim().length === 0 || file.encoding === "base64")
+    return undefined;
+  const { index: capped, warning } = capIndex(file.content, indexPath);
+
+  // One directory read serves two purposes, and neither is a precondition for recall: per-entry ages, and the
+  // files that exist but no index line points at. Best-effort — an unreachable listing just means neither.
+  const ages = new Map<string, number>();
+  const files: string[] = [];
+  try {
+    const listed = await call("list_files", { path: directory });
+    if (!listed.isError) {
+      for (const e of JSON.parse(listed.content) as { name?: unknown; modifiedAt?: unknown }[]) {
+        if (typeof e.name !== "string") continue;
+        files.push(e.name);
+        if (typeof e.modifiedAt !== "string") continue;
+        const days = daysAgo(e.modifiedAt, now);
+        if (days !== undefined) ages.set(e.name, days);
       }
-    } catch {
-      // no ages and no orphan check this turn — the index still recalls
     }
-    // Judged against the FULL index, never the capped one: a truncated index would otherwise report everything
-    // past the cut as unlisted.
-    const orphans = unlistedMemories(file.content, files);
+  } catch {
+    // no ages and no orphan check this turn — the index still recalls
+  }
+  // Judged against the FULL index, never the capped one: a truncated index would otherwise report everything
+  // past the cut as unlisted.
+  const orphans = unlistedMemories(file.content, files, directory);
+  return [
+    heading,
+    "",
+    withAges(capped, ages),
+    ...(warning ? ["", warning] : []),
+    ...(orphans ? ["", orphans] : []),
+  ].join("\n");
+}
+
+// Recall, for both scopes a workspace has. `memberDirectory` is the acting member's own area — the control plane
+// serves it only to them (MemberScopedWorkspaceFs), so this is a scope, not a naming convention. The two reads run
+// together: they are independent, and the member should not pay two round trips for what is one recall.
+export async function workspaceMemoryPreamble(
+  call: McpInvoke,
+  now = Date.now(),
+  memberDirectory?: string,
+): Promise<string | undefined> {
+  try {
+    const [shared, mine] = await Promise.all([
+      memoryScopeBlock(
+        call,
+        MEMORY_DIRECTORY,
+        `Workspace memory index (${MEMORY_INDEX_PATH} — what agents learned in PAST conversations; shared by the whole workspace):`,
+        now,
+      ),
+      memberDirectory === undefined
+        ? Promise.resolve(undefined)
+        : memoryScopeBlock(
+            call,
+            memberDirectory,
+            `This member's own memory index (${memberDirectory}/${MEMORY_INDEX_FILE} — about THIS member; only they and the agents acting for them can read it):`,
+            now,
+          ),
+    ]);
+    if (shared === undefined && mine === undefined) return undefined;
 
     const discipline = [
-      `Read a listed memory's body with get_file (${MEMORY_DIRECTORY}/<file>) when it bears on THIS task, or grep across memories with search_files (path: ${MEMORY_DIRECTORY}).`,
+      "Read a listed memory's body with get_file when it bears on THIS task, or grep across memories with search_files.",
       "The age beside each entry is when it was last written — a memory is a claim about the workspace AS IT WAS THEN, so verify an old one before acting on it.",
-      "If the user asks you to ignore memory, proceed as if this index were empty.",
+      memberDirectory === undefined
+        ? `Save a new memory under ${MEMORY_DIRECTORY}/.`
+        : `Save what is true of the WORKSPACE under ${MEMORY_DIRECTORY}/, and what is true of THIS MEMBER (their role, preferences, working habits — type: member) under ${memberDirectory}/. Putting a person's preferences in the shared area publishes them to everyone.`,
+      "If the user asks you to ignore memory, proceed as if these indexes were empty.",
     ].join(" ");
-    return [
-      `Workspace memory index (${MEMORY_INDEX_PATH} — what agents learned in PAST conversations; persists across conversations):`,
-      "",
-      withAges(capped, ages),
-      ...(warning ? ["", warning] : []),
-      ...(orphans ? ["", orphans] : []),
-      "",
-      discipline,
-    ].join("\n");
+    return [...(shared ? [shared] : []), ...(mine ? [mine] : []), "", discipline].join("\n\n");
   } catch {
     return undefined; // best-effort — memory must never fail a turn
   }
@@ -954,7 +1001,7 @@ export async function runChat(
     // Workspace auto-memory: the memory/ index rides EVERY turn (one best-effort fs read) — unlike knowledge
     // recall it is not gated on references, because memory is exactly the context a plain question can't anchor.
     if (tools.call) {
-      const memory = await workspaceMemoryPreamble(tools.call);
+      const memory = await workspaceMemoryPreamble(tools.call, Date.now(), memberMemoryDirectoryFor(principal.subject));
       if (memory) preambles.push(memory);
     }
     if (references && references.length > 0 && tools.call) {
@@ -1215,6 +1262,7 @@ export async function runChat(
           call: tools.call,
           extract: buildMemoryExtractor(small.transport, small.model),
           turn: [{ role: "user", content: userText }, ...recordsToHistory(producedRecords)],
+          memberDirectory: memberMemoryDirectoryFor(principal.subject),
         });
         deps.metrics?.counter("everdict_agent_memory_extraction_total", "Turn-end auto memory extraction outcomes", {
           outcome,

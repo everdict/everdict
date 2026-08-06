@@ -358,6 +358,57 @@ describe("workspace memory recall", () => {
     expect(preamble).not.toContain("_(");
   });
 
+  it("recalls BOTH scopes, and says which one is the member's own", async () => {
+    // Given a workspace index and this member's own index
+    const asked: string[] = [];
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const path = String(args.path ?? "");
+      asked.push(`${name} ${path}`);
+      if (name === "list_files") return listing([]);
+      if (path === "memory/MEMORY.md") return indexFile("- [Cadence](cadence.md) — Friday reports");
+      if (path === "memory/members/u-1/MEMORY.md") return indexFile("- [Tone](tone.md) — terse answers, no preamble");
+      return { content: "NOT_FOUND", isError: true };
+    };
+    const preamble = await workspaceMemoryPreamble(call, Date.parse("2026-08-06T00:00:00.000Z"), "memory/members/u-1");
+    // Then both indexes ride the turn, each labelled with who can read it
+    expect(preamble).toContain("shared by the whole workspace");
+    expect(preamble).toContain("Cadence");
+    expect(preamble).toContain("only they and the agents acting for them can read it");
+    expect(preamble).toContain("Tone");
+    // …and the write-side rule names the boundary, since that is the decision the agent gets wrong
+    expect(preamble).toContain("Putting a person's preferences in the shared area publishes them to everyone");
+  });
+
+  it("still recalls the workspace when the member has no memory yet (and vice versa)", async () => {
+    const onlyShared = async (name: string, args: Record<string, unknown>) =>
+      name === "list_files"
+        ? listing([])
+        : String(args.path) === "memory/MEMORY.md"
+          ? indexFile("- [Cadence](cadence.md) — Friday reports")
+          : { content: "NOT_FOUND", isError: true };
+    const a = await workspaceMemoryPreamble(onlyShared, Date.now(), "memory/members/u-1");
+    expect(a).toContain("Cadence");
+    expect(a).not.toContain("own memory index");
+
+    const onlyMine = async (name: string, args: Record<string, unknown>) =>
+      name === "list_files"
+        ? listing([])
+        : String(args.path) === "memory/members/u-1/MEMORY.md"
+          ? indexFile("- [Tone](tone.md) — terse answers")
+          : { content: "NOT_FOUND", isError: true };
+    const b = await workspaceMemoryPreamble(onlyMine, Date.now(), "memory/members/u-1");
+    expect(b).toContain("Tone");
+    expect(b).not.toContain("Workspace memory index");
+    // Neither scope holding anything costs no tokens at all
+    expect(
+      await workspaceMemoryPreamble(
+        async () => ({ content: "NOT_FOUND", isError: true }),
+        Date.now(),
+        "memory/members/u-1",
+      ),
+    ).toBeUndefined();
+  });
+
   it("recalls nothing when the workspace has no memory yet, an fs error, or a binary index", async () => {
     expect(await workspaceMemoryPreamble(async () => ({ content: "NOT_FOUND", isError: true }))).toBeUndefined();
     expect(

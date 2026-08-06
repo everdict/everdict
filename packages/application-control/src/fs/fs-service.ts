@@ -7,11 +7,13 @@ import {
   NotFoundError,
   guessFsContentType,
   isFsTextContentType,
+  memberMemoryOwnerOf,
 } from "@everdict/contracts";
 import type { FsRevisionDiff, FsWriteConflict } from "@everdict/contracts/wire";
 import { diffFileText, mergeThreeWay } from "@everdict/domain";
 import type { FsRevisionStore } from "../ports/fs-revision-store.js";
 import type { WorkspaceFs } from "../ports/workspace-fs.js";
+import { MemberScopedWorkspaceFs } from "./member-scoped-workspace-fs.js";
 
 export interface WriteFsFileInput {
   path: string;
@@ -93,7 +95,26 @@ export class FsService {
   constructor(
     private readonly fs: WorkspaceFs,
     private readonly revisions?: FsRevisionStore,
+    // Who is looking. Set only through forMember(); the bare service is the INTERNAL view (content projections,
+    // task outputs, operator paths) and sees the whole tree.
+    private readonly viewer?: string,
   ) {}
+
+  // The same filesystem as one member sees it: the shared tree, plus their own memory area and no one else's.
+  // Every member- or agent-facing surface goes through this, and passing nobody (an unattributed job) yields a
+  // view with NO member area rather than one with all of them — forgetting an identity must hide, not expose.
+  forMember(slug: string | undefined): FsService {
+    return new FsService(new MemberScopedWorkspaceFs(this.fs, slug), this.revisions, slug);
+  }
+
+  // The revision surfaces read the LEDGER, not the filesystem, so they are the one thing the scoped port cannot
+  // cover — the history of another member's memory would otherwise be readable (author, message, size, and via
+  // readRevision the bytes themselves).
+  private requireVisible(path: string): void {
+    const owner = memberMemoryOwnerOf(path);
+    if (owner !== undefined && owner !== this.viewer)
+      throw new NotFoundError("NOT_FOUND", { path }, `'${path}' does not exist`);
+  }
 
   list(tenant: string, path?: string): Promise<FsEntry[]> {
     return this.fs.list(tenant, path ?? "");
@@ -161,6 +182,7 @@ export class FsService {
   // backwards from a revision the caller already has (the revision number IS the cursor), so a file with
   // thousands of revisions stays walkable instead of stopping at the first page.
   async history(tenant: string, path: string, limit?: number, before?: number): Promise<FsRevision[]> {
+    this.requireVisible(path);
     if (!this.revisions) return [];
     return this.revisions.list(tenant, path, {
       ...(limit !== undefined ? { limit } : {}),
@@ -172,6 +194,7 @@ export class FsService {
   // to the live file, which is the comparison a member actually wants ("what did this revision change from what
   // I see now"). Binary or over-sized content comes back as `truncated`, never as a fabricated text diff.
   async diffRevisions(tenant: string, path: string, from: number, to?: number): Promise<FsRevisionDiff> {
+    this.requireVisible(path);
     const before = await this.readRevision(tenant, path, from);
     const after = to !== undefined ? await this.readRevision(tenant, path, to) : await this.readFile(tenant, path);
     const toRevision = after.entry.revision ?? to ?? 0;
@@ -184,6 +207,7 @@ export class FsService {
 
   // One past revision's content, for previewing or diffing it against the live file.
   async readRevision(tenant: string, path: string, revision: number): Promise<FsFileContent> {
+    this.requireVisible(path);
     const blob = await this.fs.readRevisionBlob(tenant, path, revision);
     if (!blob) {
       throw new NotFoundError("NOT_FOUND", { path, revision }, `'${path}' has no revision ${revision}`);

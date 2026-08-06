@@ -82,6 +82,77 @@ describe("maintainMemoryExtraction — the turn-end safety net", () => {
     expect(index?.content).toContain("- [Staging cluster address](staging-cluster-address.md)");
   });
 
+  it("files a MEMBER memory in that member's own area, index and body together", async () => {
+    // Given a decision about the person in the conversation, and an existing personal index at revision 7
+    const seen: string[] = [];
+    const writes: Array<{ path: string; content: string; base_revision?: number }> = [];
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const path = String(args.path);
+      if (name === "get_file") {
+        seen.push(path);
+        if (path === "memory/members/u-1/MEMORY.md")
+          return {
+            content: JSON.stringify({
+              entry: { path, revision: 7 },
+              content: "# My Memory\n\n- [Tone](tone.md) — terse\n",
+              encoding: "utf8",
+            }),
+            isError: false,
+          };
+        return {
+          content: JSON.stringify({
+            entry: { path, revision: 3 },
+            content: "# Workspace Memory\n\n- [Old](old.md) — old\n",
+            encoding: "utf8",
+          }),
+          isError: false,
+        };
+      }
+      writes.push({
+        path,
+        content: String(args.content),
+        ...(typeof args.base_revision === "number" ? { base_revision: args.base_revision } : {}),
+      });
+      return { content: JSON.stringify({ path }), isError: false };
+    };
+    const decision = JSON.stringify({
+      save: true,
+      slug: "review-style",
+      type: "member",
+      title: "Review style",
+      description: "They want the diff first and the prose second.",
+      hook: "diff first, prose second",
+      body: "They want the diff first and the prose second.",
+    });
+    // When the extraction runs for a member who has their own area
+    const outcome = await maintainMemoryExtraction({
+      call,
+      extract: async () => decision,
+      turn: LONG_TURN,
+      memberDirectory: "memory/members/u-1",
+    });
+    // Then BOTH the body and the index line land in that member's area — never split across scopes
+    expect(outcome).toBe("saved");
+    expect(writes.map((w) => w.path)).toEqual(["memory/members/u-1/review-style.md", "memory/members/u-1/MEMORY.md"]);
+    // …against THEIR index's revision, not the shared index's (that lock belongs to a different file)
+    expect(writes[1]?.base_revision).toBe(7);
+    expect(writes[1]?.content).toContain("- [Tone](tone.md)");
+    expect(seen).toContain("memory/members/u-1/MEMORY.md");
+  });
+
+  it("keeps everything that is NOT about the member in the shared area", async () => {
+    // Given the same member area, but a decision about the workspace
+    const fs = fakeFs({ index: { content: "# Workspace Memory\n", revision: 1 } });
+    const outcome = await maintainMemoryExtraction({
+      call: fs.call,
+      extract: async () => SAVE_DECISION, // type: reference
+      turn: LONG_TURN,
+      memberDirectory: "memory/members/u-1",
+    });
+    expect(outcome).toBe("saved");
+    expect(fs.writes.map((w) => w.path)).toEqual(["memory/staging-cluster-address.md", "memory/MEMORY.md"]);
+  });
+
   it("creates the index (with its header) when the workspace has no memory yet", async () => {
     const fs = fakeFs();
     const outcome = await maintainMemoryExtraction({

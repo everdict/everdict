@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 import { fsActorFor } from "./fs-actor.js";
+import { memberFs } from "./member-scope.js";
 
 // Workspace-filesystem MCP tools — the MCP twin of fs.routes.ts. The shared, workspace-isolated file tree agents
 // use to persist task outputs and artifacts as REAL files (reports, extracted data, generated configs) instead of
@@ -11,7 +12,10 @@ import { fsActorFor } from "./fs-actor.js";
 export function registerFsTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
   if (!deps.fsService) return;
-  const fs = deps.fsService;
+  // The agent sees the filesystem as the MEMBER it is acting for does — its own credential IS theirs — so
+  // list_files/search_files/get_file reach that member's memory and no other member's. One line, because every
+  // tool below reads through this handle.
+  const fs = memberFs(deps.fsService, principal);
   // Every publish this session makes is attributed to the AGENT (with its conversation) acting for the member —
   // the same authorship the web writes, so one history explains both kinds of author.
   const actor = fsActorFor(principal, ctx.agent);

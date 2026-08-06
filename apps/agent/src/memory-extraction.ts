@@ -131,6 +131,10 @@ export async function maintainMemoryExtraction(opts: {
   call: McpInvoke;
   extract: (indexContent: string, turnTranscript: string) => Promise<string>;
   turn: ChatMessage[];
+  // The acting member's own memory area. A `member` memory — who they are, how they like to work — lands there
+  // instead of the shared area, because publishing one person's preferences to the whole workspace is a
+  // different act from recording what the workspace learned. Absent (an unattributed job) = shared only.
+  memberDirectory?: string;
 }): Promise<MemoryExtractionOutcome> {
   try {
     const transcript = renderTurn(opts.turn);
@@ -149,11 +153,32 @@ export async function maintainMemoryExtraction(opts: {
     const decision = parseDecision(await opts.extract(indexContent, transcript));
     if (!decision) return "skipped";
 
+    // WHERE it lands. A `member` memory is about the person in this conversation, so it goes to their own area
+    // when they have one; everything else is what the workspace learned and stays shared. The scope decides the
+    // whole path pair — body and index line must never end up in different areas.
+    const personal = decision.type === "member" && opts.memberDirectory !== undefined;
+    const directory = personal && opts.memberDirectory !== undefined ? opts.memberDirectory : MEMORY_DIRECTORY;
+    const indexPath = `${directory}/${MEMORY_INDEX_FILE}`;
+    let scopeIndex = indexContent;
+    let scopeIndexRevision = indexRevision;
+    if (personal) {
+      // The member's index is a different file with its own revision — re-read it rather than writing the shared
+      // index's revision number onto it (which would either fail the lock or clobber whatever is there).
+      scopeIndex = "";
+      scopeIndexRevision = undefined;
+      const mine = await opts.call("get_file", { path: indexPath });
+      if (!mine.isError) {
+        const file = JSON.parse(mine.content) as { content?: unknown; entry?: { revision?: unknown } };
+        if (typeof file.content === "string") scopeIndex = file.content;
+        if (typeof file.entry?.revision === "number") scopeIndexRevision = file.entry.revision;
+      }
+    }
+
     // Publish the topic file first (base_revision 0 = "I expect to create this"): a slug that already exists is
     // someone else's memory — skip rather than overwrite, and leave the index alone.
     const bodyFile = `---\nname: ${decision.slug}\ndescription: ${decision.description}\ntype: ${decision.type}\n---\n\n${decision.body}\n`;
     const wrote = await opts.call("write_file", {
-      path: `${MEMORY_DIRECTORY}/${decision.slug}.md`,
+      path: `${directory}/${decision.slug}.md`,
       content: bodyFile,
       base_revision: 0,
       message: "auto-extracted at turn end",
@@ -162,13 +187,13 @@ export async function maintainMemoryExtraction(opts: {
 
     const line = `- [${decision.title}](${decision.slug}.md) — ${decision.hook}`;
     const nextIndex =
-      indexContent.trim().length > 0
-        ? `${indexContent.replace(/\n+$/, "")}\n${line}\n`
-        : `# Workspace Memory\n\n${line}\n`;
+      scopeIndex.trim().length > 0
+        ? `${scopeIndex.replace(/\n+$/, "")}\n${line}\n`
+        : `# ${personal ? "My Memory" : "Workspace Memory"}\n\n${line}\n`;
     const indexed = await opts.call("write_file", {
-      path: MEMORY_INDEX_PATH,
+      path: indexPath,
       content: nextIndex,
-      ...(indexRevision !== undefined ? { base_revision: indexRevision } : { base_revision: 0 }),
+      ...(scopeIndexRevision !== undefined ? { base_revision: scopeIndexRevision } : { base_revision: 0 }),
       message: "auto-extracted at turn end",
     });
     // A lost index race leaves the body published but unlisted — the consolidation pass reconciles exactly that
