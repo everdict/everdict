@@ -1352,3 +1352,76 @@ describe("SandboxSessionService — placing a session on the workspace's own run
     expect(daemonless.execs.some((c) => c.includes("base64"))).toBe(true);
   });
 });
+
+// Regression (live drill, cluster placement): a world session on a daemonless placement closed cleanly and
+// published NOTHING. teardown removes the session from the live map FIRST (so a concurrent close stays
+// idempotent) and hibernates after — and the capture used to re-read that map, finding nothing exactly when
+// hibernation matters most. The daemon path hid it: `driver.snapshot` works off the compute id, not the map.
+describe("SandboxSessionService — hibernation on a daemonless placement", () => {
+  function buildDaemonless(over: Partial<SandboxSessionServiceDeps> = {}) {
+    const daemonless = fakeDriver(); // no snapshot() — a cluster
+    const published: string[] = [];
+    const ctx = buildWorld({
+      driver: daemonless.driver,
+      publishLayerSnapshot: async (input) => {
+        published.push(input.tag);
+        return { digest: "sha256:hibernated" };
+      },
+      ...over,
+    });
+    return { ...ctx, daemonless, published };
+  }
+
+  it("captures through the handle teardown still holds — close hibernates instead of quietly publishing nothing", async () => {
+    const ctx = buildDaemonless();
+    const record = await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "reg.local:5000/acme-ns/proj:v1",
+    });
+    const closed = await ctx.service.close(creator, record.id);
+    expect(ctx.published).toEqual(["v1"]); // the capture ran AFTER the map delete and still had its compute
+    expect(closed?.session?.snapshots?.map((s) => s.version)).toEqual(["1.0.0"]);
+    const sealed = await ctx.trajectories.store.get("acme", record.id);
+    expect(sealed?.events.some((e) => e.kind === "env_action" && e.action === "session.snapshot_failed")).toBe(false);
+  });
+
+  it("expiry hibernates the same way (the sweep tears down through the same path)", async () => {
+    const ctx = buildDaemonless();
+    await ctx.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "reg.local:5000/acme-ns/proj:v1",
+      ttlSec: 60,
+    });
+    ctx.setNow("2026-07-30T01:00:00.000Z");
+    ctx.service.sweep();
+    await until(() => ctx.published.length === 1);
+  });
+
+  it("says plainly that a CRASH-orphaned session cannot be hibernated on this placement", async () => {
+    const before = buildDaemonless();
+    const record = await before.service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      world: { id: "proj" },
+      image: "reg.local:5000/acme-ns/proj:v1",
+      ttlSec: 60,
+    });
+    // A NEW process: the alloc may still be alive, but this control plane has no exec channel to it.
+    const reborn = new SandboxSessionService({
+      store: before.runStore.store,
+      driver: fakeDriver().driver,
+      images: before.images,
+      publishWorldVersion: before.publishWorldVersion,
+      publishLayerSnapshot: async () => ({ digest: "sha256:never" }),
+      now: () => "2026-07-30T01:00:00.000Z",
+    });
+    await expect(reborn.reap("acme", record.id)).resolves.toEqual({ reaped: true });
+    // The row still settles and the compute is still reclaimed — the snapshot is what is lost, and the
+    // failure is a stated limitation rather than a silent skip.
+    expect((await before.runStore.store.get(record.id))?.session?.snapshots ?? []).toEqual([]);
+  });
+});

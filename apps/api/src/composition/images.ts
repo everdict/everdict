@@ -5,11 +5,15 @@ import {
   ImageTokenService,
   InMemoryImageStore,
   ManagedImageStore,
+  type RegistryAccess,
   RegistryTokenIssuer,
   appendLayer,
+  copyImage,
   fetchManagedRegistryApi,
   fetchRegistryWriter,
   grantAsRegistryAuth,
+  remoteImageSource,
+  sourceReferenceOf,
 } from "@everdict/images";
 
 // Managed image store wiring. Entirely optional: with no endpoint or signing key configured the deployment is
@@ -26,6 +30,7 @@ export interface ManagedImages {
     world: string;
     tag: string;
     baseReference: string;
+    baseImage: string;
     layerGzip: Buffer;
     createdBy: string;
   }) => Promise<{ digest: string }>;
@@ -95,17 +100,32 @@ export function buildManagedImages(
     // rule is the isolation boundary, and a second place that spells it is a second place to get it wrong.
     publishLayerSnapshot: async (input) => {
       const repository = `${images.namespaceFor(input.tenant)}/${input.world}`;
+      const access: RegistryAccess[] = [{ type: "repository", name: repository, actions: ["pull", "push"] }];
+      // Founding a world: the base is an image somewhere else entirely (`debian:stable-slim`), and a manifest
+      // may only reference blobs its own repository holds. The daemon path hid this — a `docker commit` push
+      // uploads the base's layers along with the new one because the daemon had them locally. So copy the base
+      // in first, which is what that push was implicitly doing. Later snapshots find it already there.
+      let baseReference = input.baseReference;
+      if ((await writer.getManifest(repository, baseReference, access)) === undefined) {
+        const copied = await copyImage(
+          remoteImageSource(input.baseImage),
+          writer,
+          { repository, reference: sourceReferenceOf(input.baseImage), tag: `base-${input.tag}` },
+          access,
+        );
+        baseReference = copied.digest; // pin the base by what the TARGET registry stored
+      }
       return appendLayer(
         writer,
         {
           repository,
-          baseReference: input.baseReference,
+          baseReference,
           tag: input.tag,
           layerGzip: input.layerGzip,
           createdBy: input.createdBy,
           created: new Date().toISOString(),
         },
-        [{ type: "repository", name: repository, actions: ["pull", "push"] }],
+        access,
       );
     },
   };

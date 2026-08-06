@@ -31,3 +31,5 @@ export {
   sha256Of,
 } from "./layer-append.js";
 export { fetchRegistryWriter } from "./registry-writer.js";
+export { copyImage, type CopyImageResult, type ImageSource } from "./copy-image.js";
+export { parseImageLocation, remoteImageSource, sourceReferenceOf } from "./image-source.js";

@@ -294,6 +294,7 @@ export interface SandboxSessionServiceDeps {
     world: string;
     tag: string;
     baseReference: string;
+    baseImage: string; // the FULL ref the session booted — founding a world copies it into the world's repository
     layerGzip: Buffer;
     createdBy: string;
   }) => Promise<{ digest: string }>;
@@ -966,6 +967,8 @@ export class SandboxSessionService {
       world,
       computeId,
       actor,
+      // The compute itself — the capture path reads through it, and it must survive teardown's map delete.
+      compute: { handle: live.handle, bootImage: live.bootImage },
       ...(live.agent !== undefined ? { agent: live.agent } : {}),
       ...input,
     });
@@ -983,15 +986,15 @@ export class SandboxSessionService {
     ctx: {
       tag: string;
       publishLayer: NonNullable<SandboxSessionServiceDeps["publishLayerSnapshot"]>;
+      // The live compute, PASSED IN rather than looked up: teardown removes the session from the map before
+      // it hibernates (so a concurrent close stays idempotent), and a capture that re-read the map would find
+      // nothing exactly when hibernation matters most. A live drill found this the honest way — the cluster
+      // session closed clean and published no snapshot at all.
+      handle: ComputeHandle;
+      bootImage: string;
     },
   ): Promise<void> {
-    const live = this.sessions.get(input.runId);
-    if (!live)
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { run: input.runId },
-        "This control plane no longer holds the session, and a layer capture reads through its exec channel.",
-      );
+    const live = { handle: ctx.handle, bootImage: ctx.bootImage };
     const dir = CAPTURE_DIR;
     const limit = this.deps.maxCaptureBytes ?? DEFAULT_MAX_CAPTURE_BYTES;
     // The tar is rooted at `/` and names the directory, NOT taken from inside it. An image layer's paths are
@@ -1027,6 +1030,7 @@ export class SandboxSessionService {
       tag: ctx.tag,
       // The image the session BOOTED is the base — so a snapshot is always "this world, plus what changed".
       baseReference: baseReferenceOf(live.bootImage),
+      baseImage: live.bootImage,
       layerGzip,
       createdBy: `everdict snapshot of ${dir} (session ${input.runId})`,
     });
@@ -1042,6 +1046,9 @@ export class SandboxSessionService {
     world: string;
     computeId: string;
     actor: { subject: string; isAdmin: boolean };
+    // Present only when THIS process holds the session. The layer-capture path reads through it; the crash
+    // path (a reaper in a later process) has no exec channel and can only use a driver that can commit.
+    compute?: { handle: ComputeHandle; bootImage: string };
     agent?: SandboxAgentAttribution;
     name?: string;
     description?: string;
@@ -1075,7 +1082,13 @@ export class SandboxSessionService {
         password: grant.token,
       });
     } else if (publishLayer) {
-      await this.captureAsLayer(input, { tag, publishLayer });
+      if (!input.compute)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { run: input.runId },
+          "This session is not held by this control plane, and a registry snapshot captures through its exec channel — a crash-orphaned session on a daemonless placement cannot be hibernated.",
+        );
+      await this.captureAsLayer(input, { tag, publishLayer, ...input.compute });
     }
     // Pin the digest WITH the tag (pinDigest) so a human still reads a version off the ref. No digest →
     // the tag ref stands and the capability publish itself warns mutable-tag.
