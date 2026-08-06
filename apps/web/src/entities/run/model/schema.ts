@@ -27,6 +27,11 @@ export const scoreSchema = z.object({
   // Matches the contract's `unknown` — code judges emit structured objects, not just prose. Narrowed at render
   // via fmtScoreDetail (string as-is, else compact JSON); typing it string here rejects the whole run/scorecard.
   detail: z.unknown().optional(),
+  // Measurement status (contract: "measured" | "unmeasured" | "invalid"; absent = measured). Kept a loose string
+  // so a future status value never rejects the whole run. Non-measured rows render as "unmeasured", never as
+  // their placeholder value — see isUnmeasuredScore (shared/lib/format).
+  status: z.string().optional(),
+  reason: z.string().optional(),
 })
 export type Score = z.infer<typeof scoreSchema>
 

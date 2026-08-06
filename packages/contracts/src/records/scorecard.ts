@@ -27,6 +27,10 @@ export const MetricSummarySchema = z.object({
   // — numeric/boolean metrics leave both unset and are read via mean/passRate. `mean` stays populated but is not shown.
   distribution: z.array(z.object({ label: z.string(), count: z.number().int().nonnegative() })).optional(),
   mode: z.string().optional(),
+  // Scores of this metric that were NOT measurements (grader error / skip) — excluded from count/mean/passRate/
+  // distribution above and surfaced as their own tally so a grader outage is visible instead of shifting the mean.
+  // Present only when > 0.
+  unmeasured: z.number().int().positive().optional(),
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 

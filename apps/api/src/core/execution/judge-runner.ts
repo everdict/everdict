@@ -12,6 +12,7 @@ import type {
   ModelSpec,
   Placement,
   Score,
+  UnmeasuredReason,
 } from "@everdict/contracts";
 import { toScores } from "@everdict/contracts";
 import { modelApiKeySecretName, normalizeModelBinding } from "@everdict/domain";
@@ -31,9 +32,23 @@ export type { JudgeRunner };
 // The metric key that distinguishes multiple judges in the summary.
 const metricOf = (spec: JudgeSpec): string => `judge:${spec.id}`;
 
-// skip score — no key / no dispatch, etc. State the reason in detail so a judge the user chose doesn't silently vanish.
-function skip(spec: JudgeSpec, reason: string): Score[] {
-  return [{ graderId: spec.id, metric: metricOf(spec), value: 0, pass: undefined, detail: `skipped: ${reason}` }];
+// skip score — no key / no dispatch, etc. State the reason in detail so a judge the user chose doesn't silently
+// vanish, and stamp status "unmeasured" so the placeholder value never enters an aggregate (isMeasured gate).
+// retryable=true only when retrying AS-IS can recover (a transient error); config-shaped skips (missing secret,
+// unresolvable ref, no dispatcher) need a human change first and stay non-retryable.
+function skip(spec: JudgeSpec, reason: UnmeasuredReason, detail: string, retryable = false): Score[] {
+  return [
+    {
+      graderId: spec.id,
+      metric: metricOf(spec),
+      value: 0,
+      pass: undefined,
+      status: "unmeasured",
+      reason,
+      retryable,
+      detail: `skipped: ${detail}`,
+    },
+  ];
 }
 
 const ANTHROPIC_KEY = "ANTHROPIC_API_KEY"; // the key name looked up in the tenant SecretStore
@@ -209,7 +224,7 @@ async function runCodeJudge(
   placement?: Placement,
   submittedBy?: string,
 ): Promise<Score[]> {
-  if (!deps.dispatch) return skip(spec, "code judge dispatch not configured");
+  if (!deps.dispatch) return skip(spec, "unsupported", "code judge dispatch not configured");
   const built = buildCodeJudgeJob(spec, ctx, placement);
   const job: CaseJob = {
     evalCase: built.evalCase,
@@ -224,12 +239,17 @@ async function runCodeJudge(
   try {
     const result = await deps.dispatch(job);
     if (result.failure) {
-      return skip(spec, `code judge job failed at ${result.failure.stage}: ${result.failure.message}`);
+      return skip(
+        spec,
+        "grader_error",
+        `code judge job failed at ${result.failure.stage}: ${result.failure.message}`,
+        true,
+      );
     }
     // The wrapper job's scores ARE the code's verdict — stamp this judge's identity onto them.
     return stampCodeJudgeScores(spec, result.scores);
   } catch (err) {
-    return skip(spec, err instanceof Error ? err.message : String(err));
+    return skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true);
   }
 }
 
@@ -248,13 +268,13 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
       const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec);
-      if ("skipReason" in rubricResolution) return skip(spec, rubricResolution.skipReason);
+      if ("skipReason" in rubricResolution) return skip(spec, "unsupported", rubricResolution.skipReason);
       const { rubricText, criteria, promptTemplate } = rubricResolution.effective;
 
       // 2) Choose the transport. Skip (with a stated reason) if there's no key/dispatcher.
       let complete: JudgeCompletion;
       if (spec.kind === "harness") {
-        if (!deps.dispatch) return skip(spec, "harness judge dispatch not configured");
+        if (!deps.dispatch) return skip(spec, "unsupported", "harness judge dispatch not configured");
         const dispatch = deps.dispatch;
         const ref = spec.harness;
         const resolved = await resolveJudgeHarness(deps.harnesses, tenant, ref);
@@ -291,7 +311,11 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         try {
           secrets = await deps.secretsFor(tenant);
         } catch (err) {
-          return skip(spec, `secret decryption failed: ${err instanceof Error ? err.message : String(err)}`);
+          return skip(
+            spec,
+            "missing_secret",
+            `secret decryption failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
         // judge.model is a Model BINDING (registered id/ref | raw string). Resolve a registered Model exactly like a
         // harness does: its provider/underlying model/baseUrl/apiKeySecret + params carry the whole connection, so one
@@ -322,11 +346,12 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         } else if (explicitRef) {
           return skip(
             spec,
+            "unsupported",
             `model '${ref}${version === "latest" ? "" : `@${version}`}' is not a registered model in this workspace`,
           );
         }
         const apiKey = secrets[keyName];
-        if (!apiKey) return skip(spec, `${keyName} secret not configured`);
+        if (!apiKey) return skip(spec, "missing_secret", `${keyName} secret not configured`);
         // Same provider-native transport the agent uses (@everdict/llm) — Anthropic Messages / OpenAI, custom baseUrl
         // for an OpenAI-compatible endpoint. The OPENAI_BASE_URL secret still overrides for the openai provider.
         const baseUrl =
@@ -368,7 +393,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           };
         });
       } catch (err) {
-        return skip(spec, err instanceof Error ? err.message : String(err));
+        return skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true);
       }
     },
   };

@@ -2394,6 +2394,7 @@
     "paginationPage": "Page {page} / {total}"
   },
   "runsPage": {
+    "scoreUnmeasured": "unmeasured",
     "title": "Runs",
     "subtitle": "Every run and scorecard batch in this workspace.",
     "description": "{runs, plural, one {# run} other {# runs}}",
@@ -2712,6 +2713,7 @@
     "deleteSelected": "Delete"
   },
   "scorecardsPage": {
+    "scoreUnmeasured": "unmeasured",
     "title": "Scorecards",
     "description": "Evaluate a harness against a benchmark in one run and collect the scores.",
     "analyze": "Analyze",

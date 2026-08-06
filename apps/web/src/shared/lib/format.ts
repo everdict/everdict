@@ -28,6 +28,15 @@ export function fmtScore(
   return '–'
 }
 
+// A score that is NOT a measurement (grader error / judge skip): `status` stamp on new rows, the detail
+// sentinel on rows persisted before the field existed. Mirror of the contracts `isMeasured` gate — the web's
+// @everdict/contracts dependency is type-only, so the rule is restated locally. Non-measured rows must render
+// as "unmeasured", never as their placeholder value (a dead grader is not a $0.00).
+export function isUnmeasuredScore(s: { status?: string; detail?: unknown }): boolean {
+  if (s.status !== undefined) return s.status !== 'measured'
+  return typeof s.detail === 'string' && /^(\[grader-error\]|skipped: )/.test(s.detail)
+}
+
 // Score.detail is `unknown` on the wire — graders/judges may emit prose OR a structured verdict object.
 // Prose renders as-is; anything else degrades to compact JSON so a structured detail never breaks the page.
 export function fmtScoreDetail(detail: unknown): string | undefined {

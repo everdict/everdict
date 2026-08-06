@@ -9,6 +9,8 @@ export {
   caseVerdict,
   diffScorecards,
   type MetricSummary,
+  type RetryableUnmeasured,
+  retryableUnmeasured,
   type ScorecardDiff,
   scorecardPassRate,
   summarizeScorecard,

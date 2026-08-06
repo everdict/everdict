@@ -1,6 +1,12 @@
-import type { CaseResult, Scorecard } from "@everdict/contracts";
+import type { CaseResult, Score, Scorecard } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { caseVerdict, diffScorecards, scorecardPassRate, summarizeScorecard } from "./scorecard.js";
+import {
+  caseVerdict,
+  diffScorecards,
+  retryableUnmeasured,
+  scorecardPassRate,
+  summarizeScorecard,
+} from "./scorecard.js";
 
 // Restored from the deleted packages/suite/src/suite.test.ts (P4 sweep B) — the runSuite describes moved to
 // @everdict/application-control, but these pure-aggregation pins were dropped in the sweep. They pin the
@@ -87,6 +93,138 @@ describe("summarizeScorecard", () => {
       { label: "wrong", count: 1 },
     ]);
     expect(m?.mode).toBe("correct");
+  });
+});
+
+describe("measurement status — an unmeasured score never enters an aggregate", () => {
+  const result = (caseId: string, scores: Score[]): CaseResult => ({
+    caseId,
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+    scores,
+  });
+  const measured = (metric: string, value: number, pass?: boolean): Score => ({
+    graderId: metric,
+    metric,
+    value,
+    ...(pass !== undefined ? { pass } : {}),
+  });
+
+  it("a grader error leaves the metric mean identical to a scorecard without that score (the core invariant)", () => {
+    // Given: two cases measured at 0.8/0.6, plus one case whose grader DIED (unmeasured placeholder value 0)
+    const clean: Scorecard = {
+      suiteId: "s",
+      harness: "h@1",
+      results: [result("a", [measured("cost_usd", 0.8)]), result("b", [measured("cost_usd", 0.6)])],
+    };
+    const withOutage: Scorecard = {
+      ...clean,
+      results: [
+        ...clean.results,
+        result("c", [
+          {
+            graderId: "cost",
+            metric: "cost_usd",
+            value: 0,
+            status: "unmeasured",
+            reason: "grader_error",
+            retryable: true,
+            detail: "[grader-error] boom",
+          },
+        ]),
+      ],
+    };
+    // Then: the outage shifts NOTHING — mean/count equal the clean control; it shows up only as the unmeasured tally
+    const cleanMetric = summarizeScorecard(clean).find((m) => m.metric === "cost_usd");
+    const outageMetric = summarizeScorecard(withOutage).find((m) => m.metric === "cost_usd");
+    expect(outageMetric?.mean).toBe(cleanMetric?.mean);
+    expect(outageMetric?.count).toBe(cleanMetric?.count);
+    expect(outageMetric?.unmeasured).toBe(1);
+    expect(cleanMetric?.unmeasured).toBeUndefined();
+  });
+
+  it("legacy rows without `status` are normalized at read: [grader-error]/skipped: sentinels stay out of the mean", () => {
+    // Rows persisted before the status field marked the two skip producers in detail prose only.
+    const sc: Scorecard = {
+      suiteId: "s",
+      harness: "h@1",
+      results: [
+        result("a", [measured("judge:quality", 0.9, true)]),
+        result("b", [{ graderId: "judge", metric: "judge:quality", value: 0, detail: "[grader-error] 503" }]),
+        result("c", [{ graderId: "q", metric: "judge:quality", value: 0, detail: "skipped: no ANTHROPIC_API_KEY" }]),
+      ],
+    };
+    const m = summarizeScorecard(sc).find((s) => s.metric === "judge:quality");
+    expect(m?.mean).toBe(0.9);
+    expect(m?.count).toBe(1);
+    expect(m?.unmeasured).toBe(2);
+  });
+
+  it("an unmeasured score cannot decide a case verdict even if it carries a pass flag", () => {
+    expect(
+      caseVerdict({
+        scores: [
+          { graderId: "j", metric: "judge:q", value: 0, pass: false, status: "unmeasured", reason: "grader_error" },
+          { graderId: "custom", metric: "custom_check", value: 1, pass: true },
+        ],
+      }),
+    ).toBe(true); // the hostile unmeasured pass:false is ignored; the real measurement decides
+  });
+
+  it("diff never produces a delta or pass transition from an unmeasured placeholder", () => {
+    const base: Scorecard = {
+      suiteId: "s",
+      harness: "h@1",
+      results: [result("a", [measured("tests_pass", 1, true)])],
+    };
+    const cand: Scorecard = {
+      suiteId: "s",
+      harness: "h@2",
+      results: [
+        result("a", [
+          {
+            graderId: "tests-pass",
+            metric: "tests_pass",
+            value: 0,
+            pass: false,
+            status: "unmeasured",
+            reason: "grader_error",
+          },
+        ]),
+      ],
+    };
+    const diff = diffScorecards(base, cand);
+    expect(diff.regressions).toEqual([]); // a dead grader is not a regression
+  });
+
+  it("retryableUnmeasured lists exactly the transient failures as a re-score worklist", () => {
+    const sc: Scorecard = {
+      suiteId: "s",
+      harness: "h@1",
+      results: [
+        result("a", [
+          {
+            graderId: "judge",
+            metric: "judge:q",
+            value: 0,
+            status: "unmeasured",
+            reason: "grader_error",
+            retryable: true,
+          },
+          {
+            graderId: "j2",
+            metric: "judge:r",
+            value: 0,
+            status: "unmeasured",
+            reason: "missing_secret",
+            retryable: false,
+          },
+          measured("tests_pass", 1, true),
+        ]),
+      ],
+    };
+    expect(retryableUnmeasured(sc)).toEqual([{ caseId: "a", graderId: "judge", metric: "judge:q" }]);
   });
 });
 

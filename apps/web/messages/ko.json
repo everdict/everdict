@@ -2394,6 +2394,7 @@
     "paginationPage": "{page} / {total} 페이지"
   },
   "runsPage": {
+    "scoreUnmeasured": "미측정",
     "title": "실행",
     "subtitle": "이 워크스페이스의 모든 실행과 스코어카드 배치.",
     "description": "실행 {runs}건",
@@ -2712,6 +2713,7 @@
     "deleteSelected": "삭제"
   },
   "scorecardsPage": {
+    "scoreUnmeasured": "미측정",
     "title": "스코어카드",
     "description": "벤치마크로 하니스를 한 번에 평가하고 점수를 모아 봐요.",
     "analyze": "분석",

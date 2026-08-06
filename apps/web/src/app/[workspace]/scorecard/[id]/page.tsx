@@ -32,6 +32,7 @@ import {
   fmtTimeAgo,
   groupMetricRows,
   HEALTH_TEXT,
+  isUnmeasuredScore,
   rateHealth,
 } from '@/shared/lib/format'
 import { resolveTemporalUiBase } from '@/shared/lib/temporal-ui'
@@ -1000,7 +1001,8 @@ export default async function ScorecardDetailPage({
                               title={g.row.metric}
                               tone={scoreTone(g.row.pass)}
                             >
-                              {fmtMetricLabel(g.row.metric, caseMetrics)} {scoreBadgeValue(g.row)}
+                              {fmtMetricLabel(g.row.metric, caseMetrics)}{' '}
+                              {isUnmeasuredScore(g.row) ? t('scoreUnmeasured') : scoreBadgeValue(g.row)}
                             </Badge>
                           ) : (
                             <span
@@ -1008,7 +1010,8 @@ export default async function ScorecardDetailPage({
                               className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border/60 bg-muted/20 p-0.5"
                             >
                               <Badge title={g.row.metric} tone={scoreTone(g.row.pass)}>
-                                {fmtMetricLabel(g.row.metric, caseMetrics)} {scoreBadgeValue(g.row)}
+                                {fmtMetricLabel(g.row.metric, caseMetrics)}{' '}
+                                {isUnmeasuredScore(g.row) ? t('scoreUnmeasured') : scoreBadgeValue(g.row)}
                               </Badge>
                               {g.criteria.map((c) => (
                                 <Badge
@@ -1020,7 +1023,7 @@ export default async function ScorecardDetailPage({
                                   {c.parsed.kind === 'judge-criterion'
                                     ? c.parsed.criterionId
                                     : c.row.metric}{' '}
-                                  {scoreBadgeValue(c.row)}
+                                  {isUnmeasuredScore(c.row) ? t('scoreUnmeasured') : scoreBadgeValue(c.row)}
                                 </Badge>
                               ))}
                             </span>

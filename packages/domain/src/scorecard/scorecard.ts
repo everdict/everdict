@@ -1,4 +1,4 @@
-import type { CaseResult, Score, Scorecard } from "@everdict/contracts";
+import { type CaseResult, type Score, type Scorecard, isMeasured, measuredScores } from "@everdict/contracts";
 
 // Case pass verdict — authority-first. Decided in the order ground-truth (real-state verification) > objective comparison > model opinion.
 // The VLM/LLM judge is *auxiliary*: if an objective/ground-truth grader exists, the judge cannot override it (e.g. OSWorld file save —
@@ -10,7 +10,10 @@ const OBJECTIVE_METRICS = ["answer_match", "url_matches", "dom_contains"]; // de
 // explain WHERE a verdict came from and never decide the case themselves.
 const JUDGE_VERDICT_METRIC_RE = /^judge(?::[^:]+)?$/;
 export function caseVerdict(result: Pick<CaseResult, "scores">): boolean | undefined {
-  const byMetric = new Map(result.scores.map((s) => [s.metric, s] as const));
+  // Only MEASUREMENTS can decide a case — an unmeasured/invalid score (grader error, judge skip) carries a
+  // placeholder value/pass that must never masquerade as a verdict input.
+  const scores = measuredScores(result.scores);
+  const byMetric = new Map(scores.map((s) => [s.metric, s] as const));
   for (const m of AUTHORITATIVE_METRICS) {
     const s = byMetric.get(m);
     if (s?.pass !== undefined) return s.pass; // if ground-truth exists, it is authoritative
@@ -20,9 +23,9 @@ export function caseVerdict(result: Pick<CaseResult, "scores">): boolean | undef
   // The judge decides only when there is no objective grader. Real judge scores land under `judge:<id>`
   // (packages/graders JudgeGrader) — matching the literal "judge" alone left this rung dead and every judge
   // verdict fell through to the all-scores fallback below (an unchosen unanimous vote over unrelated scores).
-  const judges = result.scores.filter((s) => JUDGE_VERDICT_METRIC_RE.test(s.metric) && s.pass !== undefined);
+  const judges = scores.filter((s) => JUDGE_VERDICT_METRIC_RE.test(s.metric) && s.pass !== undefined);
   if (judges.length > 0) return judges.every((s) => s.pass);
-  const withPass = result.scores.filter((s) => s.pass !== undefined);
+  const withPass = scores.filter((s) => s.pass !== undefined);
   return withPass.length > 0 ? withPass.every((s) => s.pass) : undefined;
 }
 
@@ -49,25 +52,34 @@ export interface MetricSummary {
   // leave them unset. Isomorphic to the contracts MetricSummarySchema. docs/architecture/eval-domain-model.md
   distribution?: { label: string; count: number }[];
   mode?: string;
+  // Scores of this metric that were NOT measurements (grader error / skip) — excluded from every aggregate above
+  // and tallied here so a grader outage is visible instead of dragging the mean toward 0. Set only when > 0.
+  unmeasured?: number;
 }
 
 // Per-metric aggregation. Numeric/boolean metrics ⇒ count/mean/passRate. A CATEGORICAL metric (any score carried a
 // `label`) additionally gets a label distribution + mode — averaging a tier/string is meaningless, so the display
 // keys off the distribution instead of the mean (which stays populated as the mean of the ordering `value`).
+// MEASUREMENTS ONLY: an unmeasured score (grader error, judge skip — isMeasured gate) never contributes a value,
+// pass, or label; it only increments the metric's `unmeasured` tally.
 export function summarizeScorecard(sc: Scorecard): MetricSummary[] {
   const byMetric = new Map<
     string,
-    { values: number[]; passes: boolean[]; labeled: { label: string; value: number }[] }
+    { values: number[]; passes: boolean[]; labeled: { label: string; value: number }[]; unmeasured: number }
   >();
   for (const result of sc.results) {
     for (const s of result.scores) {
-      const m = byMetric.get(s.metric) ?? { values: [], passes: [], labeled: [] };
+      const m = byMetric.get(s.metric) ?? { values: [], passes: [], labeled: [], unmeasured: 0 };
+      byMetric.set(s.metric, m);
+      if (!isMeasured(s)) {
+        m.unmeasured++;
+        continue;
+      }
       m.values.push(s.value);
       if (s.pass !== undefined) m.passes.push(s.pass);
       // Pair the label with its ordering `value` (not the metric-wide values[], which would misalign if some scores
       // in the metric lacked a label) so an ORDERED enum can be shown in its natural order.
       if (s.label !== undefined) m.labeled.push({ label: s.label, value: s.value });
-      byMetric.set(s.metric, m);
     }
   }
   const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -77,6 +89,7 @@ export function summarizeScorecard(sc: Scorecard): MetricSummary[] {
       count: m.values.length,
       mean: m.values.reduce((a, b) => a + b, 0) / (m.values.length || 1),
       passRate: m.passes.length > 0 ? m.passes.filter(Boolean).length / m.passes.length : undefined,
+      ...(m.unmeasured > 0 ? { unmeasured: m.unmeasured } : {}),
     };
     if (m.labeled.length > 0) {
       const counts = new Map<string, number>();
@@ -120,10 +133,36 @@ function scoreMap(sc: Scorecard): Map<string, Map<string, Score>> {
   const m = new Map<string, Map<string, Score>>();
   for (const result of sc.results) {
     const inner = m.get(result.caseId) ?? new Map<string, Score>();
-    for (const s of result.scores) inner.set(s.metric, s);
+    // Measurements only — a diff between an unmeasured placeholder and a real value is not a delta.
+    for (const s of measuredScores(result.scores)) inner.set(s.metric, s);
     m.set(result.caseId, inner);
   }
   return m;
+}
+
+// The re-score worklist: unmeasured scores whose failure was transient (retryable) — re-running JUST these
+// graders can recover the measurements without re-running any case. Feeds the targeted re-score path.
+export interface RetryableUnmeasured {
+  caseId: string;
+  trial?: number;
+  graderId: string;
+  metric: string;
+}
+export function retryableUnmeasured(sc: Pick<Scorecard, "results">): RetryableUnmeasured[] {
+  const out: RetryableUnmeasured[] = [];
+  for (const r of sc.results) {
+    for (const s of r.scores) {
+      if (s.status === "unmeasured" && s.retryable === true) {
+        out.push({
+          caseId: r.caseId,
+          ...(r.trial !== undefined ? { trial: r.trial } : {}),
+          graderId: s.graderId,
+          metric: s.metric,
+        });
+      }
+    }
+  }
+  return out;
 }
 
 // baseline(vA) vs candidate(vB). Regressions/improvements are decided by objective `pass` transitions —

@@ -69,6 +69,10 @@ export const caseScoreSchema = z
     pass: z.boolean().optional(),
     label: z.string().optional(), // categorical value (tier/string) — shown instead of `value` when present
     detail: z.unknown().optional(),
+    // Measurement status (contract: "measured" | "unmeasured" | "invalid"; absent = measured). Loose string so a
+    // future status never rejects the scorecard; non-measured rows render "unmeasured", not the placeholder value.
+    status: z.string().optional(),
+    reason: z.string().optional(),
   })
   .passthrough()
 

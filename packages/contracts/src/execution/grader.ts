@@ -5,6 +5,16 @@ import type { EvalCase, Scorecard } from "./eval-case.js";
 import type { TraceEvidence } from "./trace-source.js";
 import type { TraceEvent } from "./trace.js";
 
+// Why a score was NOT a measurement. Closed vocabulary — a new skip path picks an existing reason or adds one here.
+export const UNMEASURED_REASONS = [
+  "grader_error", // the grader threw at scoring time (transport hiccup, judge LLM failure, grading job death)
+  "missing_evidence", // the evidence the grader needs (trace/snapshot slot) was not captured
+  "missing_secret", // a required credential was absent or undecryptable (re-scorable once configured)
+  "unsupported", // this deployment/path cannot run the grader (no dispatcher, unresolvable rubric)
+  "policy_skip", // deliberately skipped by configuration/policy — not an error
+] as const;
+export type UnmeasuredReason = (typeof UNMEASURED_REASONS)[number];
+
 export const ScoreSchema = z.object({
   graderId: z.string(),
   metric: z.string(),
@@ -16,8 +26,30 @@ export const ScoreSchema = z.object({
   // 1<2<3; 0 when unordered) so trend/diff/leaderboard still have a number. Absent ⇒ a plain numeric/boolean metric.
   label: z.string().optional(),
   detail: z.unknown().optional(),
+  // Measurement status. Absent ⇒ "measured" (plain producers + rows that predate the field). A grader failure or
+  // skip is NOT a measurement of the agent: it carries "unmeasured" + a reason, its `value` is a placeholder that
+  // MUST NOT enter any aggregate, and every aggregation consumes measured scores only (measuredScores below).
+  // "invalid" marks a contract-violating grader output — a grader bug to fix, never something to retry or average.
+  status: z.enum(["measured", "unmeasured", "invalid"]).optional(),
+  reason: z.enum(UNMEASURED_REASONS).optional(), // set when status is "unmeasured"
+  retryable: z.boolean().optional(), // unmeasured only: true ⇒ re-scoring this grader can recover the measurement
 });
 export type Score = z.infer<typeof ScoreSchema>;
+
+// Legacy sentinels: before `status` existed, the two skip producers marked themselves in `detail` prose —
+// safeGrade with "[grader-error] …" and the judge runner with "skipped: …". Persisted rows keep that shape
+// forever, so measured-ness is decided here (read-time normalization), never by re-migrating stored results.
+const LEGACY_UNMEASURED_DETAIL_RE = /^(\[grader-error\]|skipped: )/;
+
+// THE measured gate — every aggregate (mean/passRate/distribution/diff/trend/leaderboard/verdict) filters
+// through this, so "grader died" and "scored 0" can never share a number space. New aggregations must use it.
+export function isMeasured(score: Score): boolean {
+  if (score.status !== undefined) return score.status === "measured";
+  return !(typeof score.detail === "string" && LEGACY_UNMEASURED_DETAIL_RE.test(score.detail));
+}
+export function measuredScores(scores: Score[]): Score[] {
+  return scores.filter(isMeasured);
+}
 
 // A read against a purpose:"data" store's per-case slice — the store-state grader's window into the post-run world.
 // The topology runtime resolves (store, role?) → the case's isolation slice and runs `query` there. Co-located by

@@ -31,7 +31,7 @@ describe("safeGrade — isolate a grader's run-time failure", () => {
     expect(scores.map((s) => s.metric)).toEqual(["judge", "judge:accuracy", "judge:style"]);
   });
 
-  it("turns a throwing grader into a visible error score instead of propagating (pass left undefined, not FAIL)", async () => {
+  it("turns a throwing grader into an unmeasured score instead of propagating (never a measurement)", async () => {
     // Given: a grader that throws at scoring time (e.g. a judge LLM/transport hiccup)
     const flaky: Grader = {
       id: "judge",
@@ -41,9 +41,12 @@ describe("safeGrade — isolate a grader's run-time failure", () => {
     };
     // When: it is graded via safeGrade
     const [score] = await safeGrade(flaky, CTX);
-    // Then: the failure is captured as a score (never thrown) so the case + sibling graders survive
+    // Then: the failure is captured as a score (never thrown) so the case + sibling graders survive —
+    // and it is UNMEASURED: excluded from every aggregate (isMeasured gate), not a 0 that drags the mean
     expect(score?.graderId).toBe("judge");
-    expect(score?.value).toBe(0);
+    expect(score?.status).toBe("unmeasured");
+    expect(score?.reason).toBe("grader_error");
+    expect(score?.retryable).toBe(true); // a scoring-time throw is transient — re-scoring can recover it
     expect(score?.pass).toBeUndefined(); // excluded from passRate — an honest "not scored", not a false FAIL
     expect(score?.detail).toContain("judge upstream 503");
     expect(score?.detail).toContain("[grader-error]");

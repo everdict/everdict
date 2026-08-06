@@ -10,6 +10,7 @@ import {
   fmtDateTime,
   fmtMetricValue,
   groupMetricRows,
+  isUnmeasuredScore,
 } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
@@ -50,7 +51,11 @@ function ScoreRow({
   siblings: string[]
   nested?: boolean
 }) {
+  const tScores = useTranslations('runsPage')
   const hasDetail = classifyScoreDetail(score.detail) !== undefined
+  // A non-measurement (grader error / judge skip) shows "unmeasured" instead of its placeholder value —
+  // a dead grader must never read as a real $0.00 / 0-step result.
+  const unmeasured = isUnmeasuredScore(score)
   const [open, setOpen] = useState(score.pass === false && hasDetail)
   const body = (
     <div
@@ -68,7 +73,9 @@ function ScoreRow({
         <span className="min-w-0 truncate font-mono text-[11px] text-faint">{score.graderId}</span>
         <MetricLabel metric={score.metric} siblings={siblings} />
       </span>
-      <span className="font-mono text-[13px] font-[510] tabular-nums">{displayValue(score)}</span>
+      <span className="font-mono text-[13px] font-[510] tabular-nums">
+        {unmeasured ? tScores('scoreUnmeasured') : displayValue(score)}
+      </span>
       <span className="w-12 text-right">
         {score.pass != null && (
           <Badge tone={passTone(score.pass)}>{score.pass ? 'pass' : 'fail'}</Badge>
