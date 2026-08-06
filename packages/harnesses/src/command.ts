@@ -236,8 +236,12 @@ export class CommandHarness implements EvaluableHarness {
       // platform: a harness whose trace is pulled from MLflow still gets this, and if that platform is down or
       // the correlation key is wrong, the ledger still says what we ran and what came back. A configured trace
       // source ADDS the agent's own account; it never replaces ours.
+      // Anchored at the command's START and carrying its length as the event's own duration — so on the shared
+      // axis the invocation reads as the interval it was, instead of every output clustering at the exit instant
+      // with nothing saying when the work began.
       yield {
-        ...stamp(this.now),
+        ...stamp(() => startedMs),
+        durationMs: Math.max(0, this.now() - startedMs),
         kind: "env_action",
         action: "command.exit",
         detail: { command: cmd, exitCode: res.exitCode, durationMs: Math.max(0, this.now() - startedMs) },

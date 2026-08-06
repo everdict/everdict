@@ -22,6 +22,7 @@ import {
   type TraceEvent,
   type TraceEvidence,
   type TrustZone,
+  stamp,
 } from "@everdict/contracts";
 import type { TopologyStatus } from "@everdict/contracts/wire";
 import { type TrustZonePolicy, assertHardenedIsolation } from "@everdict/domain";
@@ -372,9 +373,9 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
       spec.target?.acquire?.mode === "service" && spec.target.acquire.cdpBase && !target?.cdpBase
         ? [
             {
-              t: 0,
-              kind: "infra",
-              scope: "service",
+              ...stamp(Date.now),
+              kind: "infra" as const,
+              scope: "service" as const,
               service: spec.target.acquire.service,
               event: "target_unobservable",
               message: `The session API declared a live CDP coordinate (${spec.target.acquire.cdpBase}) but returned no reachable address — this case has no live screen or environment recording.`,
@@ -638,7 +639,13 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
       } catch (err) {
         const how = inline ? "extract" : "fetch";
         trace = [
-          { t: 0, kind: "error", message: `trace ${how} failed: ${err instanceof Error ? err.message : String(err)}` },
+          // Stamped like every event we mint — an undated error either forced the whole plane off the axis
+          // (span assembly is all-or-nothing) or drew at the run's first instant instead of where it happened.
+          {
+            ...stamp(Date.now),
+            kind: "error",
+            message: `trace ${how} failed: ${err instanceof Error ? err.message : String(err)}`,
+          },
         ];
       }
       // Observation (#4 + delivery): retrieve the observation via the per-delivery.mode ObservationSource. Unset = reference (store-fetch, no regression)
@@ -705,6 +712,10 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
         trace: [...trace, ...infraMarks, ...targetInfra, ...infra, ...serviceLogEvents],
         snapshot,
         scores,
+        // The agent's clock started when the drive was submitted — the declared anchor that lets an inline
+        // trace carrying only relative `t` land on the same wall-clock axis as the placement marks. Events
+        // that stamp their own `at` (a pulled platform trace) are unaffected: `at` wins per event.
+        traceT0: new Date(driveStartedAt).toISOString(),
       };
     } finally {
       recorder?.stop(); // flush the environment recorder before the browser is torn down (idempotent)

@@ -31,6 +31,9 @@ const ctx: RunContext = { apiKeyEnv: {}, timeoutSec: 60 };
 const commandExit = (exitCode: number) => ({
   t: expect.any(Number),
   at: expect.any(String),
+  // The invocation is an INTERVAL: anchored at the command's start, its own duration on the event — so the
+  // axis draws it as the window it was instead of clustering everything at the exit instant.
+  durationMs: expect.any(Number),
   kind: "env_action",
   action: "command.exit",
   detail: expect.objectContaining({ exitCode }),
@@ -122,6 +125,28 @@ describe("CommandHarness", () => {
         text: "thinking...\nThe answer is 258.7 billion.",
       },
     ]);
+  });
+
+  it("anchors command.exit at the command's START with its real length — not at the exit instant", async () => {
+    // Regression: every event used to stamp at yield time (= after the command finished), so a 5-second run
+    // drew as a pile of ticks at its last instant with nothing saying when the work began.
+    let nowMs = 1_700_000_000_000;
+    const compute: ComputeHandle = {
+      async exec() {
+        nowMs += 5_000; // the command took 5 seconds
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+      async writeFile() {},
+      async readFile() {
+        return "";
+      },
+      async dispose() {},
+    };
+    const events = await collect(new CommandHarness(spec(), { clock: () => nowMs }).run(compute, "t", ctx));
+    const exit = events.find((e) => e.kind === "env_action" && e.action === "command.exit");
+    if (exit?.kind !== "env_action") throw new Error("expected the invocation record");
+    expect(exit.at).toBe(new Date(1_700_000_000_000).toISOString());
+    expect(exit.durationMs).toBe(5_000);
   });
 
   it("when the command exits ≠0, surface it as an error event (no silent swallowing)", async () => {

@@ -293,6 +293,13 @@ simple agent that returns `{ output, trace: [...] }` gives the judge its **actio
 each element is validated against `TraceEventSchema`, and a malformed body is downgraded to a non-fatal `error` event
 (same "trace is secondary" policy as a fetch failure). Unset = pull from the platform `traceSource` (current).
 
+**Inline `t` semantics — milliseconds from the drive's start.** An inline event's `at` (absolute ISO instant) is
+always preferred when the agent stamps it; when it doesn't, its relative `t` is read as ms offsets from the moment
+the front-door drive was submitted. The backend declares that anchor on the result (`CaseResult.traceT0` = drive
+start), the sealer stores it as the execution segment's `t0`, and the trajectory viewer uses it to lay the agent's
+steps on the same wall-clock axis as the placement marks — without it, a relative-`t` inline trace drew at the run's
+first instant, overlapping the deploy phase it actually followed.
+
 ## Grading (browser/service)
 Over `{trace, snapshot}` (no `ComputeHandle`): trace-based (`steps`/`cost`/`latency`), browser-outcome
 (`dom-contains`, `url-matches` — read the `BrowserSnapshot`), and model judge (`JudgeGrader` — LLM/VLM over

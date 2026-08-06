@@ -632,6 +632,9 @@ export class ScorecardBatchService {
             events: result.trace,
             // Names the row on the browse page: an eval is known by the case it evaluated.
             ...runEvidenceIdentity(child),
+            // The producer's declared clock anchor (a topology case: drive start) — what lets an inline
+            // trace with only relative `t` land on the placement plane's wall-clock axis.
+            ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
           }).catch(() => {});
       // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
       if (ctx.judges.length > 0) {
@@ -1172,6 +1175,7 @@ export class ScorecardBatchService {
               tenant,
               events: result.trace,
               ...runEvidenceIdentity(child),
+              ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
             }).catch(() => {});
         // Provenance: record the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
         if (runStore && child)

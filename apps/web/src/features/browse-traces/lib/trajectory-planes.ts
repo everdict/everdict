@@ -158,7 +158,9 @@ export function placeTrajectory(segments: TrajectorySegment[]): PlacedTrajectory
         emitter: segment.emitter,
         // A span id from the emitter is the node's identity; without one the event is its own leaf node.
         nodeId: event.spanId !== undefined ? `${segment.emitter}:${event.spanId}` : key,
-        ...(event.parentId !== undefined ? { parentNodeId: `${segment.emitter}:${event.parentId}` } : {}),
+        ...(event.parentId !== undefined
+          ? { parentNodeId: `${segment.emitter}:${event.parentId}` }
+          : {}),
         index,
         ...(absolute !== undefined ? { startMs: absolute } : {}),
         durationMs,
@@ -191,7 +193,19 @@ function laneRank(lane: Lane): number {
 // with "Attempted to call asSingleSegment() from the server", which is exactly how it was found (live drill).
 export function asSingleSegment(
   events: TraceEvent[],
-  source: TrajectorySegment['source']
+  source: TrajectorySegment['source'],
+  // The producer's declared clock anchor (CaseResult.traceT0) — without it a row embed whose events carry
+  // only relative `t` can never join the wall-clock axis the placement plane draws.
+  t0?: string
 ): TrajectorySegment[] {
-  return [{ emitter: source, source, eventCount: events.length, sealedAt: '', events }]
+  return [
+    {
+      emitter: source,
+      source,
+      eventCount: events.length,
+      sealedAt: '',
+      events,
+      ...(t0 !== undefined ? { t0 } : {}),
+    },
+  ]
 }

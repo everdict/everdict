@@ -661,7 +661,12 @@ export class RunService {
       }
       await this.finalize(id, (run) => run.succeed(result, this.now()));
       // P5 dual-write: seal the trajectory in the OWNED store (best-effort, idempotent — evidence, not lifecycle).
-      if (result.trace.length > 0) void this.sealPlanes(id, input.tenant, result.trace);
+      // The producer's declared clock anchor (CaseResult.traceT0) rides along as the execution segment's t0 —
+      // without it, a trace whose events carry only relative `t` can never join the placement plane's axis.
+      if (result.trace.length > 0)
+        void this.sealPlanes(id, input.tenant, result.trace, {
+          ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
+        });
     } catch (err) {
       const error =
         err instanceof AppError
@@ -674,7 +679,10 @@ export class RunService {
       const failed = failedCaseResult(job, err);
       await this.finalize(id, (run) => run.fail(error, this.now(), failed));
       // Dual-write parity with the success path: the evidence trace seals as the run's own trajectory.
-      if (failed.trace.length > 0) void this.sealPlanes(id, input.tenant, failed.trace);
+      if (failed.trace.length > 0)
+        void this.sealPlanes(id, input.tenant, failed.trace, {
+          ...(failed.traceT0 !== undefined ? { t0: failed.traceT0 } : {}),
+        });
     }
     // Completion notification (Mattermost etc.) — with the latest record. Failure is independent of the run result (swallow). Independent of the webhook.
     if (this.deps.onComplete) {
@@ -841,17 +849,17 @@ export class RunService {
     runId: string,
     tenant: string,
     events: TraceEvent[],
-    owned?: { record: RunRecord; t0?: string },
+    owned?: { record?: RunRecord; t0?: string },
   ): Promise<void> {
     const store = this.deps.trajectories;
     if (!store) return;
-    const audience = owned !== undefined ? runAudience(owned.record) : undefined;
+    const audience = owned?.record !== undefined ? runAudience(owned.record) : undefined;
     await sealExecutionPlanes(store, {
       runId,
       tenant,
       events,
       ...(audience?.scope === "member" ? { owner: audience.subject } : {}),
-      ...(owned !== undefined ? runEvidenceIdentity(owned.record) : {}),
+      ...(owned?.record !== undefined ? runEvidenceIdentity(owned.record) : {}),
       ...(owned?.t0 !== undefined ? { t0: owned.t0 } : {}),
     }).catch(() => {});
   }

@@ -190,7 +190,8 @@ export function TrajectoryView({ segments }: { segments: TrajectorySegment[] }) 
     [nodes, eventOf, lane]
   )
 
-  const currentId = selectedKey !== undefined && eventOf.has(selectedKey) ? selectedKey : rows[0]?.id
+  const currentId =
+    selectedKey !== undefined && eventOf.has(selectedKey) ? selectedKey : rows[0]?.id
   const current = currentId !== undefined ? eventOf.get(currentId) : undefined
   // The swimlanes place PLACED events; selection speaks in waterfall node ids. One map keeps the two axes
   // pointing at the same step, so clicking a bar highlights its row and vice versa.
@@ -307,7 +308,9 @@ export function TrajectoryView({ segments }: { segments: TrajectorySegment[] }) 
             {...(currentId !== undefined ? { selectedId: currentId } : {})}
             onSelect={setSelectedKey}
             laneLabelOf={(id) =>
-              lanes.length > 1 ? laneLabel(laneOfId(lanes, eventOf.get(id)?.laneId ?? ''), t) : undefined
+              lanes.length > 1
+                ? laneLabel(laneOfId(lanes, eventOf.get(id)?.laneId ?? ''), t)
+                : undefined
             }
           />
         </section>
@@ -353,7 +356,12 @@ function LaneRow({
       </span>
       <div className="relative h-5 rounded-[3px] bg-elevated/40">
         {events.map((placed) => {
-          const left = (((placed.startMs ?? axis.startMs) - axis.startMs) / span) * 100
+          // An unanchored event has no place on a wall-clock axis. Drawing it at the left edge (the old
+          // `?? axis.startMs` fallback) asserted it happened at the run's first instant — which is exactly
+          // the "agent steps overlap the placement phase" misreading. The header already counts these as
+          // "listed below, not on the axis"; make that true.
+          if (placed.startMs === undefined) return null
+          const left = ((placed.startMs - axis.startMs) / span) * 100
           const width = (placed.durationMs / span) * 100
           const nodeId = nodeIdOf(placed.key)
           return (

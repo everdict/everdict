@@ -930,6 +930,58 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(tail.service).toBe("agent-server");
     expect(tail.message.length).toBeLessThanOrEqual(8_000);
     expect(tail.message.endsWith("tail-marker")).toBe(true); // 캡은 머리가 아니라 꼬리를 남긴다
+
+    // The declared clock anchor: the agent plane's relative `t` counts from the drive's start. Without it an
+    // inline trace with no per-event `at` could never join the placement plane's wall-clock axis — the agent's
+    // steps drew at the run's first instant, overlapping the deploy phase they actually followed.
+    const anchor = Date.parse(result.traceT0 ?? "");
+    expect(Number.isFinite(anchor)).toBe(true);
+    const submitted = placement.find((e) => e.kind === "infra" && e.event === "drive_submitted");
+    expect(Math.abs(anchor - Date.parse(submitted?.at ?? ""))).toBeLessThan(60_000);
+  });
+
+  it("stamps the trace-fetch failure with an absolute instant — an undated error forced the plane off the axis", async () => {
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return {
+          wiring: { target_cdp_url: "ws://browser/ctx" },
+          async snapshot(): Promise<BrowserSnapshot> {
+            return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+          },
+          async dispose() {},
+        };
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch(): Promise<TraceEvent[]> {
+          throw new Error("platform is down");
+        },
+      },
+      specFor: () => SPEC,
+      submit: async () => {},
+      newRunId: () => "fixed",
+    });
+    const result = await backend.dispatch({
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "go",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    });
+    const error = result.trace.find((e) => e.kind === "error");
+    if (error?.kind !== "error") throw new Error("expected the trace-fetch failure to be recorded");
+    expect(error.message).toContain("platform is down");
+    expect(Number.isFinite(Date.parse(error.at ?? ""))).toBe(true);
   });
 
   // Replay ② — when the per-case browser exposes a reachable CDP AND a record sink is configured, dispatch opens an

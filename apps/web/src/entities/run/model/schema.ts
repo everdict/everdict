@@ -85,6 +85,10 @@ export const resultSchema = z
       .passthrough()
       .optional(),
     harness: z.string().optional(),
+    // The producer's declared clock anchor: the absolute instant the trace's relative `t` counts from (a
+    // topology case: front-door drive start). The embed path forwards it as the segment's `t0` so a trace
+    // whose events carry no `at` still lands on the same wall-clock axis as the placement plane.
+    traceT0: z.string().optional(),
     // Replay recording pointer — set at finalize when a run was recorded. Drives the "replay available" affordance
     // (a header badge + the Replay section on the run detail). docs/architecture/replay.md.
     recordingRef: z.object({ ref: z.string() }).optional(),

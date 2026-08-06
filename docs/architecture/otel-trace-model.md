@@ -165,6 +165,18 @@ to the per-call chat spans (records sealed before per-call usage existed keep th
 `llm_call` there is); and a chat span's captured output text projects as the assistant `message` a judge's
 `kind === "message"` filter reads, beside the `llm_call` that carries its tokens.
 
+**One run lands on one clock.** The placement plane always carries absolute stamps (`at` on every mark), so
+the axis question is entirely about the execution plane. Three rules put it on the same wall clock: every
+event WE mint carries `at` via `stamp(now)` (harness rule; this includes failure events — an undated error
+either forces span assembly to refuse for the whole plane or draws at the run's first instant); a producer
+that knows where a relative-`t` trace's clock starts DECLARES it — `CaseResult.traceT0` (the topology
+backend: front-door drive start) travels through the sealers into the segment's `t0`, which is the one
+anchor the viewer may apply to unstamped events; and a plane with neither stays **unanchored** — reported in
+the viewer, never drawn at the axis's left edge as if it happened at "accepted" (that `?? axis.startMs`
+fallback was exactly the "agent steps overlap the deploy phase" misreading). A `command.exit` invocation
+record is anchored at the command's START with its length as the event's own `durationMs`, so a CLI run
+reads as the interval it was rather than a pile of ticks at its exit instant.
+
 Harnesses keep yielding `TraceEvent` from `run()`. That is deliberate, not a leftover: a harness is a
 **black box over a process boundary**, a CLI reports points as they happen, and the live playground needs
 those points before any span could close. `eventsToSpans` (domain) assembles them — a `tool_call` and its

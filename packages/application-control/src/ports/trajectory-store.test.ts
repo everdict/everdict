@@ -142,6 +142,26 @@ describe("sealExecutionPlanes — the agent's plane and the orchestrator's are d
     expect(seals[1]?.t0).toBeUndefined();
   });
 
+  it("carries the producer's declared clock anchor (traceT0) onto the execution segment — the axis fix", async () => {
+    // A topology case's inline trace: relative `t` only, no per-event `at`. Without the declared t0 the
+    // agent plane could never join the placement plane's wall-clock axis and drew at the run's first instant.
+    const { store, seals, newSpanId } = recorder();
+    const relative: TraceEvent[] = [
+      { t: 120, kind: "tool_call", id: "c1", name: "browser.click", args: {} },
+      { t: 950, kind: "tool_result", id: "c1", ok: true, output: "ok" },
+    ];
+    await sealExecutionPlanes(store, {
+      runId: "r1",
+      tenant: "acme",
+      events: [...relative, ...infraEvents],
+      t0: "2026-08-03T00:00:02.500Z",
+      newSpanId,
+    });
+    // The execution segment declares the anchor; the infra plane keeps its own (earliest absolute stamp).
+    expect(seals[0]?.t0).toBe("2026-08-03T00:00:02.500Z");
+    expect(seals[1]?.t0).toBe("2026-08-03T00:00:01.000Z");
+  });
+
   it("seals one segment when a run has only one plane", async () => {
     const onlyAgent = recorder();
     await sealExecutionPlanes(onlyAgent.store, {

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '@/entities/trace'
 
 import type { TrajectorySegment } from '../api/browse-trajectories'
-import { placeTrajectory } from './trajectory-planes'
+import { asSingleSegment, placeTrajectory } from './trajectory-planes'
 
 // A trajectory is laid on a wall clock, and the only thing that may put an event on it is that event's OWN
 // absolute stamp. The alternative — adding `t` to whatever anchor the segment can find — reads a scalar whose
@@ -21,9 +21,30 @@ describe('placing a trajectory on the shared axis', () => {
     // Given a plane whose steps are numbered but stamped, sharing a segment with an infra anchor
     const { placed, axis } = placeTrajectory([
       segment([
-        { t: 1, at: new Date(T0 + 4_000).toISOString(), kind: 'tool_call', id: 'c1', name: 'search', args: {} },
-        { t: 2, at: new Date(T0 + 9_000).toISOString(), kind: 'tool_result', id: 'c1', ok: true, output: 'ok' },
-        { t: 0, kind: 'infra', scope: 'placement', event: 'leased', message: 'leased', at: new Date(T0).toISOString() },
+        {
+          t: 1,
+          at: new Date(T0 + 4_000).toISOString(),
+          kind: 'tool_call',
+          id: 'c1',
+          name: 'search',
+          args: {},
+        },
+        {
+          t: 2,
+          at: new Date(T0 + 9_000).toISOString(),
+          kind: 'tool_result',
+          id: 'c1',
+          ok: true,
+          output: 'ok',
+        },
+        {
+          t: 0,
+          kind: 'infra',
+          scope: 'placement',
+          event: 'leased',
+          message: 'leased',
+          at: new Date(T0).toISOString(),
+        },
       ]),
     ])
 
@@ -39,7 +60,14 @@ describe('placing a trajectory on the shared axis', () => {
     const { placed, unanchored } = placeTrajectory([
       segment([
         { t: 1, kind: 'tool_call', id: 'c1', name: 'search', args: {} },
-        { t: 0, kind: 'infra', scope: 'placement', event: 'leased', message: 'leased', at: new Date(T0).toISOString() },
+        {
+          t: 0,
+          kind: 'infra',
+          scope: 'placement',
+          event: 'leased',
+          message: 'leased',
+          at: new Date(T0).toISOString(),
+        },
       ]),
     ])
 
@@ -57,6 +85,36 @@ describe('placing a trajectory on the shared axis', () => {
     }
     const { placed } = placeTrajectory([withT0])
     expect(placed[0]?.startMs).toBe(T0 + 1_500)
+  })
+
+  it('lands a row-embed run on the wall clock through its declared traceT0 (asSingleSegment)', () => {
+    // The topology embed: placement marks with absolute stamps, an inline agent trace with only relative `t`.
+    // Pre-fix the agent steps were unanchored and the lane band drew them at the run's first instant — the
+    // "agent overlaps the deploy phase" misreading. The producer's declared anchor puts them where they ran.
+    const events: TraceEvent[] = [
+      {
+        t: 0,
+        kind: 'infra',
+        scope: 'placement',
+        event: 'accepted',
+        message: 'accepted',
+        at: new Date(T0).toISOString(),
+      },
+      {
+        t: 12_000,
+        kind: 'infra',
+        scope: 'placement',
+        event: 'drive_submitted',
+        message: 'drive',
+        at: new Date(T0 + 12_000).toISOString(),
+      },
+      { t: 800, kind: 'tool_call', id: 'c1', name: 'browser.click', args: {} }, // 800ms into the DRIVE
+    ]
+    const { placed, unanchored } = placeTrajectory(
+      asSingleSegment(events, 'run', new Date(T0 + 12_000).toISOString())
+    )
+    expect(unanchored).toBe(0)
+    expect(placed[2]?.startMs).toBe(T0 + 12_800) // after the drive began, not at "accepted"
   })
 
   it('leaves a whole unstamped plane unanchored when nothing in it can be dated', () => {

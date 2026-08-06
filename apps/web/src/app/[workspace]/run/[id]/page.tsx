@@ -196,7 +196,7 @@ export default async function RunDetailPage({
       // 404 = nothing sealed (and no embed) — the page just omits the trace sections.
     }
   } else {
-    segments = asSingleSegment(toEvidence(trace), 'run')
+    segments = asSingleSegment(toEvidence(trace), 'run', run.result?.traceT0)
   }
 
   // Replay is available for any settled run that produced an agent trace (EVERY harness does) or a recording —

@@ -125,6 +125,12 @@ export const CaseResultSchema = z.object({
   // by caseId; the per-trial verdict reuses caseVerdict. docs/architecture/trial-based-verdict.md
   trial: z.number().int().nonnegative().optional(),
   trace: z.array(TraceEventSchema),
+  // The absolute instant this result's trace `t` offsets count from, DECLARED by the producer that knows it
+  // (the topology backend: the front-door drive's start). The sealer passes it through as the execution
+  // segment's `t0`, which is what lets a trace whose events carry only relative `t` (an inline front-door
+  // trace) land on the same wall-clock axis as the placement plane. Only a producer that can vouch for the
+  // offset semantics sets it — events that carry their own `at` are never affected (`at` wins per event).
+  traceT0: z.string().optional(),
   snapshot: EnvSnapshotSchema,
   scores: z.array(ScoreSchema),
   // Classified failure (WHERE it died × WHOSE fault) — set when the case did not produce a normal eval outcome
