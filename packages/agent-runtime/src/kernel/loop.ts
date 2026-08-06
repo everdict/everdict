@@ -8,7 +8,7 @@ import type {
   StreamResult,
   TransientCarrier,
 } from "@everdict/llm";
-import { compactStep } from "../context/compaction.js";
+import { capMedia, compactStep } from "../context/compaction.js";
 import { type TokenBudget, effectiveBudget, estimateTokens, thresholdReached } from "../context/token-budget.js";
 import { buildSummarizer } from "../llm/summarize.js";
 import type { ChatMessage } from "../messages.js";
@@ -706,7 +706,11 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       // transient budget (attempt) is never consumed by them.
       let persistentAttempt = 0;
       for (let attempt = 0; ; attempt++) {
-        const turnMessages: ChatMessage[] = reminderMessage ? [...messages, reminderMessage] : messages;
+        // Media cap at the REQUEST-BUILD boundary (never on the stored history): a screenshot-driven run crosses
+        // the provider's per-request media limit and every retry then fails identically. Ephemeral + recomputed
+        // per attempt, so the trace keeps every image and a later compaction frees the budget on its own.
+        const withReminder: ChatMessage[] = reminderMessage ? [...messages, reminderMessage] : messages;
+        const turnMessages = capMedia(withReminder);
         // A retry re-streams from scratch — only the LAST attempt's text is the one the member is looking at.
         streamedText = "";
         try {

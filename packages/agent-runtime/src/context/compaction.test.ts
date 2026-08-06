@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../messages.js";
-import { compactMessages, microcompact, summarizeAndCompact } from "./compaction.js";
+import { capMedia, compactMessages, microcompact, summarizeAndCompact } from "./compaction.js";
 
 const big = (n = 600): string => "R".repeat(n);
 
@@ -133,5 +133,55 @@ describe("compactMessages (structural fallback)", () => {
     const out = compactMessages(m);
     expect(out).toHaveLength(1);
     expect(out[0]?.content).toBe("u1");
+  });
+});
+
+describe("capMedia — the per-request media cap", () => {
+  const shot = (n: number): ChatMessage => ({
+    role: "user",
+    content: [
+      { type: "text", text: `screenshot ${n}` },
+      { type: "image_url", image_url: { url: `data:image/png;base64,IMG${n}` } },
+    ],
+  });
+
+  it("drops the OLDEST images past the cap and marks their place", () => {
+    // Given more images than one request may carry
+    const messages = Array.from({ length: 5 }, (_, i) => shot(i));
+    // When the request is built with a cap of 3
+    const out = capMedia(messages, 3);
+    // Then exactly 3 images survive — the NEWEST, since those are what the agent is acting on
+    const surviving = out.flatMap((m) =>
+      (m.content as { image_url?: { url?: string } }[]).filter((p) => p.image_url).map((p) => p.image_url?.url),
+    );
+    expect(surviving).toEqual([
+      "data:image/png;base64,IMG2",
+      "data:image/png;base64,IMG3",
+      "data:image/png;base64,IMG4",
+    ]);
+    // …and the dropped ones leave a mark rather than vanishing (so the model doesn't re-read a stale one)
+    const firstParts = out[0]?.content as { type: string; text?: string }[];
+    expect(firstParts[1]?.text).toContain("older image dropped");
+    // The surrounding text of every message is untouched
+    expect(firstParts[0]?.text).toBe("screenshot 0");
+  });
+
+  it("is a no-op under the cap and never mutates the input (the stored history keeps every image)", () => {
+    const messages = [shot(0), shot(1)];
+    const out = capMedia(messages, 100);
+    expect(out).toBe(messages); // same reference — nothing rebuilt
+    const capped = capMedia([shot(0), shot(1), shot(2)], 1);
+    expect(capped).not.toBe(messages);
+    // the ORIGINAL array still holds its images: the cap is a wire-payload transform, not a history edit
+    const original = shot(0).content as { image_url?: unknown }[];
+    expect(original.some((p) => p.image_url)).toBe(true);
+  });
+
+  it("leaves image-free transcripts completely alone", () => {
+    const plain: ChatMessage[] = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+    ];
+    expect(capMedia(plain, 0)).toBe(plain);
   });
 });

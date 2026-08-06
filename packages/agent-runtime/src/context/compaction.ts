@@ -18,6 +18,48 @@ const MIN_CLEAR_CHARS = 400;
 const SKILL_KEEP_BUDGET_CHARS = 24_000;
 const SKILL_TOOL_NAMES: ReadonlySet<string> = new Set([USE_SKILL_TOOL_NAME, READ_SKILL_FILE_TOOL_NAME]);
 
+// Providers cap the number of media items in ONE request (Anthropic: 100) and reject the whole request past it with
+// an error that says nothing useful. A screenshot-driven run (browser / os-use) crosses that cap on its own, and
+// because the images live in the durable history the retry fails identically — the run cannot get out.
+const MAX_MEDIA_PER_REQUEST = 100;
+const DROPPED_IMAGE_MARK = "[older image dropped to stay under the provider's per-request media limit]";
+
+function imagePartCount(m: ChatMessage): number {
+  if (!Array.isArray(m.content)) return 0;
+  let n = 0;
+  for (const p of m.content) if (typeof p === "object" && p !== null && "image_url" in p) n++;
+  return n;
+}
+
+// Cap the media items in ONE outbound request, oldest-first — applied at the REQUEST-BUILD boundary and never to
+// the stored history, so the trace keeps every screenshot while the wire payload stays legal. Recomputed per
+// request (cheap: a scan of the content arrays), which is what lets it stay purely ephemeral: nothing to undo,
+// and a later compaction that removes old turns automatically restores the dropped images' budget.
+// The newest images are the ones an agent is acting on, so the oldest go first — with a text mark in their place
+// rather than silent removal, because "there was an image here" is what stops the model re-reading a stale one.
+export function capMedia(messages: ChatMessage[], max = MAX_MEDIA_PER_REQUEST): ChatMessage[] {
+  let total = 0;
+  for (const m of messages) total += imagePartCount(m);
+  let over = total - max;
+  if (over <= 0) return messages;
+  const out = [...messages];
+  for (let i = 0; i < out.length && over > 0; i++) {
+    const m = out[i];
+    if (!m || imagePartCount(m) === 0) continue;
+    const parts: unknown[] = [];
+    for (const p of m.content as unknown[]) {
+      if (over > 0 && typeof p === "object" && p !== null && "image_url" in p) {
+        over--;
+        parts.push({ type: "text", text: DROPPED_IMAGE_MARK });
+      } else {
+        parts.push(p);
+      }
+    }
+    out[i] = { ...m, content: parts } as ChatMessage;
+  }
+  return out;
+}
+
 // tool_call_ids of skill-tool invocations — found on the assistant turns (a tool message carries no tool name).
 function skillToolCallIds(messages: ChatMessage[]): Set<string> {
   const ids = new Set<string>();

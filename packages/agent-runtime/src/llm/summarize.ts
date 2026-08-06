@@ -19,6 +19,23 @@ const SUMMARY_SYSTEM_PROMPT = [
   "Output ONLY the summary. Do not call tools. Do not add commentary before or after.",
 ].join("\n");
 
+// Replace every image part with a text placeholder. Images ride the span as multimodal parts (tool-returned
+// screenshots), and sending them into the SUMMARY call is how the escape hatch closes on itself: the call made
+// BECAUSE the context is too large is the one that carries the heaviest payload in it, so it fails with
+// prompt-too-long exactly when the run has no other way out — and a summariser on a cheaper tier may not accept
+// images at all. A digest needs to know an image was there, never the pixels. (Claude Code strips the same way,
+// for the same stated reason, and only for this call.)
+export function stripImages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m): ChatMessage => {
+    if (!Array.isArray(m.content)) return m;
+    if (!m.content.some((p) => typeof p === "object" && p !== null && "image_url" in p)) return m;
+    const parts = m.content.map((p) =>
+      typeof p === "object" && p !== null && "image_url" in p ? { type: "text" as const, text: "[image]" } : p,
+    );
+    return { ...m, content: parts } as ChatMessage;
+  });
+}
+
 // Build a summariser bound to the loop's own transport + model — a single non-tool completion that digests the old
 // span. Reused by runAgentLoop for rung-2 (LLM) compaction; tests inject their own summariser instead.
 export function buildSummarizer(transport: LlmTransport, model: string): (oldSpan: ChatMessage[]) => Promise<string> {
@@ -27,7 +44,7 @@ export function buildSummarizer(transport: LlmTransport, model: string): (oldSpa
       model,
       system: SUMMARY_SYSTEM_PROMPT,
       messages: [
-        ...oldSpan,
+        ...stripImages(oldSpan),
         { role: "user", content: "Summarise the conversation above per the instructions. Text only, no tools." },
       ],
       tools: [],
