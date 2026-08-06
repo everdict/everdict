@@ -910,10 +910,16 @@ async function main(): Promise<void> {
         // run's derived runId, and seal it at close — a settled interactive session then replays like a settled
         // eval (and scrubs live via peek meanwhile). Both halves are best-effort by contract.
         recorder: (cdpBase, runId) => {
-          const rec = new CdpEnvironmentRecorder(cdpBase, {
-            track: (item) => void caseRecorder.recordTrack(runId, item),
-            frame: (frameBase64) => void caseRecorder.recordFrame(runId, frameBase64),
-          });
+          // frames ON (opt-in on the recorder): an interactive session is often idle network-wise — the
+          // screencast is what makes its replay show anything at all (live-found: an idle page recorded zero).
+          const rec = new CdpEnvironmentRecorder(
+            cdpBase,
+            {
+              track: (item) => void caseRecorder.recordTrack(runId, item),
+              frame: (frameBase64) => void caseRecorder.recordFrame(runId, frameBase64),
+            },
+            { frames: true },
+          );
           rec.start().catch(() => undefined); // a page-less browser records nothing, never a failed session
           return { stop: () => rec.stop() };
         },
