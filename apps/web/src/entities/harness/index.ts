@@ -51,4 +51,5 @@ export {
   HARNESS_GROUPINGS,
   HARNESS_ORDERS,
   harnessListSpec,
+  harnessTags,
 } from './model/list-view'

@@ -7,7 +7,7 @@ import type { Harness } from './schema'
 //
 // 팀이 축의 하나인 것이 이 목록의 핵심 변화다. 한동안 팀은 경로였지만(`…/team/ENG/harnesses`), 사람은
 // "우리 팀 하네스"를 팀 화면에서 찾는 게 아니라 하네스 목록에서 좁혀 찾는다.
-export const HARNESS_FACETS = ['team', 'category', 'kind', 'creator'] as const
+export const HARNESS_FACETS = ['team', 'category', 'kind', 'creator', 'tag'] as const
 export const HARNESS_GROUPINGS = [
   'none',
   'template',
@@ -26,6 +26,26 @@ function versionsOf(harness: Harness): number {
   return harness.versionCount ?? harness.versions.length
 }
 
+// 하네스를 부르는 라벨 = 버전 태그의 합집합(최신 버전 우선, 중복 제거). 하네스가 많아지면 이름만으로
+// 각각이 뭔지 안 보인다는 요구의 답이 이것이다 — 어느 버전에 붙었든 사람이 단 라벨은 목록에서 그
+// 하네스의 이름표로 남는다(새 버전을 찍어도 옛 버전의 라벨이 사라지지 않도록 최신 것만 쓰지 않는다).
+// 데이터셋과 같은 이유로 거르기 전용이다: 여럿 들 수 있어 묶으면 그룹 합이 목록보다 커진다.
+export function harnessTags(harness: Harness): string[] {
+  const byVersion = harness.versionTags
+  if (!byVersion) return []
+  const seen = new Set<string>()
+  const tags: string[] = []
+  for (const version of [...harness.versions].reverse()) {
+    for (const tag of byVersion[version] ?? []) {
+      if (!seen.has(tag)) {
+        seen.add(tag)
+        tags.push(tag)
+      }
+    }
+  }
+  return tags
+}
+
 export const harnessListSpec: ListViewSpec<Harness> = {
   facetValues: (harness, facet) => {
     switch (facet) {
@@ -37,11 +57,14 @@ export const harnessListSpec: ListViewSpec<Harness> = {
         return harness.kind === undefined ? [] : [harness.kind]
       case 'creator':
         return harness.createdBy === undefined ? [] : [harness.createdBy]
+      case 'tag':
+        return harnessTags(harness)
       default:
         return []
     }
   },
-  // 검색이 훑는 것은 사람이 그 하네스를 부를 만한 모든 이름이다 — id 뿐 아니라 부제(모델·커맨드)와 형상까지.
+  // 검색이 훑는 것은 사람이 그 하네스를 부를 만한 모든 이름이다 — id 뿐 아니라 부제(모델·커맨드)와
+  // 형상, 그리고 사람이 직접 단 버전 태그까지.
   searchText: (harness) =>
     [
       harness.id,
@@ -49,6 +72,7 @@ export const harnessListSpec: ListViewSpec<Harness> = {
       harness.kind ?? '',
       harness.subtitle ?? '',
       harness.templateId ?? '',
+      ...harnessTags(harness),
     ].join(' '),
   groupKey: (harness, grouping) => {
     switch (grouping) {

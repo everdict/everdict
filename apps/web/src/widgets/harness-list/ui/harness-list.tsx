@@ -10,6 +10,7 @@ import {
   HARNESS_GROUPINGS,
   HARNESS_ORDERS,
   harnessListSpec,
+  harnessTags,
   type Harness,
 } from '@/entities/harness'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
@@ -19,6 +20,7 @@ import type { ListViewScope } from '@/shared/lib/load-list-view'
 import { useListView } from '@/shared/lib/use-list-view'
 import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
+import { VersionTagChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
 import { facetOptionsOf, ListSection, ListToolbar, type FacetSpec } from '@/shared/ui/list-toolbar'
@@ -72,6 +74,36 @@ function VariationChips({ variation }: { variation?: { scope?: string; label: st
       ))}
       {variation.length > shown.length && (
         <span className="text-[10.5px] text-faint">+{variation.length - shown.length}</span>
+      )}
+    </div>
+  )
+}
+
+// 사람이 단 라벨(버전 태그)이 목록에서 그 하네스의 이름표가 된다 — 어느 버전에 붙었는지는 hover 로.
+// 델타 칩(무엇을 바꿨는가)과 달리 이것은 사람이 부르는 이름이라, 목록에서 "각각이 무엇인지"를 답한다.
+const TAG_LIMIT = 4
+
+function HarnessTagChips({ harness }: { harness: Harness }) {
+  const tags = harnessTags(harness)
+  if (tags.length === 0) return null
+  const byVersion = harness.versionTags ?? {}
+  const versionsOf = (tag: string) =>
+    harness.versions.filter((v) => (byVersion[v] ?? []).includes(tag))
+  const shown = tags.slice(0, TAG_LIMIT)
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {shown.map((tag) => (
+        <span
+          key={tag}
+          title={versionsOf(tag)
+            .map((v) => `v${v}`)
+            .join(', ')}
+        >
+          <VersionTagChip>{tag}</VersionTagChip>
+        </span>
+      ))}
+      {tags.length > shown.length && (
+        <span className="text-[10.5px] text-faint">+{tags.length - shown.length}</span>
       )}
     </div>
   )
@@ -153,6 +185,7 @@ export function HarnessList({
       of('category', (value) => value, list('unset.category')),
       of('kind', (value) => value, list('unset.kind')),
       of('creator', creatorName, list('unset.creator')),
+      of('tag', (value) => value, list('unset.tag')),
       // 팀이 하나도 없는 워크스페이스에 팀 축을 세워 봐야 고를 것이 없다.
     ].filter((facet) => facet.options.length > 0)
   }, [harnesses, teamName, list, authors])
@@ -269,6 +302,7 @@ export function HarnessList({
                             </p>
                           )}
                           <VariationChips variation={h.variation} />
+                          <HarnessTagChips harness={h} />
                           <div className="flex flex-wrap items-center gap-1">
                             {h.category && (
                               <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[10.5px] text-muted-foreground ring-1 ring-inset ring-border">
