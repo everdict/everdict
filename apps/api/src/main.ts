@@ -12,6 +12,7 @@ import {
   WorkflowStateService,
   registryLatestVersionResolver,
   seedFirstPartyAgents,
+  settleOrphanSessionRuns,
 } from "@everdict/application-control";
 import { ApprovalService } from "@everdict/application-control";
 import {
@@ -1030,6 +1031,16 @@ async function main(): Promise<void> {
     // safety net for a durable reaper that never armed or a process that died holding the session.
     setInterval(() => void sandboxSessions.sweepOrphans().catch(() => {}), 60_000).unref();
     void sandboxSessions.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
+  }
+  // Session rows whose lane is NOT configured here still share this ledger (another process — a dev host
+  // stack, a dead replica — may have written and abandoned them). Settle those from the ledger alone; lanes
+  // configured above exclude their trigger because their own sweep owns the full container teardown.
+  {
+    const excludeTriggers = [...(sandboxSessions ? ["sandbox"] : []), ...(browserSessionService ? ["browser"] : [])];
+    const sweepUnowned = (): void =>
+      void settleOrphanSessionRuns({ store, events: lateEvents, excludeTriggers }).catch(() => {});
+    setInterval(sweepUnowned, 60_000).unref();
+    sweepUnowned(); // boot pass
   }
 
   const app = buildServer({

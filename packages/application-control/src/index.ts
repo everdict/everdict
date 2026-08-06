@@ -442,6 +442,7 @@ export {
   type TenantValueMap,
 } from "./ops/scheduling-config.js";
 export { INTERRUPTED, type RecoveryDeps, recoverInterrupted } from "./ops/startup-recovery.js";
+export { settleOrphanSessionRuns } from "./ops/session-run-sweep.js";
 export { Metrics } from "./ops/metrics.js";
 export { assertRuntimeTarget } from "./require-runtime/require-runtime.js";
 
