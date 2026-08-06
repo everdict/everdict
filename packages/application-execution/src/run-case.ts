@@ -238,7 +238,13 @@ function startCaseFsServicing(compute: ComputeHandle, hook: CaseFsServicing): ()
 
 // (this function later becomes a Temporal activity)
 export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<CaseResult> {
-  const compute = await deps.driver.provision({ os: "linux", needs: ["shell"], image: evalCase.image });
+  // The case DECLARES its world (placement.os); the driver satisfies it or refuses before execution — no
+  // hardcoded linux assumption. Absent declaration = the platform default world (linux), stated explicitly.
+  const compute = await deps.driver.provision({
+    os: evalCase.placement?.os ?? "linux",
+    needs: ["shell"],
+    image: evalCase.image,
+  });
   let released = false;
   // Live-screen capture loop handle (opt-in) — started after install, stopped inside release() so the frame grab is
   // always halted before the compute is disposed. Undefined when the run has no liveScreen hook.

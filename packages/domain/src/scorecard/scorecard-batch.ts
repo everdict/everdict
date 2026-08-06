@@ -60,6 +60,9 @@ export interface NewQueuedBatchInput {
   // Everything a re-drive needs (restart resume / retry-failed) — persisted at submit so the batch can be
   // reconstructed after a control-plane restart. docs/architecture/batch-resilience.md
   orchestration: ScorecardOrchestration;
+  // Reproducibility digests of exactly what this batch evaluates (resolved case bundle / resolved spec /
+  // grading plan) — sealed at submit, because submit is the only moment all three are in hand resolved.
+  manifest?: ScorecardRecord["manifest"];
   now: string;
 }
 
@@ -167,6 +170,7 @@ export class ScorecardBatch {
       ...(input.runtime ? { runtime: input.runtime } : {}),
       ...(input.subset ? { subset: input.subset } : {}),
       orchestration: input.orchestration,
+      ...(input.manifest ? { manifest: input.manifest } : {}),
       createdAt: input.now,
       updatedAt: input.now,
     };

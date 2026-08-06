@@ -23,6 +23,7 @@ import {
   type TrialDiff,
   authorize,
   can,
+  contentDigest,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
@@ -253,6 +254,17 @@ export class ScorecardService {
         ...(trials > 1 ? { trials } : {}),
         ...(input.traceSink ? { traceSink: input.traceSink } : {}),
         ...(input.oomAutoBoost ? { oomAutoBoost: true } : {}),
+      },
+      // Reproducibility manifest — content digests of exactly what this batch evaluates, sealed HERE because
+      // submit is the only moment the resolved case bundle + resolved spec + grading plan are all in hand.
+      manifest: {
+        dataset: { id: dataset.id, version: dataset.version, digest: contentDigest(dataset.cases) },
+        harness: {
+          id: input.harness.id,
+          version: harnessVersion,
+          ...(harnessSpec ? { specDigest: contentDigest(harnessSpec) } : {}),
+        },
+        ...(input.graders && input.graders.length > 0 ? { graders: contentDigest(input.graders) } : {}),
       },
       now: this.now(),
     });

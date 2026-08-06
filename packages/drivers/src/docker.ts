@@ -195,6 +195,14 @@ export class DockerDriver implements Driver {
   }
 
   async provision(spec: ComputeSpec): Promise<ComputeHandle> {
+    // A declared non-linux world is refused BEFORE execution — a linux container is not that world.
+    if (spec.os !== "linux") {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { os: spec.os },
+        `DockerDriver provides linux containers only; the case declared os '${spec.os}'.`,
+      );
+    }
     const image = spec.image ?? this.opts.defaultImage;
     if (!image) {
       throw new BadRequestError("BAD_REQUEST", undefined, "DockerDriver requires spec.image or defaultImage.");

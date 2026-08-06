@@ -26,6 +26,15 @@ export const ServedCaseResultSchema = CaseResultSchema.extend({
     .describe(
       "How the verdict was decided: the rung that settled it, its aggregation rule, and the exact measurements that voted — a verdict that cannot explain itself cannot be defended",
     ),
+  evidenceStatus: z
+    .object({
+      trace: z.enum(["complete", "partial", "missing", "deferred"]),
+      snapshot: z.enum(["complete", "missing"]),
+    })
+    .optional()
+    .describe(
+      "Evidence completeness derived from the result (collect failures, placeholder snapshots) — a verdict standing on partial evidence says so",
+    ),
 });
 export type ServedCaseResult = z.infer<typeof ServedCaseResultSchema>;
 

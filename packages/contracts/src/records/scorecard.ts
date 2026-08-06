@@ -35,6 +35,17 @@ export const MetricSummarySchema = z.object({
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 
+// Reproducibility manifest — content digests of EXACTLY what this batch evaluated, sealed at submit. The
+// registry rows (dataset/harness/graders) keep living; the manifest answers "was it exactly this document?"
+// long after. Values are canonical-JSON FNV digests (@everdict/domain contentDigest). mig 0126. Absent on
+// pre-manifest batches. trust-kernel contract ⑤.
+export const ScorecardManifestSchema = z.object({
+  dataset: z.object({ id: z.string(), version: z.string(), digest: z.string() }), // digest over the resolved case bundle
+  harness: z.object({ id: z.string(), version: z.string(), specDigest: z.string().optional() }), // resolved spec (absent: built-in with no declarative spec)
+  graders: z.string().optional(), // digest of the run-time grading plan (absent = per-case defaults)
+});
+export type ScorecardManifest = z.infer<typeof ScorecardManifestSchema>;
+
 // The scorecard's denominators (isomorphic to @everdict/domain scorecardOutcomes) — served next to casePass so
 // no client conflates 841/970 (verdicted) with 841/1000 (requested). infraFailed cases carry NO product verdict;
 // they are recovery work, never product failures. DERIVED on read, never persisted.
@@ -241,6 +252,7 @@ export const ScorecardRecordSchema = z.object({
   // the STAMPED policy (resolveVerdictPolicy), never silently the newest one. Absent on batches settled before
   // the stamp existed — those were judged under the authority ladder the default policy encodes. mig 0125.
   verdictPolicy: VerdictPolicyRefSchema.optional(),
+  manifest: ScorecardManifestSchema.optional(), // reproducibility digests, sealed at submit (mig 0126)
   // Which version of the span→event PROJECTION this batch was judged under (N6,
   // docs/architecture/otel-trace-model.md). Spans are immutable once ended, so the record is stable — but the
   // projection is code, and a verdict nobody can re-derive is a verdict nobody can defend. Storing the version

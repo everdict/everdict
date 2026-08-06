@@ -25,6 +25,7 @@ interface ScorecardRow {
   analysis_ref: string | null;
   trace_projection_version: number | string | null;
   verdict_policy: unknown; // {id, version, digest} — which policy produced the verdicts (mig 0125)
+  manifest: unknown; // reproducibility digests sealed at submit (mig 0126)
   sink_export: unknown;
   error: unknown;
   steps: unknown;
@@ -64,6 +65,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     // Which verdict policy the verdicts resolve under — lightweight, so it rides the list too: diff/
     // comparability flags a cross-policy comparison before anyone reads a delta.
     verdictPolicy: row.verdict_policy ?? undefined,
+    manifest: hasDetail ? (row.manifest ?? undefined) : undefined, // provenance detail (get only)
     export: hasDetail ? (row.sink_export ?? undefined) : undefined, // for detail (get only, like steps). Column name is sink_export (reserved-word avoidance)
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
@@ -75,8 +77,9 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, scorecard, analysis_ref, sink_export, error, steps, run_ids, created_at, updated_at)";
-const SCORECARD_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, scorecard, analysis_ref, sink_export, error, steps, run_ids, created_at, updated_at)";
+const SCORECARD_VALUES =
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)";
 
 function scorecardInsertParams(r: ScorecardRecord): unknown[] {
   return [
@@ -97,6 +100,7 @@ function scorecardInsertParams(r: ScorecardRecord): unknown[] {
     r.runtime ?? null,
     r.subset ? JSON.stringify(r.subset) : null,
     r.orchestration ? JSON.stringify(r.orchestration) : null,
+    r.manifest ? JSON.stringify(r.manifest) : null,
     r.scorecard ? JSON.stringify(r.scorecard) : null,
     r.analysisRef ?? null,
     r.export ? JSON.stringify(r.export) : null,

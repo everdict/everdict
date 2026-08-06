@@ -5,7 +5,10 @@ export const CapabilitySchema = z.enum(["shell", "browser", "desktop"]);
 export type Capability = z.infer<typeof CapabilitySchema>;
 
 export const ComputeSpecSchema = z.object({
-  os: z.literal("linux"), // v1. windows/macos are extended in the Pool Driver.
+  // The world the evaluation DECLARED it needs (case/harness placement.os) — not what the driver happens to
+  // provide. A driver that cannot satisfy the declared os REFUSES before execution (a clear pre-flight error),
+  // never silently substitutes linux: a windows case run on linux is a wrong-world result, not a result.
+  os: z.enum(["linux", "windows", "macos"]),
   image: z.string().optional(),
   needs: z.array(CapabilitySchema).default(["shell"]),
   cpu: z.number().optional(),

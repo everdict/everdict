@@ -1,0 +1,41 @@
+import type { CaseResult } from "@everdict/contracts";
+import { PRE_OUTCOME_STAGES } from "./verdict-policy.js";
+
+// Evidence completeness as a VALUE — "we have evidence" and "the evidence is complete" are different claims,
+// and a verdict standing on partial evidence must say so. Derived from what the result already records (the
+// classified failure's stage + the evidence planes present), never self-reported. trust-kernel contract ⑤.
+//
+// trace:    complete = collected through the normal path with no collect failure
+//           partial  = a collect-stage failure but SOME events survived (the partial-results-by-design path)
+//           missing  = no events (never executed, or collection died before anything landed)
+//           deferred = collection intentionally moved to the control plane (traceRef) and not yet folded in
+// snapshot: complete = a real environment snapshot; missing = the empty placeholder a failed case carries
+export interface EvidenceStatus {
+  trace: "complete" | "partial" | "missing" | "deferred";
+  snapshot: "complete" | "missing";
+}
+
+// The empty prompt snapshot is the placeholder failedCaseResult synthesizes — not a captured world.
+function snapshotPresent(result: Pick<CaseResult, "snapshot">): boolean {
+  const s = result.snapshot;
+  return !(s.kind === "prompt" && s.output === "");
+}
+
+export function evidenceStatus(
+  result: Pick<CaseResult, "trace" | "snapshot"> & Pick<Partial<CaseResult>, "failure" | "traceRef">,
+): EvidenceStatus {
+  const failure = result.failure;
+  const hasEvents = result.trace.length > 0;
+  let trace: EvidenceStatus["trace"];
+  if (failure && PRE_OUTCOME_STAGES.has(failure.stage)) {
+    // never legitimately executed — whatever events exist are infra post-mortem, not the agent's trajectory
+    trace = "missing";
+  } else if (failure?.stage === "collect") {
+    trace = hasEvents ? "partial" : "missing";
+  } else if (!hasEvents && result.traceRef) {
+    trace = "deferred"; // control-plane collection pending — absence is a state, not a loss
+  } else {
+    trace = hasEvents ? "complete" : "missing";
+  }
+  return { trace, snapshot: snapshotPresent(result) ? "complete" : "missing" };
+}

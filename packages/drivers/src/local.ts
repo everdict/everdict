@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
+  BadRequestError,
   type ComputeHandle,
   type ComputeSpec,
   type Driver,
@@ -123,7 +124,16 @@ export class LocalDriver implements Driver {
   readonly id = "local";
   constructor(private readonly opts: LocalDriverOptions = {}) {}
 
-  async provision(_spec: ComputeSpec): Promise<ComputeHandle> {
+  async provision(spec: ComputeSpec): Promise<ComputeHandle> {
+    // A declared world this driver cannot provide is refused BEFORE execution — running a windows case on the
+    // host's linux would produce a wrong-world result that looks like a normal one.
+    if (spec.os !== "linux") {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { os: spec.os },
+        `LocalDriver provides linux only; the case declared os '${spec.os}'. Route it to a runtime that provides that world.`,
+      );
+    }
     const root = await mkdtemp(join(tmpdir(), "everdict-"));
     return new LocalComputeHandle(root, this.opts.echo ?? false);
   }
