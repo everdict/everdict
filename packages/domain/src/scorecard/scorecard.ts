@@ -145,13 +145,17 @@ export interface ScorecardDiff {
   comparability: "full" | "partial" | "none";
 }
 
-function scoreMap(sc: Scorecard): Map<string, Map<string, Score>> {
-  const m = new Map<string, Map<string, Score>>();
+// Keyed by (caseId, trial) — NOT caseId alone: on a trials>1 scorecard a caseId-keyed map silently kept the
+// LAST trial's scores (map last-wins), so pass transitions compared arbitrary trials. Trial i pairs with
+// trial i; the trial-statistical gate (diffTrials) remains the authoritative regression signal for trial runs.
+function scoreMap(sc: Scorecard): Map<string, { caseId: string; metrics: Map<string, Score> }> {
+  const m = new Map<string, { caseId: string; metrics: Map<string, Score> }>();
   for (const result of sc.results) {
-    const inner = m.get(result.caseId) ?? new Map<string, Score>();
+    const key = `${result.caseId}#${result.trial ?? 0}`;
+    const entry = m.get(key) ?? { caseId: result.caseId, metrics: new Map<string, Score>() };
     // Measurements only — a diff between an unmeasured placeholder and a real value is not a delta.
-    for (const s of measuredScores(result.scores)) inner.set(s.metric, s);
-    m.set(result.caseId, inner);
+    for (const s of measuredScores(result.scores)) entry.metrics.set(s.metric, s);
+    m.set(key, entry);
   }
   return m;
 }
@@ -210,11 +214,12 @@ export function diffScorecards(
   const c = scoreMap(candidate);
   const regressions: CaseDelta[] = [];
   const improvements: CaseDelta[] = [];
-  for (const [caseId, cMetrics] of c) {
-    const bMetrics = b.get(caseId);
-    if (!bMetrics) continue; // enumerated below as casesOnlyInCandidate — never silently gone
-    for (const [metric, cs] of cMetrics) {
-      const bs = bMetrics.get(metric);
+  for (const [key, cEntry] of c) {
+    const bEntry = b.get(key);
+    if (!bEntry) continue; // enumerated below as casesOnlyInCandidate — never silently gone
+    const caseId = cEntry.caseId;
+    for (const [metric, cs] of cEntry.metrics) {
+      const bs = bEntry.metrics.get(metric);
       if (!bs) continue;
       const d: CaseDelta = { caseId, metric, baseline: bs.value, candidate: cs.value, delta: cs.value - bs.value };
       if (bs.pass === true && cs.pass === false) {

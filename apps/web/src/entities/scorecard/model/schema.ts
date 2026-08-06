@@ -328,6 +328,8 @@ export const scorecardTrendSchema = z.object({
   dataset: z.string(),
   metric: z.string(),
   baseline: z.string(),
+  // Reading direction the server computed regressions under — absent = unknown: deltas stay uncolored.
+  direction: z.enum(['higher_is_better', 'lower_is_better']).optional(),
   points: z.array(trendPointSchema),
 })
 

@@ -189,7 +189,7 @@ export class ScorecardIngestService {
           judges,
           {
             sourceKind: EVERDICT_TRACE_SOURCE,
-            externalIdByCase: Object.fromEntries(runs.map((r) => [r.caseId, r.runId])),
+            externalIdByCase: uniqueExternalIds(runs),
           },
           record.createdBy,
         );
@@ -263,7 +263,7 @@ export class ScorecardIngestService {
         judges,
         {
           sourceKind: base.kind, // resolved kind (named source or inline) — for same-platform attach-only export
-          externalIdByCase: Object.fromEntries(runs.map((r) => [r.caseId, r.runId])),
+          externalIdByCase: uniqueExternalIds(runs),
         },
         record.createdBy,
       );
@@ -409,4 +409,18 @@ export class ScorecardIngestService {
     // onComplete/notification path ever ran here) — widening that coverage is an E2 decision, not a default.
     await this.deps.store.update(id, outcome(batch).patch);
   }
+}
+
+// caseId → external run id for attach-mode export. A caseId that maps to MORE THAN ONE pulled run is
+// ambiguous — attaching scores to the last-seen run would write a verdict onto the wrong trace, so the
+// duplicate caseId is excluded from attach entirely (its scores still land on the scorecard).
+function uniqueExternalIds(runs: Array<{ caseId: string; runId: string }>): Record<string, string> {
+  const byCase: Record<string, string> = {};
+  const ambiguous = new Set<string>();
+  for (const r of runs) {
+    if (r.caseId in byCase && byCase[r.caseId] !== r.runId) ambiguous.add(r.caseId);
+    else byCase[r.caseId] = r.runId;
+  }
+  for (const caseId of ambiguous) delete byCase[caseId];
+  return byCase;
 }

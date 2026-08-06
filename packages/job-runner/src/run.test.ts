@@ -87,7 +87,9 @@ describe("failureResult (classified result crosses the process boundary)", () =>
     expect(result.caseId).toBe("unknown");
     expect(result.harness).toBe("unknown@unknown");
     expect(result.failure?.stage).toBe("dispatch");
-    expect(result.scores[0]?.pass).toBe(false);
+    // an UNMEASURED diagnostic, never a product FAIL — the fate rides on the classified failure
+    expect(result.scores[0]?.status).toBe("unmeasured");
+    expect(result.scores[0]?.pass).toBeUndefined();
   });
 
   it("preserves the harness identity and the error's stage when the job is known", () => {

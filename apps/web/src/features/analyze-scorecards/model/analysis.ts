@@ -210,6 +210,7 @@ function passesFilters(
     !c.includeIncomplete &&
     (sc.status === 'superseded' ||
       sc.status === 'cancelled' ||
+      sc.status === 'failed' || // a batch that died mid-run must not feed its partial rate into any cell
       sc.status === 'queued' ||
       sc.status === 'running')
   )

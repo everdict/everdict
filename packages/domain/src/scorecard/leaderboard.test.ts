@@ -112,3 +112,23 @@ describe("leaderboard", () => {
     expect(lb.rows[0]?.judgeModels).toEqual(["gpt-5.4-mini"]);
   });
 });
+
+describe("leaderboard direction (sign-as-verdict sweep)", () => {
+  const card = (id: string, harness: string, mean: number) => ({
+    id,
+    dataset: { id: "d", version: "1" },
+    harness: { id: harness, version: "1" },
+    status: "succeeded",
+    createdAt: "2026-01-01T00:00:00Z",
+    summary: [{ metric: "cost_usd", count: 3, mean }],
+  });
+
+  it("ranking by cost_usd puts the CHEAPEST harness first — score-descending crowned the most expensive", () => {
+    const lb = leaderboard([card("a", "pricey", 2.0), card("b", "cheap", 0.2)], {
+      datasetId: "d",
+      metric: "cost_usd",
+    });
+    expect(lb.rows[0]?.harness.id).toBe("cheap");
+    expect(lb.rows[1]?.harness.id).toBe("pricey");
+  });
+});

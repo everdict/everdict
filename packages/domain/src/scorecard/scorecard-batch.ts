@@ -491,7 +491,8 @@ export class ScorecardBatch {
     const { dataset, harness } = batchLabels(this.record);
     const promoted = this.record.kind === "experiment";
     const summary = extras.summary ?? this.record.summary;
-    const passRate = summary?.find((row) => row.passRate !== undefined)?.passRate;
+    // Authority-ranked, not first-in-summary — same rule as batchTerminalFact (summary order is not authority).
+    const passRate = headlinePassRate({ ...(summary ? { summary } : {}) }) ?? undefined;
     return {
       patch: { ...(promoted ? { kind: "scorecard" as const } : {}), ...extras, updatedAt: now },
       facts: [

@@ -177,14 +177,20 @@ export class WorkspacePulseService {
         // a question about facts with timestamps, and the ledger would have to be paged to answer it.
         runs: countKinds(buckets, ["run.completed", "run.failed"]),
         failed: countKinds(buckets, ["run.failed"]),
-        ...optionalRate("passRate", meanPassRate(ratesOf(inWindow))),
-        ...optionalRate("passRateBefore", meanPassRate(ratesOf(before))),
+        // Quality rates read SUCCEEDED batches only — a failed/cancelled/superseded batch's partial rate is
+        // not a product quality signal (the analysis engine excludes exactly these; the dashboard must agree),
+        // and a superseded retry would double-count its replacement.
+        ...optionalRate("passRate", meanPassRate(ratesOf(succeededIn(inWindow)))),
+        ...optionalRate("passRateBefore", meanPassRate(ratesOf(succeededIn(before)))),
       },
       trend: {
         activity: activityTrend(buckets, spine),
         flow: flowTrend(buckets, spine),
         quality: qualityTrend(
-          inWindow.map((batch) => ({ day: batch.createdAt.slice(0, 10), ...optionalRate("passRate", rateOf(batch)) })),
+          succeededIn(inWindow).map((batch) => ({
+            day: batch.createdAt.slice(0, 10),
+            ...optionalRate("passRate", rateOf(batch)),
+          })),
           spine,
         ),
       },
@@ -206,6 +212,11 @@ function countKinds(buckets: readonly PlatformEventDailyCount[], kinds: readonly
 // and treating silence as an alarm would make every new project red.
 function isFlagged(health: string | undefined): boolean {
   return health === "at_risk" || health === "off_track";
+}
+
+// Quality-rate eligibility: only a batch that actually completed carries a defensible rate.
+function succeededIn(batches: readonly ScorecardRecord[]): ScorecardRecord[] {
+  return batches.filter((batch) => batch.status === "succeeded");
 }
 
 function batchesBetween(batches: readonly ScorecardRecord[], from: string, to: string): ScorecardRecord[] {

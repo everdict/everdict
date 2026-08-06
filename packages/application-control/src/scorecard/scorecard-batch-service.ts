@@ -599,12 +599,15 @@ export class ScorecardBatchService {
               harness: `${ctx.harnessId}@${ctx.harnessVersion}`,
               trace: [{ t: 0, kind: "error", message }],
               snapshot: { kind: "prompt", output: "" },
+              // UNMEASURED diagnostic — the failedCaseResult twin on the batch retry-exhausted path.
               scores: [
                 {
                   graderId: "dispatch",
                   metric: "error",
                   value: 0,
-                  pass: false,
+                  status: "unmeasured",
+                  reason: "missing_evidence",
+                  retryable: failure.retryable,
                   detail: `[${failure.class}] ${message}`,
                 },
               ],

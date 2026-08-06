@@ -92,8 +92,19 @@ export function failureResult(
     harness: job ? `${job.harness.id}@${job.harness.version}` : "unknown@unknown",
     trace: [{ t: 0, kind: "error", message }],
     snapshot: { kind: "prompt", output: "" },
+    // UNMEASURED diagnostic, not a measurement (run-suite failedCaseResult twin): with no status this score
+    // was "measured" — a mean-0/pass:false row — and a collect/grade-stage failure (outside PRE_OUTCOME_STAGES)
+    // even DECIDED the case on the fallback rung: an infra failure read as a product FAIL.
     scores: [
-      { graderId: failure.stage, metric: "error", value: 0, pass: false, detail: `[${failure.class}] ${message}` },
+      {
+        graderId: failure.stage,
+        metric: "error",
+        value: 0,
+        status: "unmeasured",
+        reason: "missing_evidence",
+        retryable: failure.retryable,
+        detail: `[${failure.class}] ${message}`,
+      },
     ],
     failure,
   };

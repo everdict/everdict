@@ -80,3 +80,38 @@ describe("trendSeries", () => {
     expect(t.points[0]?.passRate).toBeNull();
   });
 });
+
+describe("trend direction (sign-as-verdict sweep)", () => {
+  const card = (id: string, createdAt: string, metric: string, mean: number, passRate?: number) => ({
+    id,
+    dataset: { id: "d", version: "1" },
+    harness: { id: "h", version: "1" },
+    status: "succeeded",
+    createdAt,
+    summary: [{ metric, count: 3, mean, ...(passRate !== undefined ? { passRate } : {}) }],
+  });
+
+  it("a cost_usd DROP is not a regression — declared lower_is_better flips the reading", () => {
+    const t = trendSeries(
+      [card("a", "2026-01-01T00:00:00Z", "cost_usd", 1.0), card("b", "2026-01-02T00:00:00Z", "cost_usd", 0.5)],
+      { datasetId: "d", metric: "cost_usd" },
+    );
+    expect(t.direction).toBe("lower_is_better");
+    expect(t.points[1]?.regressed).toBe(false); // cheaper is BETTER
+    // ...and a cost INCREASE is the regression
+    const up = trendSeries(
+      [card("a", "2026-01-01T00:00:00Z", "cost_usd", 0.5), card("b", "2026-01-02T00:00:00Z", "cost_usd", 1.0)],
+      { datasetId: "d", metric: "cost_usd" },
+    );
+    expect(up.points[1]?.regressed).toBe(true);
+  });
+
+  it("an undeclared mean-only metric has no direction and flags nothing", () => {
+    const t = trendSeries(
+      [card("a", "2026-01-01T00:00:00Z", "custom", 1.0), card("b", "2026-01-02T00:00:00Z", "custom", 0.1)],
+      { datasetId: "d", metric: "custom" },
+    );
+    expect(t.direction).toBeUndefined();
+    expect(t.points.every((p) => !p.regressed)).toBe(true);
+  });
+});

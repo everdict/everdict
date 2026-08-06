@@ -74,7 +74,8 @@ describe("computeAnalysis — filters", () => {
       card("e", { status: "queued" }),
       card("f", { status: "failed" }),
     ];
-    expect(computeAnalysis(cards, config()).total).toBe(2); // succeeded + failed
+    // failed is excluded too now — a batch that died mid-run must not feed its partial rate into any cell.
+    expect(computeAnalysis(cards, config()).total).toBe(1); // succeeded only
     expect(computeAnalysis(cards, config({ includeIncomplete: true })).total).toBe(6);
   });
 

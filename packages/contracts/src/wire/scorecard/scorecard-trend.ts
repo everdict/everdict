@@ -6,6 +6,12 @@ export const ScorecardTrendResponseSchema = z.object({
   dataset: z.string().describe("Dataset id"),
   metric: z.string(),
   baseline: z.string().describe('"first" | "previous" | <scorecardId> — as requested'),
+  direction: z
+    .enum(["higher_is_better", "lower_is_better"])
+    .optional()
+    .describe(
+      "Reading direction the regression flags were computed under (policy-declared, else pass-rate ⇒ higher). Absent = unknown — no point is flagged regressed, and a delta's sign must not be colored",
+    ),
   points: z
     .array(
       z.object({
@@ -16,7 +22,7 @@ export const ScorecardTrendResponseSchema = z.object({
         passRate: z.number().nullable(),
         score: z.number().nullable().describe("passRate first (mean if absent) — the trend/regression decision key"),
         deltaVsBaseline: z.number().nullable().describe("score - baseline.score (only when both exist)"),
-        regressed: z.boolean().describe("score dropped vs baseline (beyond epsilon)"),
+        regressed: z.boolean().describe("moved AGAINST the series' direction vs baseline (beyond epsilon)"),
       }),
     )
     .describe("createdAt ascending"),

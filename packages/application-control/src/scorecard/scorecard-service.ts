@@ -794,7 +794,9 @@ export class ScorecardService {
         const children = await this.deps.runStore.list(input.tenant, { scorecardId: rec.id });
         for (const c of children) {
           if (c.status !== "succeeded" || !c.result) continue;
-          usd.push(c.usage?.usd ?? 0);
+          // Metered cases only — an unmetered run pushed $0 into the median, dragging the estimate toward
+          // zero exactly when metering coverage is worst (absence is not a price).
+          if (c.usage?.usd !== undefined) usd.push(c.usage.usd);
           const d = (new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime()) / 1000;
           if (d > 0) durations.push(d);
         }

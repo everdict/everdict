@@ -1,4 +1,6 @@
+import { metricMatches } from "@everdict/contracts";
 import type { MetricSummary } from "./scorecard.js";
+import { DEFAULT_VERDICT_POLICY } from "./verdict-policy.js";
 
 // Period trend / regression-over-time — lays out one (dataset, metric)'s scorecards in time order and views change/regression vs baseline.
 // The input is the *lightweight* shape of a scorecard (list summary is enough) — @everdict/db's ScorecardRecord satisfies this structurally
@@ -20,13 +22,17 @@ export interface TrendPoint {
   passRate: number | null;
   score: number | null; // passRate first (mean if absent) — the trend/regression decision key
   deltaVsBaseline: number | null; // score - baseline.score (only when both exist)
-  regressed: boolean; // score dropped vs baseline (> epsilon)
+  regressed: boolean; // moved AGAINST the series' direction vs baseline (> epsilon); always false when direction is unknown
 }
 
 export interface ScorecardTrend {
   dataset: string; // datasetId
   metric: string;
   baseline: string; // "first" | "previous" | <scorecardId> (as requested)
+  // The reading direction the regression flags were computed under: the policy-declared direction for the
+  // metric, else higher_is_better when the series is pass-rate-based. Absent = unknown direction — no point
+  // is flagged regressed, and a consumer must not color the delta by sign.
+  direction?: "higher_is_better" | "lower_is_better";
   points: TrendPoint[]; // createdAt ascending
 }
 
@@ -61,6 +67,18 @@ export function trendSeries(
         ? null
         : (scored.find((s) => s.card.id === baseline)?.score ?? null);
 
+  // Reading direction: declared in the verdict policy for this metric; else, a pass-rate series is
+  // higher-is-better by definition. A mean-based series with no declared direction has NO direction — a drop
+  // in cost_usd was flagged "regressed" here (sign-as-verdict, the compare-page defect's trend twin).
+  const declared = DEFAULT_VERDICT_POLICY.metrics.find((d) => metricMatches(d.match, opts.metric))?.direction;
+  const usesPassRate = scored.some((s) => s.passRate !== null);
+  const direction: "higher_is_better" | "lower_is_better" | undefined =
+    declared === "higher_is_better" || declared === "lower_is_better"
+      ? declared
+      : usesPassRate
+        ? "higher_is_better"
+        : undefined;
+
   const points: TrendPoint[] = scored.map((s, i) => {
     const baseScore =
       baseline === "previous"
@@ -78,9 +96,11 @@ export function trendSeries(
       passRate: s.passRate,
       score: s.score,
       deltaVsBaseline: delta,
-      regressed: delta !== null && delta < -EPS,
+      regressed:
+        delta !== null &&
+        (direction === "higher_is_better" ? delta < -EPS : direction === "lower_is_better" ? delta > EPS : false),
     };
   });
 
-  return { dataset: opts.datasetId, metric: opts.metric, baseline, points };
+  return { dataset: opts.datasetId, metric: opts.metric, baseline, ...(direction ? { direction } : {}), points };
 }

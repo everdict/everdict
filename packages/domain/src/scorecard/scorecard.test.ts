@@ -274,6 +274,24 @@ describe("diffScorecards — comparability first", () => {
     expect(diffScorecards(base, cand).metrics[0]?.reading).toBe("unknown");
   });
 
+  it("trial results pair trial-to-trial — the last trial can no longer shadow the others (map last-wins)", () => {
+    // Regression: scoreMap keyed by caseId alone, so on a trials>1 scorecard the LAST trial silently won and
+    // a pass→fail transition in an earlier trial vanished from the case-level diff.
+    const trialResult = (trial: number, pass: boolean): CaseResult => ({
+      caseId: "a",
+      harness: "h@1",
+      trial,
+      trace: [],
+      snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+      scores: [{ graderId: "tests-pass", metric: "tests_pass", value: pass ? 1 : 0, pass }],
+    });
+    const base = cardOf([trialResult(0, true), trialResult(1, true)]);
+    const cand = cardOf([trialResult(0, false), trialResult(1, true)]); // trial 0 broke; trial 1 (the LAST) fine
+    const diff = diffScorecards(base, cand);
+    expect(diff.regressions).toHaveLength(1);
+    expect(diff.regressions[0]?.caseId).toBe("a");
+  });
+
   it("identical full-overlap scorecards are fully comparable", () => {
     const base = cardOf([one("a", "tests_pass", 1, true)]);
     expect(diffScorecards(base, base).comparability).toBe("full");

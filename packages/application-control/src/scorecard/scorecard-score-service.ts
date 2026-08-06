@@ -253,7 +253,12 @@ export class ScorecardScoreService {
     const store = this.deps.runStore;
     if (!store || !record.runIds?.length) return;
     const children = await store.list(record.tenant, { scorecardId: record.id });
-    const byKey = new Map(children.map((c) => [childKey(c.caseId, c.result?.trial), c] as const));
+    // Only children WITH a result can receive a write-back — and a result-less child must not enter the map:
+    // childKey(trial: undefined) collapses onto "#0", where the last result-less child would silently SHADOW
+    // the real trial-0 child and make the write-back skip it.
+    const byKey = new Map(
+      children.filter((c) => c.result).map((c) => [childKey(c.caseId, c.result?.trial), c] as const),
+    );
     for (const r of results) {
       const child = byKey.get(childKey(r.caseId, r.trial));
       if (!child?.result) continue;

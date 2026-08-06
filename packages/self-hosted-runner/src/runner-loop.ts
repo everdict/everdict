@@ -278,12 +278,16 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
           harness: `${parsed.data.harness.id}@${parsed.data.harness.version}`,
           trace: [leasedMark, { t: 1, kind: "error", message: errMsg(e) }],
           snapshot: { kind: "prompt", output: "" },
+          // UNMEASURED diagnostic — the run-suite failedCaseResult twin on the self-hosted reply path: a
+          // measured pass:false here made a runner-side infra failure read as a product FAIL.
           scores: [
             {
               graderId: failure.stage,
               metric: "error",
               value: 0,
-              pass: false,
+              status: "unmeasured",
+              reason: "missing_evidence",
+              retryable: failure.retryable,
               detail: `[${failure.class}] ${errMsg(e)}`,
             },
           ],

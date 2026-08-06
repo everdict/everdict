@@ -285,6 +285,7 @@ function passesFilters(card: AnalysisCard, c: AnalysisConfig, resolveOwner: (sub
     !c.includeIncomplete &&
     (card.status === "superseded" ||
       card.status === "cancelled" ||
+      card.status === "failed" || // a batch that died mid-run must not feed its partial rate into any cell
       card.status === "queued" ||
       card.status === "running")
   )

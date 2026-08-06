@@ -256,11 +256,13 @@ export default async function TrendPage({
                       <TD className="text-right">
                         <Score passRate={p.passRate} mean={p.mean} />
                       </TD>
+                      {/* Colored by the series' DECLARED direction, not the delta's sign — a cost drop is
+                          green, and an unknown-direction metric stays neutral (its sign means nothing alone). */}
                       <TD
                         className={`text-right font-mono text-[12px] tabular-nums ${
-                          p.deltaVsBaseline === null || p.deltaVsBaseline === 0
+                          p.deltaVsBaseline === null || p.deltaVsBaseline === 0 || !trend.direction
                             ? 'text-muted-foreground'
-                            : p.deltaVsBaseline > 0
+                            : (trend.direction === 'higher_is_better') === p.deltaVsBaseline > 0
                               ? 'font-[510] text-[var(--color-success)]'
                               : 'font-[510] text-destructive'
                         }`}
