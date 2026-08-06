@@ -3126,6 +3126,8 @@
     "runExit": "Exit {code}",
     "runTimedOut": "Timed out",
     "runDuration": "{ms} ms",
+    "runOn": "Run on",
+    "runHere": "This deployment",
     "runNoOutput": "No output",
     "runTruncated": "— output truncated —",
     "runOutputs": "Files produced",

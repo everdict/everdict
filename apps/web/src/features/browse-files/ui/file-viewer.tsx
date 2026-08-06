@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Download, History, Loader2, Pencil, Play, Save, X } from 'lucide-react'
+import { Check, ChevronDown, Download, History, Loader2, Pencil, Play, Save, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type {
@@ -12,9 +12,15 @@ import type {
 import { fmtDateTime } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { CodeEditor } from '@/shared/ui/code-editor'
+import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { EmptyState } from '@/shared/ui/empty-state'
 
-import { readFileAction, runFileAction, writeFileAction } from '../api/browse-files'
+import {
+  listRunTargetsAction,
+  readFileAction,
+  runFileAction,
+  writeFileAction,
+} from '../api/browse-files'
 import { downloadBlob, fileBlob } from '../lib/file-bytes'
 import { isRunnablePath, languageFor, previewKindFor, supportsRawView } from '../lib/file-kind'
 import { displayPath } from '../lib/fs-path'
@@ -55,6 +61,11 @@ export function FileViewer({
   // looking at is worse than no output pane.
   const [running, setRunning] = useState(false)
   const [execution, setExecution] = useState<FileExecutionResultView | undefined>(undefined)
+  // WHERE it runs. undefined = the deployment's own compute; a name = one of the workspace's registered
+  // runtimes, so the script executes on their cluster inside their trust zone. Kept across files on purpose —
+  // "run my scripts over there" is a standing preference, not a per-document one.
+  const [target, setTarget] = useState<string | undefined>(undefined)
+  const [targets, setTargets] = useState<{ id: string }[] | undefined>(undefined)
 
   const load = useCallback(async () => {
     setEditing(false)
@@ -116,7 +127,7 @@ export function FileViewer({
   // sandbox is gone. A run that produced files changed the tree — tell the host so it refetches.
   async function runFile() {
     setRunning(true)
-    const res = await runFileAction(path)
+    const res = await runFileAction(path, target !== undefined ? { runtime: target } : undefined)
     setRunning(false)
     if (res.ok && res.data) {
       setExecution(res.data)
@@ -159,10 +170,55 @@ export function FileViewer({
             </Button>
           )}
           {canRun && isRunnablePath(path) && isText && !editing && !showHistory && (
-            <Button variant="outline" size="xs" disabled={running} onClick={() => void runFile()}>
-              {running ? <Loader2 className="animate-spin" /> : <Play />}{' '}
-              {running ? t('running') : t('run')}
-            </Button>
+            <span className="inline-flex items-center">
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={running}
+                className="rounded-r-none border-r-0"
+                onClick={() => void runFile()}
+              >
+                {running ? <Loader2 className="animate-spin" /> : <Play />}{' '}
+                {running ? t('running') : (target ?? t('run'))}
+              </Button>
+              <DropdownMenu
+                align="end"
+                trigger={({ toggle }) => (
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    disabled={running}
+                    className="rounded-l-none px-1.5"
+                    title={t('runOn')}
+                    aria-label={t('runOn')}
+                    onClick={() => {
+                      // Fetched on first open, not on every file — the list only matters once someone asks.
+                      if (targets === undefined) void listRunTargetsAction().then(setTargets)
+                      toggle()
+                    }}
+                  >
+                    <ChevronDown />
+                  </Button>
+                )}
+              >
+                <DropdownLabel>{t('runOn')}</DropdownLabel>
+                <DropdownItem
+                  onSelect={() => setTarget(undefined)}
+                  trailing={target === undefined ? <Check /> : undefined}
+                >
+                  {t('runHere')}
+                </DropdownItem>
+                {(targets ?? []).map((r) => (
+                  <DropdownItem
+                    key={r.id}
+                    onSelect={() => setTarget(r.id)}
+                    trailing={target === r.id ? <Check /> : undefined}
+                  >
+                    {r.id}
+                  </DropdownItem>
+                ))}
+              </DropdownMenu>
+            </span>
           )}
           {file !== undefined && !editing && !showHistory && (
             <Button variant="ghost" size="xs" onClick={download} title={t('download')}>

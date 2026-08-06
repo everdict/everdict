@@ -3126,6 +3126,8 @@
     "runExit": "종료 코드 {code}",
     "runTimedOut": "시간 초과",
     "runDuration": "{ms}ms",
+    "runOn": "실행 위치",
+    "runHere": "이 배포",
     "runNoOutput": "출력 없음",
     "runTruncated": "— 출력이 잘렸습니다 —",
     "runOutputs": "생성된 파일",

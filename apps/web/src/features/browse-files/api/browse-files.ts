@@ -2,6 +2,7 @@
 
 import { z } from 'zod'
 
+import { runtimesSchema } from '@/entities/runtime'
 import {
   fileExecutionResultSchema,
   fsEntrySchema,
@@ -92,18 +93,34 @@ export async function writeFileAction(input: {
 // so a long script holds the action open until its in-sandbox timeout — which is why that timeout is capped.
 export async function runFileAction(
   path: string,
-  image?: string
+  opts?: { image?: string; runtime?: string }
 ): Promise<FsActionResult<FileExecutionResultView>> {
   const ctx = await authContext()
   try {
     return {
       ok: true,
       data: fileExecutionResultSchema.parse(
-        await controlPlane.runFsFile(ctx, { path, ...(image !== undefined ? { image } : {}) })
+        await controlPlane.runFsFile(ctx, {
+          path,
+          ...(opts?.image !== undefined ? { image: opts.image } : {}),
+          ...(opts?.runtime !== undefined ? { runtime: opts.runtime } : {}),
+        })
       ),
     }
   } catch (e) {
     return fail(e)
+  }
+}
+
+// WHERE a run can go: the workspace's registered runtimes (its own clusters). The deployment's own compute is
+// the unnamed default, so it is not in this list — the picker adds it as the first choice. An empty list is a
+// legitimate answer (a workspace that registered nothing), not an error worth surfacing.
+export async function listRunTargetsAction(): Promise<{ id: string }[]> {
+  const ctx = await authContext()
+  try {
+    return runtimesSchema.parse(await controlPlane.listRuntimes(ctx)).map(({ id }) => ({ id }))
+  } catch {
+    return []
   }
 }
 
