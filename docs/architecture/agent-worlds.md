@@ -174,25 +174,38 @@ Two rules the live drill wrote:
 A multi-platform base is refused: snapshotting would have to pick an architecture, and a world is one
 running filesystem.
 
-## W4 — a session on a cluster is a Driver, not a new placement concept
+## W4/W5 — one placement target, two modes
 
-`Backend` is one-shot `dispatch(CaseJob) → CaseResult`; a session is not that shape, and bending it into one
-would have meant a second lifecycle in the placement layer. But the **Driver** contract already says nothing
-about where compute lives — `provision` hands back something you can `exec` on and must `dispose`. So a
-cluster session is that contract implemented over the orchestrator:
+`Backend` is one-shot `dispatch(CaseJob) → CaseResult`; a session is not that shape. The first cut answered
+that with a **separate class** (`NomadSessionDriver`) implementing the `Driver` contract over the same
+orchestrator — which worked, and was wrong in a way that only shows up once you look at the whole target:
+one cluster now had **two owners**. The session lane re-derived the address, the ACL token, the namespace and
+the trust zone; and because the scheduler only knows the objects in its registry, a held-open session
+consumed a machine the capacity probe never counted. Running a harness and founding a world are the same
+compute under two modes, so they are one object:
 
-`NomadSessionDriver` (`@everdict/backends`) submits a Nomad **`Type:"service"`** job with
-`RestartPolicy{Attempts:0}` (the container's filesystem IS the session — a silent restart would hand back a
-fresh one and lose the work), waits for a running allocation, and returns a handle whose `exec` shells
-`nomad alloc exec`. `writeFile`/`readFile` ride the same channel as base64. `dispose`/`reap` purge the job,
-and the compute id is self-describing (`job|alloc|namespace`) because the reaper in a later process gets
-nothing but that string off the run row.
+**`NomadBackend implements Backend, Driver`** — `dispatch` places a case, `provision` holds one open. The
+session mode submits a Nomad **`Type:"service"`** job with `RestartPolicy{Attempts:0}` (the container's
+filesystem IS the session — a silent restart would hand back a fresh one and lose the work), waits for a
+running allocation, and returns a handle whose `exec` shells `nomad alloc exec`. `writeFile`/`readFile` ride
+that channel as base64. `dispose`/`reap` purge the job, and the compute id is self-describing
+(`job|alloc|namespace`) because the reaper in a later process gets nothing but that string off the run row.
+Both modes submit under the `everdict-` prefix, so **`capacity()` counts a session** exactly as it counts a
+case. `DockerBackend` is the same story on a host: it already owned a `DockerDriver` internally, and now says
+so in its type.
+
+Which targets have the mode is a **typed capability, not a feature-detect** — `isSessionable(backend)`, the
+guard shape `.claude/rules/backends.md` prescribes for every other capability (`isObservable`, `isShellable`,
+…). K8s has no session mode and simply does not implement it, so asking for one is a 400 before anything is
+placed rather than a failure inside the first exec. The guard narrows to `Driver`, the contract the session
+service already consumes, so nothing below the backends layer learned a new type.
 
 Everything the session service already does — worlds, hibernation, git, retention, capacity, causedBy, the
 trajectory — then works off the control-plane host **with no changes at all**. Two properties make that true:
 
-- The driver has **no `snapshot()`**, so the service automatically takes the registry layer-append path. That
-  is why W4's snapshot half had to land first.
+- `NomadBackend` has **no `snapshot()`** (it cannot reach a daemon), so the service automatically takes the
+  registry layer-append path. That is why W4's snapshot half had to land first. `DockerBackend` does have it,
+  and takes the cheap commit-and-push path — the capability, again, decides.
 - `ComputeSpec.tenant` carries whose session it is, so the driver resolves the **same trust-zone policy** the
   dispatch lanes use (namespace + isolation runtime, `assertHardenedIsolation`) — a session runs untrusted
   code exactly as an eval case does and must not be isolated by a second, nearby rule.
@@ -202,8 +215,11 @@ deployment's default compute; `docker` stays the default and the faster path whe
 container share a host.
 
 **A workspace can place a session on its OWN runtime.** `create({runtime})` names a registered `RuntimeSpec`
-— the same axis a run's `placement.target` names — and the service resolves a driver for it (cached per
-`tenant:id@version`, cluster-API credentials from the tenant's secret store, never in the alloc env). The
+— the same axis a run's `placement.target` names — and the composition turns that spec into compute through
+**`buildRuntimeBackend`, the same builder the dispatch lane uses** (cached per `tenant:id@version`,
+cluster-API credentials from the tenant's secret store, never in the alloc env), then narrows it with
+`isSessionable`. A session therefore inherits the tenant's cluster credentials, trust zone and capacity
+envelope by construction, instead of a second builder that has to remember all three. The
 runtime lands on the run row (`runtime` + `placement.where:"runtime"`), which matters twice over: the console
 can say where a shell actually ran, and the **crash-path reaper resolves the same driver from the row** — a
 default-driver reap would silently miss a container living on the workspace's cluster. Likewise a snapshot
@@ -211,8 +227,8 @@ asks the driver that HOLDS the session, not the deployment default, because a cl
 to commit with even where the default driver does.
 
 A runtime the workspace does not have is a **404 naming it** — never a quiet fall back to the deployment's
-compute, which would run a tenant's code somewhere they did not choose. A non-nomad runtime is a 400 saying
-which kinds can host a session.
+compute, which would run a tenant's code somewhere they did not choose. A runtime whose target has no session
+mode is a 400 saying so — the guard above, at the composition edge.
 
 **Founding a world needs the base copied in.** A manifest may only reference blobs its own repository holds,
 and a genesis base lives elsewhere (`debian:stable-slim` is on Docker Hub). The daemon path hid this — a

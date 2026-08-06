@@ -9,11 +9,10 @@ import type {
   WorkspaceImages,
 } from "@everdict/application-control";
 import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
-import { NomadSessionDriver } from "@everdict/backends";
+import { type Backend, DockerBackend, NomadBackend, buildRuntimeBackend, isSessionable } from "@everdict/backends";
 import { BadRequestError, type Driver, NotFoundError, type RegistryAuth } from "@everdict/contracts";
 import type { BudgetTracker, TrustZonePolicy, UsageMeter } from "@everdict/domain";
 import { canConsumeCapability, harnessAuthEnv, parseImageRef, resolveHarnessSecrets } from "@everdict/domain";
-import { DockerDriver } from "@everdict/drivers";
 import { makeHarness } from "@everdict/job-runner";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
 import { resolveSpecModel } from "../core/execution/model-resolving-dispatcher.js";
@@ -24,6 +23,20 @@ import type { ScopedSecretsFn } from "./types.js";
 // which needs the docker socket mounted into the api container). Everywhere else the routes and the tools
 // are simply absent. Caps default CLOSED-ish (2 per tenant / 8 total) — a session is a scarcer resource than
 // an eval case because nothing ends it but the clock.
+// A placement target, narrowed to its SESSION mode. Dispatching a case and holding a session open are two
+// modes of one object here (docs/architecture/agent-worlds.md §W5) — `isSessionable` is the same compiler-
+// checked guard the backends layer uses for every other capability, so a target that only runs a job to
+// completion is refused up front by name instead of failing somewhere inside the first exec.
+function asSessionCompute(backend: Backend, kind: string, runtime?: string): Driver {
+  if (!isSessionable(backend))
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { ...(runtime !== undefined ? { runtime } : {}), kind },
+      `A ${kind} target runs a job to completion and cannot hold a sandbox session open — register a nomad runtime for sessions.`,
+    );
+  return backend;
+}
+
 export function buildSandboxSessions(opts: {
   store: RunStore;
   trajectories?: TrajectoryStore;
@@ -75,10 +88,16 @@ export function buildSandboxSessions(opts: {
     console.warn("▶ sandbox sessions: EVERDICT_SANDBOX_DRIVER=nomad needs EVERDICT_SANDBOX_NOMAD_ADDR (or NOMAD_ADDR)");
     return undefined;
   }
-  const driver =
+  // The deployment's default compute. A BACKEND in both cases, narrowed to its session mode: the same object
+  // that dispatches eval cases to this target also holds a session open on it, so placement knowledge, trust
+  // zones and — the part that was actually broken — CAPACITY accounting have one owner instead of two.
+  const defaultBackend =
     driverKind === "nomad" && nomadAddr !== undefined
-      ? new NomadSessionDriver({
+      ? new NomadBackend({
           addr: nomadAddr,
+          // The DISPATCH-mode image (what an eval case runs). A session boots the image its ComputeSpec names
+          // — the world — so this only matters if the same target is also asked to place a case.
+          image: process.env.EVERDICT_AGENT_IMAGE ?? "everdict-job-runner",
           ...(process.env.EVERDICT_SANDBOX_NOMAD_TOKEN ? { apiToken: process.env.EVERDICT_SANDBOX_NOMAD_TOKEN } : {}),
           ...(process.env.EVERDICT_SANDBOX_NOMAD_NAMESPACE
             ? { namespace: process.env.EVERDICT_SANDBOX_NOMAD_NAMESPACE }
@@ -87,7 +106,8 @@ export function buildSandboxSessions(opts: {
           // eval case does, so it must not be isolated by a second, nearby rule.
           ...(opts.trustZones ? { trustZones: opts.trustZones } : {}),
         })
-      : new DockerDriver();
+      : new DockerBackend();
+  const driver = asSessionCompute(defaultBackend, driverKind);
   console.log(
     driverKind === "nomad"
       ? `▶ sandbox sessions: nomad at ${nomadAddr} (cluster-placed; snapshots publish through the registry)`
@@ -233,24 +253,18 @@ export function buildSandboxSessions(opts: {
       ? async (tenant: string, runtime: string): Promise<Driver | undefined> => {
           const spec = await runtimes.get(tenant, runtime).catch(() => undefined);
           if (!spec) return undefined;
-          if (spec.kind !== "nomad")
-            throw new BadRequestError(
-              "BAD_REQUEST",
-              { runtime, kind: spec.kind },
-              `Runtime '${runtime}' is a ${spec.kind} runtime — only nomad runtimes can host a sandbox session today.`,
-            );
           const key = `${tenant}:${spec.id}@${spec.version}`;
           const cached = sessionDrivers.get(key);
           if (cached) return cached;
+          // Built through the SAME path a dispatched case takes — one place that turns a RuntimeSpec into live
+          // compute, so a session inherits the cluster credentials, the trust zone and the capacity envelope
+          // instead of a second construction that has to remember all three.
           const secrets = runtimeSecretsFor ? await runtimeSecretsFor(tenant) : {};
-          const apiToken = spec.authSecret ? secrets[spec.authSecret] : undefined;
-          const built = new NomadSessionDriver({
-            addr: spec.addr,
-            ...(apiToken ? { apiToken } : {}),
-            ...(spec.namespace ? { namespace: spec.namespace } : {}),
-            ...(spec.datacenters ? { datacenters: spec.datacenters } : {}),
+          const backend = buildRuntimeBackend(spec, {
+            secretEnv: secrets,
             ...(opts.trustZones ? { trustZones: opts.trustZones } : {}),
           });
+          const built = asSessionCompute(backend, spec.kind, runtime);
           sessionDrivers.set(key, built);
           return built;
         }

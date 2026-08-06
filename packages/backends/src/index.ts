@@ -17,6 +17,7 @@ export {
   isRecoverable,
   isScreenAttachable,
   isScreenCapturable,
+  isSessionable,
   isShellable,
   isTopologyInspectable,
   type LogStream,
@@ -69,8 +70,7 @@ export {
   type BackendsConfig,
 } from "./placement/config.js";
 export {
-  NomadSessionDriver,
-  type NomadSessionDriverOptions,
+  NomadSessionHandle,
   parseSessionComputeId,
   sessionComputeId,
-} from "./orchestrators/nomad-session-driver.js";
+} from "./orchestrators/nomad-session.js";

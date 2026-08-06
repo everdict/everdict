@@ -1,4 +1,4 @@
-import { type CaseJob, type CaseResult, InternalError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, type Driver, InternalError } from "@everdict/contracts";
 // Type-only reuse of the inspection wire schemas as the SSOT for Inspectable.inspect's / CaseInspectable.
 // inspectCase's returns (no drift, no runtime edge). backends → contracts is the allowed direction; /wire is the
 // same package's DTO surface.
@@ -212,6 +212,21 @@ export function isObservable(backend: Backend): backend is Backend & Observable 
 
 export function isShellable(backend: Backend): backend is Backend & Shellable {
   return typeof (backend as Partial<Shellable>).execStream === "function";
+}
+
+// Sessionable — this placement target can also hold a compute OPEN instead of running one program to completion.
+//
+// `dispatch` runs a job and hands back its result; a world session is the SAME compute under a different mode:
+// held open while the control plane drives it step by step. Two modes of one resource, not two resources — and
+// the first cut of agent worlds got that wrong. It shipped a separate session driver, which duplicated the
+// orchestrator's placement knowledge (job submission, zone application, namespace, exec) and, worse, put
+// sessions OUTSIDE `capacity()`: a cluster could fill with sessions while the Scheduler still believed it had
+// slots. Folding the mode in makes ONE object the authority for "compute on this target".
+//
+// The capability IS the existing `Driver` contract rather than a new interface, so the consumer — the sandbox
+// session service, which sits BELOW this package — keeps depending on @everdict/contracts alone.
+export function isSessionable(backend: Backend): backend is Backend & Driver {
+  return typeof (backend as Partial<Driver>).provision === "function";
 }
 
 export function isScreenCapturable(backend: Backend): backend is Backend & ScreenCapturable {

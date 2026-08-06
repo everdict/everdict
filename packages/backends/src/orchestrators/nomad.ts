@@ -5,6 +5,9 @@ import {
   BadRequestError,
   type CaseJob,
   type CaseResult,
+  type ComputeHandle,
+  type ComputeSpec,
+  type Driver,
   InternalError,
   NotFoundError,
   OOM_KILLED,
@@ -50,6 +53,15 @@ import {
   WORKLOAD_CAP,
   classifyWorkloadRole,
 } from "./inspect-common.js";
+import {
+  NomadSessionHandle,
+  SESSION_BASE,
+  SESSION_JOB_PREFIX,
+  SESSION_POLL_MS,
+  SESSION_READY_TIMEOUT_MS,
+  SESSION_TASK,
+  parseSessionComputeId,
+} from "./nomad-session.js";
 
 // --- Nomad HTTP abstraction (mockable in tests) ---
 export interface NomadHttp {
@@ -551,8 +563,24 @@ export function streamHandleFor(child: StreamChild): ExecStreamHandle {
 // Launch the job-runner as a Nomad batch alloc, poll for completion, then
 // parse the CaseResult from the sentinel in the stdout log.
 export class NomadBackend
-  implements Backend, Recoverable, Observable, Shellable, Probeable, Inspectable, CaseInspectable, Reclaimable
+  implements
+    Backend,
+    // The session mode (agent worlds): the same cluster, held open instead of run to completion. Implemented
+    // HERE rather than in a parallel class so Nomad's placement knowledge — submission, trust zone, namespace,
+    // alloc exec — has one owner, and so a session shows up in this backend's own `capacity()` probe (its jobs
+    // carry the same `everdict-` prefix the probe counts) instead of being invisible to the Scheduler.
+    Driver,
+    Recoverable,
+    Observable,
+    Shellable,
+    Probeable,
+    Inspectable,
+    CaseInspectable,
+    Reclaimable
 {
+  // The Driver contract's identity (the session mode) — "which compute is this". Backend placement is named
+  // by its registry key, so the two identities never had to agree.
+  readonly id = "nomad";
   private readonly http: NomadHttp;
 
   constructor(private readonly opts: NomadBackendOptions) {
@@ -1446,5 +1474,127 @@ export class NomadBackend
     } catch {
       return undefined;
     }
+  }
+
+  // ── Session mode (agent worlds W4) ───────────────────────────────────────────────────────────────────
+  // `provision` holds a compute open instead of running one program to completion. Deliberately NO
+  // `snapshot`: nothing here can reach a container daemon, which is why the registry layer-append path
+  // exists (docs/architecture/agent-worlds.md §W4) — a caller that finds no `snapshot` captures over this
+  // compute's own exec channel instead.
+
+  async provision(spec: ComputeSpec): Promise<ComputeHandle> {
+    if (!spec.image) throw new UpstreamError("UPSTREAM_ERROR", {}, "a cluster-placed session needs an image to run");
+    // The tenant's zone decides isolation and namespace — the SAME policy `effectiveOpts` applies to a
+    // dispatched case, because a session runs untrusted code exactly as a case does.
+    const zone = spec.tenant !== undefined ? this.opts.trustZones?.resolve(spec.tenant) : undefined;
+    if (zone) assertHardenedIsolation(zone);
+    const namespace = zone?.namespace ?? this.opts.namespace;
+    const jobId = `${SESSION_JOB_PREFIX}${dispatchSuffix()}`;
+    const body = {
+      Job: {
+        ID: jobId,
+        Type: "service", // held open until dispose — a batch job would end the moment its command did
+        ...(namespace ? { Namespace: namespace } : {}),
+        Datacenters: this.opts.datacenters ?? ["dc1"],
+        TaskGroups: [
+          {
+            Name: SESSION_TASK,
+            Count: 1,
+            // A session that dies must not be silently restarted underneath its handle: the container's
+            // filesystem IS the session, and a fresh one would quietly lose the work.
+            RestartPolicy: { Attempts: 0, Mode: "fail" },
+            Tasks: [
+              {
+                Name: SESSION_TASK,
+                Driver: "docker",
+                Config: {
+                  image: spec.image,
+                  ...((zone?.isolationRuntime ?? this.opts.runtime)
+                    ? { runtime: zone?.isolationRuntime ?? this.opts.runtime }
+                    : {}),
+                  // The image's own entrypoint is irrelevant — this container is a filesystem to live in.
+                  entrypoint: ["sh"],
+                  args: ["-c", `mkdir -p ${SESSION_BASE} && exec sleep infinity`],
+                  ...(spec.registryAuths?.[0]
+                    ? {
+                        auth: [
+                          {
+                            username: spec.registryAuths[0].username ?? "everdict",
+                            password: spec.registryAuths[0].password,
+                          },
+                        ],
+                      }
+                    : {}),
+                },
+                Resources: { CPU: 1000, MemoryMB: 2048 },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const submitted = await this.http.request("POST", "/v1/jobs", body);
+    if (submitted.status >= 300)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: submitted.status, job: jobId },
+        `the cluster refused the session job: ${submitted.text.slice(0, 300)}`,
+      );
+    try {
+      const allocId = await this.waitForSessionAlloc(jobId, namespace);
+      return new NomadSessionHandle({
+        jobId,
+        allocId,
+        ...(namespace ? { namespace } : {}),
+        http: this.http,
+        addr: this.opts.addr,
+        ...(this.opts.apiToken ? { apiToken: this.opts.apiToken } : {}),
+        run: this.opts.execRunner ?? ((bin, args, env) => spawnRunner(bin, args, env)),
+      });
+    } catch (err) {
+      await this.purgeSessionJob(jobId, namespace); // never leave a job the caller has no handle to
+      throw err;
+    }
+  }
+
+  // Tear down a session this process holds no handle to — the durable reaper's path, from the recorded id.
+  async reap(id: string): Promise<void> {
+    const { jobId, namespace } = parseSessionComputeId(id);
+    if (jobId !== "") await this.purgeSessionJob(jobId, namespace);
+  }
+
+  private async purgeSessionJob(jobId: string, namespace?: string): Promise<void> {
+    const ns = namespace ? `&namespace=${encodeURIComponent(namespace)}` : "";
+    // purge=true: a session's job is not history worth keeping, and a lingering dead job would collide with
+    // the next session that reuses the id.
+    await this.http.request("DELETE", `/v1/job/${encodeURIComponent(jobId)}?purge=true${ns}`).catch(() => undefined);
+  }
+
+  private async waitForSessionAlloc(jobId: string, namespace?: string): Promise<string> {
+    const deadline = Date.now() + SESSION_READY_TIMEOUT_MS;
+    const ns = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
+    let lastStatus = "none";
+    while (Date.now() < deadline) {
+      const res = await this.http.request("GET", `/v1/job/${encodeURIComponent(jobId)}/allocations${ns}`);
+      if (res.status < 300) {
+        const allocs = JSON.parse(res.text) as Array<{ ID: string; ClientStatus?: string }>;
+        const running = allocs.find((a) => a.ClientStatus === "running");
+        if (running) return running.ID;
+        const dead = allocs.find((a) => a.ClientStatus === "failed" || a.ClientStatus === "lost");
+        if (dead)
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { job: jobId, alloc: dead.ID, status: dead.ClientStatus },
+            `the session's allocation ${dead.ClientStatus} before it started — check the image and the client's resources`,
+          );
+        lastStatus = allocs[0]?.ClientStatus ?? "pending";
+      }
+      await new Promise((r) => setTimeout(r, SESSION_POLL_MS));
+    }
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { job: jobId, lastStatus },
+      `the session did not start within ${Math.round(SESSION_READY_TIMEOUT_MS / 1000)}s (last allocation status: ${lastStatus})`,
+    );
   }
 }

@@ -29,7 +29,12 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   starting|running|dead + blocked capacity verdict + unit/node/events — wire SSOT `CasePlacement`],
   `TopologyInspectable`=inspectTopology/topologyServiceLogs [service-topology health roster + service log tail,
   harness-keyed; ServiceTopologyBackend only], `Reclaimable`=stopWorkload/reclaimIdle/purgeTerminal/setNodeSchedulable
-  [DESTRUCTIVE control, admin-only `runtimes:control`, best-effort/idempotent, stores never reclaimed]) is a SEPARATE
+  [DESTRUCTIVE control, admin-only `runtimes:control`, best-effort/idempotent, stores never reclaimed],
+  **session mode** = the `Driver` contract itself (`provision`/`reap`/optional `snapshot`), guarded by
+  `isSessionable` — a target that can HOLD compute open (agent worlds / the playground) as well as run a case to
+  completion; Nomad + Docker have it, K8s does not, and the session lane must narrow rather than build a parallel
+  driver class for the same cluster [a second owner re-derives the address/token/namespace/trust zone and its
+  sessions go uncounted by `capacity()`]) is a SEPARATE
   interface the backend also `implements`, and consumers narrow
   with the matching guard (`isObservable(backend)`), never a `backend.logs?.()` feature-detect. Don't add a new
   optional method to `Backend`; add/extend a capability interface + its `is*` guard. If a backend can't do a
