@@ -51,7 +51,11 @@
     ".next-dev-verify/types/**/*.ts",
     ".next-dev-verify/dev/types/**/*.ts",
     ".next-verify-nav/types/**/*.ts",
-    ".next-verify-nav/dev/types/**/*.ts"
+    ".next-verify-nav/dev/types/**/*.ts",
+    ".next-dev-drill/types/**/*.ts",
+    ".next-dev-drill/dev/types/**/*.ts",
+    ".next-drill/types/**/*.ts",
+    ".next-drill/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
