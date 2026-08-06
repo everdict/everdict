@@ -338,6 +338,62 @@ describe("workspace memory recall", () => {
     expect(preamble?.length).toBeLessThan(14_000);
   });
 
+  it("runs the turn-end extraction on the SMALL tier when opted in, publishing the memory it decided on", async () => {
+    // Given a main model that just answers, and a small tier whose one-shot returns a save decision
+    const mainTransport: LlmTransport = {
+      provider: "fake",
+      stream: async () => ({
+        content: "noted",
+        toolCalls: [],
+        finishReason: "stop",
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      }),
+    };
+    const smallTransport: LlmTransport = {
+      provider: "fake-small",
+      stream: async () => ({
+        content: JSON.stringify({
+          save: true,
+          slug: "staging-cluster-address",
+          type: "reference",
+          title: "Staging cluster address",
+          description: "The staging Nomad cluster lives at nomad.internal:4646.",
+          hook: "staging Nomad at nomad.internal:4646",
+          body: "The staging Nomad cluster lives at nomad.internal:4646.",
+        }),
+        toolCalls: [],
+        finishReason: "stop",
+      }),
+    };
+    const writes: string[] = [];
+    const call = async (name: string, args: Record<string, unknown>) => {
+      if (name === "write_file") {
+        writes.push(String(args.path));
+        return { content: JSON.stringify({ path: args.path }), isError: false };
+      }
+      return { content: "NOT_FOUND", isError: true }; // no index yet (also covers the recall preamble)
+    };
+    const { deps } = await seededDeps(mainTransport);
+    const withExtraction: ChatDeps = {
+      ...deps,
+      toolProvider: async () => ({ registry: new ToolRegistry([]), call, close: async () => {} }),
+      memoryExtraction: true,
+      smallModelRef: "small",
+      resolveModelById: async () => ({ transport: smallTransport, model: "small-model" }),
+    };
+    // When a substantive turn completes
+    await runChat(
+      withExtraction,
+      PRINCIPAL,
+      {},
+      "s-1",
+      `Our staging cluster lives at nomad.internal:4646 — remember that. ${"x".repeat(400)}`,
+    );
+    // Then the safety net published the memory + its index line through the attributed fs tools
+    expect(writes).toContain("memory/staging-cluster-address.md");
+    expect(writes).toContain("memory/MEMORY.md");
+  });
+
   it("injects the memory index into the model's user turn while the persisted record stays clean", async () => {
     // Given a workspace whose filesystem has a memory index
     const requests: StreamRequest[] = [];

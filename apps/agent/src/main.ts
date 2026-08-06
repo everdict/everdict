@@ -252,6 +252,10 @@ async function main(): Promise<void> {
     ...(config.AGENT_MEMORY_TRIGGER_CHARS !== undefined
       ? { memoryTriggerChars: config.AGENT_MEMORY_TRIGGER_CHARS }
       : {}),
+    // Turn-end auto memory extraction (opt-in; needs the small tier — a boot warning below covers the misconfig).
+    ...(config.AGENT_MEMORY_EXTRACTION === "1" || config.AGENT_MEMORY_EXTRACTION === "true"
+      ? { memoryExtraction: true }
+      : {}),
     // Model tiering — only effective with resolveModelById (DB + secrets); otherwise ignored (single env model).
     ...(config.AGENT_SMALL_MODEL !== undefined ? { smallModelRef: config.AGENT_SMALL_MODEL } : {}),
     ...(config.AGENT_FALLBACK_MODEL !== undefined ? { fallbackModelRef: config.AGENT_FALLBACK_MODEL } : {}),
@@ -302,6 +306,15 @@ async function main(): Promise<void> {
   app.get("/metrics", async (_req, reply) =>
     reply.header("content-type", "text/plain; version=0.0.4").send(metrics.render()),
   );
+
+  // Extraction asked for without the tier that powers it — say so at boot instead of silently never extracting.
+  if (
+    (config.AGENT_MEMORY_EXTRACTION === "1" || config.AGENT_MEMORY_EXTRACTION === "true") &&
+    config.AGENT_SMALL_MODEL === undefined
+  )
+    console.error(
+      "▶ everdict-agent: AGENT_MEMORY_EXTRACTION is on but AGENT_SMALL_MODEL is unset — extraction never runs (it is small-tier-only by design).",
+    );
 
   // A deployment that never set WEB_BASE_URL gets an agent that can only cite ids, never links. Say so at boot:
   // silently link-less is the failure operators actually hit, and it is invisible from inside a conversation.

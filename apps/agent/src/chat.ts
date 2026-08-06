@@ -31,6 +31,13 @@ import { buildRunAnalysisTool } from "./analysis-script-tool.js";
 import { buildArtifactTools } from "./artifact-tools.js";
 import type { CodeToolRuntime } from "./code-tools.js";
 import type { ToolProvider } from "./mcp-tools.js";
+import {
+  MEMORY_DIRECTORY,
+  MEMORY_INDEX_PATH,
+  buildMemoryExtractor,
+  maintainMemoryExtraction,
+  turnWroteMemory,
+} from "./memory-extraction.js";
 import type { ModelByIdResolver, ModelResolver } from "./model.js";
 import type { ForwardHeaders, Principal } from "./principal.js";
 import type { ProfileResolver } from "./profile.js";
@@ -119,8 +126,7 @@ async function recallKnowledge(call: McpInvoke, references: AgentReference[]): P
 // control plane's local disk (multi-tenant: the per-workspace bucket IS the isolation boundary). The index is
 // injected every turn so the agent knows what past conversations learned; bodies stay out of context until the
 // agent get_file's one it judges relevant (index + body split — only the index pays rent in every window).
-export const MEMORY_DIRECTORY = "memory";
-export const MEMORY_INDEX_PATH = "memory/MEMORY.md";
+export { MEMORY_DIRECTORY, MEMORY_INDEX_PATH } from "./memory-extraction.js";
 const MAX_MEMORY_INDEX_CHARS = 12_000;
 
 export async function workspaceMemoryPreamble(call: McpInvoke): Promise<string | undefined> {
@@ -394,6 +400,11 @@ export interface ChatDeps {
   // folded into the session's digest at the turn boundary (see maintainSessionMemory). Ops/test tuning knob;
   // absent → MEMORY_TRIGGER_CHARS.
   memoryTriggerChars?: number;
+  // Turn-end auto memory extraction (AGENT_MEMORY_EXTRACTION, opt-in): a SMALL-model pass at the turn boundary
+  // that may save ONE durable workspace memory the inline discipline missed. Requires the small tier
+  // (smallModelRef + resolveModelById) — it never runs on the main model, and a turn that already wrote under
+  // memory/ skips it (the primary writer did its job). See memory-extraction.ts.
+  memoryExtraction?: boolean;
   // Agent-plane observability (the round-2 gap analysis' "measure before optimizing"): the loop's resilience
   // events become Prometheus series — turn outcomes/durations, retry waits, fallback switches, truncations,
   // compactions, tool failures — so "why do turns die" is a measured distribution, not an anecdote. main.ts
@@ -1071,6 +1082,22 @@ export async function runChat(
         ...(deps.memoryTriggerChars !== undefined ? { triggerChars: deps.memoryTriggerChars } : {}),
       });
     } catch {}
+
+    // Turn-end auto extraction (opt-in; small tier only; the safety net BEHIND the inline writer — a turn that
+    // already wrote under memory/ stands down). Best-effort like everything else at this boundary.
+    if (deps.memoryExtraction === true && smallRef && byId && tools.call && !turnWroteMemory(producedRecords)) {
+      try {
+        const small = await byId(principal, smallRef);
+        const outcome = await maintainMemoryExtraction({
+          call: tools.call,
+          extract: buildMemoryExtractor(small.transport, small.model),
+          turn: [{ role: "user", content: userText }, ...recordsToHistory(producedRecords)],
+        });
+        deps.metrics?.counter("everdict_agent_memory_extraction_total", "Turn-end auto memory extraction outcomes", {
+          outcome,
+        });
+      } catch {}
+    }
   } catch (err) {
     // Failure is a conversation CITIZEN, not just an exception (Claude Code parity): persist why the turn died
     // as an assistant record before rethrowing, so the transcript shows the failure and the conversation stays

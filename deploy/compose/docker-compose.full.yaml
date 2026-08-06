@@ -457,6 +457,9 @@ services:
       AGENT_SMALL_MODEL: ${AGENT_SMALL_MODEL:-}
       AGENT_FALLBACK_MODEL: ${AGENT_FALLBACK_MODEL:-}
       AGENT_SUBAGENT_MODEL: ${AGENT_SUBAGENT_MODEL:-}
+      # ── Workspace memory knobs: session-digest fold trigger + turn-end auto extraction (small tier only) ──
+      AGENT_MEMORY_TRIGGER_CHARS: ${AGENT_MEMORY_TRIGGER_CHARS:-}
+      AGENT_MEMORY_EXTRACTION: ${AGENT_MEMORY_EXTRACTION:-}
       # ── Proactive teammates (S4): must equal the api's AGENT_INTERNAL_TOKEN so pushed completions are accepted ──
       AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:-}
       # ── Meter workspace-billed conversation cost back to the API (POST /internal/usage); must equal the api's

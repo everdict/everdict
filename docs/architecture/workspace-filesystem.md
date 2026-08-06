@@ -101,7 +101,11 @@ tokens under `memory/` (a conservative named-pattern guard at the one choke poin
 surface shares) — reference secrets by NAME, never by value. Upkeep is the
 `memory_consolidation` first-party skill example (store → import → optionally a crafted
 agent triggered on `schedule.fired`): merge overlaps, fix stale dates, move entity facts
-to the knowledge layer, prune the index every conversation pays for.
+to the knowledge layer, prune the index every conversation pays for. Behind the inline
+writer sits an OPT-IN turn-end extraction (`AGENT_MEMORY_EXTRACTION`, small tier only —
+`apps/agent` `memory-extraction.ts`): a one-shot small-model pass that may save ONE
+durable memory the turn's agent didn't, standing down whenever the turn already wrote
+under `memory/`.
 
 ## Revisions — who published what, and safe concurrent editing
 

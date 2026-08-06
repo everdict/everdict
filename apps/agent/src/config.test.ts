@@ -54,4 +54,10 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...BASE, AGENT_MEMORY_TRIGGER_CHARS: "" }).AGENT_MEMORY_TRIGGER_CHARS).toBeUndefined();
     expect(loadConfig({ ...BASE }).AGENT_MEMORY_TRIGGER_CHARS).toBeUndefined();
   });
+
+  it("carries the memory-extraction opt-in (off by default)", () => {
+    expect(loadConfig({ ...BASE, AGENT_MEMORY_EXTRACTION: "1" }).AGENT_MEMORY_EXTRACTION).toBe("1");
+    expect(loadConfig({ ...BASE }).AGENT_MEMORY_EXTRACTION).toBeUndefined();
+    expect(loadConfig({ ...BASE, AGENT_MEMORY_EXTRACTION: "" }).AGENT_MEMORY_EXTRACTION).toBeUndefined();
+  });
 });
