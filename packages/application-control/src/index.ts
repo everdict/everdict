@@ -441,7 +441,7 @@ export {
   parseTenantMap,
   type TenantValueMap,
 } from "./ops/scheduling-config.js";
-export { type RecoveryDeps, recoverInterrupted } from "./ops/startup-recovery.js";
+export { INTERRUPTED, type RecoveryDeps, recoverInterrupted } from "./ops/startup-recovery.js";
 export { Metrics } from "./ops/metrics.js";
 export { assertRuntimeTarget } from "./require-runtime/require-runtime.js";
 

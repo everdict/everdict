@@ -47,6 +47,10 @@ const DEFAULT_TASK_TIMEOUT_SEC = 600;
 const MAX_TASK_TIMEOUT_SEC = 3600;
 const TASK_PREVIEW_CHARS = 200;
 const TEARDOWN_TASK_GRACE_MS = 5_000;
+// How long past a row's deadline the orphan sweep waits before reaping it (sweepOrphans) — long enough for
+// the process that actually holds the handle (this one or another writer on the same store) to finish its
+// own normal teardown, short enough that a crashed writer's row cannot hold a slot for more than a beat.
+const ORPHAN_GRACE_MS = 120_000;
 // How many live sessions ONE agent may hold (W3). One by default: a world is meant to be worked in, then
 // hibernated — an agent that needs several at once is a deployment decision, not a default.
 const DEFAULT_MAX_PER_AGENT = 1;
@@ -529,10 +533,16 @@ export class SandboxSessionService {
         ...(resolved.playground ? { playground: { resolved: resolved.playground, taskSeq: 0, tasks: [] } } : {}),
       });
       // Durable expiry (T-b): best-effort — a Temporal outage never blocks the session (the in-process
-      // sweep still bounds the TTL while this process lives).
+      // sweep still bounds the TTL while this process lives). Best-effort is not silent: a session whose
+      // durable timer failed to arm is one crash away from a permanent `running` row, so the failure is
+      // logged by name (the orphan sweep is the safety net that then ends it at deadline + grace).
       if (record.session !== undefined) {
         const expiresAt = record.session.expiresAt;
-        void this.deps.reaper?.start({ runId: record.id, tenant: input.tenant, expiresAt }).catch(() => {});
+        void this.deps.reaper?.start({ runId: record.id, tenant: input.tenant, expiresAt }).catch((err) => {
+          console.warn(
+            `[sandbox] durable reaper start failed for session ${record.id} (in-process sweep + orphan sweep still bound the TTL): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
       }
       return record;
     } catch (err) {
@@ -948,6 +958,33 @@ export class SandboxSessionService {
     for (const [id, live] of this.sessions) {
       if (live.expiresAtMs <= nowMs) void this.teardown(id, live, "expired").catch(() => undefined);
     }
+  }
+
+  // The LEDGER half of the sweep — the safety net that ends the zombie class. A running session row whose
+  // deadline has passed and whose handle this process does not hold is an orphan no matter HOW its timer was
+  // lost: a durable reaper that never armed, a control plane that died with the handle, a row written by a
+  // process where no reaper was wired at all. reap() re-checks everything (terminal, live handle, the row's
+  // own deadline), so this scan is safe to run on an interval and at boot. The grace window exists for the
+  // multi-writer reality this store already has: another live process may hold the handle and be tearing the
+  // session down through its own sweep — give its normal close a head start before declaring the row orphaned.
+  async sweepOrphans(): Promise<number> {
+    const nowMs = new Date(this.now()).getTime();
+    const rows = await this.deps.store.liveSessions({ trigger: SANDBOX_TRIGGER });
+    let reaped = 0;
+    for (const row of rows) {
+      if (this.sessions.has(row.id)) continue; // live here — the in-process sweep owns its deadline
+      if (row.expiresAt === undefined) continue; // no deadline on the row = nothing to judge it against
+      if (Date.parse(row.expiresAt) + ORPHAN_GRACE_MS > nowMs) continue;
+      const done = await this.reap(row.tenant, row.id).catch((err) => {
+        console.warn(
+          `[sandbox] orphan sweep could not reap session ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return { reaped: false };
+      });
+      if (done.reaped) reaped += 1;
+    }
+    if (reaped > 0) console.warn(`[sandbox] orphan sweep settled ${reaped} session run(s) past their deadline`);
+    return reaped;
   }
 
   liveCount(): number {

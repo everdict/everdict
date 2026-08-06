@@ -1,4 +1,4 @@
-import { recoverInterrupted } from "@everdict/application-control";
+import { INTERRUPTED, recoverInterrupted } from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import {
@@ -231,8 +231,10 @@ export function buildRuntimeAccess(deps: {
 export async function runStartupRecovery(deps: {
   scorecardStore: ScorecardStore;
   store: RunStore;
-  scorecardService: ScorecardService;
-  service: RunService;
+  // Structural picks of the two services — recovery only ever calls resume, and the narrow surface is what
+  // lets the tombstone-on-unresumable regression test drive this function without standing up a full service.
+  scorecardService: Pick<ScorecardService, "resume">;
+  service: Pick<RunService, "resume">;
   adoptCaseFn: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
 }): Promise<void> {
   const { scorecardStore, store, scorecardService, service, adoptCaseFn } = deps;
@@ -244,17 +246,28 @@ export async function runStartupRecovery(deps: {
     // persisted caseSpec (mig 0051); legacy records without one keep the tombstone path.
     // Claim the run for resume and adopt IN THE BACKGROUND — adopting a still-running run waits for its alloc to
     // finish (a long run would otherwise block control-plane startup). The background task settles via adoption
-    // (zero re-run) or falls back to caseSpec re-dispatch. Returning true keeps recovery from tombstoning it.
+    // (zero re-run) or falls back to caseSpec re-dispatch. Returning true keeps recovery from tombstoning it —
+    // which makes the CLAIM binding: a background leg that can neither adopt nor re-dispatch must apply the
+    // tombstone itself, or the record it claimed stays `running` forever with nobody left to settle it.
     resumeRun: async (r) => {
       void (async () => {
         const adopted = await adoptCaseFn(r.tenant, r.runtime, r.caseId).catch(() => undefined);
-        await service.resume(r, adopted).catch(() => {});
+        const resumed = await service.resume(r, adopted).catch(() => false);
+        if (!resumed)
+          await store
+            .update(r.id, { status: "failed", error: INTERRUPTED, updatedAt: new Date().toISOString() })
+            .catch((err) => {
+              console.warn(
+                `▶ boot recovery: could not tombstone unresumable run ${r.id}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              return undefined;
+            });
       })();
       return true;
     },
   });
-  if (recovered.scorecards + recovered.resumed + recovered.runs + recovered.runsResumed > 0)
+  if (recovered.scorecards + recovered.resumed + recovered.runs + recovered.runsResumed + recovered.sessions > 0)
     console.error(
-      `▶ boot recovery: batches resumed ${recovered.resumed} · batches failed(INTERRUPTED) ${recovered.scorecards} · runs resumed ${recovered.runsResumed} · runs failed ${recovered.runs}`,
+      `▶ boot recovery: batches resumed ${recovered.resumed} · batches failed(INTERRUPTED) ${recovered.scorecards} · runs resumed ${recovered.runsResumed} · runs failed ${recovered.runs} · session runs left to their reapers ${recovered.sessions}`,
     );
 }

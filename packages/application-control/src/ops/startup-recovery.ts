@@ -14,7 +14,10 @@ import type { ScorecardStore } from "../ports/scorecard-store.js";
 // Note: if more than one control plane shares the same store (DB), this also reclaims another's in-flight work — we simply
 // follow the single-control-plane assumption (common across the codebase).
 
-const INTERRUPTED = {
+// Exported so the composition's BACKGROUND resume leg can apply the same tombstone when a claimed resume
+// turns out to be impossible — a claim that fails silently leaves the record `running` forever (the exact
+// zombie this sweep exists to prevent).
+export const INTERRUPTED = {
   code: "INTERRUPTED",
   message: "The run was interrupted by a control-plane restart. Please run it again.",
 };
@@ -35,7 +38,7 @@ export interface RecoveryDeps {
 
 export async function recoverInterrupted(
   deps: RecoveryDeps,
-): Promise<{ scorecards: number; resumed: number; runs: number; runsResumed: number }> {
+): Promise<{ scorecards: number; resumed: number; runs: number; runsResumed: number; sessions: number }> {
   const now = deps.now ?? (() => new Date().toISOString());
   let scorecardCount = 0;
   let resumedCount = 0;
@@ -63,9 +66,19 @@ export async function recoverInterrupted(
   // RESUMED when possible (adopt the still-alive backend job / re-dispatch from the persisted caseSpec);
   // tombstoned only for legacy records with no persisted case.
   let runsResumed = 0;
+  let sessionCount = 0;
   if (deps.runs) {
     const runs = (await deps.runs.list()).filter((r) => ACTIVE.has(r.status));
     for (const r of runs) {
+      // Session runs (held-open compute: sandbox shells, worlds, browsers) are NOT resumable work — there is
+      // no caseSpec to re-drive and no backend job to adopt, so the old path "resumed" them into a permanent
+      // `running` row (the zombie this sweep is named after). Their lifecycle belongs to the session lanes'
+      // own reapers: the durable reaper fires at the row's deadline, and the ledger orphan sweep
+      // (SandboxSessionService.sweepOrphans / the browser equivalent) settles any row whose timer was lost.
+      if (r.kind === "sandbox") {
+        sessionCount += 1;
+        continue;
+      }
       if (deps.resumeRun && (await deps.resumeRun(r).catch(() => false))) {
         runsResumed += 1;
         continue;
@@ -74,5 +87,5 @@ export async function recoverInterrupted(
       runCount += 1;
     }
   }
-  return { scorecards: scorecardCount, resumed: resumedCount, runs: runCount, runsResumed };
+  return { scorecards: scorecardCount, resumed: resumedCount, runs: runCount, runsResumed, sessions: sessionCount };
 }

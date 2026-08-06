@@ -889,7 +889,12 @@ async function main(): Promise<void> {
         ...(browserMaxTotal !== undefined ? { maxTotal: browserMaxTotal } : {}),
       })
     : undefined;
-  if (browserSessionService) setInterval(() => browserSessionService.sweep(), 60_000).unref(); // TTL teardown
+  if (browserSessionService) {
+    setInterval(() => browserSessionService.sweep(), 60_000).unref(); // TTL teardown (live entries)
+    // The ledger half: settle rows a dead process left `running` past their deadline (zombie prevention).
+    setInterval(() => void browserSessionService.sweepOrphans().catch(() => {}), 60_000).unref();
+    void browserSessionService.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
+  }
   // N3 retention: operator-configured TTL over the owned trajectory store (unset = keep forever). Hourly
   // sweep, logged — evidence never leaves silently.
   const retentionDays = positiveIntEnv(process.env.EVERDICT_TRAJECTORY_RETENTION_DAYS);
@@ -1019,7 +1024,13 @@ async function main(): Promise<void> {
         }
       : {}),
   });
-  if (sandboxSessions) setInterval(() => sandboxSessions.sweep(), 30_000).unref();
+  if (sandboxSessions) {
+    setInterval(() => sandboxSessions.sweep(), 30_000).unref();
+    // The ledger half of the sweep: reap rows whose deadline passed with no live handle anywhere — the
+    // safety net for a durable reaper that never armed or a process that died holding the session.
+    setInterval(() => void sandboxSessions.sweepOrphans().catch(() => {}), 60_000).unref();
+    void sandboxSessions.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
+  }
 
   const app = buildServer({
     terminalTickets,

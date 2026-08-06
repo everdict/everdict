@@ -18,6 +18,10 @@ export interface CreateBrowserSessionCommand {
 // but not their caps — an agent world is bounded separately — and the trigger is what tells them apart.
 const BROWSER_TRIGGER = "browser";
 
+// How long past a row's deadline the ledger orphan sweep waits before settling it — long enough for the
+// process that actually holds the browser (this one or another replica) to finish its own teardown first.
+const ORPHAN_GRACE_MS = 120_000;
+
 // A live summary of what a capture WOULD remember right now — per-domain cookie NAMES + non-secret attributes.
 // Cookie VALUES are the login credential and never leave the control plane; names/flags/expiry are safe metadata
 // the web uses to auto-select the auth cookies and show each one's expiry. Polled while the owner logs into sites.
@@ -263,6 +267,28 @@ export class BrowserSessionService {
     const t = this.now();
     for (const [id, entry] of this.sessions)
       if (entry.record.expiresAt < t) void this.dispose(id).catch(() => undefined);
+  }
+
+  // The LEDGER half of the sweep (the sandbox lane's sweepOrphans, on this pool): a running browser row whose
+  // deadline has passed and whose entry this process does not hold was written by a process that died with the
+  // live handle — nobody is left to settle it, and it would sit `running` on the ledger forever. Settle it as
+  // expired. The browser CONTAINER (if any survived) is not reachable from here — the provisioner port has no
+  // reap-by-id surface — but the container was TTL-bound compute and the ledger must stop lying either way.
+  // Grace window: another live replica may hold the entry and be mid-teardown; let its normal close win first.
+  async sweepOrphans(): Promise<number> {
+    if (!this.runs) return 0;
+    const nowMs = this.now();
+    const rows = await this.runs.liveSessions({ trigger: BROWSER_TRIGGER });
+    let settled = 0;
+    for (const row of rows) {
+      if (this.sessions.has(row.id)) continue; // live here — sweep() owns its deadline
+      if (row.expiresAt === undefined) continue;
+      if (Date.parse(row.expiresAt) + ORPHAN_GRACE_MS > nowMs) continue;
+      await this.closeRun(row.id, "expired");
+      settled += 1;
+    }
+    if (settled > 0) console.warn(`[browser] orphan sweep settled ${settled} session run(s) past their deadline`);
+    return settled;
   }
 
   private async closeOwned(subject: string): Promise<void> {
