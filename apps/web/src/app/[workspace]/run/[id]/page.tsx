@@ -21,6 +21,7 @@ import {
   trajectoryResponseSchema,
   type Run,
   type RunCaseSpec,
+  RunLiveStreamProvider,
 } from '@/entities/run'
 import { traceEventSchema, type TraceEvent } from '@/entities/trace'
 import { authContext } from '@/shared/auth/principal'
@@ -458,6 +459,11 @@ export default async function RunDetailPage({
               화면을 쪼개는 순간을 위해 뷰포트가 아닌 컨테이너 기준). 메인 = 환경 kind가 결정: browser/os-use는
               라이브 화면, repo는 파일 워크벤치 — 둘 다 self-null이라 해당 없는 쪽은 그려지지 않는다.
               레일 = 트레이스·로그·터미널(관측 축). 모든 위젯이 self-null이라 빈 칸은 생기지 않는다. */}
+          <RunLiveStreamProvider
+            runId={run.id}
+            lanes={showFileWorkbench ? 'screen,fs' : 'screen'}
+            initialStatus={run.status}
+          >
           <div className="grid gap-4 @5xl:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
             <div className="min-w-0 space-y-4">
               {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시
@@ -494,6 +500,7 @@ export default async function RunDetailPage({
               )}
             </div>
           </div>
+          </RunLiveStreamProvider>
         </section>
       )}
 

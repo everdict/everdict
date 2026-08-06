@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
+import { useRunLiveStream } from '@/entities/run'
 import { languageFor } from '@/features/browse-files'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -78,6 +79,8 @@ export function RunFileWorkbench({ runId, initialStatus }: { runId: string; init
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const prevStatus = useRef<Map<string, FsStatus | undefined>>(new Map())
   const fileSeq = useRef(0)
+  // 멀티플렉스 스트림(④): fs 레인이 붙어 있으면 트리는 서버 push 로 온다 — 4초 폴링은 폴백으로만 산다.
+  const stream = useRunLiveStream()
   const followRef = useRef(follow)
   followRef.current = follow
   const selectedRef = useRef(selected)
@@ -103,6 +106,7 @@ export function RunFileWorkbench({ runId, initialStatus }: { runId: string; init
 
   useEffect(() => {
     if (initialStatus && TERMINAL.has(initialStatus)) return
+    if (stream?.connected) return // 스트림이 트리를 밀어주는 동안 폴링은 쉰다
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const tick = async () => {
@@ -142,7 +146,27 @@ export function RunFileWorkbench({ runId, initialStatus }: { runId: string; init
       if (timer) clearTimeout(timer)
     }
     // openFile은 ref 기반이라 안정적 — 폴링 루프는 runId 생명주기에만 묶는다.
-  }, [runId, initialStatus])
+  }, [runId, initialStatus, stream?.connected])
+
+  // 스트림 경로 — 같은 적용 규칙(따라가기 감지·열린 파일 새로고침)을 push 데이터에 태운다.
+  useEffect(() => {
+    if (!stream?.connected || !stream.fsFiles) return
+    const pushed = stream.fsFiles
+    setFiles(pushed)
+    setTreeTruncated(stream.fsTruncated ?? false)
+    const changed = pushed.find(
+      (f) => f.status && f.status !== 'deleted' && prevStatus.current.get(f.path) !== f.status
+    )
+    prevStatus.current = new Map(pushed.map((f) => [f.path, f.status]))
+    const current = selectedRef.current
+    if (followRef.current && changed && changed.path !== current) {
+      selectedRef.current = changed.path
+      setSelected(changed.path)
+      void openFile(changed.path, true)
+    } else if (current && pushed.find((f) => f.path === current)?.status) {
+      void openFile(current, false)
+    }
+  }, [stream?.connected, stream?.fsFiles, stream?.fsTruncated])
 
   const tree = useMemo(() => (files ? buildTree(files) : undefined), [files])
   const dirtyDirs = useMemo(() => (files ? dirsWithChanges(files) : new Set<string>()), [files])

@@ -332,6 +332,12 @@ export const controlPlane = {
   // Sealed replay recording of a settled run (ReplayPlayer). Creator-or-admin, enforced by the control plane.
   getRunRecording: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/recording`),
+  // 멀티플렉스 라이브 SSE(④) — 위젯별 폴러를 대체하는 한 연결. RAW Response를 그대로 반환(BFF가 무버퍼 프록시).
+  streamRunLive: (auth: AuthContext, id: string, lanes: string) =>
+    fetch(
+      `${env.CONTROL_PLANE_URL.replace(/\/$/, '')}/runs/${encodeURIComponent(id)}/live/stream?lanes=${encodeURIComponent(lanes)}`,
+      { headers: requestHeaders(auth), cache: 'no-store' }
+    ),
   // 러닝 케이스 샌드박스의 라이브 리포 파일 트리(런 워크벤치 탐색기). Creator-or-admin은 컨트롤 플레인이 강제.
   getRunFs: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}/fs`),
   // 그 리포의 파일 1개 + 워킹트리 diff(런 워크벤치 에디터 패널).
