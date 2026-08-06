@@ -137,3 +137,17 @@ describe("GET /runs/:id/fs/file (run workbench editor pane)", () => {
     expect((await app.inject({ method: "GET", url: "/runs/eval-1/fs/file", headers: bearer })).statusCode).toBe(400);
   });
 });
+
+describe("GET /runs/:id/live/stream (multiplexed live SSE) — the pre-attach gates", () => {
+  // The streaming body itself needs a raw socket (reply.hijack), which inject cannot consume — these pin the
+  // doors that answer BEFORE the hijack: workspace scoping as 404 and the creator-or-admin refusal as 403.
+  it("hides a missing run (404) and refuses another member (403)", async () => {
+    const other = await build("bob", { roles: ["member"] });
+    expect((await other.inject({ method: "GET", url: "/runs/nope/live/stream", headers: bearer })).statusCode).toBe(
+      404,
+    );
+    expect((await other.inject({ method: "GET", url: "/runs/eval-1/live/stream", headers: bearer })).statusCode).toBe(
+      403,
+    );
+  });
+});

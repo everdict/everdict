@@ -333,6 +333,105 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
     },
   );
 
+  // Multiplexed live feed (SSE): ONE connection replaces the live view's per-widget pollers. Every ~2.5s the
+  // server reads the lanes the client asked for (?lanes=screen,trace,fs — default trace) and emits only what
+  // CHANGED since the last tick (`event: <lane>` + JSON data), plus `event: status` transitions and a final
+  // `event: end`. Idle lanes cost heartbeat comments only. Creator-or-admin gated (screen/fs read the sandbox),
+  // like the strictest lane it can carry. docs/architecture/replay.md ④.
+  app.get<{ Params: { id: string }; Querystring: { lanes?: string } }>(
+    "/runs/:id/live/stream",
+    { schema: runObservabilityDocs.liveStream },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const record = await deps.service.get(req.params.id);
+      if (!record || !runVisible(record, principal))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+      if (record.createdBy && record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+        return reply
+          .code(403)
+          .send({ code: "FORBIDDEN", message: "only the run's creator or an admin can attach the live stream." });
+      const lanes = new Set(
+        (req.query.lanes ?? "trace")
+          .split(",")
+          .map((l) => l.trim())
+          .filter((l) => l === "screen" || l === "trace" || l === "fs"),
+      );
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      let closed = false;
+      req.raw.on("close", () => {
+        closed = true;
+      });
+      const TERMINAL = new Set(["succeeded", "failed", "superseded"]);
+      const emit = (event: string, data: unknown): void => {
+        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+      // Per-lane change tracking — an unchanged lane emits nothing (the wire carries deltas, not snapshots).
+      let lastStatus = "";
+      let lastScreen = "";
+      let sentTrace = 0;
+      let lastFs = "";
+      let status = record.status;
+      while (!closed) {
+        let ticked = false;
+        try {
+          const live = await deps.service.liveTrace(req.params.id);
+          if (!live) break;
+          status = live.record.status;
+          if (status !== lastStatus) {
+            lastStatus = status;
+            emit("status", { status });
+            ticked = true;
+          }
+          if (lanes.has("trace") && live.events.length > sentTrace) {
+            emit("trace", { events: live.events.slice(sentTrace), total: live.events.length });
+            sentTrace = live.events.length;
+            ticked = true;
+          }
+          if (lanes.has("screen")) {
+            const screen = await deps.service.screen(req.params.id).catch(() => undefined);
+            const dataUrl = screen?.dataUrl ?? "";
+            if (dataUrl !== "" && dataUrl !== lastScreen) {
+              lastScreen = dataUrl;
+              emit("screen", { dataUrl });
+              ticked = true;
+            }
+          }
+          if (lanes.has("fs")) {
+            const fs = await deps.service.fsTree(req.params.id).catch(() => undefined);
+            if (fs?.tree) {
+              const key = JSON.stringify(fs.tree.files);
+              if (key !== lastFs) {
+                lastFs = key;
+                emit("fs", { files: fs.tree.files, truncated: fs.tree.truncated });
+                ticked = true;
+              }
+            }
+          }
+        } catch {
+          break; // a read that stops answering ends the stream; the client reconnects or falls back to polling
+        }
+        if (TERMINAL.has(status)) break;
+        if (!ticked) reply.raw.write(": hb\n\n");
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+      if (!closed) {
+        reply.raw.write(`event: end\ndata: ${JSON.stringify({ status })}\n\n`);
+        reply.raw.end();
+      }
+    },
+  );
+
   // SSE tail: emits appended log chunks (JSON-encoded strings — newline-safe) every ~2s until the run is
   // terminal, then `event: end` with the final status. Heartbeat comments keep proxies from idling out.
   app.get<{ Params: { id: string }; Querystring: { stream?: string } }>(

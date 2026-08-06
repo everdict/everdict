@@ -210,6 +210,31 @@ const docs = {
       ...errorResponses(401, 403, 404),
     },
   },
+  liveStream: {
+    summary: "Attach one multiplexed live stream to a run (SSE)",
+    description:
+      "ONE server-sent-events connection replacing the live view's per-widget pollers: every ~2.5s the server " +
+      "reads the requested lanes (?lanes=screen,trace,fs — default trace) and emits only what CHANGED " +
+      "(`event: status|trace|screen|fs` with JSON data), then `event: end` with the final status once the run " +
+      "settles. Idle ticks cost heartbeat comments only. Creator-or-admin gated (screen/fs read the sandbox); " +
+      "requires runs:read. Workspace-scoped (404 otherwise).",
+    tags: ["run"],
+    params: runIdParams,
+    querystring: toJsonSchema(
+      z.object({
+        lanes: z.string().optional().describe("comma-separated lanes to multiplex: screen,trace,fs (default trace)"),
+      }),
+    ),
+    produces: ["text/event-stream"],
+    response: {
+      200: {
+        description:
+          "text/event-stream — `event: status|trace|screen|fs` carry JSON deltas; the final `event: end` carries { status }",
+        type: "string",
+      },
+      ...errorResponses(401, 403, 404),
+    },
+  },
   logsStream: {
     summary: "Stream a run's logs (SSE)",
     description:
