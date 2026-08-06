@@ -125,6 +125,8 @@ export const runSchema = z.object({
       ttlSec: z.number(),
       expiresAt: z.string(),
       closedReason: z.enum(['closed', 'expired', 'orphaned']).optional(),
+      // Playground conversation mode — the session's tasks continue ONE conversation instead of independent cases.
+      conversation: z.boolean().optional(),
     })
     .optional(),
   result: resultSchema.optional(),

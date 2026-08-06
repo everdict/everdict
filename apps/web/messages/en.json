@@ -3552,7 +3552,22 @@
     "shellHint": "Run a command inside the session container (ls · cat · ps · env …)",
     "shellPlaceholder": "Type a command, then Enter",
     "shellExit": "exit {code}",
-    "errorExec": "Could not run the command."
+    "errorExec": "Could not run the command.",
+    "conversationLabel": "Conversation mode",
+    "conversationHint": "Every message continues one conversation — the harness resumes its own thread in a stable working directory. Off = each message runs as an independent test case.",
+    "conversationBadge": "Conversation",
+    "runtimeLabel": "Runtime",
+    "runtimeHint": "A service harness deploys its topology on a runtime this workspace registered — the conversation runs there, not on the control plane.",
+    "runtimePlaceholder": "Pick a registered runtime",
+    "runtimeEmpty": "No registered runtimes",
+    "sessionRuntime": "Runtime",
+    "turnPlaceholder": "Message the harness…",
+    "freshConversation": "Start a new conversation (keeps the environment)",
+    "freshPending": "Next message starts a new conversation",
+    "freshDivider": "New conversation",
+    "noTurnsTitle": "No messages yet",
+    "noTurnsBody": "Say something below — the harness keeps the conversation across messages.",
+    "turnTrace": "{count} events"
   },
   "agentManager": {
     "instructions": "Instructions",

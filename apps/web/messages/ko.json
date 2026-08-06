@@ -3552,7 +3552,22 @@
     "shellHint": "세션 컨테이너에서 명령을 실행해요 (ls · cat · ps · env …)",
     "shellPlaceholder": "명령을 입력하고 Enter",
     "shellExit": "종료 코드 {code}",
-    "errorExec": "명령을 실행하지 못했어요."
+    "errorExec": "명령을 실행하지 못했어요.",
+    "conversationLabel": "대화 모드",
+    "conversationHint": "모든 메시지가 하나의 대화로 이어져요 — 하네스가 안정된 작업 디렉터리에서 자기 스레드를 이어가요. 끄면 메시지마다 독립 테스트 케이스로 실행돼요.",
+    "conversationBadge": "대화",
+    "runtimeLabel": "런타임",
+    "runtimeHint": "서비스 하네스는 워크스페이스에 등록된 런타임에 토폴로지를 배치해요 — 대화도 거기서 실행돼요.",
+    "runtimePlaceholder": "등록된 런타임 선택",
+    "runtimeEmpty": "등록된 런타임이 없어요",
+    "sessionRuntime": "런타임",
+    "turnPlaceholder": "하네스에게 말을 걸어보세요…",
+    "freshConversation": "새 대화 시작 (환경은 유지)",
+    "freshPending": "다음 메시지부터 새 대화가 시작돼요",
+    "freshDivider": "새 대화",
+    "noTurnsTitle": "아직 메시지가 없어요",
+    "noTurnsBody": "아래에 말을 걸면 하네스가 대화를 이어가요.",
+    "turnTrace": "이벤트 {count}개"
   },
   "agentManager": {
     "instructions": "지침",

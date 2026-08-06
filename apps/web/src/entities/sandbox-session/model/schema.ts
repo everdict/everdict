@@ -19,6 +19,7 @@ export const sandboxTaskSummarySchema = z.object({
   taskPreview: z.string(),
   submittedAt: z.string(),
   eventCount: z.number(),
+  fresh: z.boolean().optional(), // conversation sessions only: this turn deliberately started a new thread
 })
 export type SandboxTaskSummary = z.infer<typeof sandboxTaskSummarySchema>
 
@@ -28,7 +29,13 @@ export const sandboxSessionViewSchema = z.object({
     .object({
       expiresAt: z.string(),
       busy: z.boolean(), // a task is running — the composer waits rather than racing a 409
-      harness: z.object({ id: z.string(), version: z.string() }).optional(),
+      // kind is the panel's ONE branch signal: process/command = a container harness, service = a front-door
+      // conversation over a warm topology. Loose string — the control plane owns the vocabulary.
+      harness: z
+        .object({ id: z.string(), version: z.string(), kind: z.string().optional() })
+        .optional(),
+      // true = the task feed is one CONVERSATION (turns), not independent cases — the chat-shaped feed.
+      conversation: z.boolean().optional(),
       tasks: z.array(sandboxTaskSummarySchema),
     })
     .optional(),

@@ -14,14 +14,20 @@ import { ExecShell } from './exec-shell'
 import { SessionHeader } from './session-header'
 import { TaskCard } from './task-card'
 import { TaskComposer } from './task-composer'
+import { TurnCard } from './turn-card'
 
 // The attached session, rendered: header (what is booted, how long it has left) · the task feed · the composer.
 // Pure presentation — every piece of state is owned by the panel container, which is the only thing that talks
 // to the BFF. The feed follows new content only while the reader is already at the bottom, so scrolling back
-// through an earlier task is never yanked away by a live event.
+// through an earlier task is never yanked away by a live event. A CONVERSATION session renders the same feed
+// chat-shaped (TurnCard) with a thin divider where a `fresh` turn started a new thread.
 export function PlaygroundView({
   record,
   harness,
+  conversation = false,
+  freshAvailable = false,
+  freshPending = false,
+  onToggleFresh,
   sessions,
   onSwitch,
   tasks,
@@ -37,7 +43,11 @@ export function PlaygroundView({
   onNewSession,
 }: {
   record: Run
-  harness?: { id: string; version: string }
+  harness?: { id: string; version: string; kind?: string }
+  conversation?: boolean
+  freshAvailable?: boolean
+  freshPending?: boolean
+  onToggleFresh?: () => void
   sessions?: { id: string; label: string }[]
   onSwitch?: (id: string) => void
   tasks: SandboxTaskSummary[]
@@ -80,6 +90,7 @@ export function PlaygroundView({
       <SessionHeader
         record={record}
         {...(harness !== undefined ? { harness } : {})}
+        conversation={conversation}
         {...(sessions !== undefined ? { sessions } : {})}
         {...(onSwitch !== undefined ? { onSwitch } : {})}
         closed={closed}
@@ -90,15 +101,34 @@ export function PlaygroundView({
       <div className="relative min-h-0 flex-1">
         <div ref={scrollRef} onScroll={onScroll} className="h-full space-y-2 overflow-y-auto p-2.5">
           {tasks.length === 0 ? (
-            <EmptyState title={t('noTasksTitle')} hint={t('noTasksBody')} />
+            <EmptyState
+              title={t(conversation ? 'noTurnsTitle' : 'noTasksTitle')}
+              hint={t(conversation ? 'noTurnsBody' : 'noTasksBody')}
+            />
           ) : (
             tasks.map((task) => (
-              <TaskCard
-                key={task.runId}
-                task={task}
-                events={events.get(task.runId) ?? []}
-                workspace={workspace}
-              />
+              <div key={task.runId} className="space-y-2">
+                {conversation && task.fresh === true && (
+                  <div className="flex items-center gap-2 py-1 text-[10.5px] text-faint">
+                    <div className="h-px flex-1 bg-border" />
+                    {t('freshDivider')}
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+                )}
+                {conversation ? (
+                  <TurnCard
+                    task={task}
+                    events={events.get(task.runId) ?? []}
+                    workspace={workspace}
+                  />
+                ) : (
+                  <TaskCard
+                    task={task}
+                    events={events.get(task.runId) ?? []}
+                    workspace={workspace}
+                  />
+                )}
+              </div>
             ))
           )}
         </div>
@@ -128,13 +158,18 @@ export function PlaygroundView({
         </div>
       ) : (
         <>
-          {/* Folded by default — looking inside the container is the exception, writing the next case is the norm. */}
-          <ExecShell sessionId={record.id} />
+          {/* Folded by default — looking inside the container is the exception, writing the next case is the
+              norm. A front-door conversation holds no container, so there is no shell to offer at all. */}
+          {harness?.kind !== 'service' && <ExecShell sessionId={record.id} />}
           <TaskComposer
             value={input}
             onChange={onInputChange}
             onSend={onSend}
             disabled={composerDisabled}
+            conversation={conversation}
+            freshAvailable={freshAvailable}
+            freshPending={freshPending}
+            {...(onToggleFresh !== undefined ? { onToggleFresh } : {})}
           />
         </>
       )}

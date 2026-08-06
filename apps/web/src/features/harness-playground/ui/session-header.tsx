@@ -20,6 +20,7 @@ import { fmtCountdown } from '../lib/merge'
 export function SessionHeader({
   record,
   harness,
+  conversation = false,
   sessions = [],
   onSwitch,
   closed,
@@ -27,7 +28,8 @@ export function SessionHeader({
   onClose,
 }: {
   record: Run
-  harness?: { id: string; version: string }
+  harness?: { id: string; version: string; kind?: string }
+  conversation?: boolean
   // Every live session on the control plane. More than one means the member is holding several harnesses open
   // at once, so the badge becomes a picker; a single session keeps a plain badge (no dropdown for one choice).
   sessions?: { id: string; label: string }[]
@@ -92,6 +94,7 @@ export function SessionHeader({
             <span className="opacity-60">@{label.version}</span>
           </Badge>
         )}
+        {conversation && <Badge tone="outline">{t('conversationBadge')}</Badge>}
         <StatusPill status={record.status} />
         <div className="flex-1" />
         {!closed && (
@@ -105,6 +108,11 @@ export function SessionHeader({
         {record.session !== undefined && (
           <Tooltip content={t('sessionImage')}>
             <span className="min-w-0 truncate font-mono text-[10.5px]">{record.session.image}</span>
+          </Tooltip>
+        )}
+        {record.runtime !== undefined && (
+          <Tooltip content={t('sessionRuntime')}>
+            <span className="shrink-0 font-mono text-[10.5px]">{record.runtime}</span>
           </Tooltip>
         )}
         <div className="flex-1" />

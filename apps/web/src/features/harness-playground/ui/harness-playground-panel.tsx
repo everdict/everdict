@@ -69,6 +69,9 @@ export function HarnessPlaygroundPanel({
   const [events, setEvents] = useState<Map<string, TraceEvent[]>>(() => new Map())
   const [input, setInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // Conversation sessions: the next message starts a NEW thread (same environment). Armed by the composer's
+  // toggle, cleared after the send that carried it.
+  const [freshPending, setFreshPending] = useState(false)
   const [bootError, setBootError] = useState<string>()
   const [prefill, setPrefill] = useState<{ harnessId: string; version?: string }>()
   // Per-task poll cursors into the append-only trace buffer, the tasks already replayed once, and the fetches
@@ -245,7 +248,9 @@ export function HarnessPlaygroundPanel({
               id: bootInput.harnessId,
               version: bootInput.version,
               ...(bootInput.image !== undefined ? { image: bootInput.image } : {}),
+              ...(bootInput.conversation === true ? { conversation: true } : {}),
             },
+            ...(bootInput.runtime !== undefined ? { runtime: bootInput.runtime } : {}),
             ttlSec: bootInput.ttlSec,
           }),
         })
@@ -282,13 +287,14 @@ export function HarnessPlaygroundPanel({
     const text = input.trim()
     if (text.length === 0 || sessionId === null || submitting || busy || state !== 'attached')
       return
+    const fresh = freshPending
     setSubmitting(true)
     setInput('')
     try {
       const res = await fetch(`/api/sandboxes/${encodeURIComponent(sessionId)}/tasks`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ task: text }),
+        body: JSON.stringify({ task: text, ...(fresh ? { fresh: true } : {}) }),
       })
       const body: unknown = await res.json()
       // 409 = a task is still running. The prompt is the member's work — hand it back rather than dropping it.
@@ -303,7 +309,7 @@ export function HarnessPlaygroundPanel({
         return
       }
       const parsed = runSchema.safeParse(body)
-      if (parsed.success)
+      if (parsed.success) {
         // The 202's child run IS the handle — card it optimistically; the next reconciliation replaces this
         // with the session's own summary (same runId, so the card never blinks).
         setTasks((prev) =>
@@ -315,9 +321,12 @@ export function HarnessPlaygroundPanel({
               taskPreview: text,
               submittedAt: parsed.data.createdAt,
               eventCount: 0,
+              ...(fresh ? { fresh: true } : {}),
             },
           ])
         )
+        setFreshPending(false) // the reset was carried by THIS send — the next message continues normally
+      }
       void refresh(sessionId)
     } catch {
       setInput(text)
@@ -325,7 +334,7 @@ export function HarnessPlaygroundPanel({
     } finally {
       setSubmitting(false)
     }
-  }, [input, sessionId, submitting, busy, state, refresh, t])
+  }, [input, sessionId, submitting, busy, state, freshPending, refresh, t])
 
   const close = useCallback(async () => {
     if (sessionId === null) return
@@ -355,6 +364,7 @@ export function HarnessPlaygroundPanel({
     pulled.current = new Set()
     setBootError(undefined)
     setInput('')
+    setFreshPending(false)
     setState('none')
   }, [])
 
@@ -369,6 +379,7 @@ export function HarnessPlaygroundPanel({
       cursors.current = {}
       pulled.current = new Set()
       setInput('')
+      setFreshPending(false)
       const known = sessions.find((session) => session.record.id === id)
       if (known) applyView(known)
       void refresh(id)
@@ -407,10 +418,21 @@ export function HarnessPlaygroundPanel({
       </div>
     )
 
+  // Conversation-ness rides the live view (frontdoor = always, playground = when booted that way); the record's
+  // session half remembers it when the live half is gone. `fresh` exists only for a PROCESS conversation — a
+  // service conversation's thread is its session, and the server refuses the flag there.
+  const conversation = view.live?.conversation ?? view.record.session?.conversation ?? false
+  const harnessKind = view.live?.harness?.kind
+  const freshAvailable = conversation && harnessKind !== 'service'
+
   return (
     <PlaygroundView
       record={view.record}
       {...(view.live?.harness !== undefined ? { harness: view.live.harness } : {})}
+      conversation={conversation}
+      freshAvailable={freshAvailable}
+      freshPending={freshPending}
+      onToggleFresh={() => setFreshPending((pending) => !pending)}
       sessions={sessionOptions}
       onSwitch={switchTo}
       tasks={tasks}
