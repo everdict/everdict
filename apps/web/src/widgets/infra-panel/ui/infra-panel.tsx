@@ -424,6 +424,7 @@ export function InfraPanel({
             {tab === 'agent' && (
               <div className="h-full">
                 <AgentChatPanel
+                  workspace={workspace}
                   pendingMention={pendingMention}
                   onConsumeMention={consumePendingMention}
                   pendingSession={pendingSession}

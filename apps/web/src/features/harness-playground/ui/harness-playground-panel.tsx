@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 
 import { runSchema, type TraceEvent } from '@/entities/run'
 import {
+  mergeTasksById,
   sandboxListSchema,
   sandboxSessionViewSchema,
   sandboxTaskTraceSchema,
@@ -14,7 +15,6 @@ import {
 } from '@/entities/sandbox-session'
 import { Callout } from '@/shared/ui/callout'
 
-import { mergeTasksById } from '../lib/merge'
 import { BootForm, type BootInput } from './boot-form'
 import { PlaygroundView } from './playground-view'
 
@@ -54,7 +54,7 @@ export function HarnessPlaygroundPanel({
 }: {
   // A harness detail page asked to test THIS harness here — prefills the boot form. It never auto-boots:
   // booting spends a container, so the member presses the button.
-  pendingTarget?: { harnessId: string; version?: string } | null
+  pendingTarget?: { harnessId: string; version?: string } | { sessionId: string } | null
   onConsumeTarget?: () => void
   canSubmit?: boolean
   workspace: string
@@ -147,9 +147,12 @@ export function HarnessPlaygroundPanel({
   // re-inject the same prefill over the member's own picks.
   useEffect(() => {
     if (!pendingTarget) return
-    setPrefill(pendingTarget)
+    // A harness reference PREFILLS the boot form (booting spends a container — the member presses the button);
+    // a session id ATTACHES, because that session is already alive and someone is asking to watch it.
+    if ('sessionId' in pendingTarget) void refresh(pendingTarget.sessionId)
+    else setPrefill(pendingTarget)
     onConsumeTarget?.()
-  }, [pendingTarget, onConsumeTarget])
+  }, [pendingTarget, onConsumeTarget, refresh])
 
   // Session reconciliation — fast while a task runs, slow when idle. Skipped while the document is hidden.
   useEffect(() => {

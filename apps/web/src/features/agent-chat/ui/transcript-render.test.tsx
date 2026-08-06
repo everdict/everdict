@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { ContextBlock } from './context-block'
 import { MessageRow } from './message-row'
 import { ReasoningBlock } from './reasoning-block'
+import { DelegationCard } from './delegation-card'
 import { SubagentList } from './subagent-list'
 import { TodoList } from './todo-list'
 
@@ -21,6 +22,7 @@ const ITEMS = {
   ContextBlock,
   TodoList,
   SubagentList,
+  DelegationCard,
 }
 
 describe('agent chat transcript items', () => {

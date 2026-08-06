@@ -75,7 +75,11 @@ export const OPEN_PLAYGROUND_MESSAGE = 'everdict:open-playground'
 // A request to prefill the playground's boot form with a specific harness (a detail page's "test this harness").
 // Buffered exactly like PendingMention because the playground tab mounts lazily — and deliberately a PREFILL, not
 // a boot: spending a container is the member's call, so the panel never boots on arrival.
-export type PendingPlaygroundTarget = { harnessId: string; version?: string }
+// 플레이그라운드 탭에 무엇을 들고 갈지. 하네스 참조는 부팅 폼 PREFILL(부팅은 멤버가 누른다 — 컨테이너를 쓴다);
+// 세션 id 는 ATTACH 다(이미 살아 있는 세션을 그냥 붙는다). 대화 패널의 위임 카드가 "여기서 마저 보기"로 쓰는 문.
+export type PendingPlaygroundTarget =
+  | { harnessId: string; version?: string }
+  | { sessionId: string }
 
 type InfraPanelValue = {
   workspace: string

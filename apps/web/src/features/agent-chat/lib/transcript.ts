@@ -14,6 +14,7 @@ import type { AnalysisArtifact } from '@/entities/analysis-artifact'
 // 최신 스냅샷 하나만 최신 위치에 남긴다. 내용이 하나도 겹치지 않으면 "새 목록"으로 보고 이전 것을 이력으로 보존한다.
 const WRITE_TODOS_TOOL = 'write_todos'
 const SPAWN_AGENT_TOOL = 'spawn_agent'
+const CREATE_SANDBOX_TOOL = 'create_sandbox'
 const SPAWN_TEAMMATE_TOOL = 'spawn_teammate'
 
 // 커널(@everdict/agent-runtime loop.ts / spawn-tool.ts)의 고정 문구와 짝을 이루는 파서들 — 백그라운드 서브에이전트의
@@ -45,6 +46,17 @@ export interface SubagentView {
   summary?: string // the sub-agent's returned findings / the spawn acknowledgement
 }
 
+// 한 번의 위임. sessionRunId 가 있어야 카드가 그 대화를 붙어서 볼 수 있다 — 도구 결과(RunRecord)에서 온다.
+// 결과가 없으면(아직 실행 중) running, 결과가 RunRecord 로 안 읽히면(권한 거부·오류) failed.
+export interface DelegationView {
+  id: string
+  profileId: string
+  goal: string
+  sessionRunId?: string
+  status: 'running' | 'open' | 'failed'
+  detail?: string
+}
+
 export type TranscriptItem =
   | { kind: 'message'; message: AgentMessage } // a user turn OR an assistant turn's text
   | { kind: 'reasoning'; id: string; text: string } // an assistant turn's reasoning / thinking
@@ -54,6 +66,8 @@ export type TranscriptItem =
   | { kind: 'context'; id: string; source: 'teammate' | 'event'; sender?: string; text: string }
   // an analysis artifact (chart/table/report) the agent emitted this conversation — rendered as a card in place
   | { kind: 'artifact'; id: string; artifact: AnalysisArtifact }
+  // 에이전트가 일을 맡긴 위임 — 그 세션의 대화를 카드 안에서 그대로 펼쳐 본다(위임의 위임 가시성)
+  | { kind: 'delegation'; id: string; delegation: DelegationView }
 
 // Parse a write_todos tool-call argument string into checklist items. Best-effort: a malformed payload yields [].
 export function parseTodosArg(raw: string): TodoItemView[] {
@@ -62,6 +76,44 @@ export function parseTodosArg(raw: string): TodoItemView[] {
     return parsed.success ? parsed.data.todos : []
   } catch {
     return []
+  }
+}
+
+// create_sandbox 호출 한 건을 위임 뷰로. 인자에서 프로필/목표를, 도구 결과(RunRecord JSON)에서 세션 run id 를
+// 읽는다. 둘 다 best-effort — 손상되거나 거부 문자열이면 실패로 표시하고 카드가 그 사실을 말한다(조용히 사라지지
+// 않는다). 권한 모드가 default/plan 이면 결과는 RunRecord 가 아니라 거부 문구라서 이 분기가 실제로 쓰인다.
+export function parseDelegationEntry(
+  tc: { id: string; name: string; arguments: string },
+  result: string | undefined
+): DelegationView | undefined {
+  let profileId = ''
+  let goal = ''
+  try {
+    const args = JSON.parse(tc.arguments) as Record<string, unknown>
+    const profile = args.profile
+    if (profile === null || typeof profile !== 'object') return undefined // 위임이 아닌 일반 샌드박스 부팅
+    profileId =
+      typeof (profile as Record<string, unknown>).id === 'string'
+        ? String((profile as Record<string, unknown>).id)
+        : ''
+    const brief = args.brief
+    if (
+      brief !== null &&
+      typeof brief === 'object' &&
+      typeof (brief as Record<string, unknown>).goal === 'string'
+    )
+      goal = String((brief as Record<string, unknown>).goal)
+  } catch {
+    return undefined // 인자를 못 읽으면 위임인지조차 알 수 없다
+  }
+  if (result === undefined) return { id: tc.id, profileId, goal, status: 'running' }
+  try {
+    const record = JSON.parse(result) as Record<string, unknown>
+    const runId = typeof record.id === 'string' ? record.id : undefined
+    if (runId === undefined) throw new Error('no run id')
+    return { id: tc.id, profileId, goal, sessionRunId: runId, status: 'open' }
+  } catch {
+    return { id: tc.id, profileId, goal, status: 'failed', detail: result.slice(0, 400) }
   }
 }
 
@@ -159,6 +211,7 @@ export function buildTranscript(
   for (const m of messages)
     for (const tc of m.toolCalls ?? [])
       if (tc.name === SPAWN_AGENT_TOOL || tc.name === SPAWN_TEAMMATE_TOOL) spawnCallIds.add(tc.id)
+      else if (tc.name === CREATE_SANDBOX_TOOL) spawnCallIds.add(tc.id) // 위임 세션 id 는 결과에만 있다
   const resultByCallId = new Map<string, string>()
   for (const m of messages)
     if (m.role === 'tool' && m.toolCallId !== undefined && spawnCallIds.has(m.toolCallId))
@@ -238,6 +291,11 @@ export function buildTranscript(
         items.push({ kind: 'todos', id: tc.id, todos })
         lastTodosAt = items.length - 1
         lastTodos = todos
+      } else if (tc.name === CREATE_SANDBOX_TOOL) {
+        const delegation = parseDelegationEntry(tc, resultByCallId.get(tc.id))
+        if (delegation === undefined) continue // 프로필 없는 샌드박스 부팅은 위임이 아니다 — 카드도 없다
+        agentBuf = null // 위임은 결과물 쪽 — 열려 있던 활동 카드를 닫는다(아티팩트와 같은 규칙)
+        items.push({ kind: 'delegation', id: tc.id, delegation })
       } else if (tc.name === SPAWN_AGENT_TOOL || tc.name === SPAWN_TEAMMATE_TOOL) {
         const { entry, bgId } = parseSpawnEntry(tc, resultByCallId.get(tc.id))
         if (bgId !== undefined) pendingBg.set(bgId, entry)

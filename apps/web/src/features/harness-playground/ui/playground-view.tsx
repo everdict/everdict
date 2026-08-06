@@ -5,7 +5,7 @@ import { ArrowDown } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { Run, TraceEvent } from '@/entities/run'
-import type { SandboxTaskSummary } from '@/entities/sandbox-session'
+import { TurnCard, type SandboxTaskSummary } from '@/entities/sandbox-session'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -14,7 +14,6 @@ import { ExecShell } from './exec-shell'
 import { SessionHeader } from './session-header'
 import { TaskCard } from './task-card'
 import { TaskComposer } from './task-composer'
-import { TurnCard } from './turn-card'
 
 // The attached session, rendered: header (what is booted, how long it has left) · the task feed · the composer.
 // Pure presentation — every piece of state is owned by the panel container, which is the only thing that talks

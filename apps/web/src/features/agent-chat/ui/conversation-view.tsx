@@ -37,6 +37,7 @@ import { Markdown } from '@/shared/ui/markdown'
 import { buildTranscript } from '../lib/transcript'
 import { Composer } from './composer'
 import { ContextBlock } from './context-block'
+import { DelegationCard } from './delegation-card'
 import { MessageRow, UserBadge, type ChatUser } from './message-row'
 import { PermissionPrompt, type PendingPermission } from './permission-prompt'
 import { ReasoningBlock } from './reasoning-block'
@@ -177,6 +178,7 @@ const PendingUserRow = memo(function PendingUserRow({
 
 export function ConversationView({
   title,
+  workspace,
   user,
   models,
   model,
@@ -216,6 +218,9 @@ export function ConversationView({
   mission,
 }: {
   title: string
+  // 활성 워크스페이스 — 위임 카드 안의 턴이 자기 run 상세로 링크하는 데 쓴다. 위젯에서 prop 으로
+  // 내려온다(위로 import 하지 않는다 — FSD 방향은 아래로만).
+  workspace: string
   user?: ChatUser
   models: string[]
   model: string | null
@@ -395,6 +400,14 @@ export function ConversationView({
                   return <SubagentList key={item.id} agents={item.agents} />
                 if (item.kind === 'artifact')
                   return <ArtifactRow key={item.id} artifact={item.artifact} />
+                if (item.kind === 'delegation')
+                  return (
+                    <DelegationCard
+                      key={item.id}
+                      delegation={item.delegation}
+                      workspace={workspace}
+                    />
+                  )
                 return <MessageRow key={item.message.id} message={item.message} user={user} />
               })}
               {pendingUsers

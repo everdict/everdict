@@ -94,12 +94,14 @@ async function readSseStream(
 // it — a background turn streams its SSE to nobody, so the panel polls /messages?since= + /pending instead. The
 // prop shapes are declared inline (not imported from the widget) to keep the FSD import direction downward-only.
 export function AgentChatPanel({
+  workspace,
   pendingMention,
   onConsumeMention,
   pendingSession,
   onConsumeSession,
   user,
 }: {
+  workspace: string
   pendingMention?: {
     ref?: AgentReference
     prompt?: string
@@ -110,7 +112,7 @@ export function AgentChatPanel({
   pendingSession?: { id: string } | null
   onConsumeSession?: () => void
   user?: ChatUser
-} = {}) {
+}) {
   const t = useTranslations('agentChat')
   const router = useRouter()
   const refresh = useRefresh()
@@ -967,6 +969,7 @@ export function AgentChatPanel({
   const active = activeId ? sessions.find((s) => s.id === activeId) : undefined
   return (
     <ConversationView
+      workspace={workspace}
       title={active?.title ?? t('new')}
       user={user}
       mission={mission}

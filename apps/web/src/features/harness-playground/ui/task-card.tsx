@@ -4,14 +4,17 @@ import { ArrowUpRight } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { TraceEvent } from '@/entities/run'
-import type { SandboxTaskSummary } from '@/entities/sandbox-session'
+import {
+  failureMessage,
+  finalAnswer,
+  LiveTraceList,
+  totalCostUsd,
+  type SandboxTaskSummary,
+} from '@/entities/sandbox-session'
 import { fmtUsd } from '@/shared/lib/format'
 import { Callout } from '@/shared/ui/callout'
 import { Link } from '@/shared/ui/link'
 import { StatusIcon } from '@/shared/ui/status-pill'
-
-import { failureMessage, finalAnswer, totalCostUsd } from '../lib/trace'
-import { LiveTraceList } from './live-trace-list'
 
 // One submitted test case: the prompt the member typed, the harness's trace as it streams in, and — once the
 // harness answers — its final message pulled out of that same stream. The card is a monitoring handle, not the

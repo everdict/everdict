@@ -5,13 +5,12 @@ import { Check, ChevronDown, Timer } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import type { Run } from '@/entities/run'
+import { fmtCountdown } from '@/entities/sandbox-session'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { Tooltip } from '@/shared/ui/tooltip'
-
-import { fmtCountdown } from '../lib/merge'
 
 // What the member is holding open: which harness booted, in which image, how long it has left and how to end it.
 // A session's disposal is the invariant, so the TTL is not decoration — it is the deadline the control-plane
