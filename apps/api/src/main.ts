@@ -883,6 +883,8 @@ async function main(): Promise<void> {
         // leaves a record of the container it was holding instead of only an orphan on someone's cluster.
         runs: store,
         ...(lateEvents ? { events: lateEvents } : {}),
+        budget, // and the same tenant budget gate — a live browser is compute someone pays for
+
         ...(browserMaxPerTenant !== undefined ? { maxPerTenant: browserMaxPerTenant } : {}),
         ...(browserMaxTotal !== undefined ? { maxTotal: browserMaxTotal } : {}),
       })
@@ -981,6 +983,9 @@ async function main(): Promise<void> {
     scopedSecretsFor,
     budget,
     usage: usageMeter,
+    // P4 §5.1's causal leg, on this lane too: a session an AGENT opens draws from that turn's delegated
+    // envelope and answers the depth / in-flight guards, instead of holding a container against nobody.
+    envelopes: envelopeStore,
     // Agent worlds (W1): snapshots publish into the managed store and register as environment-capability
     // versions — absent managed store = world sessions 400, everything else keeps working. The pull side is
     // the dispatch lane's own credential seam: booting a world snapshot means pulling from our registry.
@@ -1169,6 +1174,10 @@ async function main(): Promise<void> {
     fileExecutionService: buildFileExecutionService(workspaceFs, runtimeCompute, compute, {
       runs: store,
       ...(lateEvents ? { events: lateEvents } : {}),
+      // The singular gate reaches this lane too: the tenant's budget, and — when an agent asked — its
+      // causer's envelope plus the depth / in-flight guards. It used to have no admission at all.
+      budget,
+      envelopes: envelopeStore,
     }),
     capabilityService,
     // Instance policy surfaced to the web (GET /me → config): does a plain member — not only an admin — get to

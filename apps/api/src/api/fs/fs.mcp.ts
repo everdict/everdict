@@ -225,6 +225,9 @@ export function registerFsTools(server: McpServer, ctx: McpToolContext): void {
               ...(runtime !== undefined ? { runtime } : {}),
             },
             actor,
+            // Same causal leg as every other agent-submitted unit of work: the run draws from this turn's
+            // delegated envelope rather than riding free on the tenant pool.
+            ctx.agent?.runId,
           ),
         ),
       ),

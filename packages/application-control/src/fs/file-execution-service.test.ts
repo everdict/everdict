@@ -1,5 +1,5 @@
 import type { ComputeHandle, ComputeSpec, Driver, ExecOpts, ExecResult, FsEntry, RunRecord } from "@everdict/contracts";
-import { BadRequestError, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, NotFoundError, PaymentRequiredError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { RunStore } from "../ports/run-store.js";
 import type { FsFile, WorkspaceFs } from "../ports/workspace-fs.js";
@@ -321,5 +321,68 @@ describe("FileExecutionService — running one workspace file", () => {
     // The row is SETTLED, not left at `running`: a container that never came up is precisely the case the
     // ledger exists for, and an eternally-running row would be an orphan record of its own.
     expect((await runs.list("acme"))[0]).toMatchObject({ status: "failed", error: { message: "no compute" } });
+  });
+
+  // Admission (execution-model §5, the singular gate). This lane had none at all: a member — or an agent in
+  // a loop — could take unbounded compute, and an agent's run spent against nobody's envelope.
+  it("refuses past the tenant budget BEFORE taking a container", async () => {
+    const driver = new FakeDriver(() => ok());
+    const service = new FileExecutionService(new FakeFs({ "a.py": "..." }), {
+      compute: driver,
+      budget: {
+        admit: () => {
+          throw new PaymentRequiredError("BUDGET_EXCEEDED", {}, "over budget");
+        },
+        release: () => {},
+        settle: () => {},
+        usage: () => ({ runs: 0, usd: 0, tokens: 0 }),
+      },
+    });
+
+    await expect(service.run("acme", { path: "a.py" })).rejects.toBeInstanceOf(PaymentRequiredError);
+    expect(driver.provisioned).toBeUndefined(); // a refusal costs nothing
+  });
+
+  it("an AGENT's run draws from its causer's envelope and is stamped with it", async () => {
+    const runs = new FakeRuns();
+    // The agent's turn, carrying the delegated slice every run it causes must draw from.
+    await runs.create({
+      id: "turn-1",
+      tenant: "acme",
+      harness: { id: "assistant", version: "1" },
+      caseId: "chat",
+      status: "running",
+      kind: "agent",
+      envelope: { id: "turn-1", capUsd: 5 },
+      createdAt: "t",
+      updatedAt: "t",
+    });
+    const service = new FileExecutionService(new FakeFs({ "a.py": "..." }), {
+      compute: new FakeDriver((cmd) => (cmd.startsWith("find") ? ok("") : ok())),
+      runs,
+      newId: seq("run"),
+      now: () => 1000,
+    });
+
+    await service.run("acme", { path: "a.py" }, { kind: "agent", subject: "bot", agentId: "a1" }, "turn-1");
+
+    const row = [...runs.rows.values()].find((r) => r.kind === "command");
+    expect(row).toMatchObject({
+      origin: { causedByRunId: "turn-1" }, // the causal edge is audited, not implied
+      // Inherited stamps carry only the id — the caps live on the ROOT record the id names, so there is one
+      // place a cap can be read and no copy to go stale.
+      envelope: { id: "turn-1" },
+    });
+  });
+
+  it("refuses a causer that is not this workspace's run — causation is an audited edge, never a claim", async () => {
+    const runs = new FakeRuns();
+    const driver = new FakeDriver(() => ok());
+    const service = new FileExecutionService(new FakeFs({ "a.py": "..." }), { compute: driver, runs });
+
+    await expect(service.run("acme", { path: "a.py" }, undefined, "someone-elses-run")).rejects.toBeInstanceOf(
+      BadRequestError,
+    );
+    expect(driver.provisioned).toBeUndefined();
   });
 });

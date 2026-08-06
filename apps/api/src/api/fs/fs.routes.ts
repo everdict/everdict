@@ -257,8 +257,11 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     const parsed = RunFsFileBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      const actor = fsActorFor(principal, agentAttributionFrom(req.headers));
-      return reply.send(await deps.fileExecutionService.run(principal.workspace, parsed.data, actor));
+      const attribution = agentAttributionFrom(req.headers);
+      const actor = fsActorFor(principal, attribution);
+      return reply.send(
+        await deps.fileExecutionService.run(principal.workspace, parsed.data, actor, attribution?.runId),
+      );
     } catch (err) {
       return sendError(reply, err); // no interpreter / not text → 400, missing file → 404, sandbox fault → 500
     }

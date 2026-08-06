@@ -17,6 +17,9 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       ? {
           agentId: ctx.agent.agentId,
           ...(ctx.agent.conversationId !== undefined ? { conversationId: ctx.agent.conversationId } : {}),
+          // The agent's CURRENT ledger run — the session draws from that turn's envelope and is counted by
+          // the causal-depth guard (§5.1), instead of an agent loop opening sessions against nobody's budget.
+          ...(ctx.agent.runId !== undefined ? { runId: ctx.agent.runId } : {}),
         }
       : undefined;
   const actor = () => ({

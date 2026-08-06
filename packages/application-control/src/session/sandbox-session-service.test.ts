@@ -403,14 +403,17 @@ function fakePlaygroundHarness(opts: { hold?: boolean; image?: string | undefine
   return { resolved, installs, runCwds };
 }
 
-function fakeBudget(opts: { admitError?: boolean } = {}) {
+// `admitAfter` = how many admits pass before the fake starts refusing. The session's own create now admits
+// too (the gate reaches this lane), so a test about the TASK's refusal has to let the session in first.
+function fakeBudget(opts: { admitError?: boolean; admitAfter?: number } = {}) {
   const settles: Array<{ tenant: string; usd: number }> = [];
   let admits = 0;
   let releases = 0;
   const budget: BudgetTracker = {
     admit() {
       admits++;
-      if (opts.admitError) throw new PaymentRequiredError("BUDGET_EXCEEDED", {}, "over budget");
+      if (opts.admitError && admits > (opts.admitAfter ?? 0))
+        throw new PaymentRequiredError("BUDGET_EXCEEDED", {}, "over budget");
     },
     release() {
       releases++;
@@ -538,12 +541,12 @@ describe("SandboxSessionService — the harness playground (test cases in a live
   });
 
   it("budget admission refuses at 402 BEFORE any child record exists", async () => {
-    const { budget, admits } = fakeBudget({ admitError: true });
+    const { budget, admits } = fakeBudget({ admitError: true, admitAfter: 1 }); // 1 = the session's own create
     const { service, runStore, session } = await boot({ budget });
     const before = runStore.rows.size;
     await expect(service.submitTask(creator, session.id, { task: "x" })).rejects.toMatchObject({ status: 402 });
     expect(runStore.rows.size).toBe(before);
-    expect(admits()).toBe(1);
+    expect(admits()).toBe(2);
   });
 
   it("closing the session mid-task aborts the drive: the child settles failed{CANCELLED} with its partial trace sealed", async () => {
@@ -1423,5 +1426,65 @@ describe("SandboxSessionService — hibernation on a daemonless placement", () =
     // The row still settles and the compute is still reclaimed — the snapshot is what is lost, and the
     // failure is a stated limitation rather than a silent skip.
     expect((await before.runStore.store.get(record.id))?.session?.snapshots ?? []).toEqual([]);
+  });
+});
+
+// Admission (execution-model §5.1). The session lane answered the loop guard (causedBy on facts) but not the
+// GATE: an agent could hold sessions open spending against nobody, with no causal-depth guard in the way.
+describe("SandboxSessionService — the singular admission gate", () => {
+  it("an agent's session draws from its turn's envelope, and the causal edge lands on the row", async () => {
+    const { service, runStore } = build();
+    await runStore.store.create({
+      id: "turn-1",
+      tenant: "acme",
+      harness: { id: "assistant", version: "1" },
+      caseId: "chat",
+      status: "running",
+      kind: "agent",
+      envelope: { id: "turn-1", capUsd: 5 },
+      createdAt: "t",
+      updatedAt: "t",
+    });
+
+    const run = await service.create({
+      ...creator,
+      createdBy: "alice",
+      image: "debian:stable-slim",
+      agent: { agentId: "a1", conversationId: "c1", runId: "turn-1" },
+    });
+
+    // Caps live on the ROOT the id names; an inherited stamp carries only the id.
+    expect(run.envelope).toEqual({ id: "turn-1" });
+    expect(run.origin?.causedByRunId).toBe("turn-1");
+  });
+
+  it("refuses a causer that is not this workspace's run, before any container is booted", async () => {
+    const { service, driver } = build();
+    await expect(
+      service.create({
+        ...creator,
+        createdBy: "alice",
+        image: "debian:stable-slim",
+        agent: { agentId: "a1", runId: "not-ours" },
+      }),
+    ).rejects.toThrow(/does not name a run/i);
+    expect(driver.provisioned).toHaveLength(0); // a refusal costs nothing
+  });
+
+  it("refuses past the tenant budget before booting anything", async () => {
+    const { service, driver } = build({
+      budget: {
+        admit: () => {
+          throw new PaymentRequiredError("BUDGET_EXCEEDED", {}, "over budget");
+        },
+        release: () => {},
+        settle: () => {},
+        usage: () => ({ runs: 0, usd: 0, tokens: 0 }),
+      },
+    });
+    await expect(
+      service.create({ ...creator, createdBy: "alice", image: "debian:stable-slim" }),
+    ).rejects.toBeInstanceOf(PaymentRequiredError);
+    expect(driver.provisioned).toHaveLength(0);
   });
 });

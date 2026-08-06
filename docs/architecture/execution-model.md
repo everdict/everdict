@@ -240,11 +240,26 @@ Three graphs, and the discipline that connects them:
 
 **5.1 One admission gate.** Admission of *any* run =
 `envelope check (402) → tenant queue/concurrency caps (429) → fan-out guards (max children per run, max
-causal depth) → class assignment`. The eval path already implements the first two (BudgetTracker.admit,
-Scheduler caps); the gate makes them universal — an agent activation, a command run and a sandbox session
-answer the same four questions before they exist. One gate means throughput *policy* has exactly one home,
-which is what "extend and then close" means for execution: new kinds extend the ledger; none of them
-reopens governance.
+causal depth) → class assignment`. One gate means throughput *policy* has exactly one home, which is what
+"extend and then close" means for execution: new kinds extend the ledger; none of them reopens governance.
+
+**Where it stands.** All four lanes that take compute now pass it — an eval case, an agent world / harness
+playground, a `command` run (running a workspace file), and a live browser session. Each answers the causal
+leg (`admitCausedWork`: the causer's envelope 402, the depth guard and the in-flight cap 429) when an agent
+asked, then its tenant's budget (402), *before* any container is taken — a refusal costs nothing. The file
+lane had no admission at all before this, and the two session lanes answered only their own local caps: an
+agent could hold sessions open, or loop on `run_file`, spending against nobody and with no depth guard in
+the way. The causer is never client-supplied — it rides the same attribution header the fs actor does, so a
+caller cannot name someone else's envelope in order to spend it.
+
+**What is deliberately NOT uniform: the queue.** `Scheduler.dispatch` is task-shaped — it queues work, runs
+it, and returns a result. A held-open session has no result to await, so pushing one through would park a
+scheduler slot forever and deadlock the queue behind it. The hold-open lanes therefore share *admission*,
+not *dispatch*; their own caps (per-tenant / per-agent session pools, the member reserve) stay, because
+those express something a generic queue cannot — that a person's shell must not be crowded out by their own
+agents. What the two halves DO share is the capacity fact: session, browser and topology jobs all submit
+under the `everdict-` prefix, so a held-open container is counted by the same `capacity()` probe the
+Scheduler gates eval placement on.
 
 **5.2 Delegated envelopes along the causal tree.** The tenant budget is the root envelope. An agent run is
 *activated with* an envelope — a delegated slice (the AgentSpec per-agent budget that agent-automation A7

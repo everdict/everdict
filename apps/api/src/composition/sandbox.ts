@@ -1,6 +1,7 @@
 import type {
   CapabilityService,
   CapabilityStore,
+  EnvelopeStore,
   PlatformEventEmitter,
   ResolvedSessionHarness,
   RunStore,
@@ -35,6 +36,8 @@ export function buildSandboxSessions(opts: {
   scopedSecretsFor?: ScopedSecretsFn;
   budget?: BudgetTracker;
   usage?: UsageMeter;
+  // The gate's causal leg (§5.1): an agent's session draws from its turn's delegated envelope.
+  envelopes?: EnvelopeStore;
   // The durable reaper (T-b) — main wires it to the Temporal driver when EVERDICT_TEMPORAL_ADDRESS is set;
   // absent = the in-process sweep is the only expiry (a process death can leak until a reaper exists).
   reaper?: SandboxSessionServiceDeps["reaper"];
@@ -221,6 +224,7 @@ export function buildSandboxSessions(opts: {
     ...(pruneWorldVersions ? { pruneWorldVersions } : {}),
     ...(resolveSessionHarness ? { resolveSessionHarness } : {}),
     ...(opts.budget ? { budget: opts.budget } : {}),
+    ...(opts.envelopes ? { envelopes: opts.envelopes } : {}),
     ...(opts.usage ? { usage: opts.usage } : {}),
     ...(capabilities
       ? {

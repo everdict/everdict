@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PlatformEventEmitter, RunStore } from "@everdict/application-control";
 import { stampFacts } from "@everdict/application-control";
 import { NotFoundError, RateLimitError } from "@everdict/contracts";
-import { Run } from "@everdict/domain";
+import { type BudgetTracker, Run } from "@everdict/domain";
 import { type StorageState, captureStorageState } from "@everdict/topology";
 import type { BrowserSessionProvisioner, ProvisionedBrowser } from "../../common/browser-session-provisioner.js";
 import { type BrowserSessionEntry, type BrowserSessionView, toBrowserSessionView } from "./browser-session.js";
@@ -48,6 +48,9 @@ export interface BrowserSessionServiceOptions {
   // THIS process's memory: a control plane that dies leaves the container running with nothing that knows.
   runs?: RunStore;
   events?: PlatformEventEmitter;
+  // The tenant leg of the singular gate (§5). A live browser is a held-open container someone pays for, so
+  // it answers the same budget question a case does — it used to answer none at all.
+  budget?: BudgetTracker;
 }
 
 // Owns the lifecycle of interactive browser sessions: provision a dedicated browser, hold its reachable CDP base
@@ -64,6 +67,7 @@ export class BrowserSessionService {
   private readonly maxTotal?: number;
   private readonly runs?: RunStore;
   private readonly events?: PlatformEventEmitter;
+  private readonly budget?: BudgetTracker;
 
   constructor(
     private readonly provisioner: BrowserSessionProvisioner,
@@ -78,6 +82,7 @@ export class BrowserSessionService {
     this.maxTotal = opts.maxTotal;
     this.runs = opts.runs;
     this.events = opts.events;
+    this.budget = opts.budget;
   }
 
   // ─── The run ledger ─────────────────────────────────────────────────────────────────────────────────────
@@ -140,17 +145,24 @@ export class BrowserSessionService {
     this.sweep();
     await this.closeOwned(cmd.createdBy); // frees the owner's own live session first, so caps count only the peers
     this.enforceCapacity(cmd.tenant);
+    this.budget?.admit(cmd.tenant); // 402 past the tenant cap — before a browser exists
     const proxyServer = cmd.country && this.resolveProxy ? await this.resolveProxy(cmd.tenant, cmd.country) : undefined;
     // Id is minted BEFORE provisioning so a runtime provisioner can key + rediscover the browser by session id
     // (a runtime-hosted browser is looked up by id to find its control-plane-reachable CDP). No entry is stored
     // until provisioning succeeds, so a provision failure (e.g. unknown runtime) leaves no orphaned session.
     const id = this.newId();
-    const browser = await this.provisioner.provision({
-      ...(proxyServer ? { proxyServer } : {}),
-      tenant: cmd.tenant,
-      ...(cmd.runtime ? { runtime: cmd.runtime } : {}),
-      sessionId: id,
-    });
+    let browser: ProvisionedBrowser;
+    try {
+      browser = await this.provisioner.provision({
+        ...(proxyServer ? { proxyServer } : {}),
+        tenant: cmd.tenant,
+        ...(cmd.runtime ? { runtime: cmd.runtime } : {}),
+        sessionId: id,
+      });
+    } catch (err) {
+      this.budget?.release(cmd.tenant); // the admit reservation must not leak on a failed provision
+      throw err;
+    }
     const createdAt = new Date(this.now()).toISOString();
     const entry: BrowserSessionEntry = {
       browser,

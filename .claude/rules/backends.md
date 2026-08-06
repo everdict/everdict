@@ -19,6 +19,16 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   untrusted eval code. k8s auth precedence: `kubeconfigSecret` > (`server`+`authSecret`) > `context`. The decrypted
   kubeconfig is materialized **per-dispatch** (never in the long-lived backend ctor). See `docs/runtimes.md`.
 
+- **Anything that takes compute passes the admission gate** (execution-model §5.1) — an eval submit, a
+  sandbox session, a file run, a browser session. The order is fixed: `admitCausedWork` (the causer's
+  envelope 402 + depth/in-flight guards 429, when an agent asked) then `BudgetTracker.admit` (tenant 402),
+  BEFORE any container is provisioned, and `release()` on any failure that produced nothing. The causer id
+  is never client-supplied — it rides the agent attribution header. A new lane that takes compute and skips
+  this is a bypass, and the master plan makes a bypass a review-blocking defect. What the hold-open lanes do
+  NOT share is `Scheduler.dispatch`: it is task-shaped (queue → run → result), and a session has no result
+  to await, so it would park a slot forever. They share admission, and their held-open jobs are counted by
+  the same `capacity()` probe (all submit under the `everdict-` prefix).
+
 - Implement `Backend.dispatch(job: CaseJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
   (`./backend`, `@everdict/contracts`). `capacity()` is what the `Scheduler` gates on — report a configured
   `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap (else `used: 0`).

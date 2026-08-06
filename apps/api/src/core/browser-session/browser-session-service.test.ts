@@ -1,5 +1,5 @@
 import type { RunStore } from "@everdict/application-control";
-import { AppError, RateLimitError } from "@everdict/contracts";
+import { AppError, PaymentRequiredError, RateLimitError } from "@everdict/contracts";
 import { InMemoryRunStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import type {
@@ -274,5 +274,50 @@ describe("BrowserSessionService", () => {
     await new Promise((r) => setTimeout(r, 0)); // the sweep tears down without awaiting — let it settle
 
     expect(await runs.get(view.id)).toMatchObject({ status: "succeeded", session: { closedReason: "expired" } });
+  });
+
+  // §5's tenant leg reaches this lane too. A live browser is a held-open container someone pays for, and it
+  // used to answer no budget question at all.
+  it("refuses past the tenant budget, and no browser is provisioned", async () => {
+    const p = new FakeProvisioner();
+    const s = new BrowserSessionService(p, {
+      newId: () => "bs-0",
+      now: () => 1000,
+      budget: {
+        admit: () => {
+          throw new PaymentRequiredError("BUDGET_EXCEEDED", {}, "over budget");
+        },
+        release: () => {},
+        settle: () => {},
+        usage: () => ({ runs: 0, usd: 0, tokens: 0 }),
+      },
+    });
+
+    await expect(s.create({ tenant: "acme", createdBy: "alice" })).rejects.toBeInstanceOf(PaymentRequiredError);
+    expect(p.provisioned).toEqual([]); // a refusal costs nothing
+  });
+
+  it("gives the budget reservation back when the browser fails to come up", async () => {
+    let released = 0;
+    const failing: BrowserSessionProvisioner = {
+      async provision(): Promise<ProvisionedBrowser> {
+        throw new Error("no chrome");
+      },
+    };
+    const s = new BrowserSessionService(failing, {
+      newId: () => "bs-0",
+      now: () => 1000,
+      budget: {
+        admit: () => {},
+        release: () => {
+          released += 1;
+        },
+        settle: () => {},
+        usage: () => ({ runs: 0, usd: 0, tokens: 0 }),
+      },
+    });
+
+    await expect(s.create({ tenant: "acme", createdBy: "alice" })).rejects.toThrow();
+    expect(released).toBe(1); // an admit that produced nothing must not consume the tenant's slot
   });
 });

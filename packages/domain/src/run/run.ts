@@ -255,6 +255,10 @@ export class Run {
     image: string; // the container it ran in (interpreter default, or the caller's environment image)
     createdBy: string;
     runtime?: string; // the workspace runtime it was placed on; unset = the deployment's own compute
+    // The agent turn that asked for it (§5.1): the run draws from that causer's envelope and is counted by
+    // the depth/in-flight guards, instead of spending against nobody.
+    causedByRunId?: string;
+    envelope?: RunEnvelope;
     now: string;
   }): RunRecord {
     return {
@@ -271,7 +275,12 @@ export class Run {
       // The CAUSE is a member either way: an agent's `run_file` acts AS the member it was delegated by. Whose
       // loop this was rides on the facts instead (`causedBy: agent:<id>:<conv>`, stamped by the caller) — the
       // same separation the sandbox lane keeps, and the reason an agent never wakes on its own file run.
-      origin: { cause: "member", actor: input.createdBy },
+      origin: {
+        cause: "member",
+        actor: input.createdBy,
+        ...(input.causedByRunId !== undefined ? { causedByRunId: input.causedByRunId } : {}),
+      },
+      ...(input.envelope !== undefined ? { envelope: input.envelope } : {}),
       ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
       placement: {
         where: input.runtime !== undefined ? "runtime" : "driver",

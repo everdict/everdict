@@ -20,7 +20,9 @@ import {
   shq,
 } from "@everdict/contracts";
 import { type BudgetTracker, IMAGE_REPOSITORY_NAME, Run, type UsageMeter, pinDigest } from "@everdict/domain";
+import { admitCausedWork } from "../admission/admission.js";
 import { stampFacts } from "../platform-event/outbox.js";
+import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { TrajectoryStore } from "../ports/trajectory-store.js";
@@ -84,6 +86,9 @@ export interface SandboxActor {
 export interface SandboxAgentAttribution {
   agentId: string;
   conversationId?: string;
+  // The agent's CURRENT ledger run — what this session stamps as origin.causedByRunId so it draws from that
+  // turn's delegated envelope and is counted by the depth / in-flight guards (§5.1). Never client-supplied.
+  runId?: string;
 }
 
 function causedByOf(agent: SandboxAgentAttribution | undefined): string | undefined {
@@ -237,7 +242,10 @@ export interface SandboxSessionServiceDeps {
     subject: string,
     ref: { id: string; version?: string },
   ) => Promise<ResolvedSessionHarness | undefined>;
-  budget?: BudgetTracker; // task admission (402 before a child run exists) + cost settle
+  budget?: BudgetTracker; // admission (402 before a container or a child run exists) + cost settle
+  // The causal leg of the same gate: an agent's session draws from its turn's delegated envelope.
+  envelopes?: EnvelopeStore;
+  admissionMaxInFlight?: number;
   usage?: UsageMeter; // per-model metering of task cost lines (billingCharges)
   // The durable reaper (orchestration.md T-b): start reaper:<runId> at create (a deadline timer that
   // survives every process), signal it on close (prompt completion — correctness never depends on it,
@@ -362,6 +370,24 @@ export class SandboxSessionService {
   async create(input: CreateSandboxInput): Promise<RunRecord> {
     this.sweep();
     this.enforceCapacity(input.tenant, input.agent);
+    // The singular gate (§5.1 order), before any compute is taken: caused work draws from its causer's
+    // envelope and answers the depth / in-flight guards, then the tenant's own budget. A session that an
+    // agent opens used to answer neither — an agent loop could hold sessions open spending against nobody.
+    const causedByRunId = input.agent?.runId;
+    const envelope = causedByRunId
+      ? await admitCausedWork(
+          {
+            runStore: this.deps.store,
+            ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
+            ...(this.deps.events ? { events: this.deps.events } : {}),
+            ...(this.deps.admissionMaxInFlight !== undefined ? { maxInFlight: this.deps.admissionMaxInFlight } : {}),
+          },
+          input.tenant,
+          causedByRunId,
+          1,
+        )
+      : undefined;
+    this.deps.budget?.admit(input.tenant); // 402 past the tenant cap — before a container exists
     const resolved = await this.resolveTarget(input);
     const ttlSec = Math.min(input.ttlSec ?? this.deps.defaultTtlSec ?? DEFAULT_TTL_SEC, this.maxTtl());
     const registryAuths = await this.deps
@@ -380,6 +406,7 @@ export class SandboxSessionService {
         ...(registryAuths !== undefined && registryAuths.length > 0 ? { registryAuths } : {}),
       });
     } catch (err) {
+      this.deps.budget?.release(input.tenant); // the admit reservation must not leak on a failed provision
       if (err instanceof BadRequestError) throw err;
       throw new UpstreamError(
         "UPSTREAM_ERROR",
@@ -409,6 +436,10 @@ export class SandboxSessionService {
       const record = Run.newSandboxSession({
         id: this.newId(),
         tenant: input.tenant,
+        ...(causedByRunId !== undefined
+          ? { origin: { cause: "member" as const, actor: input.createdBy, causedByRunId } }
+          : {}),
+        ...(envelope !== undefined ? { envelope } : {}),
         harness: resolved.harness,
         image: resolved.image,
         ttlSec,

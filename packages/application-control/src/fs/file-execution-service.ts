@@ -15,11 +15,15 @@ import {
   type FsActor,
   NotFoundError,
   type PlatformFact,
+  type RunEnvelope,
   type RunRecord,
   shq,
 } from "@everdict/contracts";
 import { Run, fileRunPlanFor } from "@everdict/domain";
+import type { BudgetTracker } from "@everdict/domain";
+import { admitCausedWork } from "../admission/admission.js";
 import { stampFacts } from "../platform-event/outbox.js";
+import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { WorkspaceFs } from "../ports/workspace-fs.js";
@@ -63,6 +67,14 @@ export interface FileExecutionDeps {
   events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => number;
+  // ── Admission (execution-model §5, the singular gate) ────────────────────────────────────────────────
+  // A file run is compute someone pays for, so it answers the same two questions every other lane does: is
+  // the tenant's budget still good for it (402), and — when an AGENT asked — is its causer's delegated
+  // envelope good for it and the causal chain shallow enough (402/429)? Without this an agent could loop on
+  // run_file forever: no depth guard, no envelope, spending against nobody.
+  budget?: BudgetTracker;
+  envelopes?: EnvelopeStore;
+  admissionMaxInFlight?: number;
 }
 
 export class FileExecutionService {
@@ -92,7 +104,14 @@ export class FileExecutionService {
     return resolved;
   }
 
-  async run(tenant: string, input: FileExecutionRequest, actor?: FsActor): Promise<FileExecutionResult> {
+  async run(
+    tenant: string,
+    input: FileExecutionRequest,
+    actor?: FsActor,
+    // The agent's CURRENT ledger run, when an agent asked. Never client-supplied — it rides the same
+    // attribution header the fs actor does, so a caller cannot name someone else's envelope to spend it.
+    causedByRunId?: string,
+  ): Promise<FileExecutionResult> {
     const plan = fileRunPlanFor(input.path, input.image);
     if (!plan) {
       throw new BadRequestError("BAD_REQUEST", { path: input.path }, `No interpreter for '${input.path}'.`);
@@ -109,12 +128,37 @@ export class FileExecutionService {
     const timeoutSec = Math.min(input.timeoutSec ?? FILE_EXECUTION_DEFAULT_TIMEOUT_SEC, FILE_EXECUTION_MAX_TIMEOUT_SEC);
     const command = `timeout ${timeoutSec} sh -c ${shq(plan.command)}`;
 
+    // The gate, in §5.1 order: the causal leg first (caused work draws from its causer), then the tenant's
+    // own budget. Before any compute is taken — a refusal must cost nothing.
+    const runs = this.deps.runs;
+    const envelope =
+      causedByRunId && runs
+        ? await admitCausedWork(
+            {
+              runStore: runs,
+              ...(this.deps.envelopes ? { envelopes: this.deps.envelopes } : {}),
+              ...(this.deps.events ? { events: this.deps.events } : {}),
+              ...(this.deps.admissionMaxInFlight !== undefined ? { maxInFlight: this.deps.admissionMaxInFlight } : {}),
+            },
+            tenant,
+            causedByRunId,
+            1,
+          )
+        : undefined; // no ledger composed = no causer to verify against (the composition always wires one)
+    this.deps.budget?.admit(tenant); // 402 past the tenant cap — no container, no row
+
     const target = await this.computeIn(tenant, input.runtime);
     // The row exists BEFORE the container does. A control plane that dies mid-run then leaves a record saying
     // what was started and where — which is the only thing that makes an orphaned container findable.
     const runId = await this.openRun(
       tenant,
-      { path: input.path, image: plan.image, ...(input.runtime !== undefined ? { runtime: input.runtime } : {}) },
+      {
+        path: input.path,
+        image: plan.image,
+        ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
+        ...(causedByRunId !== undefined ? { causedByRunId } : {}),
+        ...(envelope !== undefined ? { envelope } : {}),
+      },
       actor,
     );
     // Provisioning is INSIDE the guarded region: a container that never came up is exactly the case the
@@ -158,7 +202,7 @@ export class FileExecutionService {
 
   private async openRun(
     tenant: string,
-    what: { path: string; image: string; runtime?: string },
+    what: { path: string; image: string; runtime?: string; causedByRunId?: string; envelope?: RunEnvelope },
     actor?: FsActor,
   ): Promise<string | undefined> {
     const runs = this.deps.runs;

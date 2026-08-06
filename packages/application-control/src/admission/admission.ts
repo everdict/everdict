@@ -5,9 +5,13 @@ import type { RunStore } from "../ports/run-store.js";
 
 // The single admission gate's CAUSAL leg (execution-model §5.1): work that names a causer
 // (origin.causedByRunId) answers two questions before it exists — is the causer's delegated envelope still
-// good for it (402), and is the causal chain within the depth guard (429)? The eval path's tenant-level
-// checks (BudgetTracker 402, Scheduler queue caps 429) stay where they are; this leg makes CAUSED demand
-// draw from its causer instead of riding free on the tenant pool. Compute-blind demand, budget-bound spend.
+// good for it (402), and is the causal chain within the depth guard (429)? The tenant-level checks
+// (BudgetTracker 402, Scheduler queue caps 429) stay where they are; this leg makes CAUSED demand draw from
+// its causer instead of riding free on the tenant pool. Compute-blind demand, budget-bound spend.
+//
+// EVERY lane that takes compute calls this: the eval submit paths, a sandbox session, and a file run. A new
+// lane that takes compute and does not is a bypass, which the master plan makes a review-blocking defect —
+// the gate is only singular if nothing walks around it.
 
 // Fan-out guard: the maximum causal-chain depth (run caused by run caused by …). A loop or a runaway
 // recursive automation walks into this long before it walks into money. Env-tunable, never per-request.
