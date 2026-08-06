@@ -1,8 +1,7 @@
 import type { CaseJob, CaseResult } from "@everdict/contracts";
-import type { EnvRecordSink } from "@everdict/topology";
 import { detectCapabilities } from "./capabilities.js";
 import { runLeasedJob } from "./run-leased-job.js";
-import type { RunnerLoopStatus } from "./runner-loop.js";
+import type { RunnerLoopDeps, RunnerLoopStatus } from "./runner-loop.js";
 import { type ConnectClient, ResilientMcpSession, mcpConnect } from "./runner-session.js";
 import { superviseLease } from "./runner-supervisor.js";
 
@@ -46,13 +45,14 @@ export interface RunnerHostOpts {
   log?: (msg: string) => void;
   // Test injection points
   connect?: ConnectClient; // default mcpConnect(new URL("/mcp", apiUrl), token)
-  runJob?: (
-    job: CaseJob,
-    opts?: { signal?: AbortSignal; reportScreen?: (frameBase64: string) => Promise<void>; recordSink?: EnvRecordSink },
-  ) => Promise<CaseResult>; // default runLeasedJob (signal = lease cancel; reportScreen = live-screen frames)
+  // default runLeasedJob — receives the loop's WHOLE opts bag (signal/reportScreen/recordSink/reportTrace/caseFs).
+  runJob?: (job: CaseJob, opts?: RunJobOpts) => Promise<CaseResult>;
   detect?: () => Promise<string[]>; // default detectCapabilities
   sleep?: (ms: number) => Promise<void>;
 }
+
+// The lease loop's runJob opts — ONE definition (the loop's own), so a hook added there reaches every host.
+type RunJobOpts = Parameters<RunnerLoopDeps["runJob"]>[1];
 
 export class RunnerHost {
   private stopFlag = false;
@@ -91,32 +91,18 @@ export class RunnerHost {
     };
     // An image-case runs on local Docker (DockerDriver) when this runner has Docker — pass dockerAvailable from the capabilities.
     const dockerAvailable = this.capabilities.includes("docker");
+    // The worker's whole opts bag is forwarded verbatim — field-picking silently dropped every hook it didn't
+    // name (reportTrace, then the workbench's caseFs — live-found on the CLI twin of this closure).
     const baseRun =
       this.opts.runJob ??
-      ((
-        job: CaseJob,
-        opts?: {
-          signal?: AbortSignal;
-          reportScreen?: (frameBase64: string) => Promise<void>;
-          recordSink?: EnvRecordSink;
-        },
-      ) =>
+      ((job: CaseJob, opts?: RunJobOpts) =>
         runLeasedJob(job, {
           dockerAvailable,
           log: this.opts.log,
-          ...(opts?.signal ? { signal: opts.signal } : {}),
-          ...(opts?.reportScreen ? { reportScreen: opts.reportScreen } : {}),
-          ...(opts?.recordSink ? { recordSink: opts.recordSink } : {}),
+          ...opts,
         }));
     // Wrap job start/finish to track activeJobs (the basis for running/idle events) + emit a completion notice.
-    const runJob = async (
-      job: CaseJob,
-      opts?: {
-        signal?: AbortSignal;
-        reportScreen?: (frameBase64: string) => Promise<void>;
-        recordSink?: EnvRecordSink;
-      },
-    ): Promise<CaseResult> => {
+    const runJob = async (job: CaseJob, opts?: RunJobOpts): Promise<CaseResult> => {
       this.activeJobs++;
       this.emit();
       try {

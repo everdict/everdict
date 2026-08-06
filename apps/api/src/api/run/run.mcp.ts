@@ -155,6 +155,64 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   );
 
   server.registerTool(
+    "get_run_files",
+    {
+      description:
+        "List the live repo file tree of a running case's sandbox (tracked + untracked files, each with its " +
+        "working-tree status vs HEAD: modified | added | deleted). The explorer half of the run workbench — use " +
+        "it to see WHAT the agent has touched so far. Creator-or-admin only. found=false = no live container, " +
+        "or the sandbox has no git worktree (non-repo env kinds)",
+      inputSchema: { id: z.string().describe("run id") },
+    },
+    ({ id }: { id: string }) =>
+      run(principal, "runs:read", async () => {
+        const out = await deps.service.fsTree(id);
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
+        if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+          return fail("FORBIDDEN: only the run's creator or an admin can browse the sandbox files.");
+        return ok({
+          status: out.record.status,
+          found: out.tree !== undefined,
+          files: out.tree?.files ?? [],
+          truncated: out.tree?.truncated ?? false,
+        });
+      }),
+  );
+
+  server.registerTool(
+    "get_run_file",
+    {
+      description:
+        "Read one file of a running case's live repo, with its working-tree diff vs HEAD riding along — the " +
+        "editor half of the run workbench. Reads are capped (truncated=true past the cap); a binary file " +
+        "reports binary=true with empty content. Creator-or-admin only. found=false = no live container / not " +
+        "a git worktree / no such file",
+      inputSchema: {
+        id: z.string().describe("run id"),
+        path: z.string().describe("repo-relative file path (no leading slash, no traversal)"),
+      },
+    },
+    ({ id, path }: { id: string; path: string }) =>
+      run(principal, "runs:read", async () => {
+        // Path format is validated by the service (BadRequestError → the run wrapper's fail envelope).
+        const out = await deps.service.fsFile(id, path);
+        if (!out || !visible(out.record)) return fail("NOT_FOUND: run not found.");
+        if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+          return fail("FORBIDDEN: only the run's creator or an admin can read the sandbox files.");
+        return ok({
+          status: out.record.status,
+          found: out.file !== undefined,
+          path,
+          size: out.file?.size ?? 0,
+          binary: out.file?.binary ?? false,
+          truncated: out.file?.truncated ?? false,
+          content: out.file?.content ?? "",
+          diff: out.file?.diff ?? "",
+        });
+      }),
+  );
+
+  server.registerTool(
     "get_run_placement",
     {
       description:
@@ -215,7 +273,9 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     "get_run_recording",
     {
       description:
-        "The sealed replay recording of a settled run — screen frames + logs + env/runtime tracks on one t0 clock, aligned with the trace. found=false when nothing was recorded. Creator-or-admin (it contains screenshots).",
+        "The replay recording of a run — screen frames + logs + env/runtime tracks on one t0 clock, aligned with " +
+        "the trace. A settled run answers its sealed recording; a still-running one answers the live tail so far " +
+        "(envKind 'live' — poll while running). found=false when nothing was recorded. Creator-or-admin (it contains screenshots).",
       inputSchema: { id: z.string() },
     },
     ({ id }) =>

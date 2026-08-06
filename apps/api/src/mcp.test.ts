@@ -50,6 +50,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { persistentBudget } from "./common/budget-tracker.js";
+import { CaseFsRequestHub } from "./common/case-fs-request-hub.js";
 import { CaseRecorder } from "./common/case-recorder.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { LiveLogStore } from "./common/live-log-store.js";
@@ -445,6 +446,44 @@ describe("MCP — deep track push (report_case_track)", () => {
   });
 });
 
+describe("MCP — run-workbench fs rendezvous (poll_case_fs_requests / answer_case_fs_request)", () => {
+  const withHub = (hub: CaseFsRequestHub) => ({ ...harness(), caseFsRequests: hub });
+
+  it("a runner drains a parked read and its answer resolves the waiting control-plane request", async () => {
+    const hub = new CaseFsRequestHub(5000);
+    const runner = await connectRunner(withHub(hub), "laptop");
+    const parked = hub.request("evd-run-42", { kind: "fsTree" });
+
+    const polled = JSON.parse(
+      text(await runner.callTool({ name: "poll_case_fs_requests", arguments: { runId: "evd-run-42" } })),
+    ) as { requests: Array<{ id: string; kind: string }> };
+    expect(polled.requests).toHaveLength(1);
+    expect(polled.requests[0]?.kind).toBe("fsTree");
+
+    const tree = { files: [{ path: "a.py", status: "modified" }], truncated: false };
+    const res = await runner.callTool({
+      name: "answer_case_fs_request",
+      arguments: { runId: "evd-run-42", requestId: polled.requests[0]?.id, result: { kind: "fsTree", tree } },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(await parked).toEqual({ kind: "fsTree", tree });
+  });
+
+  it("regular (non-runner) credentials cannot drain or answer — FORBIDDEN", async () => {
+    const hub = new CaseFsRequestHub(50);
+    const admin = await connect(withHub(hub), ["admin"]); // via=oidc, no runnerId
+    expect((await admin.callTool({ name: "poll_case_fs_requests", arguments: { runId: "r" } })).isError).toBe(true);
+    expect(
+      (
+        await admin.callTool({
+          name: "answer_case_fs_request",
+          arguments: { runId: "r", requestId: "x", result: { kind: "fsTree" } },
+        })
+      ).isError,
+    ).toBe(true);
+  });
+});
+
 describe("MCP — runner update-required signal (lease_job)", () => {
   it("a runner whose reported protocol is behind the control plane is told to update (piggybacked on the lease reply)", async () => {
     const runner = await connectRunner(harness(), "laptop");
@@ -529,6 +568,8 @@ describe("MCP tools", () => {
       "get_model",
       "get_rubric",
       "get_run",
+      "get_run_file",
+      "get_run_files",
       "get_run_live_trace",
       "get_run_logs",
       "get_run_placement",

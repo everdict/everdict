@@ -208,5 +208,60 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
           }),
       );
     }
+
+    // Run-workbench fs rendezvous (self-hosted parity): the control plane cannot exec into a runner's sandbox,
+    // so fs reads PARK on the hub and the runner's in-case servicing loop drains + answers them here. Runner
+    // token only; both halves are best-effort (an unanswered request times out on the parked side).
+    if (deps.caseFsRequests) {
+      const hub = deps.caseFsRequests;
+      server.registerTool(
+        "poll_case_fs_requests",
+        {
+          description:
+            "Drain the control plane's parked run-workbench repo reads (fs tree / file) for a running case, keyed by its runId. The runner's in-case loop answers each via answer_case_fs_request.",
+          inputSchema: { runId: z.string().min(1) },
+        },
+        ({ runId }) =>
+          plain(async () => {
+            const key = runnerKey();
+            if (!key) return fail(NEED_RUNNER);
+            return ok({ requests: hub.pending(runId) });
+          }),
+      );
+      server.registerTool(
+        "answer_case_fs_request",
+        {
+          description:
+            "Answer one parked run-workbench repo read with the tree/file served from inside the case. An absent payload is a real answer (not a repo / no such file).",
+          inputSchema: { runId: z.string().min(1), requestId: z.string().min(1), result: CaseFsAnswerSchema },
+        },
+        ({ runId, requestId, result }) =>
+          plain(async () => {
+            const key = runnerKey();
+            if (!key) return fail(NEED_RUNNER);
+            hub.answer(runId, requestId, result);
+            return ok({ ok: true });
+          }),
+      );
+    }
   }
 }
+
+// The runner's answer payloads, validated at this boundary (the runner is remote — never trust the wire).
+// Shapes mirror the contracts' CaseFsTreePayload/CaseFsFilePayload (plain interfaces on RunContext).
+const CaseFsTreePayloadSchema = z.object({
+  files: z.array(z.object({ path: z.string(), status: z.enum(["modified", "added", "deleted"]).optional() })),
+  truncated: z.boolean(),
+});
+const CaseFsFilePayloadSchema = z.object({
+  path: z.string(),
+  size: z.number(),
+  binary: z.boolean(),
+  truncated: z.boolean(),
+  content: z.string(),
+  diff: z.string(),
+});
+const CaseFsAnswerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("fsTree"), tree: CaseFsTreePayloadSchema.optional() }),
+  z.object({ kind: z.literal("fsFile"), file: CaseFsFilePayloadSchema.optional() }),
+]);

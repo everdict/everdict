@@ -11,6 +11,7 @@ function parseLogStream(raw: string | undefined): "stdout" | "stderr" | undefine
   if (raw === undefined) return "stdout";
   return raw === "stdout" || raw === "stderr" ? raw : undefined;
 }
+
 export function registerRunObservabilityRoutes(app: FastifyInstance, deps: ServerDeps): void {
   // --- live-progress logs (observability ②) — the case job's current stdout, sentinel-stripped ---
   // Snapshot: poll-and-diff clients (web) read this. found=false = nothing to tail yet (queued / GC'd / no backend support).
@@ -235,6 +236,68 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
           supported: out.supported,
           found: out.dataUrl !== undefined,
           dataUrl: out.dataUrl ?? "",
+        });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Live repo file tree (run workbench — the explorer half of the "VS Code view" on a coding case). Same
+  // creator-or-admin gate as exec: it reads the sandbox's working tree. found=false = no live container, or
+  // the sandbox has no git worktree (non-repo env kinds) — the client renders nothing.
+  app.get<{ Params: { id: string } }>("/runs/:id/fs", { schema: runObservabilityDocs.fs }, async (req, reply) => {
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runs:read");
+      const out = await deps.service.fsTree(req.params.id);
+      if (!out || !runVisible(out.record, principal))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+      if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+        return reply
+          .code(403)
+          .send({ code: "FORBIDDEN", message: "only the run's creator or an admin can browse the sandbox files." });
+      return reply.send({
+        status: out.record.status,
+        found: out.tree !== undefined,
+        files: out.tree?.files ?? [],
+        truncated: out.tree?.truncated ?? false,
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // One file of that live repo, with its working-tree diff riding along (the editor half of the workbench).
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    "/runs/:id/fs/file",
+    { schema: runObservabilityDocs.fsFile },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        const path = req.query.path;
+        if (typeof path !== "string" || path === "")
+          return reply.code(400).send({ code: "BAD_REQUEST", message: "path query parameter is required." });
+        // Path FORMAT (traversal, absolute, control chars) is the service's one rule — BadRequestError → 400.
+        const out = await deps.service.fsFile(req.params.id, path);
+        if (!out || !runVisible(out.record, principal))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
+        if (out.record.createdBy && out.record.createdBy !== principal.subject && !principal.roles.includes("admin"))
+          return reply
+            .code(403)
+            .send({ code: "FORBIDDEN", message: "only the run's creator or an admin can read the sandbox files." });
+        return reply.send({
+          status: out.record.status,
+          found: out.file !== undefined,
+          path,
+          size: out.file?.size ?? 0,
+          binary: out.file?.binary ?? false,
+          truncated: out.file?.truncated ?? false,
+          content: out.file?.content ?? "",
+          diff: out.file?.diff ?? "",
         });
       } catch (err) {
         return sendError(reply, err);

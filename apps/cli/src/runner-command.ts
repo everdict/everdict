@@ -91,17 +91,17 @@ export async function runnerCommand(flags: Map<string, string>): Promise<void> {
   await superviseLease(
     {
       callJson,
-      // service→Docker topology / image-case→local Docker (DockerDriver, dockerOk gate, host mounts) / else→host LocalDriver
-      // signal (lease cancel) + reportScreen (live-screen frames) are threaded from the worker into the run.
+      // service→Docker topology / image-case→local Docker (DockerDriver, dockerOk gate, host mounts) / else→host LocalDriver.
+      // The worker's whole opts bag is forwarded verbatim (signal/reportScreen/recordSink/reportTrace/caseFs and
+      // whatever the loop grows next) — the old field-picking silently DROPPED every hook it didn't name, which is
+      // exactly how the workbench's caseFs servicing went dead on `everdict runner` (live-found in the S6 drill).
       runJob: (job, o) =>
         runLeasedJob(job, {
           runtimeOptions,
           dockerAvailable: dockerOk,
           mounts,
           log: (m) => console.error(m),
-          ...(o?.signal ? { signal: o.signal } : {}),
-          ...(o?.reportScreen ? { reportScreen: o.reportScreen } : {}),
-          ...(o?.recordSink ? { recordSink: o.recordSink } : {}), // replay ② — topology browser CDP events into the recording
+          ...o,
         }),
       log: (m) => console.error(m),
       sleep,

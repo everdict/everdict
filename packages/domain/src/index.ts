@@ -85,6 +85,7 @@ export {
   runEvidenceIdentity,
   type RunTransition,
 } from "./run/run.js";
+export { fsFileCommand, fsTreeCommand, parseFsFile, parseFsTree, validRepoPath } from "./run/workbench-fs.js";
 export { Approval, type ApprovalTransition, type NewPendingApprovalInput } from "./approval/approval.js";
 
 // tracker — the eval tracker's aggregates (Initiative ⊃ Project ⊃ Issue) + the readiness arithmetic that gates

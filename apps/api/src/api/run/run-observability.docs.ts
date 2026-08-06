@@ -1,6 +1,7 @@
 import { CaseRecordingSchema } from "@everdict/contracts";
 import { RunExecResponseSchema } from "@everdict/contracts/wire";
 import { RunLiveTraceResponseSchema, RunLogsResponseSchema } from "@everdict/contracts/wire";
+import { RunFsFileResponseSchema, RunFsResponseSchema } from "@everdict/contracts/wire";
 import { RunPlacementResponseSchema } from "@everdict/contracts/wire";
 import { RunScreenResponseSchema } from "@everdict/contracts/wire";
 import { RunTopologyResponseSchema, ServiceLogsResponseSchema } from "@everdict/contracts/wire";
@@ -10,6 +11,11 @@ import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 
 const runIdParams = toJsonSchema(z.object({ id: z.string().describe("Run id") }));
+const fsPathQuery = toJsonSchema(
+  z.object({
+    path: z.string().describe("repo-relative file path (no leading slash, no traversal)"),
+  }),
+);
 const logStreamQuery = toJsonSchema(
   z.object({
     stream: z
@@ -155,12 +161,43 @@ const docs = {
       ...errorResponses(401, 403, 404),
     },
   },
-  recording: {
-    summary: "Get a run's replay recording",
+  fs: {
+    summary: "List a run's live repo files",
     description:
-      "The sealed replay recording of a settled run — screen frames + logs + env/runtime tracks on one t0 clock, " +
-      "aligned with the trace. found=false when nothing was recorded. Creator-or-admin gated (it contains " +
-      "screenshots); requires runs:read. Workspace-scoped (404 otherwise).",
+      "The live repo file tree of a running case's sandbox (the run workbench's explorer): tracked + untracked " +
+      "files with their working-tree status vs HEAD, over the same one-shot exec channel as the web terminal. " +
+      "found=false = no live container, or the sandbox has no git worktree (non-repo env kinds). " +
+      "Creator-or-admin gated (it reads the sandbox); requires runs:read. Workspace-scoped (404 otherwise).",
+    tags: ["run"],
+    params: runIdParams,
+    response: {
+      200: { description: "Repo file listing", ...toJsonSchema(RunFsResponseSchema) },
+      ...errorResponses(401, 403, 404),
+    },
+  },
+  fsFile: {
+    summary: "Read one file of a run's live repo",
+    description:
+      "One file of the running case's repo, base64-transported and decoded server-side, with its working-tree " +
+      "diff vs HEAD riding along (the run workbench's editor pane). Reads are capped (truncated=true past the " +
+      "cap) and a binary file reports binary=true with empty content. found=false = no live container / not a " +
+      "git worktree / no such file. Creator-or-admin gated; requires runs:read. Workspace-scoped (404 otherwise).",
+    tags: ["run"],
+    params: runIdParams,
+    querystring: fsPathQuery,
+    response: {
+      200: { description: "File content + diff", ...toJsonSchema(RunFsFileResponseSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  recording: {
+    summary: "Get a run's replay recording (sealed, or the live tail while it runs)",
+    description:
+      "The replay recording — screen frames + logs + env/runtime tracks on one t0 clock, aligned with the " +
+      "trace. A settled run answers its sealed recording; a still-running one answers the live tail so far " +
+      "(envKind 'live', provisional t0/fidelity — live is a replay that has not finished; poll while running). " +
+      "found=false when nothing was recorded. Creator-or-admin gated (it contains screenshots); requires " +
+      "runs:read. Workspace-scoped (404 otherwise).",
     tags: ["run"],
     params: runIdParams,
     response: {

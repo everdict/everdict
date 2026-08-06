@@ -1,4 +1,11 @@
-import type { CaseJob, CaseResult, RegistryAuth, ServiceHarnessSpec, TraceEvent } from "@everdict/contracts";
+import type {
+  CaseFsServicing,
+  CaseJob,
+  CaseResult,
+  RegistryAuth,
+  ServiceHarnessSpec,
+  TraceEvent,
+} from "@everdict/contracts";
 import { pickRegistryAuth, registryAuthsOf } from "@everdict/domain";
 import { type DriverMount, pullWithRegistryAuth, runCaseJob } from "@everdict/job-runner";
 import {
@@ -47,6 +54,7 @@ export async function runLeasedJob(
         signal?: AbortSignal;
         reportScreen?: (frameBase64: string) => Promise<void>;
         reportTrace?: (events: TraceEvent[]) => Promise<void>;
+        caseFs?: CaseFsServicing;
       },
     ) => Promise<CaseResult>;
     runtimeOptions?: DockerTopologyRuntimeOptions; // service topology runtime tuning (readiness timeout etc.)
@@ -66,6 +74,9 @@ export async function runLeasedJob(
     // Live-trace batch reporter (observability ⑨) — passed through to runCaseJob unconditionally (the trace is
     // universal, unlike the screen): host-native and containerized runs both tee their drained TraceEvents out.
     reportTrace?: (events: TraceEvent[]) => Promise<void>;
+    // Run-workbench fs servicing (self-hosted parity) — passed through to runCaseJob unconditionally: host-native
+    // and containerized repo cases both answer the control plane's parked reads from inside the case.
+    caseFs?: CaseFsServicing;
   } = {},
 ): Promise<CaseResult> {
   const spec = job.harnessSpec;
@@ -96,6 +107,7 @@ export async function runLeasedJob(
     ...(opts.signal ? { signal: opts.signal } : {}),
     ...(containerize && opts.reportScreen ? { reportScreen: opts.reportScreen } : {}),
     ...(opts.reportTrace ? { reportTrace: opts.reportTrace } : {}),
+    ...(opts.caseFs ? { caseFs: opts.caseFs } : {}),
   });
 }
 

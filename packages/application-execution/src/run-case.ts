@@ -1,5 +1,7 @@
 import type {
   CaseFailure,
+  CaseFsRequest,
+  CaseFsServicing,
   CaseResult,
   ComputeHandle,
   ComputeSpec,
@@ -17,7 +19,14 @@ import type {
   TraceEvent,
 } from "@everdict/contracts";
 import { UpstreamError, stamp } from "@everdict/contracts";
-import { classifyFailure } from "@everdict/domain";
+import {
+  classifyFailure,
+  fsFileCommand,
+  fsTreeCommand,
+  parseFsFile,
+  parseFsTree,
+  validRepoPath,
+} from "@everdict/domain";
 import { safeGrade } from "./safe-grade.js";
 
 export interface RunCaseDeps {
@@ -192,6 +201,41 @@ function startEnvDeltaCapture(
 // with "control-plane" defer collection + observation scoring entirely out of the job and just carry CaseResult.traceRef
 // (completed by executeCase). docs/architecture/streaming-case-pipeline.md D3+D4
 // compute is released in finally no matter what (no-op after early release — made idempotent via a flag).
+// The run workbench's self-hosted parity (RunContext.caseFs): poll the control plane's parked repo reads and
+// answer them from INSIDE the case — the same git commands the managed exec channel runs (@everdict/domain
+// workbench-fs), executed via compute.exec at the sandbox root (the repo's `work/` is relative to it). Mirrors
+// startLiveScreenCapture: overlap-guarded, entirely best-effort — a servicing failure never touches the eval;
+// an unanswered request simply times out on the control plane.
+function startCaseFsServicing(compute: ComputeHandle, hook: CaseFsServicing): () => void {
+  let inFlight = false;
+  const timer = setInterval(() => {
+    if (inFlight) return;
+    inFlight = true;
+    void (async () => {
+      const requests = await hook.poll().catch(() => [] as CaseFsRequest[]);
+      for (const request of requests) {
+        try {
+          if (request.kind === "fsTree") {
+            const out = await compute.exec(fsTreeCommand());
+            const tree = out.exitCode === 0 ? parseFsTree(out.stdout) : undefined;
+            await hook.answer(request.id, { kind: "fsTree", ...(tree ? { tree } : {}) });
+          } else {
+            const path = request.path ?? "";
+            const out = validRepoPath(path) ? await compute.exec(fsFileCommand(path)) : undefined;
+            const file = out && out.exitCode === 0 ? parseFsFile(path, out.stdout) : undefined;
+            await hook.answer(request.id, { kind: "fsFile", ...(file ? { file } : {}) });
+          }
+        } catch {
+          // best-effort — the parked request times out on the control plane
+        }
+      }
+    })().finally(() => {
+      inFlight = false;
+    });
+  }, hook.intervalMs ?? 2000);
+  return () => clearInterval(timer);
+}
+
 // (this function later becomes a Temporal activity)
 export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<CaseResult> {
   const compute = await deps.driver.provision({ os: "linux", needs: ["shell"], image: evalCase.image });
@@ -199,6 +243,8 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
   // Live-screen capture loop handle (opt-in) — started after install, stopped inside release() so the frame grab is
   // always halted before the compute is disposed. Undefined when the run has no liveScreen hook.
   let stopLiveScreen: (() => void) | undefined;
+  // Run-workbench fs servicing loop handle (opt-in, self-hosted lane) — started after install, stopped in release().
+  let stopCaseFs: (() => void) | undefined;
   // In-run environment deltas (repo git-diff checkpoints) + the recorder handle — the environment plane for a coding
   // harness's replay. Started after install, stopped inside release(); a final sample is taken before release. replay.md.
   const envDeltas: EnvDelta[] = [];
@@ -210,6 +256,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     if (released) return;
     released = true;
     stopLiveScreen?.();
+    stopCaseFs?.();
     envRecorder?.stop();
     liveTrace?.stop();
     await compute.dispose();
@@ -219,6 +266,8 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     await deps.harness.install(compute);
     // Opt-in live screen: push periodic frames of the case's screen (e.g. browser-use's Chromium over CDP) while it runs.
     if (deps.runCtx.liveScreen) stopLiveScreen = startLiveScreenCapture(compute, deps.runCtx.liveScreen);
+    // Opt-in run-workbench servicing (self-hosted lane): answer the control plane's parked repo reads from inside the case.
+    if (deps.runCtx.caseFs) stopCaseFs = startCaseFsServicing(compute, deps.runCtx.caseFs);
     // Env recorder: sample the environment's non-intrusive delta (repo git-diff) over the run for replay (best-effort).
     envRecorder = startEnvDeltaCapture(compute, deps.environment, envDeltas);
 

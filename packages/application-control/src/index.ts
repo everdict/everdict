@@ -455,7 +455,16 @@ export { assertRuntimeTarget } from "./require-runtime/require-runtime.js";
 
 // Run / schedule / queue orchestration services (re-architecture P2 S5) — the standalone-run lifecycle, the
 // cron-schedule lifecycle (Temporal driver stays in apps/api), and the work-queue snapshot.
-export { type LiveTraceRef, RunService, type RunServiceDeps, type SubmitInput } from "./run/run-service.js";
+export {
+  type LiveTraceRef,
+  type RunFsEntry,
+  type RunFsFile,
+  type RunFsStatus,
+  type RunFsTree,
+  RunService,
+  type RunServiceDeps,
+  type SubmitInput,
+} from "./run/run-service.js";
 export {
   type CreateScheduleInput,
   type ScheduleDriver,

@@ -3990,6 +3990,19 @@
     "driving": "이 브라우저를 직접 제어하는 중",
     "stopDriving": "제어 그만두기"
   },
+  "runWorkbench": {
+    "label": "리포지토리 (라이브)",
+    "follow": "에이전트 따라가기",
+    "changed": "{count}개 변경",
+    "tabFile": "파일",
+    "tabDiff": "변경점",
+    "binaryNote": "바이너리 파일이라 내용을 표시하지 않아요.",
+    "truncatedNote": "큰 파일이라 앞 256KiB만 표시해요.",
+    "deletedNote": "워킹 트리에서 삭제된 파일이에요.",
+    "missingNote": "지금은 이 파일을 읽을 수 없어요.",
+    "treeTruncatedNote": "파일이 많아 목록을 잘라서 보여드려요.",
+    "empty": "파일을 선택하면 라이브 워킹 트리를 보여드려요."
+  },
   "runTopology": {
     "title": "서비스 토폴로지",
     "notDeployed": "지금 클러스터에 떠 있는 웜 토폴로지가 없어요.",
@@ -4031,6 +4044,7 @@
     "title": "리플레이",
     "play": "재생",
     "pause": "일시정지",
+    "live": "LIVE",
     "frameAlt": "녹화 프레임",
     "frameOf": "프레임 {i}/{n}",
     "logsOnly": "이 녹화는 로그만 있어요 (화면 프레임 없음).",

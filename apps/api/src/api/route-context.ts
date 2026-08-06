@@ -112,6 +112,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { WebSocketServer } from "ws";
 import type { z } from "zod";
 import { type BudgetAdmin, BudgetLimitInputSchema } from "../common/budget-tracker.js";
+import type { CaseFsRequestHub } from "../common/case-fs-request-hub.js";
 import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
@@ -287,6 +288,7 @@ export interface ServerDeps {
   liveLogs?: LiveLogStore; // live execution log pushed by a self-hosted runner (report_case_log) — served by RunService.logs()
   liveTraces?: LiveTraceStore; // live trajectory per run (runner report_case_trace + dispatch marks) — served by RunService.liveTrace()
   caseRecorder?: CaseRecorder; // durable replay tee — persists the pushed frames/logs (docs/architecture/replay.md)
+  caseFsRequests?: CaseFsRequestHub; // run-workbench fs rendezvous (self-hosted lane) — parked reads the runner's in-case loop answers
   browserSessionService?: BrowserSessionService; // interactive browser sessions (browser-profiles S1) — self-scoped (routes disabled if absent)
   sandboxSessions?: SandboxSessionService; // sandbox session runs (execution-model P6) — absent = no container runtime here
   trajectoryStore?: TrajectoryStore; // the owned evidence ledger's browse surface (N1 look-inward)

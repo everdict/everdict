@@ -3990,6 +3990,19 @@
     "driving": "You are driving this browser",
     "stopDriving": "Stop driving"
   },
+  "runWorkbench": {
+    "label": "Repository (live)",
+    "follow": "Follow agent",
+    "changed": "{count} changed",
+    "tabFile": "File",
+    "tabDiff": "Diff",
+    "binaryNote": "Binary file — not rendered.",
+    "truncatedNote": "Large file — showing the first 256 KiB.",
+    "deletedNote": "This file was deleted in the working tree.",
+    "missingNote": "This file is not readable right now.",
+    "treeTruncatedNote": "Listing truncated — too many files to show them all.",
+    "empty": "Select a file to inspect the live working tree."
+  },
   "runTopology": {
     "title": "Service topology",
     "notDeployed": "No warm topology is standing on the cluster right now.",
@@ -4031,6 +4044,7 @@
     "title": "Replay",
     "play": "Play",
     "pause": "Pause",
+    "live": "LIVE",
     "frameAlt": "Recorded frame",
     "frameOf": "Frame {i}/{n}",
     "logsOnly": "This recording has logs only — no screen frames.",

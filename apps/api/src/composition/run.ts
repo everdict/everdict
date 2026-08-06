@@ -13,6 +13,7 @@ import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@ev
 import type { S3ArtifactStore } from "@everdict/storage";
 import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
+import type { CaseFsRequestHub } from "../common/case-fs-request-hub.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
 import type { LiveTraceStore } from "../common/live-trace-store.js";
@@ -103,6 +104,8 @@ export function buildRun(deps: {
   liveTraces: LiveTraceStore;
   // Durable replay recording (optional) — RunService seals it at finalize and attaches the ref to the result.
   recordingStore?: RecordingStore;
+  // Run-workbench fs rendezvous (self-hosted lane) — parked reads the runner's in-case servicing loop answers.
+  caseFsRequests?: CaseFsRequestHub;
 }) {
   const {
     store,
@@ -149,6 +152,21 @@ export function buildRun(deps: {
     // Lazy — the lane-resolving closure is built further down (after the runtime registry wiring).
     readCaseLogs: (tenant, runtimeList, caseId, stream) => readCaseLogsFn(tenant, runtimeList, caseId, stream),
     execInSandbox: (tenant, runtimeList, caseId, command) => execInSandboxFn(tenant, runtimeList, caseId, command),
+    // Self-hosted twin of execInSandbox for the workbench's repo reads — park on the hub, the runner answers.
+    ...(deps.caseFsRequests
+      ? {
+          runnerCaseFs: {
+            tree: async (runId: string) => {
+              const answer = await deps.caseFsRequests?.request(runId, { kind: "fsTree" });
+              return answer?.kind === "fsTree" ? answer.tree : undefined;
+            },
+            file: async (runId: string, path: string) => {
+              const answer = await deps.caseFsRequests?.request(runId, { kind: "fsFile", path });
+              return answer?.kind === "fsFile" ? answer.file : undefined;
+            },
+          },
+        }
+      : {}),
     captureBrowserScreen: (tenant, runtimeList, runId) => captureBrowserScreenFn(tenant, runtimeList, runId),
     screenEndpoint: (tenant, runtimeList, runId) => screenEndpointFn(tenant, runtimeList, runId),
     // Pushed frames (self-hosted) — RunService.screen() prefers this over the CDP pull for unreachable containers.

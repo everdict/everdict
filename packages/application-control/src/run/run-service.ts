@@ -1,5 +1,8 @@
 import {
   AppError,
+  BadRequestError,
+  type CaseFsFilePayload,
+  type CaseFsTreePayload,
   type CaseJob,
   type CaseRecording,
   type CaseResult,
@@ -27,7 +30,12 @@ import {
   attachChannelsFor,
   billingCharges,
   canReadRun,
+  fsFileCommand,
+  fsTreeCommand,
+  parseFsFile,
+  parseFsTree,
   priceUsd,
+  validRepoPath,
   resolveHarnessSecrets,
   runAudience,
   runEvidenceIdentity,
@@ -52,6 +60,14 @@ import {
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
 import { failedCaseResult } from "../run-suite.js";
+
+// The run workbench's live repo reads (fsTree/fsFile). The shapes are the contracts' (both lanes serve them);
+// these aliases keep the service's public names stable for the transports. The git commands + parsers live in
+// @everdict/domain (workbench-fs) — ONE implementation shared with the self-hosted runner's in-case servicing.
+export type RunFsTree = CaseFsTreePayload;
+export type RunFsFile = CaseFsFilePayload;
+export type RunFsEntry = CaseFsTreePayload["files"][number];
+export type RunFsStatus = NonNullable<RunFsEntry["status"]>;
 
 // Where a running case's platform trace is accumulating (derived on read; docs/architecture/live-observability.md).
 export interface LiveTraceRef {
@@ -184,6 +200,14 @@ export interface RunServiceDeps {
     runtimeList: string | undefined,
     caseId: string,
   ) => Promise<TraceEvent[] | undefined>;
+  // Self-hosted twin of execInSandbox for the run workbench's repo reads: the control plane cannot exec into a
+  // runner's sandbox, so these PARK a request the runner's in-case servicing loop (RunContext.caseFs) answers,
+  // and await it (undefined = no answer in time — no live sandbox / an old runner without the loop). Keyed by
+  // the CP-minted runId, like every report_case_* push.
+  runnerCaseFs?: {
+    tree(runId: string): Promise<CaseFsTreePayload | undefined>;
+    file(runId: string, path: string): Promise<CaseFsFilePayload | undefined>;
+  };
   // One-shot exec inside the case's live sandbox (observability ④ web terminal / ⑤ screen capture). Resolves the
   // run's runtime to a live backend and runs `sh -c command`. undefined = no live container.
   execInSandbox?: (
@@ -390,6 +414,54 @@ export class RunService {
     return { record, result };
   }
 
+  // Repo file tree of a run's live sandbox (run workbench — "the VS Code view" of a coding case). Managed lane:
+  // rides the same one-shot exec channel the web terminal uses. Self-hosted lane (`self:*`): the control plane
+  // cannot exec into a runner's sandbox, so the read PARKS a request the runner's in-case servicing loop answers
+  // (same commands, run from inside — @everdict/domain workbench-fs). tree=undefined = no live container / no
+  // git worktree / the runner did not answer — the workbench then renders nothing rather than a wrong filesystem.
+  async fsTree(id: string): Promise<{ record: RunRecord; tree: RunFsTree | undefined } | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    if (record.runtime?.startsWith("self:")) {
+      const tree = this.deps.runnerCaseFs
+        ? await this.deps.runnerCaseFs.tree(RunService.runIdFor(record)).catch(() => undefined)
+        : undefined;
+      return { record, tree };
+    }
+    if (!this.deps.execInSandbox) return { record, tree: undefined };
+    const out = await this.deps
+      .execInSandbox(record.tenant, record.runtime, record.caseId, fsTreeCommand())
+      .catch(() => undefined);
+    if (!out || out.exitCode !== 0) return { record, tree: undefined };
+    return { record, tree: parseFsTree(out.stdout) };
+  }
+
+  // One file of the run's live repo (run workbench). Content travels base64 so binary/UTF-8 survives the exec
+  // stdout transport; the working-tree diff vs HEAD rides along for changed files. Reads are capped (a workbench
+  // shows a file, it does not download one) and a binary file reports itself instead of shipping garbage.
+  // file=undefined = no live container / not a git worktree / no such file. Self-hosted lane parks the request
+  // for the runner's in-case servicing, like fsTree.
+  async fsFile(id: string, path: string): Promise<{ record: RunRecord; file: RunFsFile | undefined } | undefined> {
+    // Repo-RELATIVE paths only — traversal, absolute paths and control characters are a client bug, refused
+    // before any shell sees them. Lives HERE so both transports (HTTP route + MCP tool) inherit one rule.
+    if (!validRepoPath(path))
+      throw new BadRequestError("BAD_REQUEST", undefined, "path must be a repo-relative file path.");
+    const record = await this.deps.store.get(id);
+    if (!record) return undefined;
+    if (record.runtime?.startsWith("self:")) {
+      const file = this.deps.runnerCaseFs
+        ? await this.deps.runnerCaseFs.file(RunService.runIdFor(record), path).catch(() => undefined)
+        : undefined;
+      return { record, file };
+    }
+    if (!this.deps.execInSandbox) return { record, file: undefined };
+    const out = await this.deps
+      .execInSandbox(record.tenant, record.runtime, record.caseId, fsFileCommand(path))
+      .catch(() => undefined);
+    if (!out || out.exitCode !== 0) return { record, file: undefined };
+    return { record, file: parseFsFile(path, out.stdout) };
+  }
+
   // Live screen frame (observability ⑤) — the case's current screen as a PNG data URL, from whichever source can
   // actually reach it: a frame the runner pushed, the per-case browser over CDP, or a desktop screenshot exec'd in
   // the sandbox. `supported` reports what we COULD capture, never what the case's declared env kind suggests we
@@ -535,8 +607,11 @@ export class RunService {
   async recording(id: string): Promise<{ record: RunRecord; recording: CaseRecording | undefined } | undefined> {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
+    // Sealed recording first; while the run still executes, fall back to the live tail (peek) — live is a replay
+    // that has not finished, so the player can scrub back mid-run off the same read. docs/architecture/replay.md.
+    const runId = RunService.runIdFor(record);
     const recording = this.deps.recordingStore
-      ? await this.deps.recordingStore.get(RunService.runIdFor(record))
+      ? ((await this.deps.recordingStore.get(runId)) ?? (await this.deps.recordingStore.peek(runId)))
       : undefined;
     // The player draws every frame straight from its ref, so this read is display-only by nature — re-mint them
     // (same reason as getForDisplay). Frames dedup by ref, so re-sign each distinct one once.

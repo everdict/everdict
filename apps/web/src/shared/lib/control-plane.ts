@@ -332,6 +332,11 @@ export const controlPlane = {
   // Sealed replay recording of a settled run (ReplayPlayer). Creator-or-admin, enforced by the control plane.
   getRunRecording: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/recording`),
+  // 러닝 케이스 샌드박스의 라이브 리포 파일 트리(런 워크벤치 탐색기). Creator-or-admin은 컨트롤 플레인이 강제.
+  getRunFs: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}/fs`),
+  // 그 리포의 파일 1개 + 워킹트리 diff(런 워크벤치 에디터 패널).
+  getRunFsFile: <T>(auth: AuthContext, id: string, path: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/fs/file?path=${encodeURIComponent(path)}`),
   // Interactive run-SCREEN ticket (⑦b) — take over the browser the case is driving. Creator-or-admin, enforced by
   // the control plane, which also 404s a run with nothing attachable.
   runScreenTicket: <T>(auth: AuthContext, id: string) =>

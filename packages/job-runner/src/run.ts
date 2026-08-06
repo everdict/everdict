@@ -7,6 +7,7 @@ import {
   type EnvSpec,
   type Environment,
   type Grader,
+  type CaseFsServicing,
   type LiveScreenCapture,
   type TraceEvent,
   judgeAuthEnv,
@@ -118,6 +119,9 @@ export async function runCaseJob(
     // short-cadence batches — the self-hosted runner pushes them to the control plane, the managed entry prints
     // EVENT_SENTINEL stdout lines. Unconditional (no spec opt-in): the trace is universal across harnesses.
     reportTrace?: (events: TraceEvent[]) => Promise<void>;
+    // Run-workbench fs servicing (self-hosted runner): poll the control plane's parked repo reads and answer them
+    // from inside the case — the workbench's self-hosted parity (the CP cannot exec into a runner's sandbox).
+    caseFs?: CaseFsServicing;
   } = {},
 ): Promise<CaseResult> {
   // Usage metering (BYO + Everdict-owned budget): the control plane decides from workspace/request policy and sends it via job.meterUsage.
@@ -183,6 +187,7 @@ export async function runCaseJob(
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(liveScreen ? { liveScreen } : {}),
       ...(opts.reportTrace ? { liveTrace: { report: opts.reportTrace } } : {}),
+      ...(opts.caseFs ? { caseFs: opts.caseFs } : {}),
     },
   });
 }

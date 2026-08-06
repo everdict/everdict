@@ -28,6 +28,43 @@ export interface RunContext {
   // Multi-turn conversation state (opt-in, in-process only — never crosses the wire, like `signal`). Only harnesses
   // marked `conversational` honor it; others ignore it and each run stays independent. Absent = one-shot run.
   conversation?: ConversationTurn;
+  // Live repo-read servicing (opt-in, in-process only — never crosses the wire, like `signal`). The run workbench's
+  // self-hosted parity: a control plane cannot exec into a runner's sandbox, so it PARKS fs requests and the runner
+  // answers them from INSIDE the case. When set, runCase polls `poll` on a short cadence, serves each request in the
+  // case compute (the same git commands the managed exec channel runs — @everdict/domain workbench-fs), and answers
+  // through `answer`. Best-effort: servicing failures never touch the eval. Absent = no fs servicing.
+  caseFs?: CaseFsServicing;
+}
+
+// A parked run-workbench read the control plane wants answered from inside the case (self-hosted lane).
+export interface CaseFsRequest {
+  id: string;
+  kind: "fsTree" | "fsFile";
+  path?: string; // fsFile only — repo-relative
+}
+// The live repo file tree / one file, as the workbench renders them (shared by both lanes — the managed exec
+// channel parses the same shapes out of the same commands).
+export interface CaseFsTreePayload {
+  files: Array<{ path: string; status?: "modified" | "added" | "deleted" }>;
+  truncated: boolean;
+}
+export interface CaseFsFilePayload {
+  path: string;
+  size: number;
+  binary: boolean;
+  truncated: boolean;
+  content: string; // UTF-8 text ("" for a binary file)
+  diff: string; // working-tree diff vs HEAD ("" when unchanged/untracked)
+}
+// The runner's answer to one parked request. An absent payload is a real answer ("not a repo" / "no such file"),
+// distinct from never answering (the control plane's wait then times out to "no live sandbox").
+export type CaseFsAnswer = { kind: "fsTree"; tree?: CaseFsTreePayload } | { kind: "fsFile"; file?: CaseFsFilePayload };
+
+// The in-process servicing hook carried on RunContext (self-hosted runner → MCP lease tools behind it).
+export interface CaseFsServicing {
+  poll: () => Promise<CaseFsRequest[]>;
+  answer: (id: string, result: CaseFsAnswer) => Promise<void>;
+  intervalMs?: number; // default 2000
 }
 
 // One conversational turn's continuity contract, carried on RunContext. `resume` is the provider-native token that

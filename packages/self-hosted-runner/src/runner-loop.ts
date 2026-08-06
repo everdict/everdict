@@ -1,5 +1,7 @@
 import { arch, hostname, platform } from "node:os";
 import {
+  type CaseFsRequest,
+  type CaseFsServicing,
   type CaseJob,
   CaseJobSchema,
   type CaseResult,
@@ -38,6 +40,8 @@ export interface RunnerLoopDeps {
       // Live-trace batch reporter (observability ⑨) — the run tees drained TraceEvents here; the loop pushes them to
       // the control plane's live-trace store so the run detail shows the trajectory accumulating. Best-effort.
       reportTrace?: (events: TraceEvent[]) => Promise<void>;
+      // Run-workbench fs servicing (self-hosted parity) — the in-case loop answers the CP's parked repo reads.
+      caseFs?: CaseFsServicing;
     },
   ) => Promise<CaseResult>;
   log?: (msg: string) => void; // default no-op (tests stay quiet)
@@ -210,6 +214,21 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
       const reportTrace = runId
         ? (events: TraceEvent[]): Promise<void> => deps.callJson("report_case_trace", { runId, events }).then(() => {})
         : undefined;
+      // Run-workbench fs servicing (self-hosted parity): the control plane cannot exec into this runner's sandbox,
+      // so it PARKS repo reads; the in-case loop polls them here and answers from inside the case. Only with a
+      // runId (CP dispatch); every call is best-effort — a servicing failure never affects the run.
+      const caseFs: CaseFsServicing | undefined = runId
+        ? {
+            poll: async () => {
+              const out = (await deps.callJson("poll_case_fs_requests", { runId })) as
+                | { requests?: CaseFsRequest[] }
+                | undefined;
+              return out?.requests ?? [];
+            },
+            answer: (id, result) =>
+              deps.callJson("answer_case_fs_request", { runId, requestId: id, result }).then(() => {}),
+          }
+        : undefined;
       reportLog?.("▶ Started — running the case on this self-hosted runner.");
       // M1 — the self-hosted lane's infra-plane record: no orchestrator sees this case, so the RUNNER (the layer
       // that does) stamps the host identity onto the result's trace. The runner id itself is already on the run
@@ -237,6 +256,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
           ...(reportScreen ? { reportScreen } : {}),
           ...(recordSink ? { recordSink } : {}),
           ...(reportTrace ? { reportTrace } : {}),
+          ...(caseFs ? { caseFs } : {}),
         });
         // Best-effort append — the infra record must never fail a job (a test double may return a bare object).
         result.trace = [...(result.trace ?? []), leasedMark, hostInfra("finished", "case finished on this runner")];
