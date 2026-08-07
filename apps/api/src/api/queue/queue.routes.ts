@@ -31,4 +31,41 @@ export function registerQueueRoutes(app: FastifyInstance, deps: ServerDeps): voi
       return sendError(reply, err);
     }
   });
+
+  // Cancel ONE waiting scheduler entry (scheduler.entries id) — the queue page's kill switch. Same gate as
+  // submitting work (runs:submit); another workspace's / an already-placed entry is 404 (no existence leak).
+  app.delete<{ Params: { entryId: string } }>(
+    "/queue/entries/:entryId",
+    { schema: queueDocs.cancelEntry },
+    async (req, reply) => {
+      if (!deps.queueService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "queue service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:submit");
+        return reply.send(deps.queueService.cancelSchedulerEntry(principal.workspace, req.params.entryId));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Move ONE waiting scheduler entry to the front of the effective order — "run this next" (queue reordering).
+  app.post<{ Params: { entryId: string } }>(
+    "/queue/entries/:entryId/promote",
+    { schema: queueDocs.promoteEntry },
+    async (req, reply) => {
+      if (!deps.queueService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "queue service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:submit");
+        return reply.send(deps.queueService.promoteSchedulerEntry(principal.workspace, req.params.entryId));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 }

@@ -43,6 +43,7 @@ export {
   type PlacementPolicy,
   type BackendSlot,
   type SchedulerOptions,
+  type SchedulerQueueEntry,
 } from "./scheduling/scheduler.js";
 export { type SecretProvider, staticSecrets } from "./policy/secrets.js";
 export {

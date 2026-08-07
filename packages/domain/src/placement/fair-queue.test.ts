@@ -64,6 +64,42 @@ describe("FairQueue (WFQ)", () => {
     expect(ids(fq.ordered())).toEqual(["A0", "A1", "B1"]);
   });
 
+  it("promote moves an item to the fair-order front while keeping the sorted invariant", () => {
+    const fq = q();
+    const a0 = { tenant: "A", id: "A0" };
+    const b0 = { tenant: "B", id: "B0" };
+    const a1 = { tenant: "A", id: "A1" };
+    fq.enqueue(a0);
+    fq.enqueue(b0);
+    fq.enqueue(a1);
+    expect(ids(fq.ordered())).toEqual(["A0", "B0", "A1"]);
+
+    expect(fq.promote(a1)).toBe(true);
+    expect(ids(fq.ordered())).toEqual(["A1", "A0", "B0"]);
+
+    // Fairness bookkeeping is untouched: a later enqueue lands by its own vf, never in front of the promoted head.
+    fq.enqueue({ tenant: "B", id: "B1" });
+    expect(ids(fq.ordered())[0]).toBe("A1");
+    expect(ids(fq.ordered())).toContain("B1");
+  });
+
+  it("promote is a no-op true for the head and false for an unknown item; repeats stack newest-first", () => {
+    const fq = q();
+    const a0 = { tenant: "A", id: "A0" };
+    const a1 = { tenant: "A", id: "A1" };
+    const a2 = { tenant: "A", id: "A2" };
+    fq.enqueue(a0);
+    fq.enqueue(a1);
+    fq.enqueue(a2);
+    expect(fq.promote(a0)).toBe(true); // already the front
+    expect(ids(fq.ordered())).toEqual(["A0", "A1", "A2"]);
+    expect(fq.promote({ tenant: "A", id: "ghost" })).toBe(false);
+
+    fq.promote(a1);
+    fq.promote(a2); // promoted later → ahead of the earlier promotion
+    expect(ids(fq.ordered())).toEqual(["A2", "A1", "A0"]);
+  });
+
   it("observes per-tenant queue counts via queuedByTenant", () => {
     const fq = q();
     fq.enqueue({ tenant: "A", id: "A0" });

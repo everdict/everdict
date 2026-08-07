@@ -52,13 +52,37 @@ export const queueLaneSchema = z.object({
   upcoming: z.array(queueUpcomingSchema),
 })
 
+// One waiting entry of the control-plane scheduler's OWN queue (WFQ) — the real control queue, in the
+// scheduler's effective scan order (position 1 is what it tries next among this workspace's entries).
+export const queueSchedulerEntrySchema = z.object({
+  id: z.string(), // stable entry handle — what cancel/promote address
+  caseId: z.string(),
+  runId: z.string().optional(),
+  batchId: z.string().optional(), // parent scorecard for batch fan-out entries
+  harness: z.object({ id: z.string(), version: z.string() }),
+  target: z.string().optional(), // pinned placement target (the runtime lane it waits for)
+  priority: z.enum(['interactive', 'batch']).optional(),
+  tags: z.array(z.string()).optional(), // e.g. ['judge'] marks a control-plane judge job
+  enqueuedAt: z.string(),
+  waitedMs: z.number(),
+  position: z.number(),
+  urgent: z.boolean(), // scanned in the urgent class (interactive / promoted / aged)
+  promoted: z.boolean(),
+})
+
 // The queue has two scopes — workspace (shared runtimes: default backend + registered infra) / personal (my self-hosted runners).
 export const queueSnapshotSchema = z.object({
   generatedAt: z.string(),
   totals: z.object({ running: z.number(), queued: z.number(), upcoming: z.number() }),
-  // This workspace's control-plane scheduler slice (+ the operator quota when dialed in).
+  // This workspace's control-plane scheduler slice (+ the operator quota when dialed in) — entries is the
+  // scheduler's OWN wait queue (present when the live scheduler is wired on the control plane).
   scheduler: z
-    .object({ queued: z.number(), inFlight: z.number(), quota: z.number().optional() })
+    .object({
+      queued: z.number(),
+      inFlight: z.number(),
+      quota: z.number().optional(),
+      entries: z.array(queueSchedulerEntrySchema).optional(),
+    })
     .optional(),
   workspace: z.array(queueLaneSchema),
   personal: z.array(queueLaneSchema),
@@ -80,5 +104,8 @@ export type QueueLane = QueueSnapshotResponse['workspace'][number]
 export type QueueLaneAdmission = NonNullable<QueueLane['admission']>
 export type QueueItem = QueueLane['running'][number]
 export type QueueUpcoming = QueueLane['upcoming'][number]
+export type QueueSchedulerEntry = NonNullable<
+  NonNullable<QueueSnapshotResponse['scheduler']>['entries']
+>[number]
 
 export type __queueDriftGuard = [_snapshotFwd, _snapshotBack]

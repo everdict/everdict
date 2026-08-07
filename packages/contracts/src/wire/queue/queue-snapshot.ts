@@ -57,6 +57,31 @@ const QueueLaneSchema = z.object({
   upcoming: z.array(QueueUpcomingSchema).describe("Next fires of active schedules aimed at this lane"),
 });
 
+// One waiting entry of the control-plane scheduler's OWN queue (the WFQ the pump drains) — the real control
+// queue, not the record-status projection the lanes are built from. Tenant-scoped by the service; ordered by the
+// scheduler's effective scan order (position 1 is what it tries next among this workspace's entries).
+const QueueSchedulerEntrySchema = z.object({
+  id: z.string().describe("Stable entry handle — what cancel/promote address"),
+  caseId: z.string(),
+  runId: z.string().optional().describe("Trace-correlation run id (evd-…) when the dispatch minted one"),
+  batchId: z.string().optional().describe("Parent scorecard for batch fan-out entries"),
+  harness: z.object({ id: z.string(), version: z.string() }),
+  target: z.string().optional().describe("Pinned placement target (the runtime lane it waits for)"),
+  priority: z.enum(["interactive", "batch"]).optional(),
+  tags: z.array(z.string()).optional().describe('EvalCase tags — e.g. ["judge"] marks a control-plane judge job'),
+  enqueuedAt: z.string().describe("ISO"),
+  waitedMs: z.number().int(),
+  position: z.number().int().describe("1-based position among this workspace's entries, effective scan order"),
+  urgent: z.boolean().describe("Scanned in the urgent class (interactive / promoted / aged)"),
+  promoted: z.boolean(),
+});
+
+// DELETE /queue/entries/:id · POST /queue/entries/:id/promote — acknowledgements.
+export const QueueEntryCancelResponseSchema = z.object({ cancelled: z.literal(true) });
+export type QueueEntryCancelResponse = z.infer<typeof QueueEntryCancelResponseSchema>;
+export const QueueEntryPromoteResponseSchema = z.object({ promoted: z.literal(true) });
+export type QueueEntryPromoteResponse = z.infer<typeof QueueEntryPromoteResponseSchema>;
+
 export const QueueSnapshotResponseSchema = z.object({
   generatedAt: z.string(),
   totals: z.object({
@@ -69,6 +94,10 @@ export const QueueSnapshotResponseSchema = z.object({
       queued: z.number().int(),
       inFlight: z.number().int(),
       quota: z.number().optional().describe("Operator per-tenant quota when dialed in"),
+      entries: z
+        .array(QueueSchedulerEntrySchema)
+        .optional()
+        .describe("This workspace's waiting entries in the scheduler's effective scan order"),
     })
     .optional()
     .describe("THIS workspace's control-plane scheduler slice (never another tenant's numbers)"),

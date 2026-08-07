@@ -1,10 +1,25 @@
 'use client'
 
-import { CalendarClock, ChevronsRight, CircleDashed, Laptop, Loader2, Server } from 'lucide-react'
+import {
+  ArrowUpToLine,
+  CalendarClock,
+  ChevronsRight,
+  CircleDashed,
+  Laptop,
+  Loader2,
+  Server,
+  X,
+} from 'lucide-react'
 import { useTimeZone, useTranslations } from 'next-intl'
+import { useState } from 'react'
 
-import { type QueueItem, type QueueLane, type QueueSnapshot } from '@/entities/queue'
-import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
+import {
+  type QueueItem,
+  type QueueLane,
+  type QueueSchedulerEntry,
+  type QueueSnapshot,
+} from '@/entities/queue'
+import { fmtDateTime, fmtDateTimeFull, fmtDurationMs, fmtSubject } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
@@ -404,6 +419,115 @@ function LaneGroup({
   )
 }
 
+// One waiting entry of the control-plane scheduler's REAL queue — identity + wait state + the two controls:
+// cancel (kill switch) and move-to-front ("run this next"). A mutation never holds the screen (plain async +
+// pending state, then an immediate re-poll); the row dims while its action is in flight.
+function SchedulerEntryRow({ entry }: { entry: QueueSchedulerEntry }) {
+  const t = useTranslations('workPanel')
+  const { refreshQueue } = useInfraPanel()
+  const [busy, setBusy] = useState(false)
+  const act = (path: string, method: 'DELETE' | 'POST') => {
+    void (async () => {
+      setBusy(true)
+      try {
+        await fetch(path, { method })
+      } catch {
+        // Surface nothing special — the re-poll below shows the authoritative queue state either way.
+      } finally {
+        refreshQueue()
+        setBusy(false)
+      }
+    })()
+  }
+  const judge = entry.tags?.includes('judge') === true
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2 rounded-md border bg-card px-2 py-1.5',
+        busy && 'opacity-50'
+      )}
+    >
+      <span className="w-5 shrink-0 text-right font-mono text-[10.5px] tabular-nums text-faint">
+        {entry.position}
+      </span>
+      <div className="min-w-0 flex-1 space-y-0.5 overflow-hidden whitespace-nowrap">
+        <div className="flex items-center gap-1.5 overflow-hidden">
+          <span className="min-w-0 truncate font-mono text-[11.5px] font-[510]">
+            {entry.caseId}
+          </span>
+          {judge && (
+            <Badge tone="info" className="shrink-0">
+              {t('entryJudge')}
+            </Badge>
+          )}
+          {entry.promoted ? (
+            <Badge tone="success" className="shrink-0">
+              {t('entryPromoted')}
+            </Badge>
+          ) : entry.urgent ? (
+            <Badge tone="warning" className="shrink-0">
+              {t('entryUrgent')}
+            </Badge>
+          ) : null}
+        </div>
+        <div className="truncate font-mono text-[10.5px] text-faint">
+          {entry.harness.id}@{entry.harness.version}
+          {entry.target ? ` · ${entry.target}` : ''}
+          {entry.batchId ? ` · ${entry.batchId}` : ''}
+        </div>
+      </div>
+      <span
+        className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground"
+        title={fmtDateTimeFull(entry.enqueuedAt)}
+      >
+        {t('entryWaited', { duration: fmtDurationMs(entry.waitedMs) })}
+      </span>
+      <span className="flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => act(`/api/queue/entries/${encodeURIComponent(entry.id)}/promote`, 'POST')}
+          title={t('promoteEntry')}
+          className="rounded p-1 text-muted-foreground transition-colors hover:bg-elevated hover:text-foreground disabled:pointer-events-none"
+        >
+          <ArrowUpToLine className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => act(`/api/queue/entries/${encodeURIComponent(entry.id)}`, 'DELETE')}
+          title={t('cancelEntry')}
+          className="rounded p-1 text-muted-foreground transition-colors hover:bg-elevated hover:text-[var(--color-danger)] disabled:pointer-events-none"
+        >
+          <X className="size-3.5" />
+        </button>
+      </span>
+    </div>
+  )
+}
+
+// The control-plane scheduler's OWN wait queue (WFQ) in its effective scan order — the queue the pump actually
+// drains, distinct from the record-status lanes below. Position 1 is what the scheduler tries next.
+function SchedulerQueue({ entries }: { entries: QueueSchedulerEntry[] }) {
+  const t = useTranslations('workPanel')
+  return (
+    <section className="space-y-1.5">
+      <h3
+        className="text-[12px] font-[560] tracking-[-0.01em] text-secondary-foreground"
+        title={t('schedulerQueueHint')}
+      >
+        {t('schedulerQueueTitle')}
+        <span className="ml-1.5 tabular-nums text-muted-foreground">{entries.length}</span>
+      </h3>
+      <div className="max-h-64 space-y-1 overflow-y-auto">
+        {entries.map((entry) => (
+          <SchedulerEntryRow key={entry.id} entry={entry} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 // Top summary stats (running/queued/upcoming) — compact for the panel.
 function Totals({ totals }: { totals: QueueSnapshot['totals'] }) {
   const t = useTranslations('workPanel')
@@ -464,6 +588,12 @@ export function WorkTab({ onNavigate }: { onNavigate: () => void }) {
             </span>
           )}
         </div>
+      )}
+
+      {/* The scheduler's REAL wait queue (WFQ entries, effective scan order) — with the kill switch and
+          move-to-front reordering. Hidden when empty (hide-empty-sections rule). */}
+      {snapshot.scheduler?.entries && snapshot.scheduler.entries.length > 0 && (
+        <SchedulerQueue entries={snapshot.scheduler.entries} />
       )}
 
       {active === 0 && snapshot.totals.upcoming === 0 ? (

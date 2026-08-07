@@ -394,6 +394,11 @@ export const controlPlane = {
     callVoid(auth, `/workspace/proxies/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   // Work queue snapshot — per-runtime-lane running / waiting (FIFO) / next scheduled fire.
   getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
+  // Scheduler queue entry controls (the REAL control-plane wait queue): kill switch + move-to-front reordering.
+  cancelQueueEntry: <T>(auth: AuthContext, entryId: string) =>
+    call<T>(auth, `/queue/entries/${encodeURIComponent(entryId)}`, { method: 'DELETE' }),
+  promoteQueueEntry: <T>(auth: AuthContext, entryId: string) =>
+    call<T>(auth, `/queue/entries/${encodeURIComponent(entryId)}/promote`, { method: 'POST' }),
   // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.
   getUsage: <T>(auth: AuthContext) => call<T>(auth, '/usage'),
   // Enforcement budget (BLOCKS runs with 402 once a cap is hit; distinct from meter-only /usage). GET = committed

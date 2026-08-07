@@ -646,4 +646,73 @@ describe("Scheduler cancellation (AbortSignal)", () => {
     await first;
     expect(b.dispatchedIds).toEqual(["first"]); // the aborted job never got dispatched
   });
+
+  it("queueEntries reports the wait queue in the effective scan order with identity fields", async () => {
+    const b = new ControlledBackend("a", 1);
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+    const inflight = sched.dispatch(tjob("t1", "c1")); // occupies the slot
+    void sched.dispatch(tjob("t1", "c2")).catch(() => {});
+    void sched.dispatch(tjob("t2", "c3")).catch(() => {});
+    await flush();
+
+    // WFQ fairness: t2's first entry (lower virtual-finish time) is scanned before t1's second one, even
+    // though it arrived later — the entries report the REAL scan order, not FIFO.
+    const entries = sched.queueEntries();
+    expect(entries.map((e) => e.caseId)).toEqual(["c3", "c2"]);
+    const first = entries[0];
+    expect(first).toMatchObject({ tenant: "t2", urgent: false, promoted: false });
+    expect(first?.id).toMatch(/^q\d+$/);
+    expect(typeof first?.enqueuedAt).toBe("number");
+
+    // An interactive job joins the urgent class → scanned (and reported) ahead of the waiting batch entries.
+    void sched.dispatch({ ...tjob("t1", "c4"), priority: "interactive" }).catch(() => {});
+    await flush();
+    expect(sched.queueEntries().map((e) => e.caseId)).toEqual(["c4", "c3", "c2"]);
+    expect(sched.queueEntries()[0]).toMatchObject({ urgent: true });
+
+    b.releaseAll();
+    await inflight;
+  });
+
+  it("cancelEntry removes ONE waiting entry, rejects its dispatch as CANCELLED, and never dispatches it", async () => {
+    const b = new ControlledBackend("a", 1);
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+    const first = sched.dispatch(tjob("t", "c1"));
+    const second = sched.dispatch(tjob("t", "c2"));
+    await flush();
+    const entry = sched.queueEntries().find((e) => e.caseId === "c2");
+    expect(entry).toBeDefined();
+
+    expect(sched.cancelEntry(entry?.id ?? "")).toBe(true);
+    await expect(second).rejects.toThrow(/cancelled/i);
+    expect(sched.stats().queued).toBe(0);
+    expect(sched.cancelEntry("q999")).toBe(false); // unknown / already settled
+
+    b.releaseAll();
+    await first;
+    expect(b.dispatchedIds).toEqual(["c1"]); // the cancelled entry never reached the backend
+  });
+
+  it("promoteEntry moves a waiting entry to the front of the effective order so it places next", async () => {
+    const b = new ControlledBackend("a", 1);
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+    const all = [sched.dispatch(tjob("t", "c1")), sched.dispatch(tjob("t", "c2")), sched.dispatch(tjob("t", "c3"))];
+    await flush();
+    expect(sched.queueEntries().map((e) => e.caseId)).toEqual(["c2", "c3"]);
+
+    const entry = sched.queueEntries().find((e) => e.caseId === "c3");
+    expect(sched.promoteEntry(entry?.id ?? "")).toBe(true);
+    expect(sched.queueEntries().map((e) => e.caseId)).toEqual(["c3", "c2"]);
+    expect(sched.queueEntries()[0]).toMatchObject({ urgent: true, promoted: true });
+    expect(sched.promoteEntry("q999")).toBe(false);
+
+    b.releaseOne();
+    await flush();
+    b.releaseOne();
+    await flush();
+    b.releaseOne();
+    await flush();
+    await Promise.all(all);
+    expect(b.dispatchedIds).toEqual(["c1", "c3", "c2"]); // the promoted entry ran before the earlier-queued one
+  });
 });

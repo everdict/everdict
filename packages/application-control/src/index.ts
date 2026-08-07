@@ -479,10 +479,12 @@ export {
   type QueueItem,
   type QueueLane,
   type QueueLaneAdmission,
+  type QueueSchedulerEntry,
   QueueService,
   type QueueServiceDeps,
   type QueueSnapshot,
   type QueueUpcoming,
+  type SchedulerQueueEntryView,
 } from "./queue/queue-service.js";
 
 // Scorecard cluster (re-architecture P2 S4) — the batch-eval facade over its lifecycle collaborators (batch

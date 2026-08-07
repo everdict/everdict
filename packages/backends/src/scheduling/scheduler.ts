@@ -46,8 +46,10 @@ export const binPackPolicy: PlacementPolicy = {
 };
 
 interface QueueEntry {
+  id: string; // stable snapshot handle (q<seq>) — what the queue page cancels/promotes by
   job: CaseJob;
   enqueuedAt: number; // aging clock — a long-waiting batch entry is promoted to the urgent scan (starvation guard)
+  promoted?: boolean; // operator "jump the line" — scanned with the urgent class and moved to the fair-order front
   resolve: (r: CaseResult) => void;
   reject: (e: unknown) => void;
   signal?: AbortSignal; // per-dispatch cancellation — forwarded to the backend once in-flight
@@ -136,6 +138,23 @@ function bump(map: Map<string, number>, key: string, delta: number): void {
   else map.set(key, next);
 }
 
+// One waiting entry as the queue page sees it — identity + placement facts + its spot in the effective scan
+// order. This is the SCHEDULER's own queue (the WFQ the pump actually drains), not the record-status projection.
+export interface SchedulerQueueEntry {
+  id: string;
+  tenant: string;
+  caseId: string;
+  runId?: string;
+  batchId?: string;
+  harness: { id: string; version: string };
+  target?: string; // pinned placement target (the runtime lane it is waiting for)
+  priority?: CaseJob["priority"];
+  tags?: string[]; // evalCase tags — e.g. ["judge"] marks a control-plane judge job
+  enqueuedAt: number; // epoch ms
+  urgent: boolean; // scanned in the urgent class (interactive / promoted / aged past agingMs)
+  promoted: boolean;
+}
+
 // A capacity-aware + tenant-fair scheduler: place jobs where there's room based on backend free capacity, but pull
 // waiting jobs in WFQ (weighted fair queue) order and don't exceed each tenant's quota. If there's no room/quota,
 // queue and then auto-pump when a slot frees (HOL avoidance). Dispatcher-compatible (drop-in).
@@ -146,6 +165,7 @@ export class Scheduler {
   private readonly admission = new Admission();
   private readonly queue: FairQueue<QueueEntry>;
   private pumping = false;
+  private entrySeq = 0; // mints the stable per-entry snapshot handle (q<seq>)
 
   constructor(
     private readonly registry: BackendRegistry,
@@ -189,6 +209,7 @@ export class Scheduler {
     }
     return new Promise<CaseResult>((resolve, reject) => {
       const entry: QueueEntry = {
+        id: `q${++this.entrySeq}`,
         job,
         enqueuedAt: (this.opts.now ?? Date.now)(),
         resolve,
@@ -305,17 +326,10 @@ export class Scheduler {
       while (placedAny && this.queue.size > 0) {
         placedAny = false;
         const slots = this.freeSlotsFrom(caps); // recompute from the snapshot + live in-flight (no HTTP)
-        // Scan in WFQ fair order, but skip jobs that can't be sent now due to quota/capacity (HOL avoidance).
-        // Priority classes first: interactive jobs (a person is waiting — single runs) jump ahead of batch
-        // fan-out, while the tenant-fair WFQ order is preserved WITHIN each class (stable partition).
-        // AGING: an entry waiting past agingMs joins the urgent class regardless of its own priority — an
-        // interactive flood must not starve batch work forever.
+        // Scan in the effective order (scanOrder — the same order queueEntries() reports), but skip jobs that
+        // can't be sent now due to quota/capacity (HOL avoidance).
         const nowMs = (this.opts.now ?? Date.now)();
-        const agingMs = this.opts.agingMs ?? 60_000;
-        const urgent = (e: QueueEntry): boolean => e.job.priority === "interactive" || nowMs - e.enqueuedAt >= agingMs;
-        const ordered = this.queue.ordered();
-        const scan = [...ordered.filter(urgent), ...ordered.filter((e) => !urgent(e))];
-        for (const entry of scan) {
+        for (const { entry } of this.scanOrder(nowMs)) {
           const tenant = tenantOf(entry.job);
           const quota = this.opts.tenantQuota?.(tenant) ?? Number.POSITIVE_INFINITY;
           if (this.admission.tenantCountFor(tenant) >= quota) continue; // tenant quota reached
@@ -364,6 +378,71 @@ export class Scheduler {
     } finally {
       this.pumping = false;
     }
+  }
+
+  // The effective scan order — the fair (WFQ) order partitioned into the urgent class first (interactive /
+  // operator-promoted / aged past agingMs; the tenant-fair order is preserved WITHIN each class) then the rest.
+  // AGING: an entry waiting past agingMs joins the urgent class regardless of its own priority — an interactive
+  // flood must not starve batch work forever. pump() places in this order and queueEntries() reports it, so what
+  // the queue page shows IS what the scheduler will try next.
+  private scanOrder(nowMs: number): Array<{ entry: QueueEntry; urgent: boolean }> {
+    const agingMs = this.opts.agingMs ?? 60_000;
+    const isUrgent = (e: QueueEntry): boolean =>
+      e.job.priority === "interactive" || e.promoted === true || nowMs - e.enqueuedAt >= agingMs;
+    const ordered = this.queue.ordered();
+    return [
+      ...ordered.filter(isUrgent).map((entry) => ({ entry, urgent: true })),
+      ...ordered.filter((e) => !isUrgent(e)).map((entry) => ({ entry, urgent: false })),
+    ];
+  }
+
+  // The scheduler's OWN wait queue, in the effective scan order — the observable half of pump(). This is the
+  // real control queue (WFQ entries), not the record-status projection the /queue lanes are built from; the
+  // caller (QueueService) filters by tenant before anything leaves the control plane.
+  queueEntries(): SchedulerQueueEntry[] {
+    const nowMs = (this.opts.now ?? Date.now)();
+    return this.scanOrder(nowMs).map(({ entry, urgent }) => ({
+      id: entry.id,
+      tenant: tenantOf(entry.job),
+      caseId: entry.job.evalCase.id,
+      ...(entry.job.runId !== undefined ? { runId: entry.job.runId } : {}),
+      ...(entry.job.batchId !== undefined ? { batchId: entry.job.batchId } : {}),
+      harness: { id: entry.job.harness.id, version: entry.job.harness.version },
+      ...(entry.job.evalCase.placement?.target !== undefined ? { target: entry.job.evalCase.placement.target } : {}),
+      ...(entry.job.priority !== undefined ? { priority: entry.job.priority } : {}),
+      ...(entry.job.evalCase.tags !== undefined && entry.job.evalCase.tags.length > 0
+        ? { tags: entry.job.evalCase.tags }
+        : {}),
+      enqueuedAt: entry.enqueuedAt,
+      urgent,
+      promoted: entry.promoted === true,
+    }));
+  }
+
+  // Cancel ONE queued entry by its snapshot id — the queue page's kill switch (e.g. a stray judge job from a
+  // reclaimed batch). Same settlement as cancelQueued: refund the admit reservation and reject with CANCELLED,
+  // so the dispatch caller's existing retry/settle machinery classifies it. In-flight work is untouched
+  // (reclaiming that is Backend.kill's job). Returns false when the id is not queued (already placed/settled).
+  cancelEntry(id: string): boolean {
+    const entry = this.queue.ordered().find((e) => e.id === id);
+    if (!entry) return false;
+    this.queue.remove(entry);
+    if (entry.onAbort && entry.signal) entry.signal.removeEventListener("abort", entry.onAbort);
+    this.releaseBudget(entry.job);
+    entry.reject(new InternalError("CANCELLED", { caseId: entry.job.evalCase.id }, "cancelled from the queue."));
+    return true;
+  }
+
+  // Move ONE queued entry to the front of the effective order (operator "run this next"): urgent class + the
+  // fair-order head. Fairness bookkeeping is untouched — promotion reorders what already waits, it grants no
+  // credit for future enqueues. Returns false when the id is not queued.
+  promoteEntry(id: string): boolean {
+    const entry = this.queue.ordered().find((e) => e.id === id);
+    if (!entry) return false;
+    entry.promoted = true;
+    this.queue.promote(entry);
+    void this.pump(); // a freed slot may already be waiting for it
+    return true;
   }
 
   // Give back a queued job's admit reservation when it leaves the queue WITHOUT being dispatched (abort / supersede /

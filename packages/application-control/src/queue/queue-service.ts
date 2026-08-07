@@ -1,4 +1,4 @@
-import { TRACE_EVAL_REF } from "@everdict/contracts";
+import { NotFoundError, TRACE_EVAL_REF } from "@everdict/contracts";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { ScheduleRecordWithNext } from "../schedule/schedule-service.js";
@@ -55,6 +55,25 @@ export interface QueueLane {
   upcoming: QueueUpcoming[]; // next fires of active schedules aimed at this lane (soonest first)
 }
 
+// One waiting entry of the control-plane scheduler's OWN queue (the WFQ its pump drains) — the real control
+// queue, not the record-status projection the lanes are built from. Tenant-scoped: the service filters before
+// anything leaves the control plane; position is 1-based among THIS workspace's entries in effective scan order.
+export interface QueueSchedulerEntry {
+  id: string; // stable entry handle — what cancel/promote address
+  caseId: string;
+  runId?: string; // trace-correlation run id (evd-…) when the dispatch minted one
+  batchId?: string; // parent scorecard for batch fan-out entries
+  harness: { id: string; version: string };
+  target?: string; // pinned placement target (the runtime lane it waits for)
+  priority?: "interactive" | "batch";
+  tags?: string[]; // evalCase tags — e.g. ["judge"] marks a control-plane judge job
+  enqueuedAt: string; // ISO
+  waitedMs: number;
+  position: number;
+  urgent: boolean; // scanned in the urgent class (interactive / promoted / aged)
+  promoted: boolean;
+}
+
 // The queue has two scopes (distinct queues): ① workspace — items requested in the workspace and running on shared runtimes (default backend +
 // registered infra). ② personal — the requester's "own" self-hosted runner (self:<id>) queue.
 // Another member's personal runner queue is invisible since it's personally owned (same as the runner ownership model).
@@ -62,10 +81,28 @@ export interface QueueSnapshot {
   generatedAt: string;
   totals: { running: number; queued: number; upcoming: number }; // sum of visible (workspace+personal) items
   // THIS workspace's scheduler slice (never another tenant's numbers): jobs waiting in the control-plane
-  // scheduler queue + in-flight, and the operator quota when one is dialed in (EVERDICT_TENANT_QUOTAS).
-  scheduler?: { queued: number; inFlight: number; quota?: number };
+  // scheduler queue + in-flight, the operator quota when one is dialed in (EVERDICT_TENANT_QUOTAS), and the
+  // workspace's waiting entries in the scheduler's effective scan order (when the live Scheduler is injected).
+  scheduler?: { queued: number; inFlight: number; quota?: number; entries?: QueueSchedulerEntry[] };
   workspace: QueueLane[];
   personal: QueueLane[];
+}
+
+// The raw scheduler-entry shape the live Scheduler reports (epoch clock, tenant still attached) — the service
+// maps it to the tenant-scoped QueueSchedulerEntry. Structural (application-control must not import backends).
+export interface SchedulerQueueEntryView {
+  id: string;
+  tenant: string;
+  caseId: string;
+  runId?: string;
+  batchId?: string;
+  harness: { id: string; version: string };
+  target?: string;
+  priority?: "interactive" | "batch";
+  tags?: string[];
+  enqueuedAt: number; // epoch ms
+  urgent: boolean;
+  promoted: boolean;
 }
 
 export interface QueueServiceDeps {
@@ -88,6 +125,11 @@ export interface QueueServiceDeps {
     queuedByTenant: Record<string, number>;
   };
   circuitStats?: () => Record<string, { consecutive: number; open: boolean }>;
+  // The live Scheduler's OWN wait queue (effective scan order, all tenants) + its per-entry controls. The
+  // service is the tenant boundary: snapshot filters entries, cancel/promote refuse another workspace's id.
+  schedulerQueue?: () => SchedulerQueueEntryView[];
+  cancelSchedulerEntry?: (id: string) => boolean;
+  promoteSchedulerEntry?: (id: string) => boolean;
   tenantQuotaFor?: (tenant: string) => number | undefined; // the operator quota dial (EVERDICT_TENANT_QUOTAS)
   // The runtime's declared admission envelope (RuntimeSpec.maxConcurrent/memoryBudgetMb) — latest version.
   runtimeEnvelopeFor?: (
@@ -290,11 +332,54 @@ export class QueueService {
               queued: stats.queuedByTenant[tenant] ?? 0,
               inFlight: stats.tenantInFlight[tenant] ?? 0,
               ...(quota !== undefined && Number.isFinite(quota) ? { quota } : {}),
+              ...(this.deps.schedulerQueue ? { entries: this.schedulerEntries(tenant) } : {}),
             },
           }
         : {}),
       workspace,
       personal,
     };
+  }
+
+  // THIS workspace's scheduler entries in effective scan order — the cross-tenant filter lives here, inside the
+  // service (same rule as the admission view): another tenant's entries never leave the control plane.
+  private schedulerEntries(tenant: string): QueueSchedulerEntry[] {
+    const all = this.deps.schedulerQueue?.() ?? [];
+    const nowMs = Date.parse(this.now());
+    return all
+      .filter((e) => e.tenant === tenant)
+      .map(({ tenant: _tenant, enqueuedAt, ...entry }, index) => ({
+        ...entry,
+        enqueuedAt: new Date(enqueuedAt).toISOString(),
+        waitedMs: Math.max(0, nowMs - enqueuedAt),
+        position: index + 1,
+      }));
+  }
+
+  // Look up one scheduler entry with the tenant guard — another workspace's id (or a settled/unknown one) is
+  // NOT_FOUND, never FORBIDDEN: existence must not leak across the trust boundary.
+  private ownedEntry(tenant: string, id: string): SchedulerQueueEntryView {
+    const entry = this.deps.schedulerQueue?.().find((e) => e.id === id);
+    if (!entry || entry.tenant !== tenant)
+      throw new NotFoundError("NOT_FOUND", { entry: id }, "queue entry not found (already placed or settled?).");
+    return entry;
+  }
+
+  // Cancel ONE waiting scheduler entry (the queue page's kill switch). The rejection settles through the
+  // dispatch caller's existing machinery (a single run fails CANCELLED; a batch case freezes/retries by its
+  // own policy) — this only removes the WAITING entry, in-flight work is untouched.
+  cancelSchedulerEntry(tenant: string, id: string): { cancelled: true } {
+    const entry = this.ownedEntry(tenant, id);
+    if (!this.deps.cancelSchedulerEntry?.(entry.id))
+      throw new NotFoundError("NOT_FOUND", { entry: id }, "queue entry not found (already placed or settled?).");
+    return { cancelled: true };
+  }
+
+  // Move ONE waiting scheduler entry to the front of the effective order ("run this next").
+  promoteSchedulerEntry(tenant: string, id: string): { promoted: true } {
+    const entry = this.ownedEntry(tenant, id);
+    if (!this.deps.promoteSchedulerEntry?.(entry.id))
+      throw new NotFoundError("NOT_FOUND", { entry: id }, "queue entry not found (already placed or settled?).");
+    return { promoted: true };
   }
 }

@@ -136,6 +136,9 @@ type InfraPanelValue = {
   knowledgeNodeId: string | null
   openKnowledgeNode: (nodeId: string | null) => void
   snapshot: QueueSnapshot | null
+  // Immediate re-poll after a queue mutation (cancel/promote a scheduler entry) — the periodic poll is too
+  // slow to reflect an action the member just took.
+  refreshQueue: () => void
   authors: Record<string, WorkAuthor>
 }
 
@@ -378,6 +381,7 @@ export function InfraPanelProvider({
         knowledgeNodeId,
         openKnowledgeNode,
         snapshot,
+        refreshQueue: poll,
         authors,
       }}
     >

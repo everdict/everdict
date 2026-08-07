@@ -59,6 +59,25 @@ export class FairQueue<T> {
     return this.nodes.map((n) => n.item);
   }
 
+  // Move an item to the FRONT of the fair order (operator "jump the line"). The node takes the current head's
+  // vf with a smaller seq, so the sorted-(vf, seq) invariant holds and ordered() yields it first. Fairness
+  // accounting (lastVf/vclock) is deliberately untouched: promotion reorders what is already queued, it does not
+  // grant the tenant credit for future enqueues. Repeated promotions stack newest-first (each takes the head).
+  promote(item: T): boolean {
+    const idx = this.nodes.findIndex((n) => n.item === item);
+    if (idx < 0) return false;
+    if (idx === 0) return true; // already at the front
+    const [node] = this.nodes.splice(idx, 1);
+    if (!node) return false;
+    const head = this.nodes[0];
+    if (head) {
+      node.vf = head.vf;
+      node.seq = head.seq - 1;
+    }
+    this.nodes.unshift(node);
+    return true;
+  }
+
   // Remove an item and advance the virtual clock to its vf (updating the fairness reference point).
   remove(item: T): boolean {
     const idx = this.nodes.findIndex((n) => n.item === item);

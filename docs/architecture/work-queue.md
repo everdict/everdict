@@ -71,8 +71,31 @@ forever. On boot, `recoverInterrupted` (`startup-recovery.ts`) finalizes queued/
 standalone runs as **failed(INTERRUPTED)**. If two control planes share the same DB, another's in-flight records
 will also be recovered, so keep the single-control-plane assumption.
 
+## The scheduler's REAL queue (entries + controls)
+
+The lanes above are a **record-status projection** (scorecard/run records grouped by runtime). The control
+plane's actual dispatch queue is the `Scheduler`'s WFQ, and it is surfaced separately as
+`snapshot.scheduler.entries` — this workspace's waiting entries in the scheduler's **effective scan order**
+(the exact order `pump()` will try: urgent class first — interactive / operator-promoted / aged past `agingMs`
+— then the rest, tenant-fair WFQ within each class; position 1 is next). Each entry carries its identity
+(`caseId` / `runId` / `batchId` / harness / pinned `target` / `evalCase.tags` — `["judge"]` marks a
+control-plane judge job) plus `enqueuedAt`/`waitedMs`/`urgent`/`promoted` and a stable handle `id` (`q<seq>`).
+
+Two controls, gated `runs:submit` (same as submitting work), tenant-guarded in `QueueService` (another
+workspace's — or an already-placed — entry reads 404, no existence leak):
+- `DELETE /queue/entries/:id` (MCP `cancel_queued_job`) — remove the WAITING entry and settle its dispatch as
+  CANCELLED (the kill switch, e.g. a judge job left queued by a reclaimed batch). In-flight work is untouched.
+- `POST /queue/entries/:id/promote` (MCP `promote_queued_job`) — move it to the front of the effective order
+  (`FairQueue.promote` takes the head's virtual-finish time + the urgent class; fairness bookkeeping is
+  untouched, repeated promotions stack newest-first). This is the queue-reorder primitive: promote in reverse
+  desired order to fully reorder.
+
+The work tab renders the entries under the scheduler headline with the wait time, judge/urgent/front badges,
+and the two per-row actions (immediate re-poll after a mutation).
+
 ## Limitations / follow-ups
-- Queue order is a createdAt FIFO **approximation** — the actual dispatch order is decided by the Scheduler
-  (WFQ)/runner lease and may be reordered for tenant fairness. Exposing the measured self-hosted lease-queue depth is a follow-up.
-- Queue control (writes) like cancel/reorder is outside this slice (read-only).
+- LANE queue order is a createdAt FIFO **approximation**; the authoritative order is `scheduler.entries`
+  (managed lanes). Exposing the measured self-hosted lease-queue depth is a follow-up.
+- Entry cancel settles through the dispatch caller's own machinery — a batch case may re-dispatch it if the
+  batch's retry budget classifies CANCELLED as retryable; cancelling the scorecard remains the batch-level stop.
 - upcoming is only present when a Temporal driver exists (nextFireTimes). dev (no driver) has an empty column.

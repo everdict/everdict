@@ -1,5 +1,6 @@
-import type { ScheduleRecordWithNext } from "@everdict/application-control";
+import type { ScheduleRecordWithNext, SchedulerQueueEntryView } from "@everdict/application-control";
 import { QueueService } from "@everdict/application-control";
+import { NotFoundError } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore, type RunRecord, type ScorecardRecord } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 
@@ -217,5 +218,99 @@ describe("QueueService.snapshot", () => {
     expect(kindLane?.admission).toEqual({ inFlight: 0 }); // no envelope declared, no circuit → bare in-flight
     const defaultLane = snap.workspace.find((l) => l.runtime === "");
     expect(defaultLane?.admission?.inFlight).toBe(4); // the global env backend's aggregate load
+  });
+});
+
+describe("QueueService scheduler entries (the real control queue)", () => {
+  const view = (over: Partial<SchedulerQueueEntryView> = {}): SchedulerQueueEntryView => ({
+    id: "q1",
+    tenant: "acme",
+    caseId: "c1",
+    harness: { id: "h", version: "1" },
+    enqueuedAt: Date.parse("2026-07-03T11:59:00.000Z"),
+    urgent: false,
+    promoted: false,
+    ...over,
+  });
+
+  const stats = () => ({
+    queued: 2,
+    inFlight: {},
+    memInFlightMb: {},
+    tenantInFlight: {},
+    queuedByTenant: { acme: 2 },
+  });
+
+  it("snapshot surfaces only THIS workspace's entries, in scan order, with wait/position derived", async () => {
+    const { scorecards, runs } = await fixtures();
+    const svc = new QueueService({
+      scorecards,
+      runs,
+      schedulerStats: stats,
+      schedulerQueue: () => [
+        view({ id: "q1", caseId: "mine-1", batchId: "sc1", tags: ["judge"], urgent: true, promoted: true }),
+        view({ id: "q2", tenant: "beta", caseId: "theirs" }), // another tenant — must never leave the service
+        view({ id: "q3", caseId: "mine-2", target: "nomad-local", priority: "batch" }),
+      ],
+      now: () => "2026-07-03T12:00:00.000Z",
+    });
+    const snap = await svc.snapshot("acme");
+    const entries = snap.scheduler?.entries;
+    expect(entries?.map((e) => e.caseId)).toEqual(["mine-1", "mine-2"]);
+    expect(entries?.[0]).toEqual({
+      id: "q1",
+      caseId: "mine-1",
+      batchId: "sc1",
+      harness: { id: "h", version: "1" },
+      tags: ["judge"],
+      enqueuedAt: "2026-07-03T11:59:00.000Z",
+      waitedMs: 60_000,
+      position: 1,
+      urgent: true,
+      promoted: true,
+    });
+    expect(entries?.[1]).toMatchObject({ position: 2, target: "nomad-local", priority: "batch" });
+    expect(JSON.stringify(entries)).not.toContain("theirs");
+  });
+
+  it("cancel/promote act on an owned entry and read another workspace's (or a settled) id as NOT_FOUND", async () => {
+    const { scorecards, runs } = await fixtures();
+    const cancelled: string[] = [];
+    const promoted: string[] = [];
+    const svc = new QueueService({
+      scorecards,
+      runs,
+      schedulerQueue: () => [view({ id: "q1" }), view({ id: "q2", tenant: "beta" })],
+      cancelSchedulerEntry: (id) => {
+        cancelled.push(id);
+        return true;
+      },
+      promoteSchedulerEntry: (id) => {
+        promoted.push(id);
+        return true;
+      },
+    });
+
+    expect(svc.cancelSchedulerEntry("acme", "q1")).toEqual({ cancelled: true });
+    expect(svc.promoteSchedulerEntry("acme", "q1")).toEqual({ promoted: true });
+    expect(cancelled).toEqual(["q1"]);
+    expect(promoted).toEqual(["q1"]);
+
+    // Cross-tenant and unknown ids are indistinguishable from absence — 404, no existence leak.
+    expect(() => svc.cancelSchedulerEntry("acme", "q2")).toThrow(NotFoundError);
+    expect(() => svc.promoteSchedulerEntry("acme", "q2")).toThrow(NotFoundError);
+    expect(() => svc.cancelSchedulerEntry("acme", "ghost")).toThrow(NotFoundError);
+    expect(cancelled).toEqual(["q1"]); // the guarded calls never reached the scheduler
+  });
+
+  it("a cancel that races the pump (entry placed between lookup and cancel) reads as NOT_FOUND", async () => {
+    const { scorecards, runs } = await fixtures();
+    const svc = new QueueService({
+      scorecards,
+      runs,
+      schedulerQueue: () => [view({ id: "q1" })],
+      cancelSchedulerEntry: () => false, // the scheduler already placed it
+    });
+    expect(() => svc.cancelSchedulerEntry("acme", "q1")).toThrow(NotFoundError);
   });
 });

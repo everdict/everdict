@@ -174,6 +174,11 @@ export function buildQueue(deps: {
     // Scheduler observability — lane admission (in-flight/memory envelope/circuit) + the workspace scheduler slice.
     schedulerStats: () => scheduler.stats(),
     circuitStats: () => breaker.stats(),
+    // The scheduler's OWN wait queue + per-entry controls (cancel / move-to-front) — the service filters by
+    // tenant, so another workspace's entries never leave the control plane.
+    schedulerQueue: () => scheduler.queueEntries(),
+    cancelSchedulerEntry: (id: string) => scheduler.cancelEntry(id),
+    promoteSchedulerEntry: (id: string) => scheduler.promoteEntry(id),
     ...(tenantQuotas ? { tenantQuotaFor: (t: string) => tenantQuotas.get(t) } : {}),
     runtimeEnvelopeFor: async (tenant, id) => {
       const spec = await runtimeRegistry.get(tenant, id).catch(() => undefined);
