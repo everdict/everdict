@@ -85,7 +85,8 @@ export function TrajectoryDetailDialog({
       labelledBy="trajectory-detail-title"
       className="flex h-[90vh] max-h-[90vh] max-w-[1400px] flex-col"
     >
-      <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+      {/* 좁은 화면에선 액션 묶음이 제목 아래로 줄바꿈된다 — 케이스 상세 다이얼로그와 같은 헤더 문법. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-border px-5 py-4">
         <div className="min-w-0 space-y-1">
           <h2
             id="trajectory-detail-title"

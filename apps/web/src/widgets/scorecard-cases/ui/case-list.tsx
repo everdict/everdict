@@ -71,7 +71,8 @@ function CaseRow({ item: c, onOpen }: { item: ScorecardCaseView; onOpen: () => v
           <span className="min-w-0 truncate text-[12px] text-muted-foreground">{c.task}</span>
         )}
       </span>
-      <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+      {/* shrink-0 금지 — 배지가 많은(다중 저지) 케이스가 좁은 컬럼에서 행 밖으로 밀려나지 않고 줄바꿈된다. */}
+      <span className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
         {c.scores.length === 0 ? (
           <span className="text-[12px] text-muted-foreground">{t('noScores')}</span>
         ) : (

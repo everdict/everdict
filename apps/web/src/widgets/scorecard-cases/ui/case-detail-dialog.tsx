@@ -103,7 +103,8 @@ export function CaseDetailDialog({
       labelledBy="scorecard-case-dialog-title"
       className="flex h-[92vh] max-h-[92vh] max-w-[1200px] flex-col"
     >
-      <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+      {/* 좁은 화면에선 액션 묶음이 제목 아래로 줄바꿈된다 — 다이얼로그 폭이 좁아도 헤더가 넘치지 않게. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-border px-5 py-4">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Badge tone={c.verdict == null ? 'neutral' : c.verdict ? 'success' : 'danger'}>
             {c.verdict == null ? 'SKIP' : c.verdict ? 'PASS' : 'FAIL'}

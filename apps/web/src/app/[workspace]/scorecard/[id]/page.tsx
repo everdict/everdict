@@ -539,7 +539,9 @@ export default async function ScorecardDetailPage({
   const caseViewIds = new Set(caseViews.map((c) => c.caseId))
 
   return (
-    <div className="space-y-7">
+    // @container: 아래 그리드들은 뷰포트가 아니라 이 컬럼의 폭에 반응한다 — 인프라 패널이 열리면
+    // 뷰포트는 넓어도 이 컬럼은 ~500px 로 좁아지므로, run 상세와 같은 컨테이너 쿼리 기준을 쓴다.
+    <div className="@container space-y-7">
       {/* In progress: periodically re-run the server component to live-update steps (stops once terminal). */}
       <AutoRefresh enabled={live} />
       <div className="space-y-3">
@@ -552,7 +554,8 @@ export default async function ScorecardDetailPage({
               : `${record.dataset.id}@${record.dataset.version} → ${record.harness.id}@${record.harness.version}`
           }
           actions={
-            <div className="flex items-center gap-2">
+            // 액션이 많은 상세라(다운로드·재실행·삭제·상태 필) 좁은 컬럼에서는 줄바꿈으로 살아남는다.
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <MentionInChatButton
                 reference={{ type: 'scorecard', id: record.id, label: record.id.slice(0, 8) }}
                 mission="scorecardAnalyze"
@@ -645,7 +648,7 @@ export default async function ScorecardDetailPage({
 
       {/* Case rollup — the headline result of this run (pass/fail at a glance). Only when there are results. */}
       {results.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 @2xl:grid-cols-4">
           <StatCard
             label={t('statCases')}
             value={results.length}
@@ -687,7 +690,7 @@ export default async function ScorecardDetailPage({
       {record.trialSummary && (
         <section className="space-y-2.5">
           <SectionHeader title={t('trialsTitle')} action={<InfoTip content={t('trialsInfo')} />} />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 @2xl:grid-cols-4">
             <StatCard
               label={t('trialsPassAt1')}
               value={fmtPct(record.trialSummary.passAt1)}
@@ -719,7 +722,7 @@ export default async function ScorecardDetailPage({
         </section>
       )}
 
-      <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
+      <Card className="grid grid-cols-2 gap-4 p-4 @2xl:grid-cols-4">
         {/* dataset · harness · judge are real entities — shown as their chip (icon + id@version), linking to the entity
             detail. A trace evaluation (no dataset / no harness run) carries the reserved sentinel for both, so show a
             single "Trace evaluation" label instead of two deep-links that would 404. */}
@@ -861,7 +864,7 @@ export default async function ScorecardDetailPage({
         )}
         {/* CI PR ephemeral pins (slot→image) — a full-width sub-row of the same meta card (origin's detail, not a separate block). */}
         {record.origin && Object.keys(record.origin.pinOverrides ?? {}).length > 0 && (
-          <div className="col-span-2 sm:col-span-4">
+          <div className="col-span-2 @2xl:col-span-4">
             <OriginPins origin={record.origin} />
           </div>
         )}
