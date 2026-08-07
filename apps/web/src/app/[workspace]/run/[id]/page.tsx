@@ -16,12 +16,12 @@ import {
   RUN_KIND_META,
   runCaseSpecSchema,
   runKindOf,
+  RunLiveStreamProvider,
   RunOutcome,
   runSchema,
   trajectoryResponseSchema,
   type Run,
   type RunCaseSpec,
-  RunLiveStreamProvider,
 } from '@/entities/run'
 import { traceEventSchema, type TraceEvent } from '@/entities/trace'
 import { authContext } from '@/shared/auth/principal'
@@ -458,48 +458,52 @@ export default async function RunDetailPage({
           {/* 라이브 워크벤치 — 넓으면 「환경 메인 패널 + 관측 레일」 2컬럼(좁으면 세로 폴백; 인프라 패널이
               화면을 쪼개는 순간을 위해 뷰포트가 아닌 컨테이너 기준). 메인 = 환경 kind가 결정: browser/os-use는
               라이브 화면, repo는 파일 워크벤치 — 둘 다 self-null이라 해당 없는 쪽은 그려지지 않는다.
-              레일 = 트레이스·로그·터미널(관측 축). 모든 위젯이 self-null이라 빈 칸은 생기지 않는다. */}
+              레일 = 트레이스·로그·터미널(관측 축). 위젯 전부가 클라이언트에서 self-null 이라 컬럼이 통째로
+              빌 수 있다 — 빈 컬럼은 empty:hidden 으로 접고, 2컬럼 분할은 양쪽 모두 내용이 있을 때만 건다
+              (:has). 안 그러면 화면 없는 run 에서 왼쪽 3fr 이 빈 채 트레이스가 레일 폭에 갇힌다. */}
           <RunLiveStreamProvider
             runId={run.id}
             lanes={showFileWorkbench ? 'screen,fs' : 'screen'}
             initialStatus={run.status}
           >
-          <div className="grid gap-4 @5xl:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
-            <div className="min-w-0 space-y-4">
-              {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시
+            <div className="grid gap-4 @5xl:[&:has([data-live-main]>*):has([data-live-rail]>*)]:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
+              <div data-live-main className="min-w-0 space-y-4 empty:hidden">
+                {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시
                   프레임으로 2초마다 폴링 */}
-              <LiveScreen runId={run.id} initialStatus={run.status} />
-              {/* 라이브 리포 워크벤치 — repo 케이스면 샌드박스 워킹트리를 파일 탐색기(M/A/D 배지)+읽기전용
+                <LiveScreen runId={run.id} initialStatus={run.status} />
+                {/* 라이브 리포 워크벤치 — repo 케이스면 샌드박스 워킹트리를 파일 탐색기(M/A/D 배지)+읽기전용
                   에디터/diff로 4초마다 폴링, "따라가기"로 에이전트가 방금 바꾼 파일을 자동으로 연다. exec 채널이
                   선언된 run에서만 시도하고, 리포가 없는 샌드박스면 위젯이 self-null */}
-              {showFileWorkbench && <RunFileWorkbench runId={run.id} initialStatus={run.status} />}
-            </div>
-            <div className="min-w-0 space-y-4">
-              {/* 라이브 트레이스(observability ⑨) — 실행 중 쌓이는 궤적(디스패치 마크 + 러너 푸시 + 매니지드
+                {showFileWorkbench && (
+                  <RunFileWorkbench runId={run.id} initialStatus={run.status} />
+                )}
+              </div>
+              <div data-live-rail className="min-w-0 space-y-4 empty:hidden">
+                {/* 라이브 트레이스(observability ⑨) — 실행 중 쌓이는 궤적(디스패치 마크 + 러너 푸시 + 매니지드
                   이벤트 센티널)을 3초마다 폴링해 봉인 전 미리보기로 그린다 */}
-              <LiveTrace runId={run.id} initialStatus={run.status} />
-              {/* 로그·터미널은 run 이 선언한 채널(attach)일 때만 — 붙을 곳 없는 run 에서 영원히 비어 있는
+                <LiveTrace runId={run.id} initialStatus={run.status} />
+                {/* 로그·터미널은 run 이 선언한 채널(attach)일 때만 — 붙을 곳 없는 run 에서 영원히 비어 있는
                   패널을 띄우지 않는다. 선언이 없는 예전 eval/command run 은 종전대로 둘 다 연다. */}
-              {showLiveLogs && (
-                <div className="space-y-2.5">
-                  <SectionHeader title={t('liveLogs')} />
-                  <Card className="p-4">
-                    <LiveLogs runId={run.id} initialStatus={run.status} />
-                  </Card>
-                </div>
-              )}
-              {/* 샌드박스 터미널 — 실행 중인 케이스 컨테이너로 들어가는 대화형 셸(cd·env 유지). 셸은 샌드박스의
+                {showLiveLogs && (
+                  <div className="space-y-2.5">
+                    <SectionHeader title={t('liveLogs')} />
+                    <Card className="p-4">
+                      <LiveLogs runId={run.id} initialStatus={run.status} />
+                    </Card>
+                  </div>
+                )}
+                {/* 샌드박스 터미널 — 실행 중인 케이스 컨테이너로 들어가는 대화형 셸(cd·env 유지). 셸은 샌드박스의
                   실제 프로세스라 "셸 열기"를 눌렀을 때만 붙는다 (creator/admin, 컨트롤플레인이 강제) */}
-              {showTerminal && (
-                <div className="space-y-2.5">
-                  <SectionHeader title={t('sandbox')} />
-                  <Card className="p-4">
-                    <LiveTerminal runId={run.id} />
-                  </Card>
-                </div>
-              )}
+                {showTerminal && (
+                  <div className="space-y-2.5">
+                    <SectionHeader title={t('sandbox')} />
+                    <Card className="p-4">
+                      <LiveTerminal runId={run.id} />
+                    </Card>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
           </RunLiveStreamProvider>
         </section>
       )}
