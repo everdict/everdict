@@ -1,4 +1,4 @@
-export { RegisterJudgeForm } from './ui/register-judge-form'
+export { RegisterJudgeForm, type JudgeFormInitial } from './ui/register-judge-form'
 export { JudgePreviewPanel } from './ui/judge-preview-panel'
 export {
   validateJudgeAction,

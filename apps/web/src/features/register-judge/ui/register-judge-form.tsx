@@ -122,10 +122,26 @@ function Field({
   )
 }
 
+// Prefill for the new-version flow — the existing spec's fields as form values (all display strings).
+// model is the registered-Model ref id; a raw model string does not prefill (the picker only offers refs).
+export interface JudgeFormInitial {
+  id: string
+  version: string
+  description?: string
+  language?: Language
+  code?: string
+  model?: string
+  runtime?: string
+  image?: string
+  timeoutSec?: string
+}
+
 // Code-judge registration — THE judge authoring surface: user Python/Node code renders the verdict from the full
 // judge context, sandboxed via dispatch. (model/harness judges remain engine-internal for already-registered specs.)
 // runtimes = this workspace's runtimes (judge execution infra; empty = co-locate only).
 // models = registered LLM models — the optional Model binding the code may call (env-injected at dispatch).
+// initial prefill + lockId (a new version of the same judge — id fixed, team ownership stays the detail's move
+// control) + redirectDetailId (return to that judge's detail on success/cancel instead of the list).
 export function RegisterJudgeForm({
   workspace,
   runtimes = [],
@@ -134,6 +150,9 @@ export function RegisterJudgeForm({
   assignments = {},
   teams = [],
   defaultTeamId,
+  initial,
+  lockId = false,
+  redirectDetailId,
 }: {
   workspace: string
   runtimes?: { id: string }[]
@@ -144,20 +163,25 @@ export function RegisterJudgeForm({
   // plane's own fallback decides.
   teams?: TeamPickerOption[]
   defaultTeamId?: string
+  initial?: JudgeFormInitial
+  lockId?: boolean
+  redirectDetailId?: string
 }) {
   const router = useRouter()
   const refresh = useRefresh()
   const t = useTranslations('registerJudge')
-  const [id, setId] = useState('')
-  const [version, setVersion] = useState('1.0.0')
+  const initialLanguage: Language = initial?.language === 'node' ? 'node' : 'python'
+  const [id, setId] = useState(initial?.id ?? '')
+  const [version, setVersion] = useState(initial?.version ?? '1.0.0')
   const [teamId, setTeamId] = useState(defaultTeamId ?? '')
-  const [description, setDescription] = useState('')
-  const [language, setLanguage] = useState<Language>('python')
-  const [code, setCode] = useState<string>(PYTHON_STARTER)
-  const [model, setModel] = useState('')
-  const [runtime, setRuntime] = useState('')
-  const [image, setImage] = useState('')
-  const [timeoutSec, setTimeoutSec] = useState('')
+  const [description, setDescription] = useState(initial?.description ?? '')
+  const [language, setLanguage] = useState<Language>(initialLanguage)
+  // An entrypoint-in-image judge carries no code — fall back to the starter rather than an empty editor.
+  const [code, setCode] = useState<string>(initial?.code ? initial.code : STARTERS[initialLanguage])
+  const [model, setModel] = useState(initial?.model ?? '')
+  const [runtime, setRuntime] = useState(initial?.runtime ?? '')
+  const [image, setImage] = useState(initial?.image ?? '')
+  const [timeoutSec, setTimeoutSec] = useState(initial?.timeoutSec ?? '')
 
   const [result, setResult] = useState<ValidateJudgeResult>()
   const [error, setError] = useState<string>()
@@ -212,6 +236,11 @@ export function RegisterJudgeForm({
     })
   }
 
+  // Where success/cancel lands: the judge's own detail for the new-version flow, else the list.
+  const doneHref = redirectDetailId
+    ? `/${workspace}/judge/${encodeURIComponent(redirectDetailId)}`
+    : `/${workspace}/judges`
+
   function onSubmit() {
     if (!precheck()) return
     startSave(async () => {
@@ -221,7 +250,7 @@ export function RegisterJudgeForm({
       const r = await createJudgeAction(teamId ? { ...spec, teamId } : spec)
       if (r.ok) {
         toast.success(t('registered', { id: r.id ?? '', version: r.version ?? '' }))
-        router.push(`/${workspace}/judges`)
+        router.push(doneHref)
         refresh()
       } else {
         setError(r.error ?? t('errorGeneric'))
@@ -234,12 +263,14 @@ export function RegisterJudgeForm({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4">
-        <Field label={t('idLabel')} hint={t('idHint')}>
+        <Field label={t('idLabel')} {...(lockId ? {} : { hint: t('idHint') })}>
           <Input
             value={id}
             onChange={(e) => setId(e.target.value)}
             placeholder="e2e-booking"
             autoComplete="off"
+            readOnly={lockId}
+            className={cn(lockId && 'opacity-60')}
           />
         </Field>
         <Field label={t('versionLabel')} hint={t('versionHint')}>
@@ -261,7 +292,8 @@ export function RegisterJudgeForm({
         />
       </Field>
 
-      <TeamPicker id="judge-team" teams={teams} value={teamId} onChange={setTeamId} />
+      {/* A new version keeps the judge's owning team — re-filing is the detail's TeamOwnerControl, not here. */}
+      {!lockId && <TeamPicker id="judge-team" teams={teams} value={teamId} onChange={setTeamId} />}
 
       {/* The code — the judge itself. Contract: argv[1] = context JSON path; print Score[] last on stdout. */}
       <div className="space-y-2.5">
@@ -361,7 +393,7 @@ export function RegisterJudgeForm({
           )}
           {t('validate')}
         </Button>
-        <Button variant="ghost" onClick={() => router.push(`/${workspace}/judges`)}>
+        <Button variant="ghost" onClick={() => router.push(doneHref)}>
           {t('cancel')}
         </Button>
       </div>

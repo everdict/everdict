@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { ChevronLeft, GitCompare } from 'lucide-react'
+import { ChevronLeft, GitBranchPlus, GitCompare } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { MentionInChatButton, OpenConversationButton } from '@/widgets/infra-panel'
@@ -178,6 +178,15 @@ export default async function JudgeDetailPage({
                 >
                   <GitCompare className="size-3.5" />
                   {t('compareVersions')}
+                </Link>
+              )}
+              {can(principal?.roles, 'judges:write') && (
+                <Link
+                  href={`/${workspace}/judge/${encodeURIComponent(judge.id)}/new-version?v=${encodeURIComponent(latest)}`}
+                  className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                >
+                  <GitBranchPlus className="size-3.5" />
+                  {t('newVersion')}
                 </Link>
               )}
               {canDeleteJudge && (
