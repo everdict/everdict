@@ -1,0 +1,151 @@
+{
+  "title": "Everdict \u2014 Operator",
+  "uid": "everdict-operator",
+  "schemaVersion": 39,
+  "tags": [
+    "everdict",
+    "operator"
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Dispatch rate by outcome",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(everdict_dispatch_total[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Scheduler queue depth",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "everdict_scheduler_queued",
+          "legendFormat": "queued"
+        },
+        {
+          "expr": "sum(everdict_scheduler_inflight)",
+          "legendFormat": "in-flight"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Case outcomes at settle (CaseOutcome vocabulary)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(everdict_case_outcome_total[15m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Unmeasured scores by reason",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(everdict_unmeasured_total[15m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Time-to-verdict (p50 / p90)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(everdict_verdict_latency_seconds_bucket[30m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(everdict_verdict_latency_seconds_bucket[30m])))",
+          "legendFormat": "p90"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Circuit breakers open",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "everdict_breaker_open",
+          "legendFormat": "{{circuit}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Batch resilience (spillover / speculation / OOM escalation)",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(everdict_spillover_total[15m]))",
+          "legendFormat": "spillover"
+        },
+        {
+          "expr": "sum(rate(everdict_speculation_fired_total[15m]))",
+          "legendFormat": "speculation fired"
+        },
+        {
+          "expr": "sum(rate(everdict_oom_escalated_total[15m]))",
+          "legendFormat": "oom escalated"
+        }
+      ]
+    }
+  ]
+}

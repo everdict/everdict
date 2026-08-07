@@ -558,6 +558,7 @@ describe("MCP tools", () => {
       "exec_in_run",
       "fail_job",
       "fire_schedule",
+      "flake_scorecards",
       "gate_scorecards",
       "get_agent",
       "get_dataset",

@@ -1006,6 +1006,13 @@ export class ScorecardService {
     return this.analytics.opsReport(tenant, opts);
   }
 
+  flake(
+    tenant: string,
+    opts: { datasetId: string; harnessId?: string; visibleTeams?: string[] },
+  ): ReturnType<ScorecardAnalyticsService["flake"]> {
+    return this.analytics.flake(tenant, opts);
+  }
+
   gateAudit(
     tenant: string,
     opts: { from?: string; to?: string; visibleTeams?: string[] } = {},

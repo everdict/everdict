@@ -4,7 +4,7 @@ import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 
 // OpenAPI descriptor for the workspace ops report (doc-only — never validates/serializes; see api/openapi.ts).
-export const opsReportDocs: Record<"read" | "gateAudit", FastifySchema> = {
+export const opsReportDocs: Record<"read" | "gateAudit" | "metrics", FastifySchema> = {
   read: {
     summary: "Read the workspace ops report",
     description:
@@ -23,6 +23,21 @@ export const opsReportDocs: Record<"read" | "gateAudit", FastifySchema> = {
     response: {
       200: { description: "The ops report for the window", ...toJsonSchema(OpsReportSchema) },
       ...errorResponses(400, 401, 403),
+    },
+  },
+  metrics: {
+    summary: "Workspace-scoped Prometheus metrics",
+    description:
+      "OpenMetrics-style text exposition of THIS workspace's ledger tallies (batch fates, case outcomes, " +
+      "evidence planes, rates) — the customer-facing counterpart of the operator /metrics, containing ONLY " +
+      "the calling workspace's numbers. Authenticate the scrape with an API key (`Authorization: Bearer " +
+      "ak_…` as the scrape config's bearer_token). Gauges sampled from the ledger at scrape time. Requires " +
+      "scorecards:read.",
+    tags: ["workspace"],
+    produces: ["text/plain"],
+    response: {
+      200: { description: "Prometheus text exposition (text/plain; version=0.0.4)", type: "string" },
+      ...errorResponses(401, 403),
     },
   },
   gateAudit: {

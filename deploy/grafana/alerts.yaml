@@ -1,0 +1,42 @@
+# Prometheus alerting rules for the Everdict operator scrape (GET /metrics, bearer-gated).
+# Import into Prometheus `rule_files` (or Grafana-managed alerts). Thresholds are starting points —
+# tune per deployment.
+groups:
+  - name: everdict-operator
+    rules:
+      - alert: EverdictInfraFailureRateHigh
+        expr: >
+          sum(rate(everdict_case_outcome_total{outcome="infra_failed"}[30m]))
+            /
+          sum(rate(everdict_case_outcome_total[30m])) > 0.05
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Infra-failure share of settled cases above 5%"
+          description: "The platform's failure share is drifting into the product's numbers — check backends/runners before anyone reads a scorecard as a regression."
+      - alert: EverdictUnmeasuredRateHigh
+        expr: >
+          sum(rate(everdict_unmeasured_total[30m])) > 0
+            and
+          sum(rate(everdict_unmeasured_total{reason="grader_error"}[30m]))
+            /
+          sum(rate(everdict_unmeasured_total[30m])) > 0.5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Grader/judge errors dominate the unmeasured tally"
+          description: "A scoring-plane outage (judge transport, provider keys) — recoverable via rescore-unmeasured once fixed; verdicts are ungated meanwhile."
+      - alert: EverdictQueueBackedUp
+        expr: everdict_scheduler_queued > 100
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Control-plane scheduler queue above 100 for 30m"
+          description: "Sustained backlog — check runner capacity / breaker state (everdict_breaker_open) before raising concurrency."
+      - alert: EverdictBreakerOpen
+        expr: max(everdict_breaker_open) > 0
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "A runtime circuit breaker has been open for 10m"
+          description: "Dispatches to that runtime are being refused/spilled — the runtime is down or persistently failing."

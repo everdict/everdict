@@ -17,6 +17,7 @@ import {
   computeAnalysis,
   diffScorecards,
   diffTrials,
+  flakeIndex,
   gateAudit,
   leaderboard,
   ownedByVisibleTeam,
@@ -104,6 +105,28 @@ export class ScorecardAnalyticsService {
       ...(opts.from ? { from: opts.from } : {}),
       ...(opts.to ? { to: opts.to } : {}),
     });
+  }
+
+  // A2 (catalog T3/T9) — the cross-batch flake index for a dataset: same (case, harness@version, runtime)
+  // key across succeeded batches, verdicts derived under each batch's OWN stamped policy. Detail hydration
+  // through the facade's get (verdicts need per-case results).
+  async flake(
+    tenant: string,
+    opts: { datasetId: string; harnessId?: string; visibleTeams?: string[] },
+  ): Promise<ReturnType<typeof flakeIndex>> {
+    const rows = await this.deps.store.list(tenant, {
+      dataset: opts.datasetId,
+      status: "succeeded",
+      kind: "scorecard",
+      ...(opts.harnessId ? { harness: opts.harnessId } : {}),
+      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
+    });
+    const detailed: ScorecardRecord[] = [];
+    for (const row of rows) {
+      const record = await this.getRecord(row.id);
+      if (record) detailed.push(record);
+    }
+    return flakeIndex(detailed);
   }
 
   // B2 — the governance window over the ledger's recorded gate decisions. The numbers are the domain's

@@ -244,6 +244,26 @@ const docs = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
+  flake: {
+    summary: "Cross-batch flake index for a dataset",
+    description:
+      "The same (case, harness@version, runtime) key observed across succeeded batches, with the verdicts it " +
+      "produced under each batch's OWN stamped policy — 'that test is just flaky' made refutable (T3/T9). " +
+      "Entries list keys that produced BOTH outcomes (most unstable first, flakeScore = min(p,1−p)×2); an " +
+      "unverdicted case (infra death, unmeasured-only) is no observation at all — an outage is not a flake. " +
+      "Advisory only: nothing is auto-quarantined. Requires scorecards:read.",
+    tags: ["scorecard"],
+    querystring: toJsonSchema(
+      z.object({
+        dataset: z.string().describe("Dataset id (required)"),
+        harness: z.string().optional().describe("Restrict to one harness id"),
+      }),
+    ),
+    response: {
+      200: { description: "Flake entries (most unstable first) + observed-key count", type: "object" },
+      ...errorResponses(400, 401, 403),
+    },
+  },
   diff: {
     summary: "Diff two scorecards (baseline vs candidate)",
     description:

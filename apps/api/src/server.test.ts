@@ -2040,6 +2040,23 @@ describe("API — GET /metrics (operator scrape, fail-closed)", () => {
   });
 });
 
+describe("API — GET /workspace/metrics (workspace-scoped scrape, C2)", () => {
+  it("serves ONLY the calling workspace's ledger tallies as a text exposition", async () => {
+    const { app } = server({ authenticator: roleAuth(["member"], "acme") });
+    const res = await app.inject({
+      method: "GET",
+      url: "/workspace/metrics",
+      headers: { authorization: "Bearer x" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.body).toContain("everdict_workspace_batches");
+    expect(res.body).toContain('everdict_workspace_case_outcome{outcome="infra_failed"}');
+    // An empty ledger renders NO rate series — absence, never 0%.
+    expect(res.body).not.toContain("everdict_workspace_rate");
+  });
+});
+
 describe("API — internal scheduling dials (operator plane)", () => {
   // Minimal in-memory stand-in mirroring main.ts's override-layer semantics (null = clear the override).
   function fakeControl() {

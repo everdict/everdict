@@ -405,6 +405,33 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     },
   );
 
+  // A2 — cross-batch flake index (static path → before :id).
+  app.get<{ Querystring: { dataset?: string; harness?: string } }>(
+    "/scorecards/flake",
+    { schema: scorecardDocs.flake },
+    async (req, reply) => {
+      if (!deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const { dataset, harness } = req.query;
+      if (!dataset)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset query parameter is required." });
+      try {
+        gate(principal, "scorecards:read");
+        return reply.send(
+          await deps.scorecardService.flake(principal.workspace, {
+            datasetId: dataset,
+            ...(harness ? { harnessId: harness } : {}),
+            ...(await teamCeiling(deps, principal)),
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // B3 — manifest verification: is the registry still exactly what this batch evaluated?
   app.post<{ Params: { id: string } }>(
     "/scorecards/:id/verify-manifest",

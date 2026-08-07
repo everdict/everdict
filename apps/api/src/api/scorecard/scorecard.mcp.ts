@@ -476,6 +476,28 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     );
 
     server.registerTool(
+      "flake_scorecards",
+      {
+        description:
+          "Cross-batch flake index for a dataset: (case, harness@version, runtime) keys that produced BOTH pass and fail verdicts across succeeded batches — 'that test is just flaky' made refutable. Verdicts derive under each batch's OWN stamped policy; an unverdicted case (infra death) is no observation — an outage is not a flake. Advisory: nothing is auto-quarantined. HTTP parity (GET /scorecards/flake).",
+        inputSchema: {
+          dataset: z.string(),
+          harness: z.string().optional().describe("restrict to one harness id"),
+        },
+      },
+      ({ dataset, harness }) =>
+        run(principal, "scorecards:read", async () =>
+          ok(
+            await scorecards.flake(ws, {
+              datasetId: dataset,
+              ...(harness ? { harnessId: harness } : {}),
+              ...(await teamCeiling(ctx.deps, principal)),
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
       "verify_scorecard_manifest",
       {
         description:
