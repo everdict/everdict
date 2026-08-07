@@ -7,7 +7,7 @@ import type {
   JudgeSpec,
   Placement,
 } from "@everdict/contracts";
-import { modelBindingLabel } from "@everdict/domain";
+import { judgeGradeable, modelBindingLabel } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
@@ -29,7 +29,7 @@ export interface ScoringServiceDeps {
 // provider tokens for a meaningless verdict and attaches a spurious judge:<id> score. The judge is strictly downstream
 // of a produced outcome, so judge starvation (0 gradeable results) must be surfaced, not silently "applied".
 export function isGradeable(result: CaseResult): boolean {
-  return result.failure === undefined;
+  return judgeGradeable(result); // one domain owner for the rule — see @everdict/domain case-outcome.ts
 }
 
 // Gradeability tally for the judge phase — surfaced so the scorecard can say "judges skipped: 0 gradeable traces

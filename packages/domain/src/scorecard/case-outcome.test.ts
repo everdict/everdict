@@ -45,6 +45,20 @@ describe("caseOutcome — the case's fate as a first-class value", () => {
   });
 });
 
+describe("caseOutcome — cancellation is neither infra nor product", () => {
+  it("a CANCELLED failure is its own fate at any stage — recovery never retries a deliberate stop", () => {
+    const killed = result("a", {
+      pass: true,
+      failure: { stage: "run", class: "infra", code: "CANCELLED", message: "batch stopped", retryable: false },
+    });
+    expect(caseOutcome(killed)).toMatchObject({ status: "cancelled" });
+    // and it carries no product verdict even though a measured pass survived the kill
+    const sc: Scorecard = { suiteId: "s", harness: "h@1", results: [killed] };
+    expect(scorecardPassRate(sc).total).toBe(0);
+    expect(scorecardOutcomes(sc).cancelled).toBe(1);
+  });
+});
+
 describe("scorecardOutcomes — denominators that never conflate platform and product", () => {
   const sc: Scorecard = {
     suiteId: "s",
@@ -59,13 +73,14 @@ describe("scorecardOutcomes — denominators that never conflate platform and pr
 
   it("splits executed/gradeable/verdicted and tallies each fate once", () => {
     expect(scorecardOutcomes(sc, 6)).toEqual({
-      requested: 6, // 2 more were never launched (cancelled) — requested − executed
+      requested: 6, // 2 more were never launched — requested − executed
       executed: 4,
       gradeable: 3,
       verdicted: 2,
       passed: 1,
       failed: 1,
       infraFailed: 1,
+      cancelled: 0,
       unmeasured: 1,
     });
   });

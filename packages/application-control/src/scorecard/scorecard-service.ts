@@ -257,6 +257,9 @@ export class ScorecardService {
         ...(input.traceSink ? { traceSink: input.traceSink } : {}),
         ...(input.oomAutoBoost ? { oomAutoBoost: true } : {}),
       },
+      // The batch's ASK — cases × trials. requested − executed is the unlaunched/cancelled tally, and it is
+      // unrecoverable from the results alone once cancellation skipped cases.
+      requested: dataset.cases.length * trials,
       // Reproducibility manifest — content digests of exactly what this batch evaluates, sealed HERE because
       // submit is the only moment the resolved case bundle + resolved spec + grading plan are all in hand.
       manifest: {

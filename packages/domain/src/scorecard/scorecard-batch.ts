@@ -64,6 +64,8 @@ export interface NewQueuedBatchInput {
   // Reproducibility digests of exactly what this batch evaluates (resolved case bundle / resolved spec /
   // grading plan) — sealed at submit, because submit is the only moment all three are in hand resolved.
   manifest?: ScorecardRecord["manifest"];
+  // The batch's ASK (cases × trials) — the requested−executed gap is unrecoverable once cases were skipped.
+  requested?: number;
   now: string;
 }
 
@@ -72,6 +74,7 @@ export interface NewQueuedBatchInput {
 export interface NewQueuedIngestInput {
   id: string;
   tenant: string;
+  requested?: number; // the ingested trace count — the ask of an ingest batch
   dataset: { id: string; version: string };
   harness: { id: string; version: string }; // the harness that produced the trace (label)
   origin?: ScorecardOrigin;
@@ -174,6 +177,7 @@ export class ScorecardBatch {
       ...(input.subset ? { subset: input.subset } : {}),
       orchestration: input.orchestration,
       ...(input.manifest ? { manifest: input.manifest } : {}),
+      ...(input.requested !== undefined ? { requested: input.requested } : {}),
       createdAt: input.now,
       updatedAt: input.now,
     };
@@ -184,6 +188,7 @@ export class ScorecardBatch {
     return {
       id: input.id,
       tenant: input.tenant,
+      ...(input.requested !== undefined ? { requested: input.requested } : {}),
       dataset: input.dataset,
       harness: input.harness,
       status: "queued",

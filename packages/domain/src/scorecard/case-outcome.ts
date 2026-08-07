@@ -11,10 +11,17 @@ export type CaseOutcome =
   // Executed cleanly but nothing pass-deciding was measured (observation-only graders, or every deciding
   // grader unmeasured) — excluded from pass rate, distinct from a FAIL.
   | { status: "unmeasured" }
-  | { status: "infra_failed"; failure: CaseFailure };
+  | { status: "infra_failed"; failure: CaseFailure }
+  // The batch was stopped mid-case — neither the platform's fault nor the agent's outcome. A case with no
+  // result at all is the OTHER cancellation shape (requested − executed); this one covers a killed case that
+  // still left a classified result.
+  | { status: "cancelled"; failure: CaseFailure };
 
 export function caseOutcome(result: Pick<CaseResult, "scores" | "failure">): CaseOutcome {
   const failure = result.failure;
+  // A user/supersede stop is CANCELLATION, not an infrastructure failure — recovery retries infra, never a
+  // deliberate stop. Identified by the classified failure's code (the cancel paths stamp CANCELLED).
+  if (failure?.code === "CANCELLED") return { status: "cancelled", failure };
   if (failure && PRE_OUTCOME_STAGES.has(failure.stage)) return { status: "infra_failed", failure };
   const verdict = caseVerdict(result);
   return verdict === undefined ? { status: "unmeasured" } : { status: "completed", verdict };
@@ -26,13 +33,22 @@ export function caseOutcome(result: Pick<CaseResult, "scores" | "failure">): Cas
 // Isomorphic to the contracts ScorecardOutcomesSchema.
 export interface ScorecardOutcomes {
   executed: number; // results present
-  gradeable: number; // legitimately executed (not infra_failed)
+  gradeable: number; // legitimately executed (not infra_failed / cancelled)
   verdicted: number; // gradeable with a product verdict
   passed: number;
   failed: number;
   infraFailed: number;
+  cancelled: number; // killed mid-case with a classified result (unlaunched cancels are requested − executed)
   unmeasured: number; // gradeable but nothing pass-deciding measured
   requested?: number;
+}
+
+// Judge-gradeability is a DIFFERENT question from verdict-legality: a judge needs a real trace/snapshot to
+// read, so ANY classified failure (including collect — no trace) starves it, while the verdict only refuses
+// pre-outcome failures (collect keeps its compute-bound measurements). One domain owner for each question —
+// the scoring service delegates here instead of re-deriving the rule.
+export function judgeGradeable(result: Pick<CaseResult, "failure">): boolean {
+  return result.failure === undefined;
 }
 
 export function scorecardOutcomes(sc: Pick<Scorecard, "results">, requested?: number): ScorecardOutcomes {
@@ -43,11 +59,16 @@ export function scorecardOutcomes(sc: Pick<Scorecard, "results">, requested?: nu
     passed: 0,
     failed: 0,
     infraFailed: 0,
+    cancelled: 0,
     unmeasured: 0,
     ...(requested !== undefined ? { requested } : {}),
   };
   for (const r of sc.results) {
     const o = caseOutcome(r);
+    if (o.status === "cancelled") {
+      out.cancelled++;
+      continue;
+    }
     if (o.status === "infra_failed") {
       out.infraFailed++;
       continue;

@@ -45,6 +45,6 @@ export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
     headlinePassRate: headline,
     // Case-fate denominators — 841/970 (verdicted) and 841/1000 (requested) are different claims; an
     // infra-failed case is recovery work with NO product verdict, so it never enters pass/total above either.
-    outcomes: scorecardOutcomes(record.scorecard),
+    outcomes: scorecardOutcomes(record.scorecard, record.requested),
   };
 }

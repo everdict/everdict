@@ -16,7 +16,13 @@ export {
   scorecardPassRate,
   summarizeScorecard,
 } from "./scorecard/scorecard.js";
-export { type CaseOutcome, caseOutcome, type ScorecardOutcomes, scorecardOutcomes } from "./scorecard/case-outcome.js";
+export {
+  type CaseOutcome,
+  caseOutcome,
+  judgeGradeable,
+  type ScorecardOutcomes,
+  scorecardOutcomes,
+} from "./scorecard/case-outcome.js";
 export {
   DEFAULT_VERDICT_POLICY,
   evaluateVerdict,

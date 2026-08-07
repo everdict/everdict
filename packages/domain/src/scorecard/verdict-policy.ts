@@ -108,8 +108,10 @@ export function evaluateVerdict(
   result: Pick<CaseResult, "scores"> & Pick<Partial<CaseResult>, "failure">,
   policy: VerdictPolicy = DEFAULT_VERDICT_POLICY,
 ): VerdictEvaluation {
-  // A case that never legitimately executed has no product verdict (caseOutcome's infra_failed).
-  if (result.failure && PRE_OUTCOME_STAGES.has(result.failure.stage)) return {};
+  // A case that never legitimately executed has no product verdict (caseOutcome's infra_failed) — and a
+  // deliberately stopped case (CANCELLED) has none at ANY stage: partial work under a kill is not an outcome.
+  if (result.failure && (result.failure.code === "CANCELLED" || PRE_OUTCOME_STAGES.has(result.failure.stage)))
+    return {};
   // Only measurements decide — unmeasured/invalid placeholders never reach a rung.
   const measured = measuredScores(result.scores);
 

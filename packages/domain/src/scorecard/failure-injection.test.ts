@@ -124,6 +124,7 @@ describe("failure injection — no failure converts into a normal number or prod
       passed: 1,
       failed: 1,
       infraFailed: 1, // the dispatch death
+      cancelled: 0,
       unmeasured: 3, // grader error + judge skip + legacy sentinel — visible, never counted
     });
     const monsterSummary = summarizeScorecard(MONSTER);

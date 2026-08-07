@@ -221,6 +221,7 @@ export const scorecardRecordSchema = z.object({
       passed: z.number().int(),
       failed: z.number().int(),
       infraFailed: z.number().int(),
+      cancelled: z.number().int(), // killed mid-case with a result (unlaunched = requested − executed)
       unmeasured: z.number().int(),
       requested: z.number().int().optional(),
     })

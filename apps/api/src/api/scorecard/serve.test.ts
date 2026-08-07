@@ -60,6 +60,7 @@ describe("serveScorecard (P1g served derivations — the client mirrors are dele
       passed: 1,
       failed: 1,
       infraFailed: 0,
+      cancelled: 0,
       unmeasured: 1,
     });
   });
@@ -88,6 +89,20 @@ describe("serveScorecard (P1g served derivations — the client mirrors are dele
     expect(served.scorecard?.results.find((r) => r.caseId === "z")?.verdict).toBeUndefined();
     expect(served.casePass).toEqual({ pass: 1, total: 1 });
     expect(served.outcomes).toMatchObject({ executed: 2, gradeable: 1, verdicted: 1, infraFailed: 1 });
+  });
+
+  it("the persisted ask rides the denominators — requested − executed is the unlaunched tally", () => {
+    const served = serveScorecard(
+      record({
+        requested: 5, // sealed at submit (cases × trials); 4 never launched (cancelled batch)
+        scorecard: {
+          suiteId: "d@1.0.0",
+          harness: "h@1.0.0",
+          results: [caseResult("a", [{ metric: "tests_pass", value: 1, pass: true }])],
+        },
+      }),
+    );
+    expect(served.outcomes).toMatchObject({ requested: 5, executed: 1 });
   });
 
   it("prefers the trial-aware passAt1 for the headline", () => {

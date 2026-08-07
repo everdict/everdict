@@ -56,6 +56,7 @@ export const ScorecardOutcomesSchema = z.object({
   passed: z.number().int().nonnegative(),
   failed: z.number().int().nonnegative(),
   infraFailed: z.number().int().nonnegative(),
+  cancelled: z.number().int().nonnegative(), // killed mid-case with a result (unlaunched = requested − executed)
   unmeasured: z.number().int().nonnegative(),
   requested: z.number().int().nonnegative().optional(),
 });
@@ -253,6 +254,9 @@ export const ScorecardRecordSchema = z.object({
   // the stamp existed — those were judged under the authority ladder the default policy encodes. mig 0125.
   verdictPolicy: VerdictPolicyRefSchema.optional(),
   manifest: ScorecardManifestSchema.optional(), // reproducibility digests, sealed at submit (mig 0126)
+  // The batch's ASK — cases × trials at submit (ingest: the trace count). The requested−executed gap is the
+  // unlaunched/cancelled tally no per-result walk can recover once cases were skipped. mig 0127.
+  requested: z.number().int().nonnegative().optional(),
   // Which version of the span→event PROJECTION this batch was judged under (N6,
   // docs/architecture/otel-trace-model.md). Spans are immutable once ended, so the record is stable — but the
   // projection is code, and a verdict nobody can re-derive is a verdict nobody can defend. Storing the version

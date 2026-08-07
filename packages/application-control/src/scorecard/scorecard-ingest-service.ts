@@ -74,6 +74,7 @@ export class ScorecardIngestService {
     const record: ScorecardRecord = ScorecardBatch.newQueuedIngest({
       id: this.newId(),
       tenant: input.tenant,
+      requested: input.traces.length, // an ingest batch's ask = the uploaded traces
       dataset: dataset ? { id: dataset.id, version: dataset.version } : TRACE_EVAL_LABEL,
       harness, // the harness that produced the trace (label) — sentinel when unspecified
       ...(input.origin ? { origin: input.origin } : {}),

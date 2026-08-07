@@ -380,7 +380,7 @@ describe("PgScorecardStore", () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     await new PgScorecardStore(client).create(rec({ analysisRef: ref }));
     expect(calls[0]?.text).toMatch(/analysis_ref/); // column present in the INSERT list (absent pre-fix)
-    expect(calls[0]?.params?.[19]).toBe(ref); // positioned after manifest+scorecard ($19), before sink_export
+    expect(calls[0]?.params?.[20]).toBe(ref); // positioned after manifest+requested+scorecard ($20), before sink_export
   });
 
   it("list(filter) → dataset_id/status clauses in the SQL WHERE + parameterization (avoids a full scan)", async () => {
