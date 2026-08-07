@@ -311,8 +311,28 @@ describe("diffScorecards — comparability first", () => {
     const diff = diffScorecards(numeric, categorical);
     expect(diff.incomparable).toEqual([{ metric: "tier", reason: "kind_changed" }]);
     expect(diff.metrics.find((m) => m.metric === "tier")).toBeUndefined(); // excluded, not a delta
-    expect(diff.comparability).toBe("partial");
+    // The ONLY shared metric became incomparable — the comparison does not hold at all.
+    expect(diff.comparability).toBe("none");
     expect(diff.overlap).toEqual({ sharedCases: 1, baselineCases: 1, candidateCases: 1 });
+    // With another comparable metric alongside, the same kind change downgrades to partial instead.
+    const numeric2 = cardOf([
+      {
+        ...numeric.results[0],
+        scores: [...(numeric.results[0]?.scores ?? []), one("a", "cost_usd", 0.4).scores[0]],
+      } as CaseResult,
+    ]);
+    const categorical2: Scorecard = {
+      ...categorical,
+      results: [
+        {
+          ...categorical.results[0],
+          scores: [...(categorical.results[0]?.scores ?? []), one("a", "cost_usd", 0.5).scores[0]],
+        } as CaseResult,
+      ],
+    };
+    const diff2 = diffScorecards(numeric2, categorical2);
+    expect(diff2.incomparable).toEqual([{ metric: "tier", reason: "kind_changed" }]);
+    expect(diff2.comparability).toBe("partial");
   });
 
   it("identical full-overlap scorecards are fully comparable", () => {
