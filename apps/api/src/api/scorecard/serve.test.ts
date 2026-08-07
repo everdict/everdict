@@ -138,7 +138,6 @@ describe("serveScorecard (P1g served derivations — the client mirrors are dele
         {
           graderId: "judge",
           metric: "judge:q",
-          value: 0,
           status: "unmeasured",
           reason: "grader_error",
           retryable: true,

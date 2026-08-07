@@ -37,7 +37,13 @@ spine contracts MUST be interfaces — many impls live in adapter packages, the 
   `Driver.reap?`/`Driver.snapshot?` are optional (docker-only today): remove / image-capture a compute by its
   recorded id — the session reaper's crash path and the agent-worlds snapshot (`RunSession.world`/`hibernate`/
   `snapshots` on `records/run.ts` are their record half).
-- **Grader** — `packages/contracts/src/execution/grader.ts`: `Score{graderId,metric,value,pass?}` + `GradeContext`.
+- **Grader** — `packages/contracts/src/execution/grader.ts`: `Grader` + `GradeContext` + the **measurement algebra**.
+  `Score` is a `z.discriminatedUnion("status", …)` of `MeasuredScore{value,pass?,label?}` | `UnmeasuredScore{reason,retryable}`
+  | `InvalidScore{reason:"contract_violation"}` — the non-measurements have NO `value`, so illegal states are
+  unrepresentable and `.value` is unreachable without the `isMeasured` type predicate. ALL legacy tolerance lives in ONE
+  read-time normalizer wired into `ScoreSchema` as a `z.preprocess` step, so every parse boundary (the job-result
+  sentinel, the Pg record schemas, MCP inputs, a script grader's stdout) normalizes by construction; `ScoreUnionSchema`
+  is the strict algebra, `sanitizeScore` its producer-side twin.
 
 ## Error model (`packages/contracts/src/errors.ts`)
 `AppError` is abstract; each subclass fixes `readonly status` → **HTTP status derives from the subtype**,

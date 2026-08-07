@@ -1,10 +1,10 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
+import { BadRequestError, type GradeContext, type Grader, type MeasuredScore } from "@everdict/contracts";
 
 // Whether the final DOM contains specific text (browser snapshot target).
 export class DomContainsGrader implements Grader {
   readonly id = "dom-contains";
   constructor(private readonly needle: string) {}
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<MeasuredScore> {
     const snap = ctx.snapshot;
     if (snap.kind !== "browser") {
       throw new BadRequestError("BAD_REQUEST", { kind: snap.kind }, "dom-contains requires a browser snapshot.");
@@ -24,7 +24,7 @@ export class AnswerMatchGrader implements Grader {
     private readonly expect?: string,
     private readonly mode: "contains" | "exact" = "contains",
   ) {}
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<MeasuredScore> {
     const msgs = ctx.trace.filter((e) => e.kind === "message" && e.role === "assistant");
     const last = msgs.at(-1);
     const answer = last && last.kind === "message" ? last.text : "";
@@ -40,7 +40,7 @@ export class AnswerMatchGrader implements Grader {
 export class UrlMatchesGrader implements Grader {
   readonly id = "url-matches";
   constructor(private readonly pattern: string) {}
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<MeasuredScore> {
     const snap = ctx.snapshot;
     if (snap.kind !== "browser") {
       throw new BadRequestError("BAD_REQUEST", { kind: snap.kind }, "url-matches requires a browser snapshot.");

@@ -86,7 +86,6 @@ describe("runSuite", () => {
       {
         graderId: "dispatch",
         metric: "error",
-        value: 0,
         status: "unmeasured",
         reason: "missing_evidence",
         retryable: true,

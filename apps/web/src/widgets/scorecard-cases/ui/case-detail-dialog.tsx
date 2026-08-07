@@ -344,6 +344,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // 따로 서 있으므로 run 상세의 값 칸처럼 0/1 도 실제 값으로 보여준다.
 function displayValue(s: CaseScoreView): string {
   if (s.label !== undefined && s.label !== '') return s.label
+  // 측정이 아닌 행은 호출 전에 걸러진다(isUnmeasuredScore) — 그래도 값이 없으면 대시가 정직한 표시다.
+  if (s.value === undefined) return '–'
   return fmtMetricValue(classifyMetric({ metric: s.metric, mean: s.value }), s.value)
 }
 

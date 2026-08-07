@@ -29,9 +29,15 @@ describe("makeGradersFromEnv", () => {
     const graders = makeGradersFromEnv([{ id: "steps" }, { id: "judge", config: { rubric: "r" } }], {});
     expect(graders.map((g) => g.id)).toEqual(["steps", "judge"]);
     const [judgeScore] = toScores((await graders[1]?.grade(ctx("hi"))) ?? []);
-    expect(judgeScore?.pass).toBeUndefined(); // skip = pass undefined
-    expect(String(judgeScore?.detail)).toContain("skipped");
-    expect(judgeScore?.metric).toBe("judge");
+    // An unconstructable grader is UNMEASURED — no value, no pass, so it cannot enter a mean or a passRate.
+    expect(judgeScore).toEqual({
+      graderId: "judge",
+      metric: "judge",
+      status: "unmeasured",
+      reason: "unsupported",
+      retryable: false,
+      detail: expect.stringContaining("skipped"),
+    });
   });
   it("judge configured: a real JudgeGrader with the injected Judge (transport made deterministic by fetch injection)", async () => {
     const fetchImpl = (async () => ({

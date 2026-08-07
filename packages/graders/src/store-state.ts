@@ -1,4 +1,10 @@
-import { BadRequestError, type GradeContext, type Grader, type Score, type StoreReadQuery } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type GradeContext,
+  type Grader,
+  type MeasuredScore,
+  type StoreReadQuery,
+} from "@everdict/contracts";
 
 // Grades a run on the POST-RUN state of a purpose:"data" store (P2). It reads the case's isolation slice via
 // ctx.readStore — a co-located runtime exec (an internal store URL never reaches a remote grader, see
@@ -16,7 +22,7 @@ export class StoreStateGrader implements Grader {
   readonly id = "store-state";
   constructor(private readonly cfg: StoreStateConfig) {}
 
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<MeasuredScore> {
     // A store-state grader needs a store-capable runtime (topology). Missing readStore = a config/placement error, like
     // an outcome grader with no compute — surfaced loud, not silently passed.
     if (!ctx.readStore) {

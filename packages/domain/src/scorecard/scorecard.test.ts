@@ -1,4 +1,5 @@
 import type { CaseResult, Score, Scorecard } from "@everdict/contracts";
+import { ScoreSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   caseVerdict,
@@ -41,7 +42,7 @@ describe("measurementCoverage", () => {
       results: [
         withScores("a", [
           { graderId: "t", metric: "tests_pass", value: 1, pass: true },
-          { graderId: "j", metric: "judge:q", value: 0, status: "unmeasured", reason: "grader_error" },
+          { graderId: "j", metric: "judge:q", status: "unmeasured", reason: "grader_error", retryable: true },
         ]),
         withScores("b", [{ graderId: "t", metric: "tests_pass", value: 0, pass: false }]),
       ],
@@ -171,7 +172,6 @@ describe("measurement status — an unmeasured score never enters an aggregate",
           {
             graderId: "cost",
             metric: "cost_usd",
-            value: 0,
             status: "unmeasured",
             reason: "grader_error",
             retryable: true,
@@ -190,14 +190,25 @@ describe("measurement status — an unmeasured score never enters an aggregate",
   });
 
   it("legacy rows without `status` are normalized at read: [grader-error]/skipped: sentinels stay out of the mean", () => {
-    // Rows persisted before the status field marked the two skip producers in detail prose only.
+    // Rows persisted before the status field marked the two skip producers in detail prose only. Legacy
+    // tolerance lives in the DECODER now (one place), so a legacy row only ever exists as data coming off a
+    // wire or a jsonb column — which is how it enters here.
     const sc: Scorecard = {
       suiteId: "s",
       harness: "h@1",
       results: [
         result("a", [measured("judge:quality", 0.9, true)]),
-        result("b", [{ graderId: "judge", metric: "judge:quality", value: 0, detail: "[grader-error] 503" }]),
-        result("c", [{ graderId: "q", metric: "judge:quality", value: 0, detail: "skipped: no ANTHROPIC_API_KEY" }]),
+        result("b", [
+          ScoreSchema.parse({ graderId: "judge", metric: "judge:quality", value: 0, detail: "[grader-error] 503" }),
+        ]),
+        result("c", [
+          ScoreSchema.parse({
+            graderId: "q",
+            metric: "judge:quality",
+            value: 0,
+            detail: "skipped: no ANTHROPIC_API_KEY",
+          }),
+        ]),
       ],
     };
     const m = summarizeScorecard(sc).find((s) => s.metric === "judge:quality");
@@ -206,13 +217,20 @@ describe("measurement status — an unmeasured score never enters an aggregate",
     expect(m?.unmeasured).toBe(2);
   });
 
-  it("an unmeasured score cannot decide a case verdict even if it carries a pass flag", () => {
+  it("an unmeasured score cannot decide a case verdict even if it arrived carrying a pass flag", () => {
+    // Unconstructible in TypeScript now — so the hostile row comes in as wire data, through the decoder.
+    const hostile = ScoreSchema.parse({
+      graderId: "j",
+      metric: "judge:q",
+      value: 0,
+      pass: false,
+      status: "unmeasured",
+      reason: "grader_error",
+      retryable: true,
+    });
     expect(
       caseVerdict({
-        scores: [
-          { graderId: "j", metric: "judge:q", value: 0, pass: false, status: "unmeasured", reason: "grader_error" },
-          { graderId: "custom", metric: "custom_check", value: 1, pass: true },
-        ],
+        scores: [hostile, { graderId: "custom", metric: "custom_check", value: 1, pass: true }],
       }),
     ).toBe(true); // the hostile unmeasured pass:false is ignored; the real measurement decides
   });
@@ -228,14 +246,15 @@ describe("measurement status — an unmeasured score never enters an aggregate",
       harness: "h@2",
       results: [
         result("a", [
-          {
+          ScoreSchema.parse({
             graderId: "tests-pass",
             metric: "tests_pass",
             value: 0,
             pass: false,
             status: "unmeasured",
             reason: "grader_error",
-          },
+            retryable: true,
+          }),
         ]),
       ],
     };
@@ -259,7 +278,6 @@ describe("measurement status — an unmeasured score never enters an aggregate",
             {
               graderId: "dispatch",
               metric: "error",
-              value: 0,
               status: "unmeasured",
               reason: "missing_evidence",
               retryable: true,
@@ -281,7 +299,6 @@ describe("measurement status — an unmeasured score never enters an aggregate",
           {
             graderId: "judge",
             metric: "judge:q",
-            value: 0,
             status: "unmeasured",
             reason: "grader_error",
             retryable: true,
@@ -289,7 +306,6 @@ describe("measurement status — an unmeasured score never enters an aggregate",
           {
             graderId: "j2",
             metric: "judge:r",
-            value: 0,
             status: "unmeasured",
             reason: "missing_secret",
             retryable: false,

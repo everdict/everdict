@@ -59,11 +59,12 @@ export interface PreviewJudgeResult {
 export interface JudgeScore {
   graderId: string
   metric: string
-  value: number
+  // ABSENT on a non-measurement — Score is a discriminated union on `status`, so a crashed or skipped judge
+  // carries no value at all. There is no placeholder 0.00 left for the preview to mistake for a verdict.
+  value?: number
   pass?: boolean
   detail?: unknown
-  // Measurement status (absent = measured) — a crashed/skipped judge marks itself here on modern rows; the
-  // preview must read it, not only the legacy prose sentinels, or a dead judge previews as a 0.00 verdict.
+  // Measurement status (absent = measured) — the discriminant the preview reads.
   status?: string
   reason?: string
 }

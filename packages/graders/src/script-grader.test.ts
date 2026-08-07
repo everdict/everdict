@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { AppError, type ComputeHandle, type ExecOpts, type GradeContext } from "@everdict/contracts";
+import { AppError, type ComputeHandle, type ExecOpts, type GradeContext, measuredScores } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
 import { ScriptGrader } from "./script-grader.js";
@@ -73,7 +73,7 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
     const out = 'loading model...\nstep 2 done\n[{"graderId":"g","metric":"m","value":0.5}]';
     const { compute } = mockCompute(out);
     const scores = await new ScriptGrader({ language: "python", code: "c" }).grade(ctx(compute));
-    expect(scores[0]?.value).toBe(0.5);
+    expect(measuredScores(scores)[0]?.value).toBe(0.5);
   });
 
   it("a non-zero exit is an explicit AppError (safeGrade turns it into a visible error score)", async () => {
@@ -131,7 +131,7 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
     });
     expect(provisionedImage).toBe("everdict/grader:1");
     expect(writes).toContain("everdict-grade-context.json"); // context lands in the dedicated compute's own workdir
-    expect(scores[0]?.value).toBe(1);
+    expect(measuredScores(scores)[0]?.value).toBe(1);
     expect(disposed).toBe(true);
   });
 
@@ -232,7 +232,7 @@ describe("ScriptGrader — user code over the full serialized GradeContext", () 
       // When the grader runs against the real filesystem + interpreter
       const scores = await grader.grade(ctx(sandbox));
       // Then the script found both the materialized code and the context file from its cwd
-      expect(scores).toEqual([{ graderId: "real", metric: "echo", value: 1 }]);
+      expect(scores).toEqual([{ graderId: "real", metric: "echo", value: 1, status: "measured" }]); // the decoder stamps it
     } finally {
       await rm(root, { recursive: true, force: true });
     }

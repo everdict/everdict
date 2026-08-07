@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
+import { BadRequestError, type GradeContext, type Grader, type MeasuredScore } from "@everdict/contracts";
 
 // ⓐ Task success (objective) — runs the test command in the environment and decides by exit code. Requires compute (an environment).
 export class TestsPassGrader implements Grader {
@@ -10,7 +10,7 @@ export class TestsPassGrader implements Grader {
     private readonly cwd = "work",
   ) {}
 
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<MeasuredScore> {
     if (!ctx.compute)
       throw new BadRequestError("BAD_REQUEST", undefined, "The tests-pass grader requires compute (an environment).");
     const r = await ctx.compute.exec(this.testCmd, { cwd: this.cwd, timeoutSec: 600 });

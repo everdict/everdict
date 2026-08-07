@@ -116,7 +116,6 @@ const measuredVerdict: Score = { graderId: "judge", metric: "judge:j", value: 1,
 const unmeasuredPlaceholder: Score = {
   graderId: "judge",
   metric: "judge:j",
-  value: 0,
   status: "unmeasured",
   reason: "grader_error",
   retryable: true,

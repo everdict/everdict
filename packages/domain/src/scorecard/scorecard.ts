@@ -1,6 +1,6 @@
 import {
   type CaseResult,
-  type Score,
+  type MeasuredScore,
   type Scorecard,
   type VerdictPolicy,
   isMeasured,
@@ -198,11 +198,11 @@ export interface ScorecardDiff {
 // Keyed by (caseId, trial) — NOT caseId alone: on a trials>1 scorecard a caseId-keyed map silently kept the
 // LAST trial's scores (map last-wins), so pass transitions compared arbitrary trials. Trial i pairs with
 // trial i; the trial-statistical gate (diffTrials) remains the authoritative regression signal for trial runs.
-function scoreMap(sc: Scorecard): Map<string, { caseId: string; metrics: Map<string, Score> }> {
-  const m = new Map<string, { caseId: string; metrics: Map<string, Score> }>();
+function scoreMap(sc: Scorecard): Map<string, { caseId: string; metrics: Map<string, MeasuredScore> }> {
+  const m = new Map<string, { caseId: string; metrics: Map<string, MeasuredScore> }>();
   for (const result of sc.results) {
     const key = `${result.caseId}#${result.trial ?? 0}`;
-    const entry = m.get(key) ?? { caseId: result.caseId, metrics: new Map<string, Score>() };
+    const entry = m.get(key) ?? { caseId: result.caseId, metrics: new Map<string, MeasuredScore>() };
     // Measurements only — a diff between an unmeasured placeholder and a real value is not a delta.
     for (const s of measuredScores(result.scores)) entry.metrics.set(s.metric, s);
     m.set(key, entry);

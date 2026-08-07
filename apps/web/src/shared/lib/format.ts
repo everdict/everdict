@@ -28,24 +28,14 @@ export function fmtScore(
   return '–'
 }
 
-// A score that is NOT a measurement (grader error / judge skip): `status` stamp on new rows, the detail
-// sentinel on rows persisted before the field existed. Mirror of the contracts `isMeasured` gate — the web's
-// @everdict/contracts dependency is type-only, so the rule is restated locally. Non-measured rows must render
-// as "unmeasured", never as their placeholder value (a dead grader is not a $0.00).
-export function isUnmeasuredScore(s: {
-  status?: string
-  pass?: boolean
-  detail?: unknown
-}): boolean {
-  if (s.status !== undefined) return s.status !== 'measured'
-  // The sentinel branch ALSO requires `pass` to be absent (both legacy producers left it undefined) — a real
-  // measurement whose prose detail merely opens with the same words must not be misclassified. Same rule as
-  // the contracts gate; the truth-table test binds this mirror to it.
-  return (
-    s.pass === undefined &&
-    typeof s.detail === 'string' &&
-    /^(\[grader-error\]|skipped: )/.test(s.detail)
-  )
+// A score that is NOT a measurement (grader error / judge skip). Mirror of the contracts `isMeasured` gate —
+// the web's @everdict/contracts dependency is type-only, so the rule is restated locally — and it reads the
+// DISCRIMINANT alone: Score is a discriminated union now, so a non-measurement arrives carrying no `value` at
+// all and the legacy detail-prose sentinels are resolved server-side by the one reader-side normalizer in
+// contracts (they can no longer reach a browser). Absent status = measured, exactly as in the contract.
+// An UNRECOGNIZED status reads as unmeasured — fail closed: a screen must not print a number it cannot vouch for.
+export function isUnmeasuredScore(s: { status?: string }): boolean {
+  return s.status !== undefined && s.status !== 'measured'
 }
 
 // Score.detail is `unknown` on the wire — graders/judges may emit prose OR a structured verdict object.
@@ -351,13 +341,16 @@ export function scoreTone(s: {
 // The value shown on a per-case score badge: a categorical `label` verbatim (gold / correct / B); a bare 0/1 pass
 // flag as a check/cross (the tone already carries the color, so the raw number is noise); else the value in its
 // inferred unit ($ / s / % / count). Keeps a single case's score as legible as the aggregate summary.
+// `value` is optional because a non-measurement genuinely has none — the callers gate on isUnmeasuredScore
+// first, and the dash is the honest fallback for anything that slips past.
 export function scoreBadgeValue(s: {
   metric: string
-  value: number
+  value?: number
   pass?: boolean
   label?: string
 }): string {
   if (s.label !== undefined && s.label !== '') return s.label
+  if (s.value === undefined) return '–'
   if (s.pass !== undefined && (s.value === 0 || s.value === 1)) return s.pass ? '✓' : '✗'
   return fmtMetricValue(classifyMetric({ metric: s.metric, mean: s.value }), s.value)
 }

@@ -5,9 +5,9 @@ import { type GradeContext, type Grader, type Score, sanitizeScore, toScores } f
 // transient LLM/transport hiccup — becomes a VISIBLE unmeasured score instead of propagating out of
 // the grade loop and forcing runCase / the service backend to record the ENTIRE case as an error.
 // status "unmeasured" keeps the failure out of EVERY aggregate (mean/passRate/diff — isMeasured is the
-// gate), so a judge blip neither counts against the agent nor drags a metric mean toward 0; the message
-// is surfaced in `detail` for triage. retryable: a scoring-time throw is transient by default (transport
-// hiccup) — re-running just this grader can recover the measurement without re-running the case.
+// gate), and the variant carries NO `value` at all, so a judge blip has no number to leak into a mean;
+// the message is surfaced in `detail` for triage. retryable: a scoring-time throw is transient by default
+// (transport hiccup) — re-running just this grader can recover the measurement without re-running the case.
 // Returns the flattened Score[] — a multi-metric grader's scores are collected as-is, a failure is one score.
 export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Score[]> {
   try {
@@ -20,7 +20,6 @@ export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Scor
       {
         graderId: grader.id,
         metric: grader.id,
-        value: 0,
         status: "unmeasured",
         reason: "grader_error",
         retryable: true,

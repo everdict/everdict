@@ -397,7 +397,6 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
               {
                 graderId: grader.id,
                 metric: grader.id,
-                value: 0,
                 status: "unmeasured",
                 reason: "missing_evidence",
                 retryable: true,

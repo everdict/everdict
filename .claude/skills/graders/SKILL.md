@@ -29,8 +29,15 @@ gold patch, runs `cmd`, verdict from exit code (or `passPattern`), returns `{gra
 The generic outcome grader; `tests-pass`/`swe-bench` are convenience presets over the same pattern.
 
 ## Contract
-`Score` (`grader.ts`) = `{ graderId, metric, value, pass?, detail? }` — `metric` is a free label, `value`
-a number, `pass` optional (trace graders like `steps`/`cost`/`latency` emit value-only, no `pass`).
+`Score` (`grader.ts`) is a **discriminated union on `status`** — a measurement algebra, not one flat object:
+`MeasuredScore{graderId, metric, value, pass?, label?, detail?}` (`status` absent ⇒ measured — what a healthy
+grader writes) | `UnmeasuredScore{graderId, metric, status:"unmeasured", reason, retryable, detail?}` |
+`InvalidScore{…, status:"invalid", reason:"contract_violation"}`. `metric` is a free label; `pass` is optional
+even on a measurement (trace graders like `steps`/`cost`/`latency` emit value-only). **The two
+non-measurements have no `value` field at all** — a dead grader has no number to leak into a mean, and
+`.value`/`.pass` will not compile until you pass `isMeasured` / `measuredScores`. Declare
+`grade(ctx): Promise<MeasuredScore>` when every path of your grader measures (all the built-in families do);
+a grader that can skip returns the wider `Score`.
 `GradeContext` = `{ case, trace, snapshot, compute?, provision?, readStore?, baseline? }`. A grader picks the fields
 its family needs (`readStore?` = a co-located store reader injected by the topology backend — store-state grading, P2).
 

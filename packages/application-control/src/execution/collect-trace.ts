@@ -46,7 +46,6 @@ function skipScore(graderId: string, reason: string): Score {
   return {
     graderId,
     metric: graderId,
-    value: 0,
     status: "unmeasured",
     reason: "unsupported",
     retryable: false,

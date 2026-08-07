@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
+import { BadRequestError, type GradeContext, type Grader, type MeasuredScore } from "@everdict/contracts";
 
 // ⓑ Trajectory (trace-family) — recover a numeric metric from the agent's own printed output.
 // A trace:none command harness emits no tool_call/llm_call events, so steps/cost graders read 0 — but the
@@ -29,7 +29,7 @@ export class TextMetricGrader implements Grader {
     this.id = opts.id ?? "text-metric";
   }
 
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<MeasuredScore> {
     // Only the FINAL assistant message speaks for the run (the stdout tail) — earlier messages are trajectory.
     for (let i = ctx.trace.length - 1; i >= 0; i--) {
       const e = ctx.trace[i];

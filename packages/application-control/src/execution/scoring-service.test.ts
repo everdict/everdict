@@ -89,10 +89,14 @@ describe("ScoringService — a SELECTED judge that cannot be resolved stays visi
 
     // Then the unresolved selection is a visible, non-retryable unmeasured score — configuration work, not silence
     expect(result.scores).toHaveLength(1);
-    const row = result.scores[0];
-    expect(row?.metric).toBe("judge:quality");
-    expect(row?.status).toBe("unmeasured");
-    expect(row?.retryable).toBe(false);
-    expect(row?.detail).toContain("could not be resolved");
+    expect(result.scores[0]).toMatchObject({
+      metric: "judge:quality",
+      status: "unmeasured",
+      reason: "unsupported",
+      retryable: false, // configuration work, not a transient error a retry could clear
+      detail: expect.stringContaining("could not be resolved"),
+    });
+    // …and it carries no value at all: the dispatch placeholder cannot enter a mean or a passRate.
+    expect(result.scores[0] !== undefined && "value" in result.scores[0]).toBe(false);
   });
 });

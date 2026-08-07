@@ -15,6 +15,7 @@ import {
   type TraceEvent,
   UpstreamError,
 } from "@everdict/contracts";
+import { measuredScores } from "@everdict/contracts";
 import {
   InMemoryEnvelopeStore,
   InMemoryPlatformEventStore,
@@ -1078,7 +1079,9 @@ describe("materialize-on-import — imported traces seal as OUR copy and are jud
 
     // First write won: the embed AND the derived metrics come from the sealed copy, not the fresh pull.
     expect(done.scorecard?.results[0]?.trace).toEqual(sealedFirst);
-    expect(done.scorecard?.results[0]?.scores.find((s) => s.metric === "tool_calls")?.value).toBe(1);
+    expect(measuredScores(done.scorecard?.results[0]?.scores ?? []).find((s) => s.metric === "tool_calls")?.value).toBe(
+      1,
+    );
   });
 
   it("the reserved source 'everdict' evaluates OWN trajectories — read from the store, judged, and NEVER duplicated", async () => {
@@ -1512,7 +1515,7 @@ describe("ScorecardService.ingestPull", () => {
     expect(done.scorecard?.results.map((r) => r.caseId).sort()).toEqual(["trace-1", "trace-2"]);
     // The selected judge scored each synthetic case (the createJudgeStream alignment works via the synthesized dataset).
     for (const r of done.scorecard?.results ?? []) {
-      expect(r.scores.some((s) => s.metric === "judge:quality" && s.pass === true)).toBe(true);
+      expect(measuredScores(r.scores).some((s) => s.metric === "judge:quality" && s.pass === true)).toBe(true);
     }
   });
 
@@ -3191,7 +3194,6 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
         {
           graderId: "judge",
           metric: "judge:j",
-          value: 0,
           status: "unmeasured",
           reason: "grader_error",
           retryable: true,
@@ -3278,7 +3280,7 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     const c2 = hydrated?.scorecard?.results.find((r) => r.caseId === "c2");
     expect(c2?.failure).toBeUndefined(); // recovered — classification shed
     expect(c2?.trace.some((e) => e.kind === "llm_call")).toBe(true); // the collected platform trace landed
-    expect(c2?.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // ground truth kept
+    expect(measuredScores(c2?.scores ?? []).some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // ground truth kept
   });
 
   it("retryFailed doubles an OOM_KILLED case's memoryMb on the job only, and compounds across consecutive retries", async () => {
@@ -4825,7 +4827,9 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     const children = await runStore.list("acme", { scorecardId: record.id });
     expect(children.length).toBeGreaterThan(0);
     for (const child of children) {
-      expect(child.result?.scores.some((s) => s.metric === "judge:quality" && s.pass === true)).toBe(true);
+      expect(
+        measuredScores(child.result?.scores ?? []).some((s) => s.metric === "judge:quality" && s.pass === true),
+      ).toBe(true);
     }
     const hydrated = await service.get(record.id);
     expect(hydrated?.scorecard?.results[0]?.scores.some((s) => s.metric === "judge:quality")).toBe(true);
@@ -4903,7 +4907,6 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
             {
               graderId: "quality",
               metric: "judge:quality",
-              value: 0,
               status: "unmeasured" as const,
               reason: "grader_error" as const,
               retryable: true,
@@ -4912,7 +4915,6 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
             {
               graderId: "tests-pass",
               metric: "tests_pass",
-              value: 0,
               status: "unmeasured" as const,
               reason: "grader_error" as const,
               retryable: true,
@@ -4932,7 +4934,7 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     const hydrated = await service.get(record.id);
     const scores = hydrated?.scorecard?.results[0]?.scores.filter((x) => x.metric === "judge:quality") ?? [];
     expect(scores).toHaveLength(1); // replaced in place — the unmeasured row is gone
-    expect(scores[0]?.pass).toBe(true);
+    expect(measuredScores(scores)[0]?.pass).toBe(true);
   });
 
   it("the workflow bridge (plan → scoreCase → finalize) resumes with zero duplicate judging", async () => {
@@ -5071,7 +5073,6 @@ describe("ScorecardService — batch_settled observability event (operator time 
               {
                 graderId: "judge",
                 metric: "judge:q",
-                value: 0,
                 status: "unmeasured",
                 reason: "grader_error",
                 retryable: true,
@@ -5408,8 +5409,8 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
       ...scored(caseId, true),
       scores: [
         { graderId: "t", metric: "tests_pass", value: 1, pass: true },
-        { graderId: "j", metric: "judge:q", value: 0, status: "unmeasured", reason: "grader_error", retryable: true },
-        { graderId: "k", metric: "judge:r", value: 0, status: "unmeasured", reason: "missing_secret", retryable: true },
+        { graderId: "j", metric: "judge:q", status: "unmeasured", reason: "grader_error", retryable: true },
+        { graderId: "k", metric: "judge:r", status: "unmeasured", reason: "missing_secret", retryable: true },
       ],
     });
     await store.create(succeededRecord("base", [scored("a", true)]));

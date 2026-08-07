@@ -71,12 +71,15 @@ export const caseScoreSchema = z
   .object({
     graderId: z.string(),
     metric: z.string(),
-    value: z.number(),
+    // ABSENT on a non-measurement. The contract's Score is a discriminated union on `status`: an unmeasured or
+    // invalid row carries no value at all (there is no placeholder zero left to mis-render), so the field has to
+    // be optional here or a dead grader would reject the whole scorecard at parse.
+    value: z.number().optional(),
     pass: z.boolean().optional(),
     label: z.string().optional(), // categorical value (tier/string) — shown instead of `value` when present
     detail: z.unknown().optional(),
     // Measurement status (contract: "measured" | "unmeasured" | "invalid"; absent = measured). Loose string so a
-    // future status never rejects the scorecard; non-measured rows render "unmeasured", not the placeholder value.
+    // future status never rejects the scorecard; isUnmeasuredScore reads it as the discriminant and fails closed.
     status: z.string().optional(),
     reason: z.string().optional(),
     // unmeasured only: true ⇒ re-scoring this grader can recover the measurement (the rescore worklist reads it).
@@ -311,8 +314,11 @@ export const trialCaseDeltaSchema = z.object({
   delta: z.number(),
   z: z.number(), // two-proportion z of candidate vs baseline (negative = candidate lower)
   method: z.enum(['z', 'fisher']), // small samples decide by Fisher's exact test, not the z approximation
-  p: z.number().optional(), // Fisher two-sided p-value (method 'fisher')
+  p: z.number(), // two-sided p of this case's test — Fisher's exact p, or the normal-tail p of z on the z branch
   significant: z.boolean(), // statistically significant AND |delta| >= minDelta
+  // Cleared its own alpha but did not survive the Benjamini–Hochberg correction across the batch's cases:
+  // significant before correction, not after. Never silently dropped — the row says it was suppressed.
+  fdrSuppressed: z.boolean().optional(),
 })
 
 // Statistically-gated diff — attached to the diff response when either side ran trials (regressions are the
@@ -476,6 +482,10 @@ type _scoreDetailAccepts = AssertAssignable<
   WireScore['detail'],
   z.infer<typeof caseScoreSchema>['detail']
 >
+// EVERY variant of the wire's Score union must fit this local view — the guard is what keeps `value`
+// optional here from drifting back to required (which would reject an unmeasured row) and what will fail
+// the web build if a variant grows a field the display needs.
+type _scoreAcceptsEveryVariant = AssertAssignable<WireScore, z.infer<typeof caseScoreSchema>>
 // ScorecardOrigin is narrower (omits retryOf/memoryBoostMb) — Pick-reverse.
 type _originFieldsOnWire = AssertAssignable<
   Pick<WireScorecardResponseOrigin, keyof WebScorecardOrigin>,

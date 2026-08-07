@@ -130,8 +130,12 @@ function ScoreRow({ score }: { score: JudgeScore }) {
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono">{score.metric}</span>
         <span className="tabular-nums">
-          {unmeasured ? (score.status ?? 'unmeasured') : score.value.toFixed(2)}
-          {!unmeasured && score.pass === true ? ' · ✓' : !unmeasured && score.pass === false ? ' · ✗' : ''}
+          {unmeasured ? (score.status ?? 'unmeasured') : (score.value?.toFixed(2) ?? '–')}
+          {!unmeasured && score.pass === true
+            ? ' · ✓'
+            : !unmeasured && score.pass === false
+              ? ' · ✗'
+              : ''}
         </span>
       </div>
       {errorDetail ? (

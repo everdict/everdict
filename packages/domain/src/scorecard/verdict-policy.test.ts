@@ -69,7 +69,7 @@ describe("evaluateVerdict — the verdict explains itself", () => {
     };
     // the required metric is only UNMEASURED (grader died) — a judge alone must not carry the verdict
     const scores: Score[] = [
-      { graderId: "tests-pass", metric: "tests_pass", value: 0, status: "unmeasured", reason: "grader_error" },
+      { graderId: "tests-pass", metric: "tests_pass", status: "unmeasured", reason: "grader_error", retryable: true },
       s("judge:quality", true),
     ];
     expect(evaluateVerdict({ scores }, strict)).toEqual({

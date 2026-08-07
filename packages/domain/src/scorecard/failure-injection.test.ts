@@ -1,4 +1,5 @@
 import type { CaseFailure, CaseResult, Score, Scorecard } from "@everdict/contracts";
+import { ScoreSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { scorecardOutcomes } from "./case-outcome.js";
 import { headlinePassRate } from "./headline.js";
@@ -61,7 +62,6 @@ const MONSTER: Scorecard = {
       {
         graderId: "cost",
         metric: "cost_usd",
-        value: 0,
         status: "unmeasured",
         reason: "grader_error",
         retryable: true,
@@ -73,7 +73,6 @@ const MONSTER: Scorecard = {
       {
         graderId: "quality",
         metric: "judge:quality",
-        value: 0,
         status: "unmeasured",
         reason: "missing_secret",
         retryable: false,
@@ -81,7 +80,10 @@ const MONSTER: Scorecard = {
       },
     ]),
     // ③ a legacy pre-status row (persisted before the field existed)
-    result("legacy-sentinel", [{ graderId: "judge", metric: "judge:quality", value: 0, detail: "[grader-error] 503" }]),
+    // A legacy row only ever exists as DATA — legacy tolerance lives in the decoder, so it enters through it.
+    result("legacy-sentinel", [
+      ScoreSchema.parse({ graderId: "judge", metric: "judge:quality", value: 0, detail: "[grader-error] 503" }),
+    ]),
     // ④ dispatch death (failedCaseResult shape)
     {
       ...result(
@@ -90,7 +92,6 @@ const MONSTER: Scorecard = {
           {
             graderId: "dispatch",
             metric: "error",
-            value: 0,
             status: "unmeasured",
             reason: "missing_evidence",
             retryable: true,
@@ -210,10 +211,8 @@ describe("failure injection — no failure converts into a normal number or prod
     const invalid: Score = {
       graderId: "buggy",
       metric: "quality",
-      value: 0,
       status: "invalid",
       reason: "contract_violation",
-      retryable: false,
       detail: "[invalid-score] value=NaN",
     };
     const sc: Scorecard = { suiteId: "s", harness: "h@1", results: [result("x", [invalid])] };
@@ -236,14 +235,26 @@ describe("failure injection — no failure converts into a normal number or prod
   });
 
   it("a hostile unmeasured score carrying pass flags cannot decide, veto, or shift anything", () => {
-    const hostile: Score = {
+    // The measurement algebra makes this row unconstructible in TypeScript — an unmeasured score has no
+    // `pass` and no `value` field at all. Hostile data arrives over a WIRE, though, so the row is built as
+    // raw JSON and put through the decoder every boundary embeds: the normalizer strips the pass flag and
+    // the placeholder value on the way in, and what reaches the engine can no longer pretend to be one.
+    const hostile: Score = ScoreSchema.parse({
       graderId: "evil",
       metric: "tests_pass",
       value: 1,
       pass: true,
       status: "unmeasured",
       reason: "grader_error",
-    };
+      retryable: true,
+    });
+    expect(hostile).toEqual({
+      graderId: "evil",
+      metric: "tests_pass",
+      status: "unmeasured",
+      reason: "grader_error",
+      retryable: true,
+    });
     // alone: nothing decides
     expect(evaluateVerdict({ scores: [hostile] })).toEqual({});
     // beside a real FAIL measurement: the real one decides
@@ -270,7 +281,6 @@ describe("failure injection — the summary plane (annihilated metrics never bec
           {
             graderId: "cost",
             metric: "cost_usd",
-            value: 0,
             status: "unmeasured" as const,
             reason: "grader_error" as const,
             retryable: true,

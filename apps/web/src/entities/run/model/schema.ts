@@ -22,16 +22,19 @@ import { z } from 'zod'
 export const scoreSchema = z.object({
   graderId: z.string(),
   metric: z.string(),
-  value: z.number(),
+  // ABSENT on a non-measurement — the contract's Score is a discriminated union on `status` and the unmeasured
+  // /invalid variants carry no value at all. Required here would reject any run whose grader died.
+  value: z.number().optional(),
   pass: z.boolean().optional(),
   // Matches the contract's `unknown` — code judges emit structured objects, not just prose. Narrowed at render
   // via fmtScoreDetail (string as-is, else compact JSON); typing it string here rejects the whole run/scorecard.
   detail: z.unknown().optional(),
   // Measurement status (contract: "measured" | "unmeasured" | "invalid"; absent = measured). Kept a loose string
-  // so a future status value never rejects the whole run. Non-measured rows render as "unmeasured", never as
-  // their placeholder value — see isUnmeasuredScore (shared/lib/format).
+  // so a future status value never rejects the whole run; isUnmeasuredScore reads it as the discriminant and
+  // fails closed on anything it does not recognize — see shared/lib/format.
   status: z.string().optional(),
   reason: z.string().optional(),
+  retryable: z.boolean().optional(),
 })
 export type Score = z.infer<typeof scoreSchema>
 
@@ -229,6 +232,9 @@ type _usageKeysMatch = AssertAssignable<keyof z.infer<typeof usageSchema>, keyof
 // Score.detail is `unknown` on the wire (structured verdict objects, not just prose) — the local view must
 // accept it, or a single object detail rejects the whole run result at parse time. Regression guard.
 type _scoreDetailAccepts = AssertAssignable<WireScore['detail'], Score['detail']>
+// Every variant of the wire's Score union must fit the local view (see the scorecard entity's twin) — this is
+// what stops `value` from drifting back to required and rejecting a run whose grader died.
+type _scoreAcceptsEveryVariant = AssertAssignable<WireScore, Score>
 // The session block is the playground's contract with the control plane (image · TTL · teardown reason), and the
 // web models a SUBSET of it — so anchor it on RunSession directly: renaming/retyping any modelled field breaks here.
 type _sessionGuard = AssertAssignable<WebRun['session'], RunSession | undefined>

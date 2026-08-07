@@ -3,9 +3,9 @@ import {
   type CaseMatcher,
   type CaseResult,
   type GraderSpec,
+  type MeasuredScore,
   type MetricAuthority,
   type MetricDefinition,
-  type Score,
   type VerdictAggregation,
   type VerdictPolicy,
   type VerdictPolicyRef,
@@ -161,7 +161,7 @@ function combine(aggregation: VerdictAggregation, deciders: Array<{ pass: boolea
 // A duplicate metric (the same metric emitted twice in one case) previously hit a Map where the LAST score
 // silently won. Duplicates now combine explicitly — unanimous within the metric name — before the rung sees
 // one deciding value per metric.
-function dedupeByMetric(scores: Score[]): Array<{ metric: string; graderId: string; pass: boolean }> {
+function dedupeByMetric(scores: MeasuredScore[]): Array<{ metric: string; graderId: string; pass: boolean }> {
   const byMetric = new Map<string, { metric: string; graderId: string; passes: boolean[] }>();
   for (const s of scores) {
     if (s.pass === undefined) continue;

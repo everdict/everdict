@@ -7,7 +7,7 @@ import type {
   TraceEvent,
   TrustZone,
 } from "@everdict/contracts";
-import { InternalError, RateLimitError } from "@everdict/contracts";
+import { InternalError, RateLimitError, measuredScores } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
@@ -1688,7 +1688,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     const result = await backend.dispatch(job);
 
     // dispatch completes without throwing.
-    expect(result.scores.find((s) => s.graderId === "url-ok")?.pass).toBe(true);
+    expect(measuredScores(result.scores).find((s) => s.graderId === "url-ok")?.pass).toBe(true);
     // The trace is surfaced as an error event instead of being lost silently. The dispatch also seals its own
     // infra-plane events into the trace — this assertion is about the PULLED half, so filter them out.
     const pulled = result.trace.filter((e) => e.kind !== "infra");

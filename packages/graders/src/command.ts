@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
+import { BadRequestError, type GradeContext, type Grader, type MeasuredScore } from "@everdict/contracts";
 
 export interface CommandConfig {
   cmd: string; // Command to run in the environment (e.g. "python -m pytest -q")
@@ -27,7 +27,7 @@ export class CommandGrader implements Grader {
     this.metric = cfg.metric ?? "command";
   }
 
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<MeasuredScore> {
     if (!ctx.compute) {
       throw new BadRequestError("BAD_REQUEST", undefined, "The command grader requires compute (an environment).");
     }

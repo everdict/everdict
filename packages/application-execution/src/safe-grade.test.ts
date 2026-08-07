@@ -42,14 +42,17 @@ describe("safeGrade — isolate a grader's run-time failure", () => {
     // When: it is graded via safeGrade
     const [score] = await safeGrade(flaky, CTX);
     // Then: the failure is captured as a score (never thrown) so the case + sibling graders survive —
-    // and it is UNMEASURED: excluded from every aggregate (isMeasured gate), not a 0 that drags the mean
-    expect(score?.graderId).toBe("judge");
-    expect(score?.status).toBe("unmeasured");
-    expect(score?.reason).toBe("grader_error");
-    expect(score?.retryable).toBe(true); // a scoring-time throw is transient — re-scoring can recover it
-    expect(score?.pass).toBeUndefined(); // excluded from passRate — an honest "not scored", not a false FAIL
-    expect(score?.detail).toContain("judge upstream 503");
-    expect(score?.detail).toContain("[grader-error]");
+    // and it is UNMEASURED: it carries no `value` and no `pass` AT ALL, so there is no placeholder number
+    // for an aggregate to pick up and no false FAIL for a passRate to count.
+    expect(score).toEqual({
+      graderId: "judge",
+      metric: "judge",
+      status: "unmeasured",
+      reason: "grader_error",
+      retryable: true, // a scoring-time throw is transient — re-scoring can recover it
+      detail: expect.stringContaining("[grader-error] judge upstream 503"),
+    });
+    expect(score !== undefined && "value" in score).toBe(false);
   });
 
   it("a grader RETURNING garbage becomes a visible invalid score — a bug, never a number", async () => {
@@ -58,10 +61,15 @@ describe("safeGrade — isolate a grader's run-time failure", () => {
       grade: async (): Promise<Score> => ({ graderId: "buggy", metric: "quality", value: Number.NaN, pass: true }),
     };
     const [score] = await safeGrade(broken, CTX);
-    expect(score?.status).toBe("invalid");
-    expect(score?.reason).toBe("contract_violation");
-    expect(score?.retryable).toBe(false); // a deterministic bug — retrying cannot recover it
-    expect(score?.pass).toBeUndefined(); // the garbage pass flag does not survive
+    // The invalid variant has neither value nor pass nor retryable: a deterministic grader bug is not a
+    // number, not a verdict, and not something a retry worklist should ever pick up.
+    expect(score).toEqual({
+      graderId: "buggy",
+      metric: "quality",
+      status: "invalid",
+      reason: "contract_violation",
+      detail: expect.stringContaining("[invalid-score]"),
+    });
   });
 
   it("stringifies a non-Error throw", async () => {

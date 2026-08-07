@@ -1,4 +1,5 @@
 import type { CaseResult, Score } from "@everdict/contracts";
+import { ScoreSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { caseReason, hasMeasuredJudgeVerdict, isJudgeMetricOf, stripJudgeScores } from "./scorecard-shared.js";
 
@@ -47,17 +48,18 @@ describe("judge-metric ownership (one predicate for both scoring paths)", () => 
   const placeholder: Score = {
     graderId: "judge",
     metric: "judge:j",
-    value: 0,
     status: "unmeasured",
     reason: "grader_error",
     retryable: true,
   };
-  const legacySentinel: Score = {
+  // A pre-status row only ever exists as persisted data, so it enters through the decoder that owns the
+  // legacy vocabulary — the single place any of it lives now.
+  const legacySentinel: Score = ScoreSchema.parse({
     graderId: "judge",
     metric: "judge:j",
     value: 0,
     detail: "[grader-error] transport died",
-  };
+  });
   const criterion: Score = { graderId: "judge", metric: "judge:j:accuracy", value: 0.8, pass: true };
   const otherJudge: Score = { graderId: "judge", metric: "judge:other", value: 1, pass: true };
   const grader: Score = { graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true };

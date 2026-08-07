@@ -1,5 +1,6 @@
 import { TraceSinkService, TraceSourceService } from "@everdict/application-control";
 import type { CaseResult, TraceSink } from "@everdict/contracts";
+import { ScoreSchema } from "@everdict/contracts";
 import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import type { TraceSinkConfig } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
@@ -133,13 +134,18 @@ describe("TraceSinkService.exportScorecard — resolving the per-harness export 
         {
           graderId: "tests-pass",
           metric: "tests_pass",
-          value: 0,
           status: "unmeasured",
           reason: "grader_error",
           retryable: true,
         },
-        // The legacy pre-status shape (detail sentinel, no `pass`) must be filtered by the same gate.
-        { graderId: "cost", metric: "cost_usd", value: 0, detail: "[grader-error] transport hiccup" },
+        // The legacy pre-status shape (detail sentinel, no `pass`) must be filtered by the same gate — it only
+        // ever reaches this code as decoded data, which is where the sentinel vocabulary now lives.
+        ScoreSchema.parse({
+          graderId: "cost",
+          metric: "cost_usd",
+          value: 0,
+          detail: "[grader-error] transport hiccup",
+        }),
       ],
     };
 

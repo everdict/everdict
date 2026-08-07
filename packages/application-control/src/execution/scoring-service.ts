@@ -140,7 +140,6 @@ export class ScoringService {
       unresolved.map((sel) => ({
         graderId: sel.id,
         metric: `judge:${sel.id}`,
-        value: 0,
         status: "unmeasured" as const,
         reason: "unsupported" as const,
         retryable: false,

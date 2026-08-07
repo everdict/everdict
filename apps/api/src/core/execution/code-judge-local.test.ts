@@ -69,9 +69,15 @@ describe("code judge — real dispatch end-to-end (in-process LocalBackend)", ()
 
     const scores = await runner().run(spec, "acme", judgeCtx);
 
-    // the wrapper's safeGrade turns the grader error into ONE visible error score whose detail carries the output
+    // the wrapper's safeGrade turns the grader error into ONE visible UNMEASURED score whose detail carries
+    // the output — no value at all, so a crashed judge can never be republished or averaged as a zero
     expect(scores).toHaveLength(1);
-    expect(scores[0]).toMatchObject({ graderId: "e2e", metric: "judge:e2e", value: 0 });
+    expect(scores[0]).toMatchObject({
+      graderId: "e2e",
+      metric: "judge:e2e",
+      status: "unmeasured",
+      reason: "grader_error",
+    });
     expect(String(scores[0]?.detail)).toContain("[grader-error]");
     expect(String(scores[0]?.detail)).toContain("BOOM: evidence.finalAnswer missing");
   }, 60_000);

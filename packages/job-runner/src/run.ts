@@ -99,7 +99,6 @@ export function failureResult(
       {
         graderId: failure.stage,
         metric: "error",
-        value: 0,
         status: "unmeasured",
         reason: "missing_evidence",
         retryable: failure.retryable,

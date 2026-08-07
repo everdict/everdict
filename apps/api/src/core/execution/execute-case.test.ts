@@ -1,6 +1,7 @@
 import { type ExecuteCaseDeps, executeCase } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { CaseJob, CaseResult } from "@everdict/contracts";
+import { measuredScores } from "@everdict/contracts";
 import { makeGraders } from "@everdict/graders";
 import { describe, expect, it } from "vitest";
 
@@ -310,7 +311,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
     expect(result.trace).toHaveLength(3); // 1 job event + 2 from the platform
     // needsCompute (tests-pass) was already scored in the job — here only the deferred steps is appended (no double scoring).
     expect(result.scores.map((s) => s.graderId)).toEqual(["tests-pass", "steps"]);
-    const steps = result.scores.find((s) => s.graderId === "steps");
+    const steps = measuredScores(result.scores).find((s) => s.graderId === "steps");
     expect(steps?.value).toBe(1); // one tool_call — proof it was derived on the collected trace
     expect(result.traceRef?.runId).toBe("rid-9"); // kept as provenance
   });
@@ -329,7 +330,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
       jobWithGraders,
     );
     expect(result.trace.some((e) => e.kind === "error" && e.message.includes("collector down"))).toBe(true);
-    expect(result.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // preserved
+    expect(measuredScores(result.scores).some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // preserved
     // The case is CLASSIFIED (stage-aware retry re-pulls it later) — not silently scored on an incomplete trace.
     expect(result.failure).toMatchObject({
       stage: "collect",
@@ -471,7 +472,7 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
       jobWithGraders,
     );
     expect(missing.trace.some((e) => e.kind === "error" && e.message.includes("NOPE"))).toBe(true);
-    expect(missing.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true);
+    expect(measuredScores(missing.scores).some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true);
     expect(missing.failure).toMatchObject({ stage: "collect", code: "TRACE_COLLECT_FAILED" }); // classified, not silent
   });
 

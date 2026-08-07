@@ -5,7 +5,9 @@
 export type CaseScoreView = {
   graderId: string
   metric: string
-  value: number
+  // 측정이 아닌 행(그레이더 사망·저지 스킵)에는 아예 없다 — 계약의 Score 는 status 판별 유니언이고
+  // unmeasured/invalid 변종은 value 를 들고 다니지 않는다(렌더할 자리표시자 0 자체가 없다).
+  value?: number
   pass?: boolean
   label?: string
   detail?: unknown

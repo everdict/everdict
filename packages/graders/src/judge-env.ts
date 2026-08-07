@@ -23,12 +23,21 @@ export function judgeFromEnv(env: Env = process.env): Judge | undefined {
   return modelJudge(transportComplete(transport, { model }));
 }
 
-// A skip grader that keeps an unrunnable grader from silently vanishing from the scores (same philosophy as judge-runner: reason in detail).
+// A skip grader that keeps an unrunnable grader from silently vanishing from the scores (same philosophy as
+// judge-runner: reason in detail). UNMEASURED with no value at all — this grader never measured anything, and
+// a config-shaped skip needs a human change before a re-score could recover it.
 export function skipGrader(id: string, metric: string, reason: string): Grader {
   return {
     id,
     async grade(): Promise<Score> {
-      return { graderId: id, metric, value: 0, pass: undefined, detail: `skipped: ${reason}` };
+      return {
+        graderId: id,
+        metric,
+        status: "unmeasured",
+        reason: "unsupported",
+        retryable: false,
+        detail: `skipped: ${reason}`,
+      };
     },
   };
 }

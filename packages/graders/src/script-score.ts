@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
+import { BadRequestError, type GradeContext, type Grader, type MeasuredScore } from "@everdict/contracts";
 
 export interface ScriptScoreConfig {
   cmd: string; // Scoring command to run in the environment — writes a continuous score to stdout (e.g. "python3 .grader/pinch_score.py …")
@@ -27,7 +27,7 @@ export class ScriptScoreGrader implements Grader {
     this.threshold = cfg.passThreshold ?? 0.6;
   }
 
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<MeasuredScore> {
     if (!ctx.compute) {
       throw new BadRequestError("BAD_REQUEST", undefined, "The script-score grader requires compute (an environment).");
     }

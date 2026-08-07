@@ -29,6 +29,7 @@ import {
   type TraceSourceConfig,
   type VerdictPolicy,
   isMeasured,
+  measuredScores,
 } from "@everdict/contracts";
 import {
   type BudgetTracker,
@@ -130,7 +131,7 @@ export function caseReason(r: CaseResult): string | undefined {
   const raw =
     errEvent && "message" in errEvent
       ? errEvent.message
-      : r.scores.find((s) => s.pass === false && typeof s.detail === "string")?.detail;
+      : measuredScores(r.scores).find((s) => s.pass === false && typeof s.detail === "string")?.detail;
   if (typeof raw !== "string" || raw === "") return undefined;
   return raw.length > CASE_REASON_MAX ? `${raw.slice(0, CASE_REASON_MAX)}…` : raw;
 }
@@ -374,8 +375,9 @@ export function batchSettledEvent(
   for (const result of scorecard.results) {
     for (const s of result.scores) {
       if (s.status !== "unmeasured") continue;
-      const reason = s.reason ?? "unspecified";
-      unmeasuredReasons[reason] = (unmeasuredReasons[reason] ?? 0) + 1;
+      // Raw rows on purpose (guard allowlist): this is the unmeasured TALLY — the one consumer whose subject
+      // is the failures themselves. `reason` is required on the variant, so the count can never be "unspecified".
+      unmeasuredReasons[s.reason] = (unmeasuredReasons[s.reason] ?? 0) + 1;
     }
   }
   return {

@@ -46,7 +46,6 @@ export function failedCaseResult(job: CaseJob, error: unknown): CaseResult {
       {
         graderId: "dispatch",
         metric: "error",
-        value: 0,
         status: "unmeasured",
         reason: "missing_evidence",
         retryable: failure.retryable,

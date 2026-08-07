@@ -5,6 +5,7 @@ import type {
   GradeContext,
   Grader,
   JudgeCriterion,
+  MeasuredScore,
   Score,
   TraceEvent,
 } from "@everdict/contracts";
@@ -185,7 +186,7 @@ export class JudgeGrader implements Grader {
       ...(this.opts.useScreenshot ? { useScreenshot: true } : {}),
     });
     const verdict = await this.judge.judge(input);
-    const overall: Score = {
+    const overall: MeasuredScore = {
       graderId: this.id,
       metric: JUDGE_OVERALL_METRIC,
       value: verdict.score,
@@ -195,12 +196,16 @@ export class JudgeGrader implements Grader {
     if (criteria.length === 0) return overall;
     const perCriterion = criteria.map((c): Score => {
       const v = verdict.criteria?.[c.id];
-      // A Judge impl that ignores criteria (non-modelJudge) yields a visible skip, not a silent drop (pass undefined).
+      // A Judge impl that ignores criteria (non-modelJudge) yields a visible UNMEASURED row, not a silent drop
+      // and not a 0. It used to lean on the legacy "skipped: " detail prose to stay out of the aggregates —
+      // the only classification channel that existed then; the status stamp says it outright now.
       if (!v) {
         return {
           graderId: this.id,
           metric: `judge:${c.id}`,
-          value: 0,
+          status: "unmeasured",
+          reason: "unsupported", // this Judge impl cannot score criteria — configuration, not a transient error
+          retryable: false,
           detail: "skipped: criterion missing from the verdict",
         };
       }

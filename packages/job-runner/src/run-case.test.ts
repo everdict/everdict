@@ -14,6 +14,7 @@ import type {
   Grader,
   Score,
 } from "@everdict/contracts";
+import { measuredScores } from "@everdict/contracts";
 import { LocalDriver } from "@everdict/drivers";
 import { RepoEnvironment } from "@everdict/environments";
 import { TestsPassGrader, costGrader, stepsGrader } from "@everdict/graders";
@@ -55,9 +56,10 @@ describe("runCase — real harness execution → trace → scoring (full loop)",
     console.log(`\n=== DIFF ===\n${result.snapshot.diff}`);
 
     expect(result.harness).toBe("scripted@0.0.0");
-    const pass = result.scores.find((s) => s.graderId === "tests-pass");
+    const measured = measuredScores(result.scores);
+    const pass = measured.find((s) => s.graderId === "tests-pass");
     expect(pass?.pass).toBe(true);
-    const steps = result.scores.find((s) => s.graderId === "steps");
+    const steps = measured.find((s) => s.graderId === "steps");
     expect(steps?.value).toBeGreaterThan(0);
     expect(result.snapshot.changedFiles).toContain("value.txt");
   });
@@ -365,13 +367,13 @@ describe("runCase — early compute release (observation-only graders score afte
     // (Pre-fix this rejected, dropping the whole case + the healthy grader's real score.)
     const result = await runCase(CASE, fakeDeps(compute, REPO_SNAPSHOT, [failing, healthy]));
 
-    // Then: the throw becomes a visible error score (pass undefined → excluded from passRate, not a false FAIL),
-    // the sibling score is intact, and the grader-array order is preserved.
+    // Then: the throw becomes a visible UNMEASURED score (no value, no pass — excluded from every aggregate,
+    // never a false FAIL), the sibling score is intact, and the grader-array order is preserved.
     expect(result.scores.map((s) => s.graderId)).toEqual(["judge", "steps"]);
     const judge = result.scores.find((s) => s.graderId === "judge");
-    expect(judge?.pass).toBeUndefined();
+    expect(judge).toMatchObject({ status: "unmeasured", reason: "grader_error", retryable: true });
     expect(judge?.detail).toContain("judge upstream 503");
-    expect(result.scores.find((s) => s.graderId === "steps")?.pass).toBe(true);
+    expect(measuredScores(result.scores).find((s) => s.graderId === "steps")?.pass).toBe(true);
     // And compute is still released exactly once (finally is a no-op after early release — no double dispose).
     expect(disposeCount).toBe(1);
   });

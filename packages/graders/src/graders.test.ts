@@ -1,4 +1,4 @@
-import { type GradeContext, type TraceEvent, toScores } from "@everdict/contracts";
+import { type GradeContext, type TraceEvent, measuredScores, toScores } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { type Judge, JudgeGrader } from "./judge.js";
@@ -69,7 +69,7 @@ describe("answer-match grader (QA benchmark answer matching)", () => {
     expect((await new AnswerMatchGrader("2020").grade(ctx)).pass).toBe(false);
     // makeGraders without expect config leaves the fallback open (regression: "" used to block it).
     const [g] = makeGraders([{ id: "answer-match" }]);
-    const [score] = toScores((await g?.grade(ctx)) ?? []);
+    const [score] = measuredScores(toScores((await g?.grade(ctx)) ?? []));
     expect(score?.pass).toBe(true);
   });
 });
@@ -81,9 +81,11 @@ describe("JudgeGrader", () => {
     },
   };
   it("converts a Judge verdict to a Score", async () => {
-    const [score] = toScores(
-      await new JudgeGrader(mockJudge, { id: "vlm-judge", useScreenshot: true }).grade(
-        browserCtx("<html/>", "https://x"),
+    const [score] = measuredScores(
+      toScores(
+        await new JudgeGrader(mockJudge, { id: "vlm-judge", useScreenshot: true }).grade(
+          browserCtx("<html/>", "https://x"),
+        ),
       ),
     );
     expect(score?.graderId).toBe("vlm-judge");
@@ -184,9 +186,16 @@ describe("JudgeGrader", () => {
         browserCtx("<html/>", "https://x"),
       ),
     );
-    expect(scores[1]?.metric).toBe("judge:accuracy");
-    expect(scores[1]?.pass).toBeUndefined();
-    expect(String(scores[1]?.detail)).toContain("skipped");
+    // A criterion the Judge impl never scored is an UNMEASURED row — it used to be a value:0 kept out of the
+    // aggregates only by its "skipped: " prose, which is exactly the sentinel the algebra retired.
+    expect(scores[1]).toEqual({
+      graderId: "judge",
+      metric: "judge:accuracy",
+      status: "unmeasured",
+      reason: "unsupported",
+      retryable: false,
+      detail: "skipped: criterion missing from the verdict",
+    });
   });
 
   it("passes the case's expected output to the judge (EXPECTED OUTPUT evidence)", async () => {
@@ -263,7 +272,7 @@ describe("JudgeGrader", () => {
       snapshot: { kind: "os-use", screenshotRef: "/tmp/everdict-screen.png", screenshot: "", windows: [] }, // none embedded → compute fallback
       compute,
     };
-    const [score] = toScores(await new JudgeGrader(spy, { id: "vlm", useScreenshot: true }).grade(ctx));
+    const [score] = measuredScores(toScores(await new JudgeGrader(spy, { id: "vlm", useScreenshot: true }).grade(ctx)));
     expect(score?.pass).toBe(true);
     expect(calls[0]).toContain("base64 -w0");
     expect(calls[0]).toContain("/tmp/everdict-screen.png");

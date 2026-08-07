@@ -1,4 +1,4 @@
-import { type CaseJob, InternalError, type TraceEvent } from "@everdict/contracts";
+import { type CaseJob, InternalError, type TraceEvent, measuredScores } from "@everdict/contracts";
 import { DockerDriver, LocalDriver } from "@everdict/drivers";
 import { describe, expect, it, vi } from "vitest";
 import { failureResult, resolveMeterUsage, runCaseJob } from "./run.js";
@@ -21,7 +21,7 @@ describe("runCaseJob", () => {
     if (result.snapshot.kind !== "repo") throw new Error("expected a repo snapshot");
 
     expect(result.harness).toBe("scripted@0.0.0");
-    const pass = result.scores.find((s) => s.graderId === "tests-pass");
+    const pass = measuredScores(result.scores).find((s) => s.graderId === "tests-pass");
     expect(pass?.pass).toBe(true);
     expect(result.snapshot.changedFiles).toContain("out.txt");
   });
@@ -88,8 +88,9 @@ describe("failureResult (classified result crosses the process boundary)", () =>
     expect(result.harness).toBe("unknown@unknown");
     expect(result.failure?.stage).toBe("dispatch");
     // an UNMEASURED diagnostic, never a product FAIL — the fate rides on the classified failure
-    expect(result.scores[0]?.status).toBe("unmeasured");
-    expect(result.scores[0]?.pass).toBeUndefined();
+    // The variant carries no `value` and no `pass` at all — nothing for an aggregate or a passRate to read.
+    expect(result.scores[0]).toMatchObject({ status: "unmeasured", reason: "missing_evidence" });
+    expect(measuredScores(result.scores)).toEqual([]);
   });
 
   it("preserves the harness identity and the error's stage when the job is known", () => {

@@ -16,7 +16,7 @@ import type {
   UnmeasuredReason,
   UsageCost,
 } from "@everdict/contracts";
-import { sanitizeScore, toScores } from "@everdict/contracts";
+import { isMeasured, sanitizeScore, toScores } from "@everdict/contracts";
 import { billingCharges, modelApiKeySecretName, normalizeModelBinding, priceUsd } from "@everdict/domain";
 import {
   JUDGE_OVERALL_METRIC,
@@ -43,7 +43,8 @@ export type { JudgeRunner };
 const metricOf = (spec: JudgeSpec): string => `judge:${spec.id}`;
 
 // skip score — no key / no dispatch, etc. State the reason in detail so a judge the user chose doesn't silently
-// vanish, and stamp status "unmeasured" so the placeholder value never enters an aggregate (isMeasured gate).
+// vanish, and stamp status "unmeasured": the variant carries no value and no pass at all, so a judge that never
+// ran has no number to leak into an aggregate and no verdict to leak into a passRate.
 // retryable=true only when retrying AS-IS can recover (a transient error); config-shaped skips (missing secret,
 // unresolvable ref, no dispatcher) need a human change first and stay non-retryable.
 function skip(spec: JudgeSpec, reason: UnmeasuredReason, detail: string, retryable = false): Score[] {
@@ -51,8 +52,6 @@ function skip(spec: JudgeSpec, reason: UnmeasuredReason, detail: string, retryab
     {
       graderId: spec.id,
       metric: metricOf(spec),
-      value: 0,
-      pass: undefined,
       status: "unmeasured",
       reason,
       retryable,
@@ -546,13 +545,13 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         // sanitizeScore: a judge transport returning garbage (NaN score) becomes a visible INVALID score at
         // THIS collection boundary too — safeGrade guards the in-job path, this guards the control-plane one.
         return graded.map((score) => {
+          const metric = score.metric.replace(/^judge/, metricOf(spec));
+          // A criterion the judge could not score is unmeasured — it has no value for a threshold to read
+          // and no pass to re-decide, so only its identity is rewritten.
+          if (!isMeasured(score)) return sanitizeScore({ ...score, metric });
           const isOverall = score.metric === JUDGE_OVERALL_METRIC; // the graders-exported name, not a re-typed literal
           const pass = isOverall && threshold != null ? score.value >= threshold : score.pass;
-          return sanitizeScore({
-            ...score,
-            metric: score.metric.replace(/^judge/, metricOf(spec)),
-            ...(pass != null ? { pass } : {}),
-          });
+          return sanitizeScore({ ...score, metric, ...(pass != null ? { pass } : {}) });
         });
       } catch (err) {
         return skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true);

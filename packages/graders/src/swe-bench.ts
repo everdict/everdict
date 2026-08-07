@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/contracts";
+import { BadRequestError, type GradeContext, type Grader, type MeasuredScore } from "@everdict/contracts";
 
 export interface SweBenchConfig {
   testPatch: string; // gold test diff (unified) — adds/modifies FAIL_TO_PASS tests
@@ -21,7 +21,7 @@ export class SweBenchGrader implements Grader {
 
   constructor(private readonly cfg: SweBenchConfig) {}
 
-  async grade(ctx: GradeContext): Promise<Score> {
+  async grade(ctx: GradeContext): Promise<MeasuredScore> {
     if (!ctx.compute) {
       throw new BadRequestError("BAD_REQUEST", undefined, "The swe-bench grader requires compute (an environment).");
     }
