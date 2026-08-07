@@ -29,10 +29,20 @@ gradeable traces (N/N failed pre-trace)` when every case died — instead of a m
 split out to `apps/api/src/execution/scoring-service.ts` (`ScoringService.createJudgeStream`/`applyJudges`(=push-all+settle,
 used by ingest)/`collectJudgeModels`). See `docs/architecture/streaming-case-pipeline.md`.
 
-**Recover transient scoring.** `POST /scorecards/:id/rescore-unmeasured` (+ MCP `rescore_unmeasured_scores`) —
-re-runs ONLY the judges behind the batch's retryable-unmeasured scores (`retryableUnmeasured` worklist), in
-place via `scoreGroup` under the batch's OWN judge pins (never a silent latest upgrade); non-judge unmeasured
-(in-job grader deaths) return as `skipped` — they need `/retry`. No case re-execution.
+**Recover transient scoring.** `POST /scorecards/:id/rescore-unmeasured` (+ MCP `rescore_unmeasured_scores`,
+wire `RescoreUnmeasuredResultSchema {id, rescoredJudges, skipped}`) — re-runs ONLY the judges behind the
+batch's retryable-unmeasured scores (`retryableUnmeasured` worklist — GRADEABLE cases only: a classified
+failure recovers through retry/re-collect, never a scoring pass), in place via `scoreGroup` under the batch's
+OWN judge pins (never a silent latest upgrade); non-judge unmeasured (in-job grader deaths) return as
+`skipped` — they need `/retry`. No case re-execution. Both scoring passes (in-process `track` AND the
+Temporal `planScore`/`scoreCase` bridge) answer "already judged?" and "which rows does a re-score replace?"
+through ONE predicate set (`hasMeasuredJudgeVerdict`/`stripJudgeScores`/`isJudgeMetricOf` in
+scorecard-shared): a MEASURED `judge:<id>` verdict = done (an unmeasured placeholder is the state the pass
+exists to replace, never "done"), and the strip removes the whole `judge:<id>` prefix family (verdict +
+criterion children + placeholders) so a re-score replaces rather than accretes. An UNRESOLVABLE selected
+judge (deleted/bad version) is never silently dropped: `ScoringService.resolveJudges` returns it and the
+stream stamps a per-case `unmeasured{unsupported, retryable:false}` row — a batch never settles claiming a
+judge it did not run.
 
 **Stop/cancel.** `ScorecardService.cancel(tenant,id)` (`POST /scorecards/:id/cancel` + `cancel_scorecard`) stops a
 queued/running batch → new terminal `cancelled` status (domain `ScorecardBatch.cancel`/`canCancel`; like
@@ -79,7 +89,13 @@ served field.
 `scorecardPassRate` aggregates over `caseVerdict`; `summarizeScorecard`
 gives per-metric count/mean/passRate (auto) — plus, for a metric whose scores carry `label`, a
 `distribution` (label→count; ordinal order for an ordered enum, else by frequency) + `mode` instead of a
-meaningless mean. The web dashboard is
+meaningless mean. Two exclusion rules there: `mean` is ABSENT when count is 0 (an annihilated metric — every
+score unmeasured/invalid — must never read as a measured zero; consumers gate on the absence, which the
+optional type forces), and a NO-OUTCOME case (failure code CANCELLED at any stage, or a pre-outcome
+dispatch/install/run death) contributes NOTHING to the metric plane — its story lives on
+`caseOutcome`/`scorecardOutcomes`; only collect-stage failures keep their compute-bound measurements.
+`classifyFailure` marks CANCELLED non-retryable (a retry would un-stop a stop), and runCase records a
+`compute.dispose()` failure on the lifecycle mark instead of destroying the finished result. The web dashboard is
 **metric-kind-aware** (`classifyMetric`/`fmtMetricValue` in `apps/web/.../format.ts`): categorical → distribution
 bar, pass/fail → proportion bar, numeric → the mean in its inferred unit ($ / s / % / count) — never a raw `0.50`.
 
@@ -126,7 +142,8 @@ weighted overall (`judge:<id>`). See `docs/judges.md` + `docs/architecture/eval-
 - Model axis (`packages/suite/src/models.ts` `scorecardModels`): **observed** (distinct `llm_call.model` from the
   trace) + **declared** (command harness `spec.model`) both kept; `primary` = mode observed → declared fallback.
   Persisted as `models` jsonb (mig `0028_add_scorecard_models.sql`); judge models mig `0030`.
-- Trend/regression-over-time: `trendSeries` (`packages/suite/src/trend.ts`), route `GET /scorecards/trend`.
+- Trend/regression-over-time: `trendSeries` (`packages/suite/src/trend.ts`), route `GET /scorecards/trend`
+  + MCP twin `trend_scorecards` (direction/policyMixed semantics reach agents too — BFF↔MCP parity).
 - Flexible analysis pivot: `computeAnalysis` (`packages/domain/src/scorecard/analysis.ts`) — filter/group/pivot/
   measure over the light list shape; route `POST /scorecards/query` + MCP `query_scorecards`. It is the
   **server-side twin of the web engine** (`apps/web/.../analyze-scorecards/model/analysis.ts`) — change BOTH in

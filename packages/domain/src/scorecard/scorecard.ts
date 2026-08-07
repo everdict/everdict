@@ -7,7 +7,7 @@ import {
   measuredScores,
   metricMatches,
 } from "@everdict/contracts";
-import { DEFAULT_VERDICT_POLICY, evaluateVerdict } from "./verdict-policy.js";
+import { DEFAULT_VERDICT_POLICY, PRE_OUTCOME_STAGES, evaluateVerdict } from "./verdict-policy.js";
 
 export { PRE_OUTCOME_STAGES } from "./verdict-policy.js";
 
@@ -57,12 +57,19 @@ export interface MetricSummary {
 // keys off the distribution instead of the mean (which stays populated as the mean of the ordering `value`).
 // MEASUREMENTS ONLY: an unmeasured score (grader error, judge skip — isMeasured gate) never contributes a value,
 // pass, or label; it only increments the metric's `unmeasured` tally.
+// OUTCOMES ONLY: a case that never legitimately produced an outcome — cancelled at any stage, or dead before
+// one (dispatch/install/run) — contributes NOTHING here, measured or not. Its story lives on the failure plane
+// (caseOutcome's cancelled/infraFailed denominators); partial work under a kill entering a metric mean is the
+// same masquerade as a dead grader's zero. (Collect-stage failures keep their compute-bound measurements —
+// the run completed; only its observability died.)
 export function summarizeScorecard(sc: Scorecard): MetricSummary[] {
   const byMetric = new Map<
     string,
     { values: number[]; passes: boolean[]; labeled: { label: string; value: number }[]; unmeasured: number }
   >();
   for (const result of sc.results) {
+    const f = result.failure;
+    if (f && (f.code === "CANCELLED" || PRE_OUTCOME_STAGES.has(f.stage))) continue;
     for (const s of result.scores) {
       const m = byMetric.get(s.metric) ?? { values: [], passes: [], labeled: [], unmeasured: 0 };
       byMetric.set(s.metric, m);

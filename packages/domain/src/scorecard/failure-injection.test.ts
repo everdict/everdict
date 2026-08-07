@@ -82,7 +82,7 @@ const MONSTER: Scorecard = {
     ]),
     // ③ a legacy pre-status row (persisted before the field existed)
     result("legacy-sentinel", [{ graderId: "judge", metric: "judge:quality", value: 0, detail: "[grader-error] 503" }]),
-    // ④ dispatch death (failedCaseResult shape) — hostile twist: a stray pass:false diagnostic
+    // ④ dispatch death (failedCaseResult shape)
     {
       ...result(
         "dispatch-died",
@@ -101,6 +101,15 @@ const MONSTER: Scorecard = {
       ),
       snapshot: { kind: "prompt", output: "" },
     },
+    // ⑤ cancelled mid-run WITH a surviving MEASURED pass — the hostile half of cancellation: partial work
+    // under a kill left a real-looking measurement behind, and an outcome-blind aggregator would fold it in.
+    result("cancelled-mid-run", [s("tests_pass", 1, true), s("cost_usd", 0.1)], {
+      stage: "run",
+      class: "infra",
+      code: "CANCELLED",
+      message: "batch stopped by the user",
+      retryable: false,
+    }),
   ],
 };
 
@@ -108,9 +117,15 @@ describe("failure injection — no failure converts into a normal number or prod
   it("every metric aggregate of the monster equals the clean control bit-for-bit", () => {
     const clean = summarizeScorecard(CLEAN);
     const monster = summarizeScorecard(MONSTER);
+    // The CONTROL's values are pinned as concrete numbers first — `expect(m?.mean).toBe(c?.mean)` alone is
+    // vacuously green when the aggregator stops emitting the metric (undefined === undefined), which would
+    // have let a totally broken summarize pass the suite's flagship assertion.
+    expect(clean.find((m) => m.metric === "tests_pass")).toMatchObject({ count: 2, mean: 0.5, passRate: 0.5 });
+    expect(clean.find((m) => m.metric === "cost_usd")).toMatchObject({ count: 2, mean: 0.6 });
     for (const metric of ["tests_pass", "cost_usd"]) {
       const c = clean.find((m) => m.metric === metric);
       const m = monster.find((x) => x.metric === metric);
+      expect(c).toBeDefined();
       expect(m?.mean).toBe(c?.mean);
       expect(m?.count).toBe(c?.count);
       expect(m?.passRate).toBe(c?.passRate);
@@ -121,13 +136,13 @@ describe("failure injection — no failure converts into a normal number or prod
     expect(scorecardPassRate(MONSTER)).toEqual(scorecardPassRate(CLEAN));
     const outcomes = scorecardOutcomes(MONSTER);
     expect(outcomes).toEqual({
-      executed: 6,
+      executed: 7,
       gradeable: 5,
       verdicted: 2, // exactly the clean core
       passed: 1,
       failed: 1,
       infraFailed: 1, // the dispatch death
-      cancelled: 0,
+      cancelled: 1, // the mid-run kill — its own denominator, never a verdict
       unmeasured: 3, // grader error + judge skip + legacy sentinel — visible, never counted
     });
     const monsterSummary = summarizeScorecard(MONSTER);
@@ -135,11 +150,35 @@ describe("failure injection — no failure converts into a normal number or prod
     expect(monsterSummary.find((m) => m.metric === "cost_usd")?.unmeasured).toBe(1);
   });
 
+  it("a no-outcome case (cancelled / pre-outcome death) contributes NO summary row — its diagnostics live on the failure plane", () => {
+    const monster = summarizeScorecard(MONSTER);
+    // The dispatch death's diagnostic score used to materialize a poisoned {metric:"error", count:0} row that
+    // every count-blind consumer read as a measured zero; the cancelled case's surviving pass:true would have
+    // shifted tests_pass toward 2/3. Neither belongs to the metric plane at all.
+    expect(monster.find((m) => m.metric === "error")).toBeUndefined();
+    expect(monster.find((m) => m.metric === "tests_pass")?.count).toBe(2); // the clean core only
+  });
+
+  it("the reverse diff enumerates the injected cases as missing from the candidate side too", () => {
+    const diff = diffScorecards(MONSTER, CLEAN);
+    expect(diff.regressions).toEqual([]);
+    expect(diff.improvements).toEqual([]);
+    expect(diff.missing.casesOnlyInBaseline.sort()).toEqual([
+      "cancelled-mid-run",
+      "dispatch-died",
+      "grader-died",
+      "judge-skipped",
+      "legacy-sentinel",
+    ]);
+    expect(diff.comparability).toBe("partial");
+  });
+
   it("diffing monster against clean reports the injected cases as missing — never as regressions", () => {
     const diff = diffScorecards(CLEAN, MONSTER);
     expect(diff.regressions).toEqual([]);
     expect(diff.improvements).toEqual([]);
     expect(diff.missing.casesOnlyInCandidate.sort()).toEqual([
+      "cancelled-mid-run",
       "dispatch-died",
       "grader-died",
       "judge-skipped",
