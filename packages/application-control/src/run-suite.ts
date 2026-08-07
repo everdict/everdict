@@ -1,4 +1,10 @@
-import type { CaseJob, CaseResult, Scorecard, Suite } from "@everdict/contracts";
+import {
+  CURRENT_EVIDENCE_VERSION,
+  type CaseJob,
+  type CaseResult,
+  type Scorecard,
+  type Suite,
+} from "@everdict/contracts";
 import { classifyFailure } from "@everdict/domain";
 
 // Same (job)→CaseResult signature as Backend/Router/Orchestrator.
@@ -30,6 +36,8 @@ export function failedCaseResult(job: CaseJob, error: unknown): CaseResult {
   return {
     caseId: job.evalCase.id,
     harness: `${job.harness.id}@${job.harness.version}`,
+    evidenceVersion: CURRENT_EVIDENCE_VERSION, // a synthesized failure vouches for nothing — the era says so
+
     ...(job.trial !== undefined ? { trial: job.trial } : {}), // carry the trial index so pass@k/flakiness sees this failure
     trace: [
       ...infra,

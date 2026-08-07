@@ -92,8 +92,12 @@ transports pass `submitterRoles`). `MetricDefinition` also carries `kind`/`verdi
 diagnostic/excluded)/`missingPolicy` — a REQUIRED metric with no measurement INVALIDATES the case (verdict
 absent with a stated cause). `caseOutcome` adds `cancelled` (failure code CANCELLED — no verdict at any
 stage, own denominator); `requested` (cases×trials / ingest trace count, mig 0127) persists the ask.
-`evidenceStatus` reads the producer's `traceSealed` vouch (runCase) — the only positive claim of trace
-completeness. trend/leaderboard flag `policyMixed` and suppress cross-policy regression flags; diff lists
+`evidenceStatus` reads the producer's `traceSealed` vouch — the only positive claim of trace completeness —
+bounded by `CaseResult.evidenceVersion` (`CURRENT_EVIDENCE_VERSION`, contracts): EVERY producer that constructs
+a CaseResult stamps the era, so from era 2 on an unsealed result with a trajectory reads `partial` (the
+producer declined to vouch) while an era-less legacy row keeps its old `complete` reading. Ingest (push AND
+pull) therefore reads partial by design — it scores a trace nobody here watched being collected. Adding a
+CaseResult producer means stamping it. trend/leaderboard flag `policyMixed` and suppress cross-policy regression flags; diff lists
 `incomparable` (kind_changed) + `overlap`. `preferredMetric` resolves absent metric axes from the data. **The ranking has exactly one
 implementation and is SERVED, never recomputed by a client**: a scorecard's per-case `verdict` and
 `RunRecord.verdict` (derived on read next to `usage`, in `withRunUsage`) both come from this engine, and the

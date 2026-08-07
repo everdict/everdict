@@ -1,4 +1,4 @@
-import type { Scorecard } from "@everdict/contracts";
+import { CURRENT_EVIDENCE_VERSION, type Scorecard } from "@everdict/contracts";
 import type { ScorecardRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryPlatformEventStore } from "../activity/platform-event-store.js";
@@ -14,6 +14,8 @@ const SCORECARD: Scorecard = {
     {
       caseId: "c1",
       harness: "scripted@0",
+      evidenceVersion: CURRENT_EVIDENCE_VERSION,
+      traceSealed: true,
       trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.02 } }],
       snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
       scores: [{ graderId: "steps", metric: "steps", value: 3, pass: true }],
@@ -323,6 +325,10 @@ describe("PgScorecardStore", () => {
     expect(got?.judgeModels).toEqual(["gpt-5.4-mini"]);
     expect(got?.createdBy).toBe("user-alice");
     expect(got?.runtime).toBe("docker"); // work-queue runtime axis
+    // The per-case evidence era survives the round trip: evidenceStatus is derived on READ from the stored
+    // result, so a field the row parse dropped would silently give every persisted case the legacy reading.
+    expect(got?.scorecard?.results[0]?.evidenceVersion).toBe(2);
+    expect(got?.scorecard?.results[0]?.traceSealed).toBe(true);
   });
 
   it("list → doesn't select the scorecard column (lightweight) but does SELECT models·judge_models + tenant filter + sort", async () => {

@@ -1,4 +1,11 @@
-import { AppError, type CaseResult, type RunRecord, type TraceEvent, stamp } from "@everdict/contracts";
+import {
+  AppError,
+  CURRENT_EVIDENCE_VERSION,
+  type CaseResult,
+  type RunRecord,
+  type TraceEvent,
+  stamp,
+} from "@everdict/contracts";
 import { type BudgetTracker, type UsageMeter, billingCharges, runEvidenceIdentity } from "@everdict/domain";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RunStore } from "../ports/run-store.js";
@@ -68,6 +75,7 @@ export class FrontDoorTurnRunner {
       const result: CaseResult = {
         caseId: record.caseId,
         harness: `${record.harness.id}@${record.harness.version}`,
+        evidenceVersion: CURRENT_EVIDENCE_VERSION, // a live turn streams its events; no collection pass to vouch for
         trace: events.slice(),
         snapshot: { kind: "prompt", output: responseText },
         scores: [],

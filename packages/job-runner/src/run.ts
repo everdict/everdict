@@ -1,6 +1,7 @@
 import { runCase } from "@everdict/application-execution";
 import {
   BadRequestError,
+  CURRENT_EVIDENCE_VERSION,
   type CaseFsServicing,
   type CaseJob,
   type CaseResult,
@@ -90,6 +91,7 @@ export function failureResult(
   return {
     caseId: job?.evalCase.id ?? "unknown",
     harness: job ? `${job.harness.id}@${job.harness.version}` : "unknown@unknown",
+    evidenceVersion: CURRENT_EVIDENCE_VERSION, // nothing was collected, and the era is what says so
     trace: [{ t: 0, kind: "error", message }],
     snapshot: { kind: "prompt", output: "" },
     // UNMEASURED diagnostic, not a measurement (run-suite failedCaseResult twin): with no status this score

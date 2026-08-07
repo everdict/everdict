@@ -1,6 +1,7 @@
 import {
   AppError,
   BadRequestError,
+  CURRENT_EVIDENCE_VERSION,
   type CaseJob,
   type CaseResult,
   type Dataset,
@@ -607,6 +608,7 @@ export class ScorecardBatchService {
             result = {
               caseId,
               harness: `${ctx.harnessId}@${ctx.harnessVersion}`,
+              evidenceVersion: CURRENT_EVIDENCE_VERSION, // synthesized after retries ran out — nothing to vouch for
               trace: [{ t: 0, kind: "error", message }],
               snapshot: { kind: "prompt", output: "" },
               // UNMEASURED diagnostic — the failedCaseResult twin on the batch retry-exhausted path.

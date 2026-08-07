@@ -96,6 +96,31 @@ policy's custom ground truth disappears and the built-in ladder re-decides every
   record, `ScorecardBatch.withTrialSummary` omits the roll-up, the regression watch never reopens an issue on
   one, and `retryFailed` refuses with a 400 rather than picking cases by re-judging them.
 
+## Evidence completeness + the evidence era
+`evidenceStatus(result)` (`@everdict/domain`, served per case) reads how complete the evidence behind a case
+actually is: `trace: complete | partial | missing | deferred` and `snapshot: complete | missing`. It is
+DERIVED from the result — a classified collect failure, a `traceRef` still pending, a placeholder snapshot —
+never self-reported, except for one positive claim: **`traceSealed`**, the producer's vouch that it ran the
+collection path to completion. Absence of bad news is not completeness; a trace truncated with no recorded
+failure looks exactly like a whole one.
+
+Which left the seal's ABSENCE ambiguous: a row from before the seal existed and a row whose producer declined
+to vouch were the same absence, so both had to be given the strongest reading. `CaseResult.evidenceVersion`
+(`CURRENT_EVIDENCE_VERSION`, `@everdict/contracts`) bounds the era. Every producer that constructs a
+`CaseResult` stamps it — `runCase`, `failedCaseResult`, the batch's retry-exhausted synthesis, the job-runner's
+failure result, the self-hosted runner's classified reply, the service-topology backend, both session runners,
+and both ingest paths — and seals only when it genuinely watched the collection.
+
+So from era 2 on, an unsealed result with a trajectory reads **`partial`**, while a row with no era (or a
+lower one) keeps its historical reading. The visible consequence: **ingest batches read `partial`**, on the
+push and the pull path alike. An ingest scores a trace someone else collected; nobody in Everdict watched that
+collection, and claiming completeness for it would be inventing evidence. Nothing gates on `evidenceStatus`
+today — it is served per case and tallied by `workspaceOpsReport` (`evidence.trace` + the `traceComplete`
+rate), where ingest-heavy workspaces will now see those cases counted as partial rather than complete.
+
+A new era is a new NUMBER, never a redefinition of an old one — the point of the field is that a record keeps
+meaning what it meant when it was written.
+
 ## Reproducibility manifest + content digests (sha256, dual-read)
 Every batch seals a `manifest` at submit — content digests of exactly what it evaluated: the resolved dataset
 case bundle, the resolved harness spec, the run-time grading plan, each selected judge's spec, and the

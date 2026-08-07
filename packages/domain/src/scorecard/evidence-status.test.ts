@@ -1,4 +1,4 @@
-import type { CaseFailure, EnvSnapshot, TraceEvent } from "@everdict/contracts";
+import { CURRENT_EVIDENCE_VERSION, type CaseFailure, type EnvSnapshot, type TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { evidenceStatus } from "./evidence-status.js";
 
@@ -49,6 +49,33 @@ describe("evidenceStatus — completeness as a value, derived not self-reported"
     expect(evidenceStatus({ trace: events, snapshot: repoSnapshot, traceSealed: true }).trace).toBe("complete");
     expect(evidenceStatus({ trace: events, snapshot: repoSnapshot, traceSealed: false }).trace).toBe("partial");
     expect(evidenceStatus({ trace: events, snapshot: repoSnapshot }).trace).toBe("complete");
+  });
+
+  it("a sealed-era result that did NOT vouch reads partial — the era is what makes the absence a statement", () => {
+    // Regression: pre-fix, an absent seal was read as "complete" no matter who wrote the row, because
+    // "written before the seal existed" and "written by a producer that declined to vouch" were the same
+    // absence. `evidenceVersion` bounds the era, so the second one is now a real statement about the trace.
+    // The ingest paths are exactly this shape: they score a trace someone else collected.
+    expect(
+      evidenceStatus({ trace: events, snapshot: repoSnapshot, evidenceVersion: CURRENT_EVIDENCE_VERSION }).trace,
+    ).toBe("partial");
+    // …and a producer of the same era that DID vouch is still complete.
+    expect(
+      evidenceStatus({
+        trace: events,
+        snapshot: repoSnapshot,
+        evidenceVersion: CURRENT_EVIDENCE_VERSION,
+        traceSealed: true,
+      }).trace,
+    ).toBe("complete");
+  });
+
+  it("a legacy row with no era keeps its old reading — history is not retroactively demoted", () => {
+    // The whole point of versioning the era rather than flipping the default: a row written before any
+    // producer could vouch says nothing about its own completeness, and inventing a downgrade for it would
+    // rewrite what every historical batch's evidence report claimed.
+    expect(evidenceStatus({ trace: events, snapshot: repoSnapshot }).trace).toBe("complete");
+    expect(evidenceStatus({ trace: events, snapshot: repoSnapshot, evidenceVersion: 1 }).trace).toBe("complete");
   });
 
   it("control-plane collection pending reads deferred — even beside the job's infra lifecycle marks", () => {

@@ -12,6 +12,7 @@ import {
 } from "@everdict/backends";
 import {
   BadRequestError,
+  CURRENT_EVIDENCE_VERSION,
   type CaseJob,
   type CaseResult,
   type EnvSnapshot,
@@ -948,6 +949,9 @@ export class ServiceTopologyBackend
       return {
         caseId: job.evalCase.id,
         harness: `${spec.id}@${spec.version}`,
+        // The era, with no seal: the front-door drive hands back whatever trace the topology produced, and
+        // this backend never watched the collection run to completion — it cannot vouch for it.
+        evidenceVersion: CURRENT_EVIDENCE_VERSION,
         trace: [...trace, ...infraMarks, ...targetInfra, ...infra, ...serviceLogEvents],
         snapshot,
         scores,

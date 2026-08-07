@@ -1,6 +1,7 @@
 import {
   AppError,
   BadRequestError,
+  CURRENT_EVIDENCE_VERSION,
   type CaseResult,
   type Dataset,
   EVERDICT_TRACE_SOURCE,
@@ -319,6 +320,10 @@ export class ScorecardIngestService {
       results.push({
         caseId: up.caseId,
         harness: harnessLabel,
+        // Stamped with the era but deliberately NOT sealed: ingest scores a trace someone else collected, on
+        // both the push and pull paths. Nobody here watched that collection run to completion, so vouching for
+        // it would be inventing a claim — these results read `partial`, which is the honest answer.
+        evidenceVersion: CURRENT_EVIDENCE_VERSION,
         trace,
         snapshot,
         ...(up.evidence ? { evidence: up.evidence } : {}),

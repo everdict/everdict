@@ -1,5 +1,6 @@
 import {
   AppError,
+  CURRENT_EVIDENCE_VERSION,
   type CaseResult,
   type ComputeHandle,
   type EvaluableHarness,
@@ -84,6 +85,7 @@ export class SessionTaskRunner {
       const result: CaseResult = {
         caseId: record.caseId,
         harness: `${record.harness.id}@${record.harness.version}`,
+        evidenceVersion: CURRENT_EVIDENCE_VERSION, // a live session streams its events; no collection pass to vouch for
         trace: events.slice(),
         snapshot: { kind: "prompt", output: lastAssistantText(events) },
         scores: [],

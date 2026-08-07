@@ -18,7 +18,7 @@ import type {
   Score,
   TraceEvent,
 } from "@everdict/contracts";
-import { UpstreamError, stamp } from "@everdict/contracts";
+import { CURRENT_EVIDENCE_VERSION, UpstreamError, stamp } from "@everdict/contracts";
 import {
   classifyFailure,
   computeNeedsFor,
@@ -414,6 +414,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     return {
       caseId: evalCase.id,
       harness: `${deps.harness.id}@${deps.harness.version}`,
+      evidenceVersion: CURRENT_EVIDENCE_VERSION, // the era this result was produced in — see the seal below
       trace,
       // The positive seal: this producer ran the collection path to completion (deferred collection is NOT
       // sealed here — the control plane seals after its own pull; a collect failure never seals).

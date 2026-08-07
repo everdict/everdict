@@ -1,5 +1,6 @@
 import { arch, hostname, platform } from "node:os";
 import {
+  CURRENT_EVIDENCE_VERSION,
   type CaseFsRequest,
   type CaseFsServicing,
   type CaseJob,
@@ -276,6 +277,7 @@ export async function runLeaseWorkers(deps: RunnerLoopDeps, opts: RunnerLoopOpts
         const failed = {
           caseId: parsed.data.evalCase.id,
           harness: `${parsed.data.harness.id}@${parsed.data.harness.version}`,
+          evidenceVersion: CURRENT_EVIDENCE_VERSION, // the runner never got a trajectory to vouch for
           trace: [leasedMark, { t: 1, kind: "error", message: errMsg(e) }],
           snapshot: { kind: "prompt", output: "" },
           // UNMEASURED diagnostic — the run-suite failedCaseResult twin on the self-hosted reply path: a

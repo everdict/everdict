@@ -1,6 +1,7 @@
 import type { Dispatcher } from "@everdict/backends";
 import {
   BadRequestError,
+  CURRENT_EVIDENCE_VERSION,
   type CaseJob,
   type CaseResult,
   ConflictError,
@@ -31,6 +32,7 @@ import {
   type Principal,
   Run,
   composeVerdictPolicy,
+  evidenceStatus,
   inMemoryUsageMeter,
   verdictPolicyRef,
 } from "@everdict/domain";
@@ -1179,6 +1181,30 @@ describe("materialize-on-import — imported traces seal as OUR copy and are jud
       source: "import",
       eventCount: 2,
     });
+  });
+
+  it("an ingested case stamps the evidence era WITHOUT a seal, so its evidence reads partial", async () => {
+    // Regression: pre-fix, an absent seal was indistinguishable from a pre-seal-era row, so every ingested
+    // case claimed COMPLETE trace evidence. Ingest scores a trace someone else collected — nobody here
+    // watched that collection, and the honest reading is partial. The era is what makes the absence a claim.
+    const { store, datasets, service } = build(new InMemoryTrajectoryStore(), {
+      fetch: async () => {
+        throw new Error("push ingest never pulls");
+      },
+    });
+    await datasets.register("acme", datasetWithCase());
+    const created = await service.ingest({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      traces: [{ caseId: "c1", trace: pulled }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    const result = done.scorecard?.results[0];
+    if (result === undefined) throw new Error("the ingested batch produced no result");
+    expect(result.evidenceVersion).toBe(CURRENT_EVIDENCE_VERSION);
+    expect(result.traceSealed).toBeUndefined();
+    expect(evidenceStatus(result).trace).toBe("partial");
   });
 });
 

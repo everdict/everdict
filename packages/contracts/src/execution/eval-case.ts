@@ -124,9 +124,21 @@ export const EnvDeltaSchema = z.object({
 });
 export type EnvDelta = z.infer<typeof EnvDeltaSchema>;
 
+// Which EVIDENCE ERA produced a result — what a reader may conclude from a field being absent.
+// 1 = the pre-seal era (no producer could vouch for trace completeness). 2 = every producer stamps this and
+// seals when it CAN vouch, so an absent seal is a real statement about that result rather than an artefact of
+// its age. Absent on rows written before the field existed = era 1 by definition.
+// A new era is a NEW NUMBER, never a redefinition of an old one: the point is that a record keeps meaning what
+// it meant when it was written.
+export const CURRENT_EVIDENCE_VERSION = 2;
+
 export const CaseResultSchema = z.object({
   caseId: z.string(),
   harness: z.string(), // "claude-code@1.2.3"
+  // The evidence era this result was produced in (CURRENT_EVIDENCE_VERSION). Without it, "written before the
+  // seal existed" and "written by a producer that declined to vouch" are the same absence, and evidenceStatus
+  // had to give both the STRONGEST reading — so a result with no seal read as complete evidence forever.
+  evidenceVersion: z.number().int().optional(),
   // Trial index (0-based) when the same case is run N times for pass@k / flakiness. Absent (or 0) = a single-run
   // case — a Scorecard may hold multiple results with the same caseId, distinguished by trial. Aggregation groups
   // by caseId; the per-trial verdict reuses caseVerdict. docs/architecture/trial-based-verdict.md
@@ -135,7 +147,7 @@ export const CaseResultSchema = z.object({
   // POSITIVE trace seal — the producer VOUCHES that collection ran to completion (runCase's normal path).
   // "has events + no recorded collect failure" is only absence of bad news; a trace truncated without a
   // recorded failure is indistinguishable from a complete one unless the producer says so. Absent on legacy
-  // rows and on producers that cannot vouch (evidenceStatus then falls back to the heuristic reading).
+  // rows and on producers that cannot vouch — and `evidenceVersion` above is what tells those two apart.
   traceSealed: z.boolean().optional(),
   // The absolute instant this result's trace `t` offsets count from, DECLARED by the producer that knows it
   // (the topology backend: the front-door drive's start). The sealer passes it through as the execution
