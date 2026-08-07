@@ -201,7 +201,11 @@ function SummaryCells({ m, unmeasuredLabel }: { m: MetricSummary; unmeasuredLabe
 // Per-case score badge tone — the judge/grader pass verdict (neutral when the score carries no pass).
 // Gated on measurement first: an unmeasured/invalid row is never a red or green claim, whatever its
 // placeholder `pass` says — the value cell already renders "unmeasured", the tone must agree.
-function scoreTone(s: { pass?: boolean; status?: string; detail?: unknown }): 'neutral' | 'success' | 'danger' {
+function scoreTone(s: {
+  pass?: boolean
+  status?: string
+  detail?: unknown
+}): 'neutral' | 'success' | 'danger' {
   if (isUnmeasuredScore(s)) return 'neutral'
   return s.pass == null ? 'neutral' : s.pass ? 'success' : 'danger'
 }
@@ -333,8 +337,7 @@ export default async function ScorecardDetailPage({
   // as a 50% product failure — exactly the conflation the served casePass/outcomes exist to prevent. The
   // local verdict counts above remain only as a fallback for legacy responses without the served field.
   const verdictedTotal = record.casePass?.total ?? passed + failedCount
-  const passRate =
-    verdictedTotal > 0 ? (record.casePass?.pass ?? passed) / verdictedTotal : null
+  const passRate = verdictedTotal > 0 ? (record.casePass?.pass ?? passed) / verdictedTotal : null
 
   // Failure-first sort (fail → skip → pass), then failed-only/all filter.
   const filter = cases === 'failed' ? 'failed' : 'all'
@@ -347,10 +350,12 @@ export default async function ScorecardDetailPage({
   const exportByCase = new Map((record.export?.cases ?? []).map((c) => [c.caseId, c]))
 
   // Case drilldown: child runs this scorecard fanned out (if any) → caseId→runId. Old/ingest scorecards have no children, so an empty map.
-  // Fetched when there are results (completed-case drilldown) OR while the batch is live (in-flight cases → watch-live links).
+  // Fetched when there are results (completed-case drilldown), while the batch is live (in-flight cases → watch-live
+  // links), or when the progress timeline names cases (a terminal-failed batch can have case steps but no results —
+  // the step's run link is then the only door to that case's execution detail).
   const childRunByCase = new Map<string, string>()
   let liveCases: { caseId: string; runId: string; status: RunStatus }[] = []
-  if (results.length > 0 || live) {
+  if (results.length > 0 || live || steps.some((s) => s.caseId !== undefined)) {
     try {
       const children = runsSchema.parse(await controlPlane.listRuns(ctx, { scorecardId: id }))
       for (const c of children) childRunByCase.set(c.caseId, c.id)
@@ -463,9 +468,11 @@ export default async function ScorecardDetailPage({
                   (passing cases carry over). The control plane enforces scorecards:run. */}
               {/* Targeted recovery of transient judge blips — shown only when the served detail says a
                   retryable-unmeasured worklist exists. In-place, no case re-runs; distinct from re-run/retry. */}
-              {canRun && record.retryableUnmeasured !== undefined && record.retryableUnmeasured > 0 && (
-                <RescoreScorecardButton id={record.id} count={record.retryableUnmeasured} />
-              )}
+              {canRun &&
+                record.retryableUnmeasured !== undefined &&
+                record.retryableUnmeasured > 0 && (
+                  <RescoreScorecardButton id={record.id} count={record.retryableUnmeasured} />
+                )}
               {canRun && (
                 <RerunScorecardButton
                   id={record.id}
@@ -869,6 +876,16 @@ export default async function ScorecardDetailPage({
                     <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
                       {s.phase}
                     </span>
+                    {/* Per-case progress step (judge verdict etc.) → that case's child run detail — the execution
+                        environment behind the verdict. Same door the case card offers, reachable from the timeline. */}
+                    {s.caseId && childRunByCase.get(s.caseId) && (
+                      <Link
+                        href={`/${workspace}/run/${childRunByCase.get(s.caseId)}`}
+                        className="ml-2 font-mono text-[11px] text-link transition-colors hover:text-foreground"
+                      >
+                        → run
+                      </Link>
+                    )}
                     {/* Long failure reasons (the whole error is carried now, not cut at 140) stay a few lines with an
                         expand toggle so one erroring case doesn't blow up the timeline; short steps show no toggle. */}
                     <ExpandableText
@@ -968,17 +985,17 @@ export default async function ScorecardDetailPage({
             record.outcomes.unmeasured > 0 ||
             record.outcomes.cancelled > 0 ||
             (record.outcomes.requested ?? record.outcomes.executed) > record.outcomes.executed) && (
-          <p className="text-[12px] text-muted-foreground">
-            {t('caseOutcomesStrip', {
-              executed: record.outcomes.executed,
-              verdicted: record.outcomes.verdicted,
-              passed: record.outcomes.passed,
-              failed: record.outcomes.failed,
-              infraFailed: record.outcomes.infraFailed,
-              unmeasured: record.outcomes.unmeasured,
-            })}
-          </p>
-        )}
+            <p className="text-[12px] text-muted-foreground">
+              {t('caseOutcomesStrip', {
+                executed: record.outcomes.executed,
+                verdicted: record.outcomes.verdicted,
+                passed: record.outcomes.passed,
+                failed: record.outcomes.failed,
+                infraFailed: record.outcomes.infraFailed,
+                unmeasured: record.outcomes.unmeasured,
+              })}
+            </p>
+          )}
         {results.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">
             {record.status === 'failed'
@@ -1046,7 +1063,9 @@ export default async function ScorecardDetailPage({
                               tone={scoreTone(g.row)}
                             >
                               {fmtMetricLabel(g.row.metric, caseMetrics)}{' '}
-                              {isUnmeasuredScore(g.row) ? t('scoreUnmeasured') : scoreBadgeValue(g.row)}
+                              {isUnmeasuredScore(g.row)
+                                ? t('scoreUnmeasured')
+                                : scoreBadgeValue(g.row)}
                             </Badge>
                           ) : (
                             <span
@@ -1055,7 +1074,9 @@ export default async function ScorecardDetailPage({
                             >
                               <Badge title={g.row.metric} tone={scoreTone(g.row)}>
                                 {fmtMetricLabel(g.row.metric, caseMetrics)}{' '}
-                                {isUnmeasuredScore(g.row) ? t('scoreUnmeasured') : scoreBadgeValue(g.row)}
+                                {isUnmeasuredScore(g.row)
+                                  ? t('scoreUnmeasured')
+                                  : scoreBadgeValue(g.row)}
                               </Badge>
                               {g.criteria.map((c) => (
                                 <Badge
@@ -1067,7 +1088,9 @@ export default async function ScorecardDetailPage({
                                   {c.parsed.kind === 'judge-criterion'
                                     ? c.parsed.criterionId
                                     : c.row.metric}{' '}
-                                  {isUnmeasuredScore(c.row) ? t('scoreUnmeasured') : scoreBadgeValue(c.row)}
+                                  {isUnmeasuredScore(c.row)
+                                    ? t('scoreUnmeasured')
+                                    : scoreBadgeValue(c.row)}
                                 </Badge>
                               ))}
                             </span>
