@@ -62,5 +62,11 @@ export const ScorecardResponseSchema = ScorecardRecordSchema.extend({
   outcomes: ScorecardOutcomesSchema.optional().describe(
     "Case-fate denominators (server-computed; present when per-case results are present): executed/gradeable/verdicted + passed/failed/infraFailed/unmeasured — an infra-failed case has no product verdict and never enters pass rate",
   ),
+  policyResolution: z
+    .enum(["resolved", "legacy_default", "unresolvable"])
+    .optional()
+    .describe(
+      "Whether this batch's STAMPED verdict policy could be restored (detail only). 'unresolvable' = the stamped document is gone, so no verdict can be re-derived: per-case `verdict`, `casePass` and `outcomes` are ABSENT rather than silently re-judged under today's default ladder",
+    ),
 });
 export type ScorecardResponse = z.infer<typeof ScorecardResponseSchema>;

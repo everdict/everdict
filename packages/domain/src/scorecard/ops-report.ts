@@ -1,6 +1,7 @@
 import type { OpsReport, Scorecard, ScorecardRecord } from "@everdict/contracts";
 import { scorecardOutcomes } from "./case-outcome.js";
 import { evidenceStatus } from "./evidence-status.js";
+import { resolvePolicyResolution } from "./verdict-policy.js";
 
 // Workspace ops report (metrics commercialization C1) — one pure derivation over the workspace's OWN
 // scorecard ledger: how much of the window's failure is the PLATFORM's (infra/scoring/evidence) versus the
@@ -10,8 +11,10 @@ import { evidenceStatus } from "./evidence-status.js";
 // Honesty rules (trust kernel): a rate whose denominator is zero is ABSENT, never 0 — a window with no
 // executed cases has no infra-failure rate. Batches without per-case detail (list rows, pre-offload records)
 // contribute to the batch tallies but not to case/evidence sums — partial visibility is reported as smaller
-// denominators, never invented rows.
-export type OpsReportInput = Pick<ScorecardRecord, "status" | "requested"> & {
+// denominators, never invented rows. A batch whose STAMPED verdict policy cannot be restored is the same
+// shape of partial visibility: its pass/fail split is not derivable, so it contributes no case rows rather
+// than a split re-judged under today's ladder.
+export type OpsReportInput = Pick<ScorecardRecord, "status" | "requested" | "verdictPolicy" | "manifest"> & {
   scorecard?: Pick<Scorecard, "results">;
 };
 
@@ -37,7 +40,9 @@ export function workspaceOpsReport(records: OpsReportInput[], window?: { from?: 
     else if (record.status === "superseded") batches.superseded++;
     if (record.requested !== undefined) requested = (requested ?? 0) + record.requested;
     if (!record.scorecard) continue;
-    const o = scorecardOutcomes(record.scorecard);
+    const resolution = resolvePolicyResolution(record.verdictPolicy, record.manifest?.verdictPolicy);
+    if (resolution.status === "unresolvable") continue;
+    const o = scorecardOutcomes(record.scorecard, undefined, resolution.policy);
     cases.executed += o.executed;
     cases.gradeable += o.gradeable;
     cases.verdicted += o.verdicted;

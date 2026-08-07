@@ -66,6 +66,36 @@ to `origin`'s *where*; older records / machine principals may lack it) — light
 the web's author display + user filter (same pattern as datasets/harnesses `created_by`).
 Migrations: `packages/db/migrations/0006_create_scorecards.sql`, `0035_add_scorecard_created_by.sql`.
 
+## The stamped verdict policy resolves in THREE states (fail-closed)
+Verdicts are derived on READ, so every settled batch stamps the policy it was judged under
+(`ScorecardRecord.verdictPolicy` = `{id, version, digest}`, mig 0125), and a **composed** policy — one a
+run-time grader's `authority`/`direction` declaration built — rides IN FULL in `manifest.verdictPolicy`
+(mig 0126), because that document exists nowhere else.
+
+`resolvePolicyResolution(ref?, embedded?)` (`@everdict/domain`) answers with a status, never just a policy:
+
+| status | when | what readers do |
+| --- | --- | --- |
+| `resolved` | the embedded document's digest matches the stamp, or the stamp names an entry in the append-only `KNOWN_VERDICT_POLICIES` whose document still hashes to it | derive verdicts under that document |
+| `legacy_default` | there is **no stamp at all** (pre-mig-0125 rows) | derive under `DEFAULT_VERDICT_POLICY` — those batches really were judged under the ladder it encodes |
+| `unresolvable` | a stamp IS present and its document cannot be produced: manifest absent, digest mismatched (tampered/edited), or an id@version nobody has | **withhold the verdict** — never re-judge under today's ladder |
+
+`unresolvable` is the whole point. Falling back to the default there rewrites history silently: a composed
+policy's custom ground truth disappears and the built-in ladder re-decides every case. Concretely:
+- **Serving** (`apps/api/.../serve.ts`): the detail response carries `policyResolution`, and on `unresolvable`
+  the per-case `verdict`/`verdictBasis`, `casePass` and `outcomes` are **absent** (`evidenceStatus` still
+  rides — it reads the result alone). The web shows a callout instead of a rollup; it never renders a 0%.
+- **Comparing** (`GET /scorecards/diff`): each side resolves its OWN policy, and each side's trials are
+  counted under it (`diffTrials` takes `baselinePolicy`/`candidatePolicy`). An unrestorable side sets
+  `policyUnresolvable` and forces `comparability: "none"`.
+- **Gating** (`evaluateGate`): `policyUnresolvable` ⇒ `not_comparable` with reason `policy_unresolvable` —
+  checked BEFORE the comparability branch, so the refusal does not depend on the caller marking the diff.
+- **List reads** carry the stamp but not the manifest. A composed stamp (`id: "composed"`, never in the
+  registry) therefore resolves to `unresolvable` **by construction** — that is the list-path guard.
+- **Other derivations** follow the same rule: `flakeIndex` and `workspaceOpsReport` skip an unresolvable
+  record, `ScorecardBatch.withTrialSummary` omits the roll-up, the regression watch never reopens an issue on
+  one, and `retryFailed` refuses with a 400 rather than picking cases by re-judging them.
+
 ## Experiments (ungraded phase-1 groups — execution-model P1)
 An **experiment** is a scorecard row that stopped after phase 1 (decision O3: the RunGroup generalizes
 `ScorecardRecord` in concept, the table is kept — `kind:"experiment"`, mig `0093`): the SAME fan-out and child

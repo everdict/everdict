@@ -79,6 +79,15 @@ export const ScorecardDiffResponseSchema = z.object({
     .describe(
       "Set when the two batches were judged under different verdict-policy digests (comparability forced to 'none')",
     ),
+  policyUnresolvable: z
+    .object({
+      baseline: z.object({ id: z.string(), version: z.string(), digest: z.string() }).optional(),
+      candidate: z.object({ id: z.string(), version: z.string(), digest: z.string() }).optional(),
+    })
+    .optional()
+    .describe(
+      "Set when a side's STAMPED verdict policy could not be restored (comparability forced to 'none'): those verdicts cannot be re-derived, so the comparison stands on nothing — a gate must refuse rather than re-judge under today's ladder",
+    ),
   trials: z
     .object({
       baseline: z.string(),

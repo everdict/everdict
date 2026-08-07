@@ -1,5 +1,6 @@
-import { BadRequestError, type CaseResult, type Scorecard } from "@everdict/contracts";
+import { BadRequestError, type CaseResult, type Scorecard, type VerdictPolicy } from "@everdict/contracts";
 import { caseVerdict } from "./scorecard.js";
+import { DEFAULT_VERDICT_POLICY } from "./verdict-policy.js";
 
 // Trial-based verdict math — turn N repeated trials of a case into pass@k, flakiness, and a
 // statistical regression gate. Pure, dependency-free (same discipline as scorecard.ts). A "trial" is
@@ -42,12 +43,17 @@ export interface CaseTrialStats {
 }
 
 // Per-case trial stats. Only trials whose caseVerdict is defined are counted (a case with no
-// pass-deciding grader is excluded, same rule as scorecardPassRate).
-export function caseTrialStats(caseId: string, results: CaseResult[]): CaseTrialStats {
+// pass-deciding grader is excluded, same rule as scorecardPassRate). The trials belong to ONE batch, so they
+// are judged under THAT batch's policy — a caller comparing two batches passes each side its own.
+export function caseTrialStats(
+  caseId: string,
+  results: CaseResult[],
+  policy: VerdictPolicy = DEFAULT_VERDICT_POLICY,
+): CaseTrialStats {
   let trials = 0;
   let passes = 0;
   for (const r of results) {
-    const v = caseVerdict(r);
+    const v = caseVerdict(r, policy);
     if (v === undefined) continue;
     trials++;
     if (v) passes++;
@@ -66,11 +72,18 @@ export interface ScorecardTrialSummary {
   flakeRate: number; // flakyCases / cases
 }
 
-// Scorecard-level trial roll-up. Cases are weighted equally (not by trial count). k defaults to
-// maxTrials ("did any of k attempts pass"); pass@1 is always reported.
-export function summarizeTrials(sc: Pick<Scorecard, "results">, k?: number): ScorecardTrialSummary {
+// Scorecard-level trial roll-up. Cases are weighted equally (not by trial count). `k` defaults to
+// maxTrials ("did any of k attempts pass"); pass@1 is always reported. `policy` is the batch's own — this
+// roll-up is derived on READ, so a stamped batch must hand in its resolved policy or its historical pass@1
+// silently moves with the ladder.
+export function summarizeTrials(
+  sc: Pick<Scorecard, "results">,
+  opts: { k?: number; policy?: VerdictPolicy } = {},
+): ScorecardTrialSummary {
+  const k = opts.k;
+  const policy = opts.policy ?? DEFAULT_VERDICT_POLICY;
   const stats = [...groupTrials(sc).entries()]
-    .map(([caseId, results]) => caseTrialStats(caseId, results))
+    .map(([caseId, results]) => caseTrialStats(caseId, results, policy))
     .filter((s) => s.trials > 0);
   if (stats.length === 0)
     return { cases: 0, minTrials: 0, maxTrials: 0, passAt1: 0, k: k ?? 0, flakyCases: 0, flakeRate: 0, passAtK: 0 };
@@ -197,10 +210,19 @@ function alphaForZ(zThreshold: number): number {
 // a significant-but-negligible 1% dip on a thousand trials is noise to a gate, and a 3/3→0/3 crash on three
 // trials is honestly NOT significant at 95% (Fisher p=0.1): the gate says so instead of pretending. Cases that
 // cannot enter the gate are enumerated in `missing`, never silently dropped.
+// Each side's trials are judged under ITS OWN stamped policy (baselinePolicy/candidatePolicy): re-deriving a
+// historical batch's pass rate under today's ladder is the retroactive rewrite the stamp exists to prevent,
+// and it lands straight in a release gate's regression count. When the two policies differ the caller's
+// comparability machinery flags the pair — the numbers here stay each side's own either way.
 export function diffTrials(
   baseline: Scorecard,
   candidate: Scorecard,
-  opts: { zThreshold?: number; minDelta?: number } = {},
+  opts: {
+    zThreshold?: number;
+    minDelta?: number;
+    baselinePolicy?: VerdictPolicy;
+    candidatePolicy?: VerdictPolicy;
+  } = {},
 ): TrialDiff {
   const zThreshold = opts.zThreshold ?? 1.96;
   const minDelta = opts.minDelta ?? 0;
@@ -216,8 +238,8 @@ export function diffTrials(
   for (const [caseId, cResults] of c) {
     const bResults = b.get(caseId);
     if (!bResults) continue; // enumerated in missing.casesOnlyInCandidate
-    const bs = caseTrialStats(caseId, bResults);
-    const cs = caseTrialStats(caseId, cResults);
+    const bs = caseTrialStats(caseId, bResults, opts.baselinePolicy ?? DEFAULT_VERDICT_POLICY);
+    const cs = caseTrialStats(caseId, cResults, opts.candidatePolicy ?? DEFAULT_VERDICT_POLICY);
     if (bs.trials === 0 || cs.trials === 0) {
       missing.unscoredCases.push(caseId);
       continue;

@@ -37,6 +37,10 @@ export const GateReasonSchema = z.object({
     "regression",
     "trial_regression",
     "policy_mismatch",
+    // One side's STAMPED verdict policy could not be restored, so its verdicts cannot be re-derived at all.
+    // Deciding anyway would mean re-judging that batch under today's ladder — a green light standing on
+    // numbers nobody produced.
+    "policy_unresolvable",
     "no_shared_cases",
     "kind_changed",
     // The comparison itself was incomplete — cases the candidate never ran, metrics that vanished or changed

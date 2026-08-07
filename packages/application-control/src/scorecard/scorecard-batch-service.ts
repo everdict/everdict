@@ -15,6 +15,7 @@ import {
   type ScorecardRecord,
   type ScorecardStep,
   type Suite,
+  type VerdictPolicy,
 } from "@everdict/contracts";
 import {
   type CircuitBreaker,
@@ -28,6 +29,7 @@ import {
   classifyFailure,
   modelBindingLabel,
   resolveHarnessSecrets,
+  resolvePolicyResolution,
   runEvidenceIdentity,
   scorecardModels,
   summarizeScorecard,
@@ -291,6 +293,9 @@ export class ScorecardBatchService {
       memoryBoostMb?: Record<string, number>; // OOM escalation of a Temporal-owned retry (origin.memoryBoostMb)
       oomAutoBoost?: boolean; // in-batch OOM auto-boost (orchestration.oomAutoBoost)
       traceSink?: string; // per-batch sink override (orchestration.traceSink)
+      // The batch's composed verdict policy (manifest.verdictPolicy) — absent = the built-in ladder. Live
+      // per-case verdicts are decided by it so a watcher sees the same PASS/FAIL the settled record stamps.
+      verdictPolicy?: VerdictPolicy;
       doneIds: Set<string>;
       // Cases currently executing in THIS process — a synchronous claim so a same-worker Temporal retry of an
       // in-flight case skips instead of double-executing (gap 12). Empty on a fresh ctx (a dead worker → cross-process
@@ -370,6 +375,9 @@ export class ScorecardBatchService {
       ...(rec.origin?.memoryBoostMb ? { memoryBoostMb: rec.origin.memoryBoostMb } : {}),
       ...(rec.orchestration?.oomAutoBoost ? { oomAutoBoost: true } : {}),
       ...(orch.traceSink ? { traceSink: orch.traceSink } : {}),
+      // The batch's own composed policy, sealed in the manifest at submit — the live verdicts and the
+      // settle-time analysis bundle are judged under it, never under whatever the ladder says today.
+      ...(rec.manifest?.verdictPolicy ? { verdictPolicy: rec.manifest.verdictPolicy } : {}),
       // Tail speculation — sharded batches only. The controller lives with the batch context (rebuilt with
       // empty duration history on a CP restart — it re-learns the median from the resumed cases).
       ...(targets.length > 1
@@ -658,7 +666,7 @@ export class ScorecardBatchService {
           ...(ranOn ? { runtime: ranOn } : {}),
         }));
       ctx.doneIds.add(caseId);
-      const v = caseVerdict(result);
+      const v = caseVerdict(result, ctx.verdictPolicy);
       const reason = caseReason(result);
       const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
       await this.appendBatchStep(id, {
@@ -708,6 +716,7 @@ export class ScorecardBatchService {
         { scorecardId: id, dataset: `${rec.dataset.id}@${rec.dataset.version}`, harness: scorecard.harness },
         summary,
         results,
+        ctx.verdictPolicy,
       ),
     );
     // Trace-sink export (batched at finalize on the Temporal path — per-case export streaming stays in-process-only).
@@ -762,7 +771,7 @@ export class ScorecardBatchService {
     // Operator time series (catalog M0) — the Temporal driver settles through the SAME derivation as the
     // in-process loop (batchSettledEvent), so the two paths cannot drift.
     this.deps.onOrchestrationEvent?.(
-      batchSettledEvent(ctx.tenant, rec.createdAt, scorecard, rec.requested, Date.parse(this.now())),
+      batchSettledEvent(ctx.tenant, rec.createdAt, scorecard, rec.requested, Date.parse(this.now()), ctx.verdictPolicy),
     );
     this.batchContexts.delete(id);
     if (this.deps.onComplete) {
@@ -796,9 +805,21 @@ export class ScorecardBatchService {
     // old `verdict !== true → "agent"` fallback swept the platform's dead judges into ?failureClass=agent.
     // A collect-stage failure is retryable even when the ground-truth verdict PASSED — the case is incomplete
     // (trace missing, observation/judge scores never ran), and its retry is a re-collect, not a re-run.
+    // Which cases "failed" is a verdict question, so it is answered under the SOURCE batch's stamped policy.
+    // A stamp whose document cannot be restored refuses rather than falling back to today's ladder: a retry
+    // selected by re-judging history would re-run the cases a rule change invented and carry over the ones it
+    // absolved, all under the original's name.
+    const resolution = resolvePolicyResolution(src.verdictPolicy, src.manifest?.verdictPolicy);
+    if (resolution.status === "unresolvable")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { scorecard: input.id, verdictPolicy: src.verdictPolicy },
+        "This batch's stamped verdict policy could not be restored, so its failed cases cannot be identified — re-run the batch instead of retrying it.",
+      );
+    const policy = resolution.policy;
     const incomplete = (r: CaseResult): boolean => r.failure?.stage === "collect";
     const classOf = (r: CaseResult): string | undefined => {
-      const outcome = caseOutcome(r);
+      const outcome = caseOutcome(r, policy);
       if (outcome.status === "completed")
         return outcome.verdict && !incomplete(r) ? undefined : (r.failure?.class ?? "agent");
       if (outcome.status === "infra_failed" || outcome.status === "cancelled") return outcome.failure.class;
@@ -807,7 +828,7 @@ export class ScorecardBatchService {
       return r.failure?.class;
     };
     const failed = results.filter((r) =>
-      input.failureClass ? classOf(r) === input.failureClass : caseVerdict(r) !== true || incomplete(r),
+      input.failureClass ? classOf(r) === input.failureClass : caseVerdict(r, policy) !== true || incomplete(r),
     );
     if (failed.length === 0)
       throw new BadRequestError(
@@ -1079,6 +1100,10 @@ export class ScorecardBatchService {
       sinkOverride?: string;
       // In-batch OOM auto-boost (orchestration.oomAutoBoost) — see oom-boost.ts.
       oomAutoBoost?: boolean;
+      // The batch's composed verdict policy (manifest.verdictPolicy) — absent = the built-in ladder. Live
+      // per-case verdicts and the settle-time derivations are decided by it, so what a member watches during
+      // the batch is what the settled record stamps.
+      verdictPolicy?: VerdictPolicy;
     } = {},
   ): Promise<void> {
     const trials = opts.trials ?? 1;
@@ -1342,7 +1367,7 @@ export class ScorecardBatchService {
         ...(trials > 1 ? { trials } : {}), // fan each case into N trials (pass@k / flakiness)
         signal: controller.signal, // on supersede, don't fire remaining cases (already-fired cases complete naturally)
         onResult: (r) => {
-          const v = caseVerdict(r);
+          const v = caseVerdict(r, opts.verdictPolicy);
           const reason = caseReason(r);
           const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
           pushStep(
@@ -1466,6 +1491,7 @@ export class ScorecardBatchService {
           { scorecardId: id, dataset: exportCtx.dataset, harness: exportCtx.harness },
           summary,
           scorecard.results,
+          opts.verdictPolicy,
         ),
       );
       // leaderboard model axis: trace observation preferred + spec declaration (command harness only) fallback.
@@ -1508,7 +1534,14 @@ export class ScorecardBatchService {
           if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
           // Operator time series (catalog M0): the closed outcome/reason vocabulary at the settle seam.
           this.deps.onOrchestrationEvent?.(
-            batchSettledEvent(tenant, settled.createdAt, scorecard, settled.requested, Date.parse(this.now())),
+            batchSettledEvent(
+              tenant,
+              settled.createdAt,
+              scorecard,
+              settled.requested,
+              Date.parse(this.now()),
+              opts.verdictPolicy,
+            ),
           );
         }
         // else: a raced supersede settled the record before the abort signal reached this loop — first

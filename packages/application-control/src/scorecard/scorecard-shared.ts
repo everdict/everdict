@@ -26,6 +26,7 @@ import {
   TraceEvidenceSchema,
   type TraceSource,
   type TraceSourceConfig,
+  type VerdictPolicy,
   isMeasured,
 } from "@everdict/contracts";
 import {
@@ -361,6 +362,7 @@ export function batchSettledEvent(
   scorecard: Pick<Scorecard, "results">,
   requested: number | undefined,
   nowMs: number,
+  policy?: VerdictPolicy, // the batch's own (composed) policy — the outcome split is a verdict derivation
 ): Extract<OrchestrationEvent, { kind: "batch_settled" }> {
   const unmeasuredReasons: Record<string, number> = {};
   for (const result of scorecard.results) {
@@ -373,7 +375,7 @@ export function batchSettledEvent(
   return {
     kind: "batch_settled",
     tenant,
-    outcomes: scorecardOutcomes(scorecard, requested),
+    outcomes: scorecardOutcomes(scorecard, requested, policy),
     unmeasuredReasons,
     latencySec: Math.max(0, (nowMs - new Date(createdAt).getTime()) / 1000),
   };
@@ -544,10 +546,14 @@ export interface AnalysisBundle {
   };
 }
 
+// `policy` is the batch's own verdict policy (the composed document sealed in its manifest, absent = the
+// built-in ladder). The bundle freezes per-case verdicts into a downloadable artifact, so judging them under
+// anything but the batch's own policy would ship a rewritten history as a file.
 export function analysisBundle(
   meta: { scorecardId: string; dataset: string; harness: string },
   summary: MetricSummary[],
   results: CaseResult[],
+  policy?: VerdictPolicy,
 ): AnalysisBundle {
   const byClass: Record<string, number> = {};
   const byCode: Record<string, number> = {};
@@ -569,7 +575,7 @@ export function analysisBundle(
     summary,
     cases: results.map((r) => ({
       caseId: r.caseId,
-      verdict: caseVerdict(r),
+      verdict: caseVerdict(r, policy),
       scores: r.scores,
       ...(r.failure ? { failure: r.failure } : {}),
     })),

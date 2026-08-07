@@ -17,18 +17,26 @@ export { PRE_OUTCOME_STAGES } from "./verdict-policy.js";
 // The ladder itself is DATA now (DEFAULT_VERDICT_POLICY in verdict-policy.ts, versioned + digested); this is
 // the plain boolean view of evaluateVerdict — use evaluateVerdict directly when the basis (which rung decided,
 // from which measurements) must ride along.
+// The `policy` argument is the batch's OWN policy — a caller holding a stamped record MUST resolve it
+// (resolvePolicyResolution) and pass it, or the verdict is re-derived under today's ladder. The default is for
+// callers whose subject genuinely has no stamp (a single RunRecord, a live case mid-batch under the composed
+// document in hand), never a licence to skip the resolution.
 export function caseVerdict(
   result: Pick<CaseResult, "scores"> & Pick<Partial<CaseResult>, "failure">,
+  policy: VerdictPolicy = DEFAULT_VERDICT_POLICY,
 ): boolean | undefined {
-  return evaluateVerdict(result).verdict;
+  return evaluateVerdict(result, policy).verdict;
 }
 
 // Per-case pass rate of a scorecard (aggregated via the authority-based caseVerdict). Cases with no pass-deciding grader are excluded.
-export function scorecardPassRate(sc: Scorecard): { pass: number; total: number; rate: number } {
+export function scorecardPassRate(
+  sc: Scorecard,
+  policy: VerdictPolicy = DEFAULT_VERDICT_POLICY,
+): { pass: number; total: number; rate: number } {
   let pass = 0;
   let total = 0;
   for (const r of sc.results) {
-    const v = caseVerdict(r);
+    const v = caseVerdict(r, policy);
     if (v === undefined) continue;
     total++;
     if (v) pass++;

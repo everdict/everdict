@@ -1,6 +1,7 @@
-import { BadRequestError, type CaseResult, type Scorecard } from "@everdict/contracts";
+import { BadRequestError, type CaseResult, type Scorecard, type VerdictPolicy } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { caseTrialStats, diffTrials, groupTrials, passAtK, summarizeTrials } from "./trials.js";
+import { DEFAULT_VERDICT_POLICY } from "./verdict-policy.js";
 
 // One trial (a CaseResult) with a tests_pass verdict. trialIdx is optional (absent = single-run).
 function trial(caseId: string, pass: boolean, trialIdx?: number): CaseResult {
@@ -181,6 +182,41 @@ describe("diffTrials (statistical regression gate)", () => {
     expect(diffTrials(base, cand).cases[0]?.method).toBe("z");
     expect(diffTrials(base, cand).regressions).toHaveLength(1); // minDelta 0 (default): gated by stats alone
     expect(diffTrials(base, cand, { minDelta: 0.05 }).regressions).toHaveLength(0);
+  });
+
+  it("judges each side's trials under ITS OWN policy — a historical batch is never re-judged by today's ladder", () => {
+    // Given trials whose only pass-deciding measurement is a CUSTOM metric the default ladder does not declare.
+    // Under the default it reaches the fallback rung and decides; under a policy that marks it `excluded` it
+    // decides nothing at all, so the case has no scored trials.
+    const custom = (caseId: string, pass: boolean, i: number): CaseResult => ({
+      caseId,
+      harness: "h@1",
+      trial: i,
+      trace: [],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [{ graderId: "schema", metric: "schema_valid", value: pass ? 1 : 0, pass }],
+    });
+    const base = card(
+      "h@1",
+      [0, 1, 2].map((i) => custom("a", true, i)),
+    );
+    const cand = card(
+      "h@2",
+      [0, 1, 2].map((i) => custom("a", false, i)),
+    );
+    const excludes: VerdictPolicy = {
+      ...DEFAULT_VERDICT_POLICY,
+      metrics: [{ match: { metric: "schema_valid" }, authority: "objective", verdictRole: "excluded" }],
+      fallback: "none",
+    };
+    // Both sides under the default ladder: 3/3 → 0/3, a real (if small-n) comparison.
+    expect(diffTrials(base, cand).cases[0]).toMatchObject({ baselineRate: 1, candidateRate: 0 });
+    // The candidate's OWN policy excludes the metric — it has no scored trials, so it cannot enter the gate.
+    // Pre-fix, diffTrials always read the default ladder and manufactured a 3/3 → 0/3 comparison out of a
+    // batch that never had a verdict.
+    const d = diffTrials(base, cand, { candidatePolicy: excludes });
+    expect(d.cases).toEqual([]);
+    expect(d.missing.unscoredCases).toEqual(["a"]);
   });
 
   it("reports what could not enter the gate instead of silently dropping it", () => {

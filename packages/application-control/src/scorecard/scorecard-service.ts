@@ -362,6 +362,10 @@ export class ScorecardService {
         ...(trials > 1 ? { trials } : {}),
         ...(input.traceSink ? { sinkOverride: input.traceSink } : {}),
         ...(input.oomAutoBoost ? { oomAutoBoost: true } : {}),
+        // The batch's own verdict policy travels WITH the driver, so the live PASS/FAIL a member watches (and
+        // the case-completed fact an agent reacts to) is decided by the same document the settled record
+        // stamps. Without it a composed policy's custom ground truth only appeared after the batch finished.
+        ...(composed ? { verdictPolicy: composedPolicy } : {}),
       },
     );
     return record;

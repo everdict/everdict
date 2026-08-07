@@ -377,7 +377,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "get_scorecard",
       {
         description:
-          "A full scorecard (including per-case results). Served enrichments: `headlinePassRate` (authority-ranked), `casePass` {pass,total} (verdicted denominator — never divide by executed), `outcomes` (requested/executed/gradeable/verdicted + infraFailed/cancelled/unmeasured — an infra failure is recovery work, never a product FAIL), per-case `verdict`+`verdictBasis` (which rung decided) and `evidenceStatus`, `retryableUnmeasured` (rescore worklist size), `verdictPolicy` stamp + `manifest` digests. Other workspaces get NOT_FOUND",
+          "A full scorecard (including per-case results). Served enrichments: `headlinePassRate` (authority-ranked), `casePass` {pass,total} (verdicted denominator — never divide by executed), `outcomes` (requested/executed/gradeable/verdicted + infraFailed/cancelled/unmeasured — an infra failure is recovery work, never a product FAIL), per-case `verdict`+`verdictBasis` (which rung decided) and `evidenceStatus`, `retryableUnmeasured` (rescore worklist size), `verdictPolicy` stamp + `manifest` digests. `policyResolution` says whether that stamp could be RESTORED: 'unresolvable' means the stamped policy document is gone, so `verdict`/`casePass`/`outcomes` are ABSENT rather than re-derived under today's ladder — read the absence, never treat it as 0. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string() },
       },
       ({ id }) =>
@@ -397,7 +397,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "diff_scorecards",
       {
         description:
-          "Compare two scorecards (baseline vs candidate). Read `comparability` FIRST: 'none' means the comparison does not hold (no shared cases/metrics, or `policyMismatch` — different verdict policies) — a different claim from 'no differences'. `missing` enumerates one-sided cases/metrics (never zero-filled), `incomparable` lists kind-changed metrics, and each metric delta carries `direction`+`reading` — never interpret a delta's sign alone. Then: per-case pass transitions → regressions/improvements. When either ran trials, a statistically-gated 'trials' diff (Fisher-exact small-n, minDelta practical floor) rides along.",
+          "Compare two scorecards (baseline vs candidate). Read `comparability` FIRST: 'none' means the comparison does not hold (no shared cases/metrics, `policyMismatch` — different verdict policies — or `policyUnresolvable` — a side whose stamped policy could not be restored, so its verdicts cannot be re-derived at all) — a different claim from 'no differences'. `missing` enumerates one-sided cases/metrics (never zero-filled), `incomparable` lists kind-changed metrics, and each metric delta carries `direction`+`reading` — never interpret a delta's sign alone. Then: per-case pass transitions → regressions/improvements. When either ran trials, a statistically-gated 'trials' diff (Fisher-exact small-n, minDelta practical floor) rides along.",
         inputSchema: {
           baseline: z.string(),
           candidate: z.string(),

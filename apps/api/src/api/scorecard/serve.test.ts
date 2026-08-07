@@ -1,5 +1,6 @@
 import type { CaseResult } from "@everdict/contracts";
 import type { ScorecardRecord } from "@everdict/db";
+import { verdictPolicyRef } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { serveScorecard } from "./serve.js";
 
@@ -161,6 +162,49 @@ describe("serveScorecard (P1g served derivations — the client mirrors are dele
     expect(judge?.passRate).toBeUndefined();
     expect(served.summary?.find((m) => m.metric === "error")).toBeUndefined();
     expect(served.headlinePassRate).toBeNull();
+  });
+
+  it("an UNRESOLVABLE stamped policy serves no verdict at all — never numbers re-judged under the default ladder", () => {
+    // Given a batch stamped with a COMPOSED policy (it lives only in the manifest) whose manifest is gone —
+    // the shape a detail read gets when the embedded document was never persisted or no longer matches.
+    // Pre-fix, resolveVerdictPolicy answered DEFAULT_VERDICT_POLICY here, so `schema_valid` dropped to the
+    // fallback rung, the judge decided instead, and the batch served a PASS it was never judged to have.
+    const served = serveScorecard(
+      record({
+        verdictPolicy: { id: "composed", version: "abc123def456", digest: "a-digest-with-no-document" },
+        scorecard: {
+          suiteId: "d@1.0.0",
+          harness: "h@1.0.0",
+          results: [
+            caseResult("a", [
+              { metric: "schema_valid", value: 0, pass: false },
+              { metric: "judge", value: 1, pass: true },
+            ]),
+          ],
+        },
+      }),
+    );
+    expect(served.policyResolution).toBe("unresolvable");
+    expect(served.scorecard?.results[0]?.verdict).toBeUndefined();
+    expect(served.scorecard?.results[0]?.verdictBasis).toBeUndefined();
+    expect(served.casePass).toBeUndefined();
+    expect(served.outcomes).toBeUndefined();
+    // Evidence completeness reads the result alone, so it survives the missing policy.
+    expect(served.scorecard?.results[0]?.evidenceStatus).toBeDefined();
+  });
+
+  it("a resolvable stamp says so, and a stamp-less record says legacy_default", () => {
+    const results = [caseResult("a", [{ metric: "tests_pass", value: 1, pass: true }])];
+    const sc = { suiteId: "d@1.0.0", harness: "h@1.0.0", results };
+    expect(serveScorecard(record({ scorecard: sc })).policyResolution).toBe("legacy_default");
+    expect(
+      serveScorecard(
+        record({
+          scorecard: sc,
+          verdictPolicy: verdictPolicyRef(),
+        }),
+      ).policyResolution,
+    ).toBe("resolved");
   });
 
   it("leaves a result-less record untouched apart from the headline", () => {

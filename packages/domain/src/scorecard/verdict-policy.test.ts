@@ -4,7 +4,7 @@ import {
   DEFAULT_VERDICT_POLICY,
   composeVerdictPolicy,
   evaluateVerdict,
-  resolveVerdictPolicy,
+  resolvePolicyResolution,
   verdictPolicyDigest,
   verdictPolicyRef,
 } from "./verdict-policy.js";
@@ -117,9 +117,35 @@ describe("verdict policy identity", () => {
     expect(verdictPolicyDigest(edited)).not.toBe(ref.digest);
   });
 
-  it("resolveVerdictPolicy finds the stamped policy and falls back to the ladder for pre-stamp records", () => {
-    expect(resolveVerdictPolicy({ id: "authority-ladder", version: "1.0.0" })).toBe(DEFAULT_VERDICT_POLICY);
-    expect(resolveVerdictPolicy(undefined)).toBe(DEFAULT_VERDICT_POLICY);
+  it("a registered stamp resolves to its exact document", () => {
+    expect(resolvePolicyResolution({ id: "authority-ladder", version: "1.0.0" })).toEqual({
+      status: "resolved",
+      policy: DEFAULT_VERDICT_POLICY,
+    });
+    expect(resolvePolicyResolution(verdictPolicyRef())).toEqual({
+      status: "resolved",
+      policy: DEFAULT_VERDICT_POLICY,
+    });
+  });
+
+  it("a record with NO stamp is legacy_default — not the same answer as a stamp that resolved", () => {
+    // Pre-mig-0125 rows really were judged under the ladder the default encodes, so restoring it is history,
+    // not a fallback. The status distinguishes it from a resolved stamp so a reader can tell the two apart.
+    expect(resolvePolicyResolution(undefined)).toEqual({ status: "legacy_default", policy: DEFAULT_VERDICT_POLICY });
+  });
+
+  it("a stamp naming a policy nobody has is UNRESOLVABLE — never the default ladder", () => {
+    // Regression (fail-open): the old resolver answered DEFAULT_VERDICT_POLICY here, so a batch judged under a
+    // policy this deployment no longer has was silently re-judged under today's ladder.
+    const ref = { id: "authority-ladder", version: "9.9.9", digest: "deadbeef" };
+    expect(resolvePolicyResolution(ref)).toEqual({ status: "unresolvable", ref });
+  });
+
+  it("a registry hit whose document no longer matches the stamped digest is unresolvable", () => {
+    // KNOWN_VERDICT_POLICIES is append-only by contract: an id@version that stopped hashing to the stamp is a
+    // document that was EDITED, and it cannot restore the history the stamp points at.
+    const ref = { id: "authority-ladder", version: "1.0.0", digest: "not-the-real-digest" };
+    expect(resolvePolicyResolution(ref)).toEqual({ status: "unresolvable", ref });
   });
 });
 
@@ -145,12 +171,28 @@ describe("composeVerdictPolicy — a custom grader gains authority by DECLARING 
     expect(composeVerdictPolicy([{ id: "steps" }])).toBe(DEFAULT_VERDICT_POLICY);
   });
 
-  it("resolveVerdictPolicy trusts an embedded document only when its digest matches the stamp", () => {
+  it("an embedded document is trusted only when its digest matches the stamp", () => {
     const composed = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
     const ref = verdictPolicyRef(composed);
-    expect(resolveVerdictPolicy(ref, composed)).toBe(composed);
-    // a tampered embedded doc falls back to the registry/default — the manifest cannot rewrite the verdict
+    expect(resolvePolicyResolution(ref, composed)).toEqual({ status: "resolved", policy: composed });
+  });
+
+  it("a TAMPERED embedded document is unresolvable — it never falls back to the default ladder", () => {
+    // Regression (fail-open): the mismatch used to hand back DEFAULT_VERDICT_POLICY, so editing a manifest
+    // did not rewrite the verdict — it silently re-derived every verdict under the built-in ladder instead,
+    // which is the same retroactive rewrite by another route.
+    const composed = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const ref = verdictPolicyRef(composed);
     const tampered = { ...composed, fallback: "none" as const };
-    expect(resolveVerdictPolicy(ref, tampered)).toBe(DEFAULT_VERDICT_POLICY);
+    expect(resolvePolicyResolution(ref, tampered)).toEqual({ status: "unresolvable", ref });
+  });
+
+  it("a COMPOSED stamp with no embedded document is unresolvable — the list-path guard", () => {
+    // A composed policy lives ONLY in its record's manifest, and list reads do not load the manifest. Since
+    // id "composed" can never be in the append-only registry, resolving without the document is structurally
+    // impossible — so any list-path reader gets `unresolvable`, never a silent default.
+    const composed = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const ref = verdictPolicyRef(composed);
+    expect(resolvePolicyResolution(ref)).toEqual({ status: "unresolvable", ref });
   });
 });

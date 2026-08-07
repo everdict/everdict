@@ -24,7 +24,14 @@ import {
   InMemoryTrajectoryStore,
   type ScorecardRecord,
 } from "@everdict/db";
-import { CircuitBreaker, type Principal, Run, inMemoryUsageMeter } from "@everdict/domain";
+import {
+  CircuitBreaker,
+  type Principal,
+  Run,
+  composeVerdictPolicy,
+  inMemoryUsageMeter,
+  verdictPolicyRef,
+} from "@everdict/domain";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryDatasetRegistry,
@@ -377,26 +384,94 @@ describe("ScorecardService.diff", () => {
   });
 
   it("refuses to compare batches judged under different verdict-policy digests (injection: policy changed between runs)", async () => {
+    // Both stamps RESOLVE (each batch carries its composed document) — they simply resolve to different
+    // documents, which is the mismatch this test is about. An unrestorable stamp is the other refusal below.
+    const basePolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const candPolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "ground_truth" }]);
+    const manifestFor = (p: typeof basePolicy) => ({
+      dataset: { id: "d", version: "1.0.0", digest: "dd" },
+      harness: { id: "h", version: "1" },
+      verdictPolicy: p,
+    });
     const store = new InMemoryScorecardStore();
     await store.create(
       record("base", {
         scorecard: scorecard(true),
-        verdictPolicy: { id: "authority-ladder", version: "1.0.0", digest: "aaa" },
+        verdictPolicy: verdictPolicyRef(basePolicy),
+        manifest: manifestFor(basePolicy),
       }),
     );
     await store.create(
       record("cand", {
         scorecard: scorecard(false),
-        verdictPolicy: { id: "authority-ladder", version: "2.0.0", digest: "bbb" },
+        verdictPolicy: verdictPolicyRef(candPolicy),
+        manifest: manifestFor(candPolicy),
       }),
     );
     const diff = await svc(store).diff("acme", "base", "cand");
     // Verdicts produced by different rules are not one experiment — "no differences" is not the claim here.
     expect(diff.comparability).toBe("none");
     expect(diff.policyMismatch).toEqual({
-      baseline: { id: "authority-ladder", version: "1.0.0", digest: "aaa" },
-      candidate: { id: "authority-ladder", version: "2.0.0", digest: "bbb" },
+      baseline: verdictPolicyRef(basePolicy),
+      candidate: verdictPolicyRef(candPolicy),
     });
+    expect(diff.policyUnresolvable).toBeUndefined();
+  });
+
+  // A case scoring one custom metric — the axis a run-time grader DECLARES authority/direction for.
+  const declaredCase = (metric: string, value: number, pass?: boolean): CaseResult => ({
+    caseId: "c1",
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+    scores: [{ graderId: metric, metric, value, ...(pass !== undefined ? { pass } : {}) }],
+  });
+  const declaredManifest = (policy: ReturnType<typeof composeVerdictPolicy>) => ({
+    dataset: { id: "d", version: "1.0.0", digest: "dd" },
+    harness: { id: "h", version: "1" },
+    verdictPolicy: policy,
+  });
+
+  it("reads a metric's delta through the DIRECTION the batch's own grader declared", async () => {
+    // Given both batches judged under a composed policy where tokens_used is declared lower_is_better.
+    const policy = composeVerdictPolicy([
+      { id: "tokens_used", authority: "observational", direction: "lower_is_better" },
+    ]);
+    const stamp = verdictPolicyRef(policy);
+    const store = new InMemoryScorecardStore();
+    for (const [id, value] of [
+      ["base", 100],
+      ["cand", 50],
+    ] as const) {
+      await store.create(
+        record(id, {
+          scorecard: { suiteId: "d", harness: "h@1", results: [declaredCase("tokens_used", value)] },
+          verdictPolicy: stamp,
+          manifest: declaredManifest(policy),
+        }),
+      );
+    }
+    // When the two are compared, the halved token count reads as an IMPROVEMENT, not an unknown sign.
+    // Pre-fix the service called diffScorecards with no policy at all, so the declared direction was dropped
+    // and every custom metric's delta read "unknown" — a declaration the batch paid to record and never used.
+    const diff = await svc(store).diff("acme", "base", "cand");
+    expect(diff.metrics.find((m) => m.metric === "tokens_used")).toMatchObject({
+      delta: -50,
+      direction: "lower_is_better",
+      reading: "improved",
+    });
+  });
+
+  it("a stamped policy that cannot be restored makes the comparison NOT hold — never a default re-judgement", async () => {
+    // Given a batch stamped with a COMPOSED policy but no manifest to restore it from (the list-path shape).
+    const policy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const stamp = verdictPolicyRef(policy);
+    const store = new InMemoryScorecardStore();
+    await store.create(record("base", { scorecard: scorecard(true) }));
+    await store.create(record("cand", { scorecard: scorecard(false), verdictPolicy: stamp }));
+    const diff = await svc(store).diff("acme", "base", "cand");
+    expect(diff.comparability).toBe("none");
+    expect(diff.policyUnresolvable).toEqual({ candidate: stamp });
   });
 
   it("missing / other-workspace scorecard → NotFoundError (404)", async () => {
@@ -5288,18 +5363,75 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
   });
 
   it("cross-policy candidates gate as NOT_COMPARABLE — never a false pass", async () => {
+    // Both stamps resolve (each batch embeds its own composed document); they resolve to DIFFERENT documents.
+    const basePolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const candPolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "ground_truth" }]);
+    const manifestFor = (p: typeof basePolicy) => ({
+      dataset: { id: "d", version: "1.0.0", digest: "dd" },
+      harness: { id: "h", version: "1" },
+      verdictPolicy: p,
+    });
     const { store, service } = build();
     await store.create({
       ...succeededRecord("base", [scored("a", true)]),
-      verdictPolicy: { id: "p", version: "1", digest: "aaa" },
+      verdictPolicy: verdictPolicyRef(basePolicy),
+      manifest: manifestFor(basePolicy),
     });
     await store.create({
       ...succeededRecord("cand", [scored("a", true)]),
-      verdictPolicy: { id: "p", version: "2", digest: "bbb" },
+      verdictPolicy: verdictPolicyRef(candPolicy),
+      manifest: manifestFor(candPolicy),
     });
     const decision = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand" });
     expect(decision.decision).toBe("not_comparable");
     expect(decision.reasons[0]?.kind).toBe("policy_mismatch");
+  });
+
+  it("gates a TRIAL pair under the policy both batches were stamped with, not under today's ladder", async () => {
+    // Given both batches judged under a composed policy that gives `schema_valid` OBJECTIVE authority — which
+    // outranks the judge rung. Every case scores a passing judge, so the two policies disagree by design:
+    //   default  → the judge decides    → both sides PASS → no regression → the gate would say PASS.
+    //   stamped  → schema_valid decides → 6/6 → 0/6       → a Fisher-significant trial regression → BLOCK.
+    // Pre-fix, caseTrialStats always judged under the default ladder, so this release shipped green.
+    const policy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const stamp = verdictPolicyRef(policy);
+    const manifest = {
+      dataset: { id: "d", version: "1.0.0", digest: "dd" },
+      harness: { id: "h", version: "1" },
+      verdictPolicy: policy,
+    };
+    const trialResults = (schemaValid: boolean): CaseResult[] =>
+      Array.from({ length: 6 }, (_, i) => ({
+        caseId: "a",
+        harness: "h@1",
+        trial: i,
+        trace: [],
+        snapshot: { kind: "prompt", output: "done" } as const,
+        scores: [
+          { graderId: "schema", metric: "schema_valid", value: schemaValid ? 1 : 0, pass: schemaValid },
+          { graderId: "j", metric: "judge", value: 1, pass: true },
+        ],
+      }));
+    const { store, service } = build();
+    await store.create({ ...succeededRecord("base", trialResults(true)), verdictPolicy: stamp, manifest });
+    await store.create({ ...succeededRecord("cand", trialResults(false)), verdictPolicy: stamp, manifest });
+
+    const decision = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand" });
+    expect(decision.decision).toBe("block");
+    expect(decision.reasons.find((r) => r.kind === "trial_regression")?.caseId).toBe("a");
+    expect(decision.evidence).toMatchObject({ trialsGated: true, regressions: 1 });
+  });
+
+  it("a candidate whose stamped policy cannot be restored gates as NOT_COMPARABLE", async () => {
+    // The stamp names a composed document, and nothing carries it — so its verdicts cannot be re-derived and
+    // there is nothing for a release decision to stand on.
+    const stamp = verdictPolicyRef(composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]));
+    const { store, service } = build();
+    await store.create(succeededRecord("base", [scored("a", true)]));
+    await store.create({ ...succeededRecord("cand", [scored("a", true)]), verdictPolicy: stamp });
+    const decision = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand" });
+    expect(decision.decision).toBe("not_comparable");
+    expect(decision.reasons[0]?.kind).toBe("policy_unresolvable");
   });
 });
 

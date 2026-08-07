@@ -1,5 +1,5 @@
 import type { IssueRecord, NotificationRecord, ScorecardRecord } from "@everdict/contracts";
-import { scorecardPassRate } from "@everdict/domain";
+import { resolvePolicyResolution, scorecardPassRate } from "@everdict/domain";
 import type { PlatformEventConsumer } from "../platform-event/event-consumer-runner.js";
 import type { IssueStore } from "../ports/issue-store.js";
 import type { NotificationStore } from "../ports/notification-store.js";
@@ -33,9 +33,14 @@ export interface RegressionWatchDeps {
   feed?: NotificationStore;
 }
 
+// The batch's pass rate under ITS OWN stamped policy. A stamp whose document cannot be restored yields no
+// rate at all: reopening someone's issue on a number re-derived under today's ladder is a false alarm with a
+// name attached to it.
 function passRateOf(record: ScorecardRecord): number | undefined {
   if (!record.scorecard) return undefined;
-  const { total, rate } = scorecardPassRate(record.scorecard);
+  const resolution = resolvePolicyResolution(record.verdictPolicy, record.manifest?.verdictPolicy);
+  if (resolution.status === "unresolvable") return undefined;
+  const { total, rate } = scorecardPassRate(record.scorecard, resolution.policy);
   return total > 0 ? rate : undefined;
 }
 

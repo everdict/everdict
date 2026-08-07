@@ -10,8 +10,10 @@ import {
 import {
   type AnalysisConfig,
   type AnalysisResult,
+  DEFAULT_VERDICT_POLICY,
   type Leaderboard,
   type MeasurementCoverage,
+  type PolicyResolution,
   type ScorecardDiff,
   type ScorecardTrend,
   type TrialDiff,
@@ -24,11 +26,28 @@ import {
   measurementCoverage,
   ownedByVisibleTeam,
   preferredMetric,
+  resolvePolicyResolution,
   scorecardModels,
   trendSeries,
   workspaceOpsReport,
 } from "@everdict/domain";
 import { type ScorecardServiceDeps, analysisArtifactKey } from "./scorecard-shared.js";
+
+// The unrestorable stamp(s) of a comparison, or undefined when both sides resolved. A stamped ref always
+// carries its digest (VerdictPolicyRef), so an unresolvable side can always name what was looked for.
+function unresolvableStamps(
+  baseline: PolicyResolution,
+  candidate: PolicyResolution,
+): { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef } | undefined {
+  const named = (r: PolicyResolution): VerdictPolicyRef | undefined =>
+    r.status === "unresolvable" && r.ref.digest !== undefined
+      ? { id: r.ref.id, version: r.ref.version, digest: r.ref.digest }
+      : undefined;
+  if (baseline.status !== "unresolvable" && candidate.status !== "unresolvable") return undefined;
+  const b = named(baseline);
+  const c = named(candidate);
+  return { ...(b ? { baseline: b } : {}), ...(c ? { candidate: c } : {}) };
+}
 
 // Analytics collaborator behind the ScorecardService facade (docs/architecture/api-route-modularization.md R2-b):
 // read-side derivations over the store + the pure @everdict/domain aggregations — diff / trend / leaderboard /
@@ -58,6 +77,7 @@ export class ScorecardAnalyticsService {
     ScorecardDiff & {
       trials?: TrialDiff;
       policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
+      policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
       coverage: { baseline: MeasurementCoverage; candidate: MeasurementCoverage };
     }
   > {
@@ -71,7 +91,22 @@ export class ScorecardAnalyticsService {
       candidateId,
       opts.visibleTeams,
     );
-    const diff = diffScorecards(baseline, candidate);
+    // Each side is read under ITS OWN stamped policy. A stamp that cannot be restored is the one case that
+    // must not fall through to the default ladder: the comparison would then stand on verdicts re-derived
+    // under rules that batch never ran under, which is exactly what a release gate would act on.
+    const bResolution = resolvePolicyResolution(baseRecord.verdictPolicy, baseRecord.manifest?.verdictPolicy);
+    const cResolution = resolvePolicyResolution(candRecord.verdictPolicy, candRecord.manifest?.verdictPolicy);
+    const policyUnresolvable = unresolvableStamps(bResolution, cResolution);
+    // Metric DIRECTIONS (cost down = better) are read off a policy too. They are cosmetic here — they colour
+    // deltas, they decide nothing — so an unrestorable stamp falls back to the built-in directions rather
+    // than blanking the table; the comparison itself is already marked as not holding just below.
+    const directionPolicy =
+      cResolution.status === "unresolvable"
+        ? bResolution.status === "unresolvable"
+          ? DEFAULT_VERDICT_POLICY
+          : bResolution.policy
+        : cResolution.policy;
+    const diff = diffScorecards(baseline, candidate, { policy: directionPolicy });
     // Two batches judged under different verdict-policy documents are not the same experiment: their verdicts
     // (and therefore pass transitions) were produced by different rules. The comparison is flagged as NOT
     // holding — "no differences" and "incomparable" are different claims. Absent stamps (pre-mig records)
@@ -79,8 +114,12 @@ export class ScorecardAnalyticsService {
     const bPolicy = baseRecord.verdictPolicy;
     const cPolicy = candRecord.verdictPolicy;
     const policyMismatch = bPolicy !== undefined && cPolicy !== undefined && bPolicy.digest !== cPolicy.digest;
-    const withPolicy: ScorecardDiff & { policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef } } =
-      policyMismatch && bPolicy && cPolicy
+    const withPolicy: ScorecardDiff & {
+      policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
+      policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
+    } = policyUnresolvable
+      ? { ...diff, comparability: "none", policyUnresolvable }
+      : policyMismatch && bPolicy && cPolicy
         ? { ...diff, comparability: "none", policyMismatch: { baseline: bPolicy, candidate: cPolicy } }
         : diff;
     const hasTrials =
@@ -88,9 +127,19 @@ export class ScorecardAnalyticsService {
     // Evidence quality of each side. Aggregates already drop unmeasured scores, so a hollowed-out batch reads
     // as healthy — the ratio has to travel WITH the comparison for a gate to be able to refuse on it.
     const coverage = { baseline: measurementCoverage(baseline), candidate: measurementCoverage(candidate) };
-    return hasTrials
-      ? { ...withPolicy, coverage, trials: diffTrials(baseline, candidate, opts) }
-      : { ...withPolicy, coverage };
+    if (!hasTrials) return { ...withPolicy, coverage };
+    return {
+      ...withPolicy,
+      coverage,
+      // Each side's trial pass rates are computed under its own resolved policy — the statistical regression
+      // signal a gate reads must not be manufactured by re-judging one side.
+      trials: diffTrials(baseline, candidate, {
+        ...(opts.zThreshold !== undefined ? { zThreshold: opts.zThreshold } : {}),
+        ...(opts.minDelta !== undefined ? { minDelta: opts.minDelta } : {}),
+        ...(bResolution.status !== "unresolvable" ? { baselinePolicy: bResolution.policy } : {}),
+        ...(cResolution.status !== "unresolvable" ? { candidatePolicy: cResolution.policy } : {}),
+      }),
+    };
   }
 
   // Workspace ops report (metrics commercialization C1) — the SLA-evidence read: the workspace's OWN

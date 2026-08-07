@@ -69,16 +69,38 @@ export const DEFAULT_VERDICT_POLICY: VerdictPolicy = {
 // exact document, or the historical verdict cannot be re-derived. A new policy version is ADDED, never edited.
 const KNOWN_VERDICT_POLICIES: readonly VerdictPolicy[] = [DEFAULT_VERDICT_POLICY];
 
+// A stamp as a record carries it: id+version always, digest on everything written since the stamp existed.
+export type StampedPolicyRef = Pick<VerdictPolicyRef, "id" | "version"> & Partial<Pick<VerdictPolicyRef, "digest">>;
+
+// Resolving a stamp has THREE answers, and collapsing them to one policy is how a verdict gets rewritten
+// behind everyone's back:
+//   resolved       — the exact document that produced the historical verdicts is in hand.
+//   legacy_default — no stamp at all (pre-mig-0125 rows); those batches really were judged under the ladder
+//                    DEFAULT_VERDICT_POLICY encodes, so the default here restores history rather than replacing it.
+//   unresolvable   — a stamp IS present and its document cannot be produced. This is the case that must never
+//                    fall back: a composed policy lives only in its manifest, so an absent/mismatched manifest
+//                    means re-judging under today's ladder — a silent retroactive rewrite of what "passing"
+//                    meant. Readers surface the absence instead (no verdict, no gate decision).
+export type PolicyResolution =
+  | { status: "resolved"; policy: VerdictPolicy }
+  | { status: "legacy_default"; policy: VerdictPolicy }
+  | { status: "unresolvable"; ref: StampedPolicyRef };
+
 // `embedded` = the full policy document a record carries in its manifest (a COMPOSED policy lives nowhere
 // else). It is trusted only when its digest matches the stamped ref — a manifest edited after the fact does
-// not get to rewrite the verdict.
-export function resolveVerdictPolicy(
-  ref?: Pick<VerdictPolicyRef, "id" | "version"> & Partial<Pick<VerdictPolicyRef, "digest">>,
-  embedded?: VerdictPolicy,
-): VerdictPolicy {
-  if (!ref) return DEFAULT_VERDICT_POLICY; // pre-stamp records were judged under the ladder this encodes
-  if (embedded && (ref.digest === undefined || verdictPolicyDigest(embedded) === ref.digest)) return embedded;
-  return KNOWN_VERDICT_POLICIES.find((p) => p.id === ref.id && p.version === ref.version) ?? DEFAULT_VERDICT_POLICY;
+// not get to rewrite the verdict; a digest mismatch is UNRESOLVABLE, not a licence to use the default.
+// The registry hit is digest-checked too: KNOWN_VERDICT_POLICIES is append-only by contract, so an id+version
+// whose document no longer hashes to the stamp is a document that was edited — it cannot restore that history.
+// This is also the LIST-PATH guard: list reads carry the stamp but not the manifest, and a composed stamp
+// (id "composed", never in the registry) with no embedded document lands here as unresolvable by construction.
+export function resolvePolicyResolution(ref?: StampedPolicyRef, embedded?: VerdictPolicy): PolicyResolution {
+  if (!ref) return { status: "legacy_default", policy: DEFAULT_VERDICT_POLICY };
+  if (embedded && (ref.digest === undefined || verdictPolicyDigest(embedded) === ref.digest))
+    return { status: "resolved", policy: embedded };
+  const known = KNOWN_VERDICT_POLICIES.find((p) => p.id === ref.id && p.version === ref.version);
+  if (known && (ref.digest === undefined || verdictPolicyDigest(known) === ref.digest))
+    return { status: "resolved", policy: known };
+  return { status: "unresolvable", ref };
 }
 
 // Compose the batch's verdict policy from the run-time grading plan's DECLARATIONS: a custom grader gains

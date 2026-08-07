@@ -1,6 +1,6 @@
-import type { CaseFailure, CaseResult, Scorecard } from "@everdict/contracts";
+import type { CaseFailure, CaseResult, Scorecard, VerdictPolicy } from "@everdict/contracts";
 import { caseVerdict } from "./scorecard.js";
-import { PRE_OUTCOME_STAGES } from "./verdict-policy.js";
+import { DEFAULT_VERDICT_POLICY, PRE_OUTCOME_STAGES } from "./verdict-policy.js";
 
 // Case outcome — the case's fate as a first-class value, so "the agent failed the task" and "the platform
 // failed the case" can never share a denominator. A result carrying a PRE-OUTCOME failure (it never
@@ -17,13 +17,16 @@ export type CaseOutcome =
   // still left a classified result.
   | { status: "cancelled"; failure: CaseFailure };
 
-export function caseOutcome(result: Pick<CaseResult, "scores" | "failure">): CaseOutcome {
+export function caseOutcome(
+  result: Pick<CaseResult, "scores" | "failure">,
+  policy: VerdictPolicy = DEFAULT_VERDICT_POLICY,
+): CaseOutcome {
   const failure = result.failure;
   // A user/supersede stop is CANCELLATION, not an infrastructure failure — recovery retries infra, never a
   // deliberate stop. Identified by the classified failure's code (the cancel paths stamp CANCELLED).
   if (failure?.code === "CANCELLED") return { status: "cancelled", failure };
   if (failure && PRE_OUTCOME_STAGES.has(failure.stage)) return { status: "infra_failed", failure };
-  const verdict = caseVerdict(result);
+  const verdict = caseVerdict(result, policy);
   return verdict === undefined ? { status: "unmeasured" } : { status: "completed", verdict };
 }
 
@@ -51,7 +54,11 @@ export function judgeGradeable(result: Pick<CaseResult, "failure">): boolean {
   return result.failure === undefined;
 }
 
-export function scorecardOutcomes(sc: Pick<Scorecard, "results">, requested?: number): ScorecardOutcomes {
+export function scorecardOutcomes(
+  sc: Pick<Scorecard, "results">,
+  requested?: number,
+  policy: VerdictPolicy = DEFAULT_VERDICT_POLICY,
+): ScorecardOutcomes {
   const out: ScorecardOutcomes = {
     executed: sc.results.length,
     gradeable: 0,
@@ -64,7 +71,7 @@ export function scorecardOutcomes(sc: Pick<Scorecard, "results">, requested?: nu
     ...(requested !== undefined ? { requested } : {}),
   };
   for (const r of sc.results) {
-    const o = caseOutcome(r);
+    const o = caseOutcome(r, policy);
     if (o.status === "cancelled") {
       out.cancelled++;
       continue;

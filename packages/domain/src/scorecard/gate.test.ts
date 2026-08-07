@@ -41,6 +41,23 @@ describe("evaluateGate — the release gate over the trust kernel's comparabilit
     expect(g.reasons[0]?.kind).toBe("policy_mismatch");
   });
 
+  it("an unrestorable stamped policy is NOT_COMPARABLE even when the diff still claims to be comparable", () => {
+    // The analytics layer forces comparability "none" on this, but the gate refuses on its own: a side whose
+    // verdicts cannot be re-derived has nothing for a release decision to stand on, and a gate that only
+    // refuses when someone else remembered to mark the diff is one forgotten line from a false green light.
+    const g = evaluateGate(
+      base({
+        comparability: "full",
+        policyUnresolvable: { candidate: { id: "composed", version: "0a1b2c3d", digest: "no-such-document" } },
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("not_comparable");
+    expect(g.reasons[0]?.kind).toBe("policy_unresolvable");
+    expect(g.reasons[0]?.detail).toContain("no-such-document");
+    expect(g.evidence.comparability).toBe("none");
+  });
+
   it("a regression blocks under maxRegressions 0 and the reason names the case", () => {
     const g = evaluateGate(
       base({

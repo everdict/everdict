@@ -18,6 +18,9 @@ import type { TrialDiff } from "./trials.js";
 export type GateInput = ScorecardDiff & {
   trials?: TrialDiff;
   policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
+  // A side whose STAMPED policy could not be restored — its verdicts are not re-derivable, so the pair is
+  // not comparable. Carries the unrestorable stamp(s) so the refusal names what is missing.
+  policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
   // Evidence quality of each side (measurementCoverage). Optional: a caller that cannot supply it simply
   // cannot gate on maxUnmeasuredFraction — the gate never invents a coverage number it was not given.
   coverage?: { baseline: MeasurementCoverage; candidate: MeasurementCoverage };
@@ -52,6 +55,21 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
     ...(missingFraction !== undefined ? { missingFraction } : {}),
     ...(unmeasuredFraction !== undefined ? { unmeasuredFraction } : {}),
   };
+
+  // An unrestorable stamp refuses BEFORE the comparability check rather than inside it: the caller forces
+  // `none` on this too, but a gate that only refuses when someone else remembered to mark the diff is a gate
+  // one forgotten line away from a false green light.
+  if (diff.policyUnresolvable !== undefined) {
+    const sides = [
+      ...(diff.policyUnresolvable.baseline ? [`baseline (${stampLabel(diff.policyUnresolvable.baseline)})`] : []),
+      ...(diff.policyUnresolvable.candidate ? [`candidate (${stampLabel(diff.policyUnresolvable.candidate)})`] : []),
+    ];
+    reasons.push({
+      kind: "policy_unresolvable",
+      detail: `the stamped verdict policy of the ${sides.join(" and ")} could not be restored — those verdicts cannot be re-derived, and re-judging them under today's ladder would decide this release on numbers the batch never produced`,
+    });
+    return { decision: "not_comparable", reasons, evidence: { ...evidence, comparability: "none" } };
+  }
 
   if (diff.comparability === "none") {
     if (diff.policyMismatch !== undefined) {
@@ -105,6 +123,11 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   // decision changes, the evidence never shrinks.
   if (withheld.length > 0) return { decision: "blocked_missing", reasons: [...withheld, ...reasons], evidence };
   return { decision: blocking > policy.maxRegressions ? "block" : "pass", reasons, evidence };
+}
+
+// A stamp as a refusal names it — id@version plus the digest that was looked for and not found.
+function stampLabel(ref: VerdictPolicyRef): string {
+  return `${ref.id}@${ref.version} ${ref.digest}`;
 }
 
 function worstUnmeasuredFraction(coverage: GateInput["coverage"]): number | undefined {

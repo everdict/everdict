@@ -69,8 +69,17 @@ rung/aggregation/measurements (served as `verdictBasis` per case); `caseVerdict`
 metrics combine unanimously (never Map last-wins); a pre-outcome failure (dispatch/install/run) yields NO
 verdict (`caseOutcome` = completed|unmeasured|infra_failed; `scorecardOutcomes` serves the denominators).
 **Every settled batch stamps `verdictPolicy{id,version,digest}`** (domain `judgedUnder`, mig 0125) and readers
-resolve the STAMPED policy (`resolveVerdictPolicy`) — evolving the policy never rewrites historical verdicts;
-new policy versions are APPENDED to `KNOWN_VERDICT_POLICIES`, never edited. **Run-time declarations compose
+resolve the STAMPED policy — evolving the policy never rewrites historical verdicts; new policy versions are
+APPENDED to `KNOWN_VERDICT_POLICIES`, never edited. Resolution is **THREE-state and FAIL-CLOSED**
+(`resolvePolicyResolution` → `resolved` | `legacy_default` (no stamp at all — pre-mig rows really were judged
+under the ladder) | `unresolvable`), and `unresolvable` — manifest gone, digest mismatched, or an id@version
+nobody has — must NEVER fall back to the default: doing so re-judges history under today's ladder. A verdict
+or gate decision therefore withholds itself instead (served `policyResolution:"unresolvable"` ⇒ no per-case
+`verdict`/`casePass`/`outcomes`; gate ⇒ `not_comparable` + reason `policy_unresolvable`). `caseVerdict`/
+`caseOutcome`/`caseTrialStats`/`summarizeTrials`/`scorecardOutcomes` all TAKE the policy — a caller holding a
+stamped record resolves it and passes it; the default parameter is only for subjects with no stamp (a single
+`RunRecord`, a live case mid-batch under the composed document in hand). List reads carry no manifest, so a
+composed stamp resolves `unresolvable` by construction — that is the list-path guard. **Run-time declarations compose
 the policy**: a `GraderSpec` may declare `authority`/`direction` for its metric (`composeVerdictPolicy` —
 appended AFTER the built-ins, so custom ground truth never outranks state/tests_pass); the composed document
 is embedded IN FULL in `manifest.verdictPolicy` (mig 0126) and trusted at read only when its digest matches

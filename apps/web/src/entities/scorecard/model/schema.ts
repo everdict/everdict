@@ -108,10 +108,7 @@ export const caseResultSchema = z
       .passthrough()
       .optional(),
     // Evidence completeness per case — a verdict standing on partial evidence says so.
-    evidenceStatus: z
-      .object({ trace: z.string(), snapshot: z.string() })
-      .passthrough()
-      .optional(),
+    evidenceStatus: z.object({ trace: z.string(), snapshot: z.string() }).passthrough().optional(),
     scores: z.array(caseScoreSchema).default([]),
     trace: z.array(traceEventSchema).default([]), // case execution trace — error events expose the failure spans
     // classified failure (loose) — runnerId links a self-hosted no_runner/capability_mismatch case to the runner it
@@ -255,9 +252,11 @@ export const scorecardRecordSchema = z.object({
     .optional(),
   // WHICH verdict policy produced this batch's verdicts — the stamp that keeps a historical verdict stable
   // when the policy evolves. Absent on batches settled before the stamp existed.
-  verdictPolicy: z
-    .object({ id: z.string(), version: z.string(), digest: z.string() })
-    .optional(),
+  verdictPolicy: z.object({ id: z.string(), version: z.string(), digest: z.string() }).optional(),
+  // Whether that stamp could be RESTORED at serve time (detail only). 'unresolvable' = the stamped document
+  // is gone, so the server withholds every verdict-derived field (per-case verdict, casePass, outcomes)
+  // rather than re-judge the batch under today's ladder — the UI must show the absence, never a 0%.
+  policyResolution: z.enum(['resolved', 'legacy_default', 'unresolvable']).optional(),
   // Reproducibility digests sealed at submit (detail only). Loose local view — the web renders it, never
   // re-derives from it.
   manifest: z
@@ -372,6 +371,14 @@ export const scorecardDiffSchema = z.object({
       candidate: z.object({ id: z.string(), version: z.string(), digest: z.string() }),
     })
     .optional(),
+  // A side whose stamped verdict policy could not be restored — its verdicts are not re-derivable, so the
+  // comparison does not hold (comparability forced to 'none').
+  policyUnresolvable: z
+    .object({
+      baseline: z.object({ id: z.string(), version: z.string(), digest: z.string() }).optional(),
+      candidate: z.object({ id: z.string(), version: z.string(), digest: z.string() }).optional(),
+    })
+    .optional(),
   trials: trialDiffSchema.optional(), // statistical (pass@k) gate — present only when either side ran trials
 })
 
@@ -426,7 +433,10 @@ type AssertAssignable<A extends B, B> = A
 // Assignability alone cannot catch a MISSING OPTIONAL field (width subtyping accepts it in both directions) —
 // which is exactly how `MetricSummary.unmeasured` was silently stripped at parse while the re-exported type
 // claimed it existed. For sub-types declared IDENTICAL to the contract, additionally assert key-set equality.
-type AssertSameKeys<A, B> = [Exclude<keyof A, keyof B>, Exclude<keyof B, keyof A>] extends [never, never]
+type AssertSameKeys<A, B> = [Exclude<keyof A, keyof B>, Exclude<keyof B, keyof A>] extends [
+  never,
+  never,
+]
   ? true
   : { missingFromWeb: Exclude<keyof B, keyof A>; extraOnWeb: Exclude<keyof A, keyof B> }
 type AssertTrue<T extends true> = T

@@ -12,7 +12,7 @@ import type {
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
 import { headlinePassRate } from "./headline.js";
 import { summarizeTrials } from "./trials.js";
-import { verdictPolicyRef } from "./verdict-policy.js";
+import { resolvePolicyResolution, verdictPolicyRef } from "./verdict-policy.js";
 
 // The domain model for a scorecard batch's lifecycle (queued → running → succeeded | failed | superseded | cancelled).
 // Wraps the persistence record (@everdict/db ScorecardRecord — shapes unchanged); guard methods are the SSOT
@@ -408,10 +408,15 @@ export class ScorecardBatch {
 
   // Trial roll-up (pass@k / flakiness) — derived on read from the scorecard's repeated trials, never stored
   // (like RunRecord.usage). A no-op for a single-run batch, so the response shape is unchanged there.
+  // Derived on read means derived under a POLICY, so it resolves this record's own stamp; a batch whose
+  // stamped policy cannot be restored gets no roll-up at all (the headline pass rate reads passAt1 first —
+  // a number re-judged under today's ladder would headline as this batch's history).
   withTrialSummary(): ScorecardRecord {
     const sc = this.record.scorecard;
     if (!sc || this.record.trialSummary || !sc.results.some((r) => r.trial !== undefined)) return this.record;
-    return { ...this.record, trialSummary: summarizeTrials(sc) };
+    const resolution = resolvePolicyResolution(this.record.verdictPolicy, this.record.manifest?.verdictPolicy);
+    if (resolution.status === "unresolvable") return this.record;
+    return { ...this.record, trialSummary: summarizeTrials(sc, { policy: resolution.policy }) };
   }
 
   // queued|running → running (the driver loop begins, or a re-attached workflow re-plans a running batch).

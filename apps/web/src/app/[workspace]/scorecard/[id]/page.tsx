@@ -646,8 +646,24 @@ export default async function ScorecardDetailPage({
         </section>
       )}
 
+      {/* The batch's stamped verdict policy could not be restored, so the server served NO verdicts at all
+          (rather than re-judging this history under today's ladder). Every pass/fail number below would be a
+          zero standing on nothing, so the rollup is replaced by the reason it is missing. */}
+      {record.policyResolution === 'unresolvable' && (
+        <Callout
+          tone="warning"
+          hint={
+            record.verdictPolicy
+              ? `${record.verdictPolicy.id}@${record.verdictPolicy.version} · ${record.verdictPolicy.digest}`
+              : undefined
+          }
+        >
+          {t('policyUnresolvable')}
+        </Callout>
+      )}
+
       {/* Case rollup — the headline result of this run (pass/fail at a glance). Only when there are results. */}
-      {results.length > 0 && (
+      {results.length > 0 && record.policyResolution !== 'unresolvable' && (
         <div className="grid grid-cols-2 gap-3 @2xl:grid-cols-4">
           <StatCard
             label={t('statCases')}

@@ -122,21 +122,24 @@ export default async function CompareScorecardsPage({
           reader (or gate) must see which one this page is making before any delta below. */}
       {diff && diff.comparability !== 'full' && (
         <Callout tone={diff.comparability === 'none' ? 'danger' : 'warning'}>
-          {diff.policyMismatch
-            ? t('comparePolicyMismatch', {
-                baseline: `${diff.policyMismatch.baseline.id}@${diff.policyMismatch.baseline.version}`,
-                candidate: `${diff.policyMismatch.candidate.id}@${diff.policyMismatch.candidate.version}`,
-              })
-            : diff.comparability === 'none'
-              ? t('compareNotComparable')
-              : t('comparePartial', {
-                  caseCount:
-                    diff.missing.casesOnlyInBaseline.length + diff.missing.casesOnlyInCandidate.length,
-                  metricCount:
-                    diff.missing.metricsOnlyInBaseline.length +
-                    diff.missing.metricsOnlyInCandidate.length +
-                    diff.incomparable.length,
-                })}
+          {diff.policyUnresolvable
+            ? t('comparePolicyUnresolvable')
+            : diff.policyMismatch
+              ? t('comparePolicyMismatch', {
+                  baseline: `${diff.policyMismatch.baseline.id}@${diff.policyMismatch.baseline.version}`,
+                  candidate: `${diff.policyMismatch.candidate.id}@${diff.policyMismatch.candidate.version}`,
+                })
+              : diff.comparability === 'none'
+                ? t('compareNotComparable')
+                : t('comparePartial', {
+                    caseCount:
+                      diff.missing.casesOnlyInBaseline.length +
+                      diff.missing.casesOnlyInCandidate.length,
+                    metricCount:
+                      diff.missing.metricsOnlyInBaseline.length +
+                      diff.missing.metricsOnlyInCandidate.length +
+                      diff.incomparable.length,
+                  })}
         </Callout>
       )}
 
