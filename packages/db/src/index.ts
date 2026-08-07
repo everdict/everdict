@@ -103,6 +103,7 @@ export type {
 export { generateKey, hashKey, generateInviteToken } from "@everdict/application-control";
 
 // Store impls (InMemory*/Pg*) + local persistence helpers stay here — the db package owns them.
+export { PgLeaderElector, type PgLeaderElectorOptions } from "./ops/leader-elector.js";
 export { InMemoryRunStore } from "./results/run-store.js";
 export { InMemoryRecordingStore } from "./results/recording-store.js";
 export { InMemoryScorecardStore } from "./results/scorecard-store.js";

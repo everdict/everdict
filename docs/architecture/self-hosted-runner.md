@@ -242,6 +242,10 @@ surface is `RunnerHubLike = RunnerHub | StoreRunnerHub`; callers `await` the met
 in-memory hub's synchronous returns). Opt in only for a genuinely multi-replica deployment — the store hub
 polls Postgres, so single-process runs should stay on the default in-memory hub.
 
+A multi-replica deployment MUST set it — and now safely can: the rest of the single-process assumptions the
+control plane carried (a per-replica admission quota, singleton loops firing once per replica) are addressed in
+`docs/architecture/multi-replica.md`, which is the deployment contract this flag belongs to.
+
 Without the store hub, either run self-hosted dispatch on a **single replica**, or make the load balancer
 **pin a runner's lease/heartbeat and its matching dispatch to the same replica** (session affinity keyed by the
 runner owner). Managed backends (nomad/k8s) are unaffected — they place through the orchestrator, not the

@@ -26,6 +26,7 @@ processes"; the per-workspace cap is counted from the ledger).
 | Concern | Mechanism |
 | --- | --- |
 | Tenant concurrency quota | `Scheduler`'s `AdmissionLedger` — `RunStore.inFlightByTenant()` over the run rows |
+| Singleton control-plane loops | `LeaderElector` — a Postgres lease; non-leaders keep their timers but no-op |
 | Self-hosted runner dispatch | `EVERDICT_SELF_HOSTED_STORE_HUB=1` — the Pg claim queue instead of the in-process hub |
 | Front-door callbacks | `StoreCallbackRendezvous` (already store-backed — an inbound POST may land on any replica) |
 
@@ -48,11 +49,38 @@ scheduler that refuses to place anything while the database blips is a worse out
 momentarily per-replica again. The quota is therefore eventually consistent — it removes the systematic N×
 multiplication, not every race between two replicas admitting in the same instant.
 
+### Leadership (S2)
+
+Loops whose step is *read state → act on the world* must run once per cluster, not once per replica. They are
+wrapped in `whenLeader(...)`: the timer stays registered on every replica (so failover needs no restart, the
+new leader's next tick just starts working) and the callback returns immediately unless this replica holds the
+lease. Leadership is one row in `everdict_control_plane_leases` claimed and renewed by a single atomic upsert
+whose `WHERE` admits only the current holder or an expired lease, fenced by the DATABASE's `now()` so replica
+clock skew can never elect two leaders. A replica stops believing it is leader `ttl − renewInterval` after its
+last successful renewal — before the row the others watch can expire — and hands the lease back on shutdown so
+a rolling restart fails over immediately instead of waiting out the TTL.
+
+*(Why a lease row and not `pg_advisory_lock`: session advisory locks live on a CONNECTION, and every store here
+talks to a `pg.Pool` — a renewal issued on a different pooled connection sees its own lock as somebody else's
+and fails forever. A lease row keeps the one injectable `SqlClient` seam the db package is built on, is
+testable with the fake client, and behaves identically through a connection pooler.)*
+
+What is gated, and what deliberately is not:
+
+| Loop | Verdict |
+| --- | --- |
+| `TopologyPoolAutoscaler` (15 s, scales a shared service) | **gated** — read-then-act on shared infrastructure |
+| `CommentService.sweepStuckAgentAnswers` | **gated** — it pings the asker; N replicas = N notifications |
+| `sweepOrphans` (sandbox · browser) + `settleOrphanSessionRuns` | **gated** — settles rows other replicas wrote, and emits a fact per settle |
+| `browserSessionService.sweep()` · `sandboxSessions.sweep()` | not gated — they reap the compute THIS process holds |
+| MCP idle-session sweep (`mcp.routes.ts`) | not gated — it evicts this process's own transports |
+| Trajectory / event retention | not gated — one atomic `DELETE … WHERE cutoff`; a second replica's pass finds nothing |
+| Slot `Autoscaler` (`EVERDICT_AUTOSCALE`) | not gated — `MutableSlots` is this replica's OWN admission envelope; gating it would pin followers at the minimum and stop them placing work |
+
 ### Still single-process (tracked separately)
 
-Two single-process assumptions remain open at this step and are fixed in the rest of this track: the
-singleton control-plane loops (sweeps, autoscalers) still run on every replica, and boot recovery still
-reclaims in-flight records unconditionally. Until they land, run N > 1 only with those loops understood.
+Boot recovery still reclaims in-flight records unconditionally, which across replicas means a booting replica
+settles work another replica is actively driving. Until that lands, roll restarts one replica at a time.
 
 ## Deliberately per-replica
 

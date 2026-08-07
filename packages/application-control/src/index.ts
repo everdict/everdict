@@ -449,6 +449,7 @@ export {
   parseTenantMap,
   type TenantValueMap,
 } from "./ops/scheduling-config.js";
+export { type LeaderElector, soleLeader, whenLeader } from "./ops/leadership.js";
 export { INTERRUPTED, type RecoveryDeps, recoverInterrupted } from "./ops/startup-recovery.js";
 export { settleOrphanSessionRuns } from "./ops/session-run-sweep.js";
 export { Metrics } from "./ops/metrics.js";

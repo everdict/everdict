@@ -1,3 +1,5 @@
+import type { LeaderElector } from "@everdict/application-control";
+import { soleLeader } from "@everdict/application-control";
 import type {
   AgentMemberPreferenceStore,
   AgentTaskStore,
@@ -88,6 +90,7 @@ import {
   PgIssueStore,
   PgKnowledgeEntryStore,
   PgKnowledgeStore,
+  PgLeaderElector,
   PgNotificationStore,
   PgOAuthStateStore,
   PgPlatformEventStore,
@@ -168,6 +171,7 @@ import {
   type RuntimeRegistry,
 } from "@everdict/registry";
 import { httpOfflineTokenMinter } from "../infrastructure/oauth/offline-token-minter.js";
+import { CONTROL_PLANE_ROLE, REPLICA_ID } from "./replica.js";
 
 export interface Persistence {
   store: RunStore;
@@ -227,6 +231,10 @@ export interface Persistence {
   usageStore: UsageStore; // durable meter-only billing usage — the in-memory UsageMeter write-throughs + hydrates from it
   budgetStore: BudgetStore; // durable per-tenant budget (usage + limits) — the in-memory BudgetTracker write-throughs + hydrates from it
   cipher: SecretCipher; // at-rest AES-256-GCM cipher (EVERDICT_SECRETS_KEY KEK) — shared by secrets + the browser-profile login blob (S3)
+  // Who runs the singleton control-plane loops (docs/architecture/multi-replica.md). Postgres → a renewed
+  // lease row, so exactly one replica scales pools, recovers at boot and settles other processes' stale rows;
+  // no Postgres → `soleLeader`, the single-process shape where every gated loop simply runs.
+  leader: LeaderElector;
 }
 
 // At-rest encryption KEK: use EVERDICT_SECRETS_KEY (base64 32B) if present, otherwise auto-generate an ephemeral key
@@ -329,6 +337,7 @@ export async function makePersistence(): Promise<Persistence> {
       usageStore: new InMemoryUsageStore(),
       budgetStore: new InMemoryBudgetStore(),
       cipher,
+      leader: soleLeader,
     };
   }
   const client = sqlClient(makePool(url));
@@ -388,6 +397,7 @@ export async function makePersistence(): Promise<Persistence> {
     callbackStore: new PgCallbackStore(client),
     usageStore: new PgUsageStore(client),
     budgetStore: new PgBudgetStore(client),
+    leader: new PgLeaderElector(client, { role: CONTROL_PLANE_ROLE, holder: REPLICA_ID }),
     cipher,
   };
 }

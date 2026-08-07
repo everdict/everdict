@@ -1,3 +1,4 @@
+import type { LeaderElector } from "@everdict/application-control";
 import type { BackendRegistry, Scheduler } from "@everdict/backends";
 import { ServiceTopologyBackend, TopologyPoolAutoscaler } from "@everdict/topology";
 
@@ -10,15 +11,23 @@ import { ServiceTopologyBackend, TopologyPoolAutoscaler } from "@everdict/topolo
 export function startTopologyPoolAutoscaler(deps: {
   backends: BackendRegistry;
   scheduler: Scheduler;
+  // Only the leader may ACT here (docs/architecture/multi-replica.md): a tick reads a pool's saturation and
+  // then rewrites a SHARED deployment's replica count, so N replicas would compute N scaling decisions from
+  // the same reading and fight each other over one service.
+  leader: LeaderElector;
 }): TopologyPoolAutoscaler {
-  const { backends, scheduler } = deps;
+  const { backends, scheduler, leader } = deps;
   const autoscaler = new TopologyPoolAutoscaler({
     // The live roster at each tick — rt:<tenant>:<id>@<version> topology backends register at first dispatch.
+    // A follower reports an EMPTY roster, which is how the gate is expressed here: the loop keeps ticking (so a
+    // replica promoted mid-life starts scaling without a restart) but has nothing to act on.
     hosts: () =>
-      backends
-        .names()
-        .map((name) => backends.get(name))
-        .filter((b): b is ServiceTopologyBackend => b instanceof ServiceTopologyBackend),
+      !leader.isLeader()
+        ? []
+        : backends
+            .names()
+            .map((name) => backends.get(name))
+            .filter((b): b is ServiceTopologyBackend => b instanceof ServiceTopologyBackend),
     // Backlog attributable to ONE pool: queued cases whose harness@version is the pool's warm identity (the
     // zone suffix rides after "|"; an image-pin variant suffixes the version with -pin-<hash>). Global backlog
     // would over-scale every pool for one harness's burst.

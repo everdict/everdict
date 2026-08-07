@@ -13,6 +13,7 @@ import {
   registryLatestVersionResolver,
   seedFirstPartyAgents,
   settleOrphanSessionRuns,
+  whenLeader,
 } from "@everdict/application-control";
 import { ApprovalService } from "@everdict/application-control";
 import {
@@ -68,6 +69,7 @@ import { buildIntegrations } from "./composition/integrations.js";
 import { lateBoundEmitter, lateBoundIssueLinker } from "./composition/late-events.js";
 import { deploymentNomad } from "./composition/nomad-env.js";
 import { makePersistence } from "./composition/persistence.js";
+import { REPLICA_ID } from "./composition/replica.js";
 import { buildRun } from "./composition/run.js";
 import { buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
 import { buildRuntimeCompute } from "./composition/runtime-compute.js";
@@ -215,7 +217,14 @@ async function main(): Promise<void> {
     usageStore,
     budgetStore,
     cipher,
+    leader,
   } = await makePersistence();
+
+  // Elect the replica that runs the singleton control-plane loops (docs/architecture/multi-replica.md). Started
+  // BEFORE the loops are registered so a boot-time pass placed after this knows whether it may act; with no
+  // Postgres this is `soleLeader` and every gated loop simply runs, exactly as it did single-process.
+  await leader.start();
+  if (leader.isLeader()) console.log(`▶ control-plane leader: ${REPLICA_ID}`);
 
   // E2 content/registry facts (event-plumbing.md §3): registration is a state transition, so it emits its fact.
   // Decorated ONCE here — every caller (routes, MCP tools, bundle apply, benchmark import, CI re-pin) goes
@@ -376,10 +385,14 @@ async function main(): Promise<void> {
         ?.catch?.(() => {});
     },
   });
+  // NOT leader-gated on purpose: `scalingTargets` are this process's own MutableSlots — its admission
+  // envelope, not a shared resource. Gating it would pin every follower at the minimum slot count and leave it
+  // unable to place work. Over-subscription across replicas is bounded by the orchestrator probe, which is the
+  // cross-replica truth for slots (docs/architecture/multi-replica.md).
   startAutoscaler({ autoscale, scalingTargets, scheduler });
   // Elastic session pools — scale declared-scalable topology session services from pool saturation + backlog
   // (acts only on harnesses that declare acquire.capacity.scale, on runtimes that can scale one service).
-  startTopologyPoolAutoscaler({ backends, scheduler });
+  startTopologyPoolAutoscaler({ backends, scheduler, leader });
   const { budget, usageMeter } = await buildBudgets({ budgetStore, usageStore });
 
   // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
@@ -594,7 +607,12 @@ async function main(): Promise<void> {
   // Stranded discussion answers (@everdict comments whose agent-side callbacks died — crash / severed detached
   // turn) → failed + asker ping. 15 min staleness safely exceeds the activity-tick cadence AND the approval-park
   // window (10 min, deny-on-expiry then resumes), so anything older is dead. Same sweep idiom as browser sessions.
-  setInterval(() => void commentService.sweepStuckAgentAnswers(15 * 60_000).catch(() => {}), 60_000).unref();
+  // Leader-gated: the sweep does not just settle the row, it PINGS the asker — on N replicas one dead turn
+  // would notify them N times (docs/architecture/multi-replica.md).
+  setInterval(
+    whenLeader(leader, () => void commentService.sweepStuckAgentAnswers(15 * 60_000).catch(() => {})),
+    60_000,
+  ).unref();
 
   // Per-runtime backend access for already-dispatched cases (adoption/kill + live-observability lane reads). Built
   // before run/scorecard because their live-observability + supersede-kill wiring closes over these functions.
@@ -935,10 +953,16 @@ async function main(): Promise<void> {
       })
     : undefined;
   if (browserSessionService) {
+    // NOT leader-gated, deliberately: this tears down the browser processes THIS node holds, which is a fact
+    // about this machine — a follower that stopped reaping its own sessions would leak them.
     setInterval(() => browserSessionService.sweep(), 60_000).unref(); // TTL teardown (live entries)
     // The ledger half: settle rows a dead process left `running` past their deadline (zombie prevention).
-    setInterval(() => void browserSessionService.sweepOrphans().catch(() => {}), 60_000).unref();
-    void browserSessionService.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
+    // Leader-gated — it acts on rows this process does not own, and the facts it emits must fire once.
+    setInterval(
+      whenLeader(leader, () => void browserSessionService.sweepOrphans().catch(() => {})),
+      60_000,
+    ).unref();
+    if (leader.isLeader()) void browserSessionService.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
   }
   // N3 retention: operator-configured TTL over the owned trajectory store (unset = keep forever). Hourly
   // sweep, logged — evidence never leaves silently.
@@ -950,6 +974,8 @@ async function main(): Promise<void> {
       if (removed > 0)
         console.log(`▶ trajectory retention: removed ${removed} sealed trajectories older than ${cutoff}`);
     };
+    // Not leader-gated: one `DELETE … WHERE sealed_at < cutoff` is atomic and idempotent, so a second replica's
+    // pass finds nothing left to remove (docs/architecture/multi-replica.md).
     setInterval(() => void sweepTrajectories(), 3_600_000).unref();
   }
   // EO4 retention: operator-configured TTL over the platform-event log (unset = keep forever). The TTL must
@@ -962,7 +988,7 @@ async function main(): Promise<void> {
       const removed = await platformEventStore.deleteOlderThan(cutoff).catch(() => 0);
       if (removed > 0) console.log(`▶ event-log retention: removed ${removed} facts older than ${cutoff}`);
     };
-    setInterval(() => void sweepEvents(), 3_600_000).unref();
+    setInterval(() => void sweepEvents(), 3_600_000).unref(); // atomic bulk delete, same as the trajectory twin
   }
   // Capture a session login into a profile (browser-profiles S3) — only when interactive sessions exist (it needs
   // a session's reachable CDP base). Encrypts the storageState blob with the shared at-rest cipher.
@@ -1073,19 +1099,26 @@ async function main(): Promise<void> {
       : {}),
   });
   if (sandboxSessions) {
+    // Per-replica by nature (like the browser twin): this reaps the compute THIS process holds open.
     setInterval(() => sandboxSessions.sweep(), 30_000).unref();
     // The ledger half of the sweep: reap rows whose deadline passed with no live handle anywhere — the
-    // safety net for a durable reaper that never armed or a process that died holding the session.
-    setInterval(() => void sandboxSessions.sweepOrphans().catch(() => {}), 60_000).unref();
-    void sandboxSessions.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
+    // safety net for a durable reaper that never armed or a process that died holding the session. Leader-gated:
+    // it reaches rows other replicas wrote (ORPHAN_GRACE_MS is the second guard, not the only one).
+    setInterval(
+      whenLeader(leader, () => void sandboxSessions.sweepOrphans().catch(() => {})),
+      60_000,
+    ).unref();
+    if (leader.isLeader()) void sandboxSessions.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
   }
   // Session rows whose lane is NOT configured here still share this ledger (another process — a dev host
   // stack, a dead replica — may have written and abandoned them). Settle those from the ledger alone; lanes
   // configured above exclude their trigger because their own sweep owns the full container teardown.
   {
     const excludeTriggers = [...(sandboxSessions ? ["sandbox"] : []), ...(browserSessionService ? ["browser"] : [])];
-    const sweepUnowned = (): void =>
+    // Leader-gated: every row it settles belongs to some other process, and each settle emits a fact.
+    const sweepUnowned = whenLeader(leader, () => {
       void settleOrphanSessionRuns({ store, events: lateEvents, excludeTriggers }).catch(() => {});
+    });
     setInterval(sweepUnowned, 60_000).unref();
     sweepUnowned(); // boot pass
   }
@@ -1306,6 +1339,15 @@ async function main(): Promise<void> {
     // MCP OAuth: advertise Keycloak as the authorization server (the client starts login). Unset → API keys only.
     ...(process.env.KEYCLOAK_ISSUER ? { authorizationServers: [process.env.KEYCLOAK_ISSUER] } : {}),
   });
+
+  // Hand the leader lease back on a normal shutdown, so a rolling restart's next replica takes over at once
+  // instead of waiting out the lease TTL. Without a leader (single process) this is a no-op.
+  const shutdown = (signal: string): void => {
+    void leader.stop().finally(() => process.exit(0));
+    console.error(`▶ ${signal}: control plane shutting down`);
+  };
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 
   await app.listen({ port, host: "0.0.0.0" });
   console.error(
