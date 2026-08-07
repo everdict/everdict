@@ -38,6 +38,24 @@ the executing actor, or when the two shared one run or one session. The last cla
 first: two distinct identities inside one execution context are not independent, because the verifier read the
 executor's own reasoning on the way in.
 
+### Context separation has no field, deliberately
+
+`RoleProfile` used to carry `contextScopes: string[]` — "which provenance scopes this role's context may draw
+from". Nothing ever read it, including `assertRoleProfile` two lines below it. It was removed rather than
+wired, on two findings:
+
+1. **There is no context-assembly point to filter.** Knowledge, memory and skills do not arrive as a
+   pre-built bundle of classes an agent could be given a subset of; the agent *pulls* each one through a tool
+   it decides to call (`get_task_context`, `use_skill`, `get_file`). The only thing injected unasked is the
+   environment block — workspace, model, date, paths. There is no menu for a role to select from.
+2. **The job it named is already done, and enforced.** "What may this role draw on" is *which tools it may
+   call*, which is exactly `TaskEnvelope.scope.allowedCapabilities` — honored by the kernel on every call and
+   inherited by sub-agents. A second vocabulary for the same concern, read by nothing, is not a weaker
+   guarantee. It is a false one.
+
+Verifier context separation stays a principle (above) until there is a verifier spawn site; the scope that
+spawn grants is where it becomes code.
+
 ### Where this is enforced — and where it is not
 
 Stated plainly, because a protocol that overstates its own coverage is the failure it exists to prevent.

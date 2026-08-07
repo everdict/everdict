@@ -57,13 +57,27 @@ export const RoleProfileSchema = z.object({
     read: z.array(z.string()).default([]),
     write: z.array(z.string()).default([]),
   }),
-  // Which provenance scopes this role's context may draw from (context separation — O3's axis).
-  contextScopes: z.array(z.string()).default([]),
+  // (Context separation has NO field here on purpose — see the note under RoleProfile below.)
   // The evidence the role MUST leave behind to finish — completion without evidence is a claim, not a result.
   requiredEvidence: z.array(z.enum(["trace", "diff", "scorecard", "checkpoint", "report"])).default([]),
   completion: RoleCompletionSchema,
 });
 export type RoleProfile = z.infer<typeof RoleProfileSchema>;
+
+// Why there is no `contextScopes` here. It existed — `string[]`, "which provenance scopes this role's context
+// may draw from" — and nothing ever read it, including the validator right below. Two findings retired it
+// rather than wiring it:
+//   ① There is no context-ASSEMBLY point to filter. Knowledge, memory and skills do not arrive as a
+//      pre-built bundle of classes; the agent PULLS each through a tool it decides to call
+//      (get_task_context / use_skill / get_file). The only thing injected unasked is the environment block:
+//      workspace, model, date, paths. There is no set of context classes for a role to select among.
+//   ② The job it named is already done, and enforced. "What may this role draw on" is which tools it may
+//      call, which is exactly `TaskEnvelope.scope.allowedCapabilities` — honored by the kernel on every call
+//      and inherited by sub-agents. A second vocabulary for the same concern, read by nothing, is not a
+//      weaker guarantee; it is a false one.
+// Context separation for a verifier (evidence only, never the executor's reasoning) remains a stated
+// PRINCIPLE awaiting a verifier runtime — see docs/architecture/ownership-protocol.md. When that spawn site
+// exists, the scope it grants is where the principle becomes code.
 
 // A role PLUS the actor holding it — the unit the independence invariant is stated over. A bare RoleProfile
 // cannot answer "is the verifier someone else?", so every check that separation matters to takes this.
