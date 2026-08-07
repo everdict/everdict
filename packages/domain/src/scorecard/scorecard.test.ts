@@ -198,6 +198,35 @@ describe("measurement status — an unmeasured score never enters an aggregate",
     expect(diff.regressions).toEqual([]); // a dead grader is not a regression
   });
 
+  it("a case with a classified failure never enters the re-score worklist — its recovery is retry, not scoring", () => {
+    // Regression: the dispatch placeholder (unmeasured, retryable) listed itself on the worklist, making the
+    // rescore button an empty promise — rescore only re-runs judges, and a dead case has no trace to judge.
+    const sc: Scorecard = {
+      suiteId: "s",
+      harness: "h@1",
+      results: [
+        {
+          caseId: "dead",
+          harness: "h@1",
+          trace: [],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [
+            {
+              graderId: "dispatch",
+              metric: "error",
+              value: 0,
+              status: "unmeasured",
+              reason: "missing_evidence",
+              retryable: true,
+            },
+          ],
+          failure: { stage: "dispatch", class: "infra", code: "X", message: "m", retryable: true },
+        },
+      ],
+    };
+    expect(retryableUnmeasured(sc)).toEqual([]);
+  });
+
   it("retryableUnmeasured lists exactly the transient failures as a re-score worklist", () => {
     const sc: Scorecard = {
       suiteId: "s",

@@ -179,6 +179,10 @@ export interface RetryableUnmeasured {
 export function retryableUnmeasured(sc: Pick<Scorecard, "results">): RetryableUnmeasured[] {
   const out: RetryableUnmeasured[] = [];
   for (const r of sc.results) {
+    // Only a case a re-SCORE can actually recover belongs on this worklist: a result carrying a classified
+    // failure (dispatch death, collect starvation) recovers through retry/re-collect, not through scoring —
+    // listing its placeholders here made the rescore button an empty promise.
+    if (r.failure !== undefined) continue;
     for (const s of r.scores) {
       if (s.status === "unmeasured" && s.retryable === true) {
         out.push({

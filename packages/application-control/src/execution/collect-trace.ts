@@ -39,9 +39,19 @@ export interface CollectTraceDeps {
   makeGraders?: (specs: GraderSpec[]) => Grader[];
 }
 
-// Explicit skip for non-reconstructable graders (e.g. inline judge) — so a grader the user chose doesn't silently vanish.
+// Explicit skip for non-reconstructable graders (e.g. inline judge) — so a grader the user chose doesn't
+// silently vanish. UNMEASURED (config-shaped, not retryable as-is): the isMeasured gate keeps it out of
+// every aggregate instead of leaning on the legacy detail sentinel.
 function skipScore(graderId: string, reason: string): Score {
-  return { graderId, metric: graderId, value: 0, detail: `skipped: ${reason}` };
+  return {
+    graderId,
+    metric: graderId,
+    value: 0,
+    status: "unmeasured",
+    reason: "unsupported",
+    retryable: false,
+    detail: `skipped: ${reason}`,
+  };
 }
 
 const COLLECT_ATTEMPTS = 3; // absorb flush latency — job end→result transport already buys a few seconds, but this guards against slow platforms
@@ -157,10 +167,13 @@ export async function collectDeferredTrace(
     scores.push(...(await safeGrade(grader, ctx)));
   }
 
-  // Collection completed — a recovered case sheds its {collect} classification (the pull succeeded this time).
+  // Collection completed — a recovered case sheds its {collect} classification (the pull succeeded this
+  // time), and the control plane SEALS the trace (traceSealed): it is the producer that can vouch for this
+  // collection path, exactly as runCase vouches for the in-job path. Without the seal, a deferred-then-
+  // collected case could never read "complete" under the positive-seal rule.
   if (recovering) {
     const { failure: _recovered, ...rest } = result;
-    return { ...rest, trace, scores };
+    return { ...rest, trace, scores, traceSealed: true };
   }
-  return { ...result, trace, scores };
+  return { ...result, trace, scores, traceSealed: true };
 }

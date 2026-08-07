@@ -51,13 +51,21 @@ describe("evidenceStatus — completeness as a value, derived not self-reported"
     expect(evidenceStatus({ trace: events, snapshot: repoSnapshot }).trace).toBe("complete");
   });
 
-  it("control-plane collection pending reads deferred — absence is a state, not a loss", () => {
+  it("control-plane collection pending reads deferred — even beside the job's infra lifecycle marks", () => {
+    const ref = { kind: "otel", endpoint: "http://t", runId: "r1" } as const;
+    expect(evidenceStatus({ trace: [], snapshot: repoSnapshot, traceRef: ref }).trace).toBe("deferred");
+    // Regression: the released-compute mark (kind "infra") rode every deferred result, so "has events" made
+    // the deferred branch unreachable and an UNCOLLECTED case read as complete.
     expect(
       evidenceStatus({
-        trace: [],
+        trace: [{ t: 0, kind: "infra", scope: "placement", message: "sandbox released in 12ms" }],
         snapshot: repoSnapshot,
-        traceRef: { kind: "otel", endpoint: "http://t", runId: "r1" },
+        traceRef: ref,
       }).trace,
     ).toBe("deferred");
+    // ...and once the control plane collects AND SEALS, the same shape is complete.
+    expect(evidenceStatus({ trace: events, snapshot: repoSnapshot, traceRef: ref, traceSealed: true }).trace).toBe(
+      "complete",
+    );
   });
 });

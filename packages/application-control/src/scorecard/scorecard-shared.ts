@@ -16,7 +16,6 @@ import {
   type RegistryAuth,
   type Score,
   ScoreSchema,
-  isMeasured,
   type ScorecardExport,
   type ScorecardOrigin,
   type ScorecardRecord,
@@ -26,6 +25,7 @@ import {
   TraceEvidenceSchema,
   type TraceSource,
   type TraceSourceConfig,
+  isMeasured,
 } from "@everdict/contracts";
 import {
   type BudgetTracker,

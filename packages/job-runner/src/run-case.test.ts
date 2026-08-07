@@ -325,7 +325,15 @@ describe("runCase — early compute release (observation-only graders score afte
       code: "TRACE_COLLECT_FAILED",
       retryable: true,
     });
-    expect(result.scores.map((s) => s.graderId)).toEqual(["outcome"]); // ground truth kept, observations deferred
+    // Ground truth kept; the observation grader leaves an UNMEASURED placeholder (missing_evidence,
+    // retryable) — visible on the recovery worklist instead of invisible by absence — but is NEVER scored
+    // against the known-incomplete trace.
+    expect(result.scores.map((s) => s.graderId)).toEqual(["outcome", "steps"]);
+    expect(result.scores.find((s) => s.graderId === "steps")).toMatchObject({
+      status: "unmeasured",
+      reason: "missing_evidence",
+      retryable: true,
+    });
     expect(observationGraded).toBe(false); // never scored against the known-incomplete trace
     expect(result.traceRef?.kind).toBe("otel"); // re-collect coordinates for the control plane / stage-aware retry
     expect(typeof result.traceRef?.runId).toBe("string");

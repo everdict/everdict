@@ -14,7 +14,7 @@ import type {
   Score,
   UnmeasuredReason,
 } from "@everdict/contracts";
-import { toScores } from "@everdict/contracts";
+import { sanitizeScore, toScores } from "@everdict/contracts";
 import { modelApiKeySecretName, normalizeModelBinding } from "@everdict/domain";
 import {
   JUDGE_OVERALL_METRIC,
@@ -214,11 +214,14 @@ export function buildCodeJudgeJob(
 // Rewrite the wrapper job's raw script scores into this judge's identity — graderId stamped, "judge" metric prefix
 // → judge:<id> (judge:<sub> → judge:<id>:<sub>), exactly like the model path.
 function stampCodeJudgeScores(spec: Extract<JudgeSpec, { kind: "code" }>, scores: Score[]): Score[] {
-  return scores.map((score) => ({
-    ...score,
-    graderId: spec.id,
-    metric: score.metric.replace(/^judge/, metricOf(spec)),
-  }));
+  // sanitizeScore: a code judge emitting garbage (NaN, empty ids) becomes a visible invalid score here too.
+  return scores.map((score) =>
+    sanitizeScore({
+      ...score,
+      graderId: spec.id,
+      metric: score.metric.replace(/^judge/, metricOf(spec)),
+    }),
+  );
 }
 
 // code judge — dispatch the sandboxed wrapper job inline (batch scoring path). The code never runs on the control
@@ -390,14 +393,16 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         // JudgeGrader emits the metric prefix "judge" (criteria as "judge:<criterion>") — rewrite the prefix to this
         // judge's identity so multiple selected judges stay distinct: judge:<id> / judge:<id>:<criterion>.
         // spec.passThreshold re-decides pass for the OVERALL score only (criteria carry their own passThreshold).
+        // sanitizeScore: a judge transport returning garbage (NaN score) becomes a visible INVALID score at
+        // THIS collection boundary too — safeGrade guards the in-job path, this guards the control-plane one.
         return graded.map((score) => {
           const isOverall = score.metric === JUDGE_OVERALL_METRIC; // the graders-exported name, not a re-typed literal
           const pass = isOverall && threshold != null ? score.value >= threshold : score.pass;
-          return {
+          return sanitizeScore({
             ...score,
             metric: score.metric.replace(/^judge/, metricOf(spec)),
             ...(pass != null ? { pass } : {}),
-          };
+          });
         });
       } catch (err) {
         return skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true);

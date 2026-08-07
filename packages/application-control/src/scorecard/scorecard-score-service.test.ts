@@ -1,4 +1,4 @@
-import type { CaseResult, Dataset, ScorecardRecord, Score } from "@everdict/contracts";
+import type { CaseResult, Dataset, Score, ScorecardRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "../execution/scoring-service.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";

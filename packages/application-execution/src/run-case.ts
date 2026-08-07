@@ -366,6 +366,26 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
             slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot: materialized, provision });
           }
         }
+      } else {
+        // The observation graders never ran (their evidence never arrived) — say so with UNMEASURED
+        // placeholders rather than by absence: an absent metric is invisible to the recovery worklist and
+        // to the unmeasured tallies, and invisibility is how a scoring outage stops being anyone's problem.
+        // retryable: the control plane's re-collect + re-score path recovers these without a case re-run.
+        for (const [i, grader] of deps.graders.entries()) {
+          if (grader.needsCompute !== true) {
+            slots[i] = [
+              {
+                graderId: grader.id,
+                metric: grader.id,
+                value: 0,
+                status: "unmeasured",
+                reason: "missing_evidence",
+                retryable: true,
+                detail: `skipped: trace collection failed — observation scoring deferred (${collectFailure.message})`,
+              },
+            ];
+          }
+        }
       }
     }
 

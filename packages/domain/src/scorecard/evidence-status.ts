@@ -25,18 +25,21 @@ export function evidenceStatus(
   result: Pick<CaseResult, "trace" | "snapshot"> & Pick<Partial<CaseResult>, "failure" | "traceRef" | "traceSealed">,
 ): EvidenceStatus {
   const failure = result.failure;
-  const hasEvents = result.trace.length > 0;
+  // The agent's TRAJECTORY, not the platform's lifecycle marks: a deferred job still carries infra-plane
+  // events (compute_released etc.), and counting those as "the trace" made the deferred state unreachable —
+  // an uncollected case read as complete.
+  const hasTrajectory = result.trace.some((event) => event.kind !== "infra");
   let trace: EvidenceStatus["trace"];
   if (failure && PRE_OUTCOME_STAGES.has(failure.stage)) {
     // never legitimately executed — whatever events exist are infra post-mortem, not the agent's trajectory
     trace = "missing";
   } else if (failure?.stage === "collect") {
-    trace = hasEvents ? "partial" : "missing";
-  } else if (!hasEvents && result.traceRef) {
-    trace = "deferred"; // control-plane collection pending — absence is a state, not a loss
+    trace = hasTrajectory ? "partial" : "missing";
   } else if (result.traceSealed === true) {
     trace = "complete"; // the producer VOUCHED — the only positive claim of completeness
-  } else if (hasEvents) {
+  } else if (result.traceRef && !hasTrajectory) {
+    trace = "deferred"; // control-plane collection pending — absence is a state, not a loss
+  } else if (hasTrajectory) {
     // Events with no seal and no recorded failure: absence of bad news is not completeness — a trace
     // truncated without a recorded collect failure looks exactly like this. Read as partial, not complete.
     trace = result.traceSealed === undefined ? "complete" : "partial"; // legacy rows (pre-seal) keep their old reading
