@@ -17,7 +17,9 @@ const PAGE_SIZE = 10
 export interface ScheduleRunEntry {
   id: string
   traceEval: boolean // 트레이스 평가 모드인가(dataset/harness 없음)
-  metrics: { metric: string; mean: number; passRate?: number | null }[]
+  // mean is ABSENT for a zero-measurement metric (every score unmeasured) — the chip renders the unmeasured
+  // marker; dropping the field here is what turned dead graders into 0.00 rows.
+  metrics: { metric: string; mean?: number; passRate?: number | null; unmeasured?: number }[]
   createdAt: string
   status: ScorecardStatus
   runner?: { name: string; avatarUrl?: string }
@@ -40,12 +42,13 @@ function primaryTrend(
       metric = name
     }
   }
-  // 오래된 → 최신 순으로(입력은 최신순). 해당 메트릭이 있는 실행만.
+  // 오래된 → 최신 순으로(입력은 최신순). 해당 메트릭이 MEASURED된 실행만 — mean이 없는(전멸 unmeasured)
+  // 포인트를 0으로 그리면 grader 장애가 추이 붕괴로 위장된다.
   const points = [...entries]
     .reverse()
     .map((e) => {
       const m = e.metrics.find((x) => x.metric === metric)
-      return m ? { at: e.createdAt, value: m.mean } : null
+      return m && m.mean !== undefined ? { at: e.createdAt, value: m.mean } : null
     })
     .filter((p): p is { at: string; value: number } => p !== null)
   return points.length >= 2 ? { metric, points } : null
@@ -166,6 +169,7 @@ export function ScheduleRuns({
                       metric={m.metric}
                       mean={m.mean}
                       passRate={m.passRate}
+                      unmeasured={m.unmeasured}
                       siblings={siblings}
                     />
                   </span>

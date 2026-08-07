@@ -39,7 +39,8 @@ export function scorecardPassRate(sc: Scorecard): { pass: number; total: number;
 export interface MetricSummary {
   metric: string;
   count: number;
-  mean: number;
+  // Absent when count is 0 (annihilated metric) — a mean over nothing is not 0.
+  mean?: number;
   passRate?: number;
   // Categorical metrics (scores carrying `label`): the label distribution (ordered enum → ordinal order, else by
   // frequency) + the most-frequent label (mode). Set only when the metric is categorical; numeric/boolean metrics
@@ -81,7 +82,9 @@ export function summarizeScorecard(sc: Scorecard): MetricSummary[] {
     const summary: MetricSummary = {
       metric,
       count: m.values.length,
-      mean: m.values.reduce((a, b) => a + b, 0) / (m.values.length || 1),
+      // A metric whose every score was unmeasured/invalid has NO mean — 0 here crowned dead graders on
+      // lower-is-better leaderboards and drew outages as regressions on trend lines.
+      ...(m.values.length > 0 ? { mean: m.values.reduce((a, b) => a + b, 0) / m.values.length } : {}),
       passRate: m.passes.length > 0 ? m.passes.filter(Boolean).length / m.passes.length : undefined,
       ...(m.unmeasured > 0 ? { unmeasured: m.unmeasured } : {}),
     };

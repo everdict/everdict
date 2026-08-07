@@ -61,7 +61,8 @@ export function trendSeries(
     .map((c) => {
       const m = c.summary?.find((s) => s.metric === opts.metric);
       const passRate = m?.passRate ?? null;
-      const mean = m ? m.mean : null;
+      // Annihilated metric (mean absent) → NO point value: an outage is a gap in the line, not a plunge to 0.
+      const mean = m?.mean ?? null;
       const score = passRate ?? mean;
       return { card: c, mean, passRate, score };
     });

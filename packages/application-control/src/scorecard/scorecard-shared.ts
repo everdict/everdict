@@ -16,6 +16,7 @@ import {
   type RegistryAuth,
   type Score,
   ScoreSchema,
+  isMeasured,
   type ScorecardExport,
   type ScorecardOrigin,
   type ScorecardRecord,
@@ -89,6 +90,29 @@ export function exportStepMessage(e: ScorecardExport): string {
 // docs/architecture/trial-based-verdict.md
 export function childKey(caseId: string, trial?: number): string {
   return `${caseId}#${trial ?? 0}`;
+}
+
+// ── Judge-metric ownership (one predicate for BOTH scoring paths) ────────────────────────────────────────
+// A judge's scores live under `judge:<id>` (the verdict) and `judge:<id>:<criterion>` (diagnostic children).
+// The in-process pass and the Temporal pass used to answer "is this case already judged?" and "which rows
+// does a re-score replace?" DIFFERENTLY — the Temporal side read bare metric PRESENCE as "judged", so an
+// unmeasured placeholder row (the very thing rescore-unmeasured exists to recover) made it skip exactly the
+// cases it was invoked for, and its strip missed the criterion children so stale diagnostics compounded on
+// every pass. Both paths now stand on these three.
+export function isJudgeMetricOf(metric: string, judgeId: string): boolean {
+  return metric === `judge:${judgeId}` || metric.startsWith(`judge:${judgeId}:`);
+}
+
+// "Already judged" = a MEASURED top-level verdict exists. An unmeasured/invalid placeholder is a recorded
+// failure to judge, never a verdict — it must leave the case eligible for the pass that replaces it.
+export function hasMeasuredJudgeVerdict(result: Pick<CaseResult, "scores">, judgeId: string): boolean {
+  return result.scores.some((s) => s.metric === `judge:${judgeId}` && isMeasured(s));
+}
+
+// Strip EVERYTHING the selected judges previously wrote — verdicts, criterion children, placeholders — so a
+// re-score replaces its own output wholesale instead of accreting duplicates next to stale rows.
+export function stripJudgeScores(scores: Score[], judges: ReadonlyArray<{ id: string }>): Score[] {
+  return scores.filter((s) => !judges.some((j) => isJudgeMetricOf(s.metric, j.id)));
 }
 
 // Progress-step failure/verdict reason — prefer a trace error event over a pass:false score.detail. Carried verbatim

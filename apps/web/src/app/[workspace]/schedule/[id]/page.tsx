@@ -79,8 +79,9 @@ export default async function ScheduleDetailPage({
       traceEval: isTraceEvaluation(s),
       metrics: (s.summary ?? []).map((m) => ({
         metric: m.metric,
-        mean: m.mean,
+        ...(m.mean !== undefined ? { mean: m.mean } : {}),
         ...(m.passRate != null ? { passRate: m.passRate } : {}),
+        ...(m.unmeasured != null ? { unmeasured: m.unmeasured } : {}),
       })),
       ...(runner ? { runner } : {}),
       createdAt: s.createdAt,

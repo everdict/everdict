@@ -133,6 +133,7 @@ export default async function ByHarnessPage({
                                   metric={m.metric}
                                   mean={m.mean}
                                   passRate={m.passRate}
+                                  unmeasured={m.unmeasured}
                                   siblings={(s.summary ?? []).map((x) => x.metric)}
                                 />
                               ))

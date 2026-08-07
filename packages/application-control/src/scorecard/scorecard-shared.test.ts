@@ -1,6 +1,6 @@
-import type { CaseResult } from "@everdict/contracts";
+import type { CaseResult, Score } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { caseReason } from "./scorecard-shared.js";
+import { caseReason, hasMeasuredJudgeVerdict, isJudgeMetricOf, stripJudgeScores } from "./scorecard-shared.js";
 
 // A CaseResult that failed with a trace error carrying `message`.
 function erroredCase(message: string): CaseResult {
@@ -39,5 +39,48 @@ describe("caseReason", () => {
         scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }],
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("judge-metric ownership (one predicate for both scoring paths)", () => {
+  const measured: Score = { graderId: "judge", metric: "judge:j", value: 1, pass: true };
+  const placeholder: Score = {
+    graderId: "judge",
+    metric: "judge:j",
+    value: 0,
+    status: "unmeasured",
+    reason: "grader_error",
+    retryable: true,
+  };
+  const legacySentinel: Score = {
+    graderId: "judge",
+    metric: "judge:j",
+    value: 0,
+    detail: "[grader-error] transport died",
+  };
+  const criterion: Score = { graderId: "judge", metric: "judge:j:accuracy", value: 0.8, pass: true };
+  const otherJudge: Score = { graderId: "judge", metric: "judge:other", value: 1, pass: true };
+  const grader: Score = { graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true };
+
+  it("hasMeasuredJudgeVerdict — a measured top-level verdict counts, placeholders (modern or legacy) do not", () => {
+    expect(hasMeasuredJudgeVerdict({ scores: [measured] }, "j")).toBe(true);
+    expect(hasMeasuredJudgeVerdict({ scores: [placeholder] }, "j")).toBe(false);
+    expect(hasMeasuredJudgeVerdict({ scores: [legacySentinel] }, "j")).toBe(false);
+    // a criterion child alone is diagnostic, never the verdict
+    expect(hasMeasuredJudgeVerdict({ scores: [criterion] }, "j")).toBe(false);
+  });
+
+  it("stripJudgeScores — removes the judge's verdict, criterion children AND placeholders; keeps everything else", () => {
+    const scores = [measured, placeholder, criterion, otherJudge, grader];
+    const stripped = stripJudgeScores(scores, [{ id: "j" }]);
+    // Regression: the exact-name strip (judge:<id> only) left stale criterion rows to compound on every pass.
+    expect(stripped).toEqual([otherJudge, grader]);
+  });
+
+  it("isJudgeMetricOf — prefix family, never a different judge sharing a prefix string", () => {
+    expect(isJudgeMetricOf("judge:j", "j")).toBe(true);
+    expect(isJudgeMetricOf("judge:j:accuracy", "j")).toBe(true);
+    expect(isJudgeMetricOf("judge:jj", "j")).toBe(false); // judge "jj" is not judge "j"
+    expect(isJudgeMetricOf("tests_pass", "j")).toBe(false);
   });
 });

@@ -7,10 +7,15 @@ import {
   NotFoundError,
   type ScorecardRecord,
 } from "@everdict/contracts";
-import { ScorecardBatch, type ScorecardOutcomeExtras, summarizeScorecard } from "@everdict/domain";
+import { ScorecardBatch, type ScorecardOutcomeExtras, judgeGradeable, summarizeScorecard } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
-import { type ScorecardServiceDeps, childKey } from "./scorecard-shared.js";
+import {
+  type ScorecardServiceDeps,
+  childKey,
+  hasMeasuredJudgeVerdict,
+  stripJudgeScores,
+} from "./scorecard-shared.js";
 
 // Phase 2, detached (execution-model.md P2): apply judges over an EXISTING group's runs and re-write the
 // aggregate — "re-score with a different judge" and "promote experiment → scorecard" are the same operation
@@ -118,7 +123,13 @@ export class ScorecardScoreService {
         `only a succeeded group can be scored (status: ${record.status})`,
       );
     const results = record.scorecard?.results ?? [];
-    const missing = results.filter((r) => !judges.every((j) => r.scores.some((s) => s.metric === `judge:${j.id}`)));
+    // Pending = judge-gradeable (a classified failure starves the judge — its recovery is retry/re-collect,
+    // not a scoring pass) AND missing a MEASURED verdict from at least one selected judge. Bare metric
+    // presence is NOT "judged": an unmeasured placeholder row is the exact state a re-score exists to replace,
+    // and reading it as done made the Temporal pass a no-op on its own worklist.
+    const missing = results.filter(
+      (r) => judgeGradeable(r) && !judges.every((j) => hasMeasuredJudgeVerdict(r, j.id)),
+    );
     return {
       keys: missing.map((r) => childKey(r.caseId, r.trial)),
       concurrency: record.orchestration?.concurrency ?? 4,
@@ -137,10 +148,14 @@ export class ScorecardScoreService {
     if (!record) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "Scorecard not found.");
     const result = (record.scorecard?.results ?? []).find((r) => childKey(r.caseId, r.trial) === key);
     if (!result) return { scored: false, skipped: true };
-    if (judges.every((j) => result.scores.some((s) => s.metric === `judge:${j.id}`)))
+    // Same predicate as planScore: a measured verdict per selected judge = done; an unmeasured placeholder
+    // is not. A non-gradeable case (classified failure) is skipped — its recovery is not a scoring pass.
+    if (!judgeGradeable(result) || judges.every((j) => hasMeasuredJudgeVerdict(result, j.id)))
       return { scored: false, skipped: true };
-    const selected = new Set(judges.map((j) => `judge:${j.id}`));
-    const single: CaseResult = { ...result, scores: result.scores.filter((s) => !selected.has(s.metric)) };
+    // Strip the selected judges' ENTIRE prior output — verdicts, criterion children, placeholders — so the
+    // re-score replaces rather than accretes (the exact-name strip left stale judge:<id>:<criterion> rows
+    // alive next to fresh ones, compounding on every pass).
+    const single: CaseResult = { ...result, scores: stripJudgeScores(result.scores, judges) };
     const dataset = await this.effectiveDataset(record, [single]);
     await this.scoring.applyJudges(record.tenant, dataset, [single], judges, record.runtime, submittedBy);
     await this.writeBackScores(record, [single]);
@@ -163,12 +178,12 @@ export class ScorecardScoreService {
     submittedBy: string | undefined,
   ): Promise<void> {
     try {
-      // Re-scoring a judge REPLACES its previous verdicts (idempotent by natural key judge:<id>) — strip the
-      // selected judges' old scores, keep everything else (graders, other judges) untouched.
-      const selected = new Set(judges.map((j) => `judge:${j.id}`));
+      // Re-scoring a judge REPLACES its previous output (idempotent by the judge:<id> prefix family — the
+      // verdict AND its criterion children) — strip the selected judges' old scores, keep everything else
+      // (graders, other judges) untouched. Same strip as the Temporal pass: two paths, one predicate.
       const results: CaseResult[] = scorecard.results.map((r) => ({
         ...r,
-        scores: r.scores.filter((s) => !selected.has(s.metric)),
+        scores: stripJudgeScores(r.scores, judges),
       }));
       const dataset = await this.effectiveDataset(record, results);
       await this.scoring.applyJudges(record.tenant, dataset, results, judges, record.runtime, submittedBy);

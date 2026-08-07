@@ -1,7 +1,10 @@
 import type { CaseFailure, CaseResult, Score, Scorecard } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { scorecardOutcomes } from "./case-outcome.js";
+import { headlinePassRate } from "./headline.js";
+import { leaderboard } from "./leaderboard.js";
 import { diffScorecards, scorecardPassRate, summarizeScorecard } from "./scorecard.js";
+import { trendSeries } from "./trend.js";
 import { evaluateVerdict } from "./verdict-policy.js";
 
 // ── The canonical failure-injection suite (trust-kernel P6) ─────────────────────────────────────────────
@@ -209,5 +212,74 @@ describe("failure injection — no failure converts into a normal number or prod
     // and it never enters the mean
     const sc: Scorecard = { suiteId: "s", harness: "h@1", results: [result("x", [hostile])] };
     expect(summarizeScorecard(sc).find((m) => m.metric === "tests_pass")?.count).toBe(0);
+  });
+});
+
+describe("failure injection — the summary plane (annihilated metrics never become numbers)", () => {
+  // A batch whose metric was ENTIRELY unmeasured (the grader died on every case).
+  const annihilated = (id: string, createdAt: string) => ({
+    id,
+    dataset: { id: "d", version: "1" },
+    harness: { id: "dead-grader", version: "1" },
+    status: "succeeded",
+    createdAt,
+    summary: summarizeScorecard({
+      suiteId: "s",
+      harness: "dead-grader@1",
+      results: [
+        result("a", [
+          {
+            graderId: "cost",
+            metric: "cost_usd",
+            value: 0,
+            status: "unmeasured" as const,
+            reason: "grader_error" as const,
+            retryable: true,
+          },
+        ]),
+      ],
+    }),
+  });
+  const healthy = (id: string, mean: number, createdAt: string) => ({
+    id,
+    dataset: { id: "d", version: "1" },
+    harness: { id: "live", version: "1" },
+    status: "succeeded",
+    createdAt,
+    summary: [{ metric: "cost_usd", count: 3, mean }],
+  });
+
+  it("an annihilated metric has NO mean — count 0, unmeasured tally only", () => {
+    const row = annihilated("x", "2026-01-01T00:00:00Z").summary.find((m) => m.metric === "cost_usd");
+    expect(row?.count).toBe(0);
+    expect(row?.mean).toBeUndefined(); // a mean over nothing is not 0
+    expect(row?.unmeasured).toBe(1);
+  });
+
+  it("a dead grader can never rank — let alone FIRST on a lower-is-better leaderboard", () => {
+    const lb = leaderboard([healthy("a", 0.4, "2026-01-01T00:00:00Z"), annihilated("b", "2026-01-02T00:00:00Z")], {
+      datasetId: "d",
+      metric: "cost_usd",
+    });
+    expect(lb.rows[0]?.harness.id).toBe("live"); // pre-fix: dead-grader ranked #1 at mean 0
+    expect(lb.rows.find((r) => r.harness.id === "dead-grader")?.score).toBeNull();
+  });
+
+  it("an outage is a GAP in the trend line, never a plunge to zero flagged as regression", () => {
+    const t = trendSeries([healthy("a", 0.4, "2026-01-01T00:00:00Z"), annihilated("b", "2026-01-02T00:00:00Z")], {
+      datasetId: "d",
+      metric: "cost_usd",
+    });
+    expect(t.points[1]?.score).toBeNull();
+    expect(t.points[1]?.regressed).toBe(false);
+  });
+
+  it("a batch whose every trial died never headlines as 0% — nothing pass-deciding is null", () => {
+    expect(
+      headlinePassRate({
+        trialSummary: { cases: 0, passAt1: 0 }, // summarizeTrials' empty-stats shape
+        summary: [],
+      }),
+    ).toBeNull();
   });
 });

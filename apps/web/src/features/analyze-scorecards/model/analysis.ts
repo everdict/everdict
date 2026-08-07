@@ -143,9 +143,10 @@ function summaryOf(sc: ScorecardRecord, metric: string | undefined): MetricSumma
   return representativeRow(rows)
 }
 
+// Policy order — state before tests_pass (lockstep with the domain twin + the verdict policy's rung order).
 const REPRESENTATIVE_METRICS = [
-  'tests_pass',
   'state',
+  'tests_pass',
   'answer_match',
   'url_matches',
   'dom_contains',
@@ -164,7 +165,13 @@ function representativeRow(rows: MetricSummary[]): MetricSummary | undefined {
 // Scorecards in a bundle whose selected metric is absent — reported, never substituted.
 function missingOf(cards: ScorecardRecord[], metric: string | undefined): number {
   if (!metric) return 0
-  return cards.filter((sc) => !(sc.summary ?? []).some((r) => r.metric === metric)).length
+  // Missing = no row OR an annihilated row (nothing measured AND no value behind it).
+  return cards.filter(
+    (sc) =>
+      !(sc.summary ?? []).some(
+        (r) => r.metric === metric && (r.count > 0 || (r.passRate ?? r.mean) !== undefined)
+      )
+  ).length
 }
 
 // This scorecard's score (for the selected metric) — passRate first, else mean. Exported so the raw-data
@@ -182,7 +189,9 @@ export function scoreOfScorecard(
 // A row reporting no usable count still counts once: an unknown weight is a reason to under-trust the
 // number, not to drop the record.
 function weightOf(row: MetricSummary): number {
-  return Number.isFinite(row.count) && row.count > 0 ? row.count : 1
+  if (Number.isFinite(row.count) && row.count > 0) return row.count
+  // count 0 with a VALUE = legacy unknown-count row (counted once); with NO value = annihilated (no sample).
+  return (row.passRate ?? row.mean) !== undefined ? 1 : 0
 }
 
 // A group's (bundle of scorecards) measured value.

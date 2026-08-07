@@ -12,7 +12,7 @@ export interface DatasetRelation {
 // The minimal scorecard shape buildDatasetRelations takes (a subset of the full ScorecardRecord).
 interface MetricLike {
   metric: string
-  mean: number
+  mean?: number // absent = zero-measurement metric (dead grader) — renders '–', never a fabricated 0.00
   passRate?: number
 }
 interface ScorecardLike {

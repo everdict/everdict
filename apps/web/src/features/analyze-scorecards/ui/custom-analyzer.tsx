@@ -45,10 +45,14 @@ type Focus = { kind: 'group' | 'bucket'; key: string; label: string }
 function measureCell(value: number | undefined, measure: Measure) {
   if (value === undefined) return <span className="text-faint">–</span>
   if (measure === 'count') return <span className="tabular-nums">{value}</span>
-  const health = rateHealth(value <= 1 ? value : null)
+  // Only the passRate measure is a rate by construction — 'latest' carries whatever the card's representative
+  // value was (a pass rate OR a raw mean), so forcing it through the percent renderer turned a $0.42 mean
+  // into "42%". Ambiguous values render as plain numbers; only a known rate gets the % form and health color.
+  const isRate = measure === 'passRate'
+  const health = rateHealth(isRate ? value : null)
   return (
     <span className={cn('font-[560] tabular-nums', HEALTH_TEXT[health])}>
-      {measure === 'mean' ? value.toFixed(2) : fmtScore(value, value)}
+      {isRate ? fmtScore(value, null) : value.toFixed(2)}
     </span>
   )
 }

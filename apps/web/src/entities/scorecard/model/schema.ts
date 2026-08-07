@@ -37,13 +37,19 @@ export const scorecardStatusSchema = z.enum([
 export const metricSummarySchema = z.object({
   metric: z.string(),
   count: z.number(),
-  mean: z.number(),
+  // Absent when count is 0 (every score of the metric was unmeasured/invalid) — a mean over nothing is not 0,
+  // and rendering it as one is how a dead grader shows up as $0.00.
+  mean: z.number().optional(),
   passRate: z.number().optional(),
   // Categorical metrics (scores carried a `label`): label distribution (ordered enum → ordinal, else by frequency) +
   // most-frequent label. Present only when the metric is categorical (tier/string/enum); the dashboard keys off this
   // instead of the mean. Guarded vs the wire.
   distribution: z.array(z.object({ label: z.string(), count: z.number() })).optional(),
   mode: z.string().optional(),
+  // Scores of this metric that were NOT measurements (grader error / judge skip) — excluded from count/mean/
+  // passRate and tallied here. A zod object strips undeclared keys, so omitting this field here silently
+  // amputated the one honest signal about a grader outage before any surface could render it.
+  unmeasured: z.number().optional(),
 })
 
 // trial roll-up (pass@k / flakiness) — derived on the detail when a batch ran trials>1. Absent on single-run batches.
@@ -73,6 +79,8 @@ export const caseScoreSchema = z
     // future status never rejects the scorecard; non-measured rows render "unmeasured", not the placeholder value.
     status: z.string().optional(),
     reason: z.string().optional(),
+    // unmeasured only: true ⇒ re-scoring this grader can recover the measurement (the rescore worklist reads it).
+    retryable: z.boolean().optional(),
   })
   .passthrough()
 
@@ -87,6 +95,23 @@ export const caseResultSchema = z
     caseId: z.string(),
     harness: z.string().optional(),
     verdict: z.boolean().optional(), // server-computed case verdict (authority rank) — served, never recomputed here
+    // The verdict's audit trail — which rung decided, under which aggregation, from which measurements. Loose
+    // local view (enums stay strings so a new authority never rejects the scorecard).
+    verdictBasis: z
+      .object({
+        authority: z.string(),
+        aggregation: z.string(),
+        deciders: z.array(
+          z.object({ metric: z.string(), graderId: z.string(), pass: z.boolean() }).passthrough()
+        ),
+      })
+      .passthrough()
+      .optional(),
+    // Evidence completeness per case — a verdict standing on partial evidence says so.
+    evidenceStatus: z
+      .object({ trace: z.string(), snapshot: z.string() })
+      .passthrough()
+      .optional(),
     scores: z.array(caseScoreSchema).default([]),
     trace: z.array(traceEventSchema).default([]), // case execution trace — error events expose the failure spans
     // classified failure (loose) — runnerId links a self-hosted no_runner/capability_mismatch case to the runner it
@@ -228,6 +253,32 @@ export const scorecardRecordSchema = z.object({
       requested: z.number().int().optional(),
     })
     .optional(),
+  // WHICH verdict policy produced this batch's verdicts — the stamp that keeps a historical verdict stable
+  // when the policy evolves. Absent on batches settled before the stamp existed.
+  verdictPolicy: z
+    .object({ id: z.string(), version: z.string(), digest: z.string() })
+    .optional(),
+  // Reproducibility digests sealed at submit (detail only). Loose local view — the web renders it, never
+  // re-derives from it.
+  manifest: z
+    .object({
+      dataset: z.object({ id: z.string(), version: z.string(), digest: z.string() }),
+      harness: z
+        .object({ id: z.string(), version: z.string(), specDigest: z.string().optional() })
+        .passthrough(),
+      graders: z.string().optional(),
+      judges: z
+        .array(
+          z
+            .object({ id: z.string(), version: z.string(), specDigest: z.string().optional() })
+            .passthrough()
+        )
+        .optional(),
+    })
+    .passthrough()
+    .optional(),
+  // The batch's ASK — cases × trials at submit. requested − executed is the unlaunched/cancelled tally.
+  requested: z.number().int().optional(),
   // Object-store ref to the self-contained analysis artifact (summary + per-case verdict/scores) — downloadable/shareable
   // independent of the DB. Best-effort at finalize; absent when no object store is configured.
   analysisRef: z.string().optional(),
@@ -372,6 +423,13 @@ export const leaderboardSchema = z.object({
 
 // Drift guards.
 type AssertAssignable<A extends B, B> = A
+// Assignability alone cannot catch a MISSING OPTIONAL field (width subtyping accepts it in both directions) —
+// which is exactly how `MetricSummary.unmeasured` was silently stripped at parse while the re-exported type
+// claimed it existed. For sub-types declared IDENTICAL to the contract, additionally assert key-set equality.
+type AssertSameKeys<A, B> = [Exclude<keyof A, keyof B>, Exclude<keyof B, keyof A>] extends [never, never]
+  ? true
+  : { missingFromWeb: Exclude<keyof B, keyof A>; extraOnWeb: Exclude<keyof A, keyof B> }
+type AssertTrue<T extends true> = T
 type WebScorecardStatus = z.infer<typeof scorecardStatusSchema>
 type WebMetricSummary = z.infer<typeof metricSummarySchema>
 type WebScorecardTrialSummary = z.infer<typeof scorecardTrialSummarySchema>
@@ -389,14 +447,19 @@ type _statusFwd = AssertAssignable<WebScorecardStatus, WireScorecardStatus>
 type _statusBack = AssertAssignable<WireScorecardStatus, WebScorecardStatus>
 type _metricFwd = AssertAssignable<WebMetricSummary, WireMetricSummary>
 type _metricBack = AssertAssignable<WireMetricSummary, WebMetricSummary>
+type _metricKeys = AssertTrue<AssertSameKeys<WebMetricSummary, WireMetricSummary>>
 type _trialFwd = AssertAssignable<WebScorecardTrialSummary, WireScorecardTrialSummary>
 type _trialBack = AssertAssignable<WireScorecardTrialSummary, WebScorecardTrialSummary>
+type _trialKeys = AssertTrue<AssertSameKeys<WebScorecardTrialSummary, WireScorecardTrialSummary>>
 type _stepFwd = AssertAssignable<WebScorecardStep, WireScorecardStep>
 type _stepBack = AssertAssignable<WireScorecardStep, WebScorecardStep>
 type _modelsFwd = AssertAssignable<WebScorecardModels, WireScorecardModels>
 type _modelsBack = AssertAssignable<WireScorecardModels, WebScorecardModels>
 type _exportFwd = AssertAssignable<WebScorecardExport, WireScorecardExport>
 type _exportBack = AssertAssignable<WireScorecardExport, WebScorecardExport>
+type _stepKeys = AssertTrue<AssertSameKeys<WebScorecardStep, WireScorecardStep>>
+type _modelsKeys = AssertTrue<AssertSameKeys<WebScorecardModels, WireScorecardModels>>
+type _exportKeys = AssertTrue<AssertSameKeys<WebScorecardExport, WireScorecardExport>>
 // Score.detail is `unknown` on the wire (structured verdict objects, not just prose) — the local view must
 // accept it, or a single object detail rejects the whole scorecard at parse time. Regression guard.
 type _scoreDetailAccepts = AssertAssignable<
@@ -451,14 +514,19 @@ export type __scorecardDriftGuard = [
   _statusBack,
   _metricFwd,
   _metricBack,
+  _metricKeys,
   _trialFwd,
   _trialBack,
+  _trialKeys,
   _stepFwd,
   _stepBack,
+  _stepKeys,
   _modelsFwd,
   _modelsBack,
+  _modelsKeys,
   _exportFwd,
   _exportBack,
+  _exportKeys,
   _scoreDetailAccepts,
   _originFieldsOnWire,
   _recordFieldsOnWire,

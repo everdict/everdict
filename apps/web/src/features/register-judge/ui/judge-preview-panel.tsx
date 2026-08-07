@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl'
 import { inspectTraceAction, TraceBrowser, TraceEventList } from '@/features/browse-traces'
 import type { TraceInspectResult, TraceSummary } from '@/entities/trace'
 import type { TraceSourceConfig } from '@/entities/trace-source'
+import { isUnmeasuredScore } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -103,14 +104,21 @@ function StepRail({
 }
 
 // One verdict row — an error detail (crashed judge: [grader-error] with stderr, or a skip reason) renders as a
-// log block so the debugging signal is readable, not truncated into a chip.
+// log block so the debugging signal is readable, not truncated into a chip. Non-measured rows (modern
+// `status` stamp OR legacy prose sentinel) never render their placeholder value as a 0.00 verdict — the
+// authoring preview is the screen that decides whether this judge is healthy.
 function ScoreRow({ score }: { score: JudgeScore }) {
-  const errorDetail = isErrorDetail(score.detail) ? score.detail : undefined
+  const unmeasured = isUnmeasuredScore(score)
+  const errorDetail = isErrorDetail(score.detail)
+    ? score.detail
+    : unmeasured && typeof score.detail === 'string' && score.detail
+      ? score.detail
+      : undefined
   return (
     <div
       className={cn(
         'rounded-md border px-2.5 py-1.5 text-[12px]',
-        errorDetail
+        errorDetail || unmeasured
           ? 'border-destructive/30 bg-destructive/8'
           : score.pass === true
             ? 'border-[var(--color-success)]/30 bg-[var(--color-success)]/8'
@@ -122,8 +130,8 @@ function ScoreRow({ score }: { score: JudgeScore }) {
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono">{score.metric}</span>
         <span className="tabular-nums">
-          {score.value.toFixed(2)}
-          {score.pass === true ? ' · ✓' : score.pass === false ? ' · ✗' : ''}
+          {unmeasured ? (score.status ?? 'unmeasured') : score.value.toFixed(2)}
+          {!unmeasured && score.pass === true ? ' · ✓' : !unmeasured && score.pass === false ? ' · ✗' : ''}
         </span>
       </div>
       {errorDetail ? (

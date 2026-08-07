@@ -3385,6 +3385,8 @@
     "metricJudgeCriterionInlineHint": "평가자 평가 기준 {criterion}",
     "subsetTitle": "부분 실행 — 전체 {total}개 중 {selected}개만 평가",
     "subsetLabel": "일부 {selected}/{total}",
+    "metricUnmeasured": "측정값 없음 (미측정 {count}건)",
+    "metricUnmeasuredMark": "미측정",
     "originCi": "CI",
     "originSchedule": "예약",
     "originWeb": "웹",

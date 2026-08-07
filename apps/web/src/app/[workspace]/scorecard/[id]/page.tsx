@@ -161,7 +161,9 @@ function ProportionBar({ value }: { value: number }) {
 // The "value" cell of a metric-summary row — kind-aware so each metric reads in its own terms rather than a uniform
 // "0.50": a categorical metric shows its label distribution, a pass/fail metric a proportion bar, and a numeric
 // metric its mean with the right unit ($ / s / % / 1.2k). Shared by judge-overall rows and their criterion sub-rows.
-function SummaryCells({ m }: { m: MetricSummary }) {
+// A zero-measurement metric has NO mean — it renders the unmeasured label (passed in: this is a sync server
+// component without its own t), and its unmeasured tally rides the count cell so the outage stays visible.
+function SummaryCells({ m, unmeasuredLabel }: { m: MetricSummary; unmeasuredLabel: string }) {
   const kind = classifyMetric(m)
   return (
     <>
@@ -170,12 +172,20 @@ function SummaryCells({ m }: { m: MetricSummary }) {
           <DistributionBar segments={m.distribution} mode={m.mode} />
         ) : kind === 'passfail' && m.passRate != null ? (
           <ProportionBar value={m.passRate} />
-        ) : (
+        ) : m.mean !== undefined ? (
           <span className="font-mono text-[12px] tabular-nums">{fmtMetricValue(kind, m.mean)}</span>
+        ) : (
+          <span className="text-[12px] text-amber-500/90">{unmeasuredLabel}</span>
         )}
       </TD>
       <TD className="text-right font-mono text-[12px] tabular-nums text-muted-foreground">
         {m.count}
+        {m.unmeasured != null && m.unmeasured > 0 && (
+          <span className="text-amber-500/80" title={unmeasuredLabel}>
+            {' '}
+            (−{m.unmeasured})
+          </span>
+        )}
       </TD>
       <TD className="text-right font-mono text-[12px] tabular-nums">
         {m.passRate == null ? (
@@ -189,8 +199,11 @@ function SummaryCells({ m }: { m: MetricSummary }) {
 }
 
 // Per-case score badge tone — the judge/grader pass verdict (neutral when the score carries no pass).
-function scoreTone(pass?: boolean): 'neutral' | 'success' | 'danger' {
-  return pass == null ? 'neutral' : pass ? 'success' : 'danger'
+// Gated on measurement first: an unmeasured/invalid row is never a red or green claim, whatever its
+// placeholder `pass` says — the value cell already renders "unmeasured", the tone must agree.
+function scoreTone(s: { pass?: boolean; status?: string; detail?: unknown }): 'neutral' | 'success' | 'danger' {
+  if (isUnmeasuredScore(s)) return 'neutral'
+  return s.pass == null ? 'neutral' : s.pass ? 'success' : 'danger'
 }
 
 // The value shown on a per-case score badge: a categorical `label` verbatim (gold / correct / B); a bare 0/1 pass
@@ -315,7 +328,13 @@ export default async function ScorecardDetailPage({
   const passed = cased.filter((c) => c.verdict === true).length
   const failedCount = cased.filter((c) => c.verdict === false).length
   const skipped = cased.filter((c) => c.verdict == null).length
-  const passRate = results.length > 0 ? passed / results.length : null
+  // The headline pass rate CONSUMES the served rollup — passed/VERDICTED, never passed/executed. Dividing by
+  // results.length put infra-failed/unmeasured/cancelled cases in the denominator, so a half-dead runner read
+  // as a 50% product failure — exactly the conflation the served casePass/outcomes exist to prevent. The
+  // local verdict counts above remain only as a fallback for legacy responses without the served field.
+  const verdictedTotal = record.casePass?.total ?? passed + failedCount
+  const passRate =
+    verdictedTotal > 0 ? (record.casePass?.pass ?? passed) / verdictedTotal : null
 
   // Failure-first sort (fail → skip → pass), then failed-only/all filter.
   const filter = cases === 'failed' ? 'failed' : 'all'
@@ -891,7 +910,7 @@ export default async function ScorecardDetailPage({
                   <TD className="text-[12px] font-[510]">
                     <MetricLabel metric={g.row.metric} siblings={summaryMetrics} />
                   </TD>
-                  <SummaryCells m={g.row} />
+                  <SummaryCells m={g.row} unmeasuredLabel={t('scoreUnmeasured')} />
                 </TR>,
                 ...g.criteria.map((c) => (
                   <TR key={c.row.metric}>
@@ -910,7 +929,7 @@ export default async function ScorecardDetailPage({
                         />
                       </span>
                     </TD>
-                    <SummaryCells m={c.row} />
+                    <SummaryCells m={c.row} unmeasuredLabel={t('scoreUnmeasured')} />
                   </TR>
                 )),
               ])}
@@ -941,9 +960,14 @@ export default async function ScorecardDetailPage({
             ) : undefined
           }
         />
-        {/* Case-fate denominators — shown when platform failures / unmeasured cases exist, so the pass count is
-            never silently read against the wrong denominator (841/970 vs 841/1000 are different claims). */}
-        {record.outcomes && (record.outcomes.infraFailed > 0 || record.outcomes.unmeasured > 0) && (
+        {/* Case-fate denominators — shown whenever the funnel is lossy (infra failures, unmeasured, cancelled,
+            or unlaunched requested cases), so the pass count is never silently read against the wrong
+            denominator (841/970 vs 841/1000 are different claims). */}
+        {record.outcomes &&
+          (record.outcomes.infraFailed > 0 ||
+            record.outcomes.unmeasured > 0 ||
+            record.outcomes.cancelled > 0 ||
+            (record.outcomes.requested ?? record.outcomes.executed) > record.outcomes.executed) && (
           <p className="text-[12px] text-muted-foreground">
             {t('caseOutcomesStrip', {
               executed: record.outcomes.executed,
@@ -1019,7 +1043,7 @@ export default async function ScorecardDetailPage({
                             <Badge
                               key={`${g.row.graderId}:${g.row.metric}`}
                               title={g.row.metric}
-                              tone={scoreTone(g.row.pass)}
+                              tone={scoreTone(g.row)}
                             >
                               {fmtMetricLabel(g.row.metric, caseMetrics)}{' '}
                               {isUnmeasuredScore(g.row) ? t('scoreUnmeasured') : scoreBadgeValue(g.row)}
@@ -1029,7 +1053,7 @@ export default async function ScorecardDetailPage({
                               key={`${g.row.graderId}:${g.row.metric}`}
                               className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border/60 bg-muted/20 p-0.5"
                             >
-                              <Badge title={g.row.metric} tone={scoreTone(g.row.pass)}>
+                              <Badge title={g.row.metric} tone={scoreTone(g.row)}>
                                 {fmtMetricLabel(g.row.metric, caseMetrics)}{' '}
                                 {isUnmeasuredScore(g.row) ? t('scoreUnmeasured') : scoreBadgeValue(g.row)}
                               </Badge>
@@ -1037,7 +1061,7 @@ export default async function ScorecardDetailPage({
                                 <Badge
                                   key={c.row.metric}
                                   title={c.row.metric}
-                                  tone={scoreTone(c.row.pass)}
+                                  tone={scoreTone(c.row)}
                                 >
                                   ›{' '}
                                   {c.parsed.kind === 'judge-criterion'

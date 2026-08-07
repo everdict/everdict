@@ -19,7 +19,9 @@ export interface JudgeHistoryEntry {
   dataset: { id: string; version?: string }
   harness: { id: string; version?: string }
   // 이 저지의 메트릭만(overall + 기준) — 칩은 compact 형(저지 id 생략)으로 렌더.
-  metrics: { metric: string; mean: number; passRate?: number | null }[]
+  // mean is ABSENT when the metric had zero measurements (the judge crashed on every case) — the chip then
+  // shows the unmeasured marker instead of a fabricated 0.00 on the judge's own health screen.
+  metrics: { metric: string; mean?: number; passRate?: number | null; unmeasured?: number }[]
   runner?: { name: string; avatarUrl?: string }
   createdAt: string
   status: ScorecardStatus
@@ -71,6 +73,7 @@ export function JudgeHistory({
                     metric={m.metric}
                     mean={m.mean}
                     passRate={m.passRate}
+                    unmeasured={m.unmeasured}
                     siblings={siblings}
                     compact
                   />

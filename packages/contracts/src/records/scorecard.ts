@@ -21,7 +21,9 @@ export const ScorecardRunErrorSchema = z.object({
 export const MetricSummarySchema = z.object({
   metric: z.string(),
   count: z.number(),
-  mean: z.number(),
+  // ABSENT when count is 0 (an annihilated metric — every score unmeasured/invalid): a mean over nothing is
+  // not 0, and serving 0 crowned dead graders on lower-is-better leaderboards and drew outages as regressions.
+  mean: z.number().optional(),
   passRate: z.number().optional(),
   // Categorical metrics (any score carried a `label`): the label distribution (ordered enum → ordinal order via the
   // scores' `value`, else by frequency) + the most-frequent label (mode). Present ONLY when the metric is categorical
@@ -191,9 +193,9 @@ export const EXPERIMENT_ADHOC_REF = "_adhoc";
 export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  // 이 결과를 만든 팀. 자산과 같은 축이라 "우리 팀이 무엇을 평가했나"를 하네스를 전부 훑지 않고
-  // 답할 수 있다. 선택적인 이유는 팀 도입 이전 행과 소유자 없는 실행이 실재하기 때문 — 없음은
-  // "모두의 것"이 아니라 "소유자 없음"이다.
+  // The team that produced this result — the same axis the eval assets carry, so "what has our team
+  // evaluated" is answerable without walking every harness. Optional because pre-team rows and ownerless
+  // runs genuinely exist: absence means "no owner", never "everyone's".
   teamId: z.string().optional(),
   // Group kind (execution-model.md P1, decision O3: the RunGroup generalizes ScorecardRecord IN CONCEPT, the
   // table is kept). "experiment" = phase 1 alone — same fan-out, same child runs, NO judges/graders and no

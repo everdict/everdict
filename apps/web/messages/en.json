@@ -3385,6 +3385,8 @@
     "metricJudgeCriterionInlineHint": "Judge criterion {criterion}",
     "subsetTitle": "Partial run — evaluated only {selected} of {total}",
     "subsetLabel": "Subset {selected}/{total}",
+    "metricUnmeasured": "no measurements ({count} unmeasured)",
+    "metricUnmeasuredMark": "unmeasured",
     "originCi": "CI",
     "originSchedule": "Scheduled",
     "originWeb": "Web",

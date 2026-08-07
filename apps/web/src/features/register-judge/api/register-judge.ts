@@ -62,6 +62,10 @@ export interface JudgeScore {
   value: number
   pass?: boolean
   detail?: unknown
+  // Measurement status (absent = measured) — a crashed/skipped judge marks itself here on modern rows; the
+  // preview must read it, not only the legacy prose sentinels, or a dead judge previews as a 0.00 verdict.
+  status?: string
+  reason?: string
 }
 export interface TryJudgeResult extends PreviewJudgeResult {
   scores?: JudgeScore[]

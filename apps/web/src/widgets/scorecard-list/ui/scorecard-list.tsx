@@ -530,6 +530,7 @@ export function ScorecardList({
                                 metric={m.metric}
                                 mean={m.mean}
                                 passRate={m.passRate}
+                                unmeasured={m.unmeasured}
                                 siblings={metrics.map((x) => x.metric)}
                               />
                             </span>

@@ -175,7 +175,7 @@ function summaryOf(card: AnalysisCard, metric: string | undefined): MetricSummar
 
 // Per-card representative when no metric axis is chosen — mirrors headlinePassRate's ranking (authority
 // first, then any pass-rate row, then the first row). Kept in lockstep with the web twin.
-const REPRESENTATIVE_METRICS = ["tests_pass", "state", "answer_match", "url_matches", "dom_contains", "judge"];
+const REPRESENTATIVE_METRICS = ["state", "tests_pass", "answer_match", "url_matches", "dom_contains", "judge"]; // policy order — state first
 function representativeRow(rows: MetricSummary[]): MetricSummary | undefined {
   for (const name of REPRESENTATIVE_METRICS) {
     const row = rows.find((r) => r.metric === name && r.passRate !== undefined);
@@ -189,7 +189,11 @@ function representativeRow(rows: MetricSummary[]): MetricSummary | undefined {
 // Cards in a bundle that could NOT contribute (selected metric absent) — reported, never substituted.
 function missingOf(cards: AnalysisCard[], metric: string | undefined): number {
   if (!metric) return 0;
-  return cards.filter((card) => !(card.summary ?? []).some((r) => r.metric === metric)).length;
+  // Missing = no row for the metric OR an annihilated row (nothing measured AND no value behind it).
+  return cards.filter(
+    (card) =>
+      !(card.summary ?? []).some((r) => r.metric === metric && (r.count > 0 || (r.passRate ?? r.mean) !== undefined)),
+  ).length;
 }
 
 // This card's score for the selected metric — passRate first, else mean.
@@ -203,7 +207,10 @@ function scoreOf(card: AnalysisCard, metric: string | undefined): number | undef
 // A row that reports no usable count still counts once rather than vanishing: an unknown weight is a
 // reason to under-trust the number, not to drop the record.
 function weightOf(row: MetricSummary): number {
-  return Number.isFinite(row.count) && row.count > 0 ? row.count : 1;
+  if (Number.isFinite(row.count) && row.count > 0) return row.count;
+  // count 0 with a VALUE = a legacy row whose count was never recorded — counted once rather than dropped.
+  // count 0 with NO value = an annihilated metric (every score unmeasured) — contributes no sample at all.
+  return (row.passRate ?? row.mean) !== undefined ? 1 : 0;
 }
 
 // A group's (bundle of cards) measured value.

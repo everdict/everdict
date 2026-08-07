@@ -11,7 +11,7 @@ export interface HarnessRelation {
 
 interface MetricLike {
   metric: string
-  mean: number
+  mean?: number // absent = zero-measurement metric (dead grader) — renders '–', never a fabricated 0.00
   passRate?: number
 }
 interface ScorecardLike {

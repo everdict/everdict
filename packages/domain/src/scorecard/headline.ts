@@ -1,8 +1,9 @@
 import type { MetricSummary } from "./scorecard.js";
 import type { ScorecardTrialSummary } from "./trials.js";
 
-// Authoritative-first metric order for a single headline pass rate (the same ranking as caseVerdict).
-const PASS_RATE_METRICS = ["tests_pass", "state", "answer_match", "url_matches", "dom_contains", "judge"];
+// Authoritative-first metric order for a single headline pass rate — the SAME order as the verdict policy's
+// ground-truth rung (state before tests_pass): the headline and the verdict must never rank differently.
+const PASS_RATE_METRICS = ["state", "tests_pass", "answer_match", "url_matches", "dom_contains", "judge"];
 // Real judges summarize under `judge:<id>` (top level; deeper = diagnostic criteria) — the literal "judge"
 // above only covers the legacy name, same dead-name family as the caseVerdict judge-rung fix.
 const isJudgeOverallMetric = (metric: string): boolean => /^judge:[^:]+$/.test(metric);
@@ -12,10 +13,14 @@ const isJudgeOverallMetric = (metric: string): boolean => /^judge:[^:]+$/.test(m
 // (nothing pass-deciding). Input is the *lightweight* record shape (list summary is enough) — the SDK's
 // Verdict and any dashboard headline read this served value instead of re-implementing the ranking.
 export function headlinePassRate(record: {
-  trialSummary?: Pick<ScorecardTrialSummary, "passAt1">;
+  trialSummary?: Pick<ScorecardTrialSummary, "passAt1" | "cases">;
   summary?: MetricSummary[];
 }): number | null {
-  if (record.trialSummary) return record.trialSummary.passAt1;
+  // Trial-aware — but an EMPTY trial summary (cases: 0 — every trial unscored/infra-failed) is "nothing
+  // pass-deciding", not a 0% product: fall through to the metric ranking (which yields null too when nothing
+  // decides). An annihilated batch must never headline as zero percent.
+  if (record.trialSummary && record.trialSummary.passAt1 !== undefined && (record.trialSummary.cases ?? 1) > 0)
+    return record.trialSummary.passAt1;
   const summary = record.summary ?? [];
   for (const metric of PASS_RATE_METRICS) {
     const s = summary.find((x) => x.metric === metric && x.passRate !== undefined);

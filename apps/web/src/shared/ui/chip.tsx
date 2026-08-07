@@ -9,27 +9,41 @@ import { cn } from '@/shared/lib/utils'
 // Judge metrics render human-readably ('judge <id> › <criterion>'); siblings disambiguate the 2-segment
 // judge form (raw label on hover). `compact` drops the redundant 'judge <id>' head (for the judge's own
 // detail page) — the overall then shows the value alone, so the empty label span is omitted.
+// `mean` is ABSENT for a metric with zero measurements (every score unmeasured/invalid) — the chip then
+// renders the unmeasured marker, never a fabricated 0.00: a judge that crashed on every case must not look
+// like it scored zero on the very screen an operator uses to judge its health.
 export function MetricChip({
   metric,
   mean,
   passRate,
+  unmeasured,
   siblings,
   compact,
 }: {
   metric: string
-  mean: number
+  mean?: number
   passRate?: number | null
+  unmeasured?: number
   siblings?: readonly string[]
   compact?: boolean
 }) {
+  const t = useTranslations('ui')
   const label = compact ? fmtMetricLabelCompact(metric, siblings) : fmtMetricLabel(metric, siblings)
+  const title =
+    unmeasured != null && unmeasured > 0
+      ? `${metric} — ${t('metricUnmeasured', { count: unmeasured })}`
+      : metric
   return (
     <code
-      title={metric}
+      title={title}
       className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]"
     >
       {label && <span className="text-faint">{label}</span>}
-      <span className="tabular-nums text-foreground/85">{mean.toFixed(2)}</span>
+      {mean !== undefined ? (
+        <span className="tabular-nums text-foreground/85">{mean.toFixed(2)}</span>
+      ) : (
+        <span className="text-amber-500/90">{t('metricUnmeasuredMark')}</span>
+      )}
       {passRate != null && <span className="tabular-nums text-faint">· {fmtPct(passRate)}</span>}
     </code>
   )

@@ -131,8 +131,9 @@ export default async function JudgeDetailPage({
         .filter((m) => m.metric === `judge:${id}` || m.metric.startsWith(`judge:${id}:`))
         .map((m) => ({
           metric: m.metric,
-          mean: m.mean,
+          ...(m.mean !== undefined ? { mean: m.mean } : {}),
           ...(m.passRate != null ? { passRate: m.passRate } : {}),
+          ...(m.unmeasured != null ? { unmeasured: m.unmeasured } : {}),
         })),
       ...(runner ? { runner } : {}),
       createdAt: s.createdAt,

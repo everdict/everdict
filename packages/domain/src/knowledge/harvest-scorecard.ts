@@ -48,8 +48,12 @@ export function harvestScorecard(sc: ScorecardRecord): HarvestResult {
   }
   // The metrics this batch measured — the summary carries the aggregate value onto the edge for at-a-glance querying.
   (sc.summary ?? []).forEach((m, i) => {
-    const attrs: Record<string, unknown> = { count: m.count, mean: m.mean };
+    // mean is ABSENT for an annihilated metric (count 0) — never write a fabricated 0 onto the edge; the
+    // unmeasured tally rides along so the graph can see the outage instead of dropping it.
+    const attrs: Record<string, unknown> = { count: m.count };
+    if (m.mean !== undefined) attrs.mean = m.mean;
     if (m.passRate !== undefined) attrs.passRate = m.passRate;
+    if (m.unmeasured !== undefined) attrs.unmeasured = m.unmeasured;
     b.ref("measures", { type: "metric", key: m.metric }, `summary[${i}]`, attrs);
   });
 
