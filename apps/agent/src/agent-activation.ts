@@ -436,7 +436,15 @@ export class AgentActivator {
       }
       const base = this.buildPermit(event, agentId, sessionId, spec, controller.signal, runRef);
       const permit = opts.wrapPermit ? opts.wrapPermit(base) : base;
-      const outcome = await this.deps.runTurn(sessionId, token, controller.signal, permit);
+      // O5: a resumed leg is bound exactly like the first one. Without this the boundary had a door in it —
+      // an activation that parked for approval (or died and was recovered) came back UNBOUNDED, which is the
+      // one moment a long-running task is most likely to keep going. The envelope keys on THIS run's id, so
+      // a continuation gets its own budget rather than inheriting a spent one: the ledger says this is a new
+      // run, and a per-run bound is the same rule sub-agents follow.
+      const envelope = this.envelopeFor(runId, spec, event);
+      const outcome = await this.deps.runTurn(sessionId, token, controller.signal, permit, envelope);
+      if (outcome?.stopReason === "budget_exhausted")
+        await this.publishHalt(token, envelope, runId, agentId, sessionId, event, outcome);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
       await this.deps.sessions.setSessionStatus(workspace, sessionId, settled, this.deps.now());
       void this.report(

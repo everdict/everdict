@@ -100,6 +100,19 @@ it would be a claim the record cannot back.
 **Interactive chat does not.** A human is present and asked for the tool call; refusing it would be the gate
 misfiring, not working.
 
+**Resumed legs are bound too.** An activation that parks for approval, or dies and is recovered after a
+restart, comes back through `runContinuationTurn` — a new run on the ledger, and for a while an *unbounded*
+one, which is the moment a long-running task is most likely to keep going. The continuation builds its own
+envelope keyed on its own run id, so its budget starts fresh rather than inheriting a spent one: the ledger
+says this is a new run, and per-run bounding is the same rule sub-agents already follow.
+
+**Teammates do not, and that is the remaining gap.** `spawn_teammate` creates a persistent autonomous agent
+whose standing task is seeded as its first message; `TeammateSupervisor` only serializes its turns. There is
+no completion condition and no budget, which is precisely what `assertTaskEnvelope` calls "an unbounded
+autonomous task has no decision boundary". A teammate's autonomy boundary today is consent at spawn time.
+Binding one needs a decision this protocol has not made — what a teammate's *goal* and terminal condition
+are — so it is named here rather than papered over.
+
 Two seams are worth naming precisely:
 
 - **Scope is completed where the tools resolve.** The activation states the boundary it owns (goal, budgets,

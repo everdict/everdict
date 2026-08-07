@@ -820,6 +820,50 @@ describe("activation task envelopes", () => {
     expect(checkpoint?.validationPlan).toBeTruthy();
   });
 
+  it("a RESUMED leg is bound too — a parked run must not come back unbounded", async () => {
+    // Given an activation stranded by a restart (the same shape an approval park leaves behind) …
+    const sessions = sessionsStub();
+    sessions.created.push({
+      id: "sess-9",
+      tenant: "acme",
+      owner: "alice",
+      title: "sentinel — scorecard.completed",
+      visibility: "workspace",
+      origin: {
+        type: "trigger",
+        agentId: "sentinel",
+        agentVersion: "1.0.0",
+        eventId: "ev-9",
+        eventKind: "scorecard.completed",
+      },
+      status: "failed",
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    } as AgentSessionRecord);
+    const seen: Array<ActivationEnvelope | undefined> = [];
+    const published: Array<Omit<HandoffCheckpoint, "id" | "createdAt" | "createdBy">> = [];
+    const { instance } = activator({
+      registry: registryOf(spec()),
+      sessions,
+      runTurn: async (_sessionId, _token, _signal, _permit, envelope) => {
+        seen.push(envelope);
+        return { stopReason: "budget_exhausted" };
+      },
+      publishCheckpoint: async (_token, checkpoint) => {
+        published.push(checkpoint);
+      },
+    });
+    // When the run resumes …
+    await instance.resumeInterrupted({ workspace: "acme", sessionId: "sess-9" });
+    await instance.idle();
+    // Then the continuation carries its own envelope (pre-fix: undefined — the boundary had a door in it at
+    // exactly the moment a long-running task is most likely to keep going) …
+    expect(seen[0]?.budgets.tokens).toBeGreaterThan(0);
+    expect(seen[0]?.stop.onBudgetExhausted).toBe("halt_checkpoint");
+    // … and its halt owes the same handoff a first leg's does.
+    expect(published).toHaveLength(1);
+  });
+
   it("a run that ends normally publishes nothing — a handoff is what a HALT owes, not every run", async () => {
     const published: unknown[] = [];
     const { instance } = activator({

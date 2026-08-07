@@ -1207,7 +1207,7 @@ export async function runChat(
           ? {
               envelope: {
                 ...hooks.envelope,
-                scope: { allowedCapabilities: registry.list().map((t) => t.name), forbidden: [] },
+                scope: { allowedCapabilities: registry.names(), forbidden: [] },
               },
             }
           : {}),
