@@ -6,6 +6,7 @@ import type {
   JudgeRunConfig,
   JudgeSpec,
   Placement,
+  Score,
 } from "@everdict/contracts";
 import { judgeGradeable, modelBindingLabel } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
@@ -58,18 +59,25 @@ const NOOP_STREAM: JudgeStream = {
 export class ScoringService {
   constructor(private readonly deps: ScoringServiceDeps) {}
 
-  // Pre-resolve the selected judges — so we don't re-query the registry per case. Missing judges are skipped here (silently).
-  async resolveJudges(tenant: string, judges: Array<{ id: string; version: string }>): Promise<JudgeSpec[]> {
-    if (judges.length === 0 || !this.deps.judges || !this.deps.judgeRunner) return [];
+  // Pre-resolve the selected judges — so we don't re-query the registry per case. An UNRESOLVABLE judge is
+  // returned, never dropped: the batch's manifest records which judges were SELECTED, so a silent skip would
+  // let a batch settle claiming verdicts a judge never produced. The stream turns each unresolved selection
+  // into a per-case unmeasured score — visible, tallied, honest.
+  async resolveJudges(
+    tenant: string,
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<{ specs: JudgeSpec[]; unresolved: Array<{ id: string; version: string; message: string }> }> {
+    if (judges.length === 0 || !this.deps.judges || !this.deps.judgeRunner) return { specs: [], unresolved: [] };
     const specs: JudgeSpec[] = [];
+    const unresolved: Array<{ id: string; version: string; message: string }> = [];
     for (const sel of judges) {
       try {
         specs.push(await this.deps.judges.get(tenant, sel.id, sel.version || "latest"));
-      } catch {
-        // silently skip a missing judge
+      } catch (err) {
+        unresolved.push({ ...sel, message: err instanceof Error ? err.message : String(err) });
       }
     }
-    return specs;
+    return { specs, unresolved };
   }
 
   // Apply the resolved judges to one case in order — score order within a case is deterministic (selection order); parallelism is on the case axis only.
@@ -112,13 +120,27 @@ export class ScoringService {
     runtime?: string,
     submittedBy?: string,
   ): Promise<JudgeStream> {
-    const specs = await this.resolveJudges(tenant, judges);
-    if (specs.length === 0) return NOOP_STREAM;
+    const { specs, unresolved } = await this.resolveJudges(tenant, judges);
+    if (specs.length === 0 && unresolved.length === 0) return NOOP_STREAM;
     const caseById = new Map(dataset.cases.map((c) => [c.id, c]));
     const limit = createLimiter(this.deps.caseConcurrency ?? 4);
     const tasks: Array<Promise<void>> = [];
     let firstError: unknown;
     const stats: JudgeStreamStats = { pushed: 0, gradeable: 0, skipped: 0 };
+    // A SELECTED judge that could not be resolved (deleted, bad version, registry outage) leaves a visible
+    // unmeasured row on every gradeable case instead of vanishing — the batch's manifest says this judge was
+    // chosen, so "no row at all" would read as a verdict nobody can account for. Not retryable in place: the
+    // fix is configuration (restore/re-pin the judge), then a re-score pass.
+    const unresolvedScores = (): Score[] =>
+      unresolved.map((sel) => ({
+        graderId: sel.id,
+        metric: `judge:${sel.id}`,
+        value: 0,
+        status: "unmeasured" as const,
+        reason: "unsupported" as const,
+        retryable: false,
+        detail: `skipped: judge ${sel.id}@${sel.version || "latest"} could not be resolved — ${sel.message}`,
+      }));
     return {
       push: (result) => {
         const evalCase = caseById.get(result.caseId);
@@ -131,6 +153,7 @@ export class ScoringService {
           return Promise.resolve();
         }
         stats.gradeable++;
+        result.scores.push(...unresolvedScores());
         const task = limit(() => this.applyJudgesToCase(tenant, evalCase, specs, result, runtime, submittedBy)).catch(
           (err) => {
             // Catch at fire time (prevents an unhandled rejection) — settle rethrows the first error.

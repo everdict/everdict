@@ -10,12 +10,7 @@ import {
 import { ScorecardBatch, type ScorecardOutcomeExtras, judgeGradeable, summarizeScorecard } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
-import {
-  type ScorecardServiceDeps,
-  childKey,
-  hasMeasuredJudgeVerdict,
-  stripJudgeScores,
-} from "./scorecard-shared.js";
+import { type ScorecardServiceDeps, childKey, hasMeasuredJudgeVerdict, stripJudgeScores } from "./scorecard-shared.js";
 
 // Phase 2, detached (execution-model.md P2): apply judges over an EXISTING group's runs and re-write the
 // aggregate — "re-score with a different judge" and "promote experiment → scorecard" are the same operation
@@ -127,9 +122,7 @@ export class ScorecardScoreService {
     // not a scoring pass) AND missing a MEASURED verdict from at least one selected judge. Bare metric
     // presence is NOT "judged": an unmeasured placeholder row is the exact state a re-score exists to replace,
     // and reading it as done made the Temporal pass a no-op on its own worklist.
-    const missing = results.filter(
-      (r) => judgeGradeable(r) && !judges.every((j) => hasMeasuredJudgeVerdict(r, j.id)),
-    );
+    const missing = results.filter((r) => judgeGradeable(r) && !judges.every((j) => hasMeasuredJudgeVerdict(r, j.id)));
     return {
       keys: missing.map((r) => childKey(r.caseId, r.trial)),
       concurrency: record.orchestration?.concurrency ?? 4,

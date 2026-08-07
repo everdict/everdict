@@ -3099,6 +3099,52 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     );
   });
 
+  it("retryFailed with failureClass=agent never sweeps in a dead-judge case — unmeasured is not the agent's fault", async () => {
+    const { dispatched, dispatcher } = capturingDispatcher();
+    const { store, datasets, service } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    // c3 executed cleanly, but its only pass-deciding score is the unmeasured placeholder a crashed judge left
+    // behind — no CaseFailure, no verdict. The old classifier read `verdict !== true` as class "agent",
+    // filing the PLATFORM's judge outage under the product-blame label.
+    const judgeDied: CaseResult = {
+      caseId: "c3",
+      harness: "h@1",
+      trace: [],
+      snapshot: { kind: "prompt", output: "done" },
+      scores: [
+        {
+          graderId: "judge",
+          metric: "judge:j",
+          value: 0,
+          status: "unmeasured",
+          reason: "grader_error",
+          retryable: true,
+          detail: "[grader-error] judge transport died",
+        },
+      ],
+    };
+    await store.create({
+      id: "sc-blame",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      orchestration: { judges: [], concurrency: 3, retries: 1 },
+      scorecard: {
+        suiteId: "rd",
+        harness: "h@1",
+        // c1 passes · c2 legitimate agent FAIL · c3 judge died (unmeasured, no failure)
+        results: [passResult("c1"), passResult("c2", false), judgeDied],
+      },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+
+    const rec = await service.retryFailed({ tenant: "acme", id: "sc-blame", failureClass: "agent" });
+    await waitTerminal(store, rec.id);
+    expect(dispatched).toEqual(["c2"]); // ONLY the real agent FAIL — the dead-judge case is not agent-class
+  });
+
   it("retryFailed re-COLLECTS a collect-stage failure by its traceRef — the agent is never re-dispatched", async () => {
     const { dispatched, dispatcher } = capturingDispatcher();
     const { store, datasets } = build(dispatcher);
