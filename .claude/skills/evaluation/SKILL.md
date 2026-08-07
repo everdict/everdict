@@ -60,7 +60,18 @@ metrics combine unanimously (never Map last-wins); a pre-outcome failure (dispat
 verdict (`caseOutcome` = completed|unmeasured|infra_failed; `scorecardOutcomes` serves the denominators).
 **Every settled batch stamps `verdictPolicy{id,version,digest}`** (domain `judgedUnder`, mig 0125) and readers
 resolve the STAMPED policy (`resolveVerdictPolicy`) — evolving the policy never rewrites historical verdicts;
-new policy versions are APPENDED to `KNOWN_VERDICT_POLICIES`, never edited. **The ranking has exactly one
+new policy versions are APPENDED to `KNOWN_VERDICT_POLICIES`, never edited. **Run-time declarations compose
+the policy**: a `GraderSpec` may declare `authority`/`direction` for its metric (`composeVerdictPolicy` —
+appended AFTER the built-ins, so custom ground truth never outranks state/tests_pass); the composed document
+is embedded IN FULL in `manifest.verdictPolicy` (mig 0126) and trusted at read only when its digest matches
+the stamp. **Constitution gate #1**: declaring `ground_truth` requires the admin role at submit (both
+transports pass `submitterRoles`). `MetricDefinition` also carries `kind`/`verdictRole`(required/supporting/
+diagnostic/excluded)/`missingPolicy` — a REQUIRED metric with no measurement INVALIDATES the case (verdict
+absent with a stated cause). `caseOutcome` adds `cancelled` (failure code CANCELLED — no verdict at any
+stage, own denominator); `requested` (cases×trials / ingest trace count, mig 0127) persists the ask.
+`evidenceStatus` reads the producer's `traceSealed` vouch (runCase) — the only positive claim of trace
+completeness. trend/leaderboard flag `policyMixed` and suppress cross-policy regression flags; diff lists
+`incomparable` (kind_changed) + `overlap`. `preferredMetric` resolves absent metric axes from the data. **The ranking has exactly one
 implementation and is SERVED, never recomputed by a client**: a scorecard's per-case `verdict` and
 `RunRecord.verdict` (derived on read next to `usage`, in `withRunUsage`) both come from this engine, and the
 web's client-side mirrors were deleted in re-architecture P1g. A surface that needs "did this pass" reads the
