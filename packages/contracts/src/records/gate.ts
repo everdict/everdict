@@ -140,9 +140,11 @@ export const GateAuditSchema = z.object({
 });
 export type GateAudit = z.infer<typeof GateAuditSchema>;
 
-// B3 — manifest verification: each stamped digest checked against the CURRENT registry state. `drifted`
-// answers "is the registry document still exactly what this batch evaluated?" — identity against honest
-// data (FNV), never tamper-evidence; the caveat rides every response so no one mistakes the claim.
+// B3 — manifest verification: each stamped digest checked against the CURRENT registry state, under the
+// STAMP's own algorithm. `drifted` answers "is the registry document still exactly what this batch
+// evaluated?" — collision-resistant evidence for a `sha256:` stamp, identity against honest data only for a
+// pre-sha256 FNV one (bare 16 hex, still verified so history keeps verifying). The caveat rides every
+// response and says which of the two this record's stamps were, so no one mistakes the claim.
 export const ManifestCheckSchema = z.object({
   subject: z.string(), // "dataset" | "harness" | "judge:<id>" | "verdict_policy"
   stored: z.string(),

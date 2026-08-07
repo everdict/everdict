@@ -40,7 +40,7 @@ export {
   verdictPolicyDigest,
   verdictPolicyRef,
 } from "./scorecard/verdict-policy.js";
-export { contentDigest } from "./provenance/content-digest.js";
+export { contentDigest, digestHex, digestUnder, digestsMatch } from "./provenance/content-digest.js";
 export { type EvidenceStatus, evidenceStatus } from "./scorecard/evidence-status.js";
 export {
   benjaminiHochberg,

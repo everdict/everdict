@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isUnmeasuredScore, scoreBadgeValue, scoreTone } from './format'
+import { fmtDigest, isUnmeasuredScore, scoreBadgeValue, scoreTone } from './format'
 
 // The web's measured gate is a HAND-COPIED mirror of the contracts `isMeasured` (the web's @everdict dep is
 // type-only, so the rule cannot be imported). This truth table pins the mirror to the contract's exact
@@ -36,5 +36,17 @@ describe('isUnmeasuredScore (contracts isMeasured mirror)', () => {
   it('a measurement still renders its value and its verdict tone', () => {
     expect(scoreBadgeValue({ metric: 'tests_pass', value: 1, pass: true })).toBe('✓')
     expect(scoreTone({ pass: false })).toBe('danger')
+  })
+})
+
+describe('fmtDigest — a content digest as it should read', () => {
+  it('keeps the algorithm and abbreviates the hex of a sha256 stamp', () => {
+    // A `sha256:` stamp is 71 characters; rendered whole it swallows the id@version it shares a line with.
+    expect(fmtDigest(`sha256:${'ab'.repeat(32)}`)).toBe('sha256:abababababab…')
+    expect(fmtDigest(`sha256:${'ab'.repeat(32)}`, 8)).toBe('sha256:abababab…')
+  })
+
+  it('leaves a pre-sha256 bare-hex stamp whole — it has no algorithm prefix and is already short', () => {
+    expect(fmtDigest('c5e5c158210d0f5a')).toBe('c5e5c158210d0f5a')
   })
 })

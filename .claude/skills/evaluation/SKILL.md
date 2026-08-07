@@ -63,7 +63,7 @@ from `GraderSpec` in `makeGraders` (`packages/graders/src/make-graders.ts`); `ju
 Case verdict is **authority-ranked and POLICY-DRIVEN** (`packages/domain/src/scorecard/verdict-policy.ts`):
 the ladder — ground-truth (`state`/`tests_pass`, priority-ordered) > objective (`answer_match`/`url_matches`/
 `dom_contains`, unanimous) > judge (`judge` + top-level `judge:<id>`, unanimous; criterion/milestone metrics
-are diagnostic and never decide) — is DATA (`DEFAULT_VERDICT_POLICY`, versioned + FNV digest), not metric-name
+are diagnostic and never decide) — is DATA (`DEFAULT_VERDICT_POLICY`, versioned + content-digested), not metric-name
 string arrays. `evaluateVerdict(result, policy)` returns `{verdict, basis}` — the basis names the deciding
 rung/aggregation/measurements (served as `verdictBasis` per case); `caseVerdict` is its boolean view. Duplicate
 metrics combine unanimously (never Map last-wins); a pre-outcome failure (dispatch/install/run) yields NO
@@ -73,7 +73,11 @@ resolve the STAMPED policy — evolving the policy never rewrites historical ver
 APPENDED to `KNOWN_VERDICT_POLICIES`, never edited. Resolution is **THREE-state and FAIL-CLOSED**
 (`resolvePolicyResolution` → `resolved` | `legacy_default` (no stamp at all — pre-mig rows really were judged
 under the ladder) | `unresolvable`), and `unresolvable` — manifest gone, digest mismatched, or an id@version
-nobody has — must NEVER fall back to the default: doing so re-judges history under today's ladder. A verdict
+nobody has — must NEVER fall back to the default: doing so re-judges history under today's ladder. Every digest
+check (here and in manifest verification) goes through the ONE comparison fn `digestsMatch(stamped, document)`
+(`@everdict/domain`), which reads the algorithm off the STAMP: new seals are `sha256:<64 hex>`, pre-V1 seals are
+bare-16-hex FNV and keep verifying — a single-algorithm comparison in a fail-closed reader erases history. A
+verdict
 or gate decision therefore withholds itself instead (served `policyResolution:"unresolvable"` ⇒ no per-case
 `verdict`/`casePass`/`outcomes`; gate ⇒ `not_comparable` + reason `policy_unresolvable`). `caseVerdict`/
 `caseOutcome`/`caseTrialStats`/`summarizeTrials`/`scorecardOutcomes` all TAKE the policy — a caller holding a

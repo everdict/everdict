@@ -5644,4 +5644,98 @@ describe("ScorecardService — gate audit + manifest verification (B2/B3)", () =
     });
     await expect(service.verifyManifest("acme", "vm-old")).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+
+  it("verifyManifest verifies a legacy FNV-sealed manifest under its OWN algorithm, and says so in the caveat", async () => {
+    // Regression: manifests sealed before V1 carry bare 16-hex FNV digests. Comparing them against sha256
+    // would report every one of them `drifted` — a reproducibility report accusing untouched registry
+    // documents of having changed. The stamp names its algorithm; the check follows it.
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch() {
+          throw new Error("never");
+        },
+      },
+      store,
+      datasets,
+    });
+    const dataset = {
+      id: "ld",
+      version: "1.0.0",
+      cases: [{ id: "a", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+      tags: [],
+    };
+    await datasets.register("acme", dataset);
+    const base = {
+      tenant: "acme",
+      dataset: { id: "ld", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded" as const,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    };
+    await store.create({
+      ...base,
+      id: "legacy-seal",
+      manifest: {
+        dataset: { id: "ld", version: "1.0.0", digest: legacyFnvOf(dataset.cases) },
+        harness: { id: "h", version: "1" },
+      },
+    });
+    const legacy = await service.verifyManifest("acme", "legacy-seal");
+    const legacyCheck = legacy.checks.find((c) => c.subject === "dataset");
+    expect(legacyCheck?.status).toBe("match");
+    // stored and current are shown in the SAME algorithm, so the report does not read as a mismatch.
+    expect(legacyCheck?.current).toBe(legacyCheck?.stored);
+    expect(legacy.caveat).toContain("pre-sha256");
+
+    // A batch sealed since V1 verifies under sha256 and its caveat states the stronger claim.
+    const { contentDigest } = await import("@everdict/domain");
+    await store.create({
+      ...base,
+      id: "sha-seal",
+      manifest: {
+        dataset: { id: "ld", version: "1.0.0", digest: contentDigest(dataset.cases) },
+        harness: { id: "h", version: "1" },
+      },
+    });
+    const sealed = await service.verifyManifest("acme", "sha-seal");
+    expect(sealed.checks.find((c) => c.subject === "dataset")?.status).toBe("match");
+    expect(sealed.caveat).toContain("collision-resistant");
+
+    // A legacy stamp over a CHANGED bundle is still drift — dual-read verifies history, it never excuses it.
+    await store.create({
+      ...base,
+      id: "legacy-drift",
+      manifest: {
+        dataset: { id: "ld", version: "1.0.0", digest: legacyFnvOf([{ ...dataset.cases[0], task: "other" }]) },
+        harness: { id: "h", version: "1" },
+      },
+    });
+    const drifted = await service.verifyManifest("acme", "legacy-drift");
+    expect(drifted.checks.find((c) => c.subject === "dataset")?.status).toBe("drifted");
+  });
 });
+
+// The pre-sha256 sealer, reproduced so a "legacy manifest" in these tests is one the OLD code would really
+// have written. Canonicalization is unchanged, only the hash.
+function legacyFnvOf(document: unknown): string {
+  const canonicalize = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
+    if (value !== null && typeof value === "object")
+      return `{${Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => `${JSON.stringify(k)}:${canonicalize(v)}`)
+        .join(",")}}`;
+    return JSON.stringify(value);
+  };
+  const text = canonicalize(document);
+  let hash = 0xcbf29ce484222325n;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= BigInt(text.charCodeAt(i));
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, "0");
+}

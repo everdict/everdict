@@ -377,6 +377,17 @@ export function fmtSubject(s: string): string {
   return s.length > 14 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s
 }
 
+// A content digest as it should READ. A `sha256:` stamp is 71 characters and would swallow the line it shares
+// with the id@version it belongs to, while the leading hex is already enough to tell two documents apart by
+// eye. Keep the algorithm prefix (it says which era the stamp is from — a bare 16-hex legacy stamp has none
+// and stays whole) and abbreviate the hex.
+export function fmtDigest(digest: string, hexChars = 12): string {
+  const separator = digest.indexOf(':')
+  if (separator < 0) return digest
+  const hex = digest.slice(separator + 1)
+  return hex.length > hexChars ? `${digest.slice(0, separator + 1)}${hex.slice(0, hexChars)}…` : digest
+}
+
 // Relative time (for feeds like notifications) — Intl.RelativeTimeFormat locale rendering (e.g. '3 minutes ago'),
 // falling back to an absolute date past 7 days. locale is passed by the caller (component) via useLocale()/getLocale() (default ko).
 export function fmtTimeAgo(iso: string, locale: string = 'ko', timeZone?: string): string {

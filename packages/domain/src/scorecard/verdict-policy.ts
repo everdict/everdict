@@ -12,7 +12,7 @@ import {
   measuredScores,
   metricMatches,
 } from "@everdict/contracts";
-import { contentDigest } from "../provenance/content-digest.js";
+import { contentDigest, digestHex, digestsMatch } from "../provenance/content-digest.js";
 
 // Stages at/before which a failure means the case never produced a legitimate outcome (no product verdict).
 // A collect/grade-stage failure is different BY DESIGN: the run completed and compute-bound measurements
@@ -96,10 +96,13 @@ export type PolicyResolution =
 // (id "composed", never in the registry) with no embedded document lands here as unresolvable by construction.
 export function resolvePolicyResolution(ref?: StampedPolicyRef, embedded?: VerdictPolicy): PolicyResolution {
   if (!ref) return { status: "legacy_default", policy: DEFAULT_VERDICT_POLICY };
-  if (embedded && (ref.digest === undefined || verdictPolicyDigest(embedded) === ref.digest))
+  // digestsMatch reads the algorithm off the STAMP: a record sealed under the FNV era verifies against its
+  // own document, a record sealed since verifies under sha256. Comparing against one algorithm would make
+  // every stamp of the other era unresolvable — which for this fail-closed resolver means erasing history.
+  if (embedded && (ref.digest === undefined || digestsMatch(ref.digest, embedded)))
     return { status: "resolved", policy: embedded };
   const known = KNOWN_VERDICT_POLICIES.find((p) => p.id === ref.id && p.version === ref.version);
-  if (known && (ref.digest === undefined || verdictPolicyDigest(known) === ref.digest))
+  if (known && (ref.digest === undefined || digestsMatch(ref.digest, known)))
     return { status: "resolved", policy: known };
   return { status: "unresolvable", ref };
 }
@@ -136,8 +139,9 @@ export function composeVerdictPolicy(
     metrics: [...base.metrics, ...additions],
     ...(criticalCases.length > 0 ? { criticalCases: [...criticalCases] } : {}),
   };
-  // The version IS the content identity — composed documents have no registry row to version against.
-  return { ...doc, version: verdictPolicyDigest(doc).slice(0, 12) };
+  // The version IS the content identity — composed documents have no registry row to version against. The
+  // hex payload without the algorithm prefix, so the version stays 12 characters of actual identity.
+  return { ...doc, version: digestHex(verdictPolicyDigest(doc)).slice(0, 12) };
 }
 
 // Aggregate one rung's deciding measurements. "priority" needs the DEFINITION order — deciders arrive

@@ -11,6 +11,28 @@ import {
 
 const s = (metric: string, pass?: boolean, value = 0): Score => ({ graderId: metric, metric, value, pass });
 
+// The pre-sha256 sealer, reproduced here so a legacy stamp in these tests is one the OLD code would really
+// have written — not a string we assert about. Canonicalization is unchanged, only the hash.
+function legacyFnvOf(document: unknown): string {
+  const canonicalize = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
+    if (value !== null && typeof value === "object")
+      return `{${Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => `${JSON.stringify(k)}:${canonicalize(v)}`)
+        .join(",")}}`;
+    return JSON.stringify(value);
+  };
+  const text = canonicalize(document);
+  let hash = 0xcbf29ce484222325n;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= BigInt(text.charCodeAt(i));
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
 describe("evaluateVerdict — the verdict explains itself", () => {
   it("states which rung decided and from which measurements", () => {
     const { verdict, basis } = evaluateVerdict({
@@ -146,6 +168,29 @@ describe("verdict policy identity", () => {
     // document that was EDITED, and it cannot restore the history the stamp points at.
     const ref = { id: "authority-ladder", version: "1.0.0", digest: "not-the-real-digest" };
     expect(resolvePolicyResolution(ref)).toEqual({ status: "unresolvable", ref });
+  });
+
+  it("a stamp from the pre-sha256 era still resolves — dual-read protects the history it was written for", () => {
+    // Regression: this resolver is FAIL-CLOSED, so switching contentDigest to sha256 while comparing every
+    // stamp against sha256 would have made every batch sealed before V1 `unresolvable` — no verdicts, no gate
+    // decisions, for exactly the records the stamp exists to preserve. The stamp names its own algorithm.
+    const legacyDigest = legacyFnvOf(DEFAULT_VERDICT_POLICY);
+    expect(legacyDigest).not.toBe(verdictPolicyDigest(DEFAULT_VERDICT_POLICY)); // the eras really do differ
+    expect(resolvePolicyResolution({ id: "authority-ladder", version: "1.0.0", digest: legacyDigest })).toEqual({
+      status: "resolved",
+      policy: DEFAULT_VERDICT_POLICY,
+    });
+  });
+
+  it("an EMBEDDED document under a legacy stamp resolves too — composed policies live only in the manifest", () => {
+    const composed = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const ref = { id: composed.id, version: composed.version, digest: legacyFnvOf(composed) };
+    expect(resolvePolicyResolution(ref, composed)).toEqual({ status: "resolved", policy: composed });
+    // …and tampering is still caught under the legacy algorithm.
+    expect(resolvePolicyResolution(ref, { ...composed, fallback: "none" as const })).toEqual({
+      status: "unresolvable",
+      ref,
+    });
   });
 });
 

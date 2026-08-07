@@ -40,8 +40,10 @@ export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 
 // Reproducibility manifest — content digests of EXACTLY what this batch evaluated, sealed at submit. The
 // registry rows (dataset/harness/graders) keep living; the manifest answers "was it exactly this document?"
-// long after. Values are canonical-JSON FNV digests (@everdict/domain contentDigest). mig 0126. Absent on
-// pre-manifest batches. trust-kernel contract ⑤.
+// long after. Values are canonical-JSON content digests (@everdict/domain contentDigest) — `sha256:<64 hex>`
+// since V1, bare 16-hex FNV on batches sealed before it (still verified under their own algorithm, so a
+// legacy stamp keeps its identity-only reading forever). mig 0126. Absent on pre-manifest batches.
+// trust-kernel contract ⑤.
 export const ScorecardManifestSchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string(), digest: z.string() }), // digest over the resolved case bundle
   harness: z.object({ id: z.string(), version: z.string(), specDigest: z.string().optional() }), // resolved spec (absent: built-in with no declarative spec)

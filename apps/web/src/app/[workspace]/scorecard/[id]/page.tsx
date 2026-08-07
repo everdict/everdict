@@ -32,6 +32,7 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import {
   classifyMetric,
+  fmtDigest,
   fmtElapsed,
   fmtMetricValue,
   fmtPct,
@@ -654,7 +655,7 @@ export default async function ScorecardDetailPage({
           tone="warning"
           hint={
             record.verdictPolicy
-              ? `${record.verdictPolicy.id}@${record.verdictPolicy.version} · ${record.verdictPolicy.digest}`
+              ? `${record.verdictPolicy.id}@${record.verdictPolicy.version} · ${fmtDigest(record.verdictPolicy.digest)}`
               : undefined
           }
         >

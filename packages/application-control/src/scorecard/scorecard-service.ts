@@ -31,6 +31,7 @@ import {
   can,
   composeVerdictPolicy,
   contentDigest,
+  digestUnder,
   evaluateGate,
   gatePolicyDigest,
   retryableUnmeasured,
@@ -1033,8 +1034,10 @@ export class ScorecardService {
 
   // B3 — manifest verification: every stamped digest checked against the CURRENT registry state. `drifted`
   // says the registry document is no longer exactly what this batch evaluated; `unverifiable` is honest
-  // scope — a subset/grading-plan bundle was a selection whose inputs the record does not replay. FNV is an
-  // identity stamp against honest data, never tamper-evidence — the caveat rides every response.
+  // scope — a subset/grading-plan bundle was a selection whose inputs the record does not replay. Each check
+  // is made under the STAMP's own algorithm (digestUnder/digestsMatch): batches sealed since V1 carry
+  // collision-resistant `sha256:` stamps, older ones the FNV identity stamp that is evidence against honest
+  // data but never tamper-evidence — which is why the caveat riding the response says which it was.
   async verifyManifest(tenant: string, id: string): Promise<ManifestVerification> {
     const record = await this.get(id);
     if (!record || record.tenant !== tenant)
@@ -1059,7 +1062,9 @@ export class ScorecardService {
     } else {
       try {
         const ds = await this.deps.datasets.get(tenant, m.dataset.id, m.dataset.version);
-        const current = contentDigest(ds.cases);
+        // `current` is computed under the STAMP's algorithm (digestUnder) so a legacy-sealed row's stored and
+        // current values stay comparable side by side; the verdict itself is digestsMatch's.
+        const current = digestUnder(m.dataset.digest, ds.cases);
         checks.push({
           subject: "dataset",
           stored: m.dataset.digest,
@@ -1075,7 +1080,7 @@ export class ScorecardService {
       if (this.deps.harnesses) {
         try {
           const spec = await this.deps.harnesses.get(tenant, m.harness.id, m.harness.version);
-          const current = contentDigest(spec);
+          const current = digestUnder(m.harness.specDigest, spec);
           checks.push({
             subject: "harness",
             stored: m.harness.specDigest,
@@ -1097,7 +1102,7 @@ export class ScorecardService {
       }
       try {
         const spec = await this.deps.judges.get(tenant, j.id, j.version);
-        const current = contentDigest(spec);
+        const current = digestUnder(j.specDigest, spec);
         checks.push({
           subject: `judge:${j.id}`,
           stored: j.specDigest,
@@ -1111,7 +1116,7 @@ export class ScorecardService {
     // Verdict policy — the embedded document must still hash to the stamped digest, else the stamp cannot be
     // trusted to re-derive verdicts (the resolvePolicyResolution rule, verified explicitly here).
     if (m.verdictPolicy !== undefined && record.verdictPolicy !== undefined) {
-      const current = contentDigest(m.verdictPolicy);
+      const current = digestUnder(record.verdictPolicy.digest, m.verdictPolicy);
       checks.push({
         subject: "verdict_policy",
         stored: record.verdictPolicy.digest,
@@ -1122,8 +1127,9 @@ export class ScorecardService {
     return {
       id,
       checks,
-      caveat:
-        "digests are FNV-1a identity stamps: they answer 'is this the same document?' against honest data, never 'was this tampered with?' — the write barriers are the admin-gated submit paths.",
+      caveat: checks.some((c) => c.stored.startsWith("sha256:"))
+        ? "sha256: digests are collision-resistant content stamps. Bare 16-hex digests are pre-sha256 FNV-1a identity stamps, verified under their own algorithm: those answer 'is this the same document?' against honest data, never 'was this tampered with?'. Under either, the write barriers are the admin-gated submit paths."
+        : "these digests are pre-sha256 FNV-1a identity stamps: they answer 'is this the same document?' against honest data, never 'was this tampered with?' — the write barriers are the admin-gated submit paths. Batches sealed since carry collision-resistant sha256: stamps.",
     };
   }
 

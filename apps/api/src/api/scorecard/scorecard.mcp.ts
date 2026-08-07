@@ -575,7 +575,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "verify_scorecard_manifest",
       {
         description:
-          "Verify a scorecard's reproducibility manifest against the CURRENT registry state — per-subject digest checks (dataset/harness/judges/verdict policy): match | drifted | missing | unverifiable. Digests are FNV identity stamps against honest data, never tamper-evidence (the caveat rides the response). HTTP parity (POST /scorecards/:id/verify-manifest).",
+          "Verify a scorecard's reproducibility manifest against the CURRENT registry state — per-subject digest checks (dataset/harness/judges/verdict policy): match | drifted | missing | unverifiable. Each check runs under the stamp's own algorithm: `sha256:` stamps are collision-resistant, pre-sha256 bare-hex FNV stamps are identity against honest data and never tamper-evidence (the caveat rides the response and says which). HTTP parity (POST /scorecards/:id/verify-manifest).",
         inputSchema: { id: z.string() },
       },
       ({ id }) => run(principal, "scorecards:read", async () => ok(await scorecards.verifyManifest(ws, id))),

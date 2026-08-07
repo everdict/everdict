@@ -96,6 +96,27 @@ policy's custom ground truth disappears and the built-in ladder re-decides every
   record, `ScorecardBatch.withTrialSummary` omits the roll-up, the regression watch never reopens an issue on
   one, and `retryFailed` refuses with a 400 rather than picking cases by re-judging them.
 
+## Reproducibility manifest + content digests (sha256, dual-read)
+Every batch seals a `manifest` at submit — content digests of exactly what it evaluated: the resolved dataset
+case bundle, the resolved harness spec, the run-time grading plan, each selected judge's spec, and the
+composed verdict policy in full. `POST /scorecards/:id/verify-manifest` (+ MCP `verify_scorecard_manifest`)
+re-checks each stamp against the CURRENT registry state: `match` · `drifted` (the registry document is no
+longer what this batch evaluated) · `missing` · `unverifiable` (a subset/grading-plan bundle is a selection
+the record cannot replay).
+
+`contentDigest` (`@everdict/domain`) hashes the **canonical** JSON (key-sorted, `undefined`-stripped) of the
+schema-parsed document, and stamps **`sha256:<64 hex>`**. Batches sealed before that carry the old bare
+16-hex FNV-1a stamp, and those keep verifying: **`digestsMatch(stamped, document)` reads the algorithm off
+the STAMP** (dual-read; `digestUnder` renders the current digest in the same algorithm so a report shows both
+sides comparably). One comparison function, used everywhere a digest is checked — including
+`resolvePolicyResolution`, which is fail-closed: a single-algorithm comparison there would turn every
+pre-sha256 batch `unresolvable` and erase the verdicts the stamp exists to preserve.
+
+What the match claims depends on the era, and the served `caveat` says which: a `sha256:` stamp is
+collision-resistant evidence about the document; a legacy FNV stamp answers "is this the same document?"
+against honest data but never "was this tampered with?". Under either, the write barriers are the
+admin-gated submit paths.
+
 ## The release gate: critical cases and multiple comparisons
 `evaluateGate(diff, policy)` (`@everdict/domain`) is the CI decision — `pass | block | blocked_missing |
 not_comparable`, only the first a green light. Two rules sit on top of the fail-closed comparability
