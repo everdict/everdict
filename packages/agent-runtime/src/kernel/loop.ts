@@ -500,6 +500,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         ...(opts.signal ? { signal: opts.signal } : {}),
         ...(opts.maxTurns !== undefined ? { maxTurns: opts.maxTurns } : {}),
         ...(opts.summarize ? { summarize: opts.summarize } : {}),
+        // The envelope binds the WHOLE delegated task, sub-agents included (LESSON 059 P5): without this line a
+        // scoped parent could spawn an unscoped child — the delegation escape the envelope exists to close.
+        // The child re-counts spend from zero (a per-run bound, not a shared pool with the parent).
+        ...(opts.envelope ? { envelope: opts.envelope } : {}),
       }).then((r) => r.content),
     );
   };

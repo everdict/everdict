@@ -79,6 +79,43 @@ describe("runAgentLoop", () => {
     expect((last as TransientCarrier | undefined)?.transient).toBe(true);
   });
 
+  it("a parent's task envelope binds its sub-agents too — the delegation escape is closed (LESSON 059 P5)", async () => {
+    // Given a parent whose envelope forbids `echo`, delegating to a sub-agent whose model calls exactly that
+    const child = fakeTransport([toolCallResult("c1", "echo", "{}"), textResult("child done")]);
+    const parent = fakeTransport([
+      toolCallResult("p1", "spawn_agent", JSON.stringify({ task: "probe the thing" })),
+      textResult("done"),
+    ]);
+    const echo: ToolDefinition = {
+      name: "echo",
+      description: "echo",
+      parametersJsonSchema: { type: "object" },
+      isReadOnly: true,
+      call: async () => ({ content: "ok", isError: false }),
+    };
+    await runAgentLoop({
+      transport: parent.transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([echo]),
+      subagentModel: { transport: child.transport, model: "cm" },
+      envelope: {
+        id: "env-1",
+        goal: "scoped probe",
+        scope: { allowedCapabilities: ["something_else"], forbidden: ["echo"] },
+        budgets: { tokens: 100_000 },
+        stop: { onBudgetExhausted: "halt_checkpoint" },
+        escalation: { onScopeExceeded: "refuse_and_replan" },
+        rollbackRequired: false,
+      },
+    });
+    // Then the CHILD's echo call was refused under the same envelope (pre-fix: the child ran unscoped)
+    const childSecond = child.requests[1];
+    const refusal = childSecond?.messages.find((m) => m.role === "tool");
+    expect(typeof refusal?.content === "string" && /forbidden|scope/i.test(refusal.content)).toBe(true);
+  });
+
   it("closing out a 3+ item list without a verification step nudges the model to spawn the verifier (LESSON 059 P3)", async () => {
     // Given a run with a "verify" subagent type available, whose model closes out the whole checklist at once
     const allDone = JSON.stringify({
