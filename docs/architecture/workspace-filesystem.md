@@ -52,13 +52,13 @@ move(tenant, from, to) → FsEntry            // file rename or whole-subtree mo
 
 ## Surfaces
 
-| Surface | What |
-| --- | --- |
-| HTTP (`apps/api` `api/fs/`) | `GET /fs/entries` · `GET /fs/search` (glob and/or content-regex grep — the budgeted, index-free recall primitive; caps report `truncated`) · `GET/PUT /fs/file` · `POST /fs/directories` · `POST /fs/move` · `POST /fs/executions` (see **Running a file**) · `DELETE /fs/entry` — thin routes over `FsService` (application-control): utf8-vs-base64 shaping on read, strict base64 decode on write, miss → 404. |
-| MCP (parity) | `list_files` / `get_file` / `search_files` (read-classified by prefix) · `write_file` / `make_directory` / `move_file` / `run_file` / `delete_file` (permission-gated; `delete_` is additionally guarded in auto mode). |
-| Conversational agent | Bridge-all picks the tools up with no extra wiring; the system prompt's **Files** section sets the convention and the per-turn Environment names the conversation's **task directory** (`tasks/<conversation-id>/`) — each task's working files land in its own area, and finished deliverables get promoted to the shared library (`reports/` · `data/` · `artifacts/`). |
-| Web (`/[workspace]/files`) | Lazy tree + viewer/editor (every class in **File types** below — prose, tables, code, media, download) + a bash-style shell (`ls cd cat tree mkdir touch echo>/>> cp mv rm`) sharing one directory cache. |
-| Settings › Files | The workspace filesystem browsed in-service (never the object-storage console): the page is the folder tree ALONE, and a selected file renders interactively in the right-hand split-view panel (the infra panel's purpose-built `files` tab — the full **File types** matrix below, member editing; a panel-side mutation bumps `fsRevision` so the tree refetches in place). No shell and no storage/cleanup surface here. `GET /fs/usage` + `DELETE /fs` (settings:write) stay API/MCP-only ops surfaces (`get_fs_usage` / `delete_all_files`). |
+| Surface                     | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP (`apps/api` `api/fs/`) | `GET /fs/entries` · `GET /fs/search` (glob and/or content-regex grep — the budgeted, index-free recall primitive; caps report `truncated`) · `GET/PUT /fs/file` · `POST /fs/directories` · `POST /fs/move` · `POST /fs/executions` (see **Running a file**) · `DELETE /fs/entry` — thin routes over `FsService` (application-control): utf8-vs-base64 shaping on read, strict base64 decode on write, miss → 404.                                                                                                                                  |
+| MCP (parity)                | `list_files` / `get_file` / `search_files` (read-classified by prefix) · `write_file` / `make_directory` / `move_file` / `run_file` / `delete_file` (permission-gated; `delete_` is additionally guarded in auto mode).                                                                                                                                                                                                                                                                                                                            |
+| Conversational agent        | Bridge-all picks the tools up with no extra wiring; the system prompt's **Files** section sets the convention and the per-turn Environment names the conversation's **task directory** (`tasks/<conversation-id>/`) — each task's working files land in its own area, and finished deliverables get promoted to the shared library (`reports/` · `data/` · `artifacts/`).                                                                                                                                                                          |
+| Web (`/[workspace]/files`)  | Lazy tree + viewer/editor (every class in **File types** below — prose, tables, code, media, download) + a bash-style shell (`ls cd cat tree mkdir touch echo>/>> cp mv rm`) sharing one directory cache.                                                                                                                                                                                                                                                                                                                                          |
+| Settings › Files            | The workspace filesystem browsed in-service (never the object-storage console): the page is the folder tree ALONE, and a selected file renders interactively in the right-hand split-view panel (the infra panel's purpose-built `files` tab — the full **File types** matrix below, member editing; a panel-side mutation bumps `fsRevision` so the tree refetches in place). No shell and no storage/cleanup surface here. `GET /fs/usage` + `DELETE /fs` (settings:write) stay API/MCP-only ops surfaces (`get_fs_usage` / `delete_all_files`). |
 
 **The tree owns the entry actions** (both web surfaces); the viewer only reads and edits the open document —
 it has neither a Move nor a Delete button, because acting on a file belongs where the folder context and the
@@ -109,7 +109,7 @@ under `memory/`.
 
 ## Revisions — who published what, and safe concurrent editing
 
-Every write PUBLISHES a revision. The tree is shared by members *and* by agents acting for them, so two
+Every write PUBLISHES a revision. The tree is shared by members _and_ by agents acting for them, so two
 questions had to become answerable: **who changed this file** and **what happens when two authors write at
 once**. Both are handled in one place — `RevisionedWorkspaceFs` (`application-control` `fs/`), a decorator
 over any `WorkspaceFs` composed once in `main.ts`. Nothing downstream opts in: the web editor, the agent's
@@ -199,17 +199,17 @@ re-resolves it and returns the resolved type on the entry, so every format the r
 **retroactively** to files already in storage: a `.go` or an `.xlsx` written months ago opens as code or as a
 document today, with no migration and no rewrite. A type that was an actual decision is never second-guessed.
 
-| Class | Formats | Viewer (`features/browse-files/ui/document-preview.tsx`) |
-| --- | --- | --- |
-| prose | `.md` `.markdown` `.mdx` | rendered Markdown + a **Raw** toggle |
-| tabular | `.csv` `.tsv` | grid (first 200 rows, quoted fields honoured) + Raw |
-| code / text | ~110 extensions + named files + dotfiles | CodeMirror, ~35 highlighted languages, member-editable |
-| image | `png` `jpg` `gif` `webp` `bmp` `ico` `tiff` `avif` `heic` `svg` | inline; svg also opens as editable markup |
-| pdf | `.pdf` | embedded `<object>` viewer |
-| audio / video | `mp3` `wav` `ogg` `flac` `m4a` `aac` / `mp4` `webm` `mov` `avi` `mkv` | native player |
-| document | `docx` `xlsx` `pptx` `doc` `xls` `ppt` `odt` `ods` `odp` `hwp` `hwpx` `rtf` `epub` | named state + **Download** |
-| archive | `zip` `tar` `gz` `tgz` `bz2` `xz` `7z` `rar` `jar` `whl` | named state + Download |
-| binary | everything else (`parquet` `sqlite` `wasm`, model weights, …) | size + Download |
+| Class         | Formats                                                                            | Viewer (`features/browse-files/ui/document-preview.tsx`) |
+| ------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| prose         | `.md` `.markdown` `.mdx`                                                           | rendered Markdown + a **Raw** toggle                     |
+| tabular       | `.csv` `.tsv`                                                                      | grid (first 200 rows, quoted fields honoured) + Raw      |
+| code / text   | ~110 extensions + named files + dotfiles                                           | CodeMirror, ~35 highlighted languages, member-editable   |
+| image         | `png` `jpg` `gif` `webp` `bmp` `ico` `tiff` `avif` `heic` `svg`                    | inline; svg also opens as editable markup                |
+| pdf           | `.pdf`                                                                             | embedded `<object>` viewer                               |
+| audio / video | `mp3` `wav` `ogg` `flac` `m4a` `aac` / `mp4` `webm` `mov` `avi` `mkv`              | native player                                            |
+| document      | `docx` `xlsx` `pptx` `doc` `xls` `ppt` `odt` `ods` `odp` `hwp` `hwpx` `rtf` `epub` | named state + **Download**                               |
+| archive       | `zip` `tar` `gz` `tgz` `bz2` `xz` `7z` `rar` `jar` `whl`                           | named state + Download                                   |
+| binary        | everything else (`parquet` `sqlite` `wasm`, model weights, …)                      | size + Download                                          |
 
 Download is offered for **every** file, not only the ones that cannot render: the bytes are already in the
 response, so the browser builds a blob URL client-side (`lib/file-bytes.ts`) — no second round trip, no
@@ -270,7 +270,7 @@ read the file → provision a container (the language's image, or a caller-chose
 
 ### Where each type can go next
 
-The registry answers "does it open". These are the openings for "does it *work*", roughly in ascending cost.
+The registry answers "does it open". These are the openings for "does it _work_", roughly in ascending cost.
 None is committed; the point is that each one is a branch in one switch, not a new subsystem.
 
 - **Code → run it. SHIPPED** — see **Running a file** below. What is still open on this axis: streaming the
@@ -298,8 +298,10 @@ None is committed; the point is that each one is a branch in one switch, not a n
 
 Two ceilings bound all of it: the **5 MiB per-file cap** and the fact that a read inlines the whole payload
 (base64 for binaries). Large media and real datasets need range reads or presigned URLs before any of the above
-is worth building on. Files also only ever arrive by agent write or the shell today — a browser upload is a
-separate surface, subject to the same cap.
+is worth building on. Files arrive by agent write, the shell, or a browser upload — the tree's upload button and
+OS-file drop go through the BFF's multipart door (`POST /api/fs/file`, sibling of the attachment door
+`/api/fs/uploads`: multipart because a JSON action body would base64-inflate the bytes), write create-only
+(`baseRevision: 0`, a name collision is a 409 shown as such), and are subject to the same cap.
 
 ## Memory has two scopes, and one of them is per member
 

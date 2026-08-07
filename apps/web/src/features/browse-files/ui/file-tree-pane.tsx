@@ -13,6 +13,7 @@ import {
   Loader2,
   RefreshCw,
   Trash2,
+  Upload,
 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
@@ -31,6 +32,7 @@ import {
   moveEntriesAction,
   writeFileAction,
 } from '../api/browse-files'
+import { uploadFilesInto, type UploadFailure } from '../api/upload-files'
 import {
   baseNameOf,
   coversPath,
@@ -45,7 +47,7 @@ import {
 import { DeleteEntriesDialog } from './delete-entries-dialog'
 import { MoveEntriesDialog } from './move-entries-dialog'
 
-// The filesystem tree card — lazy per-directory loading, create (file/folder) + refresh toolbar, and the entry
+// The filesystem tree card — lazy per-directory loading, create (file/folder) + upload + refresh toolbar, and the entry
 // LIST actions: delete lives here (a per-row trash and a multi-select bulk delete), not in the viewer, and so
 // does relocation (drag-and-drop, plus "Move to…" for a destination the drag can't reach). Multi-select follows
 // the scorecard-list grammar — hover-revealed checkboxes, shift-click ranges, Esc to clear, and a floating
@@ -60,9 +62,11 @@ type DialogMode = { kind: 'new-file' } | { kind: 'new-folder' } | null
 // The bulk action awaiting confirmation — the row trash opens the delete one with a single target.
 type BulkAction = { kind: 'delete' | 'move'; targets: FsTarget[] } | null
 
-// Our own drag payload type — a drop only reacts to a drag that started in this tree, never to OS files or
-// text dragged in from elsewhere (dragover checks the type list; the paths are unreadable until drop). The
-// payload is a JSON array: dragging a selected row carries the whole selection, not just the row under the cursor.
+// Our own drag payload type — it tells an in-tree MOVE from everything else: a drag carrying this type moves
+// entries, a drag carrying OS files ('Files' in the type list) uploads them into the hovered folder, and text
+// dragged in from elsewhere still does nothing (dragover checks the type list; the payloads are unreadable until
+// drop). The payload is a JSON array: dragging a selected row carries the whole selection, not just the row
+// under the cursor.
 const FS_DRAG_TYPE = 'application/x-everdict-fs-paths'
 
 const HOVER_EXPAND_MS = 600 // hovering a collapsed folder mid-drag opens it, so nested targets are reachable
@@ -106,6 +110,9 @@ export function FileTreePane({
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [moving, setMoving] = useState(false)
   const [moveError, setMoveError] = useState<string | undefined>(undefined)
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadError, setUploadError] = useState<string | undefined>(undefined)
+  const uploadInput = useRef<HTMLInputElement>(null)
   // Checked entries, by path. Not persisted (unlike the scorecard list): the tree never navigates away, and a
   // path is not a stable id — a move or a delete rewrites it, so a restored selection would point at ghosts.
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -301,20 +308,51 @@ export function FileTreePane({
     applyMoves(res.moved)
   }
 
+  // What failed, in the uploader's terms — the two mendable cases get their own copy; the rest is the server's.
+  const uploadFailureText = (failure: UploadFailure) =>
+    failure.kind === 'tooLarge'
+      ? t('uploadTooLarge')
+      : failure.kind === 'exists'
+        ? t('uploadExists')
+        : (failure.error ?? '')
+
+  async function runUploads(targetDir: string, files: File[]) {
+    clearHoverExpand()
+    setDropTarget(null)
+    if (files.length === 0) return
+    setUploadError(undefined)
+    setUploadBusy(true)
+    const res = await uploadFilesInto(targetDir, files)
+    setUploadBusy(false)
+    if (res.failed.length > 0) {
+      setUploadError(res.failed.map((f) => `${f.name}: ${uploadFailureText(f)}`).join(' · '))
+    }
+    if (res.uploaded.length === 0) return
+    if (targetDir !== '') expandDir(targetDir) // reveal where it landed
+    refreshAll()
+    // A single upload opens right away — "did it arrive?" is the next question, and the viewer answers it.
+    const single = res.uploaded.length === 1 ? res.uploaded[0] : undefined
+    if (single !== undefined) onOpenFile(single.path)
+  }
+
   // Drop-target wiring, shared by folder rows (drop INTO that folder), file rows (drop into the folder the file
   // sits in) and the tree body (drop at the root). Rows stop propagation so the row under the cursor — not the
-  // container it bubbles through — decides the target.
+  // container it bubbles through — decides the target. Two payloads react: an in-tree drag moves entries, an
+  // OS-file drag uploads into the same target the move would have used.
   function dropProps(targetDir: string, stop: boolean) {
     return {
       onDragOver: (e: DragEvent<HTMLElement>) => {
-        if (!canWrite || !e.dataTransfer.types.includes(FS_DRAG_TYPE)) return
+        if (!canWrite) return
+        const internal = e.dataTransfer.types.includes(FS_DRAG_TYPE)
+        const osFiles = !internal && e.dataTransfer.types.includes('Files')
+        if (!internal && !osFiles) return
         if (stop) e.stopPropagation()
-        if (movablePaths(targetDir, dragPaths).length === 0) {
+        if (internal && movablePaths(targetDir, dragPaths).length === 0) {
           setDropTarget(null)
           return // no preventDefault → the cursor shows "not allowed"
         }
         e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
+        e.dataTransfer.dropEffect = internal ? 'move' : 'copy'
         setDropTarget(targetDir)
         if (
           targetDir !== '' &&
@@ -329,9 +367,16 @@ export function FileTreePane({
         }
       },
       onDrop: (e: DragEvent<HTMLElement>) => {
-        if (!canWrite || !e.dataTransfer.types.includes(FS_DRAG_TYPE)) return
+        if (!canWrite) return
+        const internal = e.dataTransfer.types.includes(FS_DRAG_TYPE)
+        const osFiles = !internal && e.dataTransfer.types.includes('Files')
+        if (!internal && !osFiles) return
         e.preventDefault()
         if (stop) e.stopPropagation()
+        if (osFiles) {
+          void runUploads(targetDir, Array.from(e.dataTransfer.files))
+          return
+        }
         const sources = parseDragPaths(e.dataTransfer.getData(FS_DRAG_TYPE))
         if (movablePaths(targetDir, sources).length > 0) void runMoves(sources, targetDir)
         else {
@@ -531,7 +576,9 @@ export function FileTreePane({
       <div className="flex items-center justify-between border-b border-border px-2.5 py-1.5">
         <span className="flex items-center gap-1.5 px-1 text-[13px] font-[510] text-foreground">
           {t('treeTitle')}
-          {moving && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+          {(moving || uploadBusy) && (
+            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+          )}
         </span>
         <div className="flex items-center gap-0.5">
           {canWrite && (
@@ -562,6 +609,27 @@ export function FileTreePane({
               >
                 <FolderPlus />
               </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t('upload')}
+                title={t('upload')}
+                onClick={() => uploadInput.current?.click()}
+              >
+                <Upload />
+              </Button>
+              {/* The picker uploads to the root; a targeted upload is dropping the files onto a folder row. */}
+              <input
+                ref={uploadInput}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.currentTarget.files ?? [])
+                  e.currentTarget.value = '' // picking the same file again must still fire change
+                  void runUploads('', files)
+                }}
+              />
             </>
           )}
           <Button
@@ -596,6 +664,11 @@ export function FileTreePane({
       {moveError !== undefined && (
         <div className="border-t border-border px-3 py-2 text-[11.5px] text-destructive">
           {t('moveFailed')} — {moveError}
+        </div>
+      )}
+      {uploadError !== undefined && (
+        <div className="border-t border-border px-3 py-2 text-[11.5px] text-destructive">
+          {t('uploadFailed')} — {uploadError}
         </div>
       )}
       {!canWrite && (
