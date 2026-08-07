@@ -36,4 +36,29 @@ export function registerWorkspaceOpsReportTools(server: McpServer, ctx: McpToolC
         );
       }),
   );
+
+  server.registerTool(
+    "get_workspace_gate_audit",
+    {
+      description:
+        "Every recorded release-gate decision in a window, counted by outcome, plus every override with its " +
+        "stated reason — the governance read over gate_scorecards decisions. `overrideRate` = overrides/blocks, " +
+        "ABSENT when no block landed. HTTP parity (GET /workspace/audit/gates).",
+      inputSchema: {
+        from: z.string().optional().describe("ISO lower bound on decidedAt (inclusive)"),
+        to: z.string().optional().describe("ISO upper bound on decidedAt (inclusive)"),
+      },
+    },
+    ({ from, to }) =>
+      run(principal, "scorecards:read", async () => {
+        const visibleTeams = await visibleTeamsFor(deps, principal);
+        return ok(
+          await scorecards.gateAudit(ws, {
+            ...(from !== undefined ? { from } : {}),
+            ...(to !== undefined ? { to } : {}),
+            ...(visibleTeams !== undefined ? { visibleTeams } : {}),
+          }),
+        );
+      }),
+  );
 }

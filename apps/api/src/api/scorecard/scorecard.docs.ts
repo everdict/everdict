@@ -1,5 +1,5 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema } from "@everdict/application-control";
-import { GateDecisionSchema } from "@everdict/contracts";
+import { GateDecisionSchema, ManifestVerificationSchema } from "@everdict/contracts";
 import { BackfillModelsResponseSchema } from "@everdict/contracts/wire";
 import { ScorecardAnalysisBundleResponseSchema, ScorecardAnalysisResponseSchema } from "@everdict/contracts/wire";
 import { DeleteScorecardResultSchema } from "@everdict/contracts/wire";
@@ -226,6 +226,22 @@ const docs = {
     response: {
       200: { description: "The decision with its recorded override", ...toJsonSchema(GateDecisionSchema) },
       ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  verifyManifest: {
+    summary: "Verify a scorecard's reproducibility manifest",
+    description:
+      "Check every stamped digest against the CURRENT registry state: dataset bundle, resolved harness spec, " +
+      "each judge spec, and the embedded verdict policy. `drifted` = the registry document is no longer " +
+      "exactly what this batch evaluated; `unverifiable` = honest scope (a subset/grading-plan bundle is a " +
+      "selection the record cannot replay). The caveat rides every response: digests are FNV identity stamps " +
+      "against honest data, never tamper-evidence. 400 when the batch predates manifests. Requires " +
+      "scorecards:read.",
+    tags: ["scorecard"],
+    params: scorecardIdParams,
+    response: {
+      200: { description: "Per-subject digest checks + the trust caveat", ...toJsonSchema(ManifestVerificationSchema) },
+      ...errorResponses(400, 401, 403, 404),
     },
   },
   diff: {

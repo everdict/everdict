@@ -588,6 +588,7 @@ describe("MCP tools", () => {
       "get_topology_service_logs",
       "get_trajectory",
       "get_usage",
+      "get_workspace_gate_audit",
       "get_workspace_mattermost",
       "get_workspace_ops_report",
       "get_workspace_settings",
@@ -695,6 +696,7 @@ describe("MCP tools", () => {
       "validate_model",
       "validate_rubric",
       "validate_runtime",
+      "verify_scorecard_manifest",
       "verify_skill",
     ]);
   });

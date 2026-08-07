@@ -1,4 +1,11 @@
-import type { GateDecision, GatePolicy, GateReason, VerdictPolicyRef } from "@everdict/contracts";
+import type {
+  GateAudit,
+  GateDecision,
+  GatePolicy,
+  GateReason,
+  ScorecardRecord,
+  VerdictPolicyRef,
+} from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
 import type { ScorecardDiff } from "./scorecard.js";
 import type { TrialDiff } from "./trials.js";
@@ -72,4 +79,41 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
 
 export function gatePolicyDigest(policy: GatePolicy): string {
   return contentDigest(policy);
+}
+
+// B2 — the audit window over the ledger's recorded decisions: counts by decision, every override with its
+// stated reason, and the override rate (ABSENT when no block landed in the window — absence, never 0).
+export function gateAudit(
+  records: Array<Pick<ScorecardRecord, "id" | "gates">>,
+  window?: { from?: string; to?: string },
+): GateAudit {
+  const decisions = { total: 0, pass: 0, block: 0, notComparable: 0 };
+  const entries: GateAudit["overrides"]["entries"] = [];
+  for (const record of records) {
+    for (const g of record.gates ?? []) {
+      if (window?.from !== undefined && g.decidedAt < window.from) continue;
+      if (window?.to !== undefined && g.decidedAt > window.to) continue;
+      decisions.total++;
+      if (g.decision === "pass") decisions.pass++;
+      else if (g.decision === "block") decisions.block++;
+      else decisions.notComparable++;
+      if (g.override) {
+        entries.push({
+          candidate: g.candidate,
+          gateId: g.id,
+          baseline: g.baseline,
+          by: g.override.by,
+          reason: g.override.reason,
+          at: g.override.at,
+        });
+      }
+    }
+  }
+  return {
+    ...(window?.from !== undefined ? { from: window.from } : {}),
+    ...(window?.to !== undefined ? { to: window.to } : {}),
+    decisions,
+    overrides: { count: entries.length, entries },
+    ...(decisions.block > 0 ? { overrideRate: entries.length / decisions.block } : {}),
+  };
 }

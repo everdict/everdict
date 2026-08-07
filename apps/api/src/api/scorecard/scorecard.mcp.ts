@@ -476,6 +476,16 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     );
 
     server.registerTool(
+      "verify_scorecard_manifest",
+      {
+        description:
+          "Verify a scorecard's reproducibility manifest against the CURRENT registry state — per-subject digest checks (dataset/harness/judges/verdict policy): match | drifted | missing | unverifiable. Digests are FNV identity stamps against honest data, never tamper-evidence (the caveat rides the response). HTTP parity (POST /scorecards/:id/verify-manifest).",
+        inputSchema: { id: z.string() },
+      },
+      ({ id }) => run(principal, "scorecards:read", async () => ok(await scorecards.verifyManifest(ws, id))),
+    );
+
+    server.registerTool(
       "estimate_scorecard",
       {
         description:

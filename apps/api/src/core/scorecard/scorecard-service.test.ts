@@ -5215,3 +5215,150 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
     expect(decision.reasons[0]?.kind).toBe("policy_mismatch");
   });
 });
+
+describe("ScorecardService — gate audit + manifest verification (B2/B3)", () => {
+  it("gateAudit counts decisions and enumerates overrides; overrideRate absent with no block", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch() {
+          throw new Error("never");
+        },
+      },
+      store,
+      datasets,
+      newId: () => `ga-${n++}`,
+    });
+    const rec = (id: string, pass: boolean): ScorecardRecord => ({
+      id,
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      scorecard: {
+        suiteId: "d@1.0.0",
+        harness: "h@1",
+        results: [
+          {
+            caseId: "a",
+            harness: "h@1",
+            trace: [],
+            snapshot: { kind: "prompt", output: "x" },
+            scores: [{ graderId: "t", metric: "tests_pass", value: pass ? 1 : 0, pass }],
+          },
+        ],
+      },
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+    await store.create(rec("base", true));
+    await store.create(rec("cand", false));
+    const blocked = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand" });
+    await service.overrideGate({
+      tenant: "acme",
+      candidate: "cand",
+      decisionId: blocked.id,
+      reason: "hotfix window",
+      by: "admin",
+    });
+    await store.create(rec("cand2", true));
+    await service.gate({ tenant: "acme", baseline: "base", candidate: "cand2" });
+
+    const audit = await service.gateAudit("acme");
+    expect(audit.decisions).toEqual({ total: 2, pass: 1, block: 1, notComparable: 0 });
+    expect(audit.overrides.count).toBe(1);
+    expect(audit.overrides.entries[0]).toMatchObject({ candidate: "cand", by: "admin", reason: "hotfix window" });
+    expect(audit.overrideRate).toBe(1);
+
+    // A window before everything: no decisions, and overrideRate is ABSENT (0/0 is absence, not 0%).
+    const empty = await service.gateAudit("acme", { to: "2000-01-01T00:00:00Z" });
+    expect(empty.decisions.total).toBe(0);
+    expect(empty.overrideRate).toBeUndefined();
+  });
+
+  it("verifyManifest reports drift when a judge spec changed under the same version, and honest unverifiable for a subset bundle", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch() {
+          throw new Error("never");
+        },
+      },
+      store,
+      datasets,
+      judges,
+    });
+    const judgeSpec = {
+      kind: "model" as const,
+      id: "quality",
+      version: "1.0.0",
+      provider: "openai" as const,
+      model: "gpt-5.4-mini",
+      rubric: "good?",
+      inputs: ["trace" as const],
+      tags: [],
+    };
+    await judges.register("acme", judgeSpec);
+    const dataset = {
+      id: "vd",
+      version: "1.0.0",
+      cases: [{ id: "a", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+      tags: [],
+    };
+    await datasets.register("acme", dataset);
+    const { contentDigest } = await import("@everdict/domain");
+    await store.create({
+      id: "vm",
+      tenant: "acme",
+      dataset: { id: "vd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      manifest: {
+        dataset: { id: "vd", version: "1.0.0", digest: contentDigest(dataset.cases) },
+        harness: { id: "h", version: "1" },
+        judges: [{ id: "quality", version: "1.0.0", specDigest: "0000000000000000" }], // sealed digest ≠ current spec
+      },
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+
+    const v = await service.verifyManifest("acme", "vm");
+    expect(v.checks.find((c) => c.subject === "dataset")?.status).toBe("match");
+    expect(v.checks.find((c) => c.subject === "judge:quality")?.status).toBe("drifted");
+    expect(v.caveat).toContain("never");
+
+    // Subset bundles are honest unverifiable — the selection inputs are not replayable.
+    await store.create({
+      id: "vm-subset",
+      tenant: "acme",
+      dataset: { id: "vd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      subset: { total: 10, selected: 1 },
+      manifest: {
+        dataset: { id: "vd", version: "1.0.0", digest: "abc" },
+        harness: { id: "h", version: "1" },
+      },
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+    const vs = await service.verifyManifest("acme", "vm-subset");
+    expect(vs.checks.find((c) => c.subject === "dataset")?.status).toBe("unverifiable");
+
+    // Pre-manifest batches have nothing to verify — explicit 400, never an empty green report.
+    await store.create({
+      id: "vm-old",
+      tenant: "acme",
+      dataset: { id: "vd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+    await expect(service.verifyManifest("acme", "vm-old")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});

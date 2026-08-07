@@ -405,6 +405,24 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     },
   );
 
+  // B3 — manifest verification: is the registry still exactly what this batch evaluated?
+  app.post<{ Params: { id: string } }>(
+    "/scorecards/:id/verify-manifest",
+    { schema: scorecardDocs.verifyManifest },
+    async (req, reply) => {
+      if (!deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:read");
+        return reply.send(await deps.scorecardService.verifyManifest(principal.workspace, req.params.id));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.get<{ Querystring: { baseline?: string; candidate?: string; z?: string } }>(
     "/scorecards/diff",
     { schema: scorecardDocs.diff },

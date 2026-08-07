@@ -7,6 +7,8 @@ import {
   ForbiddenError,
   type GateDecision,
   type HarnessSpec,
+  type ManifestCheck,
+  type ManifestVerification,
   NotFoundError,
   type ScorecardOrigin,
   type ScorecardRecord,
@@ -1002,6 +1004,109 @@ export class ScorecardService {
     opts: { from?: string; to?: string; visibleTeams?: string[] } = {},
   ): ReturnType<ScorecardAnalyticsService["opsReport"]> {
     return this.analytics.opsReport(tenant, opts);
+  }
+
+  gateAudit(
+    tenant: string,
+    opts: { from?: string; to?: string; visibleTeams?: string[] } = {},
+  ): ReturnType<ScorecardAnalyticsService["gateAudit"]> {
+    return this.analytics.gateAudit(tenant, opts);
+  }
+
+  // B3 — manifest verification: every stamped digest checked against the CURRENT registry state. `drifted`
+  // says the registry document is no longer exactly what this batch evaluated; `unverifiable` is honest
+  // scope — a subset/grading-plan bundle was a selection whose inputs the record does not replay. FNV is an
+  // identity stamp against honest data, never tamper-evidence — the caveat rides every response.
+  async verifyManifest(tenant: string, id: string): Promise<ManifestVerification> {
+    const record = await this.get(id);
+    if (!record || record.tenant !== tenant)
+      throw new NotFoundError("NOT_FOUND", { scorecard: id }, "scorecard not found.");
+    const m = record.manifest;
+    if (!m)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { scorecard: id },
+        "this batch has no reproducibility manifest (sealed before the manifest existed) — there is nothing to verify.",
+      );
+    const checks: ManifestCheck[] = [];
+    // Dataset — the sealed digest covers the EXACT case bundle evaluated; a subset or run-time grading plan
+    // was a derived selection, so the registry bundle is not the same document (honest unverifiable).
+    if (record.subset !== undefined || m.graders !== undefined) {
+      checks.push({
+        subject: "dataset",
+        stored: m.dataset.digest,
+        status: "unverifiable",
+        note: "the sealed bundle was a subset/grading-plan selection — its inputs are not replayable from the record",
+      });
+    } else {
+      try {
+        const ds = await this.deps.datasets.get(tenant, m.dataset.id, m.dataset.version);
+        const current = contentDigest(ds.cases);
+        checks.push({
+          subject: "dataset",
+          stored: m.dataset.digest,
+          current,
+          status: current === m.dataset.digest ? "match" : "drifted",
+        });
+      } catch {
+        checks.push({ subject: "dataset", stored: m.dataset.digest, status: "missing" });
+      }
+    }
+    // Harness — only when a resolved spec was sealed and the registry can resolve it now.
+    if (m.harness.specDigest !== undefined) {
+      if (this.deps.harnesses) {
+        try {
+          const spec = await this.deps.harnesses.get(tenant, m.harness.id, m.harness.version);
+          const current = contentDigest(spec);
+          checks.push({
+            subject: "harness",
+            stored: m.harness.specDigest,
+            current,
+            status: current === m.harness.specDigest ? "match" : "drifted",
+          });
+        } catch {
+          checks.push({ subject: "harness", stored: m.harness.specDigest, status: "missing" });
+        }
+      } else {
+        checks.push({ subject: "harness", stored: m.harness.specDigest, status: "unverifiable" });
+      }
+    }
+    for (const j of m.judges ?? []) {
+      if (j.specDigest === undefined) continue;
+      if (!this.deps.judges) {
+        checks.push({ subject: `judge:${j.id}`, stored: j.specDigest, status: "unverifiable" });
+        continue;
+      }
+      try {
+        const spec = await this.deps.judges.get(tenant, j.id, j.version);
+        const current = contentDigest(spec);
+        checks.push({
+          subject: `judge:${j.id}`,
+          stored: j.specDigest,
+          current,
+          status: current === j.specDigest ? "match" : "drifted",
+        });
+      } catch {
+        checks.push({ subject: `judge:${j.id}`, stored: j.specDigest, status: "missing" });
+      }
+    }
+    // Verdict policy — the embedded document must still hash to the stamped digest, else the stamp cannot be
+    // trusted to re-derive verdicts (the resolveVerdictPolicy rule, verified explicitly here).
+    if (m.verdictPolicy !== undefined && record.verdictPolicy !== undefined) {
+      const current = contentDigest(m.verdictPolicy);
+      checks.push({
+        subject: "verdict_policy",
+        stored: record.verdictPolicy.digest,
+        current,
+        status: current === record.verdictPolicy.digest ? "match" : "drifted",
+      });
+    }
+    return {
+      id,
+      checks,
+      caveat:
+        "digests are FNV-1a identity stamps: they answer 'is this the same document?' against honest data, never 'was this tampered with?' — the write barriers are the admin-gated submit paths.",
+    };
   }
 
   // Release gate (A1) — the CI-facing decision over baseline↔candidate, RECORDED on the candidate's ledger

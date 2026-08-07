@@ -17,6 +17,7 @@ import {
   computeAnalysis,
   diffScorecards,
   diffTrials,
+  gateAudit,
   leaderboard,
   ownedByVisibleTeam,
   preferredMetric,
@@ -102,6 +103,21 @@ export class ScorecardAnalyticsService {
     return workspaceOpsReport(detailed, {
       ...(opts.from ? { from: opts.from } : {}),
       ...(opts.to ? { to: opts.to } : {}),
+    });
+  }
+
+  // B2 — the governance window over the ledger's recorded gate decisions. The numbers are the domain's
+  // (gateAudit); the list rows carry the (small) gates arrays, so no detail hydration is needed.
+  async gateAudit(
+    tenant: string,
+    opts: { from?: string; to?: string; visibleTeams?: string[] },
+  ): Promise<ReturnType<typeof gateAudit>> {
+    const rows = await this.deps.store.list(tenant, {
+      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
+    });
+    return gateAudit(rows, {
+      ...(opts.from !== undefined ? { from: opts.from } : {}),
+      ...(opts.to !== undefined ? { to: opts.to } : {}),
     });
   }
 

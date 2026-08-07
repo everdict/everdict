@@ -51,3 +51,48 @@ export const GateDecisionSchema = z.object({
   override: GateOverrideSchema.optional(),
 });
 export type GateDecision = z.infer<typeof GateDecisionSchema>;
+
+// B2 — the governance window: every decision counted, every override enumerated with its stated reason.
+export const GateAuditOverrideEntrySchema = z.object({
+  candidate: z.string(),
+  gateId: z.string(),
+  baseline: z.string(),
+  by: z.string(),
+  reason: z.string(),
+  at: z.string(),
+});
+export const GateAuditSchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+  decisions: z.object({
+    total: z.number().int().nonnegative(),
+    pass: z.number().int().nonnegative(),
+    block: z.number().int().nonnegative(),
+    notComparable: z.number().int().nonnegative(),
+  }),
+  overrides: z.object({
+    count: z.number().int().nonnegative(),
+    entries: z.array(GateAuditOverrideEntrySchema),
+  }),
+  // overrides / blocks — ABSENT when no block was recorded in the window (a denominator of zero is absence).
+  overrideRate: z.number().optional(),
+});
+export type GateAudit = z.infer<typeof GateAuditSchema>;
+
+// B3 — manifest verification: each stamped digest checked against the CURRENT registry state. `drifted`
+// answers "is the registry document still exactly what this batch evaluated?" — identity against honest
+// data (FNV), never tamper-evidence; the caveat rides every response so no one mistakes the claim.
+export const ManifestCheckSchema = z.object({
+  subject: z.string(), // "dataset" | "harness" | "judge:<id>" | "verdict_policy"
+  stored: z.string(),
+  current: z.string().optional(),
+  status: z.enum(["match", "drifted", "missing", "unverifiable"]),
+  note: z.string().optional(),
+});
+export const ManifestVerificationSchema = z.object({
+  id: z.string(),
+  checks: z.array(ManifestCheckSchema),
+  caveat: z.string(),
+});
+export type ManifestCheck = z.infer<typeof ManifestCheckSchema>;
+export type ManifestVerification = z.infer<typeof ManifestVerificationSchema>;
