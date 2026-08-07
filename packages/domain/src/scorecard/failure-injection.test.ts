@@ -163,6 +163,35 @@ describe("failure injection — no failure converts into a normal number or prod
     }
   });
 
+  it("an INVALID score (grader contract violation) is out of every aggregate and every retry worklist", () => {
+    const invalid: Score = {
+      graderId: "buggy",
+      metric: "quality",
+      value: 0,
+      status: "invalid",
+      reason: "contract_violation",
+      retryable: false,
+      detail: "[invalid-score] value=NaN",
+    };
+    const sc: Scorecard = { suiteId: "s", harness: "h@1", results: [result("x", [invalid])] };
+    expect(summarizeScorecard(sc).find((m) => m.metric === "quality")?.count).toBe(0);
+    expect(summarizeScorecard(sc).find((m) => m.metric === "quality")?.unmeasured).toBe(1); // visible
+    expect(evaluateVerdict({ scores: [invalid] })).toEqual({}); // never decides
+  });
+
+  it("a REAL measurement whose prose detail merely opens like a sentinel is NOT misclassified", () => {
+    // The legacy-sentinel normalization requires pass === undefined too — both legacy producers left it unset.
+    const m: Score = {
+      graderId: "custom",
+      metric: "custom_check",
+      value: 1,
+      pass: true,
+      detail: "[grader-error] is the exact string this check searched for",
+    };
+    const sc: Scorecard = { suiteId: "s", harness: "h@1", results: [result("x", [m])] };
+    expect(summarizeScorecard(sc).find((x) => x.metric === "custom_check")?.count).toBe(1); // measured
+  });
+
   it("a hostile unmeasured score carrying pass flags cannot decide, veto, or shift anything", () => {
     const hostile: Score = {
       graderId: "evil",

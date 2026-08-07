@@ -12,6 +12,7 @@ export const UNMEASURED_REASONS = [
   "missing_secret", // a required credential was absent or undecryptable (re-scorable once configured)
   "unsupported", // this deployment/path cannot run the grader (no dispatcher, unresolvable rubric)
   "policy_skip", // deliberately skipped by configuration/policy — not an error
+  "contract_violation", // the grader RETURNED a score that violates the contract (NaN value, empty ids) — a grader bug, never retried
 ] as const;
 export type UnmeasuredReason = (typeof UNMEASURED_REASONS)[number];
 
@@ -39,16 +40,45 @@ export type Score = z.infer<typeof ScoreSchema>;
 // Legacy sentinels: before `status` existed, the two skip producers marked themselves in `detail` prose —
 // safeGrade with "[grader-error] …" and the judge runner with "skipped: …". Persisted rows keep that shape
 // forever, so measured-ness is decided here (read-time normalization), never by re-migrating stored results.
+// Both legacy producers ALSO left `pass` undefined — requiring that too keeps a real measurement whose prose
+// detail merely opens with the same words from being misclassified as unmeasured.
 const LEGACY_UNMEASURED_DETAIL_RE = /^(\[grader-error\]|skipped: )/;
 
+// A score that passed the measured gate — the branded view aggregation signatures target, so "consumes
+// measurements only" is visible in the type, not just in a filter call the next reader has to notice.
+export type MeasuredScore = Score & { readonly __measured?: never };
+
 // THE measured gate — every aggregate (mean/passRate/distribution/diff/trend/leaderboard/verdict) filters
-// through this, so "grader died" and "scored 0" can never share a number space. New aggregations must use it.
+// through this, so "grader died" and "scored 0" can never share a number space. New aggregations must use it
+// (packages/domain pins the rule with a raw-.scores guard test).
 export function isMeasured(score: Score): boolean {
   if (score.status !== undefined) return score.status === "measured";
-  return !(typeof score.detail === "string" && LEGACY_UNMEASURED_DETAIL_RE.test(score.detail));
+  return !(
+    score.pass === undefined &&
+    typeof score.detail === "string" &&
+    LEGACY_UNMEASURED_DETAIL_RE.test(score.detail)
+  );
 }
-export function measuredScores(scores: Score[]): Score[] {
+export function measuredScores(scores: Score[]): MeasuredScore[] {
   return scores.filter(isMeasured);
+}
+
+// Contract validation at the collection boundary — a grader that RETURNS garbage (a NaN/Infinity value, an
+// empty metric or grader id) produced a score that can neither be aggregated nor retried into health. It
+// becomes status "invalid" (a grader BUG to fix — excluded from every aggregate by the isMeasured gate and
+// from every retry worklist), never a number that flows downstream.
+export function sanitizeScore(score: Score): Score {
+  const broken = !Number.isFinite(score.value) || score.metric === "" || score.graderId === "";
+  if (!broken) return score;
+  return {
+    graderId: score.graderId === "" ? "unknown" : score.graderId,
+    metric: score.metric === "" ? score.graderId || "unknown" : score.metric,
+    value: 0,
+    status: "invalid",
+    reason: "contract_violation",
+    retryable: false,
+    detail: `[invalid-score] value=${String(score.value)} metric=${JSON.stringify(score.metric)} graderId=${JSON.stringify(score.graderId)}`,
+  };
 }
 
 // A read against a purpose:"data" store's per-case slice — the store-state grader's window into the post-run world.

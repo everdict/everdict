@@ -1,4 +1,4 @@
-import { type GradeContext, type Grader, type Score, toScores } from "@everdict/contracts";
+import { type GradeContext, type Grader, type Score, sanitizeScore, toScores } from "@everdict/contracts";
 
 // Isolate a single grader's run-time failure so it can't sink the whole case (or drop the sibling
 // graders' real scores). A grader that THROWS at scoring time — most often the judge grader on a
@@ -11,7 +11,9 @@ import { type GradeContext, type Grader, type Score, toScores } from "@everdict/
 // Returns the flattened Score[] — a multi-metric grader's scores are collected as-is, a failure is one score.
 export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Score[]> {
   try {
-    return toScores(await grader.grade(ctx));
+    // sanitizeScore: a grader that RETURNS garbage (NaN value, empty ids) becomes a visible INVALID score —
+    // a grader bug to fix, excluded from every aggregate — never a number that flows downstream.
+    return toScores(await grader.grade(ctx)).map(sanitizeScore);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return [

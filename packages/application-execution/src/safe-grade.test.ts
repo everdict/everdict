@@ -52,6 +52,18 @@ describe("safeGrade — isolate a grader's run-time failure", () => {
     expect(score?.detail).toContain("[grader-error]");
   });
 
+  it("a grader RETURNING garbage becomes a visible invalid score — a bug, never a number", async () => {
+    const broken: Grader = {
+      id: "buggy",
+      grade: async (): Promise<Score> => ({ graderId: "buggy", metric: "quality", value: Number.NaN, pass: true }),
+    };
+    const [score] = await safeGrade(broken, CTX);
+    expect(score?.status).toBe("invalid");
+    expect(score?.reason).toBe("contract_violation");
+    expect(score?.retryable).toBe(false); // a deterministic bug — retrying cannot recover it
+    expect(score?.pass).toBeUndefined(); // the garbage pass flag does not survive
+  });
+
   it("stringifies a non-Error throw", async () => {
     const weird: Grader = {
       id: "steps",
