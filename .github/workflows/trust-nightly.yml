@@ -1,0 +1,111 @@
+# Nightly trust certification — the invariant suite that ci.yml deliberately does NOT run.
+#
+# `ci.yml` is the PUSH GATE: it must stay fast, so it runs unit tests against fakes on ubuntu only. This
+# workflow is the opposite trade — it boots real infrastructure (Postgres, MinIO) and runs the scenarios that
+# only real infrastructure can prove, plus an OS lane the push gate cannot afford. Nightly, never blocking.
+#
+# What it certifies, and what it deliberately leaves out: docs/trust-certification.md.
+name: trust-nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch:
+
+concurrency:
+  group: trust-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trust:
+    name: trust certification (real Postgres + MinIO)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: everdict
+          POSTGRES_PASSWORD: everdict # throwaway container on the runner's private network, never reachable off-box
+          POSTGRES_DB: everdict_trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U everdict -d everdict_trust"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      EVERDICT_TRUST_DATABASE_URL: postgresql://everdict:everdict@127.0.0.1:5432/everdict_trust
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6 # version resolved from package.json "packageManager"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The trust files import built package entrypoints (@everdict/db, @everdict/domain, …), same as any test.
+      - run: pnpm build
+
+      # MinIO for the workspace-filesystem scenario. Started with `docker run` rather than as a service
+      # container because MinIO needs a server subcommand, which the `services:` block cannot express.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=everdict -e MINIO_ROOT_PASSWORD=everdict-trust \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/minio/health/live && break
+            sleep 2
+          done
+
+      # The trust suite proper. The runner REFUSES to certify a suite whose scenarios skipped, so a broken
+      # database connection fails the job instead of quietly reporting green over an empty run.
+      - name: Trust suite
+        run: node scripts/trust/trust-suite.mjs
+
+      # The pre-existing live scenario test for the workspace filesystem — CI can satisfy its env, so it runs
+      # here. (Its twin, packages/graders model-judge.scenario, needs a paid model endpoint and stays off; see
+      # docs/trust-certification.md for how an operator enables it.)
+      - name: Workspace filesystem scenario (live MinIO)
+        env:
+          EVERDICT_E2E_S3_ENDPOINT: http://127.0.0.1:9000
+          EVERDICT_E2E_S3_ACCESS_KEY: everdict
+          EVERDICT_E2E_S3_SECRET_KEY: everdict-trust
+        run: pnpm --filter @everdict/storage exec vitest run src/s3-fs.scenario.test.ts
+
+      - name: MinIO logs on failure
+        if: failure()
+        run: docker logs minio || true
+
+  # OS lane. Windows is the production gap the trust review named: self-hosted runners run on operators'
+  # Windows machines, and nothing in CI has ever executed a line of this code there. It lives in the NIGHTLY
+  # rather than in ci.yml on purpose — Windows runners are several times slower than ubuntu and cost several
+  # times the minutes, and the push gate's value is that it is fast enough that nobody is tempted to skip it.
+  #
+  # The package scope is deliberately narrow and is documented in docs/trust-certification.md: these are the
+  # packages whose tests are platform-independent by construction (pure logic, or explicitly branching on
+  # process.platform). Packages that spawn a real POSIX shell are excluded there, with the expansion path.
+  #
+  # macOS is NOT here: cli-release.yml + desktop-release.yml already build and run on macos-latest every
+  # release, so the OS has coverage. Windows had none.
+  windows:
+    name: windows unit lane
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Unit tests (OS-sensitive + platform-independent packages)
+        run: >-
+          pnpm --filter @everdict/contracts
+          --filter @everdict/domain
+          --filter @everdict/self-hosted-runner
+          test
