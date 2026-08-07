@@ -496,7 +496,8 @@ export class ScorecardService {
 
   // Resolve each selected judge's version (latest→concrete) via the registry, so the recorded orchestration pins the
   // exact judge that scored — the same reproducibility guarantee harness/dataset already have. No registry (unit paths)
-  // or an unresolvable id → keep the ref as-given; the scoring path silently skips a judge it can't resolve, unchanged.
+  // or an unresolvable id → keep the ref as-given; the scoring path stamps a per-case unmeasured row for a judge it
+  // cannot resolve (never a silent skip), so the manifest's selection and the scores always account for each other.
   // Which judge DOCUMENTS score this batch — id+version+spec digest (an edited judge under the same version
   // would otherwise be indistinguishable in the manifest). Best-effort per judge: an unresolvable spec keeps
   // its id/version with no digest rather than failing the submit.
