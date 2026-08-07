@@ -9,8 +9,10 @@ import { EventSelectorFilterSchema } from "./event-selector.js";
 export const AgentWakeIntentSchema = z
   .object({
     // Event kinds that should resume the conversation. Membership in TRIGGERABLE_EVENT_KINDS is enforced at the
-    // tool boundary; stored loosely so an intent written by an older build still parses.
-    kinds: z.array(z.string().min(1)).min(1),
+    // tool boundary; stored loosely so an intent written by an older build still parses. EMPTY = a pure timer
+    // wait (LESSON 059 P6, the Sleep reinterpretation): no event can match an empty allowlist, so only the
+    // deadline wakes the conversation — self-paced "check again in N minutes" without polling.
+    kinds: z.array(z.string().min(1)),
     // Payload predicates (shared selector grammar) — "this scorecard", not "any scorecard".
     filters: z.array(EventSelectorFilterSchema).default([]),
     // What the agent is waiting for, in its own words. Replayed into the resumed turn and rendered in the UI, so a

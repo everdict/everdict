@@ -51,7 +51,10 @@ export function buildWaitForTool(kinds: readonly string[], submit: (request: Wai
       "NEVER close a turn with 'I'll check back later', 'let me know if you want an update', or a bare status line: " +
       "that hands your unfinished work back to the member, which is exactly what this tool exists to prevent. " +
       "Do not poll: read the status once to confirm the work is under way, then call this. On resume, report what " +
-      "changed — and if the work is still not finished, you may wait again.",
+      "changed — and if the work is still not finished, you may wait again. " +
+      "For work that emits NO platform event (an external system, a human you asked, wall-clock pacing), omit " +
+      "`kinds` and set `timeout_seconds`: a pure timer — you sleep and are resumed after that long, with no event " +
+      "able to wake you early.",
     parametersJsonSchema: {
       type: "object",
       properties: {
@@ -59,7 +62,9 @@ export function buildWaitForTool(kinds: readonly string[], submit: (request: Wai
           type: "array",
           minItems: 1,
           items: { type: "string", enum: [...kinds] },
-          description: "Event kinds that should wake you. Pick every outcome you care about (success AND failure).",
+          description:
+            "Event kinds that should wake you. Pick every outcome you care about (success AND failure). " +
+            "Omit entirely (with timeout_seconds set) for a pure timer wait.",
         },
         filters: {
           type: "array",
@@ -90,31 +95,42 @@ export function buildWaitForTool(kinds: readonly string[], submit: (request: Wai
             "should take — a job can die without ever emitting an event, and you must not wait forever.",
         },
       },
-      required: ["kinds", "note"],
+      required: ["note"],
       additionalProperties: false,
     },
     isReadOnly: true,
     alwaysLoad: true,
     call: async (input) => {
       const { kinds: rawKinds, note, timeout_seconds: timeout } = input as Record<string, unknown>;
-      if (!Array.isArray(rawKinds) || rawKinds.length === 0) {
-        return { content: "wait_for: 'kinds' must list at least one event kind.", isError: true };
+      if (timeout !== undefined && (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0)) {
+        return { content: "wait_for: 'timeout_seconds' must be a positive number.", isError: true };
+      }
+      // Timer-only wait (LESSON 059 P6, the Sleep reinterpretation): no kinds + an explicit timeout parks the
+      // conversation on the clock alone. Omitting BOTH is refused — a wait that nothing can end is not a wait.
+      const timerOnly = rawKinds === undefined || (Array.isArray(rawKinds) && rawKinds.length === 0);
+      if (timerOnly && typeof timeout !== "number") {
+        return {
+          content: "wait_for: list the event kinds to wake on, or set 'timeout_seconds' for a pure timer wait.",
+          isError: true,
+        };
       }
       const selected: string[] = [];
-      for (const kind of rawKinds) {
-        if (typeof kind !== "string" || !kinds.includes(kind)) {
-          return { content: `wait_for: '${String(kind)}' is not a waitable event kind.`, isError: true };
+      if (!timerOnly) {
+        if (!Array.isArray(rawKinds)) {
+          return { content: "wait_for: 'kinds' must be an array of event kinds.", isError: true };
         }
-        selected.push(kind);
+        for (const kind of rawKinds) {
+          if (typeof kind !== "string" || !kinds.includes(kind)) {
+            return { content: `wait_for: '${String(kind)}' is not a waitable event kind.`, isError: true };
+          }
+          selected.push(kind);
+        }
       }
       if (typeof note !== "string" || note.trim().length === 0) {
         return { content: "wait_for: 'note' must say what you are waiting for.", isError: true };
       }
       const filters = parseFilters((input as { filters?: unknown }).filters);
       if (!filters.ok) return { content: `wait_for: ${filters.error}`, isError: true };
-      if (timeout !== undefined && (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0)) {
-        return { content: "wait_for: 'timeout_seconds' must be a positive number.", isError: true };
-      }
       submit({
         kinds: selected,
         filters: filters.value,
@@ -122,7 +138,9 @@ export function buildWaitForTool(kinds: readonly string[], submit: (request: Wai
         ...(typeof timeout === "number" ? { timeoutSeconds: timeout } : {}),
       });
       return {
-        content: `Waiting for ${selected.join(", ")}. You will be resumed here when it happens.`,
+        content: timerOnly
+          ? `Waiting ${String(timeout)}s. You will be resumed here when the timer passes.`
+          : `Waiting for ${selected.join(", ")}. You will be resumed here when it happens.`,
         isError: false,
       };
     },
