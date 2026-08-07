@@ -91,3 +91,16 @@ describe("collect-stage classification", () => {
     });
   });
 });
+
+describe("classifyFailure — a deliberate stop is never retryable", () => {
+  it("classifies a CANCELLED error as non-retryable infra (a retry would un-stop a stop)", () => {
+    // Pre-fix: CANCELLED matched no set and fell to the unknown-throw default (retryable infra), so a
+    // batch's inner retry loop re-dispatched a case the user had just cancelled.
+    const failure = classifyFailure(
+      new UpstreamError("CANCELLED", { runId: "r1" }, "Run cancelled — the batch was stopped."),
+      "run",
+    );
+    expect(failure.code).toBe("CANCELLED");
+    expect(failure.retryable).toBe(false);
+  });
+});

@@ -59,6 +59,11 @@ export function classifyFailure(err: unknown, stage: CaseFailure["stage"]): Case
     // OOM stamped by a backend rides in extra.signal (the code stays UPSTREAM_ERROR for the HTTP envelope).
     const signal = typeof err.extra?.signal === "string" ? err.extra.signal : undefined;
     const code = signal ?? err.code;
+    // A deliberate stop is NEVER retryable — the unknown-throw default (retryable infra) let a batch's inner
+    // retry loop re-dispatch a case the user had just cancelled, burning compute to un-stop a stop. The code
+    // is the cancellation shape every cancel path stamps (runCase's cancelledRun, the batch settle).
+    if (code === "CANCELLED")
+      return { stage, class: "infra", code, message, retryable: false, ...failureEvidence(err.extra) };
     // A self-hosted dispatch failure (no_runner / capability_mismatch) names the runner it waited on in extra.runnerId —
     // carry it onto the failure so the result links to that runner's health. Absent for managed backends.
     const runner = typeof err.extra?.runnerId === "string" ? { runnerId: err.extra.runnerId } : {};

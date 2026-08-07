@@ -258,6 +258,11 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
   // Live-trace tee (opt-in) — batches drained TraceEvents out to the observer while the harness still runs.
   // Started before the drain, stopped inside release() (with a final flush) like the other capture loops.
   const liveTrace = deps.runCtx.liveTrace ? startLiveTraceReport(deps.runCtx.liveTrace) : undefined;
+  // Teardown failure is recorded, never propagated — by the time release runs, the agent's work and its
+  // compute-bound measurements EXIST, and a `docker rm -f` timeout throwing here would destroy that finished
+  // result (and, with `released` already latched, skip the finally's retry too). The leak is the backend
+  // reaper's concern; losing the produced evidence to a janitor error is not an acceptable trade.
+  let disposeFailure: string | undefined;
   const release = async (): Promise<void> => {
     if (released) return;
     released = true;
@@ -265,7 +270,11 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     stopCaseFs?.();
     envRecorder?.stop();
     liveTrace?.stop();
-    await compute.dispose();
+    try {
+      await compute.dispose();
+    } catch (err) {
+      disposeFailure = err instanceof Error ? err.message : String(err);
+    }
   };
   try {
     await deps.environment.seed(compute, evalCase.env);
@@ -307,6 +316,10 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       await drain;
     }
 
+    // An abort that lands AFTER the drain wins the race used to slip through: snapshot/grading proceeded and
+    // produced a normal, sealed result for a case the user had just stopped. One more cooperative check at the
+    // window's edge — later aborts (mid-grade) still settle, and the batch's first-terminal-write discards them.
+    if (signal?.aborted) throw cancelledRun(runId);
     let snapshot = await deps.environment.snapshot(compute);
     const source = deps.harness.traceSource?.();
     // The mode that defers collection out of the job — observation scoring that needs the trace is deferred with it (completed by the control plane).
@@ -339,7 +352,11 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       kind: "infra",
       scope: "placement",
       event: "compute_released",
-      message: `sandbox released in ${Date.now() - releaseStartedMs}ms`,
+      // A dispose failure rides the lifecycle mark as evidence (the compute may be leaked — the reaper's
+      // ledger picks it up); the finished result above it is untouched.
+      message: disposeFailure
+        ? `sandbox release FAILED after ${Date.now() - releaseStartedMs}ms — compute may be leaked: ${disposeFailure}`
+        : `sandbox released in ${Date.now() - releaseStartedMs}ms`,
     };
 
     let collectFailure: CaseFailure | undefined;

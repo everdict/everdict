@@ -181,3 +181,60 @@ describe("runCase — in-run environment deltas (the recorder plane)", () => {
     expect(result.envDeltas).toBeUndefined();
   });
 });
+
+describe("runCase — teardown failure never destroys the produced result", () => {
+  it("returns the finished result (scores, snapshot, trace) even when compute.dispose() throws", async () => {
+    // Given a compute whose teardown dies (a docker rm -f timeout is the realistic trigger)
+    const compute = fakeComputeHandle();
+    compute.dispose = async () => {
+      compute.disposed = true;
+      throw new Error("docker rm -f timed out");
+    };
+    const driver = { id: "fake", provision: async () => compute } as Driver;
+
+    // When the case runs to completion
+    const result = await runCase(CASE, {
+      driver,
+      environment: ENVIRONMENT,
+      harness: completingHarness(),
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+
+    // Then the result survives — the janitor's failure is recorded as lifecycle evidence, not propagated
+    // (pre-fix: release() threw, the finally re-entered a latched no-op, and the whole CaseResult was lost)
+    expect(result.caseId).toBe("c1");
+    const releaseMark = result.trace.find((e) => e.kind === "infra" && "event" in e && e.event === "compute_released");
+    expect(releaseMark && "message" in releaseMark ? releaseMark.message : "").toContain("compute may be leaked");
+  });
+});
+
+describe("runCase — an abort landing after the drain still cancels", () => {
+  it("throws CANCELLED instead of producing a normal sealed result for a stopped case", async () => {
+    const compute = fakeComputeHandle();
+    const driver = { id: "fake", provision: async () => compute } as Driver;
+    const controller = new AbortController();
+    // The harness COMPLETES its drain, then the abort lands before snapshot/grading — the window the
+    // drain-race alone could not observe.
+    const harness: EvaluableHarness = {
+      id: "finishes-then-stopped",
+      version: "1.0.0",
+      install: async () => {},
+      run: async function* (): AsyncIterable<TraceEvent> {
+        yield { t: 0, kind: "log", text: "done", stream: "stdout" } as TraceEvent;
+        controller.abort(); // lands as the drain ends — post-race, pre-snapshot
+      },
+    };
+
+    await expect(
+      runCase(CASE, {
+        driver,
+        environment: ENVIRONMENT,
+        harness,
+        graders: [],
+        runCtx: { apiKeyEnv: {}, timeoutSec: 60, signal: controller.signal },
+      }),
+    ).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(compute.disposed).toBe(true);
+  });
+});
