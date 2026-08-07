@@ -6,6 +6,7 @@ import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
 import { moveDestinationsFor, TeamOwnerControl } from '@/features/move-to-team'
 import { RerunScorecardButton } from '@/features/rerun-scorecard'
+import { RescoreScorecardButton } from '@/features/rescore-scorecard'
 import { StopScorecardButton } from '@/features/stop-scorecard'
 import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
 import { membersSchema } from '@/entities/member'
@@ -441,6 +442,11 @@ export default async function ScorecardDetailPage({
               {/* Re-run is offered once the batch is terminal, to a viewer who can run scorecards — one button that
                   chooses between a full re-run (every case, optionally re-scored) and a failed-only recovery
                   (passing cases carry over). The control plane enforces scorecards:run. */}
+              {/* Targeted recovery of transient judge blips — shown only when the served detail says a
+                  retryable-unmeasured worklist exists. In-place, no case re-runs; distinct from re-run/retry. */}
+              {canRun && record.retryableUnmeasured !== undefined && record.retryableUnmeasured > 0 && (
+                <RescoreScorecardButton id={record.id} count={record.retryableUnmeasured} />
+              )}
               {canRun && (
                 <RerunScorecardButton
                   id={record.id}

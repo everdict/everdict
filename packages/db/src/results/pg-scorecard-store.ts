@@ -190,6 +190,11 @@ export class PgScorecardStore implements ScorecardStore {
       sets.push(`trace_projection_version = $${i++}`);
       vals.push(patch.traceProjectionVersion);
     }
+    if (patch.requested !== undefined) {
+      // the pull-ingest path learns its ask only after listing the platform's traces — patched then.
+      sets.push(`requested = $${i++}`);
+      vals.push(patch.requested);
+    }
     if (patch.verdictPolicy !== undefined) {
       // stamped by the domain's terminal transition (judgedUnder) — dropping it would leave historical
       // verdicts undated and silently re-derived under whatever policy the code ships next.

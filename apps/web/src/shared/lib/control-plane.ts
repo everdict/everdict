@@ -947,6 +947,9 @@ export const controlPlane = {
   // Stop a running/queued batch — marks it cancelled and force-frees the runtime of the in-flight cases.
   cancelScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  // Re-score ONLY the retryable-unmeasured judge scores in place (transient judge blips) — no case re-run.
+  rescoreScorecardUnmeasured: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}/rescore-unmeasured`, { method: 'POST' }),
   // Hard-delete a TERMINAL scorecard (record + child runs) — the batch's creator or a workspace admin; the
   // control plane enforces (403), and an in-flight batch is a 409 (stop it first). Returns { deleted: true }.
   deleteScorecard: <T>(auth: AuthContext, id: string) =>

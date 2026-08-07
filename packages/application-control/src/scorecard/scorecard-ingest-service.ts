@@ -295,6 +295,10 @@ export class ScorecardIngestService {
       tags: [],
     };
     const caseById = new Map(effectiveDataset.cases.map((c) => [c.id, c]));
+    // The pull path's ASK becomes known only now (the platform listed its traces) — seal it onto the record
+    // so requested − executed stays statable for pulls too. Push-ingest already sealed it at create;
+    // re-writing the same number is a harmless idempotent patch.
+    await this.deps.store.update(id, { requested: perCase.length, updatedAt: this.now() });
     const results: CaseResult[] = [];
     for (const up of perCase) {
       const evalCase = caseById.get(up.caseId);

@@ -2713,6 +2713,10 @@
     "deleteSelected": "삭제"
   },
   "scorecardsPage": {
+    "rescoreButton": "미측정 {count}건 재채점",
+    "rescoring": "재채점 중…",
+    "rescoreError": "재채점에 실패했습니다.",
+    "rescoreTitle": "일시 장애로 미측정된 {count}건 뒤의 judge만 다시 채점합니다 — 케이스 재실행 없이 제자리 교체, judge 버전은 이 배치의 핀을 따릅니다.",
     "trendPolicyMixed": "이 시계열에는 서로 다른 판정 정책으로 채점된 배치가 섞여 있습니다 — 정책이 다른 지점 간 하락은 회귀로 표시되지 않습니다.",
     "leaderboardPolicyMixed": "서로 다른 판정 정책으로 채점된 배치가 함께 랭크되어 있습니다 — 이 순위는 다른 규칙이 만든 비율을 비교합니다.",
     "modelUnknownLabel": "모델 미상",

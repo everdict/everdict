@@ -51,6 +51,14 @@ export const ScorecardResponseSchema = ScorecardRecordSchema.extend({
     .describe(
       "Single headline pass rate — trial-aware (passAt1), else highest-authority metric pass rate; null = nothing pass-deciding",
     ),
+  retryableUnmeasured: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Transient scoring failures a targeted re-score (POST /scorecards/:id/rescore-unmeasured) can recover — present when > 0",
+    ),
   outcomes: ScorecardOutcomesSchema.optional().describe(
     "Case-fate denominators (server-computed; present when per-case results are present): executed/gradeable/verdicted + passed/failed/infraFailed/unmeasured — an infra-failed case has no product verdict and never enters pass rate",
   ),

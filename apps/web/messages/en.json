@@ -2713,6 +2713,10 @@
     "deleteSelected": "Delete"
   },
   "scorecardsPage": {
+    "rescoreButton": "Re-score {count} unmeasured",
+    "rescoring": "Re-scoring…",
+    "rescoreError": "Re-score failed.",
+    "rescoreTitle": "Re-run only the judges behind {count} transient scoring failure(s) — in place, no case re-runs; judge versions come from this batch's own pins.",
     "trendPolicyMixed": "This series mixes batches judged under different verdict policies — cross-policy drops are not flagged as regressions.",
     "leaderboardPolicyMixed": "These rows were judged under different verdict policies — the ordering compares rates produced by different rules.",
     "modelUnknownLabel": "model unknown",

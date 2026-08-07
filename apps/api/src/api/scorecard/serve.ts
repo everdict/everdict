@@ -5,6 +5,7 @@ import {
   evidenceStatus,
   headlinePassRate,
   resolveVerdictPolicy,
+  retryableUnmeasured,
   scorecardOutcomes,
 } from "@everdict/domain";
 
@@ -25,6 +26,7 @@ export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
   // Verdicts resolve under the batch's STAMPED policy (absent = the default ladder those records were judged
   // under) — evolving the policy never silently rewrites a historical verdict.
   const policy = resolveVerdictPolicy(record.verdictPolicy, record.manifest?.verdictPolicy);
+  const recoverable = retryableUnmeasured(record.scorecard).length;
   let pass = 0;
   let total = 0;
   const results = record.scorecard.results.map((r) => {
@@ -46,5 +48,7 @@ export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
     // Case-fate denominators — 841/970 (verdicted) and 841/1000 (requested) are different claims; an
     // infra-failed case is recovery work with NO product verdict, so it never enters pass/total above either.
     outcomes: scorecardOutcomes(record.scorecard, record.requested),
+    // Transient scoring failures a targeted re-score can recover — the web's rescore button shows iff > 0.
+    ...(recoverable > 0 ? { retryableUnmeasured: recoverable } : {}),
   };
 }
