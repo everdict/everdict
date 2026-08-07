@@ -10,8 +10,10 @@ import type { AnalysisArtifact } from '@/entities/analysis-artifact'
 // sub-agent activity card (parallel/background delegation made visible, Claude Code style). Plain tool calls/results
 // are deliberately NOT rendered — the conversation shows what the agent says and delegates, not its plumbing.
 
-// 작업목록은 전체 덮어쓰기 시맨틱(write_todos)이므로, 같은 목록의 새 스냅샷이 오면 이전 항목을 제거하고
-// 최신 스냅샷 하나만 최신 위치에 남긴다. 내용이 하나도 겹치지 않으면 "새 목록"으로 보고 이전 것을 이력으로 보존한다.
+// 작업목록은 전체 덮어쓰기 시맨틱(write_todos)이므로, 같은 목록의 새 스냅샷이 오면 처음 등장한 그 자리에서
+// 내용만 교체한다(위치·id 모두 안정 — 갱신마다 목록이 바닥으로 이동하면 위 내용이 통째로 당겨지며 스크롤이
+// 튀고, id 가 바뀌면 React 가 리마운트해 스피너·문구가 깜빡인다). 내용이 하나도 겹치지 않으면 "새 목록"으로
+// 보고 이전 것을 이력으로 보존한다.
 const WRITE_TODOS_TOOL = 'write_todos'
 const SPAWN_AGENT_TOOL = 'spawn_agent'
 const CREATE_SANDBOX_TOOL = 'create_sandbox'
@@ -284,12 +286,16 @@ export function buildTranscript(
       if (tc.name === WRITE_TODOS_TOOL) {
         const todos = parseTodosArg(tc.arguments)
         if (todos.length === 0) continue
-        // 항목 내용이 하나라도 겹치면 같은 목록의 갱신 — 이전 스냅샷을 지우고 최신 것만 남긴다.
-        // (활동 카드는 items 인덱스가 아니라 entries 배열 참조로 이어지므로 splice에 안전하다.)
+        // 항목 내용이 하나라도 겹치면 같은 목록의 갱신 — 처음 자리의 스냅샷을 제자리에서 교체한다.
+        // id 는 첫 스냅샷의 것을 유지해 React key 가 안정되게 한다(리마운트·스크롤 점프 방지).
         const sameList = todos.some((td) => lastTodos.some((prev) => prev.content === td.content))
-        if (sameList && lastTodosAt >= 0) items.splice(lastTodosAt, 1)
-        items.push({ kind: 'todos', id: tc.id, todos })
-        lastTodosAt = items.length - 1
+        const anchor = sameList && lastTodosAt >= 0 ? items[lastTodosAt] : undefined
+        if (anchor !== undefined && anchor.kind === 'todos') {
+          items[lastTodosAt] = { kind: 'todos', id: anchor.id, todos }
+        } else {
+          items.push({ kind: 'todos', id: tc.id, todos })
+          lastTodosAt = items.length - 1
+        }
         lastTodos = todos
       } else if (tc.name === CREATE_SANDBOX_TOOL) {
         const delegation = parseDelegationEntry(tc, resultByCallId.get(tc.id))
