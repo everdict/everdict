@@ -237,6 +237,27 @@ describe("PgScorecardStore", () => {
     expect(calls[0]?.params?.[14]).toBeNull(); // no runtime
   });
 
+  it("create persists the verdict-policy stamp, gates and trace projection — a record's fields never silently vanish on insert", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    const stamp = { id: "composed", version: "abc123def456", digest: "sha256:ab" };
+    const gate = {
+      id: "g1",
+      baseline: "sc0",
+      candidate: "sc1",
+      decision: "pass" as const,
+      reasons: [],
+      evidence: { comparability: "full" as const, regressions: 0, improvements: 0, missingCases: 0, trialsGated: false },
+      policy: { maxRegressions: 0 },
+      policyDigest: "sha256:cd",
+      decidedAt: "2026-06-19T00:00:00.000Z",
+    };
+    await new PgScorecardStore(client).create(rec({ verdictPolicy: stamp, gates: [gate], traceProjectionVersion: 6 }));
+    expect(calls[0]?.text).toMatch(/trace_projection_version, verdict_policy, gates/);
+    expect(calls[0]?.params?.[25]).toBe(6);
+    expect(calls[0]?.params?.[26]).toBe(JSON.stringify(stamp));
+    expect(calls[0]?.params?.[27]).toBe(JSON.stringify([gate]));
+  });
+
   it("create persists the owning team, and list SELECTs it back (mig 0106 — the column existed, nothing wrote it)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     await new PgScorecardStore(client).create(rec({ teamId: "team-eng" }));

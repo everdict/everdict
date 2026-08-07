@@ -86,9 +86,9 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, owner_replica, created_at, updated_at)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, owner_replica, created_at, updated_at)";
 const SCORECARD_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)";
 
 function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[] {
   return [
@@ -117,6 +117,12 @@ function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[
     r.error ? JSON.stringify(r.error) : null,
     r.steps ? JSON.stringify(r.steps) : null,
     r.runIds ? JSON.stringify(r.runIds) : null,
+    // Update-era fields ride the INSERT too: a store that accepts a ScorecardRecord and silently drops
+    // a field it knows the column for turns a caller's stamp into nothing (the owner_replica omission
+    // in list() already bit boot recovery once — same trap, write side).
+    r.traceProjectionVersion ?? null,
+    r.verdictPolicy ? JSON.stringify(r.verdictPolicy) : null,
+    r.gates ? JSON.stringify(r.gates) : null,
     // The writer is the driver — same stamp, same reason as the run store's.
     r.ownerReplica ?? replicaId ?? null,
     r.createdAt,
