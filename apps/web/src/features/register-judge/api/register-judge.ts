@@ -62,6 +62,11 @@ export interface JudgeScore {
   // ABSENT on a non-measurement — Score is a discriminated union on `status`, so a crashed or skipped judge
   // carries no value at all. There is no placeholder 0.00 left for the preview to mistake for a verdict.
   value?: number
+  // A CATEGORICAL verdict's answer ("gold" / "correct"), with `value` demoted to its ordering key. The code
+  // judge's own contract tells authors to emit exactly this ({metric:'tier', value:3, label:'gold'}), so a
+  // preview without it prints the author their ordering key — on the screen whose only job is "did my judge
+  // do what I meant?". Same rule as the run detail and the scorecard case dialog.
+  label?: string
   pass?: boolean
   detail?: unknown
   // Measurement status (absent = measured) — the discriminant the preview reads.

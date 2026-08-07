@@ -107,6 +107,12 @@ function StepRail({
 // log block so the debugging signal is readable, not truncated into a chip. Non-measured rows (modern
 // `status` stamp OR legacy prose sentinel) never render their placeholder value as a 0.00 verdict — the
 // authoring preview is the screen that decides whether this judge is healthy.
+// 범주형 지표는 label 이 곧 읽을 값이다(value 는 순서 키로 강등) — 런 상세·스코어카드 케이스 상세의 쌍둥이와 같은 규칙.
+export function judgeScoreDisplay(score: JudgeScore): string {
+  if (score.label !== undefined && score.label !== '') return score.label
+  return score.value?.toFixed(2) ?? '–'
+}
+
 function ScoreRow({ score }: { score: JudgeScore }) {
   const unmeasured = isUnmeasuredScore(score)
   const errorDetail = isErrorDetail(score.detail)
@@ -130,7 +136,7 @@ function ScoreRow({ score }: { score: JudgeScore }) {
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono">{score.metric}</span>
         <span className="tabular-nums">
-          {unmeasured ? (score.status ?? 'unmeasured') : (score.value?.toFixed(2) ?? '–')}
+          {unmeasured ? (score.status ?? 'unmeasured') : judgeScoreDisplay(score)}
           {!unmeasured && score.pass === true
             ? ' · ✓'
             : !unmeasured && score.pass === false
