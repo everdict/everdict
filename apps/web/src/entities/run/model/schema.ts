@@ -26,6 +26,11 @@ export const scoreSchema = z.object({
   // /invalid variants carry no value at all. Required here would reject any run whose grader died.
   value: z.number().optional(),
   pass: z.boolean().optional(),
+  // Categorical outcome (tier/string — "gold" | "correct"): present ⇒ the metric is categorical and the LABEL is
+  // what a reader wants, with `value` demoted to an ordering key. A wire optional the local view leaves out is
+  // STRIPPED by .parse() and the bidirectional AssertAssignable pair cannot see it (an extra optional is
+  // assignable in both directions), so a missing mirror field is a silent data loss the guard never reports.
+  label: z.string().optional(),
   // Matches the contract's `unknown` — code judges emit structured objects, not just prose. Narrowed at render
   // via fmtScoreDetail (string as-is, else compact JSON); typing it string here rejects the whole run/scorecard.
   detail: z.unknown().optional(),

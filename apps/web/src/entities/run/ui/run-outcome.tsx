@@ -33,6 +33,8 @@ type OutcomeRun = Pick<
 // 값 칸 — 스코어카드의 칩(0/1 을 ✓/✗ 로 접는)과 달리 판정 칸이 따로 서 있으므로 언제나 실제 값을 보여준다.
 // 단위 추론은 공용 아톰이 한다(비용 $ / 지연 s / 비율 % / 개수).
 function displayValue(score: Score): string {
+  // 범주형 지표는 label 이 곧 읽을 값이다(value 는 순서 키로 강등) — 스코어카드 케이스 상세의 쌍둥이와 같은 규칙.
+  if (score.label !== undefined && score.label !== '') return score.label
   // 측정이 아닌 행은 호출 전에 걸러진다(isUnmeasuredScore) — 그래도 값이 없으면 대시가 정직한 표시다.
   if (score.value === undefined) return '–'
   return fmtMetricValue(classifyMetric({ metric: score.metric, mean: score.value }), score.value)
