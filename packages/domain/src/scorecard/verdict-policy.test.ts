@@ -58,6 +58,46 @@ describe("evaluateVerdict — the verdict explains itself", () => {
     expect(evaluateVerdict({ scores }, DEFAULT_VERDICT_POLICY).verdict).toBe(false); // default stays unanimous
   });
 
+  it("a REQUIRED metric with no measurement invalidates the case — and the absence states its cause", () => {
+    const strict: VerdictPolicy = {
+      ...DEFAULT_VERDICT_POLICY,
+      metrics: [
+        { match: { metric: "tests_pass" }, authority: "ground_truth", verdictRole: "required" },
+        ...DEFAULT_VERDICT_POLICY.metrics,
+      ],
+    };
+    // the required metric is only UNMEASURED (grader died) — a judge alone must not carry the verdict
+    const scores: Score[] = [
+      { graderId: "tests-pass", metric: "tests_pass", value: 0, status: "unmeasured", reason: "grader_error" },
+      s("judge:quality", true),
+    ];
+    expect(evaluateVerdict({ scores }, strict)).toEqual({
+      invalidated: { reason: "required_metric_missing", metric: "tests_pass" },
+    });
+    // with the measurement present the same policy decides normally
+    expect(evaluateVerdict({ scores: [s("tests_pass", true)] }, strict).verdict).toBe(true);
+    // missingPolicy exclude_metric: proceed without it — the judge decides
+    const lax: VerdictPolicy = {
+      ...strict,
+      metrics: strict.metrics.map((d, i) => (i === 0 ? { ...d, missingPolicy: "exclude_metric" as const } : d)),
+    };
+    expect(evaluateVerdict({ scores }, lax).verdict).toBe(true);
+  });
+
+  it("diagnostic/excluded metrics explain or observe — they never decide", () => {
+    const policy: VerdictPolicy = {
+      ...DEFAULT_VERDICT_POLICY,
+      metrics: [
+        { match: { metric: "advisory_check" }, authority: "objective", verdictRole: "diagnostic" },
+        ...DEFAULT_VERDICT_POLICY.metrics,
+      ],
+    };
+    // the failing diagnostic cannot veto the passing judge
+    expect(evaluateVerdict({ scores: [s("advisory_check", false), s("judge:q", true)] }, policy).verdict).toBe(true);
+    // and alone it decides nothing
+    expect(evaluateVerdict({ scores: [s("advisory_check", false)] }, policy)).toEqual({});
+  });
+
   it("an infra-failed case yields no verdict and no basis under any policy", () => {
     const failure = { stage: "dispatch", class: "infra", code: "X", message: "m", retryable: true } as const;
     expect(evaluateVerdict({ scores: [s("state", true)], failure })).toEqual({});

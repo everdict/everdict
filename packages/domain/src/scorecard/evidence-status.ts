@@ -22,7 +22,7 @@ function snapshotPresent(result: Pick<CaseResult, "snapshot">): boolean {
 }
 
 export function evidenceStatus(
-  result: Pick<CaseResult, "trace" | "snapshot"> & Pick<Partial<CaseResult>, "failure" | "traceRef">,
+  result: Pick<CaseResult, "trace" | "snapshot"> & Pick<Partial<CaseResult>, "failure" | "traceRef" | "traceSealed">,
 ): EvidenceStatus {
   const failure = result.failure;
   const hasEvents = result.trace.length > 0;
@@ -34,8 +34,14 @@ export function evidenceStatus(
     trace = hasEvents ? "partial" : "missing";
   } else if (!hasEvents && result.traceRef) {
     trace = "deferred"; // control-plane collection pending — absence is a state, not a loss
+  } else if (result.traceSealed === true) {
+    trace = "complete"; // the producer VOUCHED — the only positive claim of completeness
+  } else if (hasEvents) {
+    // Events with no seal and no recorded failure: absence of bad news is not completeness — a trace
+    // truncated without a recorded collect failure looks exactly like this. Read as partial, not complete.
+    trace = result.traceSealed === undefined ? "complete" : "partial"; // legacy rows (pre-seal) keep their old reading
   } else {
-    trace = hasEvents ? "complete" : "missing";
+    trace = "missing";
   }
   return { trace, snapshot: snapshotPresent(result) ? "complete" : "missing" };
 }

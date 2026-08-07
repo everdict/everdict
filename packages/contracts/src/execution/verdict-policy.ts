@@ -38,6 +38,19 @@ export const MetricDefinitionSchema = z.object({
   // Reading direction for numeric deltas (diff/comparability): absent = unknown → a consumer must not
   // interpret the delta's sign as improvement/regression.
   direction: z.enum(["higher_is_better", "lower_is_better", "neutral"]).optional(),
+  // Value kind — declares what the number MEANS (a boolean 0/1, a real numeric, a categorical ordering key).
+  // Absent = inferred (label presence ⇒ categorical). The diff layer flags a kind change as incomparable.
+  kind: z.enum(["boolean", "numeric", "categorical"]).optional(),
+  // What this metric may do to the verdict. Absent = "supporting" (decides on its rung, as before).
+  // required   — the case CANNOT have a verdict without a measured score of this metric (see missingPolicy)
+  // supporting — decides on its authority rung when present (the default)
+  // diagnostic — explains, never decides (a criterion/milestone-style metric)
+  // excluded   — never touches the verdict at all
+  verdictRole: z.enum(["required", "supporting", "diagnostic", "excluded"]).optional(),
+  // With verdictRole "required": what a MISSING measurement does. "invalidate_case" (default) — the case has
+  // no verdict (unmeasured; a verdict standing on a hole it declared essential is not a verdict);
+  // "exclude_metric" — proceed without it (the metric merely stops contributing).
+  missingPolicy: z.enum(["invalidate_case", "exclude_metric"]).optional(),
 });
 export type MetricDefinition = z.infer<typeof MetricDefinitionSchema>;
 

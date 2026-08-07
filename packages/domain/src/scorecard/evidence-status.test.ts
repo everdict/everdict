@@ -43,6 +43,14 @@ describe("evidenceStatus — completeness as a value, derived not self-reported"
     ).toEqual({ trace: "missing", snapshot: "missing" }); // infra post-mortem events are not the agent's trajectory
   });
 
+  it("the positive seal is the only path to complete for sealed-era producers", () => {
+    // sealed → complete; explicitly unsealed (false) with events → partial (truncation is indistinguishable
+    // from completeness without the producer's vouch); legacy rows (field absent) keep their old reading.
+    expect(evidenceStatus({ trace: events, snapshot: repoSnapshot, traceSealed: true }).trace).toBe("complete");
+    expect(evidenceStatus({ trace: events, snapshot: repoSnapshot, traceSealed: false }).trace).toBe("partial");
+    expect(evidenceStatus({ trace: events, snapshot: repoSnapshot }).trace).toBe("complete");
+  });
+
   it("control-plane collection pending reads deferred — absence is a state, not a loss", () => {
     expect(
       evidenceStatus({

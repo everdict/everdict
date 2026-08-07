@@ -376,6 +376,9 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       caseId: evalCase.id,
       harness: `${deps.harness.id}@${deps.harness.version}`,
       trace,
+      // The positive seal: this producer ran the collection path to completion (deferred collection is NOT
+      // sealed here — the control plane seals after its own pull; a collect failure never seals).
+      ...(!defer && !collectFailure ? { traceSealed: true } : {}),
       // On a collect failure the deferred observation scoring happens control-plane-side — hand it the
       // materialized snapshot (screenshot embedded), same as defer mode.
       snapshot: collectFailure ? materialized : snapshot,

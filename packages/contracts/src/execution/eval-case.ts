@@ -125,6 +125,11 @@ export const CaseResultSchema = z.object({
   // by caseId; the per-trial verdict reuses caseVerdict. docs/architecture/trial-based-verdict.md
   trial: z.number().int().nonnegative().optional(),
   trace: z.array(TraceEventSchema),
+  // POSITIVE trace seal — the producer VOUCHES that collection ran to completion (runCase's normal path).
+  // "has events + no recorded collect failure" is only absence of bad news; a trace truncated without a
+  // recorded failure is indistinguishable from a complete one unless the producer says so. Absent on legacy
+  // rows and on producers that cannot vouch (evidenceStatus then falls back to the heuristic reading).
+  traceSealed: z.boolean().optional(),
   // The absolute instant this result's trace `t` offsets count from, DECLARED by the producer that knows it
   // (the topology backend: the front-door drive's start). The sealer passes it through as the execution
   // segment's `t0`, which is what lets a trace whose events carry only relative `t` (an inline front-door

@@ -29,8 +29,11 @@ export interface VerdictBasis {
 }
 
 export interface VerdictEvaluation {
-  verdict?: boolean; // absent = nothing decided (unmeasured case, or infra_failed)
+  verdict?: boolean; // absent = nothing decided (unmeasured case, infra_failed, or invalidated below)
   basis?: VerdictBasis; // present exactly when verdict is
+  // Set when a REQUIRED metric had no measurement and its missingPolicy invalidates the case — the absence
+  // of a verdict then has a stated cause, not just an empty object.
+  invalidated?: { reason: "required_metric_missing"; metric: string };
 }
 
 // The historical authority ladder as a policy document. version bumps REQUIRE review (constitution-gated
@@ -108,7 +111,24 @@ export function evaluateVerdict(
   // A case that never legitimately executed has no product verdict (caseOutcome's infra_failed).
   if (result.failure && PRE_OUTCOME_STAGES.has(result.failure.stage)) return {};
   // Only measurements decide — unmeasured/invalid placeholders never reach a rung.
-  const candidates = dedupeByMetric(measuredScores(result.scores));
+  const measured = measuredScores(result.scores);
+
+  // A REQUIRED metric with no measurement invalidates the case (its declared missingPolicy) — a verdict
+  // standing on a hole it declared essential is not a verdict, and the absence states its cause.
+  for (const d of policy.metrics) {
+    if (d.verdictRole !== "required") continue;
+    if ((d.missingPolicy ?? "invalidate_case") !== "invalidate_case") continue;
+    if (!measured.some((s) => metricMatches(d.match, s.metric))) {
+      const metric = "metric" in d.match ? d.match.metric : `${d.match.prefix}*`;
+      return { invalidated: { reason: "required_metric_missing", metric } };
+    }
+  }
+
+  const candidates = dedupeByMetric(measured).filter((c) => {
+    // diagnostic/excluded metrics explain or observe — they never decide (stripped before any rung).
+    const def = policy.metrics.find((d) => metricMatches(d.match, c.metric));
+    return def?.verdictRole !== "diagnostic" && def?.verdictRole !== "excluded";
+  });
 
   // Index each pass-bearing metric to its first matching definition (declaration order = priority).
   const matched = new Map<string, number>(); // metric → definition index
