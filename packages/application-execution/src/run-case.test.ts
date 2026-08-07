@@ -253,10 +253,13 @@ describe("runCase — the case's world rides the ComputeSpec", () => {
       },
     } as Driver;
 
-    await runCase(
-      { ...CASE, env: { kind: "browser" } } as EvalCase,
-      { driver, environment: ENVIRONMENT, harness: completingHarness(), graders: [], runCtx: { apiKeyEnv: {}, timeoutSec: 60 } },
-    );
+    await runCase({ ...CASE, env: { kind: "browser" } } as EvalCase, {
+      driver,
+      environment: ENVIRONMENT,
+      harness: completingHarness(),
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
     expect(captured[0]).toEqual({ os: "linux", needs: ["shell", "browser"] });
   });
 });
