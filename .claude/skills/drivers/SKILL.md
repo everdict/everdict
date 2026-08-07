@@ -19,7 +19,14 @@ Isolation/placement is the Backend's job (see skill `backends`) — this is the 
 3. The caller releases in a `finally` — `runCase` provisions once, `await compute.dispose()` always (`packages/run-case/src/run-case.ts`).
 4. A non-zero exit is a *result* `{exitCode, stdout, stderr}`, never a throw; only infra faults throw.
 5. Remap OS/SDK faults to an `AppError` — `COMPUTE_EXEC_FAILED` / `DRIVER_PROVISION_FAILED`; never leak raw.
-6. **Honor the declared world pre-flight.** `ComputeSpec.os` (case `placement.os`) and `ComputeSpec.needs`
+6. **Honor the declared world pre-flight — and never default it yourself.** `placement.os` is optional, so
+   `resolvePlacementOs(placement)` (`@everdict/contracts`) is the ONE place the linux default is decided; it
+   returns `{os, resolved: "declared"|"defaulted"}` and `runCase` records BOTH on `CaseResult.execution`
+   (the execution manifest — `docs/scorecards.md`), including your `Driver.id`. Never write `?? "linux"`:
+   that is how an authored linux and an unset os became the same byte. A site that deliberately provisions
+   linux regardless of any case (the script grader's grading image, workspace file execution) names
+   `DEFAULT_PLACEMENT_OS` so it reads as a decision, not a resolution.
+   `ComputeSpec.os` (the resolved world) and `ComputeSpec.needs`
    (derived by `computeNeedsFor(evalCase)` from the env kind: repo/prompt→shell, browser→+browser,
    os-use→+desktop) are DECLARATIONS the driver satisfies or refuses BEFORE execution — never silently
    substitutes. Local/Docker refuse non-linux os AND the `desktop` need (neither is a desktop world);

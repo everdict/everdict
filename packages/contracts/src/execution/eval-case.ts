@@ -21,14 +21,42 @@ export const GraderSpecSchema = z.object({
 });
 export type GraderSpec = z.infer<typeof GraderSpecSchema>;
 
+// The worlds an evaluation can declare. One vocabulary for the case's placement hint, the driver's
+// ComputeSpec, the os-<x> placement capabilities and the execution manifest below.
+export const PlacementOsSchema = z.enum(["linux", "windows", "macos"]);
+export type PlacementOs = z.infer<typeof PlacementOsSchema>;
+
 // Placement hint — the control-plane router reads it when deciding which backend to send to.
 // The agent ignores this field (where it runs is not the agent's concern).
 export const PlacementSchema = z.object({
   target: z.string().optional(), // registered backend name (e.g. "nomad-seoul")
-  os: z.enum(["linux", "windows", "macos"]).optional(),
+  os: PlacementOsSchema.optional(),
   isolation: z.string().optional(), // e.g. "gvisor"
 });
 export type Placement = z.infer<typeof PlacementSchema>;
+
+// The world every lane falls back to when nobody declared one. Named, not inlined, so the decision has
+// exactly ONE definition instead of a `?? "linux"` scattered across the drivers, the topology builders and
+// the capability derivation — each of which used to make it privately and silently.
+export const DEFAULT_PLACEMENT_OS: PlacementOs = "linux";
+
+// The single point at which "which world does this run in?" is decided, and the ONLY thing that knows
+// whether the answer was authored or defaulted.
+//
+// `placement.os` is optional, so every consumer defaulted it to linux on its own — and once provisioning
+// was over, an authored `linux` and an unset os were the same byte. That makes "did this suite ever run on
+// Windows?" and "was this case's world ever chosen deliberately?" unanswerable after the fact, which is
+// exactly the question an OS-specific regression asks. So the resolution RETURNS its provenance, and the
+// producers record it on the execution manifest instead of throwing it away.
+export function resolvePlacementOs(placement?: { os?: PlacementOs }): {
+  os: PlacementOs;
+  resolved: "declared" | "defaulted";
+} {
+  const declared = placement?.os;
+  return declared !== undefined
+    ? { os: declared, resolved: "declared" }
+    : { os: DEFAULT_PLACEMENT_OS, resolved: "defaulted" };
+}
 
 // A verifiable intermediate expectation on the way to the case's final outcome — case DATA, like `expected`.
 // At judge time milestones merge into the judge's criteria (metric judge:<judge-id>:milestone:<id>), so when the
@@ -94,6 +122,33 @@ export const CaseProvenanceSchema = z.object({
   billedModels: z.array(z.object({ id: z.string(), model: z.string() })).optional(),
 });
 export type CaseProvenance = z.infer<typeof CaseProvenanceSchema>;
+
+// The WORLD a case actually ran in — observed at the execution site by the producer that provisioned the
+// compute, the sibling of `provenance` above (which is stamped by the CONTROL PLANE and says who ran it).
+// Deliberately split that way: provenance is a claim the platform makes about a run, the manifest is a
+// report the execution site makes about itself, and mixing the two would make neither auditable.
+//
+// A scorecard's manifest pins the evaluation DEFINITION (dataset/harness/judge versions, the verdict
+// policy). Nothing pinned the evaluation WORLD, so a result carried no record of the os it landed on, the
+// driver that provisioned it, or the image it came out of — the run was reproducible on paper and
+// unreproducible in fact.
+//
+// Written ONLY where compute was genuinely provisioned or a topology genuinely deployed. A synthesized
+// failure (dispatch died, retries ran out, an ingested trace) ran in no world at all, and inventing one for
+// it would be the same fabrication the field exists to prevent — those results carry no manifest, and its
+// ABSENCE reads as "not recorded", never as "linux".
+export const ExecutionManifestSchema = z.object({
+  // The RESOLVED world (resolvePlacementOs) — never absent while the manifest exists, because the manifest
+  // is only written where the resolution actually happened.
+  os: PlacementOsSchema,
+  // Whether the case AUTHORED that os or the default decided it. The whole point of the manifest: without
+  // this, `placement.os: "linux"` and no placement at all leave identical evidence.
+  osResolved: z.enum(["declared", "defaulted"]),
+  driver: z.string().optional(), // Driver.id — "local" | "docker" (absent on lanes that provision no Driver)
+  image: z.string().optional(), // the image the compute was provisioned from (EvalCase.image)
+  runtime: z.string().optional(), // TopologyRuntime.id — the topology lane's answer to "driver"
+});
+export type ExecutionManifest = z.infer<typeof ExecutionManifestSchema>;
 
 // The platform coordinates of a case whose collection is deferred out of the job (to the control plane) — when spec.trace.collect="control-plane"
 // the agent loads it and executeCase completes the result by pull + scoring the deferred observation (kept as provenance even after collection).
@@ -162,6 +217,10 @@ export const CaseResultSchema = z.object({
   // (that is a grader verdict, not a failure). Drives class-aware retry. docs/architecture/batch-resilience.md
   failure: CaseFailureSchema.optional(),
   provenance: CaseProvenanceSchema.optional(), // provenance of unmanaged execution like self-hosted (control-plane stamp)
+  // The world this case ran in, self-reported by the execution site (above). Absent = the producer
+  // provisioned nothing and has nothing to report — NOT "it ran on linux". Purely additive, so it does not
+  // move the evidence era: an era-2 row with no manifest is a row nobody recorded a world for.
+  execution: ExecutionManifestSchema.optional(),
   traceRef: TraceRefSchema.optional(), // control-plane collection target (above) — absent for job collection (default)
   // Evidence extracted from a pulled trace (mapping evidence slots) — the carrier that brings CUSTOM named slots
   // to the judges (GradeContext.evidence); the fixed slots also synthesize the browser snapshot above.

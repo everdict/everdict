@@ -1,4 +1,5 @@
 import type {
+  ExecutionManifest as WireExecutionManifest,
   MetricSummary as WireMetricSummary,
   Score as WireScore,
   ScorecardExport as WireScorecardExport,
@@ -112,6 +113,20 @@ export const caseResultSchema = z
       .optional(),
     // Evidence completeness per case — a verdict standing on partial evidence says so.
     evidenceStatus: z.object({ trace: z.string(), snapshot: z.string() }).passthrough().optional(),
+    // The world this case actually ran in (execution manifest) — os + whether the case authored it, plus the
+    // driver/image/runtime that produced the compute. Absent = the producer recorded no world (a synthesized
+    // dispatch failure, an ingested trace); the UI hides the strip rather than inventing linux. Loose local
+    // view: os stays a string so a new world never rejects the whole scorecard.
+    execution: z
+      .object({
+        os: z.string(),
+        osResolved: z.string(),
+        driver: z.string().optional(),
+        image: z.string().optional(),
+        runtime: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
     scores: z.array(caseScoreSchema).default([]),
     trace: z.array(traceEventSchema).default([]), // case execution trace — error events expose the failure spans
     // classified failure (loose) — runnerId links a self-hosted no_runner/capability_mismatch case to the runner it
@@ -489,6 +504,13 @@ type _scoreDetailAccepts = AssertAssignable<
 // optional here from drifting back to required (which would reject an unmeasured row) and what will fail
 // the web build if a variant grows a field the display needs.
 type _scoreAcceptsEveryVariant = AssertAssignable<WireScore, z.infer<typeof caseScoreSchema>>
+// The execution manifest the control plane serves must fit this local view — the guard fails the web build
+// if a field is retyped. It CANNOT catch a newly ADDED optional field (still assignable both ways), which is
+// why schema.test.ts parses a full manifest and asserts what survived.
+type _executionAccepts = AssertAssignable<
+  WireExecutionManifest,
+  NonNullable<z.infer<typeof caseResultSchema>['execution']>
+>
 // ScorecardOrigin is narrower (omits retryOf/memoryBoostMb) — Pick-reverse.
 type _originFieldsOnWire = AssertAssignable<
   Pick<WireScorecardResponseOrigin, keyof WebScorecardOrigin>,

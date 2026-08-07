@@ -142,6 +142,46 @@ collision-resistant evidence about the document; a legacy FNV stamp answers "is 
 against honest data but never "was this tampered with?". Under either, the write barriers are the
 admin-gated submit paths.
 
+## Two manifests: the evaluation DEFINITION and the evaluation WORLD
+The batch manifest above pins **what we evaluated**. Nothing pinned **where it ran**, so a result carried no
+record of the OS it landed on, the driver that provisioned its compute, or the image that compute came out
+of. The batch was reproducible on paper and unreproducible in fact.
+
+`CaseResult.execution` (`ExecutionManifest`, `@everdict/contracts`) is the per-case second half — the WORLD,
+observed at the execution site:
+
+| field | who fills it | what it says |
+| --- | --- | --- |
+| `os` | every producer that writes a manifest | the RESOLVED world (`resolvePlacementOs`) |
+| `osResolved` | same | `declared` (the case authored it) vs `defaulted` (the platform default decided) |
+| `driver` | `runCase` | `Driver.id` — `local` / `docker` |
+| `image` | `runCase` | the image the compute was provisioned from (`EvalCase.image`) |
+| `runtime` | the service-topology backend | `TopologyRuntime.id` — that lane's answer to "driver" |
+
+It is the sibling of `provenance`, and the split is deliberate: **provenance is a claim the CONTROL PLANE
+makes about a run** (who ran it, on whose runner, which models the workspace paid for), **the execution
+manifest is a report the EXECUTION SITE makes about itself**. Mixing the two would make neither auditable —
+so the runner identity stays on `provenance.runner`, where it is stamped by the party that actually knows it.
+
+**`osResolved` is the point of the field.** `placement.os` is optional, and every consumer used to default it
+to linux privately (`?? "linux"` in `runCase`, in the Nomad topology builders, in the capability derivation).
+Once provisioning ended, an authored `linux` and an unset os were the same byte — which is exactly why
+"did this suite ever run on Windows?" and "was this case's world ever chosen deliberately?" had no answer.
+`resolvePlacementOs(placement)` is now the ONE definition of that decision, it RETURNS its own provenance, and
+`runCase` records the answer instead of discarding it. The two deliberate linux hardcodes that remain (the
+script grader's dedicated grading image, the workspace file-execution image) call `DEFAULT_PLACEMENT_OS` by
+name so they read as decisions rather than as resolutions.
+
+**Absence is a statement.** The manifest is written ONLY where compute was genuinely provisioned or a topology
+genuinely deployed. A synthesized dispatch failure, a retry-exhausted case, an ingested trace — those ran in no
+world at all, and a missing manifest means "nobody recorded a world", never "it ran on linux". Because the
+field is purely additive it does NOT move the evidence era: era 2 with no manifest is simply a row nobody
+recorded a world for.
+
+Not yet an analysis dimension: `ANALYSIS_DIMENSIONS` pivots over the lightweight scorecard LIST shape, which
+carries no per-case results, so grouping by `os` needs a persisted per-batch rollup first (and a decision about
+what the os of a mixed-world batch even means). The per-case fact now exists, which is the prerequisite.
+
 ## The release gate: critical cases and multiple comparisons
 `evaluateGate(diff, policy)` (`@everdict/domain`) is the CI decision — `pass | block | blocked_missing |
 not_comparable`, only the first a green light. Two rules sit on top of the fail-closed comparability

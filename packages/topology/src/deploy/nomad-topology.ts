@@ -1,8 +1,11 @@
 import {
   BadRequestError,
+  DEFAULT_PLACEMENT_OS,
+  type PlacementOs,
   type RegistryAuth,
   type ServiceHarnessSpec,
   type TopologyService,
+  resolvePlacementOs,
   serviceIsHostExec,
 } from "@everdict/contracts";
 import { flattenEnv, pickRegistryAuth } from "@everdict/domain";
@@ -258,7 +261,10 @@ export function perServiceGroupName(name: string): string {
 }
 
 // Group placement constraint for a service's intrinsic OS — the Nomad realization of the os-<x> capability.
-function osConstraint(os: "linux" | "windows" | "macos" | undefined): NomadConstraint {
+// Reads the service's world through the SAME resolution the drivers provision under (resolvePlacementOs),
+// so a Nomad constraint can never disagree with the world the case is recorded as running in.
+function osConstraint(requires: { os?: PlacementOs } | undefined): NomadConstraint {
+  const { os } = resolvePlacementOs(requires);
   return {
     LTarget: "${attr.kernel.name}",
     Operand: "=",
@@ -271,7 +277,9 @@ function osConstraint(os: "linux" | "windows" | "macos" | undefined): NomadConst
 // the same port twice in a shared netns), OR carries a host-exec service (raw_exec has no netns to co-locate in).
 // A homogeneous, single-instance Linux container topology stays co-located (no regression).
 export function needsPerServiceGroups(spec: ServiceHarnessSpec): boolean {
-  return spec.services.some((s) => (s.requires?.os ?? "linux") !== "linux" || s.replicas > 1 || serviceIsHostExec(s));
+  return spec.services.some(
+    (s) => resolvePlacementOs(s.requires).os !== DEFAULT_PLACEMENT_OS || s.replicas > 1 || serviceIsHostExec(s),
+  );
 }
 
 // Nomad-native service name a peer registers under (stable per harness/service/zone → discoverable via the catalog).
@@ -555,7 +563,7 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
     // Windows/macOS groups can't use the Linux bridge netns — omit Mode (host networking) there.
     // A host-exec process has no port mapping at all: it binds its DECLARED port directly on the node, so that port
     // is RESERVED (discovery then yields the real address) instead of dynamically mapped.
-    const kernel = svc.requires?.os ?? "linux";
+    const kernel = resolvePlacementOs(svc.requires).os;
     const network: NomadNetwork | undefined =
       svc.port !== undefined
         ? hostExec
@@ -565,7 +573,7 @@ function buildPerServiceGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOpti
     return {
       Name: perServiceGroupName(svc.name),
       Count: svc.replicas,
-      Constraints: [osConstraint(svc.requires?.os)],
+      Constraints: [osConstraint(svc.requires)],
       ...(network ? { Networks: [network] } : {}),
       ...(svc.port !== undefined
         ? { Services: [{ Name: nomadServiceName(spec, svc.name, opts.zoneId), PortLabel: label, Provider: "nomad" }] }

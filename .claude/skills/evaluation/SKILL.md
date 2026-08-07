@@ -97,7 +97,16 @@ bounded by `CaseResult.evidenceVersion` (`CURRENT_EVIDENCE_VERSION`, contracts):
 a CaseResult stamps the era, so from era 2 on an unsealed result with a trajectory reads `partial` (the
 producer declined to vouch) while an era-less legacy row keeps its old `complete` reading. Ingest (push AND
 pull) therefore reads partial by design — it scores a trace nobody here watched being collected. Adding a
-CaseResult producer means stamping it. trend/leaderboard flag `policyMixed` and suppress cross-policy regression flags; diff lists
+CaseResult producer means stamping it — **and, if it PROVISIONS, filling `CaseResult.execution`**
+(`ExecutionManifest`): the batch manifest pins the evaluation DEFINITION, this pins the evaluation WORLD
+(`os` + `osResolved` declared|defaulted · `driver`=`Driver.id` · `image` · `runtime`=`TopologyRuntime.id`).
+Sibling of `provenance` and deliberately split from it — provenance is what the CONTROL PLANE claims about a
+run, the manifest is what the EXECUTION SITE reports about itself (so the runner id stays on
+`provenance.runner`). `resolvePlacementOs(placement)` (contracts) is the ONE place `placement.os ?? "linux"`
+is decided and the only thing that knows whether the answer was AUTHORED — every consumer used to default it
+privately, which made an authored `linux` and an unset os the same byte. Written only where compute was
+actually provisioned / a topology actually deployed: a synthesized failure or an ingested trace carries NO
+manifest, and its absence means "no world recorded", never linux. Additive, so it does not move the era. trend/leaderboard flag `policyMixed` and suppress cross-policy regression flags; diff lists
 `incomparable` (kind_changed) + `overlap`. `preferredMetric` resolves absent metric axes from the data. **The ranking has exactly one
 implementation and is SERVED, never recomputed by a client**: a scorecard's per-case `verdict` and
 `RunRecord.verdict` (derived on read next to `usage`, in `withRunUsage`) both come from this engine, and the

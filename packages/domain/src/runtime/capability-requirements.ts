@@ -3,9 +3,11 @@ import type {
   CaseJob,
   EvalCase,
   HarnessSpec,
+  PlacementOs,
   RuntimeSpec,
   ServiceHarnessSpec,
 } from "@everdict/contracts";
+import { resolvePlacementOs } from "@everdict/contracts";
 import { isHardenedRuntime } from "./trust-zone-hardening.js";
 
 // Derive the capabilities a case requires to run — decided from case fields (image/env.kind/source/placement.isolation).
@@ -47,9 +49,14 @@ export function computeNeedsFor(evalCase: Pick<EvalCase, "env">): Array<"shell" 
 
 // Map a service's intrinsic OS need to its placement capability. linux is the implicit default (no capability, no
 // gate), so it — and an unset os — derive nothing.
-function osCapability(os: "linux" | "windows" | "macos" | undefined): CapabilityName | undefined {
-  if (os === "windows") return "os-windows";
-  if (os === "macos") return "os-macos";
+// The resolution goes through resolvePlacementOs, the same function the drivers provision under and the execution
+// manifest records: the gate and the world a case lands in must be answering from one definition. Behavior is
+// unchanged — an unset os resolves to linux, and linux (declared or defaulted) still derives no capability,
+// deliberately: linux is the world every runtime is assumed to offer, so gating on it would gate on everything.
+function osCapability(os: PlacementOs | undefined): CapabilityName | undefined {
+  const { os: world } = resolvePlacementOs({ os });
+  if (world === "windows") return "os-windows";
+  if (world === "macos") return "os-macos";
   return undefined;
 }
 

@@ -30,6 +30,17 @@ export type CaseSnapshotView = {
   domRef?: string
 }
 
+// 이 케이스가 "실제로 어떤 세계에서 돌았나" — 실행 매니페스트 그대로. osResolved 가 defaulted 면 케이스가
+// os 를 쓴 적이 없고 기본값이 정한 것이다(선언한 linux 와 구별되는 사실). 없으면 아예 기록이 없다는 뜻이므로
+// 스트립을 숨긴다 — linux 로 지어내지 않는다.
+export type CaseExecutionView = {
+  os: string
+  osResolved: string
+  driver?: string
+  image?: string
+  runtime?: string
+}
+
 export type ScorecardCaseView = {
   // 행의 유일 키 — 트라이얼 배치에서는 같은 caseId 가 여러 행(트라이얼)으로 반복되므로 caseId 만으로는
   // 선택을 특정할 수 없다. 유일하면 caseId 그대로, 중복이면 `caseId#n` (n = 목록 내 등장 순번).
@@ -55,6 +66,8 @@ export type ScorecardCaseView = {
   runnerHint?: string
   // 자식 run 이 없어도(레거시·ingest) 임베디드 트레이스로 실행 증거를 열 수 있는가.
   hasTrace: boolean
+  // 실행 매니페스트 — 이 케이스가 돌아간 세계 (컴퓨트를 실제로 잡은 생산자만 기록한다).
+  execution?: CaseExecutionView
   // 데이터셋 케이스 정의 — "이 케이스가 무엇이었는가". 트레이스 평가/데이터셋 조회 실패 시 없다.
   task?: string
   envKind?: string

@@ -18,7 +18,7 @@ import type {
   Score,
   TraceEvent,
 } from "@everdict/contracts";
-import { CURRENT_EVIDENCE_VERSION, UpstreamError, stamp } from "@everdict/contracts";
+import { CURRENT_EVIDENCE_VERSION, UpstreamError, resolvePlacementOs, stamp } from "@everdict/contracts";
 import {
   classifyFailure,
   computeNeedsFor,
@@ -243,8 +243,11 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
   // repo/prompt→shell, browser→+browser, os-use→+desktop) — and the driver satisfies it or refuses before
   // execution. `needs: ["shell"]` used to be hardcoded here, so an os-use case reached a process driver that
   // could never conjure its desktop and failed downstream instead of at the pre-flight gate.
+  // The os resolution goes through resolvePlacementOs and is KEPT (→ the execution manifest below): this is
+  // the moment the `?? "linux"` decision is made, and it used to be the moment the answer was lost.
+  const world = resolvePlacementOs(evalCase.placement);
   const compute = await deps.driver.provision({
-    os: evalCase.placement?.os ?? "linux",
+    os: world.os,
     needs: computeNeedsFor(evalCase),
     image: evalCase.image,
   });
@@ -415,6 +418,15 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       caseId: evalCase.id,
       harness: `${deps.harness.id}@${deps.harness.version}`,
       evidenceVersion: CURRENT_EVIDENCE_VERSION, // the era this result was produced in — see the seal below
+      // The world this case actually ran in. runCase is the site that PROVISIONS, so it is the site that
+      // knows: the resolved os and whether the case authored it, the driver that handed back the compute,
+      // and the image (if any) that compute came out of.
+      execution: {
+        os: world.os,
+        osResolved: world.resolved,
+        driver: deps.driver.id,
+        ...(evalCase.image !== undefined ? { image: evalCase.image } : {}),
+      },
       trace,
       // The positive seal: this producer ran the collection path to completion (deferred collection is NOT
       // sealed here — the control plane seals after its own pull; a collect failure never seals).

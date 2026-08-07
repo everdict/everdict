@@ -26,6 +26,7 @@ import {
   type TraceEvent,
   type TraceEvidence,
   type TrustZone,
+  resolvePlacementOs,
   stamp,
 } from "@everdict/contracts";
 import type { TopologyStatus } from "@everdict/contracts/wire";
@@ -520,6 +521,10 @@ export class ServiceTopologyBackend
     // control plane can rediscover it for the live-screen capture (observability ⑦). Falls back to a fresh id.
     const runId = job.runId ?? (this.opts.newRunId ?? newRunId)();
     const keys = keysFor(runId);
+    // The case's declared world, resolved once — the same resolution requiredCapabilities gated this dispatch
+    // on. Recorded on the result's execution manifest so "was this case's os authored or defaulted?" survives
+    // the run instead of being decided privately and thrown away.
+    const caseWorld = resolvePlacementOs(job.evalCase.placement);
 
     // The infra-plane record of THIS dispatch (topology readiness, seeding, target acquisition, the drive) —
     // appended to the result's trace so the sealed trajectory tells the whole placement story, the same account
@@ -952,6 +957,15 @@ export class ServiceTopologyBackend
         // The era, with no seal: the front-door drive hands back whatever trace the topology produced, and
         // this backend never watched the collection run to completion — it cannot vouch for it.
         evidenceVersion: CURRENT_EVIDENCE_VERSION,
+        // The world, as far as THIS lane knows it: no Driver is provisioned here (the topology runtime
+        // places the stack itself), so the manifest carries the resolved os declaration the placement gate
+        // admitted this case under, plus the runtime that stood the stack up. No `driver` — claiming one
+        // would name compute nobody provisioned.
+        execution: {
+          os: caseWorld.os,
+          osResolved: caseWorld.resolved,
+          runtime: this.opts.runtime.id,
+        },
         trace: [...trace, ...infraMarks, ...targetInfra, ...infra, ...serviceLogEvents],
         snapshot,
         scores,

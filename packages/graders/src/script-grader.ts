@@ -1,6 +1,7 @@
 import {
   BadRequestError,
   type ComputeHandle,
+  DEFAULT_PLACEMENT_OS,
   type GradeContext,
   type Grader,
   type Score,
@@ -75,7 +76,11 @@ export class ScriptGrader implements Grader {
           "The script grader's image mode needs a provisioning driver (process-harness runCase path only).",
         );
       }
-      const dedicated = await ctx.provision({ os: "linux", needs: ["shell"], image: this.cfg.image });
+      // DELIBERATELY the default world, not the case's: a grader image is a linux container by construction
+      // (the script runs `sh`), and a windows case must not drag its scoring script onto a windows host that
+      // has no such image. Named rather than inlined so this stays visibly a decision — the resolver
+      // (resolvePlacementOs) is what the CASE's compute goes through, and these two must not be confused.
+      const dedicated = await ctx.provision({ os: DEFAULT_PLACEMENT_OS, needs: ["shell"], image: this.cfg.image });
       try {
         return await this.runIn(dedicated, ctx);
       } finally {

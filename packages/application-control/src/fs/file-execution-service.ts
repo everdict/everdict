@@ -3,6 +3,7 @@ import {
   AppError,
   BadRequestError,
   type ComputeHandle,
+  DEFAULT_PLACEMENT_OS,
   type Driver,
   FILE_EXECUTION_DEFAULT_TIMEOUT_SEC,
   FILE_EXECUTION_MAX_OUTPUT_CHARS,
@@ -166,7 +167,10 @@ export class FileExecutionService {
     let compute: ComputeHandle | undefined;
     let startedAt = Date.now();
     try {
-      compute = await target.provision({ os: "linux", image: plan.image, needs: ["shell"] });
+      // DELIBERATELY the default world: a workspace file runs in the linux interpreter image fileRunPlanFor
+      // chose (python/node/sh). There is no case here to declare an os, so this is a decision rather than a
+      // resolution — named, so it reads as one and greps alongside resolvePlacementOs's call sites.
+      compute = await target.provision({ os: DEFAULT_PLACEMENT_OS, image: plan.image, needs: ["shell"] });
       startedAt = Date.now();
       await compute.writeFile(name, source);
       const result = await compute.exec(command, { timeoutSec: timeoutSec + DRIVER_GRACE_SEC });

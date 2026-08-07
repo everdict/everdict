@@ -263,3 +263,41 @@ describe("runCase — the case's world rides the ComputeSpec", () => {
     expect(captured[0]).toEqual({ os: "linux", needs: ["shell", "browser"] });
   });
 });
+
+describe("runCase — the execution manifest records the world the case actually ran in", () => {
+  it("records a defaulted linux AS defaulted when the case declared no os", async () => {
+    // Given: a case with no placement at all — the `?? "linux"` decision used to be made here and dropped,
+    // so afterwards nobody could tell this apart from a case that deliberately asked for linux.
+    const result = await runCase(CASE, {
+      driver: { id: "local", provision: async () => fakeComputeHandle() } as Driver,
+      environment: ENVIRONMENT,
+      harness: completingHarness(),
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+    // Then: the world AND the fact that the default chose it are both on the result.
+    expect(result.execution).toEqual({ os: "linux", osResolved: "defaulted", driver: "local" });
+  });
+
+  it("records an authored windows AS declared, and rides the driver that provisioned the compute", async () => {
+    const result = await runCase({ ...CASE, placement: { os: "windows" } } as EvalCase, {
+      driver: { id: "docker", provision: async () => fakeComputeHandle() } as Driver,
+      environment: ENVIRONMENT,
+      harness: completingHarness(),
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+    expect(result.execution).toEqual({ os: "windows", osResolved: "declared", driver: "docker" });
+  });
+
+  it("records the image the compute was provisioned from when the case named one", async () => {
+    const result = await runCase({ ...CASE, image: "ghcr.io/acme/swe:1" } as EvalCase, {
+      driver: { id: "docker", provision: async () => fakeComputeHandle() } as Driver,
+      environment: ENVIRONMENT,
+      harness: completingHarness(),
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+    expect(result.execution?.image).toBe("ghcr.io/acme/swe:1");
+  });
+});

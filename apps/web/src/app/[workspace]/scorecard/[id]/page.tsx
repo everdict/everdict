@@ -526,6 +526,19 @@ export default async function ScorecardDetailPage({
         .map((e) => e.message),
       ...(runnerHint !== undefined ? { runnerHint } : {}),
       hasTrace: (r.trace ?? []).length > 0,
+      // 실행 매니페스트는 그대로 넘긴다 — 없는 케이스(디스패치 실패 합성·ingest)는 없는 채로 넘겨서
+      // 다이얼로그가 스트립을 감춘다. 여기서 기본값을 채우면 "기록 없음"이 "linux"로 둔갑한다.
+      ...(r.execution !== undefined
+        ? {
+            execution: {
+              os: r.execution.os,
+              osResolved: r.execution.osResolved,
+              ...(r.execution.driver !== undefined ? { driver: r.execution.driver } : {}),
+              ...(r.execution.image !== undefined ? { image: r.execution.image } : {}),
+              ...(r.execution.runtime !== undefined ? { runtime: r.execution.runtime } : {}),
+            },
+          }
+        : {}),
       ...(datasetCase !== undefined
         ? {
             task: datasetCase.task,

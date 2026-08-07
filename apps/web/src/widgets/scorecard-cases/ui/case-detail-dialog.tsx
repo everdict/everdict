@@ -29,9 +29,10 @@ import { Link } from '@/shared/ui/link'
 import { Markdown } from '@/shared/ui/markdown'
 import { MetricLabel } from '@/shared/ui/metric-label'
 import { ScoreDetail } from '@/shared/ui/score-detail'
+import { Tooltip } from '@/shared/ui/tooltip'
 
 import { getScorecardCaseTraceAction } from '../api/case-trace'
-import type { CaseScoreView, ScorecardCaseView } from '../model/case-view'
+import type { CaseExecutionView, CaseScoreView, ScorecardCaseView } from '../model/case-view'
 
 // 케이스 상세 다이얼로그 — 분석하는 사람의 세 질문에 위에서 아래로 답한다:
 // ① 어떤 케이스였나(데이터셋 과제) → ② 실제로 어떻게 실행됐나(에이전트 궤적 + 스냅샷/에러) →
@@ -92,7 +93,11 @@ export function CaseDetailDialog({
   const scoreGroups = groupMetricRows(c.scores)
   const hasTrajectory = c.runId !== undefined || c.hasTrace
   const hasExecution =
-    hasTrajectory || c.snapshot !== undefined || c.errors.length > 0 || c.runnerHint !== undefined
+    hasTrajectory ||
+    c.snapshot !== undefined ||
+    c.errors.length > 0 ||
+    c.runnerHint !== undefined ||
+    c.execution !== undefined
   const hasIdentity =
     c.task !== undefined || c.envKind !== undefined || (c.graderIds?.length ?? 0) > 0
 
@@ -217,6 +222,8 @@ export function CaseDetailDialog({
         {hasExecution && (
           <section className="space-y-2.5">
             <SectionLabel>{t('caseDialogExecution')}</SectionLabel>
+            {/* 어떤 세계에서 돌았나 — 궤적 위에 한 줄. 기록이 없으면 통째로 숨는다(빈 섹션 숨김 관습). */}
+            {c.execution && <ExecutionStrip execution={c.execution} />}
             {traceError !== undefined ? (
               <Callout tone="danger">{t('caseTraceError', { error: traceError })}</Callout>
             ) : pending && segments === undefined ? (
@@ -338,6 +345,63 @@ export function CaseDetailDialog({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">{children}</p>
+}
+
+// 실행 매니페스트 스트립 — "이 케이스가 실제로 어떤 세계에서 돌았나". 스코어카드 매니페스트가 평가의
+// 정의(데이터셋·하네스·저지 버전)를 고정한다면 이건 평가의 세계를 고정한다.
+// osResolved 가 defaulted 면 케이스가 os 를 쓴 적이 없다는 뜻 — 선언된 linux 와 구별되는 사실이라 배지로
+// 따로 말한다(설명은 인라인 문구가 아니라 툴팁으로).
+function ExecutionStrip({ execution }: { execution: CaseExecutionView }) {
+  const t = useTranslations('scorecardsPage')
+  const defaulted = execution.osResolved === 'defaulted'
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2 text-[12px]">
+      <span className="text-faint">{t('caseWorldLabel')}</span>
+      <Badge tone="neutral">{execution.os}</Badge>
+      {defaulted && (
+        <Tooltip content={t('caseWorldDefaultedHint')}>
+          <span className="cursor-default rounded border border-dashed border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+            {t('caseWorldDefaulted')}
+          </span>
+        </Tooltip>
+      )}
+      {execution.driver !== undefined && (
+        <ExecutionFact label={t('caseWorldDriver')} value={execution.driver} />
+      )}
+      {execution.runtime !== undefined && (
+        <ExecutionFact label={t('caseWorldRuntime')} value={execution.runtime} />
+      )}
+      {execution.image !== undefined && (
+        <ExecutionFact label={t('caseWorldImage')} value={execution.image} truncate />
+      )}
+    </div>
+  )
+}
+
+function ExecutionFact({
+  label,
+  value,
+  truncate,
+}: {
+  label: string
+  value: string
+  truncate?: boolean
+}) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="text-faint">{label}</span>
+      {/* 이미지 레퍼런스는 길다 — 줄바꿈으로 스트립을 무너뜨리지 말고 잘라 두고 전체는 title 로 준다. */}
+      <span
+        className={cn(
+          'font-mono text-[11.5px] text-muted-foreground',
+          truncate && 'max-w-64 truncate'
+        )}
+        title={truncate ? value : undefined}
+      >
+        {value}
+      </span>
+    </span>
+  )
 }
 
 // 한 점수의 값 — categorical `label` 은 그대로(gold / correct / B), 아니면 단위 추론 포맷. 판정 배지가
