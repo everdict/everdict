@@ -217,11 +217,18 @@ describe("computeAnalysis — grid", () => {
     expect(r.rows[0]?.cells.map((cell) => cell.value)).toEqual([0.5, 0.8]);
   });
 
-  it("selected-but-absent metric falls back to the card's first summary row", () => {
-    const cards = [card("a", { summary: [{ metric: "cost", count: 1, mean: 0.42 }] })];
+  it("a selected-but-absent metric contributes NOTHING and is counted as missing — never substituted", () => {
+    // Regression: the old fallback substituted the card's first summary row, so one grid cell could average
+    // cost_usd means into a judge pass rate — a wrong number with no marker.
+    const cards = [
+      card("a", { summary: [{ metric: "cost", count: 1, mean: 0.42 }] }),
+      card("b", { summary: [{ metric: "judge", count: 4, mean: 0.75, passRate: 0.75 }] }),
+    ];
     const r = computeAnalysis(cards, config({ metric: "judge" }));
     if (r.kind !== "grid") throw new Error("expected grid");
-    expect(r.rows[0]?.value).toBe(0.42); // cost has no passRate → mean
+    const total = r.rows.reduce((sum, row) => sum + (row.missing ?? 0), 0);
+    expect(total).toBe(1); // card "a" reported — visible, not smuggled into the aggregate
+    for (const row of r.rows) expect(row.value === undefined || row.value === 0.75).toBe(true); // never 0.42-tainted
   });
 
   it("two-dimension group keys cannot collide across the dimension boundary", () => {

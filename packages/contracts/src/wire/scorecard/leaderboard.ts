@@ -11,6 +11,12 @@ export const LeaderboardResponseSchema = z.object({
         rank: z.number().int().describe("1-based, score descending"),
         harness: z.object({ id: z.string(), version: z.string() }),
         model: z.string().optional().describe("models.primary (group key); unset = the unknown group"),
+        modelUnknown: z
+          .boolean()
+          .optional()
+          .describe(
+            "TRUE when the row's runs recorded no model — distinct unknown models may fold together, so a fair comparison against a named-model row does not hold",
+          ),
         judgeModels: z
           .array(z.string())
           .optional()

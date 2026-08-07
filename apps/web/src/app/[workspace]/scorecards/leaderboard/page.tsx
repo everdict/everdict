@@ -164,7 +164,14 @@ export default async function LeaderboardPage({
                         {r.model ? (
                           <ModelChip>{r.model}</ModelChip>
                         ) : (
-                          <span className="text-[12px] text-faint">unknown</span>
+                          // Folded unknowns — distinct unrecorded models may share this row, so a fair
+                          // comparison against a named-model row does not hold. Say so, don't just dim it.
+                          <span
+                            className="text-[12px] text-faint"
+                            title={t('modelUnknownTitle')}
+                          >
+                            {t('modelUnknownLabel')}
+                          </span>
                         )}
                       </TD>
                       <TD>

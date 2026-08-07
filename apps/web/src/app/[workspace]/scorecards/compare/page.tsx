@@ -133,7 +133,9 @@ export default async function CompareScorecardsPage({
                   caseCount:
                     diff.missing.casesOnlyInBaseline.length + diff.missing.casesOnlyInCandidate.length,
                   metricCount:
-                    diff.missing.metricsOnlyInBaseline.length + diff.missing.metricsOnlyInCandidate.length,
+                    diff.missing.metricsOnlyInBaseline.length +
+                    diff.missing.metricsOnlyInCandidate.length +
+                    diff.incomparable.length,
                 })}
         </Callout>
       )}

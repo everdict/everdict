@@ -123,7 +123,7 @@ export function eventsToSpans(events: TraceEvent[], ctx: EventsToSpansContext): 
           attributes: {
             ...common,
             [GEN_AI.operationName]: GEN_AI_OPERATION.chat,
-            ...(event.model === "" ? {} : { [GEN_AI.requestModel]: event.model }),
+            ...(event.model === "" || event.model === "unknown" ? {} : { [GEN_AI.requestModel]: event.model }),
             ...(event.cost
               ? {
                   [GEN_AI.inputTokens]: event.cost.inputTokens,

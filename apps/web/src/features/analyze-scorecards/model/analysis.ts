@@ -134,11 +134,37 @@ export function dimValue(sc: ScorecardRecord, dim: Dimension): string {
   }
 }
 
-// The summary row this scorecard contributes for the selected metric (an absent selected metric falls back
-// to the first row — recipe semantics).
+// The summary row this scorecard contributes for the selected metric. An explicitly selected but ABSENT
+// metric contributes NOTHING (counted as `missing` — never substituted with another metric's row); with no
+// metric chosen the representative is the highest-authority pass-rate row. Lockstep with the domain twin.
 function summaryOf(sc: ScorecardRecord, metric: string | undefined): MetricSummary | undefined {
   const rows = sc.summary ?? []
-  return (metric ? rows.find((r) => r.metric === metric) : undefined) ?? rows[0]
+  if (metric) return rows.find((r) => r.metric === metric)
+  return representativeRow(rows)
+}
+
+const REPRESENTATIVE_METRICS = [
+  'tests_pass',
+  'state',
+  'answer_match',
+  'url_matches',
+  'dom_contains',
+  'judge',
+]
+function representativeRow(rows: MetricSummary[]): MetricSummary | undefined {
+  for (const name of REPRESENTATIVE_METRICS) {
+    const row = rows.find((r) => r.metric === name && r.passRate !== undefined)
+    if (row) return row
+  }
+  const judge = rows.find((r) => /^judge:[^:]+$/.test(r.metric) && r.passRate !== undefined)
+  if (judge) return judge
+  return rows.find((r) => r.passRate !== undefined) ?? rows[0]
+}
+
+// Scorecards in a bundle whose selected metric is absent — reported, never substituted.
+function missingOf(cards: ScorecardRecord[], metric: string | undefined): number {
+  if (!metric) return 0
+  return cards.filter((sc) => !(sc.summary ?? []).some((r) => r.metric === metric)).length
 }
 
 // This scorecard's score (for the selected metric) — passRate first, else mean. Exported so the raw-data
@@ -250,7 +276,8 @@ export interface GridRow {
   labels: string[] // label per groupBy dimension (for display; owner is resolved)
   count: number // scorecards in the group
   cases: number // scored cases behind the value — the sample size, NOT the scorecard count
-  value?: number // measured value when there is no pivot
+  value?: number
+  missing?: number // scorecards whose selected metric was absent — excluded, never substituted // measured value when there is no pivot
   cells: { key: string; value?: number }[] // value per pivot column
 }
 export interface GridResult {
@@ -357,6 +384,7 @@ export function computeAnalysis(
       count: cards.length,
       cases: caseCount(cards, metric),
       value: aggregate(cards, metric, config.measure),
+      ...(missingOf(cards, metric) > 0 ? { missing: missingOf(cards, metric) } : {}),
       cells,
     }
   })
@@ -365,9 +393,10 @@ export function computeAnalysis(
   rows = rows.sort((a, b) => {
     if (config.sort.by === 'label')
       return dir * a.labels.join(' ').localeCompare(b.labels.join(' '))
-    const av = a.value ?? -Infinity
-    const bv = b.value ?? -Infinity
-    return dir * (av - bv)
+    // "not measured" is not the smallest value — value-less rows always sort LAST, in either direction.
+    if (a.value === undefined || b.value === undefined)
+      return a.value === undefined ? (b.value === undefined ? 0 : 1) : -1
+    return dir * (a.value - b.value)
   })
 
   return { kind: 'grid', rows, pivotKeys, metric, total: filtered.length }

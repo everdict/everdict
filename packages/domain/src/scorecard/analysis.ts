@@ -91,6 +91,9 @@ export interface AnalysisGridRow {
   count: number; // scorecards in the group
   cases: number; // scored cases behind the value — the sample size, NOT the scorecard count
   value?: number; // measured value over the whole group (also the sort key when sorting by measure)
+  // Scorecards in the group that could NOT contribute (the selected metric absent) — reported, never
+  // silently substituted with another metric's row. Set only when > 0.
+  missing?: number;
   cells: { key: string; value?: number }[]; // value per pivot column ([] when no pivotBy)
 }
 export interface AnalysisGridResult {
@@ -159,12 +162,34 @@ export function analysisDimensionValue(card: AnalysisCard, dim: AnalysisDimensio
   }
 }
 
-// The summary row this card contributes for the selected metric. An explicitly selected but absent metric
-// falls back to the card's first summary row (recipe semantics — a View saved against a metric another
-// harness doesn't emit still renders something comparable).
+// The summary row this card contributes for the selected metric. An explicitly selected but ABSENT metric
+// contributes NOTHING — the old fallback silently substituted the card's first summary row, so one grid cell
+// could average cost_usd means into a judge pass rate (a wrong number with no marker). The absence is now
+// counted (missingOf) and rides the output instead. With no metric selected, the representative row is the
+// highest-authority pass-rate row (the headline ladder), not whatever happened to be first.
 function summaryOf(card: AnalysisCard, metric: string | undefined): MetricSummary | undefined {
   const rows = card.summary ?? [];
-  return (metric ? rows.find((r) => r.metric === metric) : undefined) ?? rows[0];
+  if (metric) return rows.find((r) => r.metric === metric);
+  return representativeRow(rows);
+}
+
+// Per-card representative when no metric axis is chosen — mirrors headlinePassRate's ranking (authority
+// first, then any pass-rate row, then the first row). Kept in lockstep with the web twin.
+const REPRESENTATIVE_METRICS = ["tests_pass", "state", "answer_match", "url_matches", "dom_contains", "judge"];
+function representativeRow(rows: MetricSummary[]): MetricSummary | undefined {
+  for (const name of REPRESENTATIVE_METRICS) {
+    const row = rows.find((r) => r.metric === name && r.passRate !== undefined);
+    if (row) return row;
+  }
+  const judge = rows.find((r) => /^judge:[^:]+$/.test(r.metric) && r.passRate !== undefined);
+  if (judge) return judge;
+  return rows.find((r) => r.passRate !== undefined) ?? rows[0];
+}
+
+// Cards in a bundle that could NOT contribute (selected metric absent) — reported, never substituted.
+function missingOf(cards: AnalysisCard[], metric: string | undefined): number {
+  if (!metric) return 0;
+  return cards.filter((card) => !(card.summary ?? []).some((r) => r.metric === metric)).length;
 }
 
 // This card's score for the selected metric — passRate first, else mean.
@@ -384,12 +409,14 @@ export function computeAnalysis(
           ),
         }))
       : [];
+    const missing = missingOf(groupCards, metric);
     return {
       key,
       labels,
       count: groupCards.length,
       cases: caseCount(groupCards, metric),
       value: aggregate(groupCards, metric, config.measure),
+      ...(missing > 0 ? { missing } : {}),
       cells,
     };
   });
@@ -397,9 +424,10 @@ export function computeAnalysis(
   const dir = config.sort.dir === "asc" ? 1 : -1;
   rows = rows.sort((a, b) => {
     if (config.sort.by === "label") return dir * a.labels.join(" ").localeCompare(b.labels.join(" "));
-    const av = a.value ?? Number.NEGATIVE_INFINITY;
-    const bv = b.value ?? Number.NEGATIVE_INFINITY;
-    return dir * (av - bv);
+    // "not measured" is not the smallest value — value-less rows always sort LAST, in either direction.
+    if (a.value === undefined || b.value === undefined)
+      return a.value === undefined ? (b.value === undefined ? 0 : 1) : -1;
+    return dir * (a.value - b.value);
   });
 
   return { kind: "grid", rows, pivotKeys, ...(metric !== undefined ? { metric } : {}), total: filtered.length };

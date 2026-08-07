@@ -140,6 +140,11 @@ export interface ScorecardDiff {
   regressions: CaseDelta[];
   improvements: CaseDelta[];
   missing: DiffMissing;
+  // A metric present on both sides whose VALUE KIND changed (categorical on one side, numeric on the other —
+  // same name, different meaning): its delta is not a number anyone should read. Excluded from `metrics`.
+  incomparable: Array<{ metric: string; reason: "kind_changed" }>;
+  // The raw overlap the comparability level was judged from — a gate that wants a threshold reads the numbers.
+  overlap: { sharedCases: number; baselineCases: number; candidateCases: number };
   // "none" = the comparison does not hold (no shared cases or no shared metrics) — which is a different claim
   // from "no differences". A gate must read this FIRST.
   comparability: "full" | "partial" | "none";
@@ -237,7 +242,16 @@ export function diffScorecards(
   const sumC = summarizeScorecard(candidate);
   const bMetricNames = new Set(sumB.filter((s) => s.count > 0).map((s) => s.metric));
   const cMetricNames = new Set(sumC.filter((s) => s.count > 0).map((s) => s.metric));
-  const shared = [...bMetricNames].filter((m) => cMetricNames.has(m));
+  const sharedNames = [...bMetricNames].filter((m) => cMetricNames.has(m));
+  // Same name, different KIND (categorical on one side, numeric on the other — the distribution marks a
+  // categorical summary): the delta of a tier against a mean is not a number anyone should read.
+  const isCategorical = (rows: MetricSummary[], metric: string): boolean =>
+    rows.find((s) => s.metric === metric)?.distribution !== undefined;
+  const incomparable = sharedNames
+    .filter((metric) => isCategorical(sumB, metric) !== isCategorical(sumC, metric))
+    .map((metric) => ({ metric, reason: "kind_changed" as const }));
+  const kindChanged = new Set(incomparable.map((x) => x.metric));
+  const shared = sharedNames.filter((m) => !kindChanged.has(m));
   const metrics: MetricDelta[] = shared.map((metric) => {
     const baselineMean = sumB.find((s) => s.metric === metric)?.mean ?? 0; // guarded: metric ∈ both summaries
     const candidateMean = sumC.find((s) => s.metric === metric)?.mean ?? 0;
@@ -255,7 +269,8 @@ export function diffScorecards(
     missing.casesOnlyInBaseline.length > 0 ||
     missing.casesOnlyInCandidate.length > 0 ||
     missing.metricsOnlyInBaseline.length > 0 ||
-    missing.metricsOnlyInCandidate.length > 0;
+    missing.metricsOnlyInCandidate.length > 0 ||
+    incomparable.length > 0;
   const comparability = sharedCases === 0 || shared.length === 0 ? "none" : anyMissing ? "partial" : "full";
   return {
     baseline: baseline.harness,
@@ -264,6 +279,8 @@ export function diffScorecards(
     regressions,
     improvements,
     missing,
+    incomparable,
+    overlap: { sharedCases, baselineCases: bCases.size, candidateCases: cCases.size },
     comparability,
   };
 }

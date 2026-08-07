@@ -9,6 +9,11 @@ import {
   type TraceSpan,
 } from "@everdict/contracts";
 
+// The model a pulled span did not name — a VISIBLE bucket on every model axis (usage, observed models),
+// never an empty string that renders as nothing. Billing attribution already treats an unattributable call
+// conservatively (own-pays: not billed to the workspace); this only makes the unknown spend readable.
+export const UNKNOWN_MODEL = "unknown";
+
 // The PROJECTION: the record (spans) → what graders and judges read (events).
 //
 // This is the whole reason making spans the record costs nothing downstream. Scoring reads a handful of
@@ -233,7 +238,7 @@ export function spansToEvents(spans: TraceSpan[], opts: SpansToEventsOptions = {
         out.push({
           ...structure,
           kind: "llm_call",
-          model: model ?? "",
+          model: model ?? UNKNOWN_MODEL, // named, so the usage/model axes show "unknown" instead of a silent empty bucket
           cost: {
             inputTokens: inTok ?? 0,
             outputTokens: outTok ?? 0,
@@ -251,7 +256,7 @@ export function spansToEvents(spans: TraceSpan[], opts: SpansToEventsOptions = {
       out.push({
         ...structure,
         kind: "llm_call",
-        model: model ?? "",
+        model: model ?? UNKNOWN_MODEL, // named, so the usage/model axes show "unknown" instead of a silent empty bucket
         cost: {
           inputTokens: inTok ?? 0,
           outputTokens: outTok ?? 0,

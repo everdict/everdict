@@ -53,6 +53,18 @@ export const ScorecardDiffResponseSchema = z.object({
       metricsOnlyInCandidate: z.array(z.string()),
     })
     .describe("What could NOT be compared — a first-class output, never a silent skip"),
+  incomparable: z
+    .array(z.object({ metric: z.string(), reason: z.literal("kind_changed") }))
+    .describe(
+      "Same-name metrics whose value KIND changed between the sides (categorical↔numeric) — excluded from metrics",
+    ),
+  overlap: z
+    .object({
+      sharedCases: z.number().int().nonnegative(),
+      baselineCases: z.number().int().nonnegative(),
+      candidateCases: z.number().int().nonnegative(),
+    })
+    .describe("The raw overlap the comparability level was judged from — threshold-minded gates read the numbers"),
   comparability: z
     .enum(["full", "partial", "none"])
     .describe(

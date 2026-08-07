@@ -2713,8 +2713,10 @@
     "deleteSelected": "Delete"
   },
   "scorecardsPage": {
+    "modelUnknownLabel": "model unknown",
+    "modelUnknownTitle": "No model was recorded for these runs — distinct unknown models may be folded together; comparison with named-model rows does not hold.",
     "compareNotComparable": "Comparison does not hold — the two scorecards share no cases or no metrics. This is \"incomparable\", not \"no differences\".",
-    "comparePartial": "Partial comparison — {caseCount} one-sided case(s) and {metricCount} one-sided metric(s) are excluded from the deltas below.",
+    "comparePartial": "Partial comparison — {caseCount} one-sided case(s) and {metricCount} metric(s) (one-sided or kind-changed) are excluded from the deltas below.",
     "comparePolicyMismatch": "These batches were judged under different verdict policies ({baseline} vs {candidate}) — verdict comparison does not hold.",
     "caseOutcomesStrip": "of {executed} executed — verdicted {verdicted} · passed {passed} · failed {failed} · infra failed {infraFailed} · unmeasured {unmeasured}",
     "scoreUnmeasured": "unmeasured",

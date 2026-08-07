@@ -292,6 +292,29 @@ describe("diffScorecards — comparability first", () => {
     expect(diff.regressions[0]?.caseId).toBe("a");
   });
 
+  it("a metric whose value KIND changed between sides is incomparable, never a readable delta", () => {
+    // Same name, different meaning: baseline scored "tier" numerically, candidate categorically (labels).
+    const numeric = cardOf([one("a", "tier", 0.8, undefined)]);
+    const categorical: Scorecard = {
+      suiteId: "s",
+      harness: "h@2",
+      results: [
+        {
+          caseId: "a",
+          harness: "h@2",
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "tier", metric: "tier", value: 3, label: "gold" }],
+        },
+      ],
+    };
+    const diff = diffScorecards(numeric, categorical);
+    expect(diff.incomparable).toEqual([{ metric: "tier", reason: "kind_changed" }]);
+    expect(diff.metrics.find((m) => m.metric === "tier")).toBeUndefined(); // excluded, not a delta
+    expect(diff.comparability).toBe("partial");
+    expect(diff.overlap).toEqual({ sharedCases: 1, baselineCases: 1, candidateCases: 1 });
+  });
+
   it("identical full-overlap scorecards are fully comparable", () => {
     const base = cardOf([one("a", "tests_pass", 1, true)]);
     expect(diffScorecards(base, base).comparability).toBe("full");

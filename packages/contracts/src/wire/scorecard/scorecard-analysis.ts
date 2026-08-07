@@ -12,6 +12,12 @@ export const AnalysisGridRowSchema = z.object({
     .int()
     .describe("Scored cases behind the value — the sample size the rate was weighted over, NOT the scorecard count"),
   value: z.number().optional().describe("Measured value over the whole group"),
+  missing: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Scorecards in the group whose selected metric was ABSENT — excluded, never substituted"),
   cells: z
     .array(z.object({ key: z.string(), value: z.number().optional() }))
     .describe("Value per pivot column ([] when no pivotBy)"),

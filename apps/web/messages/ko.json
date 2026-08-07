@@ -2713,8 +2713,10 @@
     "deleteSelected": "삭제"
   },
   "scorecardsPage": {
+    "modelUnknownLabel": "모델 미상",
+    "modelUnknownTitle": "이 런들에는 모델이 기록되지 않았습니다 — 서로 다른 미상 모델이 한 행에 접혀 있을 수 있어, 모델이 기록된 행과의 비교는 성립하지 않습니다.",
     "compareNotComparable": "비교가 성립하지 않습니다 — 두 스코어카드가 공유하는 케이스 또는 메트릭이 없습니다. \"차이 없음\"이 아니라 \"비교 불가\"입니다.",
-    "comparePartial": "부분 비교 — 한쪽에만 있는 케이스 {caseCount}건·메트릭 {metricCount}건은 아래 델타에서 제외되었습니다.",
+    "comparePartial": "부분 비교 — 케이스 {caseCount}건·메트릭 {metricCount}건(한쪽에만 있거나 종류가 바뀜)은 아래 델타에서 제외되었습니다.",
     "comparePolicyMismatch": "서로 다른 판정 정책({baseline} vs {candidate})으로 채점된 배치입니다 — 판정 비교가 성립하지 않습니다.",
     "caseOutcomesStrip": "실행 {executed}건 중 — 판정 {verdicted} · 통과 {passed} · 실패 {failed} · 인프라 실패 {infraFailed} · 미측정 {unmeasured}",
     "scoreUnmeasured": "미측정",

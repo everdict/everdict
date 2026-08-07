@@ -304,6 +304,13 @@ export const scorecardDiffSchema = z.object({
     metricsOnlyInBaseline: z.array(z.string()),
     metricsOnlyInCandidate: z.array(z.string()),
   }),
+  // Same-name metrics whose value kind changed between sides — excluded from metrics, never a readable delta.
+  incomparable: z.array(z.object({ metric: z.string(), reason: z.literal('kind_changed') })),
+  overlap: z.object({
+    sharedCases: z.number().int(),
+    baselineCases: z.number().int(),
+    candidateCases: z.number().int(),
+  }),
   // 'none' = the comparison does not hold — a different claim from 'no differences'. Read this FIRST.
   comparability: z.enum(['full', 'partial', 'none']),
   policyMismatch: z
@@ -341,6 +348,7 @@ export const leaderboardRowSchema = z.object({
   rank: z.number(),
   harness: z.object({ id: z.string(), version: z.string() }),
   model: z.string().optional(),
+  modelUnknown: z.boolean().optional(), // no model recorded — folded unknowns; fair-compare with care
   judgeModels: z.array(z.string()).optional(), // the judge model(s) that graded the representative run
   scorecardId: z.string(),
   createdAt: z.string(),
