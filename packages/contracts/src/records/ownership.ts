@@ -36,6 +36,19 @@ export const RoleCompletionSchema = z.enum([
 ]);
 export type RoleCompletion = z.infer<typeof RoleCompletionSchema>;
 
+// ── O3: WHO holds a role ─────────────────────────────────────────────────────────────────────────────
+// A role is not a person, and separation needs both halves: the profile says what the role may do, the
+// actor says who is doing it. Without this, "the actor never finally judges its own work" is unprovable —
+// two profiles can differ while one process wears them both, which is exactly self-verification with extra
+// steps. `id` is the identity the platform already stamps elsewhere (a member subject, or `agent:<agentId>`);
+// sessionId/runId narrow it to the concrete execution, so "same actor" and "same context" are both decidable.
+export const ActorRefSchema = z.object({
+  id: z.string().min(1), // member subject, or agent:<agentId>
+  sessionId: z.string().optional(), // the conversation/session the work ran in
+  runId: z.string().optional(), // the run/execution the work ran as
+});
+export type ActorRef = z.infer<typeof ActorRefSchema>;
+
 export const RoleProfileSchema = z.object({
   role: OwnershipRoleSchema,
   // Capability separation: what this role may READ vs WRITE (capability/tool ids). The domain validator
@@ -51,6 +64,14 @@ export const RoleProfileSchema = z.object({
   completion: RoleCompletionSchema,
 });
 export type RoleProfile = z.infer<typeof RoleProfileSchema>;
+
+// A role PLUS the actor holding it — the unit the independence invariant is stated over. A bare RoleProfile
+// cannot answer "is the verifier someone else?", so every check that separation matters to takes this.
+export const RoleAssignmentSchema = z.object({
+  profile: RoleProfileSchema,
+  actor: ActorRefSchema,
+});
+export type RoleAssignment = z.infer<typeof RoleAssignmentSchema>;
 
 // ── O5: the task envelope ────────────────────────────────────────────────────────────────────────────
 export const TaskEnvelopeSchema = z.object({
@@ -94,6 +115,10 @@ export type CheckpointRef = z.infer<typeof CheckpointRefSchema>;
 export const HandoffCheckpointSchema = z.object({
   id: z.string().min(1),
   envelopeId: z.string().optional(), // the TaskEnvelope this checkpoint suspends/hands off
+  // The role the predecessor was working AS. Envelopes are not persisted, so without this the checkpoint
+  // cannot say whether it carries an executor's claim or a verifier's verdict — and the independence check
+  // has nothing to key on. Absent = unprofiled work (the legacy shape).
+  role: OwnershipRoleSchema.optional(),
   goal: z.string().min(1),
   currentState: z.string().min(1),
   // The facts/hypotheses SPLIT is the checkpoint's core: a "fact" carries at least one evidence reference —
@@ -120,7 +145,11 @@ export const HandoffCheckpointSchema = z.object({
   // The machine-executable way back into the exact state — "re-read the whole conversation" is not a plan.
   reproduction: z.object({ command: z.string().min(1) }).optional(),
   createdAt: z.string(),
-  createdBy: z.string(), // member subject or agent:<id>:<conversation>
+  createdBy: z.string(), // member subject or agent:<id>:<conversation> — the ATTRIBUTION string every record carries
+  // The same producer as machine identity. `createdBy` is one opaque string a reader displays; `by` is what a
+  // check compares, which is why both exist: "agent:fixer:conv-1" cannot be asked whether it is the actor that
+  // executed run-42. Absent = written before actor identity existed (the check then abstains, never guesses).
+  by: ActorRefSchema.optional(),
 });
 export type HandoffCheckpoint = z.infer<typeof HandoffCheckpointSchema>;
 

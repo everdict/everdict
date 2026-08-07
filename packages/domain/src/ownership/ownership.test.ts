@@ -1,7 +1,14 @@
-import { type HandoffCheckpoint, HandoffCheckpointSchema, type TaskEnvelope } from "@everdict/contracts";
+import {
+  type ActorRef,
+  type HandoffCheckpoint,
+  HandoffCheckpointSchema,
+  type RoleAssignment,
+  type TaskEnvelope,
+} from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   assertCheckpointForEnvelope,
+  assertIndependentVerification,
   assertRoleProfile,
   assertTaskEnvelope,
   budgetExhausted,
@@ -45,6 +52,81 @@ describe("O2 — role separation invariants", () => {
         completion: "verified_verdict",
       }),
     ).toThrow(/claim, not a verdict/);
+  });
+});
+
+describe("O3 — a verdict needs an independent actor, not just a second role", () => {
+  const executorOf = (actor: ActorRef): RoleAssignment => ({
+    profile: {
+      role: "executor",
+      capabilities: { read: ["read_file"], write: ["edit_file"] },
+      contextScopes: [],
+      requiredEvidence: ["diff"],
+      completion: "change_set",
+    },
+    actor,
+  });
+  const verifierOf = (actor: ActorRef): RoleAssignment => ({
+    profile: {
+      role: "verifier",
+      capabilities: { read: ["scorecards"], write: [] },
+      contextScopes: [],
+      requiredEvidence: ["scorecard"],
+      completion: "verified_verdict",
+    },
+    actor,
+  });
+
+  it("the actor that did the work cannot verify it — swapping roles is not swapping actors", () => {
+    // Given one actor holding both assignments (every intra-profile rule satisfied) …
+    const both = { id: "agent:fixer" };
+    expect(() => assertRoleProfile(executorOf(both).profile)).not.toThrow();
+    expect(() => assertRoleProfile(verifierOf(both).profile)).not.toThrow();
+    // When it verifies its own work / Then the verdict is refused.
+    expect(() => assertIndependentVerification(executorOf(both), verifierOf(both))).toThrow(/cannot verify its own/);
+  });
+
+  it("a different actor verifying is accepted", () => {
+    expect(() =>
+      assertIndependentVerification(executorOf({ id: "agent:fixer" }), verifierOf({ id: "agent:checker" })),
+    ).not.toThrow();
+  });
+
+  it("two identities sharing one run or session are not independent — the context came with them", () => {
+    expect(() =>
+      assertIndependentVerification(
+        executorOf({ id: "agent:fixer", runId: "run-42" }),
+        verifierOf({ id: "agent:checker", runId: "run-42" }),
+      ),
+    ).toThrow(/not independent/);
+    expect(() =>
+      assertIndependentVerification(
+        executorOf({ id: "agent:fixer", sessionId: "conv-1" }),
+        verifierOf({ id: "agent:checker", sessionId: "conv-1" }),
+      ),
+    ).toThrow(/inherits its reasoning/);
+    // Different runs, same two actors — independent.
+    expect(() =>
+      assertIndependentVerification(
+        executorOf({ id: "agent:fixer", runId: "run-42" }),
+        verifierOf({ id: "agent:checker", runId: "run-43" }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("abstains when no verdict is being claimed — a change_set claims nothing about someone else's work", () => {
+    const same = { id: "agent:fixer" };
+    const reporter: RoleAssignment = {
+      profile: {
+        role: "diagnostician",
+        capabilities: { read: ["read_file"], write: [] },
+        contextScopes: [],
+        requiredEvidence: ["report"],
+        completion: "report",
+      },
+      actor: same,
+    };
+    expect(() => assertIndependentVerification(executorOf(same), reporter)).not.toThrow();
   });
 });
 

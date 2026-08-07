@@ -202,6 +202,7 @@ export {
 // ownership — the O-track kernel (roles/envelope/checkpoint invariants; trust-kernel O2/O5/O6)
 export {
   assertCheckpointForEnvelope,
+  assertIndependentVerification,
   assertRoleProfile,
   assertTaskEnvelope,
   type BudgetDecision,
