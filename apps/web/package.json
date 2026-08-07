@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3001",
     "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "format": "prettier --write src/"
   },
