@@ -1594,6 +1594,7 @@
     "harnesses": "하니스",
     "datasets": "데이터셋",
     "scorecards": "스코어카드",
+    "reliability": "신뢰성",
     "judges": "평가자",
     "views": "뷰",
     "knowledge": "지식",
@@ -5760,5 +5761,65 @@
     },
     "ownerWorkspace": "워크스페이스",
     "ownerShared": "기본 제공"
+  },
+  "reliabilityPage": {
+    "title": "신뢰성",
+    "description": "플랫폼의 실패 몫과 제품의 실패 몫을 분리해 보여줍니다 — 실행 건강, 게이트 감사, 배치-간 플레이크. 모든 숫자는 이 워크스페이스의 원장에서 서버가 파생합니다.",
+    "connectError": "신뢰성 데이터를 불러오지 못했습니다: {error}",
+    "notMeasured": "—",
+    "window": {
+      "all": "전체 기간",
+      "days": "최근 {days}일"
+    },
+    "tiles": {
+      "infraFailure": "인프라 실패율",
+      "infraFailureHint": "infra-failed / executed — 플랫폼의 몫",
+      "unmeasured": "미측정률",
+      "unmeasuredHint": "unmeasured / gradeable — 채점 평면의 장애 몫",
+      "traceComplete": "트레이스 봉인율",
+      "traceCompleteHint": "증거가 수집·봉인된 케이스 / executed",
+      "gates": "게이트 (통과 / 차단 / 비교불성립)",
+      "gatesHint": "기간 내 릴리스 게이트 결정"
+    },
+    "caseOutcomes": {
+      "title": "케이스 운명",
+      "description": "실행된 모든 케이스의 결말 — 인프라 실패는 복구 대상이지 제품 FAIL이 아닙니다.",
+      "verdicted": "판정됨",
+      "unmeasured": "미측정",
+      "infraFailed": "인프라 실패",
+      "cancelled": "취소됨",
+      "executed": "{executed}건 실행",
+      "requested": "{requested}건 요청"
+    },
+    "evidence": {
+      "title": "증거 완전성",
+      "description": "실행 케이스별 트레이스 평면 상태 — 부분 증거 위의 판정은 스스로 그렇다고 말합니다.",
+      "complete": "완전",
+      "partial": "부분",
+      "deferred": "지연 수집",
+      "missing": "없음"
+    },
+    "gates": {
+      "title": "게이트 강행",
+      "overrideRate": "차단 결정 중 강행 비율 {rate} — 모든 강행은 누가·왜와 함께 기록됩니다.",
+      "noBlocks": "이 기간에 차단 결정이 없습니다 — 강행된 것도 없습니다.",
+      "candidate": "후보",
+      "by": "강행자",
+      "reason": "사유",
+      "at": "시각"
+    },
+    "flake": {
+      "title": "배치-간 플레이크",
+      "description": "동일 (케이스, 하네스@버전, 런타임) 키를 배치들을 가로질러, 각 배치에 스탬프된 정책으로 판정합니다. 제안일 뿐 자동 격리는 없습니다.",
+      "pickDataset": "플레이크 인덱스를 볼 데이터셋을 선택하세요.",
+      "stable": "플레이키한 케이스가 없습니다 — 관측된 모든 키가 한 판정을 유지했습니다.",
+      "observedKeys": "{count}개 키가 2회 이상 판정 관측을 가졌습니다.",
+      "case": "케이스",
+      "harness": "하네스",
+      "runtime": "런타임",
+      "record": "통과 / 실패",
+      "score": "플레이크 점수",
+      "passFail": "{passes}P / {failures}F"
+    }
   }
 }

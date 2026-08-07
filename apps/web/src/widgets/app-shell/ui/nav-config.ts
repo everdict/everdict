@@ -13,6 +13,7 @@ import {
   MonitorDown,
   Network,
   Puzzle,
+  ShieldCheck,
   Store,
   Target,
   Terminal,
@@ -166,6 +167,13 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'scorecards',
         icon: ClipboardCheck,
         keywords: 'scorecard batch eval result regression pass rate 스코어카드 배치 평가 결과',
+      },
+      {
+        href: '/reliability',
+        labelKey: 'reliability',
+        icon: ShieldCheck,
+        keywords:
+          'reliability trust flake gate audit infra failure sla ops 신뢰성 플레이크 게이트 감사 안정성',
       },
     ],
   },

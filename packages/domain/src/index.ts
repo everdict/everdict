@@ -24,7 +24,7 @@ export {
   scorecardOutcomes,
 } from "./scorecard/case-outcome.js";
 export { type GateEvaluation, type GateInput, evaluateGate, gateAudit, gatePolicyDigest } from "./scorecard/gate.js";
-export { type FlakeEntry, type FlakeIndex, flakeIndex } from "./scorecard/flake.js";
+export { flakeIndex } from "./scorecard/flake.js";
 export { type OpsReportInput, workspaceOpsReport } from "./scorecard/ops-report.js";
 export {
   composeVerdictPolicy,

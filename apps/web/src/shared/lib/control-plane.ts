@@ -339,7 +339,8 @@ export const controlPlane = {
       { headers: requestHeaders(auth), cache: 'no-store' }
     ),
   // 러닝 케이스 샌드박스의 라이브 리포 파일 트리(런 워크벤치 탐색기). Creator-or-admin은 컨트롤 플레인이 강제.
-  getRunFs: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}/fs`),
+  getRunFs: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/fs`),
   // 그 리포의 파일 1개 + 워킹트리 diff(런 워크벤치 에디터 패널).
   getRunFsFile: <T>(auth: AuthContext, id: string, path: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/fs/file?path=${encodeURIComponent(path)}`),
@@ -399,6 +400,28 @@ export const controlPlane = {
     call<T>(auth, `/queue/entries/${encodeURIComponent(entryId)}`, { method: 'DELETE' }),
   promoteQueueEntry: <T>(auth: AuthContext, entryId: string) =>
     call<T>(auth, `/queue/entries/${encodeURIComponent(entryId)}/promote`, { method: 'POST' }),
+  // Workspace ops report — the SLA-evidence read: the platform's failure share separated from the product's.
+  getOpsReport: <T>(auth: AuthContext, window?: { from?: string; to?: string }) => {
+    const q = new URLSearchParams()
+    if (window?.from) q.set('from', window.from)
+    if (window?.to) q.set('to', window.to)
+    const qs = q.toString()
+    return call<T>(auth, qs ? `/workspace/ops-report?${qs}` : '/workspace/ops-report')
+  },
+  // Gate audit — every recorded release-gate decision + every override with its stated reason.
+  getGateAudit: <T>(auth: AuthContext, window?: { from?: string; to?: string }) => {
+    const q = new URLSearchParams()
+    if (window?.from) q.set('from', window.from)
+    if (window?.to) q.set('to', window.to)
+    const qs = q.toString()
+    return call<T>(auth, qs ? `/workspace/audit/gates?${qs}` : '/workspace/audit/gates')
+  },
+  // Cross-batch flake index for one dataset (verdict variance under each batch's own stamped policy).
+  getScorecardFlake: <T>(auth: AuthContext, dataset: string, harness?: string) => {
+    const q = new URLSearchParams({ dataset })
+    if (harness) q.set('harness', harness)
+    return call<T>(auth, `/scorecards/flake?${q.toString()}`)
+  },
   // Metered billing usage (LLM cost for orchestration + verdict; own-pays runs excluded) — meter-only, never blocks.
   getUsage: <T>(auth: AuthContext) => call<T>(auth, '/usage'),
   // Enforcement budget (BLOCKS runs with 402 once a cap is hit; distinct from meter-only /usage). GET = committed

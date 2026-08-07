@@ -1594,6 +1594,7 @@
     "harnesses": "Harnesses",
     "datasets": "Datasets",
     "scorecards": "Scorecards",
+    "reliability": "Reliability",
     "judges": "Judges",
     "views": "Views",
     "knowledge": "Knowledge",
@@ -5760,5 +5761,65 @@
     },
     "ownerWorkspace": "Workspace",
     "ownerShared": "Built in"
+  },
+  "reliabilityPage": {
+    "title": "Reliability",
+    "description": "The platform's failure share separated from the product's — ops health, gate audit, and cross-batch flake, all served from this workspace's own ledger.",
+    "connectError": "Could not load the reliability data: {error}",
+    "notMeasured": "—",
+    "window": {
+      "all": "All time",
+      "days": "Last {days}d"
+    },
+    "tiles": {
+      "infraFailure": "Infra failure rate",
+      "infraFailureHint": "infra-failed / executed — the platform's share",
+      "unmeasured": "Unmeasured rate",
+      "unmeasuredHint": "unmeasured / gradeable — the scoring plane's outage share",
+      "traceComplete": "Trace seal rate",
+      "traceCompleteHint": "evidence collected and sealed / executed",
+      "gates": "Gates (pass / block / n.c.)",
+      "gatesHint": "release-gate decisions in the window"
+    },
+    "caseOutcomes": {
+      "title": "Case outcomes",
+      "description": "Every executed case's fate — an infra failure is recovery work, never a product FAIL.",
+      "verdicted": "verdicted",
+      "unmeasured": "unmeasured",
+      "infraFailed": "infra failed",
+      "cancelled": "cancelled",
+      "executed": "{executed} executed",
+      "requested": "{requested} requested"
+    },
+    "evidence": {
+      "title": "Evidence completeness",
+      "description": "Trace-plane status per executed case (trust-kernel contract ⑤) — a verdict standing on partial evidence says so.",
+      "complete": "complete",
+      "partial": "partial",
+      "deferred": "deferred",
+      "missing": "missing"
+    },
+    "gates": {
+      "title": "Gate overrides",
+      "overrideRate": "Override rate {rate} of blocking decisions — every force is recorded with who and why.",
+      "noBlocks": "No blocking decision in this window — nothing was forced.",
+      "candidate": "Candidate",
+      "by": "By",
+      "reason": "Reason",
+      "at": "At"
+    },
+    "flake": {
+      "title": "Cross-batch flake",
+      "description": "Same (case, harness@version, runtime) key across batches, judged under each batch's own stamped policy. Advisory — nothing is auto-quarantined.",
+      "pickDataset": "Pick a dataset to inspect its flake index.",
+      "stable": "No flaky case — every observed key held one verdict.",
+      "observedKeys": "{count} keys had 2+ verdicted observations.",
+      "case": "Case",
+      "harness": "Harness",
+      "runtime": "Runtime",
+      "record": "Pass / fail",
+      "score": "Flake score",
+      "passFail": "{passes}P / {failures}F"
+    }
   }
 }

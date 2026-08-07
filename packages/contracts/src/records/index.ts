@@ -8,6 +8,7 @@ export * from "./analysis-artifact.js";
 export * from "./browser-profile.js";
 export * from "./budget.js";
 export * from "./capability.js";
+export * from "./flake.js";
 export * from "./gate.js";
 export * from "./ops-report.js";
 export * from "./ownership.js";
