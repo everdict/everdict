@@ -5056,3 +5056,61 @@ describe("ScorecardService — batch_settled observability event (operator time 
     expect(latency as number).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe("ScorecardService.opsReport — the workspace's own SLA evidence (C1)", () => {
+  it("derives the platform's failure share from the settled ledger, rates absent on empty windows", async () => {
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        if (job.evalCase.id === "b") throw new UpstreamError("UPSTREAM_ERROR", {}, "placement blip");
+        return {
+          caseId: job.evalCase.id,
+          harness: "h@1",
+          trace: [{ t: 0, kind: "log", stream: "stdout", text: "ran" }],
+          traceSealed: true,
+          snapshot: { kind: "prompt", output: "done" },
+          scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }],
+        };
+      },
+    };
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    let n = 0;
+    const service = new ScorecardService({ dispatcher, store, datasets, newId: () => `ops-${n++}` });
+    await datasets.register("acme", {
+      id: "ops",
+      version: "1.0.0",
+      cases: (["a", "b"] as const).map((id) => ({
+        id,
+        env: { kind: "prompt" },
+        task: `q-${id}`,
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      })),
+      tags: [],
+    });
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "ops", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      retries: 0,
+    });
+    await waitTerminal(store, rec.id);
+
+    const report = await service.opsReport("acme");
+    expect(report.batches).toMatchObject({ total: 1, succeeded: 1 });
+    expect(report.cases).toMatchObject({ executed: 2, verdicted: 1, infraFailed: 1 });
+    expect(report.rates.infraFailure).toBeCloseTo(1 / 2);
+    expect(report.rates.traceComplete).toBeCloseTo(1 / 2);
+    expect(report.evidence.trace).toMatchObject({ complete: 1, missing: 1 });
+
+    // Another workspace's ledger is empty — and empty means NO rates, never 0%.
+    const empty = await service.opsReport("other");
+    expect(empty.batches.total).toBe(0);
+    expect(empty.rates).toEqual({});
+
+    // A window that excludes everything behaves like the empty ledger.
+    const outside = await service.opsReport("acme", { to: "2000-01-01T00:00:00Z" });
+    expect(outside.batches.total).toBe(0);
+  });
+});

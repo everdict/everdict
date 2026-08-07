@@ -58,6 +58,7 @@ import { registerTeamTools } from "./api/team/team.mcp.js";
 import { registerTraceSourceTools } from "./api/trace-source/trace-source.mcp.js";
 import { registerTrajectoryTools } from "./api/trajectory/trajectory.mcp.js";
 import { registerViewTools } from "./api/view/view.mcp.js";
+import { registerWorkspaceOpsReportTools } from "./api/workspace/ops-report.mcp.js";
 import { registerWorkspacePulseTools } from "./api/workspace/pulse.mcp.js";
 import { registerSettingsTools } from "./api/workspace/settings.mcp.js";
 import { registerWorkspaceTools } from "./api/workspace/workspace.mcp.js";
@@ -123,6 +124,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerInviteTools(server, ctx);
   registerWorkspaceTools(server, ctx);
   registerWorkspacePulseTools(server, ctx);
+  registerWorkspaceOpsReportTools(server, ctx);
   registerProfileTools(server, ctx);
   registerSettingsTools(server, ctx);
   registerGithubAppTools(server, ctx);

@@ -994,6 +994,13 @@ export class ScorecardService {
     return this.analytics.backfillModels(tenant);
   }
 
+  opsReport(
+    tenant: string,
+    opts: { from?: string; to?: string; visibleTeams?: string[] } = {},
+  ): ReturnType<ScorecardAnalyticsService["opsReport"]> {
+    return this.analytics.opsReport(tenant, opts);
+  }
+
   analysis(tenant: string, config: AnalysisConfig, visibleTeams?: string[]): Promise<AnalysisResult> {
     return this.analytics.analysis(tenant, config, visibleTeams);
   }

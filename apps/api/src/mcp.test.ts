@@ -588,6 +588,7 @@ describe("MCP tools", () => {
       "get_trajectory",
       "get_usage",
       "get_workspace_mattermost",
+      "get_workspace_ops_report",
       "get_workspace_settings",
       "get_workspace_trace_ingestion",
       "get_workspace_trace_thresholds",

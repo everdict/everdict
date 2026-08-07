@@ -22,6 +22,7 @@ import {
   preferredMetric,
   scorecardModels,
   trendSeries,
+  workspaceOpsReport,
 } from "@everdict/domain";
 import { type ScorecardServiceDeps, analysisArtifactKey } from "./scorecard-shared.js";
 
@@ -77,6 +78,31 @@ export class ScorecardAnalyticsService {
     const hasTrials =
       baseline.results.some((r) => r.trial !== undefined) || candidate.results.some((r) => r.trial !== undefined);
     return hasTrials ? { ...withPolicy, trials: diffTrials(baseline, candidate, opts) } : withPolicy;
+  }
+
+  // Workspace ops report (metrics commercialization C1) — the SLA-evidence read: the workspace's OWN
+  // execution health over a window, the platform's failure share separated from the product's. The numbers
+  // are the domain's (workspaceOpsReport) — this method only hydrates the ledger rows (per-case detail lives
+  // on the children, so each in-range record goes through the facade's hydrating get).
+  async opsReport(
+    tenant: string,
+    opts: { from?: string; to?: string; visibleTeams?: string[] },
+  ): Promise<ReturnType<typeof workspaceOpsReport>> {
+    const rows = await this.deps.store.list(tenant, {
+      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
+    });
+    const inRange = rows.filter(
+      (r) => (opts.from === undefined || r.createdAt >= opts.from) && (opts.to === undefined || r.createdAt <= opts.to),
+    );
+    const detailed: ScorecardRecord[] = [];
+    for (const row of inRange) {
+      const record = await this.getRecord(row.id);
+      if (record) detailed.push(record);
+    }
+    return workspaceOpsReport(detailed, {
+      ...(opts.from ? { from: opts.from } : {}),
+      ...(opts.to ? { to: opts.to } : {}),
+    });
   }
 
   // Time-range trend / regression-over-time — line up a (dataset, metric)'s scorecards chronologically and flag regressions vs the baseline.

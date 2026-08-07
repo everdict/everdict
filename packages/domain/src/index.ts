@@ -23,6 +23,7 @@ export {
   type ScorecardOutcomes,
   scorecardOutcomes,
 } from "./scorecard/case-outcome.js";
+export { type OpsReportInput, workspaceOpsReport } from "./scorecard/ops-report.js";
 export {
   composeVerdictPolicy,
   DEFAULT_VERDICT_POLICY,

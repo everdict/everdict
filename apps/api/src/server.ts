@@ -155,6 +155,7 @@ import { registerTeamRoutes } from "./api/team/team.routes.js";
 import { registerTraceSourceRoutes } from "./api/trace-source/trace-source.routes.js";
 import { registerTrajectoryRoutes } from "./api/trajectory/trajectory.routes.js";
 import { registerViewRoutes } from "./api/view/view.routes.js";
+import { registerWorkspaceOpsReportRoutes } from "./api/workspace/ops-report.routes.js";
 import { registerWorkspacePulseRoutes } from "./api/workspace/pulse.routes.js";
 import { registerWorkspaceSettingsRoutes } from "./api/workspace/settings.routes.js";
 import { registerWorkspaceRoutes } from "./api/workspace/workspace.routes.js";
@@ -247,6 +248,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerProfileRoutes(routes, deps);
     registerWorkspaceRoutes(routes, deps);
     registerWorkspacePulseRoutes(routes, deps);
+    registerWorkspaceOpsReportRoutes(routes, deps);
     registerMemberRoutes(routes, deps);
     registerInviteRoutes(routes, deps);
     registerWorkspaceSettingsRoutes(routes, deps);
