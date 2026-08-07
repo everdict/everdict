@@ -79,6 +79,7 @@ import { buildScorecard } from "./composition/scorecard.js";
 import {
   buildBrowserProfile,
   buildCatalog,
+  buildCheckpoint,
   buildCiLink,
   buildMattermostCommand,
   buildQueue,
@@ -198,6 +199,7 @@ async function main(): Promise<void> {
     fsRevisionStore,
     subscriptionStore,
     viewStore,
+    handoffCheckpointStore,
     taskStore,
     teamStore,
     cycleStore,
@@ -778,6 +780,14 @@ async function main(): Promise<void> {
     tenantQuotas,
   });
   const viewService = buildView({ viewStore });
+  // Handoff checkpoints (ownership O6). The ref resolvers and the run-creator linkage are bound HERE — the
+  // service stays honest about what it can verify by only being handed resolvers that exist.
+  const checkpointService = buildCheckpoint({
+    handoffCheckpointStore,
+    runStore: store,
+    scorecardStore,
+    events: platformEventService,
+  });
   // Workspace task ledger (agent-teams): lifecycle facts (task.created/claimed/completed/cancelled) are
   // emitted here — the single choke point both transports call; created/completed are trigger-matchable.
   const taskService = new TaskService({ store: taskStore, events: platformEventService });
@@ -1184,6 +1194,7 @@ async function main(): Promise<void> {
     scheduleService,
     queueService,
     viewService,
+    checkpointService,
     taskService,
     teamService,
     workflowStateService, // the team's board — /teams/:id/states, edited from Settings › Teams

@@ -159,6 +159,8 @@ export * from "./trace-source/trace-source-assignments.js";
 export * from "./trace-source/trace-source-config-view.js";
 export * from "./trace-source/trace-source-roster.js";
 export * from "./trace-probe/trace-probe-result.js";
+export * from "./checkpoint/checkpoint-list.js";
+export * from "./checkpoint/checkpoint.js";
 export * from "./view/view-list.js";
 export * from "./view/view.js";
 export * from "./workspace/workspace-record.js";

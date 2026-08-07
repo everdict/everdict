@@ -134,6 +134,13 @@ export const PLATFORM_EVENT_KINDS = [
   // because the subject is what a listener filters on — "tell me when this goal slips" is not "tell me when any
   // of its projects did", and the goal's own update is the one a stakeholder reads.
   "initiative.update_posted",
+  // A handoff checkpoint was published (ownership protocol O6, docs/architecture/ownership-protocol.md) — an
+  // autonomous task stopped at its envelope's boundary and left a resumable state transfer behind. The fact a
+  // workspace needs: work that was running is now waiting for a successor, with the evidence it stands on.
+  // Payload carries the envelope id, the halt reason, and the producing role. Deliberately NOT
+  // trigger-matchable in v1 — a checkpoint is agent output, and an agent waking on another agent's handoff is
+  // the same runaway vector the agent.run.* family is excluded for.
+  "checkpoint.created",
   // Agent-run lifecycle facts (reported BY the agent service) — observable in the feed/fleet view, but NEVER
   // trigger-matchable in v1 (agents watching agents is a runaway vector; see the loop-prevention guardrails).
   "agent.run.started",

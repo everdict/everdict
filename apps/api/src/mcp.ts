@@ -10,6 +10,7 @@ import { registerBrowserProfileTools } from "./api/browser-profile/browser-profi
 import { registerBrowserSessionTools } from "./api/browser-session/browser-session.mcp.js";
 import { registerBundleTools } from "./api/bundle/bundle.mcp.js";
 import { registerCapabilityTools } from "./api/capability/capability.mcp.js";
+import { registerCheckpointTools } from "./api/checkpoint/checkpoint.mcp.js";
 import { registerCiLinkTools } from "./api/ci-link/ci-link.mcp.js";
 import { registerCommentTools } from "./api/comment/comment.mcp.js";
 import { registerCycleTools } from "./api/cycle/cycle.mcp.js";
@@ -100,6 +101,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerBundleTools(server, ctx);
   registerScheduleTools(server, ctx);
   registerViewTools(server, ctx);
+  registerCheckpointTools(server, ctx);
   registerTaskTools(server, ctx);
   registerTeamTools(server, ctx);
   registerCycleTools(server, ctx);

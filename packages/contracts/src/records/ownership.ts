@@ -153,6 +153,14 @@ export const HandoffCheckpointSchema = z.object({
 });
 export type HandoffCheckpoint = z.infer<typeof HandoffCheckpointSchema>;
 
+// The persisted checkpoint — the contract above plus the workspace it belongs to. A handoff is only useful if
+// a successor can FIND it, and finding it means a store; the tenant is the isolation boundary every record in
+// everdict carries, so it lives on the record rather than beside it.
+export const HandoffCheckpointRecordSchema = HandoffCheckpointSchema.extend({
+  tenant: z.string().min(1),
+});
+export type HandoffCheckpointRecord = z.infer<typeof HandoffCheckpointRecordSchema>;
+
 // ── O5 decisions (pure, beside the contract — the isMeasured precedent) ──────────────────────────────
 export type EnvelopeDecision =
   | { allowed: true }

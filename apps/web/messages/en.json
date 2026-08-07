@@ -1737,6 +1737,7 @@
       "runtime": "Runtime",
       "budget": "Budget",
       "approval": "Approval",
+      "checkpoint": "Checkpoint",
       "file": "File",
       "knowledge": "Knowledge",
       "agent_run": "Agent run",

@@ -8,6 +8,8 @@ import type { ScheduleService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import type { AgentRegistry } from "@everdict/application-control";
 import { SubscriptionService } from "@everdict/application-control";
+import { CheckpointService } from "@everdict/application-control";
+import type { HandoffCheckpointStore, PlatformEventEmitter } from "@everdict/application-control";
 import { ViewService } from "@everdict/application-control";
 import { ViewSnapshotService } from "@everdict/application-control";
 import type { WorkspaceFs } from "@everdict/application-control";
@@ -229,6 +231,33 @@ export function buildSubscription(deps: {
         await agentSaves.saveAgent(tenant, undefined, agentId, { ...rest, triggers: [] });
       },
     },
+  });
+}
+
+// Handoff checkpoints (ownership protocol O6). The evidence resolvers are bound here, and deliberately only
+// for the ref types everdict can actually answer for: a run and a scorecard are records we hold, a commit is
+// not — everdict does not host the tenant's git remote, and refusing a checkpoint for citing one would be
+// pretending to a check nobody made. `runCreator` is the independence linkage: it is what lets the service
+// refuse a verifier checkpoint filed by the actor that executed the run it claims to verify.
+export function buildCheckpoint(deps: {
+  handoffCheckpointStore: HandoffCheckpointStore;
+  runStore: RunStore;
+  scorecardStore: ScorecardStore;
+  events?: PlatformEventEmitter;
+}): CheckpointService {
+  return new CheckpointService({
+    store: deps.handoffCheckpointStore,
+    // The tenant comparison is the resolver's own job: RunStore.get is keyed by id alone, and a checkpoint in
+    // one workspace proving a "fact" with another workspace's run would be evidence its readers cannot see.
+    resolvers: {
+      run: async (tenant, id) => (await deps.runStore.get(id))?.tenant === tenant,
+      scorecard: async (tenant, id) => (await deps.scorecardStore.get(id))?.tenant === tenant,
+    },
+    runCreator: async (tenant, id) => {
+      const record = await deps.runStore.get(id);
+      return record?.tenant === tenant ? record.createdBy : undefined;
+    },
+    ...(deps.events ? { events: deps.events } : {}),
   });
 }
 

@@ -39,7 +39,8 @@ function catalogKey(token: string): string {
 // 어느 축의 사실인가 — 아이콘 하나로 "이건 일 얘기 / 평가 얘기"가 구분된다. 서버가 계약에 박아 둔 축 분류와
 // 같은 갈래(@everdict/contracts `activityAxisOf`)지만, 여기서는 아이콘을 고르는 데만 쓰므로 접두사로 판단한다.
 function iconOf(kind: string): LucideIcon {
-  if (kind.startsWith('agent.') || kind.startsWith('approval.')) return Bot
+  if (kind.startsWith('agent.') || kind.startsWith('approval.') || kind.startsWith('checkpoint.'))
+    return Bot
   if (kind.startsWith('file.') || kind.startsWith('knowledge.')) return BookOpen
   if (
     kind.startsWith('run.') ||

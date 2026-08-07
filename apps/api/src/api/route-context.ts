@@ -34,6 +34,7 @@ import {
 } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type {
+  CheckpointService,
   CycleService,
   GithubIssueSync,
   InitiativeService,
@@ -165,6 +166,7 @@ export interface ServerDeps {
   metrics?: { render(): string }; // Prometheus text exposition (GET /metrics) (route disabled if absent)
   subscriptionService?: SubscriptionService; // subscription registry (event → reaction rules, E3) (route disabled if absent)
   viewService?: ViewService; // saved scorecard-analysis View CRUD (route disabled if absent)
+  checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/read (routes disabled if absent)
   taskService?: TaskService; // workspace task ledger — cross-agent coordination (route disabled if absent)
   // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).
   teamService?: TeamService; // teams own issues and name them (ENG-12); a workspace always keeps one default

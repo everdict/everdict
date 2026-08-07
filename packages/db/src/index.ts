@@ -168,6 +168,10 @@ export { PgApprovalStore } from "./activity/pg-approval-store.js";
 export { InMemoryCommentStore, PgCommentStore } from "./activity/comment-store.js";
 export { InMemoryAgentSessionStore, PgAgentSessionStore } from "./activity/agent-session-store.js";
 export { InMemoryAgentTaskStore, PgAgentTaskStore } from "./activity/agent-task-store.js";
+export {
+  InMemoryHandoffCheckpointStore,
+  PgHandoffCheckpointStore,
+} from "./activity/handoff-checkpoint-store.js";
 // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, facts on the E0 same-tx outbox.
 export { InMemoryCycleStore, PgCycleStore } from "./tracker/cycle-store.js";
 export { InMemoryIssueStore, PgIssueStore } from "./tracker/issue-store.js";

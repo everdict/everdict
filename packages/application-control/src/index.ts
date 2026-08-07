@@ -103,6 +103,13 @@ export type { IssueNumberGrant, TeamListFilter, TeamStore } from "./ports/team-s
 export type { ProjectListFilter, ProjectStore, ProjectUpdateStore } from "./ports/project-store.js";
 export type { InitiativeListFilter, InitiativeStore, InitiativeUpdateStore } from "./ports/initiative-store.js";
 export type { ViewStore } from "./ports/view-store.js";
+export type { HandoffCheckpointStore } from "./ports/handoff-checkpoint-store.js";
+export {
+  CheckpointService,
+  type CheckpointRefResolvers,
+  type CheckpointServiceDeps,
+  type CreateCheckpointInput,
+} from "./ownership/checkpoint-service.js";
 export type { OAuthStateStore } from "./ports/oauth-state-store.js";
 export type { RunnerStore } from "./ports/runner-store.js";
 export type { SecretStore } from "./ports/secret-store.js";

@@ -1,4 +1,4 @@
-import type { LeaderElector, ReplicaRegistry } from "@everdict/application-control";
+import type { HandoffCheckpointStore, LeaderElector, ReplicaRegistry } from "@everdict/application-control";
 import { soleLeader, soloReplicas } from "@everdict/application-control";
 import type {
   AgentMemberPreferenceStore,
@@ -37,6 +37,7 @@ import {
   InMemoryEnvelopeStore,
   InMemoryEventConsumerStateStore,
   InMemoryFsRevisionStore,
+  InMemoryHandoffCheckpointStore,
   InMemoryInitiativeStore,
   InMemoryInitiativeUpdateStore,
   InMemoryIssueLabelStore,
@@ -84,6 +85,7 @@ import {
   PgEnvelopeStore,
   PgEventConsumerStateStore,
   PgFsRevisionStore,
+  PgHandoffCheckpointStore,
   PgInitiativeStore,
   PgInitiativeUpdateStore,
   PgIssueLabelStore,
@@ -209,6 +211,9 @@ export interface Persistence {
   fsRevisionStore: FsRevisionStore; // workspace-filesystem publication ledger — who published which revision, when
   subscriptionStore: SubscriptionStore; // subscription registry (event → reaction rules, E3 §6)
   viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
+  // Handoff checkpoints (ownership O6) — where an autonomous task's resumable state transfer outlives the
+  // process that wrote it. Append-only: a predecessor must not rewrite evidence its successor already used.
+  handoffCheckpointStore: HandoffCheckpointStore;
   taskStore: AgentTaskStore; // workspace task ledger — cross-turn, cross-agent coordination (agent-teams)
   // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer.
   teamStore: TeamStore;
@@ -323,6 +328,7 @@ export async function makePersistence(): Promise<Persistence> {
       fsRevisionStore: new InMemoryFsRevisionStore(),
       subscriptionStore: new InMemorySubscriptionStore(),
       viewStore: new InMemoryViewStore(),
+      handoffCheckpointStore: new InMemoryHandoffCheckpointStore(),
       taskStore: new InMemoryAgentTaskStore(),
       teamStore: new InMemoryTeamStore(),
       cycleStore: new InMemoryCycleStore(),
@@ -385,6 +391,7 @@ export async function makePersistence(): Promise<Persistence> {
     fsRevisionStore: new PgFsRevisionStore(client),
     subscriptionStore: new PgSubscriptionStore(client),
     viewStore: new PgViewStore(client),
+    handoffCheckpointStore: new PgHandoffCheckpointStore(client),
     taskStore: new PgAgentTaskStore(client),
     teamStore: new PgTeamStore(client),
     cycleStore: new PgCycleStore(client),

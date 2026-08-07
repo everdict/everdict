@@ -1737,6 +1737,7 @@
       "runtime": "런타임",
       "budget": "예산",
       "approval": "승인",
+      "checkpoint": "체크포인트",
       "file": "파일",
       "knowledge": "지식",
       "agent_run": "에이전트 실행",

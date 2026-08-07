@@ -76,3 +76,27 @@ A successor decides its next action from evidence references, not from the prede
 evidence, because a statement with nothing behind it *is* a hypothesis and the checkpoint has a field for
 those. `danglingCheckpointRefs` resolves every reference against the real stores; a fact whose evidence
 cannot be found is not a fact the successor can stand on.
+
+### Persistence and the surface
+
+`HandoffCheckpointStore` (`packages/application-control/src/ports`, `everdict_handoff_checkpoints`,
+migration 0137) is **append-only on purpose**: the port offers no update and no delete, so a predecessor
+cannot rewrite evidence its successor already acted on. `CheckpointService` holds the two admission rules,
+because both need to read *other people's* records:
+
+1. **Dangling evidence is refused** (400). Resolvers are bound in the composition root for the ref types
+   everdict can actually answer for — a run and a scorecard are records we hold. A type with no resolver
+   (`commit`) is **unverifiable, not false**: everdict does not host the tenant's git remote, and refusing a
+   checkpoint for citing a commit would be pretending to a check nobody made. The tenant comparison lives in
+   the resolver, so a checkpoint cannot prove a fact with another workspace's run.
+2. **A verifier does not check its own work** (400) — the resolvable half of the O3 invariant above. When the
+   checkpoint declares `role: "verifier"` and carries `by`, the service resolves each referenced run's
+   creator; if that creator is the filing actor, the checkpoint is refused. Every clause is conditional on
+   the linkage existing — no `by`, no role, or an unresolvable creator makes the check **abstain**.
+
+Surface: `POST/GET /checkpoints` + `GET /checkpoints/:id`, and the MCP twins `publish_checkpoint` /
+`list_checkpoints` / `get_checkpoint` — the transport an agent actually reaches this through, which is the
+point. Authz reuses `agents:read` / `agents:write` (no new action). Creation emits `checkpoint.created` on
+the E0 same-tx outbox, classified on the `agent` activity axis; it is deliberately **not** trigger-matchable,
+because an agent waking on another agent's handoff is the runaway vector the `agent.run.*` family is
+excluded for.
