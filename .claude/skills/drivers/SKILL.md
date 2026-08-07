@@ -19,6 +19,13 @@ Isolation/placement is the Backend's job (see skill `backends`) — this is the 
 3. The caller releases in a `finally` — `runCase` provisions once, `await compute.dispose()` always (`packages/run-case/src/run-case.ts`).
 4. A non-zero exit is a *result* `{exitCode, stdout, stderr}`, never a throw; only infra faults throw.
 5. Remap OS/SDK faults to an `AppError` — `COMPUTE_EXEC_FAILED` / `DRIVER_PROVISION_FAILED`; never leak raw.
+6. **Honor the declared world pre-flight.** `ComputeSpec.os` (case `placement.os`) and `ComputeSpec.needs`
+   (derived by `computeNeedsFor(evalCase)` from the env kind: repo/prompt→shell, browser→+browser,
+   os-use→+desktop) are DECLARATIONS the driver satisfies or refuses BEFORE execution — never silently
+   substitutes. Local/Docker refuse non-linux os AND the `desktop` need (neither is a desktop world);
+   `browser` flows through deliberately — the container IMAGE may carry headless chromium, so only the
+   harness/image can satisfy or fail it. `placement.os` also derives `os-windows`/`os-macos` in
+   `requiredCapabilities`, so the placement gates refuse an unplaceable world before any dispatch.
 
 ## Reference impl
 `packages/drivers/src/local.ts` — `LocalDriver` (`id="local"`): `mkdtemp` root + `child_process.exec`;

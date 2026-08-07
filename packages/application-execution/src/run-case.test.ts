@@ -238,3 +238,25 @@ describe("runCase — an abort landing after the drain still cancels", () => {
     expect(compute.disposed).toBe(true);
   });
 });
+
+describe("runCase — the case's world rides the ComputeSpec", () => {
+  it("derives needs from the env kind instead of hardcoding shell (browser env asks for a browser)", async () => {
+    // Regression: needs was the literal ["shell"], so a browser/os-use case reached the driver with a
+    // declaration that said nothing — the pre-flight gates had nothing to refuse or satisfy.
+    const captured: Array<{ os: string; needs: string[] }> = [];
+    const compute = fakeComputeHandle();
+    const driver = {
+      id: "fake",
+      provision: async (spec: { os: string; needs?: string[] }) => {
+        captured.push({ os: spec.os, needs: spec.needs ?? [] });
+        return compute;
+      },
+    } as Driver;
+
+    await runCase(
+      { ...CASE, env: { kind: "browser" } } as EvalCase,
+      { driver, environment: ENVIRONMENT, harness: completingHarness(), graders: [], runCtx: { apiKeyEnv: {}, timeoutSec: 60 } },
+    );
+    expect(captured[0]).toEqual({ os: "linux", needs: ["shell", "browser"] });
+  });
+});

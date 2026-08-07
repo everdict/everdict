@@ -295,6 +295,7 @@ export {
   runtimeSatisfies,
 } from "./runtime/capability.js";
 export {
+  computeNeedsFor,
   defaultRuntimeCapabilities,
   requiredCapabilities,
   requiredCapabilitiesForHarness,

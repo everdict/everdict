@@ -21,6 +21,7 @@ import type {
 import { UpstreamError, stamp } from "@everdict/contracts";
 import {
   classifyFailure,
+  computeNeedsFor,
   fsFileCommand,
   fsTreeCommand,
   parseFsFile,
@@ -238,11 +239,13 @@ function startCaseFsServicing(compute: ComputeHandle, hook: CaseFsServicing): ()
 
 // (this function later becomes a Temporal activity)
 export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<CaseResult> {
-  // The case DECLARES its world (placement.os); the driver satisfies it or refuses before execution — no
-  // hardcoded linux assumption. Absent declaration = the platform default world (linux), stated explicitly.
+  // The case DECLARES its world — os from placement, needs from the environment kind (computeNeedsFor:
+  // repo/prompt→shell, browser→+browser, os-use→+desktop) — and the driver satisfies it or refuses before
+  // execution. `needs: ["shell"]` used to be hardcoded here, so an os-use case reached a process driver that
+  // could never conjure its desktop and failed downstream instead of at the pre-flight gate.
   const compute = await deps.driver.provision({
     os: evalCase.placement?.os ?? "linux",
-    needs: ["shell"],
+    needs: computeNeedsFor(evalCase),
     image: evalCase.image,
   });
   let released = false;

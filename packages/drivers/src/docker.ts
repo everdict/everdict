@@ -203,6 +203,16 @@ export class DockerDriver implements Driver {
         `DockerDriver provides linux containers only; the case declared os '${spec.os}'.`,
       );
     }
+    // A container is not a desktop either — os-use worlds live behind computer-use runtimes. "browser" flows
+    // through deliberately: the IMAGE may carry headless chromium (browser-use bundles do), so the driver must
+    // not refuse what the image can satisfy.
+    if (spec.needs.includes("desktop")) {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { needs: spec.needs },
+        "DockerDriver cannot provide a desktop world (os-use case). Route it to a computer-use-capable runtime.",
+      );
+    }
     const image = spec.image ?? this.opts.defaultImage;
     if (!image) {
       throw new BadRequestError("BAD_REQUEST", undefined, "DockerDriver requires spec.image or defaultImage.");

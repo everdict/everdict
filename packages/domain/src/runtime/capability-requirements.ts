@@ -24,7 +24,25 @@ export function requiredCapabilities(evalCase: EvalCase): CapabilityName[] {
     req.add("computer-use"); // OS GUI control
   }
   if (evalCase.placement?.isolation) req.add("sandbox"); // isolation requirement (security — enforced by trust-zone)
+  // The case's DECLARED world (placement.os) is a placement requirement like any other — deriving it here puts
+  // it in front of the SAME pre-placement gates (runtimeSatisfies / the runner hub) every capability uses.
+  // Before this, a windows-declaring case sailed through placement and was refused only by the driver deep
+  // inside the job — a full dispatch round-trip to learn what the gate could have said for free.
+  const osCap = osCapability(evalCase.placement?.os);
+  if (osCap) req.add(osCap);
   return [...req];
+}
+
+// ── Compute needs (the DRIVER lane's world declaration) ─────────────────────────────────────────────────
+// What a case's compute must offer, derived from the environment kind — the ComputeSpec.needs the driver
+// receives. Distinct from the placement-capability vocabulary above: capabilities gate WHERE a job may be
+// placed; needs tell the provisioned compute what world the case is about to act on. "browser" flows through
+// to the driver (a container IMAGE can provide headless chromium — the driver cannot know, so it must not
+// refuse); "desktop" is a world no process/container driver can conjure and is refused pre-flight there.
+export function computeNeedsFor(evalCase: Pick<EvalCase, "env">): Array<"shell" | "browser" | "desktop"> {
+  if (evalCase.env.kind === "browser") return ["shell", "browser"];
+  if (evalCase.env.kind === "os-use") return ["shell", "desktop"];
+  return ["shell"];
 }
 
 // Map a service's intrinsic OS need to its placement capability. linux is the implicit default (no capability, no

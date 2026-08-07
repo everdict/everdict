@@ -1,6 +1,7 @@
 import type { CaseJob, EvalCase, RuntimeSpec, ServiceHarnessSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  computeNeedsFor,
   defaultRuntimeCapabilities,
   requiredCapabilities,
   requiredCapabilitiesForHarness,
@@ -40,6 +41,26 @@ describe("requiredCapabilities — derive execution requirements from the case (
 
   it("adds sandbox when placement.isolation is set (security — enforced by trust-zone)", () => {
     expect(requiredCapabilities(base({ placement: { isolation: "gvisor" } }))).toContain("sandbox");
+  });
+
+  it("derives the case's declared os as a placement capability — windows/macos gate BEFORE dispatch", () => {
+    // Regression: placement.os never entered the capability set, so a windows-declaring case sailed through
+    // every placement gate and was refused only by the driver inside the job — a wasted dispatch round-trip
+    // for an answer the gate had at submit.
+    expect(requiredCapabilities(base({ placement: { os: "windows" } }))).toContain("os-windows");
+    expect(requiredCapabilities(base({ placement: { os: "macos" } }))).toContain("os-macos");
+    // linux is the implicit default world — no capability, no gate.
+    expect(requiredCapabilities(base({ placement: { os: "linux" } }))).toEqual([]);
+    expect(requiredCapabilities(base({}))).toEqual([]);
+  });
+});
+
+describe("computeNeedsFor — the driver lane's world declaration, derived from the env kind", () => {
+  it("repo/prompt → shell; browser adds browser; os-use adds desktop", () => {
+    expect(computeNeedsFor(base({}))).toEqual(["shell"]);
+    expect(computeNeedsFor(base({ env: { kind: "prompt" } }))).toEqual(["shell"]);
+    expect(computeNeedsFor(base({ env: { kind: "browser" } }))).toEqual(["shell", "browser"]);
+    expect(computeNeedsFor(base({ env: { kind: "os-use" } }))).toEqual(["shell", "desktop"]);
   });
 });
 

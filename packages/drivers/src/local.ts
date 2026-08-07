@@ -134,6 +134,15 @@ export class LocalDriver implements Driver {
         `LocalDriver provides linux only; the case declared os '${spec.os}'. Route it to a runtime that provides that world.`,
       );
     }
+    // Same rule for the capability axis: a host process has no desktop world to offer an os-use case.
+    // "browser" deliberately flows through — the host may have one; the harness knows, the driver cannot.
+    if (spec.needs.includes("desktop")) {
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { needs: spec.needs },
+        "LocalDriver cannot provide a desktop world (os-use case). Route it to a computer-use-capable runtime.",
+      );
+    }
     const root = await mkdtemp(join(tmpdir(), "everdict-"));
     return new LocalComputeHandle(root, this.opts.echo ?? false);
   }
