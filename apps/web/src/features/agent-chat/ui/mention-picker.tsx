@@ -46,6 +46,9 @@ export const REFERENCE_TYPE_ICON: Record<AgentReferenceType, LucideIcon> = {
 // cross-source trace browse would be prohibitively wide. So the picker tabs offer every type EXCEPT trace.
 const PICKABLE_REFERENCE_TYPES = AGENT_REFERENCE_TYPES.filter((rt) => rt !== 'trace')
 
+// 타이핑이 멎기를 기다리는 시간(ms) — IssueSearchOptions 와 같은 값, 같은 이유.
+const SEARCH_DEBOUNCE_MS = 200
+
 interface MentionItem {
   id: string
   label: string
@@ -111,33 +114,32 @@ export function MentionPicker({
     return () => window.removeEventListener('keydown', onKey, true)
   }, [type, onClose])
 
+  // 후보는 서버가 좁힌다(IssueSearchOptions 와 같은 이유): 라우트는 창 하나(20건)로 답하므로, 받아 둔
+  // 창을 여기서 거르면 컬렉션이 창보다 큰 타입(이슈)에서 조용히 못 찾기 시작한다. 취소는 두 겹 — 아직
+  // 안 나간 요청은 타이머로, 이미 나간 요청은 AbortController 로 접는다.
   useEffect(() => {
     if (!type) return
-    let cancelled = false
-    setLoading(true)
-    void (async () => {
-      try {
-        const res = await fetch(`/api/agent/mentions/${type}`, { cache: 'no-store' })
-        const data = res.ok ? await res.json() : { items: [] }
-        if (!cancelled) setItems(Array.isArray(data.items) ? data.items : [])
-      } catch {
-        if (!cancelled) setItems([])
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      setLoading(true)
+      const trimmed = q.trim()
+      fetch(`/api/agent/mentions/${type}${trimmed ? `?q=${encodeURIComponent(trimmed)}` : ''}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+        .then(async (res) => {
+          const data = res.ok ? await res.json() : { items: [] }
+          setItems(Array.isArray(data.items) ? data.items : [])
+        })
+        // 실패·중단이면 고를 것이 없는 것과 같다 — 빈 목록 문구가 답한다.
+        .catch(() => undefined)
+        .finally(() => setLoading(false))
+    }, SEARCH_DEBOUNCE_MS)
     return () => {
-      cancelled = true
+      clearTimeout(timer)
+      controller.abort()
     }
-  }, [type])
-
-  const filtered = q
-    ? items.filter(
-        (it) =>
-          it.id.toLowerCase().includes(q.toLowerCase()) ||
-          it.label.toLowerCase().includes(q.toLowerCase())
-      )
-    : items
+  }, [type, q])
 
   return (
     // Anchored to the composer's left edge at a fixed menu width (like the session/team menus) — the panel is a
@@ -167,6 +169,9 @@ export function MentionPicker({
                   type="button"
                   onClick={() => {
                     setQ('')
+                    // 이전 타입의 행이 디바운스 창 동안 남아 보이지 않게 — 바로 로딩 문구로 넘어간다.
+                    setItems([])
+                    setLoading(true)
                     setType(rt)
                   }}
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent"
@@ -190,10 +195,10 @@ export function MentionPicker({
           <ul className="min-h-0 flex-1 overflow-y-auto p-1">
             {loading ? (
               <li className="px-2 py-2 text-[12px] text-muted-foreground">{t('mentionLoading')}</li>
-            ) : filtered.length === 0 ? (
+            ) : items.length === 0 ? (
               <li className="px-2 py-2 text-[12px] text-muted-foreground">{t('mentionEmpty')}</li>
             ) : (
-              filtered.map((it) => (
+              items.map((it) => (
                 <li key={`${it.id}@${it.version ?? ''}`}>
                   <button
                     type="button"

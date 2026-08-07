@@ -109,7 +109,10 @@ export async function GET(
     let items = (Array.isArray(rows) ? rows : [])
       .map(normalize)
       .filter((x): x is MentionItem => x !== null)
-    if (q)
+    // 이슈는 제어 평면이 이미 검색해 좁힌 답이다(fetchRows 가 `search` 를 넘긴다) — 여기서 부분문자열로
+    // 한 번 더 거르면 서버 의미론으로 찾은 행(식별자·제목 밖 매치)이 조용히 떨어진다. 창 전체를 받아오는
+    // 나머지 타입만 여기서 거른다.
+    if (q && type !== 'issue')
       items = items.filter(
         (it) => it.id.toLowerCase().includes(q) || it.label.toLowerCase().includes(q)
       )
