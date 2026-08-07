@@ -28,7 +28,9 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
   `maxConcurrent` is the operator ceiling over the topology lane (absent → backend default 8), and when the
   harness declares a session pool (`target.acquire.capacity`) the lane's capacity follows the LIVE pool under
   that ceiling — scale the session service out and the Scheduler admits wider on the next pass, no re-registration
-  (see `architecture/live-observability.md`).
+  (see `architecture/live-observability.md`). A harness additionally declaring `capacity.scale {min,max}` opts
+  its session service into automatic replica scaling on k8s runtimes (pool saturation + queued backlog drive it;
+  the Nomad co-located group cannot scale one service and never acts).
 - **runtime-side placement binding (nomad/k8s) — GPU + node targeting.** Operator-owned hints the cluster's own
   scheduler uses to place a job onto a matching node; the harness stays infra-agnostic (it declares WHAT it needs,
   not WHERE — cluster specifics are runtime-owned, see `architecture/heterogeneous-topology-placement.md`).

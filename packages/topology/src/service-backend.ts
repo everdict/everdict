@@ -2,7 +2,9 @@ import { scoreObservations } from "@everdict/application-execution";
 import {
   type Backend,
   type BackendCapacity,
+  type CaseCapacityAware,
   type DispatchOptions,
+  type PoolReporting,
   type ScreenAttachable,
   type ScreenCapturable,
   type TopologyInspectable,
@@ -16,6 +18,7 @@ import {
   type FrontDoorFile,
   type Grader,
   InternalError,
+  RateLimitError,
   type Score,
   type ServiceHarnessSpec,
   type StoreReader,
@@ -25,7 +28,7 @@ import {
   stamp,
 } from "@everdict/contracts";
 import type { TopologyStatus } from "@everdict/contracts/wire";
-import { type TrustZonePolicy, assertHardenedIsolation } from "@everdict/domain";
+import { type ScalingTarget, type TrustZonePolicy, assertHardenedIsolation } from "@everdict/domain";
 import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
 import { type StoreSeedPlan, planStoreSeed } from "./deploy/store-seed.js";
@@ -98,6 +101,9 @@ export interface ServiceTopologyBackendOptions {
   // pump and a settle-heavy batch pumps constantly — the TTL keeps that from turning into a live HTTP read of
   // the tenant's session service per settle. 0 = probe fresh on every call (tests). Default 3000.
   poolCacheTtlMs?: number;
+  // The dispatch-side slot wait against a full session pool (awaitPoolSlot): poll cadence, how long a case is
+  // willing to wait for a slot before giving up with 429, and an injectable sleep (deterministic tests).
+  poolWait?: { intervalMs?: number; timeoutMs?: number; sleep?: (ms: number) => Promise<void> };
   trustZones?: TrustZonePolicy; // per-tenant isolation — separate the warm pool per zone (no sharing)
   // Saved-profile injection (browser-profiles S5) — when spec.target.profile is set, seed that profile's captured
   // login (cookies) into the per-case browser BEFORE the agent connects, so the eval runs already authenticated. The
@@ -136,7 +142,9 @@ function numberAt(body: unknown, path: string): number | undefined {
 
 // The orchestrator-agnostic service-topology backend (a Backend implementation).
 // ensure warm topology → per-case browser → drive (front-door, per-run wiring) → collectTrace → observe → grade.
-export class ServiceTopologyBackend implements Backend, ScreenCapturable, ScreenAttachable, TopologyInspectable {
+export class ServiceTopologyBackend
+  implements Backend, ScreenCapturable, ScreenAttachable, TopologyInspectable, PoolReporting, CaseCapacityAware
+{
   // Live target lookup for in-flight cases: runId → the control-plane-reachable CDP base of THIS case's browser,
   // recorded once the target is acquired and dropped when it is released. `captureScreen` is a separate call stack
   // from `dispatch` (an API request vs the running dispatch), so without this it can only ask the runtime to
@@ -148,9 +156,15 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
   // capacity() probe reads a pool it already knows how to reach and never deploys anything. Keyed by warm
   // identity (spec id@effectiveVersion + zone) so image-pin variants and per-tenant zones count separately,
   // exactly as their warm pools deploy separately.
-  private readonly trackedPools = new Map<string, { spec: ServiceHarnessSpec; endpoints: Record<string, string> }>();
+  private readonly trackedPools = new Map<
+    string,
+    { spec: ServiceHarnessSpec; zone?: TrustZone; endpoints: Record<string, string> }
+  >();
   // One aggregate pool snapshot cached across pump-driven capacity() probes (see poolCacheTtlMs).
   private poolSnapshot: { at: number; value: { total: number; used: number } | undefined } | undefined;
+  // The last per-pool readings behind poolStats() (PoolReporting) — refreshed by the same capacity probes the
+  // Scheduler pump already drives, so a metrics scrape reads without probing anything.
+  private readonly lastPools = new Map<string, { total: number; used?: number }>();
 
   constructor(private readonly opts: ServiceTopologyBackendOptions) {}
 
@@ -213,16 +227,149 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     }
   }
 
+  // The warm identity a tracked pool is keyed by — spec id@effectiveVersion, zone-suffixed for zoned tenants.
+  private warmKey(spec: ServiceHarnessSpec, zone: TrustZone | undefined): string {
+    return zone ? `${spec.id}@${spec.version}|${zone.id}` : `${spec.id}@${spec.version}`;
+  }
+
   // Remember where a warm topology's session pool can be asked (called on every dispatch, once the topology is
   // up). Only session pools the harness declared sizable (acquire.capacity with a total) are worth probing.
   private trackPool(spec: ServiceHarnessSpec, zone: TrustZone | undefined, endpoints: Record<string, string>): void {
     const acquire = spec.target?.acquire;
     if (acquire?.mode !== "service" || !acquire.capacity) return;
-    const key = `${spec.id}@${spec.version}|${zone?.id ?? ""}`;
+    const key = this.warmKey(spec, zone);
     // A NEW pool invalidates the cached aggregate so the next capacity() sees it immediately; re-recording a
     // known pool must not (a batch dispatches per case, and invalidating per case would defeat the TTL).
     if (!this.trackedPools.has(key)) this.poolSnapshot = undefined;
-    this.trackedPools.set(key, { spec, endpoints });
+    this.trackedPools.set(key, { spec, ...(zone ? { zone } : {}), endpoints });
+  }
+
+  // The scalable session pools of this backend's warm topologies — the actuation surface of elastic capacity
+  // (docs/architecture/live-observability.md). An entry exists only when ALL THREE parties opted in: the harness
+  // declared scale bounds (acquire.capacity.scale — only its author knows sessions aren't pinned to one replica's
+  // state), the runtime can address one service's scale (K8s; the Nomad co-located group cannot), and the pool
+  // has a live reading (refreshed by the capacity probes — no signal, no action). `target.current` reads the
+  // DESIRED replica count live and THROWS when unreadable so a scaling tick skips instead of acting blind.
+  poolScalingTargets(): Array<{
+    key: string;
+    bounds: { min: number; max: number };
+    pool: { total: number; used?: number };
+    target: ScalingTarget;
+  }> {
+    const runtime = this.opts.runtime;
+    const read = runtime.serviceReplicas?.bind(runtime);
+    const scale = runtime.scaleService?.bind(runtime);
+    if (!read || !scale) return [];
+    const out: ReturnType<ServiceTopologyBackend["poolScalingTargets"]> = [];
+    for (const [key, tracked] of this.trackedPools) {
+      const acquire = tracked.spec.target?.acquire;
+      if (acquire?.mode !== "service") continue;
+      const bounds = acquire.capacity?.scale;
+      const pool = this.lastPools.get(key);
+      if (!bounds || !pool) continue;
+      const { spec, zone } = tracked;
+      const service = acquire.service; // the service HOLDING the sessions (the poll may live on a status sibling)
+      out.push({
+        key,
+        bounds,
+        pool,
+        target: {
+          id: key,
+          current: async () => {
+            const replicas = await read(spec, service, zone);
+            if (replicas === undefined)
+              throw new InternalError("HARNESS_RUN_FAILED", { service }, "replica count unreadable.");
+            return replicas;
+          },
+          scaleTo: (desired: number) => scale(spec, service, desired, zone),
+        },
+      });
+    }
+    return out;
+  }
+
+  // The last known session-pool readings, keyed by warm identity (PoolReporting — the /metrics scrape). Never
+  // probes: the readings refresh with the capacity probes the Scheduler pump already drives.
+  poolStats(): Array<{ pool: string; total: number; used?: number }> {
+    return [...this.lastPools.entries()].map(([pool, p]) => ({
+      pool,
+      total: p.total,
+      ...(p.used !== undefined ? { used: p.used } : {}),
+    }));
+  }
+
+  // Park a case in front of a FULL session pool instead of letting the open fail (#2/#4 pre-gate). The Scheduler
+  // admits against the aggregate pool, but a burst that beat the first pool read (cold start — the pool is only
+  // visible after a dispatch records it) or another lane's sessions can still arrive at a full pool; without
+  // this gate each overflow case failed at session-open, rode the batch retry, and fed the per-runtime circuit
+  // breaker a saturation it miscounted as an outage. Bounded (429 with pool evidence at the deadline) and
+  // abort-aware; only a pool that reports `used` can be waited on — without it, the open attempt IS the probe.
+  private async awaitPoolSlot(
+    job: CaseJob,
+    spec: ServiceHarnessSpec,
+    endpoints: Record<string, string>,
+    opts: DispatchOptions | undefined,
+    mark: (event: string, message: string, service?: string) => void,
+  ): Promise<void> {
+    const acquire = spec.target?.acquire;
+    if (acquire?.mode !== "service" || !acquire.capacity?.used) return;
+    const intervalMs = this.opts.poolWait?.intervalMs ?? 2_000;
+    const timeoutMs = this.opts.poolWait?.timeoutMs ?? 120_000;
+    const sleep = this.opts.poolWait?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const deadline = Date.now() + timeoutMs;
+    let announced = false;
+    for (;;) {
+      if (opts?.signal?.aborted) throw dispatchAborted(job);
+      const pool = await this.readPoolAt(spec, endpoints);
+      // A free slot, an unreadable pool, or one that stopped reporting `used` → proceed (the open is the probe).
+      if (!pool || pool.used === undefined || pool.used < pool.total) return;
+      if (!announced) {
+        announced = true;
+        const reason = `session pool full (${pool.used}/${pool.total}) on service ${acquire.service} — waiting for a slot`;
+        mark("target_waiting", reason);
+        // Surface the park reason once (the batch path appends it as a step); best-effort by contract.
+        try {
+          opts?.onWaiting?.(reason);
+        } catch {
+          // a listener failure must not break dispatch
+        }
+      }
+      if (Date.now() >= deadline) {
+        // Saturation is backpressure, not an outage: 429 keeps it out of the infra-failure ledger (the circuit
+        // breaker must not open because a healthy pool is merely full).
+        throw new RateLimitError(
+          "RATE_LIMITED",
+          { service: acquire.service, pool: { total: pool.total, used: pool.used } },
+          `the session pool stayed full (${pool.used}/${pool.total}) for ${timeoutMs}ms.`,
+        );
+      }
+      await sleep(intervalMs);
+    }
+  }
+
+  // Harness-keyed capacity (CaseCapacityAware): THIS job's harness pools only — one runtime carrying two
+  // service harnesses sizes each by its own pool instead of the shared aggregate. Answers from the LAST pool
+  // readings (the pump's capacity() probe just refreshed them; per-job consultation must never probe). Pin
+  // variants of the version count together (the same harness re-imaged), and only the job's own zone counts
+  // (pools are per tenant zone — the same resolution dispatch applies). undefined = this harness has no
+  // visible pool (cold start / no declaration) → the Scheduler falls back to the aggregate.
+  async capacityFor(job: CaseJob): Promise<BackendCapacity | undefined> {
+    const zone = this.opts.trustZones?.resolve(job.tenant ?? "default");
+    const base = `${job.harness.id}@${job.harness.version}`;
+    let total = 0;
+    let used = 0;
+    let found = false;
+    for (const key of this.trackedPools.keys()) {
+      const [identity, zonePart] = key.split("|");
+      if (zonePart !== zone?.id) continue; // both undefined (zoneless) or the exact same zone
+      if (identity !== base && !identity?.startsWith(`${base}-pin-`)) continue;
+      const pool = this.lastPools.get(key);
+      if (!pool) continue;
+      found = true;
+      total += pool.total;
+      used += pool.used ?? 0;
+    }
+    return found ? { total, used } : undefined;
   }
 
   // Aggregate the live session pools across this backend's tracked warm topologies — the admission-plane read
@@ -237,7 +384,12 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     const pools = await Promise.all(
       [...this.trackedPools.entries()].map(async ([key, tracked]) => {
         const pool = await this.readPoolAt(tracked.spec, tracked.endpoints);
-        if (!pool) this.trackedPools.delete(key);
+        if (!pool) {
+          this.trackedPools.delete(key);
+          this.lastPools.delete(key); // a dead pool leaves the scrape too — no ghost gauges
+        } else {
+          this.lastPools.set(key, { total: pool.total, ...(pool.used !== undefined ? { used: pool.used } : {}) });
+        }
         return pool;
       }),
     );
@@ -405,6 +557,9 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
       "topology_ready",
       `topology ${spec.id}@${spec.version} ready in ${Date.now() - t0}ms — services: ${spec.services.map((s) => s.name).join(", ")}${spec.dependencies.length > 0 ? `; stores: ${spec.dependencies.map((d) => d.store).join(", ")}` : ""}`,
     );
+    // Park in front of a full pool BEFORE any per-case work (seeding/acquisition) — a slot may free any moment,
+    // and failing the case at session-open taught the batch layer nothing but retries.
+    await this.awaitPoolSlot(job, spec, topo.endpoints, opts, mark);
     // World-state fixture seeding (P2): seed the case's declared fixtures into their per-case isolation slices AFTER the
     // warm topology is up and BEFORE the drive, so the agent operates on the seeded state. A PRECONDITION — planStoreSeed
     // binds/validates each fixture against a purpose:"data" store (throws on a bad target), and a seed failure or a

@@ -38,7 +38,10 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   stores, best-effort→`warnings`], `CaseInspectable`=inspectCase [case-scoped placement: phase queued|blocked|
   starting|running|dead + blocked capacity verdict + unit/node/events — wire SSOT `CasePlacement`],
   `TopologyInspectable`=inspectTopology/topologyServiceLogs [service-topology health roster + service log tail,
-  harness-keyed; ServiceTopologyBackend only], `Reclaimable`=stopWorkload/reclaimIdle/purgeTerminal/setNodeSchedulable
+  harness-keyed; ServiceTopologyBackend only], `PoolReporting`=poolStats [last session-pool readings for the
+  /metrics gauges — never a live probe], `CaseCapacityAware`=capacityFor [harness-keyed capacity: the Scheduler
+  consults it per job so each harness is admitted by ITS pool on a shared runtime; must answer from already-
+  probed readings, cheap enough for per-job-per-round], `Reclaimable`=stopWorkload/reclaimIdle/purgeTerminal/setNodeSchedulable
   [DESTRUCTIVE control, admin-only `runtimes:control`, best-effort/idempotent, stores never reclaimed],
   **session mode** = the `Driver` contract itself (`provision`/`reap`/optional `snapshot`), guarded by
   `isSessionable` — a target that can HOLD compute open (agent worlds / the playground) as well as run a case to
@@ -88,6 +91,11 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   to grow/shrink capacity (`desiredCapacity` is pure; upscale immediate, downscale after hysteresis). A backend's
   `maxConcurrent` may be `() => number` so scaling takes effect next placement pass; after a scale, re-pump via
   `Scheduler.poke()`. Actuation is abstracted — in-memory `MutableSlots` or a callback to Nomad Autoscaler/ASG/K8s.
+  The topology lane has its own loop (`TopologyPoolAutoscaler`, @everdict/topology): a harness declaring
+  `acquire.capacity.scale {min,max}` opts its session service into replica scaling via
+  `TopologyRuntime.serviceReplicas/scaleService` (K8s only; the Nomad co-located group cannot address one
+  service) — demand = pool saturation + that harness's queued backlog, wired in apps/api
+  `composition/topology-autoscaler.ts`.
 - Tenant isolation: eval = untrusted code. A backend with a `TrustZonePolicy` resolves `tenant → TrustZone`
   and applies it per dispatch — set the docker `runtime`/`Namespace` from the zone and call
   `assertHardenedIsolation` (untrusted tenants MUST get runsc/kata, never shared-kernel runc). Default to

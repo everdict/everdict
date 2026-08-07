@@ -716,3 +716,90 @@ describe("Scheduler cancellation (AbortSignal)", () => {
     expect(b.dispatchedIds).toEqual(["c1", "c3", "c2"]); // the promoted entry ran before the earlier-queued one
   });
 });
+
+// Harness-keyed capacity (CaseCapacityAware) — one backend, several harnesses, each admitted by its OWN pool.
+// Pre-fix the Scheduler admitted against the backend-wide aggregate only, so a job whose harness pool was full
+// was dispatched into a case-by-case refusal while a sibling harness's room said "free".
+describe("Scheduler — harness-keyed capacity (CaseCapacityAware)", () => {
+  class PooledBackend extends ControlledBackend {
+    pools = new Map<string, { total: number; used: number }>();
+    async capacityFor(j: CaseJob): Promise<{ total: number; used: number } | undefined> {
+      return this.pools.get(`${j.harness.id}@${j.harness.version}`);
+    }
+  }
+  const jobFor = (harness: string, caseId: string): CaseJob => ({
+    harness: { id: harness, version: "1" },
+    evalCase: {
+      id: caseId,
+      env: { kind: "repo", source: { files: {} } },
+      task: "t",
+      graders: [],
+      timeoutSec: 1,
+      tags: [],
+    },
+  });
+
+  it("admits each harness by its own pool — a full pool queues its jobs while a sibling harness keeps flowing", async () => {
+    const b = new PooledBackend("topo", 8);
+    b.pools.set("a@1", { total: 1, used: 0 });
+    b.pools.set("b@1", { total: 2, used: 0 });
+    const sched = new Scheduler(new BackendRegistry().register("topo", b));
+
+    const all = [
+      sched.dispatch(jobFor("a", "a1")),
+      sched.dispatch(jobFor("a", "a2")),
+      sched.dispatch(jobFor("b", "b1")),
+    ];
+    await flush();
+
+    // a's pool holds ONE session: a1 in flight, a2 queued; b1 flowed past it (HOL avoidance), well under the
+    // backend-wide 8 slots that pre-fix would have admitted all three into.
+    expect(b.dispatchedIds).toEqual(["a1", "b1"]);
+    expect(sched.stats().queued).toBe(1);
+
+    b.releaseOne(); // a1 settles → the per-harness in-flight count frees a's slot
+    await flush();
+    expect(b.dispatchedIds).toEqual(["a1", "b1", "a2"]);
+    b.releaseAll();
+    await flush();
+    b.releaseAll();
+    await Promise.all(all);
+  });
+
+  it("counts the pool's externally-held sessions (another lane) against admission, and flows once they free", async () => {
+    const b = new PooledBackend("topo", 8);
+    b.pools.set("a@1", { total: 2, used: 2 }); // the conversation lane holds both sessions
+    const sched = new Scheduler(new BackendRegistry().register("topo", b));
+
+    const p = sched.dispatch(jobFor("a", "a1"));
+    await flush();
+    expect(b.dispatchedIds).toEqual([]); // no pool room anywhere → queued, not dispatched into a refusal
+    expect(sched.stats().queued).toBe(1);
+
+    b.pools.set("a@1", { total: 2, used: 1 }); // a session closed
+    sched.poke();
+    await flush();
+    expect(b.dispatchedIds).toEqual(["a1"]);
+    b.releaseAll();
+    await p;
+  });
+
+  it("a harness with no pool signal falls back to the backend-wide slots (cold start / no declaration)", async () => {
+    const b = new PooledBackend("topo", 2);
+    const sched = new Scheduler(new BackendRegistry().register("topo", b));
+
+    const all = [
+      sched.dispatch(jobFor("c", "c1")),
+      sched.dispatch(jobFor("c", "c2")),
+      sched.dispatch(jobFor("c", "c3")),
+    ];
+    await flush();
+    expect(b.dispatchedIds).toEqual(["c1", "c2"]); // the aggregate (total 2) still gates
+    expect(sched.stats().queued).toBe(1);
+
+    b.releaseAll();
+    await flush();
+    b.releaseAll();
+    await Promise.all(all);
+  });
+});

@@ -94,6 +94,12 @@ export { DockerTopologyRuntime, type DockerTopologyRuntimeOptions } from "./depl
 export { type Docker, type DockerRunSpec, dockerCli, dockerRunArgs, parseHostPort } from "./deploy/docker.js";
 export { ServiceTopologyBackend, type ServiceTopologyBackendOptions, type SubmitFn } from "./service-backend.js";
 export {
+  type PoolAutoscalerHost,
+  type ScalablePool,
+  TopologyPoolAutoscaler,
+  type TopologyPoolAutoscalerOptions,
+} from "./pool-autoscaler.js";
+export {
   type FrontDoorDriver,
   type FrontDoorDriveRequest,
   type DriveOutcome,

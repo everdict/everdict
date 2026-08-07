@@ -1,4 +1,4 @@
-import { type CaseJob, type CaseResult, UpstreamError } from "@everdict/contracts";
+import { type CaseJob, type CaseResult, RateLimitError, UpstreamError } from "@everdict/contracts";
 import { CircuitBreaker } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { executeWithSpillover } from "./runtime-spillover.js";
@@ -66,6 +66,30 @@ describe("executeWithSpillover", () => {
     expect(seen).toEqual(["nomad", "kind"]);
     expect(outcome.target).toBe("kind");
     expect(spills).toEqual(["c1:nomad->kind"]);
+  });
+
+  it("backpressure (RATE_LIMITED) spills but never feeds the breaker — a full pool means busy, not down", async () => {
+    const breaker = new CircuitBreaker({ now: () => 0 });
+    const poolFull = new RateLimitError(
+      "RATE_LIMITED",
+      { pool: { total: 4, used: 4 } },
+      "the session pool stayed full.",
+    );
+    // Three consecutive saturated cases — at the default threshold this used to OPEN the circuit and announce
+    // an outage on a healthy runtime exactly when the batch ran widest.
+    for (let i = 0; i < 3; i++) {
+      const outcome = await executeWithSpillover(
+        async (j) => {
+          if ((j.evalCase.placement?.target ?? "?") === "nomad") throw poolFull;
+          return okResult;
+        },
+        jobOn("nomad"),
+        { targets: ["nomad", "kind"], tenant: "acme", breaker },
+      );
+      expect(outcome.target).toBe("kind"); // the spill itself still happens — the next runtime may have room
+    }
+    expect(breaker.isOpen("acme:nomad")).toBe(false);
+    expect(breaker.stats()["acme:nomad"]).toBeUndefined(); // saturation was never even counted
   });
 
   it("skips a runtime whose circuit is open and goes straight to a healthy one", async () => {

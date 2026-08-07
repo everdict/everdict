@@ -54,9 +54,13 @@ export async function executeWithSpillover(
       return { result, target };
     } catch (err) {
       const failure = classifyFailure(err, "dispatch");
-      // Only an infra failure says anything about the runtime's health. (The closed→open transition itself is
-      // announced by the breaker's own onOpen hook — wired where the breaker is constructed.)
-      if (failure.class === "infra") opts.breaker.failure(keyOf(target));
+      // Only an infra failure says anything about the runtime's health — and saturation says even less: a full
+      // session pool / scheduler queue (RATE_LIMITED, 429) means the runtime is BUSY, not down. Feeding it to
+      // the breaker opened the circuit on a healthy runtime exactly when a batch ran widest, and the outage
+      // fact/notification blamed an outage that never happened. Backpressure still SPILLS below (the next
+      // runtime in the user's list may have room); it just never counts toward an outage. (The closed→open
+      // transition itself is announced by the breaker's own onOpen hook — wired where the breaker is constructed.)
+      if (failure.class === "infra" && failure.code !== "RATE_LIMITED") opts.breaker.failure(keyOf(target));
       lastErr = err;
       const next = candidates[i + 1];
       // Fatal or non-infra failures rethrow immediately: moving runtimes can't fix an OOM-sized harness, a

@@ -540,6 +540,41 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     }
   }
 
+  // Elastic session pools (TopologyRuntime actuation seams). One Deployment per service + Service DNS spreading
+  // sessions across replicas is exactly the shape a single-service scale needs — the reason K8s implements these
+  // and the Nomad co-located group does not. The DESIRED count (.spec.replicas) is read, not live pods: a scale
+  // mid-rollout must not be re-issued from the transient pod count.
+  async serviceReplicas(spec: ServiceHarnessSpec, service: string, zone?: TrustZone): Promise<number | undefined> {
+    const read = this.kubectl.deploymentReplicas?.bind(this.kubectl);
+    if (!read) return undefined;
+    try {
+      return await read(`${spec.id}-${service}`, this.nsFor(zone));
+    } catch {
+      return undefined; // best-effort — an unreadable count skips a scaling tick, never fails anything
+    }
+  }
+
+  async scaleService(spec: ServiceHarnessSpec, service: string, replicas: number, zone?: TrustZone): Promise<void> {
+    const scale = this.kubectl.scaleDeployment?.bind(this.kubectl);
+    if (!scale) {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { service, replicas },
+        "this kubectl seam cannot scale a Deployment (scaleDeployment not provided).",
+      );
+    }
+    try {
+      await scale(`${spec.id}-${service}`, this.nsFor(zone), replicas);
+    } catch (err) {
+      // Explicit failure — a scale that silently no-ops would read as "capacity added".
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { service, replicas },
+        `scaling ${spec.id}-${service} to ${replicas} replicas failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   async teardown(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<void> {
     const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
     const entry = this.warm.get(key);

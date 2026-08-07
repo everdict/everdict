@@ -481,3 +481,55 @@ describe("buildBrowserManifests — the harness's client-extension browser", () 
     expect(container?.args).toEqual(["--remote-allow-origins=*"]);
   });
 });
+
+// Elastic session pools — the K8s actuation seams (one Deployment per service; the Service DNS spreads
+// sessions across replicas, which is why K8s can address one service's scale and the Nomad group cannot).
+describe("K8sTopologyRuntime — serviceReplicas / scaleService", () => {
+  const zone: TrustZone = {
+    id: "acme",
+    isolationRuntime: "runsc",
+    network: "deny-cross-tenant",
+    trusted: false,
+  };
+
+  it("reads the DESIRED replica count of the service's own Deployment in the zone namespace", async () => {
+    const { kubectl, calls } = fakeKubectl();
+    kubectl.deploymentReplicas = async (deployment, ns) => {
+      calls.push(`replicas:${ns}/${deployment}`);
+      return 2;
+    };
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    expect(await rt.serviceReplicas(SPEC, "agent-server", zone)).toBe(2);
+    expect(calls).toContain("replicas:everdict-acme/bu-agent-server");
+  });
+
+  it("an unreadable count reads as undefined (skip a scaling tick), never a throw", async () => {
+    const { kubectl } = fakeKubectl();
+    kubectl.deploymentReplicas = async () => {
+      throw new Error("apiserver away");
+    };
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    expect(await rt.serviceReplicas(SPEC, "agent-server", zone)).toBeUndefined();
+    // A kubectl seam without the read at all is the same non-signal.
+    const bare = new K8sTopologyRuntime({ kubectl: fakeKubectl().kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    expect(await bare.serviceReplicas(SPEC, "agent-server", zone)).toBeUndefined();
+  });
+
+  it("scales the service's Deployment; a failure surfaces as UpstreamError — a silent no-op would read as capacity added", async () => {
+    const { kubectl, calls } = fakeKubectl();
+    kubectl.scaleDeployment = async (deployment, ns, replicas) => {
+      calls.push(`scale:${ns}/${deployment}=${replicas}`);
+    };
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    await rt.scaleService(SPEC, "agent-server", 3, zone);
+    expect(calls).toContain("scale:everdict-acme/bu-agent-server=3");
+
+    kubectl.scaleDeployment = async () => {
+      throw new Error("forbidden");
+    };
+    await expect(rt.scaleService(SPEC, "agent-server", 3, zone)).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+    // A kubectl seam that cannot scale at all must refuse loudly too.
+    const bare = new K8sTopologyRuntime({ kubectl: fakeKubectl().kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    await expect(bare.scaleService(SPEC, "agent-server", 3, zone)).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+  });
+});

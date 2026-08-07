@@ -1,6 +1,6 @@
 import { Metrics } from "@everdict/application-control";
 import { type AutoscaleConfig, parseAutoscale, parseTenantMap } from "@everdict/application-control";
-import { BackendRegistry, K8sBackend, NomadBackend, Scheduler } from "@everdict/backends";
+import { BackendRegistry, K8sBackend, NomadBackend, Scheduler, isPoolReporting } from "@everdict/backends";
 import type { BudgetStore, SecretStore, UsageStore } from "@everdict/db";
 import { Autoscaler, type BudgetLimit, CircuitBreaker, MutableSlots, type TrustZonePolicy } from "@everdict/domain";
 import { collectAuthEnv } from "@everdict/job-runner";
@@ -99,7 +99,18 @@ export function buildExecutionScheduling(deps: {
       scheduler.poke(); // loosened quotas should drain the queue immediately
     },
   };
+  // Global queue-depth backstop (EVERDICT_MAX_QUEUE_DEPTH, default 10000): with capacity now truthful (a
+  // saturated topology QUEUES instead of failing case by case), the queue is where pressure accumulates — and
+  // an unbounded queue lets one runaway submitter hold the control plane's memory hostage. Beyond the backstop
+  // dispatch rejects 429 (explicit backpressure, never a silent drop); the per-tenant depth caps stay the finer
+  // dial. Malformed values fail the boot — a typo'd backstop must not silently mean "unlimited".
+  const rawMaxQueueDepth = process.env.EVERDICT_MAX_QUEUE_DEPTH;
+  const maxQueueDepth = rawMaxQueueDepth === undefined ? 10_000 : Number(rawMaxQueueDepth);
+  if (!Number.isInteger(maxQueueDepth) || maxQueueDepth <= 0) {
+    throw new Error(`EVERDICT_MAX_QUEUE_DEPTH must be a positive integer (got "${rawMaxQueueDepth}").`);
+  }
   const scheduler = new Scheduler(backends, {
+    maxQueueDepth,
     tenantQuota: (t: string) => quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY,
     weightFor: (t: string) => weightOverrides.get(t) ?? tenantWeights?.get(t) ?? 1,
     ...(tenantQueueDepths
@@ -111,7 +122,10 @@ export function buildExecutionScheduling(deps: {
 
 // Prometheus metrics (docs/architecture/work-queue.md — the time-series half; /queue is the snapshot half)
 // + the per-runtime circuit breaker + the scrape-time scheduler gauges.
-export function buildObservability(scheduler: Scheduler, opts?: { onBreakerOpen?: (key: string) => void }) {
+export function buildObservability(
+  scheduler: Scheduler,
+  opts?: { onBreakerOpen?: (key: string) => void; backends?: BackendRegistry },
+) {
   const metrics = new Metrics();
   // Per-runtime circuit breaker — shared between the batch spillover (ScorecardService) and the queue view
   // (observability): one health memory, three consumers (spillover · queue view · metrics). The extra
@@ -147,6 +161,31 @@ export function buildObservability(scheduler: Scheduler, opts?: { onBreakerOpen?
       .filter(([, st]) => st.open)
       .map(([circuit]) => ({ labels: { circuit }, value: 1 })),
   );
+  // Session-pool gauges — the pool the orchestrator cannot see, sampled from each pool-reporting backend's LAST
+  // capacity reading (never a live probe: a scrape must not touch the tenant's cluster). Backends register/retire
+  // dynamically (rt:<tenant>:<id>@<version>), so the roster is walked at scrape time.
+  if (opts?.backends) {
+    const backends = opts.backends;
+    const poolRows = (pick: (p: { total: number; used?: number }) => number | undefined) =>
+      backends.names().flatMap((backend) => {
+        const b = backends.get(backend);
+        if (!isPoolReporting(b)) return [];
+        return b.poolStats().flatMap((p) => {
+          const value = pick(p);
+          return value === undefined ? [] : [{ labels: { backend, pool: p.pool }, value }];
+        });
+      });
+    metrics.gauge(
+      "everdict_topology_pool_total",
+      "Declared size of each live session pool behind a topology backend.",
+      () => poolRows((p) => p.total),
+    );
+    metrics.gauge(
+      "everdict_topology_pool_used",
+      "Sessions currently held in each live session pool (absent when the service does not report it).",
+      () => poolRows((p) => p.used),
+    );
+  }
   return { metrics, breaker };
 }
 

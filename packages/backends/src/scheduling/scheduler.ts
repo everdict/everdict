@@ -1,10 +1,13 @@
 import { type CaseJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/contracts";
 import { type BudgetTracker, FairQueue, costOf } from "@everdict/domain";
-import { type BackendCapacity, type DispatchOptions, dispatchAborted } from "../backend.js";
+import { type BackendCapacity, type DispatchOptions, dispatchAborted, isCaseCapacityAware } from "../backend.js";
 import type { BackendRegistry } from "../placement/registry.js";
 
 const DEFAULT_TENANT = "default";
 const tenantOf = (job: CaseJob): string => job.tenant ?? DEFAULT_TENANT;
+// The per-harness admission key (harness-keyed capacity) — the requested identity; a backend's own warm keys
+// (pin-suffixed versions, zones) fold into it inside capacityFor.
+const harnessKeyOf = (job: CaseJob): string => `${job.harness.id}@${job.harness.version}`;
 
 // A snapshot of one backend's available slots.
 export interface BackendSlot {
@@ -85,23 +88,32 @@ class Admission {
   private readonly backendMemMb = new Map<string, number>();
   private readonly backendCpu = new Map<string, number>();
   private readonly tenantCounts = new Map<string, number>();
+  // Per-(backend, harness@version) in-flight — the fifth dimension, for harness-keyed capacity (a topology
+  // backend's session pools are per harness): within one pump the pool reading is a snapshot, so our OWN
+  // placements of that harness must be counted locally or a single drain over-admits into one pool.
+  private readonly harnessCounts = new Map<string, number>();
 
-  reserve(backend: string, tenant: string, memMb: number, cpu: number): void {
+  reserve(backend: string, tenant: string, memMb: number, cpu: number, harness: string): void {
     bump(this.backendCounts, backend, 1);
     if (memMb > 0) bump(this.backendMemMb, backend, memMb);
     if (cpu > 0) bump(this.backendCpu, backend, cpu);
     bump(this.tenantCounts, tenant, 1);
+    bump(this.harnessCounts, `${backend}|${harness}`, 1);
   }
 
-  release(backend: string, tenant: string, memMb: number, cpu: number): void {
+  release(backend: string, tenant: string, memMb: number, cpu: number, harness: string): void {
     bump(this.backendCounts, backend, -1);
     if (memMb > 0) bump(this.backendMemMb, backend, -memMb);
     if (cpu > 0) bump(this.backendCpu, backend, -cpu);
     bump(this.tenantCounts, tenant, -1);
+    bump(this.harnessCounts, `${backend}|${harness}`, -1);
   }
 
   countFor(backend: string): number {
     return this.backendCounts.get(backend) ?? 0;
+  }
+  harnessCountFor(backend: string, harness: string): number {
+    return this.harnessCounts.get(`${backend}|${harness}`) ?? 0;
   }
   memMbFor(backend: string): number {
     return this.backendMemMb.get(backend) ?? 0;
@@ -323,6 +335,9 @@ export class Scheduler {
       if (this.queue.size === 0) return; // nothing to place — don't probe the cluster
       let placedAny = true;
       const caps = await this.probeCapacities(); // ONE cluster probe per drain, reused across placement rounds
+      // Per-drain memo for harness-keyed capacity (capacityFor answers from the same probe snapshot, so one
+      // reading per (backend, harness) is both cheap and coherent with `caps` above).
+      const caseCaps = new Map<string, BackendCapacity | undefined>();
       while (placedAny && this.queue.size > 0) {
         placedAny = false;
         const slots = this.freeSlotsFrom(caps); // recompute from the snapshot + live in-flight (no HTTP)
@@ -357,7 +372,17 @@ export class Scheduler {
             );
           if (candidates.length === 0) continue; // no room right now → try the next job
 
-          const chosen = this.policy.choose(candidates, entry.job);
+          // Harness-keyed capacity (CaseCapacityAware): among the slot-eligible backends keep only those where
+          // THIS job's harness has pool room — one runtime carrying two service harnesses admits each by its
+          // own pool, and a job whose pool is full is skipped (HOL avoidance) instead of dispatched into
+          // case-by-case refusals.
+          const withHarnessRoom: BackendSlot[] = [];
+          for (const slot of candidates) {
+            if (await this.harnessRoom(slot.name, entry.job, caseCaps)) withHarnessRoom.push(slot);
+          }
+          if (withHarnessRoom.length === 0) continue;
+
+          const chosen = this.policy.choose(withHarnessRoom, entry.job);
           if (chosen === undefined) continue;
 
           this.queue.remove(entry);
@@ -370,7 +395,7 @@ export class Scheduler {
             slot.memFreeMb -= memNeed;
             slot.cpuFree -= cpuNeed;
           }
-          this.admission.reserve(chosen, tenant, memNeed, cpuNeed);
+          this.admission.reserve(chosen, tenant, memNeed, cpuNeed, harnessKeyOf(entry.job));
           this.runOne(entry, chosen, tenant, memNeed, cpuNeed);
           placedAny = true;
         }
@@ -378,6 +403,25 @@ export class Scheduler {
     } finally {
       this.pumping = false;
     }
+  }
+
+  // Does THIS job's harness have room on the backend? Only CaseCapacityAware backends are asked; the answer is
+  // memoized per drain (capacityFor reads the same probe snapshot the drain started with), and our OWN
+  // per-harness placements are max'd in so a single drain cannot over-admit into one pool.
+  private async harnessRoom(
+    name: string,
+    job: CaseJob,
+    memo: Map<string, BackendCapacity | undefined>,
+  ): Promise<boolean> {
+    const backend = this.registry.get(name);
+    if (!isCaseCapacityAware(backend)) return true;
+    const harness = harnessKeyOf(job);
+    const key = `${name}|${harness}`;
+    if (!memo.has(key)) memo.set(key, await backend.capacityFor(job).catch(() => undefined));
+    const cap = memo.get(key);
+    if (!cap) return true; // no per-harness signal (not warm yet / no pool declared) → the aggregate decides
+    const used = Math.max(cap.used, this.admission.harnessCountFor(name, harness));
+    return cap.total - used > 0;
   }
 
   // The effective scan order — the fair (WFQ) order partitioned into the urgent class first (interactive /
@@ -473,7 +517,7 @@ export class Scheduler {
         entry.resolve(result);
       }, entry.reject)
       .finally(() => {
-        this.admission.release(name, tenant, memNeedMb, cpuNeed);
+        this.admission.release(name, tenant, memNeedMb, cpuNeed, harnessKeyOf(entry.job));
         void this.pump();
       });
   }

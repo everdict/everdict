@@ -198,6 +198,26 @@ export interface TopologyInspectable {
   ): Promise<string | undefined>;
 }
 
+// CaseCapacityAware — harness-keyed capacity, for a backend whose REAL limit depends on which harness a job
+// drives (a topology backend's session pools are per warm topology, so one runtime carrying two service
+// harnesses has two independent limits). The Scheduler consults it per job during placement ON TOP of the
+// backend-wide capacity() (which stays the aggregate the probe reports): a job only places where its own
+// harness has room. Must be CHEAP — it runs per queued job per placement round, so implementations answer from
+// the readings the backend-wide capacity() probe already refreshed, never with a live probe of their own.
+// undefined = no per-harness signal for this job (not warm yet / no pool declared) → the aggregate decides.
+export interface CaseCapacityAware {
+  capacityFor(job: CaseJob): Promise<BackendCapacity | undefined>;
+}
+
+// PoolReporting — the last known session-pool readings behind a backend's capacity (the pool that lives INSIDE a
+// service container, invisible to any orchestrator read). Read-only and non-probing: the readings refresh with the
+// capacity probes the Scheduler pump already drives, so the /metrics scrape samples without touching the cluster.
+// `pool` is the warm identity (spec id@version, zone-suffixed for zoned tenants); `used` is absent when the
+// service does not report it. ServiceTopologyBackend implements it; job-runner backends have no session pool.
+export interface PoolReporting {
+  poolStats(): Array<{ pool: string; total: number; used?: number }>;
+}
+
 // Reclaimable — DESTRUCTIVE live-cluster control paired with Inspectable, for the runtime detail screen's admin
 // actions (gated runtimes:control at the control plane). Nomad/K8s implement it; local does not. The reclaim
 // methods are best-effort and idempotent (acting on an already-gone target is a no-op, not an error) — the caller
@@ -227,6 +247,14 @@ export interface Reclaimable {
 export function isRecoverable(backend: Backend): backend is Backend & Recoverable {
   const b = backend as Partial<Recoverable>;
   return typeof b.adopt === "function" && typeof b.kill === "function";
+}
+
+export function isPoolReporting(backend: Backend): backend is Backend & PoolReporting {
+  return typeof (backend as Partial<PoolReporting>).poolStats === "function";
+}
+
+export function isCaseCapacityAware(backend: Backend): backend is Backend & CaseCapacityAware {
+  return typeof (backend as Partial<CaseCapacityAware>).capacityFor === "function";
 }
 
 export function isObservable(backend: Backend): backend is Backend & Observable {

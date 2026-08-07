@@ -84,6 +84,7 @@ import {
   buildView,
   buildViewSnapshot,
 } from "./composition/services.js";
+import { startTopologyPoolAutoscaler } from "./composition/topology-autoscaler.js";
 import { buildTrustZones } from "./composition/trust-zones.js";
 import { buildWorkspace } from "./composition/workspace.js";
 import { AgentMemberToolingService } from "./core/agent/agent-member-tooling-service.js";
@@ -357,6 +358,7 @@ async function main(): Promise<void> {
   // service is built after the scheduler). Key format is `${tenant}:${runtimeId}` — split on the FIRST colon
   // (the runtime half may itself carry colons, e.g. self:ws).
   const { metrics, breaker } = buildObservability(scheduler, {
+    backends, // session-pool gauges walk the live backend roster at scrape time (rt: backends register dynamically)
     onBreakerOpen: (key) => {
       const sep = key.indexOf(":");
       if (sep <= 0) return;
@@ -374,6 +376,9 @@ async function main(): Promise<void> {
     },
   });
   startAutoscaler({ autoscale, scalingTargets, scheduler });
+  // Elastic session pools — scale declared-scalable topology session services from pool saturation + backlog
+  // (acts only on harnesses that declare acquire.capacity.scale, on runtimes that can scale one service).
+  startTopologyPoolAutoscaler({ backends, scheduler });
   const { budget, usageMeter } = await buildBudgets({ budgetStore, usageStore });
 
   // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).

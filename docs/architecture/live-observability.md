@@ -244,11 +244,27 @@ the warm topology's pool coordinates, and `ServiceTopologyBackend.capacity()` ag
 (TTL-cached; never deploys — an unreachable pool drops out of the probe set until the next dispatch re-records
 it): `total` follows the pool, clamped by the runtime's declared `maxConcurrent`, and `used` counts every session
 in it, so a full pool queues in the Scheduler (backpressure and queue-depth signals engage) instead of failing its
-overflow case by case, and a pool wider than the old static cap admits that wide. The per-backend `capacity()`
-signature stays: pools aggregate across a backend's warm topologies (exact in the dominant one-harness-per-runtime
-case). Until a pool is visible — nothing dispatched yet, or no `acquire.capacity` declared — the static cap
-(`maxConcurrent ?? 8`) stands, so a first wave can still overshoot a smaller pool; its overflow fails fast and the
-batch retry re-queues against the now-truthful number.
+overflow case by case, and a pool wider than the old static cap admits that wide. Until a pool is visible —
+nothing dispatched yet, or no `acquire.capacity` declared — the static cap (`maxConcurrent ?? 8`) stands.
+
+On top of the recorded pools sit four consumers. **Per-harness admission**: `capacityFor(job)`
+(`CaseCapacityAware`, consulted by the Scheduler per job with a per-drain memo + a per-(backend, harness)
+in-flight count) answers with that harness's pools only, so one runtime carrying two service harnesses sizes each
+by its own pool and a job whose pool is full is skipped (HOL avoidance) rather than dispatched into a refusal.
+**The dispatch-side slot wait**: `awaitPoolSlot` parks a case in front of a full pool before any per-case work —
+`target_waiting` sealed into the trajectory + `onWaiting` up the step seam — and gives up with a 429
+`RateLimitError` at `poolWait.timeoutMs` (default 120s); saturation is backpressure, not an outage, so the batch
+spillover's circuit breaker explicitly ignores `RATE_LIMITED` (it still spills — the next runtime may have room).
+**/metrics**: `poolStats()` (`PoolReporting`) feeds `everdict_topology_pool_total/used` gauges from the last
+capacity reading — a scrape never touches the cluster. **The actuation loop**: a harness declaring
+`acquire.capacity.scale {min,max}` opts its session service into replica scaling — `TopologyPoolAutoscaler`
+(one domain `Autoscaler` per warm pool: demand = pool `used` + that harness's queued backlog, translated
+sessions→replicas by the pool's own per-replica ratio; upscale immediate, downscale after idle hysteresis)
+drives `TopologyRuntime.serviceReplicas`/`scaleService`, which K8s implements (one Deployment per service; the
+Service DNS spreads sessions across replicas) and the Nomad co-located group deliberately does not (scaling the
+group replicates the whole stack while endpoint discovery stays pinned to one alloc — that lane needs an LB/mesh
+front first). The sensing half then closes the loop by itself: the scaled-out service reports a bigger pool, and
+the next capacity probe admits wider.
 
 ### Failure evidence retention (`CaseFailure.placement`/`logTail`)
 

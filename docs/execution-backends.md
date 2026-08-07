@@ -119,6 +119,9 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   these are just the dials. Cross-tenant fairness is operator-set, not workspace self-serve.
   `EVERDICT_TENANT_QUEUE_DEPTHS="acme=200,*=1000"` caps a tenant's **queued** entries (over-cap submit =
   429 `RATE_LIMITED`, never a silent drop) so one tenant's burst can't consume unbounded queue memory.
+  `EVERDICT_MAX_QUEUE_DEPTH` (default 10000) is the GLOBAL backstop over the whole queue — with topology
+  capacity truthful, a saturated pool queues rather than fails, so the queue is where pressure accumulates;
+  beyond the backstop dispatch rejects 429. Malformed = boot failure (a typo must not mean "unlimited").
   Quota/weight can also be adjusted **without a restart** via `PUT /internal/scheduling`
   (`{"quotas":{"acme":2,"beta":null},"weights":{…}}`, `null` clears an override; `GET` returns the
   effective view) — an override layer on top of the env defaults, guarded like every `/internal/**`

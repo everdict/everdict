@@ -64,6 +64,15 @@ export interface TopologyRuntime {
   // on an unref'd interval, so superseded versions' warm jobs stop exhausting the cluster even with no new dispatch.
   // Returns the reclaimed warm keys (observability/tests).
   sweepIdle?(idleMs: number): Promise<string[]>;
+  // Elastic session pools (the actuation half): the DESIRED replica count of ONE deployed service of the warm
+  // topology, and the write that changes it. Optional: only runtimes that can address a single service's scale
+  // implement them (K8s — one Deployment per service, the Service DNS spreads sessions across replicas). The
+  // Nomad co-located topology deliberately does NOT: scaling its one group replicates the whole stack while
+  // endpoint discovery stays pinned to one alloc, so the added capacity would never be reached — that needs an
+  // LB/mesh front first. serviceReplicas is best-effort (undefined = unreadable → the autoscaler skips a tick);
+  // scaleService THROWS on failure — a scale that silently no-ops would read as "capacity added".
+  serviceReplicas?(spec: ServiceHarnessSpec, service: string, zone?: TrustZone): Promise<number | undefined>;
+  scaleService?(spec: ServiceHarnessSpec, service: string, replicas: number, zone?: TrustZone): Promise<void>;
 }
 
 // Warm-topology reclamation defaults (A9). Browser sessions always swept on a 60s timer; warm topologies never did —

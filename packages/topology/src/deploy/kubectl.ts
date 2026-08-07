@@ -39,6 +39,12 @@ export interface Kubectl {
   >;
   // Current log tail of a target (pod or deployment/x) — the service-level log read. Optional + best-effort.
   logs?(target: string, ns: string, tailLines?: number): Promise<string | undefined>;
+  // Elastic session pools: scale a Deployment to an absolute replica count. Optional + explicit-failure — a
+  // scale that silently no-ops would read as "capacity added", so impls throw on a non-zero exit.
+  scaleDeployment?(deployment: string, ns: string, replicas: number): Promise<void>;
+  // The DESIRED replica count of a Deployment (.spec.replicas — what was asked for, the base the next scaling
+  // decision builds on, deliberately not the live pod count). Optional + best-effort: undefined = unreadable.
+  deploymentReplicas?(deployment: string, ns: string): Promise<number | undefined>;
   // Namespace events attached to one object (a pod) — scheduling/kubelet causes. Optional + best-effort.
   objectEvents?(
     name: string,
@@ -170,6 +176,24 @@ export function kubectlCli(opts: { context?: string; bin?: string } = {}): Kubec
     },
     async deleteNamespace(ns) {
       await run(bin, [...ctx, "delete", "namespace", ns, "--ignore-not-found", "--wait=false"]);
+    },
+    async scaleDeployment(deployment, ns, replicas) {
+      const res = await run(bin, [...ctx, "-n", ns, "scale", `deployment/${deployment}`, `--replicas=${replicas}`]);
+      if (res.code !== 0) throw new Error(`scale ${deployment} to ${replicas} failed: ${res.stderr || res.stdout}`);
+    },
+    async deploymentReplicas(deployment, ns) {
+      const res = await run(bin, [
+        ...ctx,
+        "-n",
+        ns,
+        "get",
+        `deployment/${deployment}`,
+        "-o",
+        "jsonpath={.spec.replicas}",
+      ]);
+      if (res.code !== 0) return undefined;
+      const n = Number(res.stdout.trim());
+      return Number.isInteger(n) && n >= 0 ? n : undefined;
     },
     async podFor(selector, ns) {
       const res = await run(bin, [

@@ -7,7 +7,7 @@ import type {
   TraceEvent,
   TrustZone,
 } from "@everdict/contracts";
-import { InternalError } from "@everdict/contracts";
+import { InternalError, RateLimitError } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import type { TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
@@ -2851,6 +2851,16 @@ describe("ServiceTopologyBackend — capacity() follows the live session pool", 
     expect(counts.ensures).toBe(1);
   });
 
+  it("poolStats exposes the last capacity reading per warm pool (the /metrics sample) without probing", async () => {
+    const { backend, counts } = pooledBackend();
+    expect(backend.poolStats()).toEqual([]); // nothing tracked yet
+    await backend.dispatch(job);
+    await backend.capacity(); // the pump-driven probe refreshes the readings
+    const polls = counts.polls;
+    expect(backend.poolStats()).toEqual([{ pool: "browser-use-langgraph@1.0.0", total: 32, used: 21 }]);
+    expect(counts.polls).toBe(polls); // the scrape read never probes the cluster
+  });
+
   it("maxConcurrent clamps the pool-driven total (the operator ceiling over the live pool)", async () => {
     const { backend } = pooledBackend({ maxConcurrent: 16 });
     await backend.dispatch(job);
@@ -2858,9 +2868,249 @@ describe("ServiceTopologyBackend — capacity() follows the live session pool", 
   });
 
   it("a saturated pool reports full — the Scheduler queues instead of over-admitting into case-by-case refusals", async () => {
-    const { backend } = pooledBackend({ poolBody: () => ({ max_browsers: 4, active_browsers: 4 }) });
-    await backend.dispatch(job);
+    let used = 1;
+    const { backend } = pooledBackend({ poolBody: () => ({ max_browsers: 4, active_browsers: used }) });
+    await backend.dispatch(job); // a dispatch with room records the pool coordinates
+    used = 4; // other lanes (conversation sessions) filled the pool since
     expect(await backend.capacity()).toEqual({ total: 4, used: 4 });
+  });
+
+  it("capacityFor answers per harness — two service harnesses on one runtime size by their OWN pools", async () => {
+    const specA: ServiceHarnessSpec = { ...POOLED, id: "harness-a" };
+    const specB: ServiceHarnessSpec = { ...POOLED, id: "harness-b" };
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology(spec) {
+        return { endpoints: { "agent-server": `http://${spec.id}:8000` } };
+      },
+      async provisionBrowserEnv() {
+        throw new Error("unused");
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: (_tenant, id) => (id === "harness-a" ? specA : specB),
+      submit: async () => {},
+      acquireRequest,
+      newRunId: () => "fixed",
+      poolCacheTtlMs: 0,
+      getJson: async (url) =>
+        url.includes("harness-a") ? { max_browsers: 4, active_browsers: 1 } : { max_browsers: 16, active_browsers: 9 },
+    });
+    const jobFor = (id: string): CaseJob => ({ ...job, harness: { id, version: "1.0.0" } });
+
+    await backend.dispatch(jobFor("harness-a"));
+    await backend.dispatch(jobFor("harness-b"));
+    expect(await backend.capacity()).toEqual({ total: 20, used: 10 }); // the aggregate stays the probe's story
+
+    // …but admission for a JOB is its own harness's pool, not the aggregate.
+    expect(await backend.capacityFor(jobFor("harness-a"))).toEqual({ total: 4, used: 1 });
+    expect(await backend.capacityFor(jobFor("harness-b"))).toEqual({ total: 16, used: 9 });
+    expect(await backend.capacityFor(jobFor("harness-c"))).toBeUndefined(); // never warm here → aggregate decides
+  });
+
+  it("poolScalingTargets exposes a pool only when the harness declared scale bounds AND the runtime can act", async () => {
+    const SCALABLE: ServiceHarnessSpec = {
+      ...POOLED,
+      target: {
+        ...(POOLED.target as NonNullable<ServiceHarnessSpec["target"]>),
+        acquire: {
+          ...(POOLED.target?.acquire as Extract<
+            NonNullable<NonNullable<ServiceHarnessSpec["target"]>["acquire"]>,
+            { mode: "service" }
+          >),
+          capacity: {
+            poll: "GET /health",
+            total: "max_browsers",
+            used: "active_browsers",
+            scale: { min: 1, max: 4 },
+          },
+        },
+      },
+    };
+    const scaled: Array<{ service: string; replicas: number }> = [];
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        throw new Error("unused");
+      },
+      async serviceReplicas() {
+        return 2;
+      },
+      async scaleService(_spec, service, replicas) {
+        scaled.push({ service, replicas });
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SCALABLE,
+      submit: async () => {},
+      acquireRequest,
+      newRunId: () => "fixed",
+      poolCacheTtlMs: 0,
+      getJson: async () => ({ max_browsers: 8, active_browsers: 3 }),
+    });
+
+    expect(backend.poolScalingTargets()).toEqual([]); // nothing tracked yet
+    await backend.dispatch(job);
+    await backend.capacity(); // the probe records the reading the scaling entry carries
+    const targets = backend.poolScalingTargets();
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({
+      key: "browser-use-langgraph@1.0.0",
+      bounds: { min: 1, max: 4 },
+      pool: { total: 8, used: 3 },
+    });
+    expect(await targets[0]?.target.current()).toBe(2);
+    await targets[0]?.target.scaleTo(3);
+    expect(scaled).toEqual([{ service: "agent-server", replicas: 3 }]); // the SESSION service, in the runtime's hands
+  });
+
+  it("a pool without declared scale bounds (or on a runtime that cannot act) is never a scaling target", async () => {
+    const { backend } = pooledBackend(); // POOLED declares capacity but no scale; mock runtime has no seams either
+    await backend.dispatch(job);
+    await backend.capacity();
+    expect(backend.poolScalingTargets()).toEqual([]);
+  });
+
+  it("a full pool parks the case: onWaiting names the reason and the session opens only after a slot frees", async () => {
+    // The Scheduler admits against the aggregate pool, but a cold-start burst or another lane's sessions can
+    // still arrive at a full pool — pre-fix each overflow case failed at session-open and rode the batch retry.
+    let reads = 0;
+    const counts = { ensures: 0 };
+    const acqCalls: string[] = [];
+    const waits: string[] = [];
+    const sleeps: number[] = [];
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        counts.ensures += 1;
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        throw new Error("unused — service acquisition");
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => POOLED,
+      submit: async () => {},
+      acquireRequest: async (method, url) => {
+        acqCalls.push(`${method} ${url}`);
+        return method === "POST" ? { id: "sess-1" } : undefined;
+      },
+      newRunId: () => "fixed",
+      poolCacheTtlMs: 0,
+      poolWait: { intervalMs: 5, sleep: async (ms) => void sleeps.push(ms) },
+      getJson: async () => {
+        reads += 1;
+        // Full for the first two waits, then a slot frees.
+        return reads <= 2 ? { max_browsers: 2, active_browsers: 2 } : { max_browsers: 2, active_browsers: 1 };
+      },
+    });
+
+    const result = await backend.dispatch(job, { onWaiting: (reason) => void waits.push(reason) });
+
+    expect(result.harness).toBe("browser-use-langgraph@1.0.0");
+    expect(waits).toEqual(["session pool full (2/2) on service agent-server — waiting for a slot"]); // announced ONCE
+    expect(sleeps).toEqual([5, 5]); // two full reads → two waits, then the freed slot let the open proceed
+    expect(acqCalls[0]).toBe("POST http://agent-server:8000/sessions"); // the session opened only after the slot freed
+    // The park is also sealed into the trajectory (target_waiting infra mark).
+    expect(result.trace.some((e) => e.kind === "infra" && "event" in e && e.event === "target_waiting")).toBe(true);
+  });
+
+  it("a pool that stays full times out with 429 + pool evidence, and never opens a session", async () => {
+    const acqCalls: string[] = [];
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        throw new Error("unused");
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => POOLED,
+      submit: async () => {},
+      acquireRequest: async (method, url) => {
+        acqCalls.push(`${method} ${url}`);
+        return { id: "sess-1" };
+      },
+      newRunId: () => "fixed",
+      poolCacheTtlMs: 0,
+      poolWait: { timeoutMs: 0 }, // deadline already passed on the first full read — deterministic without a clock
+      getJson: async () => ({ max_browsers: 2, active_browsers: 2 }),
+    });
+
+    const err = await backend.dispatch(job).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(RateLimitError); // saturation = backpressure (429), never an infra outage
+    expect((err as RateLimitError).extra?.pool).toEqual({ total: 2, used: 2 });
+    expect(acqCalls).toEqual([]); // gave up BEFORE opening — no half-open session to leak
+  });
+
+  it("an abort while parked at the full pool rejects with CANCELLED and never opens a session", async () => {
+    const acqCalls: string[] = [];
+    const controller = new AbortController();
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        throw new Error("unused");
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => POOLED,
+      submit: async () => {},
+      acquireRequest: async (method, url) => {
+        acqCalls.push(`${method} ${url}`);
+        return { id: "sess-1" };
+      },
+      newRunId: () => "fixed",
+      poolCacheTtlMs: 0,
+      // Abort while the case sleeps in front of the full pool — the next wakeup must observe it.
+      poolWait: { intervalMs: 5, sleep: async () => controller.abort() },
+      getJson: async () => ({ max_browsers: 2, active_browsers: 2 }),
+    });
+
+    const err = await backend.dispatch(job, { signal: controller.signal }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(InternalError);
+    expect((err as InternalError).code).toBe("CANCELLED");
+    expect(acqCalls).toEqual([]);
   });
 
   it("a pool that stops answering drops out of the probe set — static fallback, no repeat probing of a dead coordinate", async () => {

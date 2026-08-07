@@ -327,6 +327,19 @@ seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`.
   refusals — queue depth / backpressure / autoscaler signals become real for the topology lane.
   `RuntimeSpec.maxConcurrent` (threaded via `buildTopologyEnvironment`) clamps as the operator ceiling; until a
   pool is visible (nothing dispatched yet / no `acquire.capacity`), the static cap (`maxConcurrent ?? 8`) stands.
+  Four consumers hang off the recorded pools: ① **per-harness admission** — `capacityFor(job)`
+  (`CaseCapacityAware`) answers with THIS harness's pools only (pin variants together, the job's zone only), so
+  the Scheduler sizes each harness by its own pool on a shared runtime and skips (HOL) a job whose pool is full;
+  ② **the dispatch-side slot wait** — `awaitPoolSlot` parks a case in front of a full pool (`target_waiting`
+  infra mark + `onWaiting`, bounded by `poolWait.timeoutMs` → 429 `RateLimitError`; saturation must never read
+  as an outage — the spillover breaker ignores `RATE_LIMITED`); ③ **/metrics** — `poolStats()` (`PoolReporting`)
+  feeds `everdict_topology_pool_total/used` gauges from the LAST reading (a scrape never probes); ④ **the
+  actuation loop** — declaring `capacity.scale {min,max}` opts the SESSION service into replica scaling
+  (`TopologyPoolAutoscaler`: demand = pool.used + that harness's queued backlog, sessions→replicas via the
+  pool's per-replica ratio, upscale immediate / downscale after hysteresis) through
+  `TopologyRuntime.serviceReplicas/scaleService` — K8s implements them (per-service Deployment + Service DNS);
+  the Nomad co-located group deliberately does NOT (scaling it replicates the whole stack while discovery stays
+  pinned to one alloc).
 - **`acquire.cdpBase` — the session's watchable address.** A dot-path into the open response yielding a
   **control-plane-reachable** CDP base (NOT the agent-facing coordinate — that one is an internal alias). It fills
   `TargetEnvHandle.cdpBase`, which is the single switch behind the CDP environment recorder AND the live screen,

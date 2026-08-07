@@ -313,6 +313,15 @@ export const TargetAcquireSchema = z.discriminatedUnion("mode", [
         poll: z.string(), // "GET /health" (method+path; wiring {var} interpolation)
         total: z.string(), // dot-path to the pool size in that response
         used: z.string().optional(), // dot-path to how many are in use right now
+        // Replica bounds for the SESSION service behind this pool — the actuation half of elastic capacity.
+        // Declaring them lets the control plane scale that service between min..max replicas when the pool
+        // saturates with work still queued (and back down once idle). The harness author declares it because
+        // only they know the service scales horizontally (sessions are not pinned to one replica's state).
+        // Absent = the pool is fixed; runtimes that cannot address one service's scale never act.
+        scale: z
+          .object({ min: z.number().int().positive(), max: z.number().int().positive() })
+          .refine((s) => s.min <= s.max, { message: "scale.min must not exceed scale.max" })
+          .optional(),
       })
       .optional(),
     // A pool that is momentarily full is a QUEUE, not a failure. A batch is routinely wider than the session pool
