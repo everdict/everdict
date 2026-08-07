@@ -157,6 +157,19 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     s.permissionRules = rules;
   }
 
+  async setSessionPlan(
+    tenant: string,
+    id: string,
+    plan: { content: string; approvedAt: string } | null,
+    updatedAt: string,
+  ): Promise<void> {
+    const index = this.sessions.findIndex((r) => r.tenant === tenant && r.id === id);
+    const current = this.sessions[index];
+    if (!current) return;
+    const { plan: _cleared, ...rest } = current;
+    this.sessions[index] = { ...rest, ...(plan === null ? {} : { plan }), updatedAt };
+  }
+
   async listTeammateSessions(opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
     return this.sessions.filter((s) => s.teammate !== undefined).slice(0, opts?.limit ?? 200);
   }
@@ -235,12 +248,13 @@ interface SessionRow {
   wake_intent: unknown;
   teammate: unknown;
   permission_rules: unknown;
+  plan: unknown;
   created_at: string | Date;
   updated_at: string | Date;
 }
 
 const SESSION_COLUMNS =
-  "id, tenant, owner, title, model, permission_mode, memory, memory_through_seq, visibility, origin, status, run_id, wake_intent, teammate, permission_rules, created_at, updated_at";
+  "id, tenant, owner, title, model, permission_mode, memory, memory_through_seq, visibility, origin, status, run_id, wake_intent, teammate, permission_rules, plan, created_at, updated_at";
 
 function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
   return AgentSessionRecordSchema.parse({
@@ -261,6 +275,7 @@ function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
     ...(row.permission_rules !== null && row.permission_rules !== undefined
       ? { permissionRules: row.permission_rules }
       : {}),
+    ...(row.plan !== null && row.plan !== undefined ? { plan: row.plan } : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
@@ -482,6 +497,18 @@ export class PgAgentSessionStore implements AgentSessionStore {
     await this.client.query(
       "UPDATE everdict_agent_sessions SET permission_rules = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
       [tenant, id, JSON.stringify(rules), updatedAt],
+    );
+  }
+
+  async setSessionPlan(
+    tenant: string,
+    id: string,
+    plan: { content: string; approvedAt: string } | null,
+    updatedAt: string,
+  ): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_agent_sessions SET plan = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
+      [tenant, id, plan === null ? null : JSON.stringify(plan), updatedAt],
     );
   }
 

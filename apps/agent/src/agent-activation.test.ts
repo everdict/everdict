@@ -129,6 +129,7 @@ function sessionsStub() {
       return [];
     },
     async setSessionPermissionRules() {},
+    async setSessionPlan() {},
     async hasTriggerSession(_tenant: string, agentId: string, eventId: string) {
       return created.some((s) => s.origin?.agentId === agentId && s.origin?.eventId === eventId);
     },

@@ -762,12 +762,20 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       });
       const noticed = noticeParkedApproval(); // no tool = the CP words the ping as a plan review
       const decision = await permissions.wait(requestId, id, controller.signal).finally(() => clearAfter(noticed));
-      if (decision === "allow" && expectedTools !== undefined && expectedTools.length > 0) {
-        for (const tool of expectedTools) {
-          if (isGuardedAction(tool)) continue;
-          rules.set(principal.workspace, id, tool, "allow");
+      if (decision === "allow") {
+        if (expectedTools !== undefined && expectedTools.length > 0) {
+          for (const tool of expectedTools) {
+            if (isGuardedAction(tool)) continue;
+            rules.set(principal.workspace, id, tool, "allow");
+          }
+          persistRules(principal.workspace, id);
         }
-        persistRules(principal.workspace, id);
+        // Plan durability (LESSON 059 P6): approval promotes the plan to standing session state — it keeps
+        // steering after the memory fold and across a restart; a newer approval replaces it. Best-effort:
+        // a stamp failure leaves an approved-but-restart-mortal plan, never a blocked approval.
+        void deps.sessions
+          .setSessionPlan(principal.workspace, id, { content: plan, approvedAt: deps.now() }, deps.now())
+          .catch(() => {});
       }
       return decision === "allow";
     };

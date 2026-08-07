@@ -56,6 +56,14 @@ export interface AgentSessionStore {
   // Every waiting conversation across ALL workspaces whose deadline has passed at `now` — the restart-proof sweep
   // (W3): a job that dies without emitting a terminal fact must never strand its watcher.
   listExpiredWakeIntents(now: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]>;
+  // The approved plan (LESSON 059 P6): promote a plan-mode approval to standing session state (null clears).
+  // The transcript remains the record of WHEN it was approved; this field is what later turns re-read.
+  setSessionPlan(
+    tenant: string,
+    id: string,
+    plan: { content: string; approvedAt: string } | null,
+    updatedAt: string,
+  ): Promise<void>;
   // Standing permission rules (LESSON 059 P4): replace the session's tool→allow|deny rule set — written
   // through on every rule change so "always allow" survives a service restart (the in-memory PermissionRules
   // map is the hot path; this row is its durability).

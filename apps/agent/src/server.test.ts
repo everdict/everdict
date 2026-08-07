@@ -839,6 +839,69 @@ describe("agent server", () => {
       await app.close();
     });
 
+    it("an approved plan persists on the session and steers later turns as a standing preamble (LESSON 059 P6)", async () => {
+      const sessions = new InMemoryAgentSessionStore();
+      let n = 0;
+      const usage = { inputTokens: 5, outputTokens: 1, totalTokens: 6 };
+      const requestsSeen: string[] = [];
+      const transport: LlmTransport = {
+        provider: "fake",
+        stream: async (request) => {
+          requestsSeen.push(
+            (request.messages ?? []).map((m) => (typeof m.content === "string" ? m.content : "")).join("\n"),
+          );
+          n += 1;
+          if (n === 1)
+            return {
+              content: null,
+              toolCalls: [
+                { id: "p1", name: "present_plan", arguments: JSON.stringify({ plan: "1. fix the grader\n2. re-run" }) },
+              ],
+              finishReason: "tool_calls" as const,
+              usage,
+            };
+          return { content: "ok", toolCalls: [], finishReason: "stop" as const, usage };
+        },
+      };
+      const app = buildServer(makeDeps({ sessions, resolveModel: async () => ({ transport, model: "test-model" }) }));
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      // Turn 1: plan mode — the plan parks, the member approves it.
+      const turn = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "plan it", mode: "plan" },
+      });
+      await vi.waitFor(async () => {
+        const res = await app.inject({ method: "GET", url: `/agent/sessions/${s.id}/pending`, headers: auth });
+        const pending = (res.json() as { pending: { requestId: string }[] }).pending;
+        expect(pending).toHaveLength(1);
+        await app.inject({
+          method: "POST",
+          url: `/agent/sessions/${s.id}/permission`,
+          headers: auth,
+          payload: { requestId: pending[0]?.requestId, decision: "allow" },
+        });
+      });
+      await turn;
+      // The approval promoted the plan to standing session state…
+      await vi.waitFor(async () => {
+        expect((await sessions.getSession("acme", "alice", s.id))?.plan?.content).toContain("fix the grader");
+      });
+      // …and a LATER turn re-reads it as a preamble (pre-fix: the plan lived only in the transcript, and the
+      // memory fold / a restart's bounded replay silently dropped the conversation's goal).
+      await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: auth,
+        payload: { message: "carry on" },
+      });
+      const followUp = requestsSeen[requestsSeen.length - 1];
+      expect(followUp).toContain("still standing");
+      expect(followUp).toContain("1. fix the grader");
+      await app.close();
+    });
+
     it("an 'always allow' rule survives a service restart — hydrated from the session record (LESSON 059 P4)", async () => {
       const sessions = new InMemoryAgentSessionStore();
       const before = buildServer(makeDeps({ sessions }));

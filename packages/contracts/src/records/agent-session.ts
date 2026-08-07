@@ -108,6 +108,16 @@ export const AgentSessionRecordSchema = z.object({
   // consulted before the human ask (the "always allow/deny this tool here" layer above modes). Persisted so a
   // service restart does not silently reopen every prompt the member already answered with "always".
   permissionRules: z.record(z.enum(["allow", "deny"])).optional(),
+  // The conversation's APPROVED PLAN (LESSON 059 P6): plan-mode approval promotes the plan from a transcript
+  // moment to standing session state, so it keeps steering after the memory fold (whose digest may drop the
+  // detail) and across a service restart. Every later turn re-reads it as a preamble; a newer approval
+  // replaces it (the latest plan is the plan).
+  plan: z
+    .object({
+      content: z.string().min(1),
+      approvedAt: z.string(),
+    })
+    .optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

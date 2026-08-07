@@ -1017,6 +1017,25 @@ export async function runChat(
       const stale = await staleFileReminder(tools.call, existing, sessionId);
       if (stale) preambles.push(stale);
     }
+    // The APPROVED PLAN is the conversation's standing goal (LESSON 059 P6): it lives on the session record —
+    // surviving the memory fold (whose digest may drop the detail) and a service restart — and every later
+    // turn re-reads it here. A plan that only lived in the transcript stopped steering the moment bounded
+    // replay dropped it. Capped so a very long plan cannot crowd the turn.
+    if (session.plan) {
+      preambles.push(
+        [
+          "<system-reminder>",
+          `An approved plan from earlier in this conversation is still standing (approved ${session.plan.approvedAt}):`,
+          "",
+          session.plan.content.length > 6000
+            ? `${session.plan.content.slice(0, 6000)}\n…(truncated)`
+            : session.plan.content,
+          "",
+          "If it is relevant to the current work and not already complete, continue working through it. Ignore it only if the member has since changed direction.",
+          "</system-reminder>",
+        ].join("\n"),
+      );
+    }
     const userForModel =
       preambles.length > 0 ? `${preambles.join("\n\n")}\n\n---\n\nUser message:\n${userText}` : userText;
     const history: ChatMessage[] = [
