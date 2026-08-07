@@ -3775,6 +3775,7 @@
     "attachRemove": "Remove attachment",
     "emptyMessagesTitle": "How can I help?",
     "scrollToBottom": "Scroll to bottom",
+    "showEarlier": "Show {count} earlier items",
     "stop": "Stop",
     "permissionTitle": "Approval needed",
     "permissionBody": "The agent wants to run {tool}, which can make changes. Allow it?",

@@ -429,6 +429,39 @@ export function AgentChatPanel({
     })
   }, [])
 
+  // Live streaming buffers: the SOURCE accumulates in a ref, and the visible state flushes at most once per
+  // animation frame. SSE chunks arrive far more often than the display refreshes, and every visible update
+  // re-parses the whole in-flight markdown bubble — per-chunk setState made a long answer pay O(length) parse
+  // work at chunk rate (on top of a re-render of the panel), which is what dragged as conversations grew.
+  const liveStreamRef = useRef({ text: '', reasoning: '' })
+  const streamFlushRef = useRef<number | null>(null)
+  const flushStreaming = useCallback(() => {
+    streamFlushRef.current = null
+    setStreamingText(liveStreamRef.current.text)
+    setStreamingReasoning(liveStreamRef.current.reasoning)
+  }, [])
+  const scheduleStreamFlush = useCallback(() => {
+    if (streamFlushRef.current === null)
+      streamFlushRef.current = requestAnimationFrame(flushStreaming)
+  }, [flushStreaming])
+  // Zero the buffers AND the visible state together — a frame flush still pending after this is harmless
+  // (it re-applies the now-empty buffers).
+  const resetStreaming = useCallback(() => {
+    if (streamFlushRef.current !== null) {
+      cancelAnimationFrame(streamFlushRef.current)
+      streamFlushRef.current = null
+    }
+    liveStreamRef.current = { text: '', reasoning: '' }
+    setStreamingText('')
+    setStreamingReasoning('')
+  }, [])
+  useEffect(
+    () => () => {
+      if (streamFlushRef.current !== null) cancelAnimationFrame(streamFlushRef.current)
+    },
+    []
+  )
+
   // Apply one SSE event: a text delta grows the live assistant bubble; a persisted record merges into the
   // transcript (and, for the finalized assistant text, retires the live bubble); a `permission` event parks a
   // write-tool approval the member must decide, and `permission_resolved` dismisses it (e.g. server timeout).
@@ -440,7 +473,10 @@ export function AgentChatPanel({
           data !== null && typeof data === 'object' && 'text' in data
             ? (data as { text?: unknown }).text
             : undefined
-        if (typeof delta === 'string' && delta.length > 0) setStreamingText((prev) => prev + delta)
+        if (typeof delta === 'string' && delta.length > 0) {
+          liveStreamRef.current.text += delta
+          scheduleStreamFlush()
+        }
         setStreamNotice(null) // progress — the retry wait is over
       } else if (event === 'reasoning') {
         // Live extended-thinking tokens — grow the in-flight reasoning block until this turn's record lands.
@@ -448,8 +484,10 @@ export function AgentChatPanel({
           data !== null && typeof data === 'object' && 'text' in data
             ? (data as { text?: unknown }).text
             : undefined
-        if (typeof delta === 'string' && delta.length > 0)
-          setStreamingReasoning((prev) => prev + delta)
+        if (typeof delta === 'string' && delta.length > 0) {
+          liveStreamRef.current.reasoning += delta
+          scheduleStreamFlush()
+        }
         setStreamNotice(null)
       } else if (event === 'message') {
         const parsed = agentMessageSchema.safeParse(data)
@@ -461,8 +499,12 @@ export function AgentChatPanel({
         if (parsed.data.role === 'user') dropPending(parsed.data.content)
         // Each assistant record carries this turn's finalized reasoning + text, so retire the live buffers when it lands.
         if (parsed.data.role === 'assistant') {
+          liveStreamRef.current.reasoning = ''
           setStreamingReasoning('')
-          if (parsed.data.content.trim().length > 0) setStreamingText('')
+          if (parsed.data.content.trim().length > 0) {
+            liveStreamRef.current.text = ''
+            setStreamingText('')
+          }
         }
       } else if (event === 'retry') {
         // 루프가 일시 장애를 대기 중 — 조용한 턴의 이유를 배너로. 최신 시도가 이전 배너를 대체한다.
@@ -534,7 +576,7 @@ export function AgentChatPanel({
           })
       }
     },
-    [t]
+    [t, dropPending, scheduleStreamFlush]
   )
 
   // 스트림 소유권 토큰: 전송/재접속 리더가 시작될 때마다 증가. 끝난(또는 끊긴) 리더의 뒷정리는 자신이 아직
@@ -565,8 +607,7 @@ export function AgentChatPanel({
     (seq: number, sessionId: string | null) => {
       if (streamSeqRef.current !== seq) return
       abortRef.current = null
-      setStreamingText('')
-      setStreamingReasoning('')
+      resetStreaming()
       setStreamNotice(null)
       setPendingUsers([])
       setSending(false)
@@ -578,7 +619,7 @@ export function AgentChatPanel({
       refresh()
       setAttachEpoch((e) => e + 1)
     },
-    [loadSessions, loadTeammates, reconcileMessages, router]
+    [loadSessions, loadTeammates, reconcileMessages, resetStreaming, router]
   )
 
   const send = useCallback(
@@ -666,8 +707,7 @@ export function AgentChatPanel({
 
       setSending(true)
       setPendingUsers((prev) => [...prev, { text, queued: false }])
-      setStreamingText('')
-      setStreamingReasoning('')
+      resetStreaming()
 
       // Ask the analysis canvas (analyze dashboard / open View, same window) what it CURRENTLY shows — a
       // synchronous request/response round-trip, so every turn grounds on the live stored-form config
@@ -753,6 +793,7 @@ export function AgentChatPanel({
       draftPermissionMode,
       applyStreamEvent,
       dropPending,
+      resetStreaming,
       settleStream,
       t,
     ]
@@ -898,8 +939,7 @@ export function AgentChatPanel({
         abortRef.current = controller
         seq = ++streamSeqRef.current
         setSending(true)
-        setStreamingText('')
-        setStreamingReasoning('')
+        resetStreaming()
         await readSseStream(res.body, applyStreamEvent)
         // 최초 트랜스크립트 로드와 스트림 구독 사이에 영속된 레코드가 낄 수 있다 — 꼬리를 한 번 더 병합해
         // 닫는다(id 병합이라 중복 무해).
@@ -919,7 +959,7 @@ export function AgentChatPanel({
       }
     })()
     return () => controller.abort()
-  }, [activeId, attachEpoch, applyStreamEvent, settleStream])
+  }, [activeId, attachEpoch, applyStreamEvent, resetStreaming, settleStream])
 
   // Stop = 명시적 서버 중단(POST /stop). 연결을 끊는 것으로는 더 이상 턴이 멈추지 않는다(턴은 연결과 분리됐다)
   // — 서버가 루프를 abort 하면 터미널 이벤트가 우리 스트림을 닫고 settleStream 이 정리한다. 요청이 실패해도

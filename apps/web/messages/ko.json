@@ -3775,6 +3775,7 @@
     "attachRemove": "첨부 제거",
     "emptyMessagesTitle": "무엇을 도와드릴까요?",
     "scrollToBottom": "맨 아래로",
+    "showEarlier": "이전 내용 {count}개 보기",
     "stop": "정지",
     "permissionTitle": "승인 필요",
     "permissionBody": "에이전트가 변경을 일으킬 수 있는 {tool} 도구를 실행하려 합니다. 허용할까요?",

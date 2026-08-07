@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { ContextBlock } from './context-block'
+import { TranscriptList } from './conversation-view'
+import { DelegationCard } from './delegation-card'
 import { MessageRow } from './message-row'
 import { ReasoningBlock } from './reasoning-block'
-import { DelegationCard } from './delegation-card'
 import { SubagentList } from './subagent-list'
 import { TodoList } from './todo-list'
 
@@ -23,6 +24,10 @@ const ITEMS = {
   TodoList,
   SubagentList,
   DelegationCard,
+  // The list itself is a memo boundary too: the composer draft and the live streaming tail re-render the
+  // conversation view on every keystroke/SSE delta, and without this boundary each of those re-reconciles
+  // all N rows (N element allocations + prop compares) even though every row bails out.
+  TranscriptList,
 }
 
 describe('agent chat transcript items', () => {

@@ -34,7 +34,7 @@ import { Button } from '@/shared/ui/button'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Markdown } from '@/shared/ui/markdown'
 
-import { buildTranscript } from '../lib/transcript'
+import { buildTranscript, type TranscriptItem } from '../lib/transcript'
 import { Composer } from './composer'
 import { ContextBlock } from './context-block'
 import { DelegationCard } from './delegation-card'
@@ -147,6 +147,84 @@ const ArtifactRow = memo(function ArtifactRow({ artifact }: { artifact: Analysis
     <div className="px-3 py-1.5">
       <ArtifactCard artifact={artifact} action={<PinControl artifact={artifact} />} />
     </div>
+  )
+})
+
+// Cap on MOUNTED transcript rows. content-visibility already skips off-screen layout/paint, but the React tree
+// and the DOM still grow per row — this bounds them: older rows stay unmounted behind an explicit "show earlier"
+// step, so a very long conversation opens (and streams) at flat cost. 80 items ≈ dozens of turns on screen.
+const TRANSCRIPT_WINDOW = 80
+
+// The settled transcript as ONE memo boundary. The composer draft and the live streaming tail are state ABOVE
+// this list, so without the boundary every keystroke and every SSE delta re-reconciles all N rows — each row's
+// own memo skips its re-render, but allocating N elements and comparing their props is still O(N) per update,
+// which is exactly the cost that grows as a conversation gets long. This list re-renders only when the settled
+// transcript itself changes (a persisted record, an artifact, a turn boundary).
+export const TranscriptList = memo(function TranscriptList({
+  items,
+  workspace,
+  user,
+  sending,
+}: {
+  items: TranscriptItem[]
+  workspace: string
+  user?: ChatUser
+  sending: boolean
+}) {
+  const t = useTranslations('agentChat')
+  // Collapsed on every mount — the parent keys this list by conversation, so switching sessions (or reopening
+  // the tab) always lands on the bounded window; expanding is a per-visit choice, not a persisted one.
+  const [expanded, setExpanded] = useState(false)
+  const hiddenCount = expanded ? 0 : Math.max(0, items.length - TRANSCRIPT_WINDOW)
+  const visible = hiddenCount > 0 ? items.slice(hiddenCount) : items
+  // The checklist spinner must track reality, not the persisted snapshot: only the LATEST todos item may animate,
+  // and only while a turn is actually running (`sending` covers both a fresh send and a reattached live turn).
+  const lastTodosId = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i]
+      if (item?.kind === 'todos') return item.id
+    }
+    return null
+  }, [items])
+  return (
+    <>
+      {hiddenCount > 0 && (
+        <div className="flex justify-center px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="rounded-md border border-border bg-card/50 px-2.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            {t('showEarlier', { count: hiddenCount })}
+          </button>
+        </div>
+      )}
+      {visible.map((item) => (
+        // content-visibility lets the browser skip layout/paint for off-screen rows, so following the stream
+        // (a scrollHeight read + scrollTo per frame) stays flat-cost as the transcript grows. The intrinsic-size
+        // fallback sizes rows that have never been rendered; once rendered, `auto` remembers the real height.
+        <div
+          key={item.kind === 'message' ? item.message.id : item.id}
+          className="[contain-intrinsic-block-size:auto_120px] [content-visibility:auto]"
+        >
+          {item.kind === 'reasoning' ? (
+            <ReasoningBlock text={item.text} />
+          ) : item.kind === 'context' ? (
+            <ContextBlock source={item.source} sender={item.sender} text={item.text} />
+          ) : item.kind === 'todos' ? (
+            <TodoList todos={item.todos} active={sending && item.id === lastTodosId} />
+          ) : item.kind === 'agents' ? (
+            <SubagentList agents={item.agents} />
+          ) : item.kind === 'artifact' ? (
+            <ArtifactRow artifact={item.artifact} />
+          ) : item.kind === 'delegation' ? (
+            <DelegationCard delegation={item.delegation} workspace={workspace} />
+          ) : (
+            <MessageRow message={item.message} user={user} />
+          )}
+        </div>
+      ))}
+    </>
   )
 })
 
@@ -297,16 +375,6 @@ export function ConversationView({
   // new object identity would push a re-render straight through the memoized rows into their markdown parsers.
   const items = useMemo(() => buildTranscript(messages, artifacts), [messages, artifacts])
 
-  // The checklist spinner must track reality, not the persisted snapshot: only the LATEST todos item may animate,
-  // and only while a turn is actually running (`sending` covers both a fresh send and a reattached live turn).
-  const lastTodosId = useMemo(() => {
-    for (let i = items.length - 1; i >= 0; i--) {
-      const item = items[i]
-      if (item?.kind === 'todos') return item.id
-    }
-    return null
-  }, [items])
-
   const isEmpty = messages.length === 0 && pendingUsers.length === 0 && !sending
   // 임무로 진입했으면 그 임무의 카탈로그 블록(agentChat.missions.<kind>)이 빈 화면의 제목·설명·제안을 대신한다 —
   // 구조는 그대로, 라이팅만 그 작업의 것으로. 임무가 없으면 기존 범용 문구.
@@ -376,40 +444,13 @@ export function ConversationView({
             </div>
           ) : (
             <>
-              {items.map((item) => {
-                if (item.kind === 'reasoning')
-                  return <ReasoningBlock key={item.id} text={item.text} />
-                if (item.kind === 'context')
-                  return (
-                    <ContextBlock
-                      key={item.id}
-                      source={item.source}
-                      sender={item.sender}
-                      text={item.text}
-                    />
-                  )
-                if (item.kind === 'todos')
-                  return (
-                    <TodoList
-                      key={item.id}
-                      todos={item.todos}
-                      active={sending && item.id === lastTodosId}
-                    />
-                  )
-                if (item.kind === 'agents')
-                  return <SubagentList key={item.id} agents={item.agents} />
-                if (item.kind === 'artifact')
-                  return <ArtifactRow key={item.id} artifact={item.artifact} />
-                if (item.kind === 'delegation')
-                  return (
-                    <DelegationCard
-                      key={item.id}
-                      delegation={item.delegation}
-                      workspace={workspace}
-                    />
-                  )
-                return <MessageRow key={item.message.id} message={item.message} user={user} />
-              })}
+              <TranscriptList
+                key={activeId ?? 'draft'}
+                items={items}
+                workspace={workspace}
+                user={user}
+                sending={sending}
+              />
               {pendingUsers
                 .filter((p) => !p.queued)
                 .map((p, i) => (
