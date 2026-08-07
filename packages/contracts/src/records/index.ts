@@ -8,6 +8,7 @@ export * from "./analysis-artifact.js";
 export * from "./browser-profile.js";
 export * from "./budget.js";
 export * from "./capability.js";
+export * from "./ownership.js";
 export * from "./capability-diff.js";
 export * from "./capability-origin.js";
 export * from "./comment.js";

@@ -190,6 +190,20 @@ export {
   type TeamTransition,
 } from "./tracker/team.js";
 
+// ownership — the O-track kernel (roles/envelope/checkpoint invariants; trust-kernel O2/O5/O6)
+export {
+  assertCheckpointForEnvelope,
+  assertRoleProfile,
+  assertTaskEnvelope,
+  type BudgetDecision,
+  budgetExhausted,
+  type DanglingRef,
+  danglingCheckpointRefs,
+  type EnvelopeDecision,
+  type EnvelopeSpend,
+  envelopeAllows,
+} from "./ownership/ownership.js";
+
 // member — the last-admin invariant (from apps/api core/member)
 export { MembershipPolicy } from "./member/membership-policy.js";
 
