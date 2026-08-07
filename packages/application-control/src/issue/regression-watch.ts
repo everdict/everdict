@@ -50,6 +50,9 @@ export function regressionWatch(deps: RegressionWatchDeps): PlatformEventConsume
     async handle(event) {
       const candidate = await deps.scorecards.get(event.subject.id);
       if (!candidate || candidate.tenant !== event.tenant || candidate.status !== "succeeded") return;
+      // A partial run (explicit subset of the dataset) never reopens an issue — a 2-case rerun's rate is not
+      // the guarantee's rate, and reopening on it is exactly the false alarm that erodes trust in the watch.
+      if (candidate.subset) return;
       const candidateRate = passRateOf(candidate);
       if (candidateRate === undefined) return; // nothing gradeable to compare
 
@@ -68,6 +71,9 @@ export function regressionWatch(deps: RegressionWatchDeps): PlatformEventConsume
         if (!baseline || baseline.tenant !== event.tenant) continue;
         // A late-arriving OLD batch must not look like a regression — only a run after the resolution counts.
         if (candidate.createdAt <= baseline.createdAt) continue;
+        // Cross-HARNESS-version drops are the signal (the harness moved, the guarantee did not) — but a
+        // different DATASET version is a different case set: the comparison does not hold, so it cannot reopen.
+        if (candidate.dataset.version !== baseline.dataset.version) continue;
         const baselineRate = passRateOf(baseline);
         if (baselineRate === undefined || candidateRate >= baselineRate) continue;
 

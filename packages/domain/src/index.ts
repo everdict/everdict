@@ -240,6 +240,8 @@ export {
   flowTrend,
   meanPassRate,
   qualityTrend,
+  type WeightedRate,
+  weightedMeanPassRate,
 } from "./workspace/pulse.js";
 
 // judge — spec version diff (base ↔ candidate); shares the spec-diff engine with the harness diff

@@ -17,13 +17,14 @@ import {
   type WorkspacePulse,
 } from "@everdict/contracts";
 import {
+  type WeightedRate,
   activityTrend,
   addCalendarDays,
   calendarSpan,
   flowTrend,
   headlinePassRate,
-  meanPassRate,
   qualityTrend,
+  weightedMeanPassRate,
 } from "@everdict/domain";
 
 // The workspace PULSE — one read that answers "how is this workspace doing" (docs/architecture/workspace-pulse.md).
@@ -180,8 +181,8 @@ export class WorkspacePulseService {
         // Quality rates read SUCCEEDED batches only — a failed/cancelled/superseded batch's partial rate is
         // not a product quality signal (the analysis engine excludes exactly these; the dashboard must agree),
         // and a superseded retry would double-count its replacement.
-        ...optionalRate("passRate", meanPassRate(ratesOf(succeededIn(inWindow)))),
-        ...optionalRate("passRateBefore", meanPassRate(ratesOf(succeededIn(before)))),
+        ...optionalRate("passRate", weightedMeanPassRate(ratesOf(succeededIn(inWindow)))),
+        ...optionalRate("passRateBefore", weightedMeanPassRate(ratesOf(succeededIn(before)))),
       },
       trend: {
         activity: activityTrend(buckets, spine),
@@ -229,8 +230,15 @@ function rateOf(batch: ScorecardRecord): number | undefined {
   return headlinePassRate(batch) ?? undefined;
 }
 
-function ratesOf(batches: readonly ScorecardRecord[]): number[] {
-  return batches.map(rateOf).filter((rate): rate is number => rate !== undefined);
+// rate + the cases behind it — the weight keeps a 3-case smoke run from moving the headline like a 500-case
+// suite. Weight = the largest measured count among the batch's pass-rate-bearing metrics (1 when unknown).
+function ratesOf(batches: readonly ScorecardRecord[]): WeightedRate[] {
+  return batches.flatMap((batch) => {
+    const rate = rateOf(batch);
+    if (rate === undefined) return [];
+    const weight = Math.max(1, ...(batch.summary ?? []).filter((m) => m.passRate !== undefined).map((m) => m.count));
+    return [{ rate, weight }];
+  });
 }
 
 // A rate that was never measured is left OFF the object rather than sent as zero — the contract marks it

@@ -120,6 +120,19 @@ export function meanPassRate(rates: readonly number[]): number | undefined {
   return rates.length > 0 ? mean(rates) : undefined;
 }
 
+// Case-weighted mean — a rate is a ratio, and a plain mean of per-batch rates lets a 3-case smoke run move
+// the workspace headline as much as a 500-case suite (the same failure mode the analysis engine documents).
+// Weight = the cases behind each batch's rate; a batch that cannot say (pre-summary rows) weighs 1.
+export interface WeightedRate {
+  rate: number;
+  weight: number;
+}
+export function weightedMeanPassRate(rates: readonly WeightedRate[]): number | undefined {
+  const total = rates.reduce((sum, r) => sum + Math.max(1, r.weight), 0);
+  if (total === 0 || rates.length === 0) return undefined;
+  return rates.reduce((sum, r) => sum + r.rate * Math.max(1, r.weight), 0) / total;
+}
+
 function mean(values: readonly number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }

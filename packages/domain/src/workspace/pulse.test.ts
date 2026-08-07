@@ -1,6 +1,6 @@
 import { PLATFORM_EVENT_KINDS, activityAxisOf } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { activityTrend, calendarSpan, flowTrend, meanPassRate, qualityTrend } from "./pulse.js";
+import { activityTrend, calendarSpan, flowTrend, meanPassRate, qualityTrend, weightedMeanPassRate } from "./pulse.js";
 
 describe("the activity axis vocabulary", () => {
   it("places every recorded event kind on exactly one axis", () => {
@@ -115,5 +115,17 @@ describe("the window's headline pass rate", () => {
 
   it("is absent when nothing was", () => {
     expect(meanPassRate([])).toBeUndefined();
+  });
+});
+
+describe("weightedMeanPassRate", () => {
+  it("weights by case count — a 3-case smoke run cannot move the headline like a 500-case suite", () => {
+    const rates = [
+      { rate: 1.0, weight: 3 }, // tiny smoke run, perfect
+      { rate: 0.5, weight: 497 }, // the real suite
+    ];
+    const weighted = weightedMeanPassRate(rates);
+    expect(weighted).toBeCloseTo((1.0 * 3 + 0.5 * 497) / 500, 5); // ≈ 0.503, not the plain-mean 0.75
+    expect(weightedMeanPassRate([])).toBeUndefined();
   });
 });

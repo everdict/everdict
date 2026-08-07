@@ -124,12 +124,22 @@ class FakeFeed implements NotificationStore {
 
 // A scorecard whose two cases yield the given pass rate (0, 0.5 or 1). Only the fields the watch reads are
 // meaningful; the rest satisfy the record's shape.
-function scorecard(id: string, over: { passes: number; createdAt: string; harnessVersion?: string }): ScorecardRecord {
+function scorecard(
+  id: string,
+  over: {
+    passes: number;
+    createdAt: string;
+    harnessVersion?: string;
+    datasetVersion?: string;
+    subset?: ScorecardRecord["subset"];
+  },
+): ScorecardRecord {
   const harness = `web-agent@${over.harnessVersion ?? "2.0.0"}`;
   return {
     id,
     tenant: "acme",
-    dataset: { id: "regression-suite", version: "1.0.0" },
+    ...(over.subset ? { subset: over.subset } : {}),
+    dataset: { id: "regression-suite", version: over.datasetVersion ?? "1.0.0" },
     harness: { id: "web-agent", version: over.harnessVersion ?? "2.0.0" },
     status: "succeeded",
     summary: [],
@@ -234,6 +244,24 @@ describe("regressionWatch", () => {
     expect(bell[0]).toMatchObject({ kind: "issue_regressed", link: { resourceType: "issue", resourceId: "iss-1" } });
     expect(bell[0]?.body).toContain("100%");
     expect(bell[0]?.body).toContain("50%");
+  });
+
+  it("a partial (subset) rerun never reopens — a 2-case rerun's rate is not the guarantee's rate", async () => {
+    await resolvedIssue();
+    await scorecards.create(scorecard("sc-partial", { passes: 0, createdAt: NOW, subset: { total: 50, selected: 2 } }));
+
+    await watcher().handle(completedEvent("sc-partial"));
+
+    expect((await issues.get("acme", "iss-1"))?.status).toBe("done"); // untouched
+  });
+
+  it("a different DATASET version cannot reopen — a different case set is not the same comparison", async () => {
+    await resolvedIssue();
+    await scorecards.create(scorecard("sc-newds", { passes: 0, createdAt: NOW, datasetVersion: "2.0.0" }));
+
+    await watcher().handle(completedEvent("sc-newds"));
+
+    expect((await issues.get("acme", "iss-1"))?.status).toBe("done"); // untouched
   });
 
   it("fires across a harness VERSION bump — that is exactly the drop worth catching", async () => {
