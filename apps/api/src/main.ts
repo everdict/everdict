@@ -352,6 +352,7 @@ async function main(): Promise<void> {
     k8sContext,
     image,
     secretStore,
+    runLedger: store, // the tenant quota is counted from the run ledger, not from this process's maps
     ...(trustZones ? { trustZones } : {}),
   });
   // M2 — runtime.circuit_opened rides the breaker's own closed→open transition (late-bound: the platform event

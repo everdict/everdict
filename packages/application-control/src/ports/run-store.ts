@@ -1,4 +1,5 @@
 import type { PlatformEventRecord, RunRecord } from "@everdict/contracts";
+import type { AdmissionLedger } from "./admission-ledger.js";
 
 // list options. The default (unset) returns only standalone runs — hides scorecard child runs to prevent activity-list flooding.
 // With scorecardId, returns only that batch's child runs (for the case drill-down in scorecard detail).
@@ -57,7 +58,9 @@ export interface LiveSessionQuery {
   trigger?: string;
 }
 
-export interface RunStore {
+// The run ledger. It also IS the `AdmissionLedger` (see that port): the scheduler's fleet-wide tenant count is
+// derived from these very rows, so the control plane hands its store over instead of keeping a second ledger.
+export interface RunStore extends AdmissionLedger {
   create(record: RunRecord, events?: OutboxEvent[]): Promise<void>;
   update(id: string, patch: Partial<RunRecord>, events?: OutboxEvent[]): Promise<RunRecord | undefined>;
   get(id: string): Promise<RunRecord | undefined>;

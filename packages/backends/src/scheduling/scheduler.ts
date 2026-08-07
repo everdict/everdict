@@ -1,3 +1,4 @@
+import type { AdmissionLedger } from "@everdict/application-control";
 import { type CaseJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/contracts";
 import { type BudgetTracker, FairQueue, costOf } from "@everdict/domain";
 import { type BackendCapacity, type DispatchOptions, dispatchAborted, isCaseCapacityAware } from "../backend.js";
@@ -78,6 +79,27 @@ export interface SchedulerOptions {
   now?: () => number; // injectable clock (aging tests)
   // Tenant budget: admit on dispatch (402 if over), settle cost on completion.
   budget?: BudgetTracker;
+  // The durable run ledger (docs/architecture/multi-replica.md). Without it `tenantQuota` bounds what THIS
+  // process holds, so a deployment of N replicas grants every workspace N quotas; with it the quota is
+  // fleet-wide. Optional on purpose: a single-process control plane (dev, the CLI worker) needs no ledger and
+  // behaves exactly as before. Read once per drain, like the cluster capacity probe.
+  ledger?: AdmissionLedger;
+}
+
+// The fleet's tenant in-flight, as ONE drain sees it: the ledger reading taken at the top of the drain plus
+// whatever this process has placed since. The reading already includes our own running rows, so adding the
+// whole local count would double-count them — only the delta since the reading is ours to add, and the `max`
+// keeps us honest when the ledger lags behind rows we have only just dispatched.
+class FleetInFlight {
+  constructor(
+    private readonly atProbe: Record<string, number>,
+    private readonly localAtProbe: Record<string, number>,
+  ) {}
+
+  countFor(tenant: string, localNow: number): number {
+    const placedSinceProbe = Math.max(0, localNow - (this.localAtProbe[tenant] ?? 0));
+    return Math.max(localNow, (this.atProbe[tenant] ?? 0) + placedSinceProbe);
+  }
 }
 
 // In-flight accounting for the Scheduler: reserve on placement, release on completion. One object keeps the four
@@ -309,6 +331,15 @@ export class Scheduler {
     return caps;
   }
 
+  // Read the fleet's tenant in-flight once per drain. Best-effort by contract: a ledger that cannot answer (the
+  // database is briefly unreachable) falls back to this process's own counts — the pre-ledger behavior — because
+  // a scheduler that refuses to place anything while the ledger is down is a worse outage than a quota that is
+  // momentarily per-replica again. Absent ledger = the same fallback, with no read at all.
+  private async probeFleetInFlight(): Promise<FleetInFlight> {
+    const atProbe = this.opts.ledger ? await this.opts.ledger.inFlightByTenant().catch(() => ({})) : {};
+    return new FleetInFlight(atProbe, this.admission.snapshot().tenantInFlight);
+  }
+
   // Free slots from a capacity snapshot + the scheduler's live in-flight counts — pure, recomputed each placement
   // round with no HTTP. used = max(probe, ownInFlight) so a lagging probe can't let us over-admit our own placements.
   private freeSlotsFrom(caps: Map<string, BackendCapacity>): Map<string, BackendSlot> {
@@ -335,6 +366,7 @@ export class Scheduler {
       if (this.queue.size === 0) return; // nothing to place — don't probe the cluster
       let placedAny = true;
       const caps = await this.probeCapacities(); // ONE cluster probe per drain, reused across placement rounds
+      const fleet = await this.probeFleetInFlight(); // ONE ledger read per drain, on the same budget
       // Per-drain memo for harness-keyed capacity (capacityFor answers from the same probe snapshot, so one
       // reading per (backend, harness) is both cheap and coherent with `caps` above).
       const caseCaps = new Map<string, BackendCapacity | undefined>();
@@ -347,7 +379,9 @@ export class Scheduler {
         for (const { entry } of this.scanOrder(nowMs)) {
           const tenant = tenantOf(entry.job);
           const quota = this.opts.tenantQuota?.(tenant) ?? Number.POSITIVE_INFINITY;
-          if (this.admission.tenantCountFor(tenant) >= quota) continue; // tenant quota reached
+          // The quota is measured against the WHOLE control plane when a ledger is wired, against this process
+          // alone when it isn't (see FleetInFlight / SchedulerOptions.ledger).
+          if (fleet.countFor(tenant, this.admission.tenantCountFor(tenant)) >= quota) continue; // tenant quota reached
 
           let names: string[];
           try {

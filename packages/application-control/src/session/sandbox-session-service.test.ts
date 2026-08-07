@@ -43,6 +43,9 @@ function fakeRunStore() {
     async countActiveByEnvelope() {
       return 0;
     },
+    async inFlightByTenant() {
+      return {};
+    },
     // The ledger IS the session pool now — a per-process map counts only one replica's sessions. The real
     // stores additionally drop rows past their deadline (a crashed writer must not hold a slot forever);
     // that rule is the STORE's and is tested in @everdict/db, so this fake leaves it out rather than

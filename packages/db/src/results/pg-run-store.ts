@@ -266,6 +266,21 @@ export class PgRunStore implements RunStore {
     return Number(res.rows[0]?.n ?? 0);
   }
 
+  // The scheduler's admission count as the LEDGER knows it — every replica's in-flight eval work, not just this
+  // process's (AdmissionLedger). `running` only: a queued row is still waiting in some replica's scheduler queue,
+  // and counting those against the quota that decides whether it may start would deadlock a tenant at quota.
+  // Legacy rows carry no `kind`, which means eval; sessions are bounded by the session pool's own cap instead.
+  async inFlightByTenant(): Promise<Record<string, number>> {
+    const res = await this.client.query<{ tenant: string; n: string | number }>(
+      `SELECT tenant, count(*) AS n FROM everdict_runs
+       WHERE status = 'running' AND (kind IS NULL OR kind = 'eval') AND (lifetime IS NULL OR lifetime <> 'session')
+       GROUP BY tenant`,
+    );
+    const counts: Record<string, number> = {};
+    for (const row of res.rows) counts[row.tenant] = Number(row.n);
+    return counts;
+  }
+
   // The session pool as the LEDGER knows it — every replica's held-open compute, not just this process's.
   // No time predicate here on purpose (see the port): the deadline is judged by the clock that wrote it.
   async liveSessions(query: LiveSessionQuery = {}): Promise<LiveSessionRow[]> {

@@ -258,6 +258,9 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
       async countActiveByEnvelope() {
         return 0;
       },
+      async inFlightByTenant() {
+        return {};
+      },
       async liveSessions() {
         return [];
       },

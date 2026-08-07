@@ -409,6 +409,55 @@ describe("InMemoryRunStore — the live session pool", () => {
   });
 });
 
+describe("RunStore — the scheduler's admission ledger (multi-replica tenant quota)", () => {
+  const run = (id: string, extra: Partial<RunRecord>): RunRecord => ({
+    id,
+    tenant: "acme",
+    harness: { id: "scripted", version: "0" },
+    caseId: "c1",
+    status: "running",
+    createdAt: "t",
+    updatedAt: "t",
+    ...extra,
+  });
+
+  it("counts a workspace's running eval work — the fact every replica must share", async () => {
+    const store = new InMemoryRunStore();
+    await store.create(run("r1", {}));
+    await store.create(run("r2", { kind: "eval" }));
+    await store.create(run("r3", { tenant: "other" }));
+
+    expect(await store.inFlightByTenant()).toEqual({ acme: 2, other: 1 });
+  });
+
+  it("leaves out what the quota must not count: queued work, sessions, and other run families", async () => {
+    const store = new InMemoryRunStore();
+    // Queued = still waiting in some replica's scheduler queue. Counting it against the quota that decides
+    // whether it may start would deadlock a workspace sitting at its cap.
+    await store.create(run("r1", { status: "queued" }));
+    await store.create(run("r2", { status: "succeeded" }));
+    // A held-open session is bounded by the session pool's own cap, not by the eval quota.
+    await store.create(run("r3", { kind: "sandbox", lifetime: "session" }));
+    await store.create(run("r4", { kind: "agent" }));
+
+    expect(await store.inFlightByTenant()).toEqual({});
+  });
+
+  it("Pg asks the same question in SQL — grouped, active-only, one read per scheduler drain", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [{ tenant: "acme", n: "3" }] }));
+    const store = new PgRunStore(client);
+
+    expect(await store.inFlightByTenant()).toEqual({ acme: 3 }); // count(*) comes back as a numeric string
+
+    const sql = calls[0]?.text ?? "";
+    expect(sql).toContain("FROM everdict_runs");
+    expect(sql).toContain("status = 'running'");
+    expect(sql).toContain("kind IS NULL OR kind = 'eval'");
+    expect(sql).toContain("lifetime IS NULL OR lifetime <> 'session'");
+    expect(sql).toContain("GROUP BY tenant");
+  });
+});
+
 describe("InMemoryRunStore — scorecard child-run filter", () => {
   const mk = (id: string, extra: Partial<RunRecord>): RunRecord => ({
     id,

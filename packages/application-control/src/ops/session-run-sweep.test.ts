@@ -31,6 +31,9 @@ function fakeStore() {
     async countActiveByEnvelope() {
       return 0;
     },
+    async inFlightByTenant() {
+      return {};
+    },
     async liveSessions(query: LiveSessionQuery = {}) {
       return [...rows.values()]
         .filter((r) => r.lifetime === "session" && (r.status === "queued" || r.status === "running"))

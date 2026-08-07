@@ -99,6 +99,14 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   first. Heavier `weightFor(tenant)` ⇒ served more often; an idle tenant can't hoard credit (the global
   virtual clock advances on every dequeue). `tenantQuota(tenant)` caps a tenant's concurrent in-flight
   runs even when slots are free.
+- **the tenant quota is fleet-wide** — a quota bounds a WORKSPACE, so counting it from one process's map
+  handed it out once per control-plane replica (the exact regression the session pool hit: "a 3-instance
+  deployment gave every workspace three times the pool"). The optional `AdmissionLedger` (`RunStore.
+  inFlightByTenant()`) makes the count DERIVED from the run ledger — read once per drain, `running` eval
+  rows only, best-effort — so a tombstoned run frees its slot by being terminal and there is no counter to
+  reconcile. Absent (single-process dev, the CLI worker) ⇒ identical to the per-process behavior. Backend
+  slots/memory/cpu stay per-replica on purpose: the orchestrator probe is already their cross-replica truth.
+  See `docs/architecture/multi-replica.md`.
 - **queue + backpressure** — if no backend has a free slot (or the tenant is at quota) the job waits and
   is dispatched the moment a slot frees (a dispatch settling re-pumps the queue). `maxQueueDepth` rejects
   with `RateLimitError` (429) when the queue is saturated. The scheduler avoids head-of-line blocking by

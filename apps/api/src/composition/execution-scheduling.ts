@@ -1,5 +1,10 @@
 import { Metrics } from "@everdict/application-control";
-import { type AutoscaleConfig, parseAutoscale, parseTenantMap } from "@everdict/application-control";
+import {
+  type AdmissionLedger,
+  type AutoscaleConfig,
+  parseAutoscale,
+  parseTenantMap,
+} from "@everdict/application-control";
 import { BackendRegistry, K8sBackend, NomadBackend, Scheduler, isPoolReporting } from "@everdict/backends";
 import type { BudgetStore, SecretStore, UsageStore } from "@everdict/db";
 import { Autoscaler, type BudgetLimit, CircuitBreaker, MutableSlots, type TrustZonePolicy } from "@everdict/domain";
@@ -20,8 +25,12 @@ export function buildExecutionScheduling(deps: {
   // The operator's isolation policy — the SAME one the tenant-runtime lane and the sandbox lane apply. A
   // deployment-wide target runs untrusted eval code exactly as a tenant's own runtime does.
   trustZones?: TrustZonePolicy;
+  // The run ledger the tenant quota is measured against (docs/architecture/multi-replica.md) — the RunStore
+  // itself. With Postgres this makes the quota fleet-wide; with the in-memory store it answers for the one
+  // process that owns it, which is the same thing when there is only one.
+  runLedger: AdmissionLedger;
 }) {
-  const { nomad, k8sContext, image, secretStore, trustZones } = deps;
+  const { nomad, k8sContext, image, secretStore, trustZones, runLedger } = deps;
   // Inject workspace secrets (model/provider keys) only into that tenant's job env (no leakage). The store is always active.
   const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
 
@@ -111,6 +120,7 @@ export function buildExecutionScheduling(deps: {
   }
   const scheduler = new Scheduler(backends, {
     maxQueueDepth,
+    ledger: runLedger,
     tenantQuota: (t: string) => quotaOverrides.get(t) ?? tenantQuotas?.get(t) ?? Number.POSITIVE_INFINITY,
     weightFor: (t: string) => weightOverrides.get(t) ?? tenantWeights?.get(t) ?? 1,
     ...(tenantQueueDepths

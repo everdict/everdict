@@ -1,3 +1,4 @@
+import type { AdmissionLedger } from "@everdict/application-control";
 import { type CaseJob, type CaseResult, PaymentRequiredError } from "@everdict/contracts";
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
@@ -59,6 +60,40 @@ class ControlledBackend implements Backend {
   }
   releaseAll(): void {
     while (this.pending.length > 0) this.releaseOne();
+  }
+}
+
+// The durable run ledger as two replicas share it: a row appears when compute starts (the onStarted
+// queued→running flip) and disappears when the run goes terminal. Stands in for `RunStore.inFlightByTenant`.
+class FleetLedger implements AdmissionLedger {
+  private readonly counts = new Map<string, number>();
+  start(tenant: string): void {
+    this.counts.set(tenant, (this.counts.get(tenant) ?? 0) + 1);
+  }
+  settle(tenant: string): void {
+    this.counts.set(tenant, Math.max(0, (this.counts.get(tenant) ?? 0) - 1));
+  }
+  total(): number {
+    return [...this.counts.values()].reduce((a, b) => a + b, 0);
+  }
+  async inFlightByTenant(): Promise<Record<string, number>> {
+    return Object.fromEntries(this.counts);
+  }
+}
+
+// A ControlledBackend that also writes to the shared ledger, the way a dispatched case's run row does.
+class LedgerBackend extends ControlledBackend {
+  constructor(
+    id: string,
+    total: number,
+    private readonly ledger: FleetLedger,
+  ) {
+    super(id, total);
+  }
+  override dispatch(job: CaseJob): Promise<CaseResult> {
+    const tenant = job.tenant ?? "default";
+    this.ledger.start(tenant);
+    return super.dispatch(job).finally(() => this.ledger.settle(tenant));
   }
 }
 
@@ -246,6 +281,60 @@ describe("Scheduler", () => {
     await flush();
     expect(b.dispatchedIds).toContain("A1");
 
+    b.releaseAll();
+    await flush();
+    await Promise.all(p);
+  });
+
+  it("tenant quota: two control-plane replicas sharing one run ledger admit the cap ONCE, not once each", async () => {
+    // Given: one shared ledger (the durable run rows) and two schedulers — the multi-replica deployment.
+    const ledger = new FleetLedger();
+    const backendA = new LedgerBackend("a", 10, ledger);
+    const backendB = new LedgerBackend("b", 10, ledger);
+    const opts = { tenantQuota: () => 5, ledger };
+    const replicaA = new Scheduler(new BackendRegistry().register("a", backendA), opts);
+    const replicaB = new Scheduler(new BackendRegistry().register("b", backendB), opts);
+
+    // When: replica A takes 3 of the workspace's 5 slots …
+    const pa = [0, 1, 2].map((i) => replicaA.dispatch(tjob("acme", `A${i}`)));
+    await flush();
+    expect(backendA.dispatchedIds).toEqual(["A0", "A1", "A2"]);
+
+    // … and replica B is then handed 5 more jobs of the same workspace.
+    const pb = [0, 1, 2, 3, 4].map((i) => replicaB.dispatch(tjob("acme", `B${i}`)));
+    await flush();
+
+    // Then: B sees A's 3 in the ledger and admits only the remaining 2 — 5 in flight fleet-wide, not 8.
+    // (Pre-fix, B's own empty map said 0 in flight and it admitted all 5.)
+    expect(backendB.dispatchedIds).toEqual(["B0", "B1"]);
+    expect(ledger.total()).toBe(5);
+    expect(replicaB.stats().queued).toBe(3);
+
+    // And: a terminal run frees its slot by leaving the ledger — no counter to reconcile.
+    backendA.releaseAll();
+    await flush();
+    replicaB.poke(); // the other replica settles out-of-band; a poke is what tells this one to look again
+    await flush();
+    expect(backendB.dispatchedIds).toEqual(["B0", "B1", "B2", "B3", "B4"]);
+
+    backendB.releaseAll();
+    await flush();
+    await Promise.all([...pa, ...pb]);
+  });
+
+  it("tenant quota: a ledger that cannot answer falls back to this replica's own count (never a stall)", async () => {
+    const b = new ControlledBackend("a", 5);
+    const failing = {
+      inFlightByTenant: () => Promise.reject(new Error("database unreachable")),
+    };
+    const sched = new Scheduler(new BackendRegistry().register("a", b), { tenantQuota: () => 1, ledger: failing });
+
+    const p = [sched.dispatch(tjob("A", "A0")), sched.dispatch(tjob("A", "A1"))];
+    await flush();
+
+    expect(b.dispatchedIds).toEqual(["A0"]); // the local quota still holds — placement is not blocked by the read
+    b.releaseAll();
+    await flush();
     b.releaseAll();
     await flush();
     await Promise.all(p);

@@ -106,6 +106,20 @@ export class InMemoryRunStore implements RunStore {
     return active;
   }
 
+  // The scheduler's fleet-wide tenant count (AdmissionLedger). Single-process by construction here — the
+  // in-memory store IS one replica — so this answers exactly what the scheduler's own maps hold; the Pg twin is
+  // where the cross-replica truth lives. The predicate is pinned to the port's contract and to the Pg twin.
+  async inFlightByTenant(): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    for (const r of this.runs.values()) {
+      if (r.status !== "running") continue;
+      if (r.kind !== undefined && r.kind !== "eval") continue;
+      if (r.lifetime === "session") continue;
+      counts[r.tenant] = (counts[r.tenant] ?? 0) + 1;
+    }
+    return counts;
+  }
+
   async liveSessions(query: LiveSessionQuery = {}): Promise<LiveSessionRow[]> {
     const rows: LiveSessionRow[] = [];
     for (const r of this.runs.values()) {

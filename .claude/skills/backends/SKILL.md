@@ -109,6 +109,12 @@ Two dispatchers (both satisfy `Dispatcher` — `dispatch(job)→CaseResult`; dep
     (`leastLoadedPolicy` spread default / `binPackPolicy` consolidate); honors `placement.target` as a hard pin.
   - **tenant fairness**: `FairQueue` (WFQ by virtual-finish time, keyed by `tenant`; `weightFor`) so one
     tenant's batch can't starve another; `tenantQuota` caps a tenant's concurrent in-flight.
+  - **replica-global vs per-replica admission**: the scheduler's five in-flight maps are per PROCESS. The
+    tenant quota bounds a workspace, so it is measured against the optional `AdmissionLedger` port
+    (`RunStore.inFlightByTenant()` — `running` eval rows, one read per drain, best-effort fallback to the
+    local count) and not against the map alone; without it, N replicas grant N quotas. Backend slots/memory/
+    cpu and per-harness pool room stay local BY DESIGN — the orchestrator `capacity()` probe and
+    `capacityFor`'s live pool reading are already their cross-replica truth. `docs/architecture/multi-replica.md`.
   - **queue + backpressure**: no slot/over-quota ⇒ queue, re-pump on settle (no head-of-line block);
     `maxQueueDepth` ⇒ `RateLimitError` (429). `poke()` re-pumps when capacity grows out-of-band.
   - **budgets**: optional `BudgetTracker` — `admit(tenant)` before queue (over-limit ⇒ `PaymentRequiredError`

@@ -60,6 +60,7 @@ export {
   type SubscriptionReactionDeps,
   subscriptionReactionConsumer,
 } from "./platform-event/subscription-reaction-consumer.js";
+export type { AdmissionLedger } from "./ports/admission-ledger.js";
 export type { BudgetStore } from "./ports/budget-store.js";
 export type {
   LiveSessionQuery,

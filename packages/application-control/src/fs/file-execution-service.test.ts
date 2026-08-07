@@ -113,6 +113,9 @@ class FakeRuns implements RunStore {
   async countActiveByEnvelope(): Promise<number> {
     return 0;
   }
+  async inFlightByTenant(): Promise<Record<string, number>> {
+    return {};
+  }
   async liveSessions(): Promise<[]> {
     return [];
   }

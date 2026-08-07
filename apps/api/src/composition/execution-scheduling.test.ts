@@ -43,6 +43,8 @@ describe("buildObservability — topology session-pool gauges", () => {
 // turns unbounded growth into explicit 429 backpressure. Env-dialed, boot-validated.
 describe("buildExecutionScheduling — EVERDICT_MAX_QUEUE_DEPTH backstop", () => {
   const secretStore = { entries: async () => ({}) } as unknown as SecretStore;
+  // The run ledger the tenant quota is counted from — empty here; these tests dial the queue, not the quota.
+  const runLedger = { inFlightByTenant: async () => ({}) };
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -55,6 +57,7 @@ describe("buildExecutionScheduling — EVERDICT_MAX_QUEUE_DEPTH backstop", () =>
       k8sContext: undefined,
       image: undefined,
       secretStore,
+      runLedger,
     });
     const job = (id: string) => ({
       harness: { id: "h", version: "1" },
@@ -80,7 +83,7 @@ describe("buildExecutionScheduling — EVERDICT_MAX_QUEUE_DEPTH backstop", () =>
   it("a malformed dial fails the boot instead of silently meaning unlimited", () => {
     vi.stubEnv("EVERDICT_MAX_QUEUE_DEPTH", "lots");
     expect(() =>
-      buildExecutionScheduling({ nomad: undefined, k8sContext: undefined, image: undefined, secretStore }),
+      buildExecutionScheduling({ nomad: undefined, k8sContext: undefined, image: undefined, secretStore, runLedger }),
     ).toThrow(/EVERDICT_MAX_QUEUE_DEPTH/);
   });
 });
