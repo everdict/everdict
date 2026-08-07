@@ -23,6 +23,7 @@ import {
   ScorecardBatch,
   type ScorecardOutcomeExtras,
   billingCharges,
+  caseOutcome,
   caseVerdict,
   classifyFailure,
   modelBindingLabel,
@@ -781,13 +782,22 @@ export class ScorecardBatchService {
     const results = src.scorecard?.results ?? [];
     if (results.length === 0)
       throw new BadRequestError("BAD_REQUEST", { scorecard: input.id }, "This batch has no per-case results to retry.");
-    // Class selection: a result with a classified failure matches its class; a plain grader FAIL (no failure field)
-    // is the agent's own outcome → class "agent". Unset = every non-passing case.
+    // Class selection stands on the case OUTCOME, not the bare verdict boolean. "agent" is the product-blame
+    // label — it applies ONLY to a completed FAIL (the agent's own outcome). An UNMEASURED case (its judge
+    // died leaving unmeasured scores and no case failure) has no verdict and therefore no blame class: the
+    // old `verdict !== true → "agent"` fallback swept the platform's dead judges into ?failureClass=agent.
     // A collect-stage failure is retryable even when the ground-truth verdict PASSED — the case is incomplete
     // (trace missing, observation/judge scores never ran), and its retry is a re-collect, not a re-run.
     const incomplete = (r: CaseResult): boolean => r.failure?.stage === "collect";
-    const classOf = (r: CaseResult): string | undefined =>
-      caseVerdict(r) === true && !incomplete(r) ? undefined : (r.failure?.class ?? "agent");
+    const classOf = (r: CaseResult): string | undefined => {
+      const outcome = caseOutcome(r);
+      if (outcome.status === "completed")
+        return outcome.verdict && !incomplete(r) ? undefined : (r.failure?.class ?? "agent");
+      if (outcome.status === "infra_failed" || outcome.status === "cancelled") return outcome.failure.class;
+      // unmeasured: executed, nothing pass-deciding measured — a scoring outage, never the agent's fault.
+      // A collect-starved case keeps its classified class; a plain judge death carries none.
+      return r.failure?.class;
+    };
     const failed = results.filter((r) =>
       input.failureClass ? classOf(r) === input.failureClass : caseVerdict(r) !== true || incomplete(r),
     );
