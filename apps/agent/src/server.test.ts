@@ -760,6 +760,105 @@ describe("agent server", () => {
       await app.close();
     });
 
+    it("approving a plan pre-authorizes its DECLARED write tools — guarded ones still ask (LESSON 059 P4)", async () => {
+      // Given a plan-mode turn whose plan declares do_write (routine) and delete_everything (guarded prefix)
+      const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+      const writeTool: ToolDefinition = {
+        name: "do_write",
+        description: "write",
+        parametersJsonSchema: { type: "object", properties: {} },
+        isReadOnly: false,
+        call: writeCall,
+      };
+      let n = 0;
+      const usage = { inputTokens: 5, outputTokens: 1, totalTokens: 6 };
+      const transport: LlmTransport = {
+        provider: "fake",
+        stream: async () => {
+          n += 1;
+          if (n === 1)
+            return {
+              content: null,
+              toolCalls: [
+                {
+                  id: "p1",
+                  name: "present_plan",
+                  arguments: JSON.stringify({
+                    plan: "## Plan\n1. write the thing",
+                    expected_tools: ["do_write", "delete_everything"],
+                  }),
+                },
+              ],
+              finishReason: "tool_calls" as const,
+              usage,
+            };
+          if (n === 2)
+            return {
+              content: null,
+              toolCalls: [{ id: "w1", name: "do_write", arguments: "{}" }],
+              finishReason: "tool_calls" as const,
+              usage,
+            };
+          return { content: "done", toolCalls: [], finishReason: "stop" as const, usage };
+        },
+      };
+      const app = buildServer(
+        makeDeps({
+          resolveModel: async () => ({ transport, model: "test-model" }),
+          toolProvider: async () => ({ registry: new ToolRegistry([writeTool]), call: null, close: async () => {} }),
+        }),
+      );
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const turn = app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: { ...auth, accept: "text/event-stream" },
+        payload: { message: "plan then do it", mode: "plan" },
+      });
+      // The plan parks; approving it is the ONLY human decision in this turn.
+      await vi.waitFor(async () => {
+        const res = await app.inject({ method: "GET", url: `/agent/sessions/${s.id}/pending`, headers: auth });
+        const pending = (res.json() as { pending: { requestId: string }[] }).pending;
+        expect(pending).toHaveLength(1);
+        await app.inject({
+          method: "POST",
+          url: `/agent/sessions/${s.id}/permission`,
+          headers: auth,
+          payload: { requestId: pending[0]?.requestId, decision: "allow" },
+        });
+      });
+      // Then the declared write runs WITHOUT a second ask (pre-fix: it parked again and the turn hung here)…
+      await turn;
+      expect(writeCall).toHaveBeenCalled();
+      // …the grant is a standing session rule, and the guarded declaration was NOT granted (its consent is
+      // never bundled into a plan approval).
+      const ruleSet = (await app.inject({ method: "GET", url: `/agent/sessions/${s.id}/rules`, headers: auth })).json()
+        .rules as Record<string, string>;
+      expect(ruleSet.do_write).toBe("allow");
+      expect(ruleSet.delete_everything).toBeUndefined();
+      await app.close();
+    });
+
+    it("an 'always allow' rule survives a service restart — hydrated from the session record (LESSON 059 P4)", async () => {
+      const sessions = new InMemoryAgentSessionStore();
+      const before = buildServer(makeDeps({ sessions }));
+      const s = (await before.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      await before.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/rules`,
+        headers: auth,
+        payload: { tool: "do_write", decision: "allow" },
+      });
+      await before.close(); // the in-memory rule map dies with the process
+
+      const after = buildServer(makeDeps({ sessions }));
+      const rulesAfter = (
+        await after.inject({ method: "GET", url: `/agent/sessions/${s.id}/rules`, headers: auth })
+      ).json().rules as Record<string, string>;
+      expect(rulesAfter).toEqual({ do_write: "allow" }); // pre-fix: {} — every "always" answered before the restart reopened
+      await after.close();
+    });
+
     it("manages rules over their CRUD endpoints", async () => {
       const app = buildServer(makeDeps());
       const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();

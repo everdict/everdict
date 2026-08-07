@@ -104,6 +104,10 @@ export const AgentSessionRecordSchema = z.object({
   // itself is NEVER stored (tenant keys are hashed one-way); a boot restore mints a fresh one and revokes the
   // stale key by `keyId`. Present = this session IS a live teammate; cleared when the teammate is dismissed.
   teammate: AgentTeammateConfigSchema.optional(),
+  // Fine-grained standing permission rules for THIS conversation (LESSON 059 P4): tool name → allow|deny,
+  // consulted before the human ask (the "always allow/deny this tool here" layer above modes). Persisted so a
+  // service restart does not silently reopen every prompt the member already answered with "always".
+  permissionRules: z.record(z.enum(["allow", "deny"])).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

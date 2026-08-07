@@ -56,6 +56,15 @@ export interface AgentSessionStore {
   // Every waiting conversation across ALL workspaces whose deadline has passed at `now` — the restart-proof sweep
   // (W3): a job that dies without emitting a terminal fact must never strand its watcher.
   listExpiredWakeIntents(now: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]>;
+  // Standing permission rules (LESSON 059 P4): replace the session's tool→allow|deny rule set — written
+  // through on every rule change so "always allow" survives a service restart (the in-memory PermissionRules
+  // map is the hot path; this row is its durability).
+  setSessionPermissionRules(
+    tenant: string,
+    id: string,
+    rules: Record<string, "allow" | "deny">,
+    updatedAt: string,
+  ): Promise<void>;
   // Teammate durability (LESSON 059 P2): stamp or clear a session's standing-teammate config — the durable
   // half of the roster (the execution token stays process-memory and is re-minted on restore; `keyId` is what
   // lets the restore revoke the stale key). null = the teammate was dismissed.

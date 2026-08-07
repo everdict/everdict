@@ -194,7 +194,8 @@ export interface AgentLoopOptions {
   // Plan mode: start read-only-only; the agent must present_plan and get it approved (onPlan) before any write tool
   // runs. onPlan defaults to auto-approve. Off unless the host opts in.
   planMode?: boolean;
-  onPlan?: (plan: string) => boolean | Promise<boolean>;
+  // `expectedTools`: the write tools the plan declared (LESSON 059 P4) — the host may pre-authorize them on approval.
+  onPlan?: (plan: string, expectedTools?: string[]) => boolean | Promise<boolean>;
   // Extended thinking: when set, the model is asked to reason before answering (Anthropic `thinking` budget; OpenAI-side
   // reasoning models reason regardless, so this is a no-op there). Reasoning is CAPTURED either way and surfaced via
   // `reasoning_delta` events + the assistant message's reasoning. Absent → thinking off (the historical behaviour).
@@ -569,9 +570,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   let inPlanMode = opts.planMode === true;
   const planTools: ToolDefinition[] = opts.planMode
     ? [
-        buildPresentPlanTool(async (plan) => {
+        buildPresentPlanTool(async (plan, expectedTools) => {
           emit({ type: "plan", plan });
-          const approved = opts.onPlan ? await opts.onPlan(plan) : true;
+          const approved = opts.onPlan ? await opts.onPlan(plan, expectedTools) : true;
           if (approved) inPlanMode = false;
           return approved;
         }),

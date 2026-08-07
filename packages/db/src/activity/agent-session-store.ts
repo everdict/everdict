@@ -145,6 +145,18 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
     this.sessions[index] = { ...rest, ...(config === null ? {} : { teammate: config }), updatedAt };
   }
 
+  async setSessionPermissionRules(
+    tenant: string,
+    id: string,
+    rules: Record<string, "allow" | "deny">,
+    updatedAt: string,
+  ): Promise<void> {
+    const s = this.sessions.find((r) => r.tenant === tenant && r.id === id);
+    if (!s) return;
+    s.updatedAt = updatedAt;
+    s.permissionRules = rules;
+  }
+
   async listTeammateSessions(opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
     return this.sessions.filter((s) => s.teammate !== undefined).slice(0, opts?.limit ?? 200);
   }
@@ -222,12 +234,13 @@ interface SessionRow {
   run_id: string | null;
   wake_intent: unknown;
   teammate: unknown;
+  permission_rules: unknown;
   created_at: string | Date;
   updated_at: string | Date;
 }
 
 const SESSION_COLUMNS =
-  "id, tenant, owner, title, model, permission_mode, memory, memory_through_seq, visibility, origin, status, run_id, wake_intent, teammate, created_at, updated_at";
+  "id, tenant, owner, title, model, permission_mode, memory, memory_through_seq, visibility, origin, status, run_id, wake_intent, teammate, permission_rules, created_at, updated_at";
 
 function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
   return AgentSessionRecordSchema.parse({
@@ -245,6 +258,9 @@ function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
     ...(row.run_id !== null ? { runId: row.run_id } : {}),
     ...(row.wake_intent !== null && row.wake_intent !== undefined ? { wakeIntent: row.wake_intent } : {}),
     ...(row.teammate !== null && row.teammate !== undefined ? { teammate: row.teammate } : {}),
+    ...(row.permission_rules !== null && row.permission_rules !== undefined
+      ? { permissionRules: row.permission_rules }
+      : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
@@ -454,6 +470,18 @@ export class PgAgentSessionStore implements AgentSessionStore {
     await this.client.query(
       "UPDATE everdict_agent_sessions SET teammate = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
       [tenant, id, config === null ? null : JSON.stringify(config), updatedAt],
+    );
+  }
+
+  async setSessionPermissionRules(
+    tenant: string,
+    id: string,
+    rules: Record<string, "allow" | "deny">,
+    updatedAt: string,
+  ): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_agent_sessions SET permission_rules = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
+      [tenant, id, JSON.stringify(rules), updatedAt],
     );
   }
 

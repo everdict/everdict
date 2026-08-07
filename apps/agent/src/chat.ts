@@ -646,7 +646,8 @@ export interface ChatHooks {
   // Plan mode: start read-only; the agent must present_plan and have it approved (onPlan) before any write tool runs.
   // The SSE handler supplies onPlan to park for the human; absent onPlan → auto-approve.
   planMode?: boolean;
-  onPlan?: (plan: string) => boolean | Promise<boolean>;
+  // `expectedTools` (LESSON 059 P4): the write tools the plan declared — approval may pre-authorize them.
+  onPlan?: (plan: string, expectedTools?: string[]) => boolean | Promise<boolean>;
   // Route send_message to a recipient that is not this run's own background sub-agent (another session/teammate), via
   // the host mailbox (S2 generalization). Absent → send_message only reaches this run's background sub-agents.
   sendMessage?: (

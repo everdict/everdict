@@ -172,6 +172,18 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   const mailbox = new AgentMailbox();
   // Fine-grained "always allow / deny this tool" rules (per session) that short-circuit the HITL prompt.
   const rules = new PermissionRules();
+  // Standing-rule durability (LESSON 059 P4): the in-memory map is the hot path; the session record is the
+  // truth across restarts. Hydrate at most once per process per session; persist (best-effort) on every change.
+  const hydrateRules = async (workspace: string, subject: string, sessionId: string): Promise<void> => {
+    if (rules.has(workspace, sessionId)) return;
+    const stored = await deps.sessions.getVisibleSession(workspace, subject, sessionId).catch(() => undefined);
+    rules.hydrate(workspace, sessionId, stored?.permissionRules ?? {});
+  };
+  const persistRules = (workspace: string, sessionId: string): void => {
+    void deps.sessions
+      .setSessionPermissionRules(workspace, sessionId, rules.list(workspace, sessionId), deps.now())
+      .catch(() => {});
+  };
   // Live chat turns keyed by session: a turn OUTLIVES the request that started it (SSE responses are just
   // subscribers, a disconnect only detaches), GET /stream re-attaches, POST /stop is the explicit abort, and a
   // concurrent /chat on the same session 409s. See live-turns.ts.
@@ -611,7 +623,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       [...teammates.entries()]
         .filter(([, t]) => t.owner === principal.subject && t.workspace === principal.workspace)
         .map(([id, t]) => ({ id, name: t.name, watch: [...t.watch] }));
-    // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt.
+    // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt. Hydrated
+    // from the session record first, so "always allow" answered before a restart still holds (LESSON 059 P4).
+    await hydrateRules(principal.workspace, principal.subject, id);
     const withRules =
       (base: PermissionHook): PermissionHook =>
       (request) => {
@@ -736,11 +750,25 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       return ask(request);
     });
     // Plan approval reuses the same park-and-await channel: emit a `plan` ask, resolve via POST /permission.
-    const onPlan = async (plan: string): Promise<boolean> => {
+    // Approval pre-authorizes the plan's DECLARED write tools (LESSON 059 P4, allowedPrompts reinterpreted):
+    // the member read exactly what the plan will do, so "plan then execute" no longer stalls at each step —
+    // except guarded (destructive/governance/credential) actions, whose consent is never bundled.
+    const onPlan = async (plan: string, expectedTools?: string[]): Promise<boolean> => {
       const requestId = deps.newId();
-      write("plan", { requestId, plan });
+      write("plan", {
+        requestId,
+        plan,
+        ...(expectedTools !== undefined && expectedTools.length > 0 ? { expectedTools } : {}),
+      });
       const noticed = noticeParkedApproval(); // no tool = the CP words the ping as a plan review
       const decision = await permissions.wait(requestId, id, controller.signal).finally(() => clearAfter(noticed));
+      if (decision === "allow" && expectedTools !== undefined && expectedTools.length > 0) {
+        for (const tool of expectedTools) {
+          if (isGuardedAction(tool)) continue;
+          rules.set(principal.workspace, id, tool, "allow");
+        }
+        persistRules(principal.workspace, id);
+      }
       return decision === "allow";
     };
     try {
@@ -1379,6 +1407,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const { id } = idParams.parse(req.params);
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    rules.hydrate(principal.workspace, id, session.permissionRules ?? {});
     return reply.send({ rules: rules.list(principal.workspace, id) });
   });
 
@@ -1390,7 +1419,10 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    // Hydrate BEFORE mutating, so the write-through below persists the stored rules PLUS this one — not just this one.
+    rules.hydrate(principal.workspace, id, session.permissionRules ?? {});
     rules.set(principal.workspace, id, parsed.data.tool, parsed.data.decision);
+    persistRules(principal.workspace, id);
     return reply.send({ rules: rules.list(principal.workspace, id) });
   });
 
@@ -1400,7 +1432,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const params = z.object({ id: z.string().min(1), tool: z.string().min(1) }).parse(req.params);
     const session = await deps.sessions.getSession(principal.workspace, principal.subject, params.id);
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
+    rules.hydrate(principal.workspace, params.id, session.permissionRules ?? {});
     rules.clear(principal.workspace, params.id, params.tool);
+    persistRules(principal.workspace, params.id);
     return reply.code(204).send();
   });
 

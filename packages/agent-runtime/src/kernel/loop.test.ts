@@ -620,7 +620,7 @@ describe("runAgentLoop", () => {
       onPlan,
     });
     expect(writeCall).toHaveBeenCalledOnce(); // only the post-approval write ran
-    expect(onPlan).toHaveBeenCalledWith("1. do the thing");
+    expect(onPlan).toHaveBeenCalledWith("1. do the thing", []); // no expected_tools declared → empty pre-auth list
     expect(result.content).toBe("done");
     const toolResults = result.produced.filter((m) => m.role === "tool").map((m) => (m as { content: string }).content);
     expect(toolResults[0]).toContain("In plan mode"); // the first write was blocked
