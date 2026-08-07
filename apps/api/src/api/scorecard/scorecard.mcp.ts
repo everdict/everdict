@@ -332,6 +332,19 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     );
 
     server.registerTool(
+      "rescore_unmeasured_scores",
+      {
+        description:
+          "Re-score a scorecard's retryable-unmeasured judge scores in place (transient judge LLM/transport blips) — no case re-execution; judge versions come from the batch's own pins. Non-judge unmeasured scores need a case re-run (retry) and come back as `skipped`.",
+        inputSchema: { id: z.string() },
+      },
+      ({ id }) =>
+        run(principal, "scorecards:run", async () =>
+          ok(await scorecards.rescoreUnmeasured({ tenant: ws, id, submittedBy: principal.subject })),
+        ),
+    );
+
+    server.registerTool(
       "move_scorecard",
       {
         description: moveToolDescription(

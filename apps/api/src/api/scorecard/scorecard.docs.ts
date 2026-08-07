@@ -58,6 +58,18 @@ const docs = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
+  rescoreUnmeasured: {
+    summary: "Re-score retryable unmeasured judge scores in place",
+    description:
+      "Targeted transient-scoring recovery: re-runs ONLY the judges whose scores are retryable-unmeasured " +
+      "(a judge LLM/transport blip), replacing their previous judge:<id> rows — no case is re-executed, and " +
+      "the batch aggregates exactly as if scoring had succeeded the first time. Judge versions come from the " +
+      "batch's own orchestration pins (never a silent latest upgrade). Non-judge unmeasured scores (in-job " +
+      "grader failures) need a case re-run (/retry) and are returned as `skipped`. Requires scorecards:run " +
+      "(member+), workspace-scoped. 400 when the batch has no per-case results yet.",
+    tags: ["scorecard"],
+    params: scorecardIdParams,
+  },
   rerun: {
     summary: "Re-run a scorecard (full re-run)",
     description:

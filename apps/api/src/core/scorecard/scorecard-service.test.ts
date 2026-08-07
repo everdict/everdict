@@ -4713,6 +4713,81 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     expect(judgeScores).toHaveLength(1); // replaced, not appended
   });
 
+  it("rescoreUnmeasured recovers ONLY the retryable-unmeasured judges — in place, no case re-execution", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", qualityJudge);
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    let judgeCalls = 0;
+    const runner: JudgeRunner = {
+      run: async (spec) => {
+        judgeCalls++;
+        return [{ graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true }];
+      },
+    };
+    const service = new ScorecardService({
+      dispatcher: ungraded,
+      store,
+      runStore,
+      datasets,
+      judges,
+      judgeRunner: runner,
+    });
+    const record = await service.submitExperiment({
+      tenant: "acme",
+      harness: { id: "scripted", version: "0" },
+      task: { prompt: "hi" },
+    });
+    await waitTerminal(store, record.id);
+    // Simulate a settled batch whose judge blipped (retryable unmeasured) + an in-job grader death (not
+    // recoverable without a re-run). get() hydrates results from the CHILD runs, so the injection goes there.
+    const settled = await store.get(record.id);
+    await store.update(record.id, {
+      orchestration: { ...settled?.orchestration, judges: [{ id: "quality", version: "1.0.0" }] },
+    } as Partial<ScorecardRecord>);
+    for (const child of await runStore.list("acme", { scorecardId: record.id })) {
+      if (!child.result) continue;
+      await runStore.update(child.id, {
+        result: {
+          ...child.result,
+          scores: [
+            ...child.result.scores,
+            {
+              graderId: "quality",
+              metric: "judge:quality",
+              value: 0,
+              status: "unmeasured" as const,
+              reason: "grader_error" as const,
+              retryable: true,
+              detail: "skipped: judge upstream 503",
+            },
+            {
+              graderId: "tests-pass",
+              metric: "tests_pass",
+              value: 0,
+              status: "unmeasured" as const,
+              reason: "grader_error" as const,
+              retryable: true,
+              detail: "[grader-error] in-job",
+            },
+          ],
+        },
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    const out = await service.rescoreUnmeasured({ tenant: "acme", id: record.id });
+    // The judge is re-scored (under the batch's PINNED version), the in-job grader is reported, never guessed
+    expect(out.rescoredJudges).toEqual(["quality"]);
+    expect(out.skipped.map((w) => w.metric)).toEqual(["tests_pass"]);
+    await waitScored(store, record.id);
+    expect(judgeCalls).toBeGreaterThan(0);
+    const hydrated = await service.get(record.id);
+    const scores = hydrated?.scorecard?.results[0]?.scores.filter((x) => x.metric === "judge:quality") ?? [];
+    expect(scores).toHaveLength(1); // replaced in place — the unmeasured row is gone
+    expect(scores[0]?.pass).toBe(true);
+  });
+
   it("the workflow bridge (plan → scoreCase → finalize) resumes with zero duplicate judging", async () => {
     const datasets = new InMemoryDatasetRegistry();
     const judges = new InMemoryJudgeRegistry();

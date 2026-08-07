@@ -652,6 +652,7 @@ describe("MCP tools", () => {
       "remove_workspace_mattermost",
       "remove_workspace_trace_source",
       "rerun_scorecard",
+      "rescore_unmeasured_scores",
       "retry_scorecard",
       "revoke_api_key",
       "revoke_invite",

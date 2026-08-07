@@ -16,6 +16,7 @@ import {
   CircuitBreaker,
   type Leaderboard,
   type Principal,
+  type RetryableUnmeasured,
   Run,
   ScorecardBatch,
   type ScorecardDiff,
@@ -24,6 +25,7 @@ import {
   authorize,
   can,
   contentDigest,
+  retryableUnmeasured,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { ScoringService } from "../execution/scoring-service.js";
@@ -390,6 +392,42 @@ export class ScorecardService {
   // experiment → scorecard" move (scoring an experiment flips its kind). Delegated to the score collaborator.
   async scoreGroup(input: ScoreGroupInput): Promise<ScorecardRecord> {
     return this.scoreService.score(input);
+  }
+
+  // Targeted recovery for TRANSIENT scoring failures (trust-kernel unlock ①): re-run ONLY the judges whose
+  // scores are retryable-unmeasured (a judge LLM/transport blip), replacing their previous rows in place —
+  // no case is re-executed, and a recovered batch aggregates exactly as if scoring had succeeded first time.
+  // Non-judge unmeasured scores (in-job grader failures) need a case re-run and are returned as `skipped`.
+  async rescoreUnmeasured(input: { tenant: string; id: string; submittedBy?: string }): Promise<{
+    id: string;
+    rescoredJudges: string[];
+    skipped: RetryableUnmeasured[];
+  }> {
+    const record = await this.get(input.id);
+    if (!record || record.tenant !== input.tenant)
+      throw new NotFoundError("NOT_FOUND", { id: input.id }, `scorecard '${input.id}' not found.`);
+    if (!record.scorecard)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { id: input.id, status: record.status },
+        `scorecard '${input.id}' has no per-case results to re-score (status=${record.status}).`,
+      );
+    const work = retryableUnmeasured(record.scorecard);
+    const isJudgeMetric = (metric: string): boolean => metric === "judge" || metric.startsWith("judge:");
+    const judgeIds = [...new Set(work.filter((w) => isJudgeMetric(w.metric)).map((w) => w.graderId))];
+    const skipped = work.filter((w) => !isJudgeMetric(w.metric));
+    if (judgeIds.length === 0) return { id: record.id, rescoredJudges: [], skipped };
+    // Versions from the batch's own orchestration pins — the SAME judge version that failed, never a silent
+    // upgrade to whatever "latest" resolves to now (that would change the verdict, not recover it).
+    const pinned = record.orchestration?.judges ?? [];
+    const judges = judgeIds.map((id) => ({ id, version: pinned.find((j) => j.id === id)?.version ?? "latest" }));
+    await this.scoreGroup({
+      tenant: input.tenant,
+      id: record.id,
+      judges,
+      ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
+    });
+    return { id: record.id, rescoredJudges: judgeIds, skipped };
   }
 
   // Cascade cancel (§5.5, O8): the causal tree is the kill switch — cancelling a run revokes every
