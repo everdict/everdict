@@ -1,3 +1,4 @@
+import { soloReplicas } from "@everdict/application-control";
 import type { RunRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { describe, expect, it, vi } from "vitest";
@@ -28,6 +29,8 @@ describe("runStartupRecovery (the composition's background resume leg)", () => {
       scorecardService: { resume: async () => false },
       service: { resume: async () => false }, // no caseSpec to re-dispatch
       adoptCaseFn: async () => undefined, // no backend job survived to adopt
+      owner: "cp-test",
+      replicas: soloReplicas, // single process — every in-flight record is an orphan
     });
 
     await vi.waitFor(async () => {
@@ -54,6 +57,8 @@ describe("runStartupRecovery (the composition's background resume leg)", () => {
         },
       },
       adoptCaseFn: async () => undefined,
+      owner: "cp-test",
+      replicas: soloReplicas,
     });
 
     await vi.waitFor(() => expect(resumed).toBe(true));

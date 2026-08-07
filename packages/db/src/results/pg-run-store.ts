@@ -38,6 +38,7 @@ interface RunRow {
   lineage: unknown | null;
   outputs: unknown | null;
   session: unknown | null;
+  owner_replica: string | null; // which control-plane replica drives this run (mig 0135)
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -71,6 +72,7 @@ function rowToRecord(row: RunRow): RunRecord {
     ...(row.lineage ? { lineage: row.lineage } : {}),
     ...(row.outputs ? { outputs: row.outputs } : {}),
     ...(row.session ? { session: row.session } : {}),
+    ...(row.owner_replica ? { ownerReplica: row.owner_replica } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -78,11 +80,11 @@ function rowToRecord(row: RunRow): RunRecord {
 }
 
 const RUN_COLUMNS =
-  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, team_id, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, session, created_at, updated_at)";
+  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, team_id, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, session, owner_replica, created_at, updated_at)";
 const RUN_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)";
 
-function runInsertParams(r: RunRecord): unknown[] {
+function runInsertParams(r: RunRecord, replicaId?: string): unknown[] {
   return [
     r.id,
     r.tenant,
@@ -109,6 +111,9 @@ function runInsertParams(r: RunRecord): unknown[] {
     r.lineage ? JSON.stringify(r.lineage) : null,
     r.outputs ? JSON.stringify(r.outputs) : null,
     r.session ? JSON.stringify(r.session) : null,
+    // The writer is the driver: whoever inserts the row is the process about to drive it, so ownership is
+    // stamped HERE rather than threaded through every submit path (and cannot be forged by a caller).
+    r.ownerReplica ?? replicaId ?? null,
     r.createdAt,
     r.updatedAt,
   ];
@@ -116,10 +121,15 @@ function runInsertParams(r: RunRecord): unknown[] {
 
 // Postgres-backed result store. Same RunStore contract as in-memory — apps/api just swaps the two.
 export class PgRunStore implements RunStore {
-  constructor(private readonly client: SqlClient) {}
+  // `replicaId` = the process this store belongs to; every row it inserts is stamped with it so boot recovery
+  // can tell a dead driver's work from a live one's (docs/architecture/multi-replica.md).
+  constructor(
+    private readonly client: SqlClient,
+    private readonly replicaId?: string,
+  ) {}
 
   async create(r: RunRecord, events?: OutboxEvent[]): Promise<void> {
-    const base = runInsertParams(r);
+    const base = runInsertParams(r, this.replicaId);
     if (events && events.length > 0) {
       // One statement, two writes (E0): the run insert and its facts commit or roll back together.
       const ev = eventValuesClause(events, base.length + 1);
@@ -170,6 +180,12 @@ export class PgRunStore implements RunStore {
     if (patch.session !== undefined) {
       sets.push(`session = $${i++}`);
       vals.push(JSON.stringify(patch.session));
+    }
+    // Ownership TRANSFER — the replica that claims an orphaned run for resume becomes its driver, or the next
+    // boot would still see the dead owner and reclaim work that is now being driven again.
+    if (patch.ownerReplica !== undefined) {
+      sets.push(`owner_replica = $${i++}`);
+      vals.push(patch.ownerReplica);
     }
     if (patch.updatedAt !== undefined) {
       sets.push(`updated_at = $${i++}`);

@@ -169,6 +169,12 @@ export const RunRecordSchema = z.object({
   lineage: RunLineageSchema.optional(), // retry/rescore/fork relations to earlier runs
   outputs: RunOutputsSchema.optional(), // what it left behind (artifacts/files/summary)
   session: RunSessionSchema.optional(), // session runs only (P6, mig 0099): image + hard deadline + teardown reason
+  // WHICH control-plane replica is driving this run (mig 0135, docs/architecture/multi-replica.md). Stamped by
+  // the store at create and re-stamped by whoever claims the run for resume, so boot recovery can tell work
+  // whose owner is DEAD from work another live replica is still driving. Absent = written before the column
+  // existed (or by the in-memory store), which recovery treats as unowned and reclaims as it always did.
+  // A random per-boot id, never a hostname — it identifies a process, it does not describe the infrastructure.
+  ownerReplica: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

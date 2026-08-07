@@ -27,6 +27,7 @@ processes"; the per-workspace cap is counted from the ledger).
 | --- | --- |
 | Tenant concurrency quota | `Scheduler`'s `AdmissionLedger` — `RunStore.inFlightByTenant()` over the run rows |
 | Singleton control-plane loops | `LeaderElector` — a Postgres lease; non-leaders keep their timers but no-op |
+| Boot recovery | Record ownership + replica heartbeats — a boot reclaims only work whose driver is gone |
 | Self-hosted runner dispatch | `EVERDICT_SELF_HOSTED_STORE_HUB=1` — the Pg claim queue instead of the in-process hub |
 | Front-door callbacks | `StoreCallbackRendezvous` (already store-backed — an inbound POST may land on any replica) |
 
@@ -77,10 +78,25 @@ What is gated, and what deliberately is not:
 | Trajectory / event retention | not gated — one atomic `DELETE … WHERE cutoff`; a second replica's pass finds nothing |
 | Slot `Autoscaler` (`EVERDICT_AUTOSCALE`) | not gated — `MutableSlots` is this replica's OWN admission envelope; gating it would pin followers at the minimum and stop them placing work |
 
-### Still single-process (tracked separately)
+### Recovery (S3)
 
-Boot recovery still reclaims in-flight records unconditionally, which across replicas means a booting replica
-settles work another replica is actively driving. Until that lands, roll restarts one replica at a time.
+`recoverInterrupted` resumes or tombstones every `queued`/`running` record it finds, on the single-control-plane
+assumption its own header used to state. Across replicas that is a boot settling work another replica is
+actively driving, which is the sharpest hazard on this list: it kills live batches.
+
+Two facts make it decidable. Records carry `ownerReplica`, stamped by the STORE at insert — the process that
+writes the row is the process about to drive it, so ownership needs no submit path to thread it and no caller
+can forge it — and every replica writes a heartbeat into `everdict_control_plane_replicas`. Recovery reclaims
+a record only when its owner is absent from the live set, re-stamps whatever it claims as its own (or the next
+boot would take it back from the replica now driving it), and reports what it deliberately left alone. A record
+with no owner — written before the column existed, or by the in-memory store — keeps the old unconditional
+behavior. An unreadable heartbeat set is treated as "everyone may be alive": leaving a stale record for the
+next boot is recoverable, killing a live batch is not.
+
+Recovery deliberately runs on EVERY replica rather than only the leader: it is what reclaims a dead
+predecessor's work, and gating it on leadership would leave that work stranded until the leader happened to
+restart. Ownership is the precise guard; leadership would only have been a coarse one. The residual race is
+narrow and documented — two replicas booting in the same instant can both claim the same dead owner's record.
 
 ## Deliberately per-replica
 
@@ -100,6 +116,8 @@ settles work another replica is actively driving. Until that lands, roll restart
 
 1. `DATABASE_URL` — required. Without Postgres there is no ledger, no lease and no heartbeat: every replica
    is its own island, exactly as before.
+   `EVERDICT_REPLICA_ID` may pin this process's identity for log correlation, but it MUST be unique per
+   replica — two replicas sharing one id look like one process to both the lease and the heartbeat.
 2. `EVERDICT_SELF_HOSTED_STORE_HUB=1` — self-hosted runner jobs are parked and leased through the Pg claim
    queue (`everdict_runner_jobs`, migration 0055) instead of the in-process hub. Left off, a job parked on
    one replica is invisible to a runner leasing from another.

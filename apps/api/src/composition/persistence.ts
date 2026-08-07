@@ -1,5 +1,5 @@
-import type { LeaderElector } from "@everdict/application-control";
-import { soleLeader } from "@everdict/application-control";
+import type { LeaderElector, ReplicaRegistry } from "@everdict/application-control";
+import { soleLeader, soloReplicas } from "@everdict/application-control";
 import type {
   AgentMemberPreferenceStore,
   AgentTaskStore,
@@ -97,6 +97,7 @@ import {
   PgProjectStore,
   PgProjectUpdateStore,
   PgRecordingStore,
+  PgReplicaRegistry,
   PgRunStore,
   PgRunnerJobStore,
   PgRunnerStore,
@@ -235,6 +236,10 @@ export interface Persistence {
   // lease row, so exactly one replica scales pools, recovers at boot and settles other processes' stale rows;
   // no Postgres → `soleLeader`, the single-process shape where every gated loop simply runs.
   leader: LeaderElector;
+  // WHICH control planes are alive (docs/architecture/multi-replica.md) — boot recovery reclaims only records
+  // whose owning replica stopped heartbeating. No Postgres → `soloReplicas`, i.e. no peers, so recovery
+  // reclaims every in-flight record exactly as it did before.
+  replicas: ReplicaRegistry;
 }
 
 // At-rest encryption KEK: use EVERDICT_SECRETS_KEY (base64 32B) if present, otherwise auto-generate an ephemeral key
@@ -338,6 +343,7 @@ export async function makePersistence(): Promise<Persistence> {
       budgetStore: new InMemoryBudgetStore(),
       cipher,
       leader: soleLeader,
+      replicas: soloReplicas,
     };
   }
   const client = sqlClient(makePool(url));
@@ -345,9 +351,9 @@ export async function makePersistence(): Promise<Persistence> {
   if (applied.length > 0) console.error(`▶ db migrations applied: ${applied.join(", ")}`);
   const harnessTemplateRegistry = new PgHarnessTemplateRegistry(client);
   return {
-    store: new PgRunStore(client),
+    store: new PgRunStore(client, REPLICA_ID),
     recordingStore: new PgRecordingStore(client),
-    scorecardStore: new PgScorecardStore(client),
+    scorecardStore: new PgScorecardStore(client, REPLICA_ID),
     keyStore: new PgTenantKeyStore(client),
     harnessTemplateRegistry,
     harnessInstanceRegistry: new PgHarnessInstanceRegistry(client, harnessTemplateRegistry),
@@ -398,6 +404,7 @@ export async function makePersistence(): Promise<Persistence> {
     usageStore: new PgUsageStore(client),
     budgetStore: new PgBudgetStore(client),
     leader: new PgLeaderElector(client, { role: CONTROL_PLANE_ROLE, holder: REPLICA_ID }),
+    replicas: new PgReplicaRegistry(client, { replicaId: REPLICA_ID }),
     cipher,
   };
 }

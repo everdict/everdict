@@ -409,6 +409,44 @@ describe("InMemoryRunStore — the live session pool", () => {
   });
 });
 
+describe("PgRunStore — which replica drives the row (multi-replica boot recovery)", () => {
+  const queued: RunRecord = {
+    id: "r9",
+    tenant: "acme",
+    harness: { id: "scripted", version: "0" },
+    caseId: "c1",
+    status: "queued",
+    createdAt: "2026-08-07T00:00:00.000Z",
+    updatedAt: "2026-08-07T00:00:00.000Z",
+  };
+
+  it("stamps the writing process as the driver — ownership needs no submit path to thread it", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+
+    await new PgRunStore(client, "cp-abc").create(queued);
+
+    expect(calls[0]?.text).toMatch(/session, owner_replica, created_at/);
+    expect(calls[0]?.params?.[25]).toBe("cp-abc");
+  });
+
+  it("leaves the owner NULL when the store has no replica identity (the single-process shape)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+
+    await new PgRunStore(client).create(queued);
+
+    expect(calls[0]?.params?.[25]).toBeNull();
+  });
+
+  it("transfers ownership on update — the replica that resumes an orphan becomes its driver", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+
+    await new PgRunStore(client, "cp-abc").update("r9", { ownerReplica: "cp-new" });
+
+    expect(calls[0]?.text).toMatch(/UPDATE everdict_runs SET owner_replica = \$1/);
+    expect(calls[0]?.params).toEqual(["cp-new", "r9"]);
+  });
+});
+
 describe("RunStore — the scheduler's admission ledger (multi-replica tenant quota)", () => {
   const run = (id: string, extra: Partial<RunRecord>): RunRecord => ({
     id,

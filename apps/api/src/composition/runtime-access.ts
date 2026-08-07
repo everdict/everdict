@@ -1,4 +1,4 @@
-import { INTERRUPTED, recoverInterrupted } from "@everdict/application-control";
+import { INTERRUPTED, type ReplicaRegistry, recoverInterrupted } from "@everdict/application-control";
 import type { RunService } from "@everdict/application-control";
 import type { ScorecardService } from "@everdict/application-control";
 import {
@@ -248,16 +248,22 @@ export function buildRuntimeAccess(deps: {
 export async function runStartupRecovery(deps: {
   scorecardStore: ScorecardStore;
   store: RunStore;
+  // WHO we are + who else is alive (docs/architecture/multi-replica.md). Recovery reclaims a record only when
+  // the replica that was driving it stopped heartbeating — a boot must never settle a living replica's work.
+  owner: string;
+  replicas: ReplicaRegistry;
   // Structural picks of the two services — recovery only ever calls resume, and the narrow surface is what
   // lets the tombstone-on-unresumable regression test drive this function without standing up a full service.
   scorecardService: Pick<ScorecardService, "resume">;
   service: Pick<RunService, "resume">;
   adoptCaseFn: (tenant: string, runtimeList: string | undefined, caseId: string) => Promise<CaseResult | undefined>;
 }): Promise<void> {
-  const { scorecardStore, store, scorecardService, service, adoptCaseFn } = deps;
+  const { scorecardStore, store, scorecardService, service, adoptCaseFn, owner, replicas } = deps;
   const recovered = await recoverInterrupted({
     scorecards: scorecardStore,
     runs: store,
+    owner,
+    replicas,
     resume: (id) => scorecardService.resume(id),
     // Standalone runs: adopt the still-alive backend job first (zero re-run), else re-dispatch from the
     // persisted caseSpec (mig 0051); legacy records without one keep the tombstone path.
@@ -287,4 +293,8 @@ export async function runStartupRecovery(deps: {
     console.error(
       `▶ boot recovery: batches resumed ${recovered.resumed} · batches failed(INTERRUPTED) ${recovered.scorecards} · runs resumed ${recovered.runsResumed} · runs failed ${recovered.runs} · session runs left to their reapers ${recovered.sessions}`,
     );
+  // Announced separately: "we found in-flight work and deliberately did NOT touch it" is the line an operator
+  // needs when a replica boots into a running fleet.
+  if (recovered.live > 0)
+    console.error(`▶ boot recovery: left ${recovered.live} record(s) alone — another live replica is driving them`);
 }

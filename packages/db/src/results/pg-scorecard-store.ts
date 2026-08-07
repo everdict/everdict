@@ -32,6 +32,7 @@ interface ScorecardRow {
   error: unknown;
   steps: unknown;
   run_ids: unknown;
+  owner_replica: string | null; // which control-plane replica drives this batch (mig 0135)
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -76,6 +77,8 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
     runIds: hasDetail ? (row.run_ids ?? undefined) : undefined, // detail-only lightweight reference (get only, like steps)
+    // Lightweight — boot recovery reads the LIST, so the owner must ride it or the check cannot be made.
+    ownerReplica: row.owner_replica ?? undefined,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -83,11 +86,11 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, created_at, updated_at)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, owner_replica, created_at, updated_at)";
 const SCORECARD_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)";
 
-function scorecardInsertParams(r: ScorecardRecord): unknown[] {
+function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[] {
   return [
     r.id,
     r.tenant,
@@ -114,16 +117,23 @@ function scorecardInsertParams(r: ScorecardRecord): unknown[] {
     r.error ? JSON.stringify(r.error) : null,
     r.steps ? JSON.stringify(r.steps) : null,
     r.runIds ? JSON.stringify(r.runIds) : null,
+    // The writer is the driver — same stamp, same reason as the run store's.
+    r.ownerReplica ?? replicaId ?? null,
     r.createdAt,
     r.updatedAt,
   ];
 }
 
 export class PgScorecardStore implements ScorecardStore {
-  constructor(private readonly client: SqlClient) {}
+  // `replicaId` = the process this store belongs to; the batches it inserts are stamped with it so boot
+  // recovery can tell a dead driver's batch from a live one's (docs/architecture/multi-replica.md).
+  constructor(
+    private readonly client: SqlClient,
+    private readonly replicaId?: string,
+  ) {}
 
   async create(r: ScorecardRecord, events?: OutboxEvent[]): Promise<void> {
-    const base = scorecardInsertParams(r);
+    const base = scorecardInsertParams(r, this.replicaId);
     if (events && events.length > 0) {
       // One statement, two writes (E0): the scorecard insert and its facts commit or roll back together
       // (same data-modifying-CTE outbox as PgRunStore).
@@ -152,6 +162,11 @@ export class PgScorecardStore implements ScorecardStore {
     if (patch.status !== undefined) {
       sets.push(`status = $${i++}`);
       vals.push(patch.status);
+    }
+    // Ownership TRANSFER — the replica that claims an interrupted batch for resume becomes its driver.
+    if (patch.ownerReplica !== undefined) {
+      sets.push(`owner_replica = $${i++}`);
+      vals.push(patch.ownerReplica);
     }
     if (patch.kind !== undefined) {
       // written by P2 scoring only — promoting an experiment flips kind to the explicit 'scorecard'.

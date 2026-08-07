@@ -34,6 +34,11 @@ Now boot recovery **resumes** interrupted batches instead: for each active score
   first run (already-judged done results keep their scores; only new results stream through the
   judge).
 
+Recovery reclaims an active record only when the replica that was driving it is **gone** — records carry
+`ownerReplica` and every control plane heartbeats, so a booting replica cannot settle a batch another one is
+still fanning out (`docs/architecture/multi-replica.md`). A record with no owner (pre-column rows) is treated
+as orphaned exactly as before.
+
 Everything resume needs is on the record: dataset/harness refs, `runtime`, `subset`, and the new
 **`orchestration`** field (`{judges, judge?, concurrency, retries}`, migration
 `0049_add_scorecard_orchestration`) persisted at submit. Records from before this field (no

@@ -218,7 +218,13 @@ async function main(): Promise<void> {
     budgetStore,
     cipher,
     leader,
+    replicas,
   } = await makePersistence();
+
+  // Announce that this process is alive, before anything reads the live set: boot recovery on a PEER replica
+  // must be able to see us, and our own ownership stamps mean nothing if nobody can tell we are running.
+  await replicas.beat().catch(() => {});
+  setInterval(() => void replicas.beat().catch(() => {}), 10_000).unref();
 
   // Elect the replica that runs the singleton control-plane loops (docs/architecture/multi-replica.md). Started
   // BEFORE the loops are registered so a boot-time pass placed after this knows whether it may act; with no
@@ -721,7 +727,15 @@ async function main(): Promise<void> {
   });
   cascadeCancel.fn = (tenant, runId) => scorecardService.cancelCausedBy(tenant, runId);
 
-  await runStartupRecovery({ scorecardStore, store, scorecardService, service, adoptCaseFn });
+  await runStartupRecovery({
+    scorecardStore,
+    store,
+    scorecardService,
+    service,
+    adoptCaseFn,
+    owner: REPLICA_ID,
+    replicas,
+  });
 
   const mattermostCommandService = buildMattermostCommand({ settingsStore, runtimeSecretsFor, scorecardService });
   const { benchmarkService, bundleService } = buildCatalog({
@@ -1343,7 +1357,9 @@ async function main(): Promise<void> {
   // Hand the leader lease back on a normal shutdown, so a rolling restart's next replica takes over at once
   // instead of waiting out the lease TTL. Without a leader (single process) this is a no-op.
   const shutdown = (signal: string): void => {
-    void leader.stop().finally(() => process.exit(0));
+    // Stop counting as alive too: whoever boots next should reclaim this replica's interrupted work at once
+    // rather than waiting for our heartbeat to go stale.
+    void Promise.allSettled([leader.stop(), replicas.leave()]).finally(() => process.exit(0));
     console.error(`▶ ${signal}: control plane shutting down`);
   };
   process.once("SIGTERM", () => shutdown("SIGTERM"));

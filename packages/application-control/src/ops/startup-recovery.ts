@@ -1,4 +1,5 @@
 import type { RunRecord } from "@everdict/contracts";
+import type { ReplicaRegistry } from "../ports/replica-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 
@@ -11,8 +12,12 @@ import type { ScorecardStore } from "../ports/scorecard-store.js";
 // faithfully resumed (pre-orchestration records, unresolvable dataset) fall back to the old failed(INTERRUPTED)
 // tombstone so the state still matches reality. Standalone runs are resumed too (P4 single-run durability): adopt the
 // still-alive backend job's result, else re-dispatch from the persisted caseSpec (mig 0051); legacy records tombstone.
-// Note: if more than one control plane shares the same store (DB), this also reclaims another's in-flight work — we simply
-// follow the single-control-plane assumption (common across the codebase).
+//
+// MORE THAN ONE control plane may share this store (docs/architecture/multi-replica.md), and then "in flight" no
+// longer means "orphaned": the record may belong to a replica that is very much alive. So a record is reclaimed
+// only when its owner is GONE — `ownerReplica` (stamped by the store that wrote it) is checked against the live
+// heartbeat set, and a record with no owner (pre-column rows, the in-memory store) keeps the old unconditional
+// behavior. A record this replica does claim is re-stamped as ours, so the NEXT boot doesn't take it back from us.
 
 // Exported so the composition's BACKGROUND resume leg can apply the same tombstone when a claimed resume
 // turns out to be impossible — a claim that fails silently leaves the record `running` forever (the exact
@@ -23,6 +28,8 @@ export const INTERRUPTED = {
 };
 
 const ACTIVE = new Set(["queued", "running"]);
+// "we could not read who is alive" — distinct from "nobody is alive", which would clear every owned record.
+const UNKNOWN = "unknown" as const;
 
 export interface RecoveryDeps {
   scorecards: ScorecardStore;
@@ -33,20 +40,49 @@ export interface RecoveryDeps {
   // RunService.resume (adopt-first) — re-drive an interrupted STANDALONE run (adopt the still-alive backend job
   // or re-dispatch from the persisted caseSpec). false = legacy record → tombstone as before.
   resumeRun?: (record: RunRecord) => Promise<boolean>;
+  // WHO this process is. Records it claims are re-stamped with it; records already stamped with it are ours to
+  // reclaim (a replica whose identity is pinned across restarts must still recover its own interrupted work).
+  owner?: string;
+  // Which control planes are alive. Absent = the single-process assumption, i.e. every in-flight record is an
+  // orphan — exactly the previous behavior.
+  replicas?: ReplicaRegistry;
   now?: () => string;
 }
 
-export async function recoverInterrupted(
-  deps: RecoveryDeps,
-): Promise<{ scorecards: number; resumed: number; runs: number; runsResumed: number; sessions: number }> {
+export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
+  scorecards: number;
+  resumed: number;
+  runs: number;
+  runsResumed: number;
+  sessions: number;
+  // Records left alone because another replica is still driving them — the difference between a control plane
+  // that scales and one that eats its own work at every boot.
+  live: number;
+}> {
   const now = deps.now ?? (() => new Date().toISOString());
   let scorecardCount = 0;
   let resumedCount = 0;
   let runCount = 0;
+  let liveCount = 0;
+
+  // A store hiccup here must not turn into "reclaim everything" — an unreadable heartbeat set means we cannot
+  // prove anybody is dead, so with a registry wired we treat every OWNED record as still driven (fail-closed:
+  // leaving a stale record for the next boot is recoverable, killing a live batch is not).
+  const live = deps.replicas ? await deps.replicas.liveReplicas().catch(() => UNKNOWN) : [];
+  const drivenByAnother = (ownerReplica: string | undefined): boolean =>
+    ownerReplica !== undefined && ownerReplica !== deps.owner && (live === UNKNOWN || live.includes(ownerReplica));
+  // Taking a record over means becoming its driver — otherwise the next boot reads the dead owner and reclaims
+  // work this replica is now driving.
+  const claim = deps.owner === undefined ? undefined : { ownerReplica: deps.owner };
 
   // ① Orphaned batches — resume when possible; tombstone (plus their still-active children) when not.
   const cards = (await deps.scorecards.list()).filter((c) => ACTIVE.has(c.status));
   for (const c of cards) {
+    if (drivenByAnother(c.ownerReplica)) {
+      liveCount += 1;
+      continue;
+    }
+    if (claim) await deps.scorecards.update(c.id, claim);
     if (deps.resume && (await deps.resume(c.id).catch(() => false))) {
       resumedCount += 1;
       continue; // resume re-dispatches unfinished cases and supersedes mid-flight children itself
@@ -79,6 +115,13 @@ export async function recoverInterrupted(
         sessionCount += 1;
         continue;
       }
+      // Another replica is still driving this run — its result is coming, and settling it here would tombstone
+      // work that is about to succeed.
+      if (drivenByAnother(r.ownerReplica)) {
+        liveCount += 1;
+        continue;
+      }
+      if (claim) await deps.runs.update(r.id, claim);
       if (deps.resumeRun && (await deps.resumeRun(r).catch(() => false))) {
         runsResumed += 1;
         continue;
@@ -87,5 +130,12 @@ export async function recoverInterrupted(
       runCount += 1;
     }
   }
-  return { scorecards: scorecardCount, resumed: resumedCount, runs: runCount, runsResumed, sessions: sessionCount };
+  return {
+    scorecards: scorecardCount,
+    resumed: resumedCount,
+    runs: runCount,
+    runsResumed,
+    sessions: sessionCount,
+    live: liveCount,
+  };
 }

@@ -284,6 +284,11 @@ export const ScorecardRecordSchema = z.object({
   // The ids of the child runs this batch fanned out (if any). scorecard = run × N expressed as references — a per-case addressable run drill-down.
   // A lightweight reference separate from the heavy scorecard (embedded results). get only (like steps) — for detail. Unset for past records/ingest paths.
   runIds: z.array(z.string()).optional(),
+  // WHICH control-plane replica is driving this batch (mig 0135, docs/architecture/multi-replica.md) — the
+  // same stamp runs carry, for the same reason: a booting replica must be able to tell a batch whose driver
+  // DIED from one another live replica is still fanning out. Absent = unowned (pre-column rows, the in-memory
+  // store), which recovery reclaims exactly as it always did.
+  ownerReplica: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
