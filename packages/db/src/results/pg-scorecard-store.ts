@@ -327,7 +327,10 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(filter.kind === "experiment" ? "kind = 'experiment'" : "(kind IS NULL OR kind <> 'experiment')");
     }
     const res = await this.client.query<ScorecardRow>(
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, created_at, updated_at
+      // owner_replica rides the LIST projection because boot recovery reads batches through list() and
+      // decides on `ownerReplica` alone: omitted, every record reads unowned and a booting replica tombstones
+      // batches a live replica is still driving. It is one text column, not a heavy one.
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, owner_replica, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,
