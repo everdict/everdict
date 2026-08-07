@@ -127,3 +127,38 @@ describe("renderTodoCarryover", () => {
     expect(renderTodoCarryover([])).toBe("");
   });
 });
+
+describe("close-out nudge + stale reminder (LESSON 059 P3)", () => {
+  it("invokes closeOutNudge with the incoming list BEFORE committing it, and appends what it returns", async () => {
+    let committed: unknown;
+    let sawPreviousUncommitted = false;
+    const tool = buildTodoTool(
+      (t) => {
+        committed = t;
+      },
+      {
+        closeOutNudge: (next) => {
+          // The hook runs before setTodos — its closure can still read the PREVIOUS list.
+          sawPreviousUncommitted = committed === undefined;
+          return next.every((t) => t.status === "completed") ? "VERIFY-NUDGE" : undefined;
+        },
+      },
+    );
+    const allDone = items.map((t) => ({ ...t, status: "completed" }));
+    const r = await tool.call({ todos: allDone }, {});
+    expect(sawPreviousUncommitted).toBe(true);
+    expect(r.content).toContain("3/3 completed");
+    expect(r.content).toContain("VERIFY-NUDGE");
+    // A write that leaves items open gets no nudge appended.
+    const r2 = await tool.call({ todos: items }, {});
+    expect(r2.content).not.toContain("VERIFY-NUDGE");
+  });
+
+  it("the stale flag appends a true-up line; a fresh list renders without it", () => {
+    const fresh = renderTodoReminder(parseTodos(items));
+    expect(fresh).not.toContain("has not moved");
+    const stale = renderTodoReminder(parseTodos(items), { stale: true });
+    expect(stale).toContain("has not moved");
+    expect(stale).toContain("prune items that no longer apply");
+  });
+});

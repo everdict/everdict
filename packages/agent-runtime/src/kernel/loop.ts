@@ -240,6 +240,19 @@ const DEFAULT_MAX_CONCURRENT_SUBAGENTS = 4;
 // No-progress guard: stop if the model asks for the EXACT same tool-call batch this many turns in a row (it has already
 // seen the identical result twice and repeated anyway → it's stuck, not progressing). Prevents silent token burn.
 const NO_PROGRESS_LIMIT = 3;
+// Completion-forcing nudges (LESSON 059 P3). The verify nudge is appended to the write_todos RESULT at the exact
+// moment the last open item closes — the moment completion-skips actually happen; a rule in the system prompt does
+// not survive it. "You cannot certify your own work" is the load-bearing sentence: the failure mode is the model
+// closing out with a caveated summary instead of an independent check.
+const VERIFY_CLOSEOUT_NUDGE =
+  'NOTE: You just closed out a list of 3+ items and none of them was a verification step. Before writing your final answer, spawn the verification subagent (spawn_agent with subagent_type "verify") on what you produced and act on its verdict. You cannot certify your own work by adding caveats to a summary — the verdict comes from the verifier.';
+// Turns without a write_todos before the per-turn reminder starts asking the model to true up an open checklist.
+const STALE_TODO_TURNS = 10;
+// Context-anxiety counter: past this fraction of the window, remind the model that compaction (not rushing) owns
+// the context problem — models otherwise truncate work "to save context" long before any real pressure exists.
+const DONT_RUSH_FRACTION = 0.25;
+const DONT_RUSH_REMINDER =
+  "<system-reminder>Context length is managed automatically (older tool results are compacted as needed) — do NOT rush, summarize prematurely, or drop remaining work because the conversation is getting long. Finish the task properly.</system-reminder>";
 const RETRY_BASE_DELAY_MS = 500;
 const RETRY_MAX_DELAY_MS = 32_000;
 // Persistent (unattended) capacity waits back off further — up to 5 minutes between attempts.
@@ -437,6 +450,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   // Goal persistence: the loop owns a todo list the model manages via write_todos, re-surfaced each turn as a
   // transient system-reminder so a long task stays on-goal. Seeded from a prior run in the same conversation.
   let todos: TodoItem[] = extractTodosFromHistory(messages);
+  // Staleness clock (LESSON 059 P3): turns since the model last touched the checklist — past the threshold with
+  // items still open, the per-turn reminder asks it to bring the list back in line with reality.
+  let turnsSinceTodoWrite = 0;
   // Large tool results are offloaded here (stored full) and previewed to the model, which pages the rest via read_tool_result.
   const resultStore = new ResultStore();
   // Sub-agent delegation: below the depth cap, add spawn_agent — it runs a nested loop (fresh context, read-only tools)
@@ -591,9 +607,26 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       : [];
   const registry = new ToolRegistry([
     ...opts.registry.list(),
-    buildTodoTool((t) => {
-      todos = t;
-    }),
+    buildTodoTool(
+      (t) => {
+        todos = t;
+        turnsSinceTodoWrite = 0;
+      },
+      {
+        // Completion-forcing nudge (LESSON 059 P3): fires at the exact loop-exit moment where verification
+        // skips happen — the write that closes the LAST open item. Only where a verifier exists to spawn
+        // (main loop with a registered "verify" subagent type), only on the transition into all-done, and only
+        // when no item was itself a verification step. Prompt-level discipline alone does not survive this
+        // moment; the tool result is the one channel the model reads right then.
+        closeOutNudge: (next) => {
+          if (spawnTools.length === 0 || !subagentTypeByName.has("verify")) return undefined;
+          if (next.length < 3 || !next.every((t) => t.status === "completed")) return undefined;
+          if (todos.length > 0 && todos.every((t) => t.status === "completed")) return undefined; // already closed
+          if (next.some((t) => /verif/i.test(t.content))) return undefined;
+          return VERIFY_CLOSEOUT_NUDGE;
+        },
+      },
+    ),
     buildReadResultTool(resultStore),
     ...spawnTools,
     ...planTools,
@@ -733,9 +766,19 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     // Inject the current todos as a transient reminder (this turn only — never persisted, no history bloat).
     // Marked transient so the transport's rolling prompt-cache breakpoint stays on durable history: this message
     // is re-rendered per call and won't exist at this position next request, so a breakpoint on it is never read.
-    const reminder = renderTodoReminder(todos);
+    turnsSinceTodoWrite += 1;
+    const reminderParts: string[] = [];
+    const todoReminder = renderTodoReminder(todos, {
+      stale: turnsSinceTodoWrite > STALE_TODO_TURNS && todos.some((t) => t.status !== "completed"),
+    });
+    if (todoReminder.length > 0) reminderParts.push(todoReminder);
+    // Context-anxiety counter (LESSON 059 P3): past a quarter of the window, models start rushing, summarizing
+    // prematurely, or dropping remaining work "to save context" — say out loud that compaction owns that
+    // problem, not the model. One line, transient, same cache discipline as the todo reminder.
+    if (budget.maxTokens > 0 && budget.consumed > budget.maxTokens * DONT_RUSH_FRACTION)
+      reminderParts.push(DONT_RUSH_REMINDER);
     const reminderMessage: ChatMessage | undefined =
-      reminder.length > 0 ? { role: "user", content: reminder } : undefined;
+      reminderParts.length > 0 ? { role: "user", content: reminderParts.join("\n") } : undefined;
     if (reminderMessage) (reminderMessage as TransientCarrier).transient = true;
 
     // `messages` is always balanced at the top of a turn (never a dangling assistant tool_call), so a retry re-sends a

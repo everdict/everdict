@@ -79,6 +79,92 @@ describe("runAgentLoop", () => {
     expect((last as TransientCarrier | undefined)?.transient).toBe(true);
   });
 
+  it("closing out a 3+ item list without a verification step nudges the model to spawn the verifier (LESSON 059 P3)", async () => {
+    // Given a run with a "verify" subagent type available, whose model closes out the whole checklist at once
+    const allDone = JSON.stringify({
+      todos: [
+        { content: "Read the scorecard", activeForm: "Reading", status: "completed" },
+        { content: "Fix the grader", activeForm: "Fixing", status: "completed" },
+        { content: "Re-run the batch", activeForm: "Re-running", status: "completed" },
+      ],
+    });
+    const { transport, requests } = fakeTransport([toolCallResult("t1", "write_todos", allDone), textResult("done")]);
+    const verifyType = { name: "verify", description: "adversarial verifier" };
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      subagentTypes: [verifyType],
+    });
+    // Then the write_todos RESULT — the exact loop-exit moment where skips happen — carries the verify nudge
+    const second = requests[1];
+    const toolResult = second?.messages.find((m) => m.role === "tool");
+    expect(typeof toolResult?.content === "string" && toolResult.content.includes('subagent_type "verify"')).toBe(true);
+    expect(typeof toolResult?.content === "string" && toolResult.content.includes("cannot certify your own work")).toBe(
+      true,
+    );
+
+    // And WITHOUT a verifier to spawn, the nudge never fires — an instruction to use a tool that does not
+    // exist would be worse than none
+    const bare = fakeTransport([toolCallResult("t1", "write_todos", allDone), textResult("done")]);
+    await runAgentLoop({
+      transport: bare.transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+    });
+    const bareResult = bare.requests[1]?.messages.find((m) => m.role === "tool");
+    expect(typeof bareResult?.content === "string" && bareResult.content.includes("verify")).toBe(false);
+  });
+
+  it("past a quarter of the token budget the loop injects the don't-rush reminder (context anxiety counter)", async () => {
+    // Given a tiny budget so the first turn's usage already crosses 25% (but stays under the compaction band)
+    const { transport, requests } = fakeTransport([
+      toolCallResult(
+        "t1",
+        "write_todos",
+        JSON.stringify({ todos: [{ content: "Step one", activeForm: "Stepping", status: "pending" }] }),
+      ),
+      textResult("done"),
+    ]);
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      maxTokens: 400,
+    });
+    // With a roomy budget (25% = 100 tokens) the first turn's usage does not cross the line — no reminder…
+    const calm = requests[1]?.messages.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n");
+    expect(calm?.includes("do NOT rush")).toBe(false);
+
+    // …while a tight budget puts the same turn past a quarter, and the reminder rides the next request.
+    const anxious = fakeTransport([
+      toolCallResult(
+        "t1",
+        "write_todos",
+        JSON.stringify({ todos: [{ content: "Step one", activeForm: "Stepping", status: "pending" }] }),
+      ),
+      textResult("done"),
+    ]);
+    await runAgentLoop({
+      transport: anxious.transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([]),
+      maxTokens: 48, // 25% = 12 — usage 7 + the turn's tool-result estimate crosses it; the 90% compaction band (43) is not reached
+    });
+    const rushed = anxious.requests[1]?.messages
+      .map((m) => (typeof m.content === "string" ? m.content : ""))
+      .join("\n");
+    expect(rushed?.includes("do NOT rush")).toBe(true);
+  });
+
   it("fires onUsage with each turn's token usage (the host meters LLM cost from it)", async () => {
     const { transport } = fakeTransport([textResult("Hi there")]);
     const seen: { inputTokens: number; outputTokens: number }[] = [];

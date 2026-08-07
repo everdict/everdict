@@ -28,7 +28,14 @@ export function parseTodos(raw: unknown): TodoItem[] {
 
 // The loop owns the todo list; this native (always-loaded) tool lets the model create or REPLACE it. The list is
 // re-surfaced to the model each turn (renderTodoReminder) so a long task stays on-goal — Claude Code parity.
-export function buildTodoTool(setTodos: (todos: TodoItem[]) => void): ToolDefinition {
+// `closeOutNudge` (LESSON 059 P3) is the loop's hook onto the EXACT moment completion-skips happen — the write
+// that closes the last open item ("when the last task closed, the loop exited"): it is invoked with the incoming
+// list BEFORE setTodos commits it (so the hook's closure still reads the previous list), and whatever it returns
+// is appended to the tool result — the one channel the model is guaranteed to read right then.
+export function buildTodoTool(
+  setTodos: (todos: TodoItem[]) => void,
+  opts?: { closeOutNudge?: (next: TodoItem[]) => string | undefined },
+): ToolDefinition {
   return {
     name: WRITE_TODOS_TOOL_NAME,
     description:
@@ -67,16 +74,22 @@ export function buildTodoTool(setTodos: (todos: TodoItem[]) => void): ToolDefini
     alwaysLoad: true,
     call: async (input) => {
       const todos = parseTodos((input as { todos?: unknown }).todos);
+      const nudge = opts?.closeOutNudge?.(todos); // before setTodos — the hook reads the PREVIOUS list
       setTodos(todos);
       const done = todos.filter((t) => t.status === "completed").length;
-      return { content: `Updated todo list — ${done}/${todos.length} completed.`, isError: false };
+      return {
+        content: `Updated todo list — ${done}/${todos.length} completed.${nudge !== undefined ? `\n${nudge}` : ""}`,
+        isError: false,
+      };
     },
   };
 }
 
 // The current todos rendered as a system-reminder the loop injects each turn (transient — not persisted into the
-// transcript) so the goal stays in front of the model over many turns. Empty list → no reminder.
-export function renderTodoReminder(todos: TodoItem[]): string {
+// transcript) so the goal stays in front of the model over many turns. Empty list → no reminder. `stale` (LESSON
+// 059 P3): the loop hasn't seen a write_todos in a while though items are still open — nudge the model to make
+// the list match reality instead of letting it rot (a rotten checklist steers worse than none).
+export function renderTodoReminder(todos: TodoItem[], opts?: { stale?: boolean }): string {
   if (todos.length === 0) return "";
   const lines = todos.map((t) => {
     const box = t.status === "completed" ? "[x]" : t.status === "in_progress" ? "[~]" : "[ ]";
@@ -86,6 +99,11 @@ export function renderTodoReminder(todos: TodoItem[]): string {
     "<system-reminder>",
     "Your current todo list (update it with write_todos as you make progress; mark items completed as you finish them):",
     ...lines,
+    ...(opts?.stale === true
+      ? [
+          "This checklist has not moved in a while. Bring it back in line with reality — mark what is actually done, and prune items that no longer apply. A stale list steers you worse than none.",
+        ]
+      : []),
     "</system-reminder>",
   ].join("\n");
 }
