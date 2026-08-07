@@ -55,6 +55,17 @@ export type AgentRunStatus = z.infer<typeof AgentRunStatusSchema>;
 // A conversation between a workspace member and Everdict's own agent. Personal to its owner (the creator's
 // subject) but workspace-scoped for data access — the agent reads that workspace's eval data on the owner's
 // behalf. See docs/architecture/agent-conversations.md.
+// A standing TEAMMATE's durable config (LESSON 059 P2) — see the `teammate` field below for the why.
+export const AgentTeammateConfigSchema = z
+  .object({
+    name: z.string().min(1),
+    task: z.string().min(1),
+    watch: z.array(z.string()).default([]),
+    keyId: z.string().min(1),
+  })
+  .strict();
+export type AgentTeammateConfig = z.infer<typeof AgentTeammateConfigSchema>;
+
 export const AgentSessionRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -85,6 +96,12 @@ export const AgentSessionRecordSchema = z.object({
   // Set while this conversation is WAITING on the world (the agent called wait_for). Present = the agent still
   // owes the member an answer; absent = nothing is being watched. See AgentWakeIntentSchema.
   wakeIntent: AgentWakeIntentSchema.optional(),
+  // A standing TEAMMATE's durable config (LESSON 059 P2): everything the agent service needs to re-register
+  // the teammate after a restart — the roster used to live only in a process Map, so one restart evaporated
+  // the whole team (name, watch kinds, standing token) with nothing to rebuild it from. The execution token
+  // itself is NEVER stored (tenant keys are hashed one-way); a boot restore mints a fresh one and revokes the
+  // stale key by `keyId`. Present = this session IS a live teammate; cleared when the teammate is dismissed.
+  teammate: AgentTeammateConfigSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

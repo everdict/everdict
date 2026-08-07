@@ -6,6 +6,7 @@ import {
   type AgentRunStatus,
   type AgentSessionRecord,
   AgentSessionRecordSchema,
+  type AgentTeammateConfig,
   type AgentWakeIntent,
 } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
@@ -131,6 +132,23 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
       .slice(0, opts?.limit ?? 50);
   }
 
+  async setSessionTeammate(
+    tenant: string,
+    id: string,
+    config: AgentTeammateConfig | null,
+    updatedAt: string,
+  ): Promise<void> {
+    const index = this.sessions.findIndex((r) => r.tenant === tenant && r.id === id);
+    const current = this.sessions[index];
+    if (!current) return;
+    const { teammate: _cleared, ...rest } = current;
+    this.sessions[index] = { ...rest, ...(config === null ? {} : { teammate: config }), updatedAt };
+  }
+
+  async listTeammateSessions(opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
+    return this.sessions.filter((s) => s.teammate !== undefined).slice(0, opts?.limit ?? 200);
+  }
+
   async listOrphanedRuns(before: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
     return this.sessions
       .filter((s) => s.status === "running" && s.updatedAt < before)
@@ -203,12 +221,13 @@ interface SessionRow {
   status: string | null;
   run_id: string | null;
   wake_intent: unknown;
+  teammate: unknown;
   created_at: string | Date;
   updated_at: string | Date;
 }
 
 const SESSION_COLUMNS =
-  "id, tenant, owner, title, model, permission_mode, memory, memory_through_seq, visibility, origin, status, run_id, wake_intent, created_at, updated_at";
+  "id, tenant, owner, title, model, permission_mode, memory, memory_through_seq, visibility, origin, status, run_id, wake_intent, teammate, created_at, updated_at";
 
 function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
   return AgentSessionRecordSchema.parse({
@@ -225,6 +244,7 @@ function sessionRowToRecord(row: SessionRow): AgentSessionRecord {
     ...(row.status !== null ? { status: row.status } : {}),
     ...(row.run_id !== null ? { runId: row.run_id } : {}),
     ...(row.wake_intent !== null && row.wake_intent !== undefined ? { wakeIntent: row.wake_intent } : {}),
+    ...(row.teammate !== null && row.teammate !== undefined ? { teammate: row.teammate } : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   });
@@ -421,6 +441,29 @@ export class PgAgentSessionStore implements AgentSessionStore {
        ORDER BY wake_intent->>'deadlineAt' ASC
        LIMIT $2`,
       [now, opts?.limit ?? 50],
+    );
+    return res.rows.map(sessionRowToRecord);
+  }
+
+  async setSessionTeammate(
+    tenant: string,
+    id: string,
+    config: AgentTeammateConfig | null,
+    updatedAt: string,
+  ): Promise<void> {
+    await this.client.query(
+      "UPDATE everdict_agent_sessions SET teammate = $3, updated_at = $4 WHERE tenant = $1 AND id = $2",
+      [tenant, id, config === null ? null : JSON.stringify(config), updatedAt],
+    );
+  }
+
+  async listTeammateSessions(opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
+    // Cross-tenant on purpose: the boot restore is an operator-side scan (one row per standing teammate).
+    const res = await this.client.query<SessionRow>(
+      `SELECT ${SESSION_COLUMNS}
+       FROM everdict_agent_sessions WHERE teammate IS NOT NULL
+       ORDER BY updated_at DESC, id DESC LIMIT $1`,
+      [opts?.limit ?? 200],
     );
     return res.rows.map(sessionRowToRecord);
   }

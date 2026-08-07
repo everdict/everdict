@@ -311,6 +311,21 @@ async function main(): Promise<void> {
     console.error("▶ everdict-agent: wake-intent sweep on (parked conversations resume on their deadline)");
   }
 
+  // Teammate roster restore (P2/LESSON 059): the roster's durable half is the session rows — re-register every
+  // standing teammate (fresh token minted, stale key revoked) so a restart no longer evaporates the team.
+  const teammateRestorer = (app as unknown as { teammateRestorer?: { restore: () => Promise<number> } })
+    .teammateRestorer;
+  if (teammateRestorer) {
+    void teammateRestorer
+      .restore()
+      .then((restored) => {
+        if (restored > 0) console.error(`▶ everdict-agent: restored ${restored} standing teammate(s) after restart`);
+      })
+      .catch((err: unknown) => {
+        console.error(`[agent] teammate restore failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  }
+
   // Crash reconcile (P0/LESSON 059): runs stranded in "running" by a previous process death are claimed
   // atomically, settled, and — when the trigger machinery is wired — resumed as one continuation turn on the
   // same session. Without this, an orphaned session lies ("running") forever AND its (agent, event) can never

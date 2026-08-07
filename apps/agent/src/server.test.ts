@@ -514,6 +514,51 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("a standing teammate survives a service restart — the roster is rebuilt from the session rows with a fresh token (LESSON 059 P2)", async () => {
+    // Given a teammate spawned by the previous process incarnation (shared durable stores)
+    const sessions = new InMemoryAgentSessionStore();
+    const keyStore = new InMemoryTenantKeyStore();
+    const before = buildServer(makeDeps({ sessions, keyStore }));
+    const spawned = (
+      await before.inject({
+        method: "POST",
+        url: "/agent/teammates",
+        headers: auth,
+        payload: { name: "watcher", task: "watch regressions", watch: ["scorecard.regressed"] },
+      })
+    ).json();
+    await new Promise((r) => setTimeout(r, 30));
+    await before.close(); // the process dies — the in-memory roster (and its token) dies with it
+
+    // When a fresh process boots against the same stores and restores the roster
+    const after = buildServer(makeDeps({ sessions, keyStore }));
+    const restorer = (after as unknown as { teammateRestorer?: { restore: () => Promise<number> } }).teammateRestorer;
+    expect(restorer).toBeDefined();
+    expect(await restorer?.restore()).toBe(1);
+
+    // Then the roster lists the teammate again…
+    const roster = (await after.inject({ method: "GET", url: "/agent/teammates", headers: auth })).json().teammates as {
+      id: string;
+      name: string;
+      watch: string[];
+    }[];
+    expect(roster).toEqual([{ id: spawned.id, name: "watcher", watch: ["scorecard.regressed"] }]);
+    // …and a watched event still wakes it — restart changed nothing the owner can observe
+    const fanned = (
+      await after.inject({
+        method: "POST",
+        url: "/agent/events",
+        headers: auth,
+        payload: { kind: "scorecard.regressed", message: "sc_1 regressed after restart" },
+      })
+    ).json();
+    expect(fanned.notified).toBe(1);
+    // …and dismissal clears the durable config so a THIRD boot does not resurrect it
+    await after.inject({ method: "DELETE", url: `/agent/teammates/${spawned.id}`, headers: auth });
+    expect(await sessions.listTeammateSessions()).toHaveLength(0);
+    await after.close();
+  });
+
   it("a task.created fan-out carries the task id and the work-pull recipe — the executor half of delegation (LESSON 059 P1)", async () => {
     const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore() }));
     const worker = (

@@ -124,6 +124,10 @@ function sessionsStub() {
     async claimOrphanedRun() {
       return false;
     },
+    async setSessionTeammate() {},
+    async listTeammateSessions() {
+      return [];
+    },
     async hasTriggerSession(_tenant: string, agentId: string, eventId: string) {
       return created.some((s) => s.origin?.agentId === agentId && s.origin?.eventId === eventId);
     },

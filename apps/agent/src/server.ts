@@ -217,6 +217,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       tenant: principal.workspace,
       owner: principal.subject,
       title: name,
+      origin: { type: "teammate" },
       createdAt: now,
       updatedAt: now,
     });
@@ -227,6 +228,12 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       ["write"],
       `teammate:${name}`,
     );
+    // Durable half of the roster (LESSON 059 P2): the config lives on the session row so a restart can rebuild
+    // the team; only the token stays process-memory (re-minted by the boot restore). Best-effort — a stamp
+    // failure leaves a working (if restart-mortal) teammate rather than no teammate.
+    await deps.sessions
+      .setSessionTeammate(principal.workspace, sessionId, { name, task, watch, keyId }, deps.now())
+      .catch(() => {});
     teammates.set(sessionId, {
       token,
       keyId,
@@ -241,6 +248,48 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       content: `You are "${name}", an autonomous teammate. Your standing task:\n${task}`,
     });
     return { id: sessionId };
+  };
+  // Boot restore (LESSON 059 P2): re-register every standing teammate the previous process held — the roster's
+  // durable half is the session rows; the volatile half (the execution token) is re-minted here and the stale
+  // key revoked, so a restart changes nothing a teammate's owner can observe. Registered quietly: no wake, no
+  // re-seeded standing task (the transcript already carries it) — the next message or watched event wakes it.
+  const restoreTeammates = async (): Promise<number> => {
+    if (!deps.keyStore) return 0;
+    const keyStore = deps.keyStore;
+    const rows = await deps.sessions.listTeammateSessions();
+    let restored = 0;
+    for (const session of rows) {
+      const config = session.teammate;
+      if (!config || teammates.has(session.id)) continue;
+      try {
+        const { token, id: keyId } = await issueAgentToken(
+          keyStore,
+          session.tenant,
+          session.owner,
+          ["write"],
+          `teammate:${config.name}`,
+        );
+        await keyStore.revoke(session.tenant, config.keyId, session.owner).catch(() => {});
+        await deps.sessions
+          .setSessionTeammate(session.tenant, session.id, { ...config, keyId }, deps.now())
+          .catch(() => {});
+        teammates.set(session.id, {
+          token,
+          keyId,
+          name: config.name,
+          owner: session.owner,
+          workspace: session.tenant,
+          watch: new Set(config.watch),
+        });
+        supervisor.register(session.id, config.name);
+        restored += 1;
+      } catch (err) {
+        console.error(
+          `[agent] teammate restore failed for ${session.id} (${config.name}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return restored;
   };
   // Fan a platform event out to a (workspace, owner)'s teammates that watch its kind, waking each. Returns the count.
   const fanEvent = (
@@ -350,6 +399,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     : undefined;
 
   app.decorate("wakeResumer", resumer);
+  // Boot restore for the standing-teammate roster (LESSON 059 P2) — main.ts invokes it once at startup.
+  app.decorate("teammateRestorer", { restore: restoreTeammates });
 
   app.get("/healthz", async () => ({ ok: true }));
 
@@ -974,6 +1025,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const t = teammates.get(id);
     if (t && deps.keyStore) await deps.keyStore.revoke(principal.workspace, t.keyId, principal.subject);
     teammates.delete(id);
+    // Dismissal clears the durable config too — otherwise the boot restore would resurrect the teammate.
+    await deps.sessions.setSessionTeammate(principal.workspace, id, null, deps.now()).catch(() => {});
     return reply.code(204).send();
   });
 

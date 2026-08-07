@@ -3,6 +3,7 @@ import type {
   AgentPermissionMode,
   AgentRunStatus,
   AgentSessionRecord,
+  AgentTeammateConfig,
   AgentWakeIntent,
 } from "@everdict/contracts";
 
@@ -55,6 +56,13 @@ export interface AgentSessionStore {
   // Every waiting conversation across ALL workspaces whose deadline has passed at `now` — the restart-proof sweep
   // (W3): a job that dies without emitting a terminal fact must never strand its watcher.
   listExpiredWakeIntents(now: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]>;
+  // Teammate durability (LESSON 059 P2): stamp or clear a session's standing-teammate config — the durable
+  // half of the roster (the execution token stays process-memory and is re-minted on restore; `keyId` is what
+  // lets the restore revoke the stale key). null = the teammate was dismissed.
+  setSessionTeammate(tenant: string, id: string, config: AgentTeammateConfig | null, updatedAt: string): Promise<void>;
+  // Every session carrying a teammate config, across ALL workspaces — the boot restore's read (cross-tenant
+  // like the other reapers: an operator-side scan, small by nature — one row per standing teammate).
+  listTeammateSessions(opts?: { limit?: number }): Promise<AgentSessionRecord[]>;
   // Crash reconcile (LESSON 059 P0): every headless run stranded in status "running" from BEFORE `before` —
   // a previous process died mid-turn, so nothing in-process will ever settle them. `before` is the sweeping
   // process's boot instant: anything newer is owned by a live in-process activation whose own try/catch
