@@ -1,3 +1,4 @@
+import { EvalCaseSchema, ScoreSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { contentDigest, digestHex, digestUnder, digestsMatch } from "./content-digest.js";
 
@@ -67,5 +68,41 @@ describe("digestsMatch — dual-read verification (a stamp is verified under its
     // that is only an algorithm change.
     expect(digestUnder(LEGACY_STAMP, LEGACY_DOCUMENT)).toBe(LEGACY_STAMP);
     expect(digestUnder(contentDigest(LEGACY_DOCUMENT), LEGACY_DOCUMENT)).toBe(contentDigest(LEGACY_DOCUMENT));
+  });
+});
+
+// A digest is only re-derivable if the SAME canonical form is produced at seal time and at verify time. Two
+// things can break that without anyone noticing, and both are read-time rewrites rather than edits: a Zod
+// `.default()` filling a field the raw document never had, and the Score normalizer (`ScoreSchema`'s
+// z.preprocess) rewriting a pre-status score row on its way in. These tests pin the rule that keeps both
+// harmless — digest the SCHEMA-PARSED document, and never digest a subject that carries scores.
+describe("what a digest may be computed over", () => {
+  const rawCase = { id: "c1", env: { kind: "prompt" }, task: "do the thing" };
+
+  it("parse is what a digest must be taken over — the raw document hashes differently", () => {
+    // EvalCaseSchema fills graders/tags/timeoutSec by `.default()`, so the parsed document is genuinely a
+    // different document from the raw one. Both the seal (registry-resolved dataset) and the verify (the same
+    // registry read) hand over parsed cases, which is the only reason the two agree.
+    const parsed = EvalCaseSchema.parse(rawCase);
+    expect(contentDigest(parsed)).not.toBe(contentDigest(rawCase));
+    // …and parsing is idempotent, so re-reading the same registry row never drifts the digest.
+    expect(contentDigest(EvalCaseSchema.parse(parsed))).toBe(contentDigest(parsed));
+  });
+
+  it("the Score normalizer really does rewrite a legacy row — which is why no digest subject carries scores", () => {
+    // A genuine pre-status score row: the `[grader-error]` detail sentinel plus the placeholder value the
+    // union removed. Reading it back through ScoreSchema stamps a status and drops the value, so a digest
+    // taken over a parsed result would NOT match one taken over the raw jsonb for any pre-union batch.
+    const legacyScore = { graderId: "tests", metric: "tests_pass", value: 0, detail: "[grader-error] boom" };
+    const normalized = ScoreSchema.parse(legacyScore);
+    expect(contentDigest(normalized)).not.toBe(contentDigest(legacyScore));
+
+    // The manifest's subjects are case bundles, resolved harness/judge specs, grading plans and policy
+    // documents — none of which can hold a Score (ScoreSchema is referenced by exactly one field in
+    // contracts: CaseResult.scores), and a CaseResult is never digested. So the rewrite above cannot move a
+    // byte under any stamp we take. A future subject that DOES embed scores must digest the parsed form.
+    const bundle = [EvalCaseSchema.parse(rawCase)];
+    expect(JSON.stringify(bundle)).not.toContain("grader-error");
+    expect(digestsMatch(contentDigest(bundle), bundle)).toBe(true);
   });
 });

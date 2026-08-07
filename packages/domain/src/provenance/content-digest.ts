@@ -29,11 +29,17 @@ function canonicalize(value: unknown): string {
 // The canonical text both algorithms hash — the SAME bytes, so a document's legacy and sha256 stamps describe
 // the same canonicalization and a dual-read verification compares like with like.
 //
-// Callers stamp the SCHEMA-PARSED document, never a raw jsonb row: canonicalization normalizes shape (key
-// order, absent keys) but not semantics, so a value a schema would rewrite must be rewritten before it is
-// hashed. No digest input carries `Score` rows today (the subjects are dataset case bundles, resolved harness
-// and judge specs, grading plans and policy documents), so the read-time score normalizer never moves a byte
-// under a stamp — a manifest subject that later embeds scores must digest the parsed form.
+// Callers stamp the SCHEMA-PARSED document, never a raw jsonb row. Canonicalization normalizes SHAPE (key
+// order, absent keys) but not semantics, and two read-time rewrites change semantics without anyone editing
+// anything: a Zod `.default()` filling a field the stored document never had (EvalCaseSchema does this for
+// graders/tags/timeoutSec), and `ScoreSchema`'s normalizer rewriting a pre-status score row. A digest taken
+// over one form and checked against the other reports drift on a document nobody touched — and in a
+// fail-closed reader that reads as history being unverifiable. Seal and verify therefore both hash what the
+// registry parse produced.
+// No digest subject carries `Score` rows today: the subjects are dataset case bundles, resolved harness and
+// judge specs, grading plans and policy documents, and `ScoreSchema` is referenced by exactly one field in
+// contracts — the one a `CaseResult` carries, which is never digested. A subject that later embeds scores
+// must digest the parsed form. Pinned by content-digest.test.ts "what a digest may be computed over".
 function canonicalText(value: unknown): string {
   // `undefined` is not a document — JSON.stringify(undefined) returns the VALUE undefined (typed string), so
   // canonicalize would hand back a non-string far from the caller. Refuse it here, typed and named. (Inside
