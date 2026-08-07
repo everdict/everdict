@@ -210,8 +210,13 @@ const docs = {
       "blocks unless the policy says comparability=allow_partial and states its tolerance " +
       "(maxMissingCases / maxMissingFraction); maxUnmeasuredFraction is enforced under either mode. When " +
       "either batch ran trials, the Fisher-gated trials diff is the authoritative regression signal and the " +
-      "policy's zThreshold/minDelta set its bar. The decision embeds its effective policy (+digest) and is " +
-      "RECORDED on the candidate's ledger row for the gate audit. Requires scorecards:run (member+).",
+      "policy's zThreshold/minDelta set its bar; fdrAlpha adds the Benjamini-Hochberg correction across the " +
+      "per-case tests (200 cases at alpha 0.05 otherwise manufacture ~10 false regressions, and under " +
+      "maxRegressions 0 any one of them blocks the release). One thing precedes the statistics: a case the " +
+      "CANDIDATE's verdict policy declared critical blocks on collapse or absence regardless of significance, " +
+      "of maxRegressions, and of any missingness tolerance (reason critical_case_failed). The decision embeds " +
+      "its effective policy (+digest) and is RECORDED on the candidate's ledger row for the gate audit. " +
+      "Requires scorecards:run (member+).",
     tags: ["scorecard"],
     body: toJsonSchema(GateScorecardsBodySchema),
     response: {

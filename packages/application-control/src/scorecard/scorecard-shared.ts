@@ -3,6 +3,7 @@ import {
   BadRequestError,
   type CaseFailure,
   type CaseJob,
+  type CaseMatcher,
   type CaseResult,
   type Dataset,
   EnvSnapshotSchema,
@@ -297,6 +298,11 @@ export interface RunScorecardInput {
   // Run-time grading plan — replaces every case's default graders for THIS batch (the dataset stays pure data).
   // Persisted in orchestration so resume/retry re-apply it. Absent = each case's own graders.
   graders?: GraderSpec[];
+  // Cases whose failure is a product judgment, not a statistical question: a release gate blocks on a
+  // critical case's collapse regardless of significance and regardless of its regression budget. Composed
+  // INTO this batch's verdict policy (composeVerdictPolicy) so the declaration is digested, carried in the
+  // manifest, and resolved with the rest of the stamp — a gate decision must be re-derivable from the record.
+  criticalCases?: CaseMatcher[];
   runtime?: string; // tenant Runtime id to run on (placement.target). Absent = default backend.
   judge?: JudgeRunConfig; // inline judge-grader scoring-model override (defaults to the workspace default if unset)
   // Number of cases to dispatch concurrently within one batch (runSuite parallelism). Defaults to the service default if unset.

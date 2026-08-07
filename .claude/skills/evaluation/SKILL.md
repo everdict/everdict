@@ -159,6 +159,19 @@ See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
   comparison out without ever making it `partial`). `zThreshold`/`minDelta` on the policy are the trials diff's
   bar — the gate computes the diff under its OWN statistical policy. Both blocking decisions are overridable
   (recorded, with who and why); `gateAudit` counts them separately.
+  **Product judgment precedes statistics in exactly ONE place, by declaration**: `VerdictPolicy.criticalCases`
+  (matchers `{caseId}` / `{prefix}`) names cases whose collapse `block`s with reason `critical_case_failed`
+  regardless of significance, of `maxRegressions`, and of any missingness tolerance — a login case going 3/3 →
+  0/3 is an honest Fisher p=0.1, and shipping a broken login on that arithmetic is still wrong. A critical case
+  MISSING from the candidate blocks too (an ordinary-missingness tolerance never covers a critical case), and
+  the finding ranks above `blocked_missing`. Criticality lives in the VERDICT POLICY (digest-covered,
+  manifest-carried, three-state-resolved — a recorded decision must be re-derivable from the record, not from
+  the caller's flags), declared at submit via `criticalCases` → `composeVerdictPolicy`, and read off the
+  CANDIDATE's resolved policy. Nothing fires unless someone declared it.
+  **Every case is its own hypothesis test**: `GatePolicy.fdrAlpha` applies Benjamini–Hochberg (in `diffTrials`)
+  across the per-case trial tests, because 200 cases at α≈0.05 manufacture ~10 false regressions and
+  `maxRegressions: 0` lets any one of them block the release. Opt-in; unset = today's per-case alpha exactly.
+  A suppressed case is marked `fdrSuppressed` and counted in `evidence.suppressedByFdr`, never silently dropped.
 - `leaderboard(cards, opts)` (`packages/domain/src/scorecard/leaderboard.ts`) — groups by
   `(harness@version × model.primary)`, ranks by passRate→mean **under the metric's policy-declared direction**
   (rank 1 = BEST: `?metric=cost_usd` puts the cheapest first, not the most expensive), `window: latest|best`,

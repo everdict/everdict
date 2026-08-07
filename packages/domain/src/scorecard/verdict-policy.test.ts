@@ -196,3 +196,40 @@ describe("composeVerdictPolicy — a custom grader gains authority by DECLARING 
     expect(resolvePolicyResolution(ref)).toEqual({ status: "unresolvable", ref });
   });
 });
+
+// Criticality is a per-CASE product declaration ("this release must not break login"), and a release gate
+// acts on it — so it has to live inside the document the batch stamps, not in the gate call. These tests pin
+// the two properties that buys: it composes, and it moves the digest.
+describe("composeVerdictPolicy — criticalCases ride in the digested document", () => {
+  it("composes on its own, with no grader declaration in sight", () => {
+    const policy = composeVerdictPolicy([], DEFAULT_VERDICT_POLICY, { criticalCases: [{ caseId: "login" }] });
+    expect(policy.id).toBe("composed");
+    expect(policy.criticalCases).toEqual([{ caseId: "login" }]);
+    // The built-in ladder is untouched — criticality decides gates, never verdicts.
+    expect(policy.metrics).toEqual(DEFAULT_VERDICT_POLICY.metrics);
+  });
+
+  it("declaring nothing at all still returns the base document identically", () => {
+    expect(composeVerdictPolicy([], DEFAULT_VERDICT_POLICY, {})).toBe(DEFAULT_VERDICT_POLICY);
+  });
+
+  it("two policies differing ONLY in criticalCases have different digests", () => {
+    // Given two batches whose ladders are identical
+    const plain = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const critical = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }], DEFAULT_VERDICT_POLICY, {
+      criticalCases: [{ caseId: "login" }],
+    });
+    // Then the declaration is covered by the stamp: a gate decision recorded under one cannot be re-derived
+    // under the other, which is exactly what the stamp exists to prevent.
+    expect(verdictPolicyDigest(critical)).not.toBe(verdictPolicyDigest(plain));
+    expect(critical.version).not.toBe(plain.version);
+  });
+
+  it("a criticalCases edit after the fact is unresolvable, not a silent re-decision", () => {
+    const stamped = composeVerdictPolicy([], DEFAULT_VERDICT_POLICY, { criticalCases: [{ caseId: "login" }] });
+    const ref = { id: stamped.id, version: stamped.version, digest: verdictPolicyDigest(stamped) };
+    const edited: VerdictPolicy = { ...stamped, criticalCases: [] };
+    expect(resolvePolicyResolution(ref, edited).status).toBe("unresolvable");
+    expect(resolvePolicyResolution(ref, stamped).status).toBe("resolved");
+  });
+});

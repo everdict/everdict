@@ -22,8 +22,16 @@ const TrialCaseDeltaSchema = z.object({
   method: z
     .enum(["z", "fisher"])
     .describe("Which test decided significance — small samples use Fisher's exact test, not the z approximation"),
-  p: z.number().optional().describe("Fisher two-sided p-value (present when method is fisher)"),
+  p: z
+    .number()
+    .describe("Two-sided p of this case's test — Fisher's exact p, or the normal-tail p of z on the z branch"),
   significant: z.boolean().describe("Statistically significant AND |delta| >= minDelta"),
+  fdrSuppressed: z
+    .boolean()
+    .optional()
+    .describe(
+      "Cleared its own alpha but did not survive the Benjamini-Hochberg correction across the batch's cases — significant before correction, not after",
+    ),
 });
 
 export const ScorecardDiffResponseSchema = z.object({
@@ -96,6 +104,12 @@ export const ScorecardDiffResponseSchema = z.object({
       minDelta: z
         .number()
         .describe("Practical-significance floor — significant drops smaller than this stay out of the gate"),
+      fdrAlpha: z
+        .number()
+        .optional()
+        .describe(
+          "Benjamini-Hochberg false-discovery level applied across these cases' tests — absent means every case was gated at its own alpha",
+        ),
       cases: z.array(TrialCaseDeltaSchema),
       regressions: z.array(TrialCaseDeltaSchema).describe("Significant AND pass rate dropped"),
       improvements: z.array(TrialCaseDeltaSchema).describe("Significant AND pass rate rose"),

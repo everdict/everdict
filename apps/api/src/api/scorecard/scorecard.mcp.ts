@@ -54,6 +54,13 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             .describe(
               "run-time grading plan (GraderSpec[] {id, config?}) — replaces every case's default graders for THIS batch; the dataset stays untouched",
             ),
+          critical_cases: z
+            .array(z.union([z.object({ caseId: z.string().min(1) }), z.object({ prefix: z.string().min(1) })]))
+            .min(1)
+            .optional()
+            .describe(
+              'cases this batch declares CRITICAL ({caseId} = one case, {prefix} = a family like "auth/") — composed into its verdict policy, so a release gate over this batch blocks on their collapse regardless of statistical significance and regardless of maxRegressions. Unset = the gate is pure arithmetic — HTTP parity',
+            ),
           judge: z
             .object({ provider: z.enum(["openai", "anthropic"]).optional(), model: z.string() })
             .optional()
@@ -137,6 +144,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         runtime,
         judges,
         graders,
+        critical_cases,
         judge,
         concurrency,
         retries,
@@ -173,6 +181,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               },
               judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
               ...(graders ? { graders } : {}),
+              ...(critical_cases ? { criticalCases: critical_cases } : {}),
               ...(judge ? { judge } : {}),
               ...(runtime ? { runtime } : {}),
               ...(concurrency !== undefined ? { concurrency } : {}),
@@ -470,6 +479,14 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             .max(1)
             .optional()
             .describe("practical-significance floor for a trial pass-rate drop (default 0; trials only)"),
+          fdr_alpha: z
+            .number()
+            .gt(0)
+            .lt(1)
+            .optional()
+            .describe(
+              "Benjamini-Hochberg false-discovery level across the per-case trial tests (e.g. 0.05; trials only). Every case is its own hypothesis test, so 200 cases at alpha 0.05 manufacture ~10 false regressions and under max_regressions 0 any one of them blocks the release. Unset = no correction (each case gated at its own alpha)",
+            ),
         },
       },
       ({
@@ -482,6 +499,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         max_unmeasured_fraction,
         z_threshold,
         min_delta,
+        fdr_alpha,
       }) =>
         run(principal, "scorecards:run", async () =>
           ok(
@@ -497,6 +515,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
                 ...(max_unmeasured_fraction !== undefined ? { maxUnmeasuredFraction: max_unmeasured_fraction } : {}),
                 ...(z_threshold !== undefined ? { zThreshold: z_threshold } : {}),
                 ...(min_delta !== undefined ? { minDelta: min_delta } : {}),
+                ...(fdr_alpha !== undefined ? { fdrAlpha: fdr_alpha } : {}),
               },
               decidedBy: principal.subject,
               ...(await teamCeiling(ctx.deps, principal)),

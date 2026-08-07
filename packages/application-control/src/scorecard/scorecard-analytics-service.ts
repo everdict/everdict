@@ -1,6 +1,7 @@
 import {
   AppError,
   BadRequestError,
+  type CaseMatcher,
   NotFoundError,
   type Scorecard,
   type ScorecardRecord,
@@ -72,13 +73,14 @@ export class ScorecardAnalyticsService {
     tenant: string,
     baselineId: string,
     candidateId: string,
-    opts: { zThreshold?: number; minDelta?: number; visibleTeams?: string[] } = {},
+    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } = {},
   ): Promise<
     ScorecardDiff & {
       trials?: TrialDiff;
       policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
       policyUnresolvable?: { baseline?: VerdictPolicyRef; candidate?: VerdictPolicyRef };
       coverage: { baseline: MeasurementCoverage; candidate: MeasurementCoverage };
+      criticalCases?: CaseMatcher[];
     }
   > {
     const { scorecard: baseline, record: baseRecord } = await this.requireSucceeded(
@@ -127,15 +129,22 @@ export class ScorecardAnalyticsService {
     // Evidence quality of each side. Aggregates already drop unmeasured scores, so a hollowed-out batch reads
     // as healthy — the ratio has to travel WITH the comparison for a gate to be able to refuse on it.
     const coverage = { baseline: measurementCoverage(baseline), candidate: measurementCoverage(candidate) };
-    if (!hasTrials) return { ...withPolicy, coverage };
+    // Criticality is read off the CANDIDATE's own resolved policy — it is the candidate that is asking to
+    // ship. An unresolvable candidate stamp contributes none: the pair is already refused as not_comparable,
+    // and inventing critical cases out of the default ladder would be the same retroactive rewrite.
+    const criticalCases = cResolution.status !== "unresolvable" ? cResolution.policy.criticalCases : undefined;
+    const withCritical = criticalCases !== undefined && criticalCases.length > 0 ? { criticalCases } : {};
+    if (!hasTrials) return { ...withPolicy, coverage, ...withCritical };
     return {
       ...withPolicy,
       coverage,
+      ...withCritical,
       // Each side's trial pass rates are computed under its own resolved policy — the statistical regression
       // signal a gate reads must not be manufactured by re-judging one side.
       trials: diffTrials(baseline, candidate, {
         ...(opts.zThreshold !== undefined ? { zThreshold: opts.zThreshold } : {}),
         ...(opts.minDelta !== undefined ? { minDelta: opts.minDelta } : {}),
+        ...(opts.fdrAlpha !== undefined ? { fdrAlpha: opts.fdrAlpha } : {}),
         ...(bResolution.status !== "unresolvable" ? { baselinePolicy: bResolution.policy } : {}),
         ...(cResolution.status !== "unresolvable" ? { candidatePolicy: cResolution.policy } : {}),
       }),

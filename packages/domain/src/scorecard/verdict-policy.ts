@@ -1,5 +1,6 @@
 import {
   type CaseFailure,
+  type CaseMatcher,
   type CaseResult,
   type GraderSpec,
   type MetricAuthority,
@@ -108,9 +109,14 @@ export function resolvePolicyResolution(ref?: StampedPolicyRef, embedded?: Verdi
 // appended AFTER the built-ins, so a custom ground-truth ranks below state/tests_pass in the priority rung
 // (adding a source of truth never silently outranks the established ones). No declarations ⇒ the base policy
 // object itself (identity-comparable, so callers can tell "nothing composed").
+// `criticalCases` composes in the same way and for the same reason: it is a per-batch product declaration
+// ("this release must not break login") that a release gate acts on, so it belongs INSIDE the digested
+// document rather than in the gate call — a recorded gate decision must be re-derivable without the flags
+// whoever ran it happened to pass.
 export function composeVerdictPolicy(
   specs: readonly Pick<GraderSpec, "id" | "authority" | "direction">[],
   base: VerdictPolicy = DEFAULT_VERDICT_POLICY,
+  opts: { criticalCases?: readonly CaseMatcher[] } = {},
 ): VerdictPolicy {
   const additions: MetricDefinition[] = [];
   for (const spec of specs) {
@@ -121,8 +127,15 @@ export function composeVerdictPolicy(
       ...(spec.direction ? { direction: spec.direction } : {}),
     });
   }
-  if (additions.length === 0) return base;
-  const doc: VerdictPolicy = { ...base, id: "composed", version: "0", metrics: [...base.metrics, ...additions] };
+  const criticalCases = opts.criticalCases ?? [];
+  if (additions.length === 0 && criticalCases.length === 0) return base;
+  const doc: VerdictPolicy = {
+    ...base,
+    id: "composed",
+    version: "0",
+    metrics: [...base.metrics, ...additions],
+    ...(criticalCases.length > 0 ? { criticalCases: [...criticalCases] } : {}),
+  };
   // The version IS the content identity — composed documents have no registry row to version against.
   return { ...doc, version: verdictPolicyDigest(doc).slice(0, 12) };
 }

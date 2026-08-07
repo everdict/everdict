@@ -96,6 +96,32 @@ policy's custom ground truth disappears and the built-in ladder re-decides every
   record, `ScorecardBatch.withTrialSummary` omits the roll-up, the regression watch never reopens an issue on
   one, and `retryFailed` refuses with a 400 rather than picking cases by re-judging them.
 
+## The release gate: critical cases and multiple comparisons
+`evaluateGate(diff, policy)` (`@everdict/domain`) is the CI decision — `pass | block | blocked_missing |
+not_comparable`, only the first a green light. Two rules sit on top of the fail-closed comparability
+machinery (SSOT: `docs/architecture/metrics-commercialization.md`):
+
+- **Critical cases — the one place product judgment precedes statistics.** `VerdictPolicy.criticalCases`
+  (matchers `{caseId: "login"}` or `{prefix: "auth/"}`) names cases whose failure is a product call, not a
+  statistical question: a login case going baseline 3/3 → candidate 0/3 is honestly Fisher p=0.1, and the
+  gate says `pass` on that arithmetic unless someone declared the case critical. Declared, the collapse
+  (every candidate trial failing while the baseline had passes; on a non-trial batch, a pass → fail flip)
+  `block`s with reason `critical_case_failed` — regardless of significance, of `maxRegressions`, and of any
+  `allow_partial` tolerance. A critical case **missing** from the candidate blocks the same way. It ranks
+  above `blocked_missing`; the other reasons still ride the decision (the decision changes, the evidence
+  never shrinks). Nothing fires unless it was declared.
+  Criticality lives in the VERDICT POLICY, not in the gate call — it is digested, manifest-carried and
+  three-state-resolved with the rest of the stamp, so a recorded gate decision is re-derivable from the
+  record alone. Author it at submit: `POST /scorecards` `criticalCases` (MCP `run_scorecard`
+  `critical_cases`) → `composeVerdictPolicy` composes it into the batch's stamped document. The gate reads
+  it off the **candidate's** resolved policy — the candidate is the one asking to ship.
+- **Multiple comparisons — `GatePolicy.fdrAlpha`.** Every case is its own hypothesis test, so 200 cases at
+  α≈0.05 manufacture ~10 false regressions and `maxRegressions: 0` turns any one of them into a blocked
+  release. `fdrAlpha` applies Benjamini–Hochberg across the per-case trial tests of one evaluation; a case
+  counts as a `trial_regression` only if it survives BH **and** clears `minDelta`. Unset = exactly today's
+  per-case-alpha behavior. A suppressed case is marked `fdrSuppressed` on its `TrialCaseDelta` and counted in
+  `evidence.suppressedByFdr` — never silently dropped.
+
 ## Experiments (ungraded phase-1 groups — execution-model P1)
 An **experiment** is a scorecard row that stopped after phase 1 (decision O3: the RunGroup generalizes
 `ScorecardRecord` in concept, the table is kept — `kind:"experiment"`, mig `0093`): the SAME fan-out and child

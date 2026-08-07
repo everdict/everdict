@@ -43,11 +43,13 @@ export {
 export { contentDigest } from "./provenance/content-digest.js";
 export { type EvidenceStatus, evidenceStatus } from "./scorecard/evidence-status.js";
 export {
+  benjaminiHochberg,
   type CaseTrialStats,
   caseTrialStats,
   diffTrials,
   groupTrials,
   passAtK,
+  twoSidedPFromZ,
   type ScorecardTrialSummary,
   summarizeTrials,
   type TrialCaseDelta,

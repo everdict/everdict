@@ -1,10 +1,12 @@
-import type {
-  GateAudit,
-  GateDecision,
-  GatePolicy,
-  GateReason,
-  ScorecardRecord,
-  VerdictPolicyRef,
+import {
+  type CaseMatcher,
+  type GateAudit,
+  type GateDecision,
+  type GatePolicy,
+  type GateReason,
+  type ScorecardRecord,
+  type VerdictPolicyRef,
+  caseMatches,
 } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
 import type { MeasurementCoverage, ScorecardDiff } from "./scorecard.js";
@@ -24,6 +26,10 @@ export type GateInput = ScorecardDiff & {
   // Evidence quality of each side (measurementCoverage). Optional: a caller that cannot supply it simply
   // cannot gate on maxUnmeasuredFraction — the gate never invents a coverage number it was not given.
   coverage?: { baseline: MeasurementCoverage; candidate: MeasurementCoverage };
+  // Cases the CANDIDATE's stamped verdict policy declared critical (VerdictPolicy.criticalCases). Read off
+  // the candidate because it is the candidate that is asking to ship: criticality is a claim about what this
+  // release must not break. Absent ⇒ nothing was declared critical, and the gate is pure arithmetic.
+  criticalCases?: readonly CaseMatcher[];
 };
 
 export type GateEvaluation = Pick<GateDecision, "decision" | "reasons" | "evidence">;
@@ -46,6 +52,14 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   // The WORSE of the two sides: a comparison is only as measured as its weaker half — a baseline made of
   // placeholders makes "no regression" meaningless just as surely as a hollow candidate does.
   const unmeasuredFraction = worstUnmeasuredFraction(diff.coverage);
+  // Product judgment, computed before any statistics can weigh in on it.
+  const critical = criticalReasons(diff);
+  // Regressions the per-case test found and the BH correction then withdrew. Counted only when a correction
+  // actually ran — absence says "no correction", which is not the same claim as "nothing was suppressed".
+  const suppressedByFdr =
+    trialsGated && diff.trials?.fdrAlpha !== undefined
+      ? diff.trials.cases.filter((c) => c.fdrSuppressed === true).length
+      : undefined;
   const evidence: GateEvaluation["evidence"] = {
     comparability: diff.comparability,
     regressions,
@@ -54,6 +68,8 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
     trialsGated,
     ...(missingFraction !== undefined ? { missingFraction } : {}),
     ...(unmeasuredFraction !== undefined ? { unmeasuredFraction } : {}),
+    ...(diff.criticalCases !== undefined ? { criticalFailures: critical.length } : {}),
+    ...(suppressedByFdr !== undefined ? { suppressedByFdr } : {}),
   };
 
   // An unrestorable stamp refuses BEFORE the comparability check rather than inside it: the caller forces
@@ -118,11 +134,60 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   }
 
   const blocking = reasons.filter((r) => r.kind === "regression" || r.kind === "trial_regression").length;
-  // Missingness first: when the comparison was too incomplete to decide on, saying `blocked_missing` names
+  // A critical case outranks both of the decisions below. It is a plain `block`, not `blocked_missing`, even
+  // when the case is simply absent: the gate is not withholding for lack of evidence, it is refusing a
+  // release that broke something the policy said must not break.
+  if (critical.length > 0) return { decision: "block", reasons: [...critical, ...withheld, ...reasons], evidence };
+  // Missingness next: when the comparison was too incomplete to decide on, saying `blocked_missing` names
   // WHY the gate withheld the light. Any regressions found in the overlap still ride in `reasons` — the
   // decision changes, the evidence never shrinks.
   if (withheld.length > 0) return { decision: "blocked_missing", reasons: [...withheld, ...reasons], evidence };
   return { decision: blocking > policy.maxRegressions ? "block" : "pass", reasons, evidence };
+}
+
+// The one place where PRODUCT JUDGMENT precedes statistics, and it does so only because someone declared it:
+// a login case going baseline 3/3 → candidate 0/3 is Fisher p=0.1 — an honest "not significant" — and
+// shipping a fully broken login on that arithmetic is still wrong. So a case the candidate's verdict policy
+// named critical blocks when it collapses, regardless of significance, of maxRegressions, and of any
+// missingness tolerance. Nothing here fires unless `criticalCases` was declared: statistics stay in charge
+// everywhere else, by default.
+function criticalReasons(diff: GateInput): GateReason[] {
+  const matchers = diff.criticalCases;
+  if (!matchers || matchers.length === 0) return [];
+  const isCritical = (caseId: string): boolean => matchers.some((m) => caseMatches(m, caseId));
+  const out: GateReason[] = [];
+  // Absent from the candidate. A tolerance for ORDINARY missingness (allow_partial + maxMissing*) never
+  // covers a critical case — "we accept losing some coverage" was never an acceptance of losing this one.
+  for (const caseId of diff.missing.casesOnlyInBaseline) {
+    if (!isCritical(caseId)) continue;
+    out.push({
+      kind: "critical_case_failed",
+      caseId,
+      detail: `critical case '${caseId}' is missing from the candidate — a missingness tolerance covers ordinary coverage loss, never a case the policy declared critical`,
+    });
+  }
+  if (diff.trials) {
+    // Collapsed to a zero pass rate while the baseline had passes. Statistical significance is deliberately
+    // not consulted: at three trials the exact test cannot reach 95% no matter how total the collapse.
+    for (const c of diff.trials.cases) {
+      if (!isCritical(c.caseId) || c.candidateRate > 0 || c.baselineRate <= 0) continue;
+      out.push({
+        kind: "critical_case_failed",
+        caseId: c.caseId,
+        detail: `critical case '${c.caseId}' failed every one of its ${c.candidateTrials} candidate trial(s) after passing ${(c.baselineRate * 100).toFixed(0)}% of ${c.baselineTrials} on the baseline — blocked regardless of statistical significance (p=${c.p.toFixed(3)})`,
+      });
+    }
+  } else {
+    for (const r of diff.regressions) {
+      if (!isCritical(r.caseId)) continue;
+      out.push({
+        kind: "critical_case_failed",
+        caseId: r.caseId,
+        detail: `critical case '${r.caseId}' flipped pass → fail on metric '${r.metric}' — blocked regardless of the regression budget`,
+      });
+    }
+  }
+  return out;
 }
 
 // A stamp as a refusal names it — id@version plus the digest that was looked for and not found.

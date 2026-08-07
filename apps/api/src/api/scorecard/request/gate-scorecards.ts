@@ -16,6 +16,8 @@ export const GateScorecardsBodySchema = z.object({
       maxUnmeasuredFraction: z.number().min(0).max(1).optional(),
       zThreshold: z.number().positive().optional(),
       minDelta: z.number().min(0).max(1).optional(),
+      // Benjamini–Hochberg false-discovery level across the per-case trial tests. Absent = no correction.
+      fdrAlpha: z.number().gt(0).lt(1).optional(),
     })
     .optional(),
 });

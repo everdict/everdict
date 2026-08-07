@@ -26,6 +26,7 @@ import {
 } from "@everdict/db";
 import {
   CircuitBreaker,
+  DEFAULT_VERDICT_POLICY,
   type Principal,
   Run,
   composeVerdictPolicy,
@@ -5273,6 +5274,68 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
     await expect(
       service.overrideGate({ tenant: "acme", candidate: "cand2", decisionId: passed.id, reason: "r", by: "x" }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  // The critical-case rule, end to end: the declaration rides the batch's own stamped verdict policy, so the
+  // gate reads it off the record instead of off whatever flags CI happened to pass.
+  it("a case the stamped policy declared CRITICAL blocks on collapse, past the regression budget", async () => {
+    // Given both batches judged under a composed policy that names "login" critical
+    const { store, service } = build();
+    const policy = composeVerdictPolicy([], DEFAULT_VERDICT_POLICY, { criticalCases: [{ caseId: "login" }] });
+    const stamped = (id: string, results: CaseResult[]): ScorecardRecord => ({
+      ...succeededRecord(id, results),
+      verdictPolicy: verdictPolicyRef(policy),
+      manifest: {
+        dataset: { id: "d", version: "1.0.0", digest: "dd" },
+        harness: { id: "h", version: "1" },
+        verdictPolicy: policy,
+      },
+    });
+    await store.create(stamped("base", [scored("login", true), scored("other", true)]));
+    await store.create(stamped("cand", [scored("login", false), scored("other", true)]));
+
+    // When the gate runs with a budget generous enough to absorb an ordinary regression
+    const decision = await service.gate({
+      tenant: "acme",
+      baseline: "base",
+      candidate: "cand",
+      policy: { maxRegressions: 5 },
+    });
+
+    // Then the budget does not reach a case the policy declared critical
+    expect(decision.decision).toBe("block");
+    expect(decision.reasons.find((r) => r.kind === "critical_case_failed")?.caseId).toBe("login");
+    expect(decision.evidence.criticalFailures).toBe(1);
+  });
+
+  it("fdrAlpha reaches the trials diff and rides the recorded policy", async () => {
+    const { store, service } = build();
+    const trial = (caseId: string, pass: boolean, index: number): CaseResult => ({
+      ...scored(caseId, pass),
+      trial: index,
+    });
+    const side = (passes: number): CaseResult[] => Array.from({ length: 20 }, (_, i) => trial("a", i < passes, i));
+    await store.create(succeededRecord("base", side(20)));
+    await store.create(succeededRecord("cand", side(14))); // Fisher p ≈ 0.020 — clears its own alpha
+
+    // With m=1 hypothesis BH's threshold IS alpha, so 0.02 survives at 0.05 and not at 0.01: the level the
+    // caller sent is the one the diff was computed under, and it is embedded in the decision.
+    const loose = await service.gate({
+      tenant: "acme",
+      baseline: "base",
+      candidate: "cand",
+      policy: { fdrAlpha: 0.05 },
+    });
+    expect(loose.decision).toBe("block");
+    expect(loose.policy.fdrAlpha).toBe(0.05);
+    const strict = await service.gate({
+      tenant: "acme",
+      baseline: "base",
+      candidate: "cand",
+      policy: { fdrAlpha: 0.01 },
+    });
+    expect(strict.decision).toBe("pass");
+    expect(strict.evidence.suppressedByFdr).toBe(1);
   });
 
   it("a candidate that ran fewer cases than the baseline is BLOCKED_MISSING, and the force is overridable", async () => {

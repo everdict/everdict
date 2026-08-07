@@ -1,6 +1,6 @@
 import { BadRequestError, type CaseResult, type Scorecard, type VerdictPolicy } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { caseTrialStats, diffTrials, groupTrials, passAtK, summarizeTrials } from "./trials.js";
+import { benjaminiHochberg, caseTrialStats, diffTrials, groupTrials, passAtK, summarizeTrials } from "./trials.js";
 import { DEFAULT_VERDICT_POLICY } from "./verdict-policy.js";
 
 // One trial (a CaseResult) with a tests_pass verdict. trialIdx is optional (absent = single-run).
@@ -227,5 +227,98 @@ describe("diffTrials (statistical regression gate)", () => {
     expect(d.missing.casesOnlyInCandidate).toEqual(["new"]);
     expect(d.missing.unscoredCases).toEqual(["u"]); // present on both sides, but no scored candidate trials
     expect(d.cases.map((c) => c.caseId)).toEqual(["a"]);
+  });
+});
+
+describe("diffTrials — the Benjamini-Hochberg multiple-comparison correction", () => {
+  // A 20-case suite where exactly ONE case genuinely broke and three others dipped just far enough to clear
+  // their own 5% alpha. Every case is its own hypothesis test, so a suite this size manufactures borderline
+  // "regressions" by construction — and under maxRegressions 0 any one of them blocks the release.
+  const suite = (): { base: Scorecard; cand: Scorecard } => {
+    const baseResults: CaseResult[] = [
+      ...trials("real", 20, 20), // 20/20 → 5/20, Fisher p ≈ 1e-6 — a genuine collapse
+      ...trials("borderline-a", 20, 20), // → 14/20, p ≈ 0.020
+      ...trials("borderline-b", 18, 20), // → 11/20, p ≈ 0.031
+      ...trials("borderline-c", 20, 20), // → 15/20, p ≈ 0.047
+    ];
+    const candResults: CaseResult[] = [
+      ...trials("real", 5, 20),
+      ...trials("borderline-a", 14, 20),
+      ...trials("borderline-b", 11, 20),
+      ...trials("borderline-c", 15, 20),
+    ];
+    for (let i = 0; i < 16; i++) {
+      baseResults.push(...trials(`quiet-${i}`, 20, 20));
+      candResults.push(...trials(`quiet-${i}`, 20, 20));
+    }
+    return { base: card("h@1", baseResults), cand: card("h@2", candResults) };
+  };
+
+  it("without fdrAlpha every case answers for itself — the three borderline dips all count as regressions", () => {
+    // Given a 20-case suite with one real collapse and three borderline dips
+    const { base, cand } = suite();
+    // When no correction is asked for
+    const d = diffTrials(base, cand);
+    // Then each case is gated at its own alpha: four "regressions" out of one real one
+    expect(d.regressions.map((r) => r.caseId).sort()).toEqual(["borderline-a", "borderline-b", "borderline-c", "real"]);
+    expect(d.fdrAlpha).toBeUndefined();
+    expect(d.cases.every((c) => c.fdrSuppressed === undefined)).toBe(true);
+  });
+
+  it("with fdrAlpha the family decides — the borderline dips are suppressed and the real collapse survives", () => {
+    // Given the same suite
+    const { base, cand } = suite();
+    // When the caller asks for a 5% false-discovery rate across the 20 per-case tests
+    const d = diffTrials(base, cand, { fdrAlpha: 0.05 });
+    // Then only the case whose p survives BH's k/m step-up blocks
+    expect(d.regressions.map((r) => r.caseId)).toEqual(["real"]);
+    expect(d.fdrAlpha).toBe(0.05);
+    // ...and the suppressed ones are MARKED, not silently dropped: "significant before correction, not after"
+    const suppressed = d.cases.filter((c) => c.fdrSuppressed === true).map((c) => c.caseId);
+    expect(suppressed.sort()).toEqual(["borderline-a", "borderline-b", "borderline-c"]);
+    expect(d.cases.find((c) => c.caseId === "borderline-a")?.significant).toBe(false);
+    expect(d.cases.find((c) => c.caseId === "real")?.fdrSuppressed).toBeUndefined();
+  });
+
+  it("the practical floor still applies after the correction — surviving BH is not enough on its own", () => {
+    const { base, cand } = suite();
+    // A 0.8 minDelta is above even the real case's 0.75 drop: BH rejects its null, the floor keeps it out.
+    const d = diffTrials(base, cand, { fdrAlpha: 0.05, minDelta: 0.8 });
+    expect(d.regressions).toEqual([]);
+  });
+
+  it("an unset fdrAlpha leaves an existing comparison bit-for-bit unchanged", () => {
+    // The pre-correction fixture: 5/5 → 0/5 is exact-significant, 5/5 → 2/5 is not.
+    const base = card("h@1", [...trials("crash", 5, 5), ...trials("dip", 5, 5)]);
+    const cand = card("h@2", [...trials("crash", 0, 5), ...trials("dip", 2, 5)]);
+    const legacy = diffTrials(base, cand, { zThreshold: 1.96 });
+    expect(legacy.regressions.map((r) => r.caseId)).toEqual(["crash"]);
+    expect(legacy.cases.map((c) => c.significant)).toEqual([true, false]);
+    expect(legacy.fdrAlpha).toBeUndefined();
+  });
+
+  it("the z branch reports a real p-value too — a correction ranks p's, not threshold comparisons", () => {
+    // 40 trials a side clears FISHER_MAX_N, so this case is decided by the normal approximation.
+    const base = card("h@1", trials("big", 40, 40));
+    const cand = card("h@2", trials("big", 20, 40));
+    const d = diffTrials(base, cand);
+    expect(d.cases[0]?.method).toBe("z");
+    expect(d.cases[0]?.p).toBeLessThan(0.001);
+  });
+});
+
+describe("benjaminiHochberg", () => {
+  it("rejects up to the largest rank k whose p clears (k/m)·alpha", () => {
+    // m=5, alpha=0.05 → per-rank thresholds 0.01, 0.02, 0.03, 0.04, 0.05. Ranks 1-3 (0.001, 0.02, 0.025)
+    // each clear theirs and ranks 4-5 do not, so the step-up stops at 3 and rejects ranks 1..3.
+    expect([...benjaminiHochberg([0.001, 0.02, 0.025, 0.4, 0.9], 0.05)].sort()).toEqual([0, 1, 2]);
+  });
+
+  it("rejects nothing when the smallest p misses its own threshold", () => {
+    expect(benjaminiHochberg([0.04, 0.2, 0.5], 0.05).size).toBe(0);
+  });
+
+  it("an empty family rejects nothing", () => {
+    expect(benjaminiHochberg([], 0.05).size).toBe(0);
   });
 });

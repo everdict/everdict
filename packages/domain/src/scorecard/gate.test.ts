@@ -235,3 +235,189 @@ describe("evaluateGate — fail-closed on missingness", () => {
     expect(evaluateGate(base({}), { maxRegressions: 0 }).decision).toBe("pass");
   });
 });
+
+// The one place where product judgment is allowed to precede statistics — and only because someone declared
+// it. A login case going 3/3 → 0/3 is Fisher p=0.1: an honest "not significant", and a fully broken login
+// that ships anyway. The pair of tests below is the whole argument: the statistical answer stays the default,
+// the product answer is opt-in and named.
+describe("evaluateGate — critical cases", () => {
+  // 3/3 → 0/3 on one case, exactly the review's scenario: a total collapse the exact test cannot call.
+  const collapsed = (caseId: string): NonNullable<GateInput["trials"]> => ({
+    baseline: "b",
+    candidate: "c",
+    zThreshold: 1.96,
+    minDelta: 0,
+    cases: [
+      {
+        caseId,
+        baselineRate: 1,
+        baselineTrials: 3,
+        candidateRate: 0,
+        candidateTrials: 3,
+        delta: -1,
+        z: -2.45,
+        method: "fisher",
+        p: 0.1,
+        significant: false, // p=0.1 — the trials diff correctly refuses to call this significant
+      },
+    ],
+    regressions: [],
+    improvements: [],
+    missing: { casesOnlyInBaseline: [], casesOnlyInCandidate: [], unscoredCases: [] },
+  });
+
+  it("a 3/3 → 0/3 collapse PASSES when nothing was declared critical — the statistics are honest", () => {
+    // Given a case that failed all three candidate trials, at a p the exact test cannot call significant
+    // When no criticality is declared
+    const g = evaluateGate(base({ trials: collapsed("login") }), { maxRegressions: 0 });
+    // Then the gate reports what the arithmetic says, and says nothing about criticality at all
+    expect(g.decision).toBe("pass");
+    expect(g.evidence.criticalFailures).toBeUndefined();
+  });
+
+  it("the same collapse BLOCKS once the policy declares the case critical — regardless of significance", () => {
+    // Given the same comparison
+    // When the candidate's verdict policy names the case critical
+    const g = evaluateGate(base({ trials: collapsed("login"), criticalCases: [{ caseId: "login" }] }), {
+      maxRegressions: 0,
+    });
+    // Then the block stands on the product judgment, and the reason says so with the p it overrode
+    expect(g.decision).toBe("block");
+    const reason = g.reasons.find((r) => r.kind === "critical_case_failed");
+    expect(reason?.caseId).toBe("login");
+    expect(reason?.detail).toContain("regardless of statistical significance");
+    expect(g.evidence.criticalFailures).toBe(1);
+  });
+
+  it("a prefix matcher covers a whole family without listing every case", () => {
+    const g = evaluateGate(base({ trials: collapsed("auth/login-otp"), criticalCases: [{ prefix: "auth/" }] }), {
+      maxRegressions: 0,
+    });
+    expect(g.decision).toBe("block");
+    expect(g.reasons[0]?.caseId).toBe("auth/login-otp");
+  });
+
+  it("a critical case missing from the candidate blocks even under a generous allow_partial tolerance", () => {
+    // Given a caller that deliberately accepted losing up to 90% of the suite
+    // When one of the cases the candidate never ran is a critical one
+    const g = evaluateGate(
+      base({
+        comparability: "partial",
+        missing: {
+          casesOnlyInBaseline: ["checkout", "login"],
+          casesOnlyInCandidate: [],
+          metricsOnlyInBaseline: [],
+          metricsOnlyInCandidate: [],
+        },
+        overlap: { sharedCases: 8, baselineCases: 10, candidateCases: 8 },
+        criticalCases: [{ caseId: "login" }],
+      }),
+      { maxRegressions: 0, comparability: "allow_partial", maxMissingCases: 50, maxMissingFraction: 0.9 },
+    );
+    // Then the tolerance does not reach it: "we accept losing some coverage" was never an acceptance of this
+    expect(g.decision).toBe("block");
+    expect(g.reasons[0]).toMatchObject({ kind: "critical_case_failed", caseId: "login" });
+    expect(g.reasons[0]?.detail).toContain("missing from the candidate");
+    expect(g.evidence.criticalFailures).toBe(1);
+  });
+
+  it("on a NON-trial batch a critical case's pass → fail flip blocks regardless of the regression budget", () => {
+    // Given a regression budget generous enough to absorb the flip
+    const g = evaluateGate(
+      base({
+        regressions: [
+          { caseId: "login", metric: "tests_pass", baseline: 1, candidate: 0, delta: -1, passChange: "broke" },
+        ],
+        criticalCases: [{ caseId: "login" }],
+      }),
+      { maxRegressions: 5 },
+    );
+    // Then the budget does not cover a case the policy declared critical
+    expect(g.decision).toBe("block");
+    expect(g.reasons.map((r) => r.kind)).toContain("critical_case_failed");
+  });
+
+  it("a critical case that merely dipped is not a critical failure — the collapse is what the rule names", () => {
+    const dipped = collapsed("login");
+    const [only] = dipped.cases;
+    if (!only) throw new Error("fixture");
+    const g = evaluateGate(
+      base({
+        trials: { ...dipped, cases: [{ ...only, candidateRate: 1 / 3, delta: -2 / 3 }] },
+        criticalCases: [{ caseId: "login" }],
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("pass");
+    expect(g.evidence.criticalFailures).toBe(0);
+  });
+
+  it("a critical failure outranks blocked_missing — the decision is a block, with both reasons kept", () => {
+    const g = evaluateGate(
+      base({
+        comparability: "partial",
+        trials: collapsed("login"),
+        missing: {
+          casesOnlyInBaseline: ["gone"],
+          casesOnlyInCandidate: [],
+          metricsOnlyInBaseline: [],
+          metricsOnlyInCandidate: [],
+        },
+        overlap: { sharedCases: 9, baselineCases: 10, candidateCases: 9 },
+        criticalCases: [{ caseId: "login" }],
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("block");
+    // The decision changes; the evidence never shrinks — the missingness reason still rides.
+    expect(g.reasons.map((r) => r.kind)).toEqual(["critical_case_failed", "missing_cases"]);
+  });
+});
+
+describe("evaluateGate — multiple-comparison correction evidence", () => {
+  const withTrials = (over: Partial<NonNullable<GateInput["trials"]>>): GateInput =>
+    base({
+      trials: {
+        baseline: "b",
+        candidate: "c",
+        zThreshold: 1.96,
+        minDelta: 0,
+        cases: [],
+        regressions: [],
+        improvements: [],
+        missing: { casesOnlyInBaseline: [], casesOnlyInCandidate: [], unscoredCases: [] },
+        ...over,
+      },
+    });
+
+  it("counts the regressions the correction withdrew, so a pass can explain itself", () => {
+    const g = evaluateGate(
+      withTrials({
+        fdrAlpha: 0.05,
+        cases: [
+          {
+            caseId: "a",
+            baselineRate: 1,
+            baselineTrials: 20,
+            candidateRate: 0.7,
+            candidateTrials: 20,
+            delta: -0.3,
+            z: -2.3,
+            method: "fisher",
+            p: 0.02,
+            significant: false,
+            fdrSuppressed: true,
+          },
+        ],
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("pass");
+    expect(g.evidence.suppressedByFdr).toBe(1);
+  });
+
+  it("reports no suppression count at all when no correction ran — absence is not zero", () => {
+    const g = evaluateGate(withTrials({}), { maxRegressions: 0 });
+    expect(g.evidence.suppressedByFdr).toBeUndefined();
+  });
+});

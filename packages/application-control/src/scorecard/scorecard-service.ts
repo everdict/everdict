@@ -18,6 +18,7 @@ import {
   type AnalysisConfig,
   type AnalysisResult,
   CircuitBreaker,
+  DEFAULT_VERDICT_POLICY,
   type Leaderboard,
   type Principal,
   type RetryableUnmeasured,
@@ -168,7 +169,12 @@ export class ScorecardService {
     // Constitution seed (trust-kernel O1): a grading plan declaring GROUND-TRUTH authority redefines what
     // passing means for this batch — an admin's call, never ambient member power. The composed policy itself
     // is embedded in the manifest below so the stamped verdicts stay re-derivable forever.
-    const composedPolicy = composeVerdictPolicy(input.graders ?? []);
+    // criticalCases composes into the SAME document: a release gate blocks on a critical case's collapse, so
+    // the declaration has to be inside what the batch stamps — a gate decision must stay re-derivable from
+    // the record alone, never from flags whoever ran the gate happened to pass.
+    const composedPolicy = composeVerdictPolicy(input.graders ?? [], DEFAULT_VERDICT_POLICY, {
+      ...(input.criticalCases ? { criticalCases: input.criticalCases } : {}),
+    });
     const composed = composedPolicy.id === "composed";
     if (
       (input.graders ?? []).some((g) => g.authority === "ground_truth") &&
@@ -1145,6 +1151,7 @@ export class ScorecardService {
       ...(p?.maxUnmeasuredFraction !== undefined ? { maxUnmeasuredFraction: p.maxUnmeasuredFraction } : {}),
       ...(p?.zThreshold !== undefined ? { zThreshold: p.zThreshold } : {}),
       ...(p?.minDelta !== undefined ? { minDelta: p.minDelta } : {}),
+      ...(p?.fdrAlpha !== undefined ? { fdrAlpha: p.fdrAlpha } : {}),
     };
     // The gate's statistical policy IS the trials diff's policy — a caller that raised the significance bar
     // for its release decision must have the diff computed under that bar, not under diffTrials' defaults.
@@ -1152,6 +1159,7 @@ export class ScorecardService {
       ...(input.visibleTeams ? { visibleTeams: input.visibleTeams } : {}),
       ...(policy.zThreshold !== undefined ? { zThreshold: policy.zThreshold } : {}),
       ...(policy.minDelta !== undefined ? { minDelta: policy.minDelta } : {}),
+      ...(policy.fdrAlpha !== undefined ? { fdrAlpha: policy.fdrAlpha } : {}),
     });
     const evaluation = evaluateGate(diff, policy);
     const decision: GateDecision = {

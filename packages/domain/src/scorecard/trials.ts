@@ -117,8 +117,14 @@ export interface TrialCaseDelta {
   // Fisher's exact test — the normal approximation behind z is unreliable at eval-scale trial counts (3–10)
   // and near 0/1 rates. p is the Fisher two-sided p-value when method is "fisher".
   method: "z" | "fisher";
-  p?: number;
+  // Two-sided p of this case's test — Fisher's exact p under `method: "fisher"`, the normal-tail p of `z`
+  // otherwise. Always present: a multiple-comparison correction needs an actual p per hypothesis, not a
+  // pass/fail against a threshold.
+  p: number;
   significant: boolean; // statistically significant AND |delta| >= minDelta (practical threshold)
+  // Set when this case cleared its OWN alpha but did not survive the Benjamini–Hochberg correction across
+  // the batch's cases — "significant before correction, not after". Absent when no fdrAlpha was in effect.
+  fdrSuppressed?: boolean;
 }
 
 // Cases that could not enter the statistical gate — reported, never silently dropped.
@@ -133,6 +139,9 @@ export interface TrialDiff {
   candidate: string;
   zThreshold: number;
   minDelta: number; // practical-significance floor: a statistically significant drop below this is noise, not a gate
+  // The BH false-discovery-rate level applied across these cases' tests, when one was asked for. Absent =
+  // every case was gated at its own alpha (no correction).
+  fdrAlpha?: number;
   cases: TrialCaseDelta[];
   regressions: TrialCaseDelta[]; // significant AND rate dropped
   improvements: TrialCaseDelta[]; // significant AND rate rose
@@ -193,15 +202,35 @@ export function fisherExactTwoSided(cb: number, nb: number, cc: number, nc: numb
   return Math.min(1, p);
 }
 
-// The z threshold's two-sided alpha (e.g. 1.96 → ~0.05) so the Fisher branch gates at the same confidence.
-function alphaForZ(zThreshold: number): number {
+// Two-sided normal-tail p of a z statistic: 2·(1 − Φ(|z|)). Used for BOTH jobs — mapping a gate's z
+// threshold to the alpha its Fisher branch gates at, and giving the z branch a real p-value (a
+// multiple-comparison correction ranks p's; it cannot rank threshold comparisons).
+export function twoSidedPFromZ(z: number): number {
+  const a = Math.abs(z);
   // Φ(z) via the Abramowitz–Stegun erf approximation — plenty for mapping a gate threshold to its alpha.
-  const t = 1 / (1 + 0.3275911 * (zThreshold / Math.SQRT2));
+  const t = 1 / (1 + 0.3275911 * (a / Math.SQRT2));
   const erf =
     1 -
     (0.254829592 * t - 0.284496736 * t ** 2 + 1.421413741 * t ** 3 - 1.453152027 * t ** 4 + 1.061405429 * t ** 5) *
-      Math.exp(-((zThreshold / Math.SQRT2) ** 2));
-  return 2 * (1 - (1 + erf) / 2);
+      Math.exp(-((a / Math.SQRT2) ** 2));
+  return Math.min(1, Math.max(0, 2 * (1 - (1 + erf) / 2)));
+}
+
+// Benjamini–Hochberg step-up: the indices whose null hypothesis is rejected while holding the expected
+// FALSE-DISCOVERY rate (share of wrong rejections among all rejections) at `alpha`. Sort the m p-values
+// ascending, find the largest rank k with p₍ₖ₎ ≤ (k/m)·alpha, reject ranks 1..k. Controlling the
+// family-wise error instead (Bonferroni) would be far stricter than a release gate wants: missing a real
+// regression is also a cost, and BH is the standard trade at this m.
+export function benjaminiHochberg(pValues: readonly number[], alpha: number): Set<number> {
+  const m = pValues.length;
+  if (m === 0) return new Set();
+  const ranked = pValues.map((p, index) => ({ p, index })).sort((a, b) => a.p - b.p);
+  let cutoff = -1;
+  for (let i = 0; i < m; i++) {
+    const entry = ranked[i];
+    if (entry !== undefined && entry.p <= ((i + 1) / m) * alpha) cutoff = i;
+  }
+  return new Set(ranked.slice(0, cutoff + 1).map((e) => e.index));
 }
 
 // Statistical regression gate — baseline(vA) vs candidate(vB) over the same cases, run as trials.
@@ -210,6 +239,10 @@ function alphaForZ(zThreshold: number): number {
 // a significant-but-negligible 1% dip on a thousand trials is noise to a gate, and a 3/3→0/3 crash on three
 // trials is honestly NOT significant at 95% (Fisher p=0.1): the gate says so instead of pretending. Cases that
 // cannot enter the gate are enumerated in `missing`, never silently dropped.
+// `fdrAlpha` adds the MULTIPLE-COMPARISON correction across these cases: every case is its own hypothesis
+// test, so a 200-case suite at α≈0.05 manufactures ~10 false regressions and — under maxRegressions 0 — one
+// of them blocks every release. Benjamini–Hochberg holds the expected share of false rejections at fdrAlpha;
+// a case that cleared its own alpha but not the correction is marked `fdrSuppressed` rather than dropped.
 // Each side's trials are judged under ITS OWN stamped policy (baselinePolicy/candidatePolicy): re-deriving a
 // historical batch's pass rate under today's ladder is the retroactive rewrite the stamp exists to prevent,
 // and it lands straight in a release gate's regression count. When the two policies differ the caller's
@@ -220,16 +253,20 @@ export function diffTrials(
   opts: {
     zThreshold?: number;
     minDelta?: number;
+    fdrAlpha?: number;
     baselinePolicy?: VerdictPolicy;
     candidatePolicy?: VerdictPolicy;
   } = {},
 ): TrialDiff {
   const zThreshold = opts.zThreshold ?? 1.96;
   const minDelta = opts.minDelta ?? 0;
-  const alpha = alphaForZ(zThreshold);
+  const fdrAlpha = opts.fdrAlpha;
+  const alpha = twoSidedPFromZ(zThreshold);
   const b = groupTrials(baseline);
   const c = groupTrials(candidate);
-  const cases: TrialCaseDelta[] = [];
+  // Per-case tests, kept BEFORE the significance verdict: a multiple-comparison correction is a decision over
+  // the whole family of tests, so no case can be settled until every case has been tested.
+  const tested: Array<Omit<TrialCaseDelta, "significant" | "fdrSuppressed"> & { ownAlpha: boolean }> = [];
   const missing: TrialDiffMissing = {
     casesOnlyInBaseline: [...b.keys()].filter((id) => !c.has(id)),
     casesOnlyInCandidate: [...c.keys()].filter((id) => !b.has(id)),
@@ -247,9 +284,8 @@ export function diffTrials(
     const z = twoProportionZ(bs.passes, bs.trials, cs.passes, cs.trials);
     const delta = cs.passRate - bs.passRate;
     const useFisher = bs.trials < FISHER_MAX_N || cs.trials < FISHER_MAX_N;
-    const p = useFisher ? fisherExactTwoSided(bs.passes, bs.trials, cs.passes, cs.trials) : undefined;
-    const statSignificant = useFisher ? (p ?? 1) < alpha : Math.abs(z) >= zThreshold;
-    cases.push({
+    const p = useFisher ? fisherExactTwoSided(bs.passes, bs.trials, cs.passes, cs.trials) : twoSidedPFromZ(z);
+    tested.push({
       caseId,
       baselineRate: bs.passRate,
       baselineTrials: bs.trials,
@@ -258,15 +294,35 @@ export function diffTrials(
       delta,
       z,
       method: useFisher ? "fisher" : "z",
-      ...(p !== undefined ? { p } : {}),
-      significant: statSignificant && Math.abs(delta) >= minDelta,
+      p,
+      // Whether this case clears its OWN alpha, ignoring every other case. The z branch keeps comparing the
+      // statistic to its threshold so an unchanged (uncorrected) run stays bit-for-bit what it was.
+      ownAlpha: useFisher ? p < alpha : Math.abs(z) >= zThreshold,
     });
   }
+  // With fdrAlpha the family decides: only the cases BH rejects are statistically significant. Without it
+  // each case answers for itself — the historical behavior, unchanged.
+  const rejected =
+    fdrAlpha === undefined
+      ? undefined
+      : benjaminiHochberg(
+          tested.map((t) => t.p),
+          fdrAlpha,
+        );
+  const cases: TrialCaseDelta[] = tested.map(({ ownAlpha, ...core }, index) => {
+    const statSignificant = rejected === undefined ? ownAlpha : rejected.has(index);
+    return {
+      ...core,
+      significant: statSignificant && Math.abs(core.delta) >= minDelta,
+      ...(rejected !== undefined && ownAlpha && !statSignificant ? { fdrSuppressed: true } : {}),
+    };
+  });
   return {
     baseline: baseline.harness,
     candidate: candidate.harness,
     zThreshold,
     minDelta,
+    ...(fdrAlpha !== undefined ? { fdrAlpha } : {}),
     cases,
     regressions: cases.filter((d) => d.significant && d.delta < 0),
     improvements: cases.filter((d) => d.significant && d.delta > 0),

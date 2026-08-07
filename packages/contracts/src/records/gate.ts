@@ -29,6 +29,12 @@ export const GatePolicySchema = z.object({
   // Without these a CI caller could not set the significance bar it is gating on at all.
   zThreshold: z.number().positive().optional(),
   minDelta: z.number().min(0).max(1).optional(),
+  // False-discovery-rate level for the Benjamini–Hochberg correction across the per-case trial tests of ONE
+  // gate evaluation. Every case is its own hypothesis test: 200 cases at α≈0.05 produce ~10 false regressions
+  // by construction, and under maxRegressions 0 any one of them blocks every release. Absent = no correction
+  // (each case gated at its own alpha, exactly as before) — the correction is opt-in because it trades a
+  // higher per-case miss rate for a controlled share of false blocks, and that is the caller's call.
+  fdrAlpha: z.number().gt(0).lt(1).optional(),
 });
 export type GatePolicy = z.infer<typeof GatePolicySchema>;
 
@@ -43,6 +49,10 @@ export const GateReasonSchema = z.object({
     "policy_unresolvable",
     "no_shared_cases",
     "kind_changed",
+    // A case the verdict policy declared CRITICAL either collapsed to a zero pass rate or is absent from the
+    // candidate. This is the one place where product judgment precedes statistics: it blocks regardless of
+    // significance, regardless of maxRegressions, and regardless of any missingness tolerance.
+    "critical_case_failed",
     // The comparison itself was incomplete — cases the candidate never ran, metrics that vanished or changed
     // kind, scores that were never measurements. Each carries its counts so CI/UI can state WHY it blocked.
     "missing_cases",
@@ -87,6 +97,12 @@ export const GateDecisionSchema = z.object({
     missingFraction: z.number().optional(),
     // The worse side's share of scores that were not measurements — ABSENT when coverage was not supplied.
     unmeasuredFraction: z.number().optional(),
+    // Critical cases that failed or went missing — ABSENT when the candidate's policy declared none (absence
+    // = "no criticality was declared", which is a different statement from "none of them failed").
+    criticalFailures: z.number().int().nonnegative().optional(),
+    // Per-case regressions that cleared their own alpha but did NOT survive the BH correction — ABSENT when
+    // no fdrAlpha was in effect, 0 when the correction ran and suppressed nothing.
+    suppressedByFdr: z.number().int().nonnegative().optional(),
   }),
   decidedBy: z.string().optional(),
   decidedAt: z.string(),

@@ -54,6 +54,15 @@ export const MetricDefinitionSchema = z.object({
 });
 export type MetricDefinition = z.infer<typeof MetricDefinitionSchema>;
 
+// Which CASES a per-case policy clause covers. Same grammar as MetricMatcher minus `segments` (case ids
+// have no `:`-segment convention): `caseId` = exact id, `prefix` = id starts with it, so a whole family
+// ("auth/") is nameable without listing every row.
+export const CaseMatcherSchema = z.union([
+  z.object({ caseId: z.string().min(1) }),
+  z.object({ prefix: z.string().min(1) }),
+]);
+export type CaseMatcher = z.infer<typeof CaseMatcherSchema>;
+
 export const VerdictPolicySchema = z.object({
   id: z.string().min(1),
   version: z.string().min(1),
@@ -69,6 +78,12 @@ export const VerdictPolicySchema = z.object({
   // When NO declared rung decides: combine the remaining measured pass-bearing scores this way, or "none"
   // (undeclared metrics never decide — strict mode).
   fallback: z.union([VerdictAggregationSchema, z.literal("none")]),
+  // Cases whose failure is a PRODUCT judgment that precedes statistics: a login case going 3/3 → 0/3 is an
+  // honestly non-significant Fisher p=0.1, and shipping a fully broken login on that arithmetic is still
+  // wrong. A release gate blocks on a critical case's collapse regardless of significance and regardless of
+  // its regression budget. Criticality lives HERE, in the versioned+digested policy document, because it
+  // changes what a gate decision means: the stamp is what keeps a historical decision re-derivable.
+  criticalCases: z.array(CaseMatcherSchema).optional(),
 });
 export type VerdictPolicy = z.infer<typeof VerdictPolicySchema>;
 
@@ -86,4 +101,8 @@ export function metricMatches(matcher: MetricMatcher, metric: string): boolean {
   if ("metric" in matcher) return matcher.metric === metric;
   if (!metric.startsWith(matcher.prefix)) return false;
   return matcher.segments === undefined || metric.split(":").length === matcher.segments;
+}
+
+export function caseMatches(matcher: CaseMatcher, caseId: string): boolean {
+  return "caseId" in matcher ? matcher.caseId === caseId : caseId.startsWith(matcher.prefix);
 }

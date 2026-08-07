@@ -1,4 +1,4 @@
-import { GraderSpecSchema, JudgeRunConfigSchema } from "@everdict/contracts";
+import { CaseMatcherSchema, GraderSpecSchema, JudgeRunConfigSchema } from "@everdict/contracts";
 import { z } from "zod";
 import { ScorecardOriginBodySchema } from "./scorecard-origin.js";
 
@@ -16,6 +16,10 @@ export const RunScorecardBodySchema = z.object({
   // Run-time grading plan — replaces every case's default graders for THIS batch (the dataset stays pure data;
   // re-scoring differently never edits the dataset). Persisted in orchestration so resume/retry re-apply it.
   graders: z.array(GraderSpecSchema).min(1).optional(),
+  // Cases this batch declares CRITICAL — composed into its verdict policy, so a release gate over this batch
+  // blocks on their collapse regardless of statistical significance and regardless of its regression budget.
+  // `{caseId}` = one case, `{prefix}` = a family ("auth/"). Unset = the gate is pure arithmetic, as before.
+  criticalCases: z.array(CaseMatcherSchema).min(1).optional(),
   // tenant Runtime id to execute on (placement.target). A comma-separated list SHARDS the batch round-robin
   // across the listed runtimes (e.g. "nomad-seoul,k8s-east"); "auto" expands to every registered runtime.
   // Absent = default backend.
