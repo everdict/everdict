@@ -29,6 +29,11 @@ gradeable traces (N/N failed pre-trace)` when every case died — instead of a m
 split out to `apps/api/src/execution/scoring-service.ts` (`ScoringService.createJudgeStream`/`applyJudges`(=push-all+settle,
 used by ingest)/`collectJudgeModels`). See `docs/architecture/streaming-case-pipeline.md`.
 
+**Recover transient scoring.** `POST /scorecards/:id/rescore-unmeasured` (+ MCP `rescore_unmeasured_scores`) —
+re-runs ONLY the judges behind the batch's retryable-unmeasured scores (`retryableUnmeasured` worklist), in
+place via `scoreGroup` under the batch's OWN judge pins (never a silent latest upgrade); non-judge unmeasured
+(in-job grader deaths) return as `skipped` — they need `/retry`. No case re-execution.
+
 **Stop/cancel.** `ScorecardService.cancel(tenant,id)` (`POST /scorecards/:id/cancel` + `cancel_scorecard`) stops a
 queued/running batch → new terminal `cancelled` status (domain `ScorecardBatch.cancel`/`canCancel`; like
 `superseded`, excluded from baseline/diff/leaderboard/trend, which positively filter `succeeded`). It shares the
