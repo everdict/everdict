@@ -138,6 +138,8 @@ function server(
     budget?: ReturnType<typeof inMemoryBudget>;
     requireAuth?: boolean;
     internalToken?: string;
+    metrics?: { render(): string };
+    metricsToken?: string;
     authenticator?: Authenticator;
     authorizationServers?: string[];
     callbackSink?: { deliver(runId: string, body: unknown): void };
@@ -340,6 +342,8 @@ function server(
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
     internalToken: opts.internalToken,
+    ...(opts.metrics ? { metrics: opts.metrics } : {}),
+    ...(opts.metricsToken ? { metricsToken: opts.metricsToken } : {}),
     requireAuth: opts.requireAuth,
     ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
     ...(opts.callbackSink ? { callbackSink: opts.callbackSink } : {}),
@@ -2006,6 +2010,33 @@ describe("API — run live logs (observability: snapshot + SSE tail)", () => {
       headers: { "x-everdict-tenant": "acme" },
     });
     expect(res.json()).toMatchObject({ found: false, text: "" });
+  });
+});
+
+describe("API — GET /metrics (operator scrape, fail-closed)", () => {
+  const exposition = 'everdict_tenant_inflight{workspace="acme"} 1\n';
+
+  it("does not exist without the operator token — the exposition carries per-workspace labels", async () => {
+    // Regression: the scrape was UNAUTHENTICATED while everdict_tenant_*{workspace=…} enumerated every
+    // tenant's id and activity volume — cross-tenant metadata to anyone who could reach the port.
+    const { app } = server({ metrics: { render: () => exposition } });
+    const res = await app.inject({ method: "GET", url: "/metrics" });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("refuses a wrong or missing bearer with 403", async () => {
+    const { app } = server({ metrics: { render: () => exposition }, metricsToken: "mtok" });
+    expect((await app.inject({ method: "GET", url: "/metrics" })).statusCode).toBe(403);
+    const wrong = await app.inject({ method: "GET", url: "/metrics", headers: { authorization: "Bearer nope" } });
+    expect(wrong.statusCode).toBe(403);
+  });
+
+  it("serves the text exposition to the operator bearer", async () => {
+    const { app } = server({ metrics: { render: () => exposition }, metricsToken: "mtok" });
+    const res = await app.inject({ method: "GET", url: "/metrics", headers: { authorization: "Bearer mtok" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.body).toContain("everdict_tenant_inflight");
   });
 });
 

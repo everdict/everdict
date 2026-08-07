@@ -4978,3 +4978,81 @@ describe("ScorecardService.scoreGroup — phase 2 detached (P2)", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
+
+describe("ScorecardService — batch_settled observability event (operator time series, catalog M0)", () => {
+  it("fires once at settle with domain-derived outcome tallies, unmeasured reasons, and the submit->verdict latency", async () => {
+    // One pass, one infra death, one unmeasured-only case — the closed vocabulary the counters promote.
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        if (job.evalCase.id === "b") throw new UpstreamError("UPSTREAM_ERROR", {}, "placement blip");
+        if (job.evalCase.id === "c")
+          return {
+            caseId: "c",
+            harness: "h@1",
+            trace: [],
+            snapshot: { kind: "prompt", output: "" },
+            scores: [
+              {
+                graderId: "judge",
+                metric: "judge:q",
+                value: 0,
+                status: "unmeasured",
+                reason: "grader_error",
+                retryable: true,
+              },
+            ],
+          };
+        return {
+          caseId: job.evalCase.id,
+          harness: "h@1",
+          trace: [],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }],
+        };
+      },
+    };
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    const events: Array<{ kind: string } & Record<string, unknown>> = [];
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      newId: () => `bse-${n++}`,
+      onOrchestrationEvent: (e) => events.push(e),
+      // retries=0 via orchestration input below keeps the infra death terminal in one dispatch.
+    });
+    await datasets.register("acme", {
+      id: "obs",
+      version: "1.0.0",
+      cases: (["a", "b", "c"] as const).map((id) => ({
+        id,
+        env: { kind: "prompt" },
+        task: `q-${id}`,
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      })),
+      tags: [],
+    });
+    const rec = await service.submit({
+      tenant: "acme",
+      dataset: { id: "obs", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      retries: 0,
+    });
+    await waitTerminal(store, rec.id);
+
+    const settled = events.filter((e) => e.kind === "batch_settled");
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({
+      tenant: "acme",
+      outcomes: { executed: 3, verdicted: 1, infraFailed: 1, unmeasured: 1, cancelled: 0 },
+      unmeasuredReasons: { grader_error: 1 },
+    });
+    const latency = settled[0]?.latencySec;
+    expect(typeof latency).toBe("number");
+    expect(latency as number).toBeGreaterThanOrEqual(0);
+  });
+});

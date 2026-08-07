@@ -6,16 +6,17 @@ import { errorResponses, toJsonSchema } from "../openapi.js";
 // rule api-layer). Attached by queue.routes.ts as { schema: queueDocs.<key> }.
 const docs = {
   metrics: {
-    summary: "Prometheus metrics",
+    summary: "Prometheus metrics (operator scrape)",
     description:
-      "Prometheus text exposition (version 0.0.4). UNAUTHENTICATED by design — standard scrape practice; the " +
-      "path is expected to be firewalled. Counters/histograms accumulate at the dispatch seam; gauges sample " +
-      "live components. 404 when metrics are not configured.",
+      "Prometheus text exposition (version 0.0.4), OPERATOR-ONLY: the exposition carries per-workspace labels, " +
+      "so the scrape is gated by the operator token (`Authorization: Bearer <EVERDICT_METRICS_TOKEN>` — one " +
+      "`bearer_token` line in the scrape config), fail-closed like /internal/**. Counters/histograms accumulate " +
+      "at the dispatch seam; gauges sample live components. 404 when metrics or the token are not configured.",
     tags: ["queue"],
     produces: ["text/plain"],
     response: {
       200: { description: "Prometheus text exposition (text/plain; version=0.0.4)", type: "string" },
-      ...errorResponses(404),
+      ...errorResponses(403, 404),
     },
   },
   queue: {

@@ -254,6 +254,7 @@ export interface ServerDeps {
   authenticator?: Authenticator; // authentication owned by the control plane (OIDC + API keys)
   keyStore?: TenantKeyStore; // for /internal/tenant-keys issuance
   internalToken?: string; // /internal/** guard (fail-closed if absent)
+  metricsToken?: string; // GET /metrics operator-scrape guard (fail-closed if absent — the exposition carries per-workspace labels)
   // T-d bridge: the reaction workflow's activities reach the agent service THROUGH the CP (one bridge, the
   // reaper/approval discipline). Mirrors the agent service's HTTP answer so retry semantics ride honestly.
   reactionBridge?: {

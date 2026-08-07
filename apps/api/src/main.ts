@@ -1292,6 +1292,7 @@ async function main(): Promise<void> {
     authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),
     keyStore,
     internalToken: process.env.EVERDICT_INTERNAL_TOKEN,
+    metricsToken: process.env.EVERDICT_METRICS_TOKEN,
     requireAuth: process.env.EVERDICT_REQUIRE_AUTH === "1",
     ...(callbackRendezvous ? { callbackSink: callbackRendezvous } : {}), // receive /frontdoor-callback inbound (the same rendezvous instance)
     // Structured request/auth logs (pino). Default info — diagnose auth denials (401) and their reason from the control-plane log. Turn off with silent.

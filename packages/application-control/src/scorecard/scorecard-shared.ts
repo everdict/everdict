@@ -16,6 +16,7 @@ import {
   type RegistryAuth,
   type Score,
   ScoreSchema,
+  type Scorecard,
   type ScorecardExport,
   type ScorecardOrigin,
   type ScorecardRecord,
@@ -31,8 +32,10 @@ import {
   type BudgetTracker,
   type CircuitBreaker,
   type HarnessSecretMaps,
+  type ScorecardOutcomes,
   type UsageMeter,
   caseVerdict,
+  scorecardOutcomes,
 } from "@everdict/domain";
 import { z } from "zod";
 import type { ExecuteCaseDeps } from "../execution/execute-case.js";
@@ -331,6 +334,51 @@ export interface SubmitExperimentInput {
   origin?: ScorecardOrigin;
 }
 
+// Orchestration observability events — the generic seam keeping the services metrics-vocabulary-free;
+// the composition root (main.ts) maps these to the operator Prometheus registry.
+export type OrchestrationEvent =
+  | { kind: "spillover"; from: string; to: string; code: string }
+  | { kind: "speculation_fired"; from: string; to: string }
+  | { kind: "speculation_settled"; winnerSpeculated: boolean }
+  | { kind: "oom_escalated"; memoryMb: number }
+  | { kind: "concurrency_adapted"; effective: number; previous: number; base: number }
+  // Batch settle (both drivers — in-process track AND Temporal finalize): the contract's closed vocabulary
+  // promoted to time series. Tallies are the DOMAIN's (caseOutcome/scorecardOutcomes) — the seam never
+  // re-derives outcome semantics.
+  | {
+      kind: "batch_settled";
+      tenant: string;
+      outcomes: ScorecardOutcomes;
+      unmeasuredReasons: Record<string, number>; // closed reason vocabulary → count (never graderId — unbounded)
+      latencySec: number; // submit → terminal (time-to-verdict, catalog S1)
+    };
+
+// Derive the batch_settled observation from the final scorecard — shared by both settle drivers so the
+// two paths cannot drift (the rescore-predicate lesson).
+export function batchSettledEvent(
+  tenant: string,
+  createdAt: string,
+  scorecard: Pick<Scorecard, "results">,
+  requested: number | undefined,
+  nowMs: number,
+): Extract<OrchestrationEvent, { kind: "batch_settled" }> {
+  const unmeasuredReasons: Record<string, number> = {};
+  for (const result of scorecard.results) {
+    for (const s of result.scores) {
+      if (s.status !== "unmeasured") continue;
+      const reason = s.reason ?? "unspecified";
+      unmeasuredReasons[reason] = (unmeasuredReasons[reason] ?? 0) + 1;
+    }
+  }
+  return {
+    kind: "batch_settled",
+    tenant,
+    outcomes: scorecardOutcomes(scorecard, requested),
+    unmeasuredReasons,
+    latencySec: Math.max(0, (nowMs - new Date(createdAt).getTime()) / 1000),
+  };
+}
+
 export interface ScorecardServiceDeps {
   dispatcher: Dispatcher; // dispatch a case as a job (same path as a single run)
   store: ScorecardStore;
@@ -391,16 +439,9 @@ export interface ScorecardServiceDeps {
   // runner (via its heartbeat) to abort the in-flight run, freeing the runtime mid-case. killCase covers managed
   // Nomad/K8s backends; self:* lanes are lease queues, so this is their force-kill path (RunnerHub.requestCancel).
   cancelLeased?: (predicate: (job: CaseJob) => boolean) => number | Promise<number>;
-  // Orchestration-event observability hook (metrics) — fired on spillover / speculation / OOM escalation.
-  // One generic seam so the service stays metrics-vocabulary-free; main.ts maps events to counters.
-  onOrchestrationEvent?: (
-    event:
-      | { kind: "spillover"; from: string; to: string; code: string }
-      | { kind: "speculation_fired"; from: string; to: string }
-      | { kind: "speculation_settled"; winnerSpeculated: boolean }
-      | { kind: "oom_escalated"; memoryMb: number }
-      | { kind: "concurrency_adapted"; effective: number; previous: number; base: number },
-  ) => void;
+  // Orchestration-event observability hook (metrics) — fired on spillover / speculation / OOM escalation /
+  // batch settle. One generic seam so the service stays metrics-vocabulary-free; main.ts maps events to counters.
+  onOrchestrationEvent?: (event: OrchestrationEvent) => void;
   // Adaptive batch concurrency (pressure signals) — scheduler queue depth + the threshold above which the
   // effective batch width halves. Absent queueDepth = breaker-only adaptation. docs/architecture/batch-resilience.md
   queueDepth?: () => number;

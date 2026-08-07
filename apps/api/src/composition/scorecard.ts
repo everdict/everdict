@@ -144,6 +144,40 @@ export function buildScorecard(deps: {
         metrics.counter("everdict_concurrency_adapted_total", "Adaptive batch-width transitions.", {
           direction: event.effective < event.previous ? "shrink" : "restore",
         });
+      else if (event.kind === "batch_settled") {
+        // Catalog M0 — the contract's closed vocabulary as time series. Labels are closed sets only
+        // (outcome states, unmeasured reasons); graderId/caseId never label a series (unbounded cardinality).
+        const o = event.outcomes;
+        const outcomeCounts = {
+          completed: o.verdicted,
+          unmeasured: o.unmeasured,
+          infra_failed: o.infraFailed,
+          cancelled: o.cancelled,
+        };
+        for (const [outcome, count] of Object.entries(outcomeCounts)) {
+          if (count > 0)
+            metrics.counter(
+              "everdict_case_outcome_total",
+              "Case fates at batch settle (CaseOutcome vocabulary).",
+              { outcome },
+              count,
+            );
+        }
+        for (const [reason, count] of Object.entries(event.unmeasuredReasons)) {
+          metrics.counter(
+            "everdict_unmeasured_total",
+            "Unmeasured scores by reason at batch settle.",
+            { reason },
+            count,
+          );
+        }
+        metrics.observe(
+          "everdict_verdict_latency_seconds",
+          "Batch submit → terminal verdict latency.",
+          {},
+          event.latencySec,
+        );
+      }
     },
     // Adaptive batch concurrency — pressure = the shared scheduler's queue depth (EVERDICT_QUEUE_PRESSURE dial).
     queueDepth: () => scheduler.stats().queued,

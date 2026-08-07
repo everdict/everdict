@@ -49,6 +49,7 @@ import {
   type ScorecardServiceDeps,
   analysisBundle,
   applyGradingPlan,
+  batchSettledEvent,
   caseReason,
   childKey,
   embedHarnessSpec,
@@ -756,6 +757,11 @@ export class ScorecardBatchService {
       stampedCompletion.map((f) => f.record),
     );
     if (stampedCompletion.length > 0) void this.deps.events?.pushPersisted?.(stampedCompletion);
+    // Operator time series (catalog M0) — the Temporal driver settles through the SAME derivation as the
+    // in-process loop (batchSettledEvent), so the two paths cannot drift.
+    this.deps.onOrchestrationEvent?.(
+      batchSettledEvent(ctx.tenant, rec.createdAt, scorecard, rec.requested, Date.parse(this.now())),
+    );
     this.batchContexts.delete(id);
     if (this.deps.onComplete) {
       const done = await this.deps.store.get(id);
@@ -1494,6 +1500,10 @@ export class ScorecardBatchService {
             stamped.map((f) => f.record),
           );
           if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
+          // Operator time series (catalog M0): the closed outcome/reason vocabulary at the settle seam.
+          this.deps.onOrchestrationEvent?.(
+            batchSettledEvent(tenant, settled.createdAt, scorecard, settled.requested, Date.parse(this.now())),
+          );
         }
         // else: a raced supersede settled the record before the abort signal reached this loop — first
         // terminal write wins, the late success is a no-op skip.
