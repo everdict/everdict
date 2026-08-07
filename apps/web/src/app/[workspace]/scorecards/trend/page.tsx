@@ -187,6 +187,10 @@ export default async function TrendPage({
 
       {error && <Callout tone="danger">{t('trendLoadError', { error })}</Callout>}
 
+      {/* One line through two rule-sets is disclosed, never silently drawn — cross-policy regressions are
+          already suppressed server-side. */}
+      {trend?.policyMixed && <Callout tone="warning">{t('trendPolicyMixed')}</Callout>}
+
       {trend && (
         <div className="space-y-7">
           <Card className="space-y-4 p-4">

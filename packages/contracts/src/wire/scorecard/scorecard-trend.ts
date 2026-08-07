@@ -6,6 +6,12 @@ export const ScorecardTrendResponseSchema = z.object({
   dataset: z.string().describe("Dataset id"),
   metric: z.string(),
   baseline: z.string().describe('"first" | "previous" | <scorecardId> — as requested'),
+  policyMixed: z
+    .boolean()
+    .optional()
+    .describe(
+      "The series mixes batches judged under different verdict policies — points kept, cross-policy regressions suppressed",
+    ),
   direction: z
     .enum(["higher_is_better", "lower_is_better"])
     .optional()
@@ -23,6 +29,10 @@ export const ScorecardTrendResponseSchema = z.object({
         score: z.number().nullable().describe("passRate first (mean if absent) — the trend/regression decision key"),
         deltaVsBaseline: z.number().nullable().describe("score - baseline.score (only when both exist)"),
         regressed: z.boolean().describe("moved AGAINST the series' direction vs baseline (beyond epsilon)"),
+        policyDiffers: z
+          .boolean()
+          .optional()
+          .describe("Judged under a different verdict policy than the baseline point — never flagged regressed"),
       }),
     )
     .describe("createdAt ascending"),

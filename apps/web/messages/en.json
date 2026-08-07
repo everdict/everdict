@@ -2713,6 +2713,8 @@
     "deleteSelected": "Delete"
   },
   "scorecardsPage": {
+    "trendPolicyMixed": "This series mixes batches judged under different verdict policies — cross-policy drops are not flagged as regressions.",
+    "leaderboardPolicyMixed": "These rows were judged under different verdict policies — the ordering compares rates produced by different rules.",
     "modelUnknownLabel": "model unknown",
     "modelUnknownTitle": "No model was recorded for these runs — distinct unknown models may be folded together; comparison with named-model rows does not hold.",
     "compareNotComparable": "Comparison does not hold — the two scorecards share no cases or no metrics. This is \"incomparable\", not \"no differences\".",

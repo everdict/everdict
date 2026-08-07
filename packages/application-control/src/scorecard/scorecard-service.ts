@@ -24,6 +24,7 @@ import {
   type TrialDiff,
   authorize,
   can,
+  composeVerdictPolicy,
   contentDigest,
   retryableUnmeasured,
 } from "@everdict/domain";
@@ -158,6 +159,22 @@ export class ScorecardService {
     // Run-time grading plan — this batch scores with the requested graders instead of each case's defaults (S5).
     const dataset: Dataset = { ...resolved, cases: applyGradingPlan(selectedCases, input.graders) };
 
+    // Constitution seed (trust-kernel O1): a grading plan declaring GROUND-TRUTH authority redefines what
+    // passing means for this batch — an admin's call, never ambient member power. The composed policy itself
+    // is embedded in the manifest below so the stamped verdicts stay re-derivable forever.
+    const composedPolicy = composeVerdictPolicy(input.graders ?? []);
+    const composed = composedPolicy.id === "composed";
+    if (
+      (input.graders ?? []).some((g) => g.authority === "ground_truth") &&
+      !(input.submitterRoles ?? []).includes("admin")
+    ) {
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { graders: (input.graders ?? []).filter((g) => g.authority === "ground_truth").map((g) => g.id) },
+        "Declaring ground_truth authority for a run-time grader requires the admin role — it changes what passing means.",
+      );
+    }
+
     // P4 causal leg (§5.1): an agent-caused batch draws its WHOLE fan-out from the causer's envelope —
     // headroom is checked here (402 past the cap, 429 past the depth guard, NEVER silently) before any
     // case exists; the children stamp the envelope at creation and settle real cost against it per case.
@@ -270,6 +287,10 @@ export class ScorecardService {
           ...(harnessSpec ? { specDigest: contentDigest(harnessSpec) } : {}),
         },
         ...(input.graders && input.graders.length > 0 ? { graders: contentDigest(input.graders) } : {}),
+        ...(await this.judgeManifest(input.tenant, pinnedJudges)),
+        // The composed policy in FULL — it lives nowhere else, and a stamp without its document is a verdict
+        // nobody can re-derive.
+        ...(composed ? { verdictPolicy: composedPolicy } : {}),
       },
       now: this.now(),
     });
@@ -476,6 +497,26 @@ export class ScorecardService {
   // Resolve each selected judge's version (latest→concrete) via the registry, so the recorded orchestration pins the
   // exact judge that scored — the same reproducibility guarantee harness/dataset already have. No registry (unit paths)
   // or an unresolvable id → keep the ref as-given; the scoring path silently skips a judge it can't resolve, unchanged.
+  // Which judge DOCUMENTS score this batch — id+version+spec digest (an edited judge under the same version
+  // would otherwise be indistinguishable in the manifest). Best-effort per judge: an unresolvable spec keeps
+  // its id/version with no digest rather than failing the submit.
+  private async judgeManifest(
+    tenant: string,
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<{ judges?: Array<{ id: string; version: string; specDigest?: string }> }> {
+    if (judges.length === 0) return {};
+    const out: Array<{ id: string; version: string; specDigest?: string }> = [];
+    for (const j of judges) {
+      try {
+        const spec = await this.deps.judges?.get(tenant, j.id, j.version);
+        out.push({ ...j, ...(spec ? { specDigest: contentDigest(spec) } : {}) });
+      } catch {
+        out.push({ ...j });
+      }
+    }
+    return { judges: out };
+  }
+
   private async pinJudgeVersions(
     tenant: string,
     judges: Array<{ id: string; version: string }>,

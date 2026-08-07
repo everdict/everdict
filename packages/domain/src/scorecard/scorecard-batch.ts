@@ -6,6 +6,7 @@ import type {
   ScorecardOrigin,
   ScorecardRecord,
   ScorecardSubset,
+  VerdictPolicy,
   VerdictPolicyRef,
 } from "@everdict/contracts";
 import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
@@ -36,8 +37,8 @@ export type ScorecardRunError = NonNullable<ScorecardRecord["error"]>;
 // projection is code, and an undated interpretation makes an old verdict impossible to re-derive.
 // Also stamps WHICH verdict policy the batch's verdicts resolve under (id + version + content digest) —
 // verdicts are derived on read, so the stamp is what keeps them stable when the policy evolves (mig 0125).
-function judgedUnder(): { traceProjectionVersion: number; verdictPolicy: VerdictPolicyRef } {
-  return { traceProjectionVersion: SPANS_TO_EVENTS_VERSION, verdictPolicy: verdictPolicyRef() };
+function judgedUnder(policy?: VerdictPolicy): { traceProjectionVersion: number; verdictPolicy: VerdictPolicyRef } {
+  return { traceProjectionVersion: SPANS_TO_EVENTS_VERSION, verdictPolicy: verdictPolicyRef(policy) };
 }
 
 export type ScorecardOutcomeExtras = Partial<
@@ -423,7 +424,7 @@ export class ScorecardBatch {
   succeed(extras: ScorecardOutcomeExtras, now: string): ScorecardTransition {
     this.assertNotTerminal("succeed");
     return {
-      patch: { status: "succeeded", ...extras, ...judgedUnder(), updatedAt: now },
+      patch: { status: "succeeded", ...extras, ...judgedUnder(this.record.manifest?.verdictPolicy), updatedAt: now },
       facts: batchTerminalFact(this.record, "succeeded", extras),
     };
   }
@@ -432,7 +433,13 @@ export class ScorecardBatch {
   fail(error: ScorecardRunError, extras: ScorecardOutcomeExtras, now: string): ScorecardTransition {
     this.assertNotTerminal("fail");
     return {
-      patch: { status: "failed", error, ...extras, ...judgedUnder(), updatedAt: now },
+      patch: {
+        status: "failed",
+        error,
+        ...extras,
+        ...judgedUnder(this.record.manifest?.verdictPolicy),
+        updatedAt: now,
+      },
       facts: batchTerminalFact(this.record, "failed", extras),
     };
   }

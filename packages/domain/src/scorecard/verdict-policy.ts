@@ -1,7 +1,9 @@
 import {
   type CaseFailure,
   type CaseResult,
+  type GraderSpec,
   type MetricAuthority,
+  type MetricDefinition,
   type Score,
   type VerdictAggregation,
   type VerdictPolicy,
@@ -67,9 +69,40 @@ export const DEFAULT_VERDICT_POLICY: VerdictPolicy = {
 // exact document, or the historical verdict cannot be re-derived. A new policy version is ADDED, never edited.
 const KNOWN_VERDICT_POLICIES: readonly VerdictPolicy[] = [DEFAULT_VERDICT_POLICY];
 
-export function resolveVerdictPolicy(ref?: Pick<VerdictPolicyRef, "id" | "version">): VerdictPolicy {
+// `embedded` = the full policy document a record carries in its manifest (a COMPOSED policy lives nowhere
+// else). It is trusted only when its digest matches the stamped ref — a manifest edited after the fact does
+// not get to rewrite the verdict.
+export function resolveVerdictPolicy(
+  ref?: Pick<VerdictPolicyRef, "id" | "version"> & Partial<Pick<VerdictPolicyRef, "digest">>,
+  embedded?: VerdictPolicy,
+): VerdictPolicy {
   if (!ref) return DEFAULT_VERDICT_POLICY; // pre-stamp records were judged under the ladder this encodes
+  if (embedded && (ref.digest === undefined || verdictPolicyDigest(embedded) === ref.digest)) return embedded;
   return KNOWN_VERDICT_POLICIES.find((p) => p.id === ref.id && p.version === ref.version) ?? DEFAULT_VERDICT_POLICY;
+}
+
+// Compose the batch's verdict policy from the run-time grading plan's DECLARATIONS: a custom grader gains
+// authority for the metric sharing its id by declaring it — no domain-code edit. Declared definitions are
+// appended AFTER the built-ins, so a custom ground-truth ranks below state/tests_pass in the priority rung
+// (adding a source of truth never silently outranks the established ones). No declarations ⇒ the base policy
+// object itself (identity-comparable, so callers can tell "nothing composed").
+export function composeVerdictPolicy(
+  specs: readonly Pick<GraderSpec, "id" | "authority" | "direction">[],
+  base: VerdictPolicy = DEFAULT_VERDICT_POLICY,
+): VerdictPolicy {
+  const additions: MetricDefinition[] = [];
+  for (const spec of specs) {
+    if (spec.authority === undefined) continue;
+    additions.push({
+      match: { metric: spec.id },
+      authority: spec.authority,
+      ...(spec.direction ? { direction: spec.direction } : {}),
+    });
+  }
+  if (additions.length === 0) return base;
+  const doc: VerdictPolicy = { ...base, id: "composed", version: "0", metrics: [...base.metrics, ...additions] };
+  // The version IS the content identity — composed documents have no registry row to version against.
+  return { ...doc, version: verdictPolicyDigest(doc).slice(0, 12) };
 }
 
 // Aggregate one rung's deciding measurements. "priority" needs the DEFINITION order — deciders arrive

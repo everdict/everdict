@@ -2,6 +2,7 @@ import type { Score, VerdictPolicy } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_VERDICT_POLICY,
+  composeVerdictPolicy,
   evaluateVerdict,
   resolveVerdictPolicy,
   verdictPolicyDigest,
@@ -119,5 +120,37 @@ describe("verdict policy identity", () => {
   it("resolveVerdictPolicy finds the stamped policy and falls back to the ladder for pre-stamp records", () => {
     expect(resolveVerdictPolicy({ id: "authority-ladder", version: "1.0.0" })).toBe(DEFAULT_VERDICT_POLICY);
     expect(resolveVerdictPolicy(undefined)).toBe(DEFAULT_VERDICT_POLICY);
+  });
+});
+
+describe("composeVerdictPolicy — a custom grader gains authority by DECLARING it", () => {
+  it("a declared objective grader decides its metric with no domain-code edit", () => {
+    const policy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    expect(policy.id).toBe("composed");
+    // the declared metric now OVERRULES a judge (objective rung > judge rung)
+    const { verdict, basis } = evaluateVerdict({ scores: [s("schema_valid", false), s("judge:q", true)] }, policy);
+    expect(verdict).toBe(false);
+    expect(basis?.authority).toBe("objective");
+    // under the default (undeclared) policy the same metric only reaches the fallback
+    expect(evaluateVerdict({ scores: [s("schema_valid", false), s("judge:q", true)] }).verdict).toBe(true);
+  });
+
+  it("a declared ground truth never OUTRANKS the built-ins — additions append after state/tests_pass", () => {
+    const policy = composeVerdictPolicy([{ id: "custom_state", authority: "ground_truth" }]);
+    const { verdict } = evaluateVerdict({ scores: [s("state", true), s("custom_state", false)] }, policy);
+    expect(verdict).toBe(true); // priority rung: state (built-in, first) still decides
+  });
+
+  it("no declarations returns the base policy object itself", () => {
+    expect(composeVerdictPolicy([{ id: "steps" }])).toBe(DEFAULT_VERDICT_POLICY);
+  });
+
+  it("resolveVerdictPolicy trusts an embedded document only when its digest matches the stamp", () => {
+    const composed = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const ref = verdictPolicyRef(composed);
+    expect(resolveVerdictPolicy(ref, composed)).toBe(composed);
+    // a tampered embedded doc falls back to the registry/default — the manifest cannot rewrite the verdict
+    const tampered = { ...composed, fallback: "none" as const };
+    expect(resolveVerdictPolicy(ref, tampered)).toBe(DEFAULT_VERDICT_POLICY);
   });
 });

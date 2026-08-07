@@ -53,6 +53,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         await deps.scorecardService.submit({
           tenant: principal.workspace,
           submittedBy: principal.subject,
+          submitterRoles: principal.roles, // the constitution seed reads them (ground_truth declarations are admin-only)
           // Only what the caller actually NAMED is an owner claim (owner.gate carries exactly that); the rest is
           // the fallback the service reaches for after the harness's own team. Passing owner.teamId as `teamId`
           // would make "whichever membership loaded first" outrank what was run.

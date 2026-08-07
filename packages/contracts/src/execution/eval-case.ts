@@ -5,12 +5,19 @@ import { ScoreSchema } from "./grader.js";
 import { RecordingRefSchema } from "./recording.js";
 import { SpanAttrMappingSchema, TraceEvidenceSchema } from "./trace-source.js";
 import { TraceEventSchema } from "./trace.js";
+import { MetricAuthoritySchema } from "./verdict-policy.js";
 
 // Grader spec: id + optional config (e.g. tests-pass's { cmd }).
 // The agent reconstructs a Grader instance from this spec.
 export const GraderSpecSchema = z.object({
   id: z.string(),
   config: z.record(z.unknown()).optional(),
+  // The metric semantics this run-time grader DECLARES for the metric sharing its id — composed into the
+  // batch's verdict policy at submit (composeVerdictPolicy), so a custom grader gains authority by DECLARING
+  // it, never by a domain-code edit. A ground_truth declaration is constitution-gated (admin-only at submit):
+  // whoever can name new ground truth can decide what passing MEANS, and that power is reviewed, not ambient.
+  authority: MetricAuthoritySchema.optional(),
+  direction: z.enum(["higher_is_better", "lower_is_better", "neutral"]).optional(),
 });
 export type GraderSpec = z.infer<typeof GraderSpecSchema>;
 

@@ -24,6 +24,7 @@ export {
   scorecardOutcomes,
 } from "./scorecard/case-outcome.js";
 export {
+  composeVerdictPolicy,
   DEFAULT_VERDICT_POLICY,
   evaluateVerdict,
   resolveVerdictPolicy,

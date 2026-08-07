@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { JudgeRunConfigSchema } from "../execution/case-job.js";
 import { GraderSpecSchema, ScorecardSchema } from "../execution/eval-case.js";
-import { VerdictPolicyRefSchema } from "../execution/verdict-policy.js";
+import { VerdictPolicyRefSchema, VerdictPolicySchema } from "../execution/verdict-policy.js";
 
 // Scorecard run lifecycle: accept a dataset×harness batch eval → run → success/failure.
 // superseded = a terminal state where a newer fire of the same (origin.repo, prNumber, harness, dataset) reclaimed (cancelled·replaced) this batch.
@@ -43,6 +43,13 @@ export const ScorecardManifestSchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string(), digest: z.string() }), // digest over the resolved case bundle
   harness: z.object({ id: z.string(), version: z.string(), specDigest: z.string().optional() }), // resolved spec (absent: built-in with no declarative spec)
   graders: z.string().optional(), // digest of the run-time grading plan (absent = per-case defaults)
+  // The selected judges with their resolved spec digests — WHICH judge documents scored this batch, not just
+  // which ids (an edited judge under the same version would otherwise be indistinguishable).
+  judges: z.array(z.object({ id: z.string(), version: z.string(), specDigest: z.string().optional() })).optional(),
+  // The COMPOSED verdict policy this batch judges under, embedded IN FULL when it differs from the built-in
+  // ladder: a composed document lives nowhere else, and a stamp whose document cannot be found is a verdict
+  // that cannot be re-derived. Absent = the default ladder.
+  verdictPolicy: VerdictPolicySchema.optional(),
 });
 export type ScorecardManifest = z.infer<typeof ScorecardManifestSchema>;
 

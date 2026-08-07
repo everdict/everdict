@@ -5,6 +5,10 @@ export const LeaderboardResponseSchema = z.object({
   dataset: z.string().describe("Dataset id (the benchmark)"),
   metric: z.string(),
   window: z.enum(["latest", "best"]).describe("Group representative policy: newest createdAt vs highest score"),
+  policyMixed: z
+    .boolean()
+    .optional()
+    .describe("The ranked batches were judged under different verdict policies — the ordering is cross-policy"),
   rows: z
     .array(
       z.object({

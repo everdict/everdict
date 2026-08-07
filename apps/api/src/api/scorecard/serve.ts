@@ -24,7 +24,7 @@ export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
   if (!record.scorecard) return { ...record, headlinePassRate: headline };
   // Verdicts resolve under the batch's STAMPED policy (absent = the default ladder those records were judged
   // under) — evolving the policy never silently rewrites a historical verdict.
-  const policy = resolveVerdictPolicy(record.verdictPolicy);
+  const policy = resolveVerdictPolicy(record.verdictPolicy, record.manifest?.verdictPolicy);
   let pass = 0;
   let total = 0;
   const results = record.scorecard.results.map((r) => {

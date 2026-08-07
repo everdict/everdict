@@ -331,6 +331,31 @@ describe("ScorecardService.moveToTeam — evidence is re-filed, and both teams a
   });
 });
 
+describe("ScorecardService — constitution seed (verdict-authority declarations)", () => {
+  it("a member declaring ground_truth authority for a run-time grader is refused; an admin passes and the composed policy is sealed", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({ dispatcher, store, datasets });
+    const base = {
+      tenant: "acme",
+      dataset: { id: datasetWithCase().id, version: datasetWithCase().version },
+      harness: { id: "scripted", version: "0" },
+      graders: [{ id: "custom_state", authority: "ground_truth" as const }],
+    };
+    // member: refused — whoever can name new ground truth decides what passing MEANS
+    await expect(service.submit({ ...base, submitterRoles: ["member"] })).rejects.toThrow(/admin/);
+    // admin: accepted, and the COMPOSED policy document is sealed into the manifest (re-derivable forever)
+    const record = await service.submit({ ...base, submitterRoles: ["admin"] });
+    expect(record.manifest?.verdictPolicy?.id).toBe("composed");
+    expect(
+      record.manifest?.verdictPolicy?.metrics.some(
+        (d) => "metric" in d.match && d.match.metric === "custom_state" && d.authority === "ground_truth",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("ScorecardService.diff", () => {
   it("reports pass transitions as regression/improvement", async () => {
     const store = new InMemoryScorecardStore();

@@ -257,6 +257,9 @@ export interface RunScorecardInput {
   // submitter (principal.subject) — the owner used to resolve a private-repo case's personally-owned connection ("clone via my connection").
   // Consequently a private-repo dataset is effectively single-owner (a case's connectionId only resolves when that owner submits).
   submittedBy?: string;
+  // The submitter's roles (principal.roles) — the constitution seed reads them: a run-time grader declaring
+  // ground_truth authority redefines what passing MEANS, and that is an admin's call, not any member's.
+  submitterRoles?: string[];
   dataset: { id: string; version: string };
   // pins = submit-time ephemeral pin overrides (slot→image, registry unchanged) — a CI PR fire swaps one service image for evaluation.
   // Recorded in origin.pinOverrides (reproducibility evidence). Durable changes go through POST /harnesses/:id/pins (a new instance version).

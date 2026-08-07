@@ -115,3 +115,32 @@ describe("trend direction (sign-as-verdict sweep)", () => {
     expect(t.points.every((p) => !p.regressed)).toBe(true);
   });
 });
+
+describe("trend policy gate", () => {
+  const c = (id: string, createdAt: string, passRate: number, digest?: string) => ({
+    id,
+    dataset: { id: "d", version: "1" },
+    harness: { id: "h", version: "1" },
+    status: "succeeded",
+    createdAt,
+    summary: [{ metric: "tests_pass", count: 3, mean: passRate, passRate }],
+    ...(digest ? { verdictPolicy: { digest } } : {}),
+  });
+
+  it("a drop across a policy change is disclosed, never flagged as a regression", () => {
+    const t = trendSeries([c("a", "2026-01-01T00:00:00Z", 1.0, "aaa"), c("b", "2026-01-02T00:00:00Z", 0.5, "bbb")], {
+      datasetId: "d",
+      metric: "tests_pass",
+    });
+    expect(t.policyMixed).toBe(true);
+    expect(t.points[1]?.policyDiffers).toBe(true);
+    expect(t.points[1]?.regressed).toBe(false); // different rules produced the two rates
+    // the same drop under ONE policy IS a regression
+    const same = trendSeries([c("a", "2026-01-01T00:00:00Z", 1.0, "aaa"), c("b", "2026-01-02T00:00:00Z", 0.5, "aaa")], {
+      datasetId: "d",
+      metric: "tests_pass",
+    });
+    expect(same.policyMixed).toBeUndefined();
+    expect(same.points[1]?.regressed).toBe(true);
+  });
+});

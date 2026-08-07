@@ -107,6 +107,8 @@ export default async function LeaderboardPage({
 
       {error && <Callout tone="danger">{t('leaderboardLoadError', { error })}</Callout>}
 
+      {board?.policyMixed && <Callout tone="warning">{t('leaderboardPolicyMixed')}</Callout>}
+
       {board && (
         <div className="space-y-4">
           <p className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">

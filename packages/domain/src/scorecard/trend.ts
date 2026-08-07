@@ -12,6 +12,7 @@ export interface TrendCard {
   status: string;
   createdAt: string; // ISO
   summary?: MetricSummary[];
+  verdictPolicy?: { digest: string }; // which policy judged this batch (absent = the default ladder)
 }
 
 export interface TrendPoint {
@@ -23,6 +24,9 @@ export interface TrendPoint {
   score: number | null; // passRate first (mean if absent) — the trend/regression decision key
   deltaVsBaseline: number | null; // score - baseline.score (only when both exist)
   regressed: boolean; // moved AGAINST the series' direction vs baseline (> epsilon); always false when direction is unknown
+  // TRUE when this point was judged under a DIFFERENT verdict policy than its baseline point — the two rates
+  // were produced by different rules, so a drop between them is never flagged as a regression.
+  policyDiffers?: boolean;
 }
 
 export interface ScorecardTrend {
@@ -33,6 +37,9 @@ export interface ScorecardTrend {
   // metric, else higher_is_better when the series is pass-rate-based. Absent = unknown direction — no point
   // is flagged regressed, and a consumer must not color the delta by sign.
   direction?: "higher_is_better" | "lower_is_better";
+  // TRUE when the series mixes batches judged under different verdict policies — one line drawn through two
+  // rule-sets. Points are kept (never silently dropped); cross-policy regression flags are suppressed per point.
+  policyMixed?: boolean;
   points: TrendPoint[]; // createdAt ascending
 }
 
@@ -79,15 +86,28 @@ export function trendSeries(
         ? "higher_is_better"
         : undefined;
 
+  const digestOf = (card: TrendCard): string => card.verdictPolicy?.digest ?? "default";
+  const baselineDigest =
+    baseline === "first"
+      ? (scored.find((s) => s.score !== null)?.card ?? scored[0]?.card)
+      : baseline === "previous"
+        ? undefined
+        : scored.find((s) => s.card.id === baseline)?.card;
+  const policyMixed = new Set(scored.map((s) => digestOf(s.card))).size > 1;
+
   const points: TrendPoint[] = scored.map((s, i) => {
-    const baseScore =
+    const prev =
       baseline === "previous"
-        ? (scored
+        ? scored
             .slice(0, i)
             .reverse()
-            .find((p) => p.score !== null)?.score ?? null)
-        : fixedBaselineScore;
+            .find((p) => p.score !== null)
+        : undefined;
+    const baseScore = baseline === "previous" ? (prev?.score ?? null) : fixedBaselineScore;
     const delta = s.score !== null && baseScore !== null ? s.score - baseScore : null;
+    // Cross-policy comparison never regresses: the two rates were produced by different rules.
+    const refCard = baseline === "previous" ? prev?.card : baselineDigest;
+    const policyDiffers = refCard !== undefined && digestOf(refCard) !== digestOf(s.card);
     return {
       scorecardId: s.card.id,
       harness: `${s.card.harness.id}@${s.card.harness.version}`,
@@ -97,10 +117,19 @@ export function trendSeries(
       score: s.score,
       deltaVsBaseline: delta,
       regressed:
+        !policyDiffers &&
         delta !== null &&
         (direction === "higher_is_better" ? delta < -EPS : direction === "lower_is_better" ? delta > EPS : false),
+      ...(policyDiffers ? { policyDiffers } : {}),
     };
   });
 
-  return { dataset: opts.datasetId, metric: opts.metric, baseline, ...(direction ? { direction } : {}), points };
+  return {
+    dataset: opts.datasetId,
+    metric: opts.metric,
+    baseline,
+    ...(direction ? { direction } : {}),
+    ...(policyMixed ? { policyMixed } : {}),
+    points,
+  };
 }

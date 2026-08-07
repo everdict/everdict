@@ -154,6 +154,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             await scorecards.submit({
               tenant: ws,
               submittedBy: principal.subject, // clone private-repo cases via my personal connection
+              submitterRoles: principal.roles, // constitution seed (ground_truth declarations are admin-only)
               // Named → the owner; unnamed → the service inherits the harness's team, else this fallback.
               ...(team_id !== undefined && owner !== undefined ? { teamId: owner } : {}),
               ...(owner !== undefined ? { submitterTeamId: owner } : {}),

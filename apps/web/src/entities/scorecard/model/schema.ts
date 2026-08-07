@@ -332,6 +332,7 @@ export const trendPointSchema = z.object({
   score: z.number().nullable(),
   deltaVsBaseline: z.number().nullable(),
   regressed: z.boolean(),
+  policyDiffers: z.boolean().optional(), // different policy than the baseline point — never regressed
 })
 
 export const scorecardTrendSchema = z.object({
@@ -340,6 +341,7 @@ export const scorecardTrendSchema = z.object({
   baseline: z.string(),
   // Reading direction the server computed regressions under — absent = unknown: deltas stay uncolored.
   direction: z.enum(['higher_is_better', 'lower_is_better']).optional(),
+  policyMixed: z.boolean().optional(), // mixed verdict policies — cross-policy regressions are suppressed
   points: z.array(trendPointSchema),
 })
 
@@ -362,6 +364,7 @@ export const leaderboardSchema = z.object({
   dataset: z.string(),
   metric: z.string(),
   window: z.enum(['latest', 'best']),
+  policyMixed: z.boolean().optional(), // ranked under different verdict policies — ordering is cross-policy
   rows: z.array(leaderboardRowSchema),
 })
 
