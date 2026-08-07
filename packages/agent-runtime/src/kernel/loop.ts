@@ -227,9 +227,9 @@ export interface AgentLoopResult {
 // A high safety cap, not a task budget — the token budget (+ compaction) is the primary limiter for long tasks. 12
 // was too low for multi-step goals; compaction keeps the context bounded so more turns don't blow the window.
 const DEFAULT_MAX_TURNS = 50;
-// 6 retries with exponential backoff (500ms base, 32s cap) ≈ half a minute of patience before the fallback model /
-// failure — 2 fixed-backoff attempts died on any real capacity dip (Claude Code ships 10).
-const DEFAULT_MAX_RETRIES = 6;
+// 19 retries (20 attempts total) with exponential backoff (500ms base, 32s cap) ≈ 7½ minutes of patience before the
+// fallback model / failure — 6 retries (≈ half a minute) still died on sustained provider instability.
+const DEFAULT_MAX_RETRIES = 19;
 // Circuit breaker: if compaction fires this many times in one run without the context ever fitting, stop instead of
 // hammering the summariser forever on an irrecoverably-oversized context. Shared by the proactive + reactive paths.
 const MAX_COMPACTIONS = 12;
