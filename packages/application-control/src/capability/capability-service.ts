@@ -11,6 +11,7 @@ import {
   NotFoundError,
 } from "@everdict/contracts";
 import {
+  assertCapabilityEffects,
   canConsumeCapability,
   classifyImageRef,
   compareVersions,
@@ -157,6 +158,8 @@ export class CapabilityService {
     id: string,
     body: CapabilityUpsert,
   ): Promise<SaveCapabilityResult> {
+    // O4 registration guard: a write-capable tool must declare its effect contract — refused before any write.
+    assertCapabilityEffects(body.spec);
     // Computed on every save path (create / new version / idempotent no-op) — the author benefits either way.
     const warnings = await this.environmentImageWarnings(tenant, body.spec);
     const withWarnings = (result: SaveCapabilityResult): SaveCapabilityResult =>
@@ -220,6 +223,8 @@ export class CapabilityService {
     id: string,
     body: { name: string; description: string; spec: CapabilitySpec },
   ): Promise<CapabilityValidation> {
+    // Same O4 guard as save — the wizard's dry-run review surfaces the refusal before the author commits.
+    assertCapabilityEffects(body.spec);
     const imageWarnings = await this.environmentImageWarnings(tenant, body.spec);
     const withWarnings = <T extends object>(v: T): T => (imageWarnings.length > 0 ? { ...v, imageWarnings } : v);
     const existingVersions = await this.deps.store.versions(tenant, id);

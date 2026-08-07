@@ -60,6 +60,21 @@ export type RequiredSecret = z.infer<typeof RequiredSecretSchema>;
 // discriminatedUnion member may not be a refined ZodEffects (zod v3); the runtime prefers image, else url, else skips.
 // requiredSecrets bind to the `Authorization` header (url) or to container env vars (image); the adopter maps each
 // name to one of their own secrets at adoption.
+// The effect contract (trust-kernel O4): what invoking this capability DOES to the world outside the
+// sandbox. "deploy" as one opaque verb is how an agent inherits a footgun — a WRITE-capable capability must
+// say its blast radius, whether a retry is safe, how one invocation is undone, and what a partial success
+// leaves behind. The domain guard (assertCapabilityEffects) refuses registering a write-capable capability
+// without it: an undeclared side effect is not a smaller side effect.
+export const EffectContractSchema = z.object({
+  // none: pure computation/read · workspace: mutates everdict-owned state · external: reaches an outside
+  // system (deploys, emails, third-party writes) — the highest blast radius.
+  sideEffect: z.enum(["none", "workspace", "external"]),
+  idempotent: z.boolean().optional(), // calling twice ≡ calling once. Absent = UNKNOWN — treated as NOT idempotent.
+  rollback: z.string().min(1).max(500).optional(), // how one invocation is undone (executable prose, not hope)
+  partialFailure: z.string().min(1).max(500).optional(), // what a partial success leaves behind and how to tell
+});
+export type EffectContract = z.infer<typeof EffectContractSchema>;
+
 export const McpToolSpecSchema = z.object({
   type: z.literal("mcp"),
   url: z.string().url().optional(), // remote MCP endpoint (Streamable HTTP) — auth = requiredSecrets[0] → Authorization header
@@ -68,6 +83,7 @@ export const McpToolSpecSchema = z.object({
   provides: z.array(z.string()).default([]), // the tool names this server exposes (store card / discovery only)
   requiredSecrets: z.array(RequiredSecretSchema).default([]), // secrets the adopter supplies at adoption (header value for url; env vars for image)
   write: z.boolean().default(false), // does this server offer mutating tools (adopter still opts in per-adoption)
+  effects: EffectContractSchema.optional(), // REQUIRED (domain guard) when write=true — see EffectContractSchema
 });
 export type McpToolSpec = z.infer<typeof McpToolSpecSchema>;
 
@@ -95,6 +111,7 @@ export const CodeToolSpecSchema = z.object({
   timeoutSec: z.number().int().positive().optional(),
   image: z.string().optional(), // optional dedicated sandbox image (else the default hardened sandbox)
   examples: z.array(CodeToolExampleSchema).max(8).default([]), // worked examples (store detail · try-runner · tool description)
+  effects: EffectContractSchema.optional(), // REQUIRED (domain guard) when isReadOnly=false — see EffectContractSchema
 });
 export type CodeToolSpec = z.infer<typeof CodeToolSpecSchema>;
 
