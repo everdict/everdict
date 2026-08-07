@@ -260,7 +260,8 @@ export const ScorecardRecordSchema = z.object({
   export: ScorecardExportSchema.optional(), // trace-sink export result (for detail — get only, like steps)
   // WHICH verdict policy produced this batch's verdicts (id + version + content digest). Verdicts are derived
   // on read, so this stamp is what keeps a historical verdict stable when the policy evolves: readers resolve
-  // the STAMPED policy (resolveVerdictPolicy), never silently the newest one. Absent on batches settled before
+  // the STAMPED policy (resolvePolicyResolution), never silently the newest one — a stamp that cannot be
+  // restored withholds the verdict instead of falling back. Absent on batches settled before
   // the stamp existed — those were judged under the authority ladder the default policy encodes. mig 0125.
   verdictPolicy: VerdictPolicyRefSchema.optional(),
   manifest: ScorecardManifestSchema.optional(), // reproducibility digests, sealed at submit (mig 0126)

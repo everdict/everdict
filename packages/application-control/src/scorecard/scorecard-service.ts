@@ -1103,7 +1103,7 @@ export class ScorecardService {
       }
     }
     // Verdict policy — the embedded document must still hash to the stamped digest, else the stamp cannot be
-    // trusted to re-derive verdicts (the resolveVerdictPolicy rule, verified explicitly here).
+    // trusted to re-derive verdicts (the resolvePolicyResolution rule, verified explicitly here).
     if (m.verdictPolicy !== undefined && record.verdictPolicy !== undefined) {
       const current = contentDigest(m.verdictPolicy);
       checks.push({
