@@ -7,19 +7,27 @@ import type {
   VerdictPolicyRef,
 } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
-import type { ScorecardDiff } from "./scorecard.js";
+import type { MeasurementCoverage, ScorecardDiff } from "./scorecard.js";
 import type { TrialDiff } from "./trials.js";
 
 // Release-gate evaluation (metrics commercialization A1) — ONE pure derivation from the diff the trust
-// kernel already computes. The gate's competitive claim is the middle decision: `not_comparable` is
-// first-class, so an incomparable pair can never produce a false green light, and "no differences" is a
-// different answer from "the comparison does not hold".
+// kernel already computes. The gate's competitive claim is the middle decisions: `not_comparable` and
+// `blocked_missing` are first-class, so an incomparable OR an incomplete pair can never produce a false
+// green light, and "no differences" is a different answer from "the comparison does not hold" — which is
+// again different from "the comparison held, but not over enough".
 export type GateInput = ScorecardDiff & {
   trials?: TrialDiff;
   policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
+  // Evidence quality of each side (measurementCoverage). Optional: a caller that cannot supply it simply
+  // cannot gate on maxUnmeasuredFraction — the gate never invents a coverage number it was not given.
+  coverage?: { baseline: MeasurementCoverage; candidate: MeasurementCoverage };
 };
 
 export type GateEvaluation = Pick<GateDecision, "decision" | "reasons" | "evidence">;
+
+// Fail-closed default. A gate exists to withhold a green light the evidence does not support, so the
+// caller that wants to decide on a PARTIAL comparison is the one who has to say so.
+const DEFAULT_COMPARABILITY: NonNullable<GatePolicy["comparability"]> = "require_full";
 
 export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluation {
   const reasons: GateReason[] = [];
@@ -27,12 +35,22 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   // last-trial pass transitions are noise on a trial run (the diffTrials contract).
   const trialsGated = diff.trials !== undefined;
   const regressions = trialsGated && diff.trials ? diff.trials.regressions.length : diff.regressions.length;
+  // Cases the CANDIDATE never ran, against the baseline's own case count: "how much of what we compared
+  // against did this candidate actually cover?". A candidate that ADDED cases lost no coverage, so extra
+  // candidate-only cases are counted in missingCases but never inflate this fraction.
+  const uncovered = diff.missing.casesOnlyInBaseline.length;
+  const missingFraction = diff.overlap.baselineCases > 0 ? uncovered / diff.overlap.baselineCases : undefined;
+  // The WORSE of the two sides: a comparison is only as measured as its weaker half — a baseline made of
+  // placeholders makes "no regression" meaningless just as surely as a hollow candidate does.
+  const unmeasuredFraction = worstUnmeasuredFraction(diff.coverage);
   const evidence: GateEvaluation["evidence"] = {
     comparability: diff.comparability,
     regressions,
     improvements: trialsGated && diff.trials ? diff.trials.improvements.length : diff.improvements.length,
     missingCases: diff.missing.casesOnlyInBaseline.length + diff.missing.casesOnlyInCandidate.length,
     trialsGated,
+    ...(missingFraction !== undefined ? { missingFraction } : {}),
+    ...(unmeasuredFraction !== undefined ? { unmeasuredFraction } : {}),
   };
 
   if (diff.comparability === "none") {
@@ -49,6 +67,14 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
     }
     return { decision: "not_comparable", reasons, evidence };
   }
+
+  // ── Missingness, decided BEFORE the arithmetic ──
+  // `partial` means the comparison held only over part of what was asked: cases the candidate never ran,
+  // metrics that vanished, columns whose value kind changed. Reading "0 regressions" out of the 60 cases
+  // that survived a 100-case baseline is evidence about 60 cases — the arithmetic below is honest and the
+  // CONCLUSION drawn from it is not. So a partial comparison blocks by default, and a caller who wants to
+  // ship on a subset says so (allow_partial) and states how much loss it accepts.
+  const withheld = missingnessReasons(diff, policy, { uncovered, missingFraction, unmeasuredFraction });
 
   if (trialsGated && diff.trials) {
     for (const r of diff.trials.regressions) {
@@ -74,7 +100,81 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   }
 
   const blocking = reasons.filter((r) => r.kind === "regression" || r.kind === "trial_regression").length;
+  // Missingness first: when the comparison was too incomplete to decide on, saying `blocked_missing` names
+  // WHY the gate withheld the light. Any regressions found in the overlap still ride in `reasons` — the
+  // decision changes, the evidence never shrinks.
+  if (withheld.length > 0) return { decision: "blocked_missing", reasons: [...withheld, ...reasons], evidence };
   return { decision: blocking > policy.maxRegressions ? "block" : "pass", reasons, evidence };
+}
+
+function worstUnmeasuredFraction(coverage: GateInput["coverage"]): number | undefined {
+  if (!coverage) return undefined;
+  const sides = [coverage.baseline.unmeasuredFraction, coverage.candidate.unmeasuredFraction].filter(
+    (f): f is number => f !== undefined,
+  );
+  return sides.length > 0 ? Math.max(...sides) : undefined;
+}
+
+// The reasons a comparison is too incomplete to decide on. Empty ⇒ the gate may read the arithmetic.
+function missingnessReasons(
+  diff: GateInput,
+  policy: GatePolicy,
+  measured: { uncovered: number; missingFraction?: number; unmeasuredFraction?: number },
+): GateReason[] {
+  const out: GateReason[] = [];
+  const mode = policy.comparability ?? DEFAULT_COMPARABILITY;
+  const missingCases = diff.missing.casesOnlyInBaseline.length + diff.missing.casesOnlyInCandidate.length;
+  // A metric that exists on one side only, or whose value kind changed, is a column the comparison lost —
+  // both are causes of `partial`, so both are counted here.
+  const missingMetrics =
+    diff.missing.metricsOnlyInBaseline.length + diff.missing.metricsOnlyInCandidate.length + diff.incomparable.length;
+
+  if (diff.comparability === "partial" && mode === "require_full") {
+    if (missingCases > 0)
+      out.push({
+        kind: "missing_cases",
+        count: missingCases,
+        ...(measured.missingFraction !== undefined ? { fraction: measured.missingFraction } : {}),
+        detail: `${measured.uncovered} of the baseline's ${diff.overlap.baselineCases} case(s) were not run by the candidate — this comparison covers a subset, so it cannot answer whether the whole suite regressed (set comparability "allow_partial" to decide on a subset deliberately)`,
+      });
+    if (missingMetrics > 0)
+      out.push({
+        kind: "missing_metrics",
+        count: missingMetrics,
+        detail:
+          "metric(s) exist on one side only or changed value kind — the comparison lost columns, so a clean result over what remains is not a clean result",
+      });
+  } else if (diff.comparability === "partial" && mode === "allow_partial") {
+    // The caller accepted a subset — but only up to the limits it stated. An unstated limit is not a limit.
+    const overCount = policy.maxMissingCases !== undefined && missingCases > policy.maxMissingCases;
+    const overFraction =
+      policy.maxMissingFraction !== undefined &&
+      measured.missingFraction !== undefined &&
+      measured.missingFraction > policy.maxMissingFraction;
+    if (overCount || overFraction)
+      out.push({
+        kind: "missing_cases",
+        count: missingCases,
+        ...(measured.missingFraction !== undefined ? { fraction: measured.missingFraction } : {}),
+        detail: overCount
+          ? `${missingCases} one-sided case(s) exceeds the policy's maxMissingCases of ${policy.maxMissingCases}`
+          : `${((measured.missingFraction ?? 0) * 100).toFixed(1)}% of the baseline's cases were not run by the candidate, over the policy's maxMissingFraction of ${policy.maxMissingFraction}`,
+      });
+  }
+
+  // Independent of the comparability mode: unmeasured scores never make a comparison `partial` (both sides
+  // report the same metrics, they are just empty), so this limit would be unreachable if it were gated on it.
+  if (
+    policy.maxUnmeasuredFraction !== undefined &&
+    measured.unmeasuredFraction !== undefined &&
+    measured.unmeasuredFraction > policy.maxUnmeasuredFraction
+  )
+    out.push({
+      kind: "unmeasured_evidence",
+      fraction: measured.unmeasuredFraction,
+      detail: `${(measured.unmeasuredFraction * 100).toFixed(1)}% of the compared scores were not measurements (dead graders / skipped judges), over the policy's maxUnmeasuredFraction of ${policy.maxUnmeasuredFraction} — the numbers that survived are real, there are just too few of them to ship on`,
+    });
+  return out;
 }
 
 export function gatePolicyDigest(policy: GatePolicy): string {
@@ -87,7 +187,7 @@ export function gateAudit(
   records: Array<Pick<ScorecardRecord, "id" | "gates">>,
   window?: { from?: string; to?: string },
 ): GateAudit {
-  const decisions = { total: 0, pass: 0, block: 0, notComparable: 0 };
+  const decisions = { total: 0, pass: 0, block: 0, blockedMissing: 0, notComparable: 0 };
   const entries: GateAudit["overrides"]["entries"] = [];
   for (const record of records) {
     for (const g of record.gates ?? []) {
@@ -96,6 +196,7 @@ export function gateAudit(
       decisions.total++;
       if (g.decision === "pass") decisions.pass++;
       else if (g.decision === "block") decisions.block++;
+      else if (g.decision === "blocked_missing") decisions.blockedMissing++;
       else decisions.notComparable++;
       if (g.override) {
         entries.push({
@@ -114,6 +215,10 @@ export function gateAudit(
     ...(window?.to !== undefined ? { to: window.to } : {}),
     decisions,
     overrides: { count: entries.length, entries },
-    ...(decisions.block > 0 ? { overrideRate: entries.length / decisions.block } : {}),
+    // Denominator = every decision that COULD be overridden (both blocking kinds), so a team routinely
+    // forcing incomplete comparisons through shows up here instead of hiding behind a zero-block window.
+    ...(decisions.block + decisions.blockedMissing > 0
+      ? { overrideRate: entries.length / (decisions.block + decisions.blockedMissing) }
+      : {}),
   };
 }

@@ -6,6 +6,7 @@ import {
   EXPERIMENT_ADHOC_REF,
   ForbiddenError,
   type GateDecision,
+  type GatePolicy,
   type HarnessSpec,
   type ManifestCheck,
   type ManifestVerification,
@@ -960,7 +961,7 @@ export class ScorecardService {
     tenant: string,
     baselineId: string,
     candidateId: string,
-    opts: { zThreshold?: number; visibleTeams?: string[] } = {},
+    opts: { zThreshold?: number; minDelta?: number; visibleTeams?: string[] } = {},
   ): ReturnType<ScorecardAnalyticsService["diff"]> {
     return this.analytics.diff(tenant, baselineId, candidateId, opts);
   }
@@ -1124,14 +1125,30 @@ export class ScorecardService {
     tenant: string;
     baseline: string;
     candidate: string;
-    policy?: { maxRegressions?: number };
+    policy?: Partial<GatePolicy>;
     decidedBy?: string;
     visibleTeams?: string[];
   }): Promise<GateDecision> {
+    // Only what the caller actually SENT is embedded (beyond maxRegressions' long-standing 0 default): the
+    // stamped policy is the caller's own document, so an already-recorded `{maxRegressions: 0}` keeps its
+    // digest even as the schema grows. The semantic default for `comparability` lives in evaluateGate.
+    const p = input.policy;
+    const policy: GatePolicy = {
+      maxRegressions: p?.maxRegressions ?? 0,
+      ...(p?.comparability !== undefined ? { comparability: p.comparability } : {}),
+      ...(p?.maxMissingCases !== undefined ? { maxMissingCases: p.maxMissingCases } : {}),
+      ...(p?.maxMissingFraction !== undefined ? { maxMissingFraction: p.maxMissingFraction } : {}),
+      ...(p?.maxUnmeasuredFraction !== undefined ? { maxUnmeasuredFraction: p.maxUnmeasuredFraction } : {}),
+      ...(p?.zThreshold !== undefined ? { zThreshold: p.zThreshold } : {}),
+      ...(p?.minDelta !== undefined ? { minDelta: p.minDelta } : {}),
+    };
+    // The gate's statistical policy IS the trials diff's policy — a caller that raised the significance bar
+    // for its release decision must have the diff computed under that bar, not under diffTrials' defaults.
     const diff = await this.analytics.diff(input.tenant, input.baseline, input.candidate, {
       ...(input.visibleTeams ? { visibleTeams: input.visibleTeams } : {}),
+      ...(policy.zThreshold !== undefined ? { zThreshold: policy.zThreshold } : {}),
+      ...(policy.minDelta !== undefined ? { minDelta: policy.minDelta } : {}),
     });
-    const policy = { maxRegressions: input.policy?.maxRegressions ?? 0 };
     const evaluation = evaluateGate(diff, policy);
     const decision: GateDecision = {
       id: this.newId(),
@@ -1168,8 +1185,10 @@ export class ScorecardService {
     return decision;
   }
 
-  // B1 — the recorded force: overriding a BLOCK ships anyway, with who and why. Only a block can be
-  // overridden (pass needs no force; not_comparable has nothing to force — rerun a comparable pair).
+  // B1 — the recorded force: overriding a BLOCK ships anyway, with who and why. Only a blocking decision can
+  // be overridden — `block` and `blocked_missing` alike, because knowingly shipping on an incomplete
+  // comparison is exactly the call that should be recorded with a name against it (pass needs no force;
+  // not_comparable has nothing to force — rerun a comparable pair).
   async overrideGate(input: {
     tenant: string;
     candidate: string;
@@ -1184,7 +1203,7 @@ export class ScorecardService {
     const decision = gates.find((g) => g.id === input.decisionId);
     if (!decision)
       throw new NotFoundError("NOT_FOUND", { gate: input.decisionId }, "gate decision not found on this candidate.");
-    if (decision.decision !== "block")
+    if (decision.decision !== "block" && decision.decision !== "blocked_missing")
       throw new ConflictError(
         "CONFLICT",
         { gate: input.decisionId, decision: decision.decision },

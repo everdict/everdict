@@ -117,6 +117,33 @@ export function summarizeScorecard(sc: Scorecard): MetricSummary[] {
   });
 }
 
+// How much of a batch's score plane was an actual MEASUREMENT. Aggregates already exclude unmeasured scores,
+// which is why a hollowed-out batch can look perfectly healthy: every surviving number is real, there are just
+// far fewer of them than anyone asked for. A release gate ships on evidence, so it needs the ratio as an
+// INPUT to the decision rather than as a footnote nobody reads.
+// Counted over exactly the cases summarizeScorecard aggregates (a no-outcome case — cancelled, or dead before
+// an outcome — contributes nothing at all), so the denominator matches the metric plane it describes.
+export interface MeasurementCoverage {
+  scores: number; // scores on outcome-bearing cases
+  unmeasured: number; // of those, the ones that were not measurements (grader death / judge skip)
+  // unmeasured / scores — ABSENT when there were no scores at all (a ratio over nothing is not 0).
+  unmeasuredFraction?: number;
+}
+
+export function measurementCoverage(sc: Pick<Scorecard, "results">): MeasurementCoverage {
+  let scores = 0;
+  let unmeasured = 0;
+  for (const result of sc.results) {
+    const f = result.failure;
+    if (f && (f.code === "CANCELLED" || PRE_OUTCOME_STAGES.has(f.stage))) continue;
+    for (const s of result.scores) {
+      scores++;
+      if (!isMeasured(s)) unmeasured++;
+    }
+  }
+  return { scores, unmeasured, ...(scores > 0 ? { unmeasuredFraction: unmeasured / scores } : {}) };
+}
+
 export interface CaseDelta {
   caseId: string;
   metric: string;

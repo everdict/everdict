@@ -202,11 +202,16 @@ const docs = {
   gate: {
     summary: "Release-gate a candidate against a baseline",
     description:
-      "The CI-facing decision over a baseline↔candidate comparison: pass | block | not_comparable — " +
-      "`not_comparable` is a FIRST-CLASS decision (an incomparable pair never yields a false green light; " +
-      "policy mismatch and zero shared cases land here). When either batch ran trials, the Fisher-gated " +
-      "trials diff is the authoritative regression signal. The decision embeds its effective policy (+digest) " +
-      "and is RECORDED on the candidate's ledger row for the gate audit. Requires scorecards:run (member+).",
+      "The CI-facing decision over a baseline↔candidate comparison: pass | block | blocked_missing | " +
+      "not_comparable. TWO decisions are neither a pass nor a regression block, and neither may be read as a " +
+      "green light: `not_comparable` (the comparison does not hold — policy mismatch, zero shared cases) and " +
+      "`blocked_missing` (it held, but not over enough — cases the candidate never ran, metrics that vanished " +
+      "or changed kind, scores that were not measurements). The gate is FAIL-CLOSED: a partial comparison " +
+      "blocks unless the policy says comparability=allow_partial and states its tolerance " +
+      "(maxMissingCases / maxMissingFraction); maxUnmeasuredFraction is enforced under either mode. When " +
+      "either batch ran trials, the Fisher-gated trials diff is the authoritative regression signal and the " +
+      "policy's zThreshold/minDelta set its bar. The decision embeds its effective policy (+digest) and is " +
+      "RECORDED on the candidate's ledger row for the gate audit. Requires scorecards:run (member+).",
     tags: ["scorecard"],
     body: toJsonSchema(GateScorecardsBodySchema),
     response: {
@@ -218,8 +223,10 @@ const docs = {
     summary: "Override a blocking gate decision",
     description:
       "Force a BLOCK through — recorded, never silent: who and why ride the decision and the gate audit " +
-      "counts it (catalog R7). Only a blocking decision can be overridden (pass needs no force; " +
-      "not_comparable has nothing to force) — anything else is 409. Requires scorecards:run (member+).",
+      "counts it (catalog R7). Only a blocking decision can be overridden — `block` and `blocked_missing` " +
+      "alike, since knowingly shipping on an incomplete comparison is exactly the call that wants a name " +
+      "against it (pass needs no force; not_comparable has nothing to force) — anything else is 409. " +
+      "Requires scorecards:run (member+).",
     tags: ["scorecard"],
     params: scorecardIdParams,
     body: toJsonSchema(OverrideGateBodySchema),

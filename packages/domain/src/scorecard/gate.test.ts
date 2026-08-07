@@ -81,3 +81,140 @@ describe("evaluateGate — the release gate over the trust kernel's comparabilit
     expect(g.reasons.map((r) => r.kind)).toEqual(["kind_changed"]);
   });
 });
+
+// A comparison that held over only part of what was asked used to run the SAME arithmetic as a complete one:
+// zero regressions among the cases that survived came back as `pass`. The gate now refuses to read a verdict
+// out of an incomplete comparison unless the caller says, in policy, that a subset is what it wants.
+describe("evaluateGate — fail-closed on missingness", () => {
+  // 100 baseline cases, 60 of them re-run by the candidate, no regressions among those 60.
+  const shrunk = (over: Partial<GateInput> = {}): GateInput =>
+    base({
+      comparability: "partial",
+      missing: {
+        casesOnlyInBaseline: Array.from({ length: 40 }, (_, i) => `c${i}`),
+        casesOnlyInCandidate: [],
+        metricsOnlyInBaseline: [],
+        metricsOnlyInCandidate: [],
+      },
+      overlap: { sharedCases: 60, baselineCases: 100, candidateCases: 60 },
+      ...over,
+    });
+
+  it("a PARTIAL comparison is blocked_missing by default — 0 regressions over 60 of 100 cases is not a green light", () => {
+    // Given a candidate that only ran 60 of the baseline's 100 cases, and regressed in none of them
+    // When the gate decides under the default policy (no comparability stated)
+    const g = evaluateGate(shrunk(), { maxRegressions: 0 });
+
+    // Then it withholds the light and says which 40 cases it never saw
+    expect(g.decision).toBe("blocked_missing");
+    const reason = g.reasons.find((r) => r.kind === "missing_cases");
+    expect(reason).toMatchObject({ count: 40, fraction: 0.4 });
+    expect(g.evidence).toMatchObject({ comparability: "partial", regressions: 0, missingFraction: 0.4 });
+  });
+
+  it("a metric that vanished or changed kind blocks a require_full gate too — the comparison lost a column", () => {
+    const g = evaluateGate(
+      base({
+        comparability: "partial",
+        incomparable: [{ metric: "tier", reason: "kind_changed" }],
+        missing: {
+          casesOnlyInBaseline: [],
+          casesOnlyInCandidate: [],
+          metricsOnlyInBaseline: ["cost_usd"],
+          metricsOnlyInCandidate: [],
+        },
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("blocked_missing");
+    // The vanished metric AND the kind-changed one are both losses of the comparison.
+    expect(g.reasons.find((r) => r.kind === "missing_metrics")?.count).toBe(2);
+  });
+
+  it("allow_partial within the stated tolerance passes — a deliberate subset is a decision, not an accident", () => {
+    const g = evaluateGate(shrunk(), {
+      maxRegressions: 0,
+      comparability: "allow_partial",
+      maxMissingFraction: 0.5,
+      maxMissingCases: 50,
+    });
+    expect(g.decision).toBe("pass");
+    expect(g.reasons.filter((r) => r.kind === "missing_cases")).toEqual([]);
+  });
+
+  it("allow_partial beyond the stated tolerance is blocked_missing, and the reason names the limit it broke", () => {
+    const byFraction = evaluateGate(shrunk(), {
+      maxRegressions: 0,
+      comparability: "allow_partial",
+      maxMissingFraction: 0.1,
+    });
+    expect(byFraction.decision).toBe("blocked_missing");
+    expect(byFraction.reasons.find((r) => r.kind === "missing_cases")?.detail).toContain("maxMissingFraction");
+
+    const byCount = evaluateGate(shrunk(), { maxRegressions: 0, comparability: "allow_partial", maxMissingCases: 5 });
+    expect(byCount.decision).toBe("blocked_missing");
+    expect(byCount.reasons.find((r) => r.kind === "missing_cases")?.detail).toContain("maxMissingCases");
+  });
+
+  it("allow_partial with NO tolerance stated accepts any missingness — an unstated limit is not a limit", () => {
+    const g = evaluateGate(shrunk(), { maxRegressions: 0, comparability: "allow_partial" });
+    expect(g.decision).toBe("pass");
+  });
+
+  it("too much of the comparison being unmeasured blocks under EITHER mode — hollow scores are not evidence", () => {
+    // Given a complete comparison whose candidate scores were 70% dead graders / skipped judges
+    const hollow = base({
+      coverage: {
+        baseline: { scores: 100, unmeasured: 0, unmeasuredFraction: 0 },
+        candidate: { scores: 100, unmeasured: 70, unmeasuredFraction: 0.7 },
+      },
+    });
+
+    // When a policy that tolerates 20% unmeasured decides — under require_full AND allow_partial
+    const strict = evaluateGate(hollow, { maxRegressions: 0, maxUnmeasuredFraction: 0.2 });
+    const lenient = evaluateGate(hollow, {
+      maxRegressions: 0,
+      comparability: "allow_partial",
+      maxUnmeasuredFraction: 0.2,
+    });
+
+    // Then both refuse: unmeasured scores never make a comparison `partial`, so gating this on the
+    // comparability mode would make the limit unreachable.
+    expect(strict.decision).toBe("blocked_missing");
+    expect(lenient.decision).toBe("blocked_missing");
+    expect(strict.reasons.find((r) => r.kind === "unmeasured_evidence")?.fraction).toBeCloseTo(0.7);
+    expect(strict.evidence.unmeasuredFraction).toBeCloseTo(0.7);
+    // The WORSE side decides — a hollow baseline makes "no regression" just as meaningless.
+    expect(evaluateGate(hollow, { maxRegressions: 0, maxUnmeasuredFraction: 0.8 }).decision).toBe("pass");
+  });
+
+  it("without a stated maxUnmeasuredFraction the coverage rides as evidence only — the gate invents no limit", () => {
+    const g = evaluateGate(
+      base({
+        coverage: {
+          baseline: { scores: 10, unmeasured: 9, unmeasuredFraction: 0.9 },
+          candidate: { scores: 10, unmeasured: 9, unmeasuredFraction: 0.9 },
+        },
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("pass");
+    expect(g.evidence.unmeasuredFraction).toBeCloseTo(0.9);
+  });
+
+  it("a blocked_missing decision still carries the regressions found in the overlap — the evidence never shrinks", () => {
+    const g = evaluateGate(
+      shrunk({
+        regressions: [{ caseId: "x", metric: "tests_pass", baseline: 1, candidate: 0, delta: -1, passChange: "broke" }],
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("blocked_missing");
+    expect(g.reasons.map((r) => r.kind)).toEqual(["missing_cases", "regression"]);
+    expect(g.evidence.regressions).toBe(1);
+  });
+
+  it("a comparison with no missingness is unaffected by the fail-closed default", () => {
+    expect(evaluateGate(base({}), { maxRegressions: 0 }).decision).toBe("pass");
+  });
+});

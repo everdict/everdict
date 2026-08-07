@@ -5200,6 +5200,93 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
+  it("a candidate that ran fewer cases than the baseline is BLOCKED_MISSING, and the force is overridable", async () => {
+    // Given a 3-case baseline and a candidate that only re-ran 2 of them, regressing in neither
+    const { store, service } = build();
+    await store.create(succeededRecord("base", [scored("a", true), scored("b", true), scored("c", true)]));
+    await store.create(succeededRecord("cand", [scored("a", true), scored("b", true)]));
+
+    // When the gate decides under the default (fail-closed) policy
+    const decision = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand", decidedBy: "ci" });
+
+    // Then it refuses rather than reading "no regressions" as a green light over a suite it never fully ran
+    expect(decision.decision).toBe("blocked_missing");
+    expect(decision.reasons.find((r) => r.kind === "missing_cases")).toMatchObject({ count: 1, fraction: 1 / 3 });
+    expect(decision.evidence).toMatchObject({ comparability: "partial", regressions: 0 });
+
+    // And knowingly shipping on the subset is possible — recorded, with a name and a reason against it.
+    const forced = await service.overrideGate({
+      tenant: "acme",
+      candidate: "cand",
+      decisionId: decision.id,
+      reason: "the 3rd case is quarantined, tracked in EV-31",
+      by: "release-manager",
+    });
+    expect(forced.override).toMatchObject({ by: "release-manager" });
+
+    // Or the caller states up front that a subset is what it wants, within a tolerance.
+    const deliberate = await service.gate({
+      tenant: "acme",
+      baseline: "base",
+      candidate: "cand",
+      policy: { comparability: "allow_partial", maxMissingFraction: 0.5 },
+    });
+    expect(deliberate.decision).toBe("pass");
+    // The recorded policy is the caller's own document — nothing the gate defaulted leaks into the digest.
+    expect(deliberate.policy).toEqual({
+      maxRegressions: 0,
+      comparability: "allow_partial",
+      maxMissingFraction: 0.5,
+    });
+  });
+
+  it("the policy's statistical bar reaches the trials diff — minDelta turns a significant-but-small drop into a pass", async () => {
+    const { store, service } = build();
+    const trials = (caseId: string, passes: number, total: number): CaseResult[] =>
+      Array.from({ length: total }, (_, i) => ({ ...scored(caseId, i < passes), trial: i }));
+    // 10/10 → 3/10: a real, Fisher-significant drop of 0.7.
+    await store.create(succeededRecord("base", trials("a", 10, 10)));
+    await store.create(succeededRecord("cand", trials("a", 3, 10)));
+
+    const blocked = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand" });
+    expect(blocked.decision).toBe("block");
+    expect(blocked.evidence).toMatchObject({ trialsGated: true, regressions: 1 });
+
+    // A caller that only cares about drops of 0.8 or more gets its own bar applied to the trials diff.
+    const tolerated = await service.gate({
+      tenant: "acme",
+      baseline: "base",
+      candidate: "cand",
+      policy: { minDelta: 0.8 },
+    });
+    expect(tolerated.decision).toBe("pass");
+    expect(tolerated.evidence.regressions).toBe(0);
+    expect(tolerated.policy).toMatchObject({ minDelta: 0.8 });
+  });
+
+  it("a batch whose scores were mostly dead graders is BLOCKED_MISSING under a maxUnmeasuredFraction", async () => {
+    const { store, service } = build();
+    const dead = (caseId: string): CaseResult => ({
+      ...scored(caseId, true),
+      scores: [
+        { graderId: "t", metric: "tests_pass", value: 1, pass: true },
+        { graderId: "j", metric: "judge:q", value: 0, status: "unmeasured", reason: "grader_error", retryable: true },
+        { graderId: "k", metric: "judge:r", value: 0, status: "unmeasured", reason: "missing_secret", retryable: true },
+      ],
+    });
+    await store.create(succeededRecord("base", [scored("a", true)]));
+    await store.create(succeededRecord("cand", [dead("a")]));
+
+    const decision = await service.gate({
+      tenant: "acme",
+      baseline: "base",
+      candidate: "cand",
+      policy: { maxUnmeasuredFraction: 0.25 },
+    });
+    expect(decision.decision).toBe("blocked_missing");
+    expect(decision.reasons.find((r) => r.kind === "unmeasured_evidence")?.fraction).toBeCloseTo(2 / 3);
+  });
+
   it("cross-policy candidates gate as NOT_COMPARABLE — never a false pass", async () => {
     const { store, service } = build();
     await store.create({
@@ -5267,7 +5354,7 @@ describe("ScorecardService — gate audit + manifest verification (B2/B3)", () =
     await service.gate({ tenant: "acme", baseline: "base", candidate: "cand2" });
 
     const audit = await service.gateAudit("acme");
-    expect(audit.decisions).toEqual({ total: 2, pass: 1, block: 1, notComparable: 0 });
+    expect(audit.decisions).toEqual({ total: 2, pass: 1, block: 1, blockedMissing: 0, notComparable: 0 });
     expect(audit.overrides.count).toBe(1);
     expect(audit.overrides.entries[0]).toMatchObject({ candidate: "cand", by: "admin", reason: "hotfix window" });
     expect(audit.overrideRate).toBe(1);

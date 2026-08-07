@@ -423,7 +423,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "gate_scorecards",
       {
         description:
-          "Release-gate a candidate scorecard against a baseline → {decision: pass|block|not_comparable, reasons, evidence}. `not_comparable` is a FIRST-CLASS decision (policy mismatch / zero shared cases) — never read it as pass. With trials, the Fisher-gated trials diff is the authoritative regression signal. The decision embeds its effective policy (+digest) and is RECORDED on the candidate for the gate audit. HTTP parity (POST /scorecards/gate).",
+          "Release-gate a candidate scorecard against a baseline → {decision: pass|block|blocked_missing|not_comparable, reasons, evidence}. TWO decisions are neither pass nor a regression block, and neither may be read as a green light: `not_comparable` (policy mismatch / zero shared cases — the comparison does not hold) and `blocked_missing` (the comparison held, but not over enough — cases the candidate never ran, metrics that vanished or changed kind, or scores that were not measurements). The gate is FAIL-CLOSED: a partial comparison blocks unless you pass comparability=allow_partial and state your tolerance. With trials, the Fisher-gated trials diff is the authoritative regression signal (z_threshold/min_delta set its bar). The decision embeds its effective policy (+digest) and is RECORDED on the candidate for the gate audit. HTTP parity (POST /scorecards/gate).",
         inputSchema: {
           baseline: z.string(),
           candidate: z.string(),
@@ -433,16 +433,71 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             .nonnegative()
             .optional()
             .describe("regressions tolerated before block (default 0 — any regression blocks)"),
+          comparability: z
+            .enum(["require_full", "allow_partial"])
+            .optional()
+            .describe(
+              "what an INCOMPLETE comparison means (default require_full — a partial comparison is blocked_missing, because 0 regressions over the cases that survived is evidence about those cases only)",
+            ),
+          max_missing_cases: z
+            .number()
+            .int()
+            .nonnegative()
+            .optional()
+            .describe("allow_partial only: one-sided cases (both directions) tolerated"),
+          max_missing_fraction: z
+            .number()
+            .min(0)
+            .max(1)
+            .optional()
+            .describe("allow_partial only: share of the BASELINE's cases the candidate may skip"),
+          max_unmeasured_fraction: z
+            .number()
+            .min(0)
+            .max(1)
+            .optional()
+            .describe(
+              "share of compared scores that may be non-measurements (dead graders / skipped judges); enforced under either comparability mode",
+            ),
+          z_threshold: z
+            .number()
+            .positive()
+            .optional()
+            .describe("confidence threshold for the trial regression gate (default 1.96 ≈ 95%; trials only)"),
+          min_delta: z
+            .number()
+            .min(0)
+            .max(1)
+            .optional()
+            .describe("practical-significance floor for a trial pass-rate drop (default 0; trials only)"),
         },
       },
-      ({ baseline, candidate, max_regressions }) =>
+      ({
+        baseline,
+        candidate,
+        max_regressions,
+        comparability,
+        max_missing_cases,
+        max_missing_fraction,
+        max_unmeasured_fraction,
+        z_threshold,
+        min_delta,
+      }) =>
         run(principal, "scorecards:run", async () =>
           ok(
             await scorecards.gate({
               tenant: ws,
               baseline,
               candidate,
-              ...(max_regressions !== undefined ? { policy: { maxRegressions: max_regressions } } : {}),
+              policy: {
+                ...(max_regressions !== undefined ? { maxRegressions: max_regressions } : {}),
+                ...(comparability !== undefined ? { comparability } : {}),
+                ...(max_missing_cases !== undefined ? { maxMissingCases: max_missing_cases } : {}),
+                ...(max_missing_fraction !== undefined ? { maxMissingFraction: max_missing_fraction } : {}),
+                ...(max_unmeasured_fraction !== undefined ? { maxUnmeasuredFraction: max_unmeasured_fraction } : {}),
+                ...(z_threshold !== undefined ? { zThreshold: z_threshold } : {}),
+                ...(min_delta !== undefined ? { minDelta: min_delta } : {}),
+              },
               decidedBy: principal.subject,
               ...(await teamCeiling(ctx.deps, principal)),
             }),
@@ -454,7 +509,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "override_scorecard_gate",
       {
         description:
-          "Force a BLOCKING gate decision through — recorded, never silent: who and why land on the decision and the gate audit counts it. Only a block can be overridden (409 otherwise). HTTP parity (POST /scorecards/:id/gate/override).",
+          "Force a BLOCKING gate decision through — recorded, never silent: who and why land on the decision and the gate audit counts it. Only a blocking decision can be overridden — `block` and `blocked_missing` alike (409 otherwise: pass needs no force, not_comparable has nothing to force). HTTP parity (POST /scorecards/:id/gate/override).",
         inputSchema: {
           candidate: z.string().describe("the candidate scorecard id the decision was recorded on"),
           decision_id: z.string(),

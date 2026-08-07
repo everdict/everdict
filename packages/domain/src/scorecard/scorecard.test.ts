@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   caseVerdict,
   diffScorecards,
+  measurementCoverage,
   retryableUnmeasured,
   scorecardPassRate,
   summarizeScorecard,
@@ -24,6 +25,50 @@ function caseResult(caseId: string, harness: string, pass: boolean, steps: numbe
     ],
   };
 }
+
+describe("measurementCoverage", () => {
+  const withScores = (caseId: string, scores: Score[], failure?: CaseResult["failure"]): CaseResult => ({
+    caseId,
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+    scores,
+    ...(failure ? { failure } : {}),
+  });
+
+  it("reports how much of the score plane was an actual measurement", () => {
+    const sc: Pick<Scorecard, "results"> = {
+      results: [
+        withScores("a", [
+          { graderId: "t", metric: "tests_pass", value: 1, pass: true },
+          { graderId: "j", metric: "judge:q", value: 0, status: "unmeasured", reason: "grader_error" },
+        ]),
+        withScores("b", [{ graderId: "t", metric: "tests_pass", value: 0, pass: false }]),
+      ],
+    };
+    expect(measurementCoverage(sc)).toEqual({ scores: 3, unmeasured: 1, unmeasuredFraction: 1 / 3 });
+  });
+
+  it("counts over the same cases the metric plane aggregates — a no-outcome case contributes nothing", () => {
+    const sc: Pick<Scorecard, "results"> = {
+      results: [
+        withScores("a", [{ graderId: "t", metric: "tests_pass", value: 1, pass: true }]),
+        withScores("cancelled", [{ graderId: "t", metric: "tests_pass", value: 0 }], {
+          code: "CANCELLED",
+          stage: "run",
+          message: "stopped",
+          class: "infra",
+          retryable: false,
+        }),
+      ],
+    };
+    expect(measurementCoverage(sc)).toMatchObject({ scores: 1, unmeasured: 0 });
+  });
+
+  it("has NO fraction when there were no scores at all — a ratio over nothing is absence, not 0", () => {
+    expect(measurementCoverage({ results: [] })).toEqual({ scores: 0, unmeasured: 0 });
+  });
+});
 
 describe("summarizeScorecard", () => {
   it("aggregates pass rate/mean per metric", () => {

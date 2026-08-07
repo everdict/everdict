@@ -137,7 +137,19 @@ See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
   + `policyMismatch` when the two batches' stamped verdict-policy digests differ. `diffTrials` gates small
   samples (<30 trials) by **Fisher's exact test** (z is overconfident at eval-scale n; 3/3→0/3 is honestly
   p=0.1) and applies the `minDelta` practical floor — statistically-significant-but-negligible dips stay out;
-  skipped cases ride `missing`. Route `GET /scorecards/diff`.
+  skipped cases ride `missing`. The diff also carries `coverage` (`measurementCoverage` per side: how many of
+  its scores were actual measurements) — aggregates already drop unmeasured scores, so a hollowed-out batch
+  reads as healthy and the ratio has to travel WITH the comparison. Route `GET /scorecards/diff`.
+- `evaluateGate(diff, policy)` (`packages/domain/src/scorecard/gate.ts`) — the CI decision, **fail-closed**:
+  four outcomes `pass | block | blocked_missing | not_comparable`, and only the first is a green light.
+  `not_comparable` = the comparison does not hold (`comparability: "none"`); `blocked_missing` = it held but
+  not over enough. `GatePolicy.comparability` defaults to `require_full` **in the domain fn, never as a Zod
+  default** (the policy embedded in a recorded decision must stay exactly what the caller sent, so old digests
+  survive schema growth); `allow_partial` + `maxMissingCases`/`maxMissingFraction` is how a caller decides on a
+  subset deliberately, and `maxUnmeasuredFraction` applies under either mode (unmeasured scores hollow a
+  comparison out without ever making it `partial`). `zThreshold`/`minDelta` on the policy are the trials diff's
+  bar — the gate computes the diff under its OWN statistical policy. Both blocking decisions are overridable
+  (recorded, with who and why); `gateAudit` counts them separately.
 - `leaderboard(cards, opts)` (`packages/domain/src/scorecard/leaderboard.ts`) — groups by
   `(harness@version × model.primary)`, ranks by passRate→mean **under the metric's policy-declared direction**
   (rank 1 = BEST: `?metric=cost_usd` puts the cheapest first, not the most expensive), `window: latest|best`,

@@ -11,6 +11,7 @@ import {
   type AnalysisConfig,
   type AnalysisResult,
   type Leaderboard,
+  type MeasurementCoverage,
   type ScorecardDiff,
   type ScorecardTrend,
   type TrialDiff,
@@ -20,6 +21,7 @@ import {
   flakeIndex,
   gateAudit,
   leaderboard,
+  measurementCoverage,
   ownedByVisibleTeam,
   preferredMetric,
   scorecardModels,
@@ -51,9 +53,13 @@ export class ScorecardAnalyticsService {
     tenant: string,
     baselineId: string,
     candidateId: string,
-    opts: { zThreshold?: number; visibleTeams?: string[] } = {},
+    opts: { zThreshold?: number; minDelta?: number; visibleTeams?: string[] } = {},
   ): Promise<
-    ScorecardDiff & { trials?: TrialDiff; policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef } }
+    ScorecardDiff & {
+      trials?: TrialDiff;
+      policyMismatch?: { baseline: VerdictPolicyRef; candidate: VerdictPolicyRef };
+      coverage: { baseline: MeasurementCoverage; candidate: MeasurementCoverage };
+    }
   > {
     const { scorecard: baseline, record: baseRecord } = await this.requireSucceeded(
       tenant,
@@ -79,7 +85,12 @@ export class ScorecardAnalyticsService {
         : diff;
     const hasTrials =
       baseline.results.some((r) => r.trial !== undefined) || candidate.results.some((r) => r.trial !== undefined);
-    return hasTrials ? { ...withPolicy, trials: diffTrials(baseline, candidate, opts) } : withPolicy;
+    // Evidence quality of each side. Aggregates already drop unmeasured scores, so a hollowed-out batch reads
+    // as healthy — the ratio has to travel WITH the comparison for a gate to be able to refuse on it.
+    const coverage = { baseline: measurementCoverage(baseline), candidate: measurementCoverage(candidate) };
+    return hasTrials
+      ? { ...withPolicy, coverage, trials: diffTrials(baseline, candidate, opts) }
+      : { ...withPolicy, coverage };
   }
 
   // Workspace ops report (metrics commercialization C1) — the SLA-evidence read: the workspace's OWN

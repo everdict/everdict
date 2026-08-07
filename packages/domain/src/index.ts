@@ -8,6 +8,8 @@ export {
   type CaseDelta,
   caseVerdict,
   diffScorecards,
+  type MeasurementCoverage,
+  measurementCoverage,
   type MetricSummary,
   PRE_OUTCOME_STAGES,
   type RetryableUnmeasured,

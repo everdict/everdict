@@ -4,9 +4,18 @@ import { z } from "zod";
 export const GateScorecardsBodySchema = z.object({
   baseline: z.string().min(1),
   candidate: z.string().min(1),
+  // Every field is optional and only what the caller SENDS is embedded in the recorded decision — the
+  // semantic defaults (maxRegressions 0, comparability "require_full") are applied downstream so an
+  // already-recorded policy keeps its digest.
   policy: z
     .object({
       maxRegressions: z.number().int().nonnegative().optional(),
+      comparability: z.enum(["require_full", "allow_partial"]).optional(),
+      maxMissingCases: z.number().int().nonnegative().optional(),
+      maxMissingFraction: z.number().min(0).max(1).optional(),
+      maxUnmeasuredFraction: z.number().min(0).max(1).optional(),
+      zThreshold: z.number().positive().optional(),
+      minDelta: z.number().min(0).max(1).optional(),
     })
     .optional(),
 });
