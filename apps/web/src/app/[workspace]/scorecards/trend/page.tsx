@@ -152,7 +152,8 @@ export default async function TrendPage({
       trend = scorecardTrendSchema.parse(
         await controlPlane.trendScorecards(ctx, {
           dataset,
-          metric: metric ?? 'judge',
+          // absent = the server resolves the highest-authority metric present (preferredMetric)
+          ...(metric ? { metric } : {}),
           baseline: baseline ?? 'first',
         })
       )

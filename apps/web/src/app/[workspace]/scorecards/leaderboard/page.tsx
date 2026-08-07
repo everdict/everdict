@@ -67,7 +67,8 @@ export default async function LeaderboardPage({
       board = leaderboardSchema.parse(
         await controlPlane.leaderboardScorecards(ctx, {
           dataset,
-          metric: metric ?? 'judge',
+          // absent = the server resolves the highest-authority metric present (preferredMetric)
+          ...(metric ? { metric } : {}),
           window: window === 'best' ? 'best' : 'latest',
           ...(judgeModel ? { judgeModel } : {}),
         })

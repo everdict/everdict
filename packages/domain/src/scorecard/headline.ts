@@ -26,3 +26,18 @@ export function headlinePassRate(record: {
   if (judge?.passRate !== undefined) return judge.passRate;
   return summary.find((x) => x.passRate !== undefined)?.passRate ?? null;
 }
+
+// The default analysis metric for a SET of cards (trend/leaderboard axis when the caller names none): the
+// highest-authority metric that actually carries a pass rate anywhere in the set — same ladder as
+// headlinePassRate — else any pass-rate-bearing metric, else the first metric present. Replaces the
+// hardcoded "judge"/"tests_pass" defaults: a workspace whose graders emit `state` or `judge:<id>` got a
+// silently empty board under a literal default.
+export function preferredMetric(cards: Array<{ summary?: MetricSummary[] }>): string | undefined {
+  const summaries = cards.flatMap((c) => c.summary ?? []);
+  for (const metric of PASS_RATE_METRICS) {
+    if (summaries.some((s) => s.metric === metric && s.passRate !== undefined)) return metric;
+  }
+  const judge = summaries.find((s) => isJudgeOverallMetric(s.metric) && s.passRate !== undefined);
+  if (judge) return judge.metric;
+  return (summaries.find((s) => s.passRate !== undefined) ?? summaries[0])?.metric;
+}

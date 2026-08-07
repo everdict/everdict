@@ -31,13 +31,14 @@ export function LeaderboardPicker({
   const { workspace } = useParams<{ workspace: string }>()
   const t = useTranslations('leaderboardScorecards')
   const [d, setD] = useState(dataset ?? datasets[0]?.id ?? '')
-  const [m, setM] = useState(metric ?? 'judge')
+  const [m, setM] = useState(metric ?? '') // empty = the server resolves the highest-authority metric present
   const [w, setW] = useState(window === 'best' ? 'best' : 'latest')
   const [jm, setJm] = useState(judgeModel ?? '')
 
   function go() {
     if (!d) return
-    const q = new URLSearchParams({ dataset: d, metric: m || 'judge', window: w })
+    const q = new URLSearchParams({ dataset: d, window: w })
+    if (m) q.set('metric', m) // absent = server-resolved (preferredMetric)
     if (jm) q.set('judgeModel', jm)
     router.push(`/${workspace}/scorecards/leaderboard?${q.toString()}`)
   }

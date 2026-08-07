@@ -62,7 +62,9 @@ export function buildMattermostCommand(deps: {
       return { id: rec.id };
     },
     leaderboard: async (workspace, datasetId) => {
-      const lb = await scorecardService.leaderboard(workspace, { datasetId, metric: "tests_pass" });
+      // Metric resolved from the dataset's own cards (preferredMetric) — the hardcoded "tests_pass" gave a
+      // silently empty board to any workspace whose graders summarize under other names.
+      const lb = await scorecardService.leaderboard(workspace, { datasetId });
       return lb.rows.map((r) => ({
         label: `${r.harness.id}@${r.harness.version}`,
         value: r.score !== null ? r.score.toFixed(3) : "—",

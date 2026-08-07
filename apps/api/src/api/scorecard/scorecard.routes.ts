@@ -373,7 +373,9 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.send(
         await deps.scorecardService.trend(principal.workspace, {
           datasetId: dataset,
-          metric: metric ?? "judge",
+          // absent = server resolves the highest-authority pass-rate metric present (preferredMetric) —
+          // a literal default gave workspaces with differently-named graders a silently empty view.
+          ...(metric ? { metric } : {}),
           ...(harness ? { harnessId: harness } : {}),
           ...(from ? { from } : {}),
           ...(to ? { to } : {}),
@@ -408,7 +410,9 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.send(
         await deps.scorecardService.leaderboard(principal.workspace, {
           datasetId: dataset,
-          metric: metric ?? "judge",
+          // absent = server resolves the highest-authority pass-rate metric present (preferredMetric) —
+          // a literal default gave workspaces with differently-named graders a silently empty view.
+          ...(metric ? { metric } : {}),
           ...(harness ? { harnessId: harness } : {}),
           ...(model ? { model } : {}),
           ...(judgeModel ? { judgeModel } : {}),

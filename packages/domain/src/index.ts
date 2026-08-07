@@ -52,7 +52,7 @@ export {
   trendSeries,
 } from "./scorecard/trend.js";
 export { type ScorecardModels, scorecardModels } from "./scorecard/models.js";
-export { headlinePassRate } from "./scorecard/headline.js";
+export { headlinePassRate, preferredMetric } from "./scorecard/headline.js";
 
 // scorecard — flexible analysis pivot (filter/group/pivot/measure), the server-side twin of the web engine
 export {

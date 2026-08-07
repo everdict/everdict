@@ -152,8 +152,13 @@ export function withCaseMilestones(
 }
 
 // LLM/VLM judge grader. When useScreenshot, passes the snapshot's screenshot as vision input (browser=ref, os-use=read from the environment as bytes).
-// With criteria it is a multi-metric grader: ONE model call → the overall Score (metric "judge") followed by one Score
-// per criterion (metric "judge:<criterion-id>"). The judge runner rewrites the "judge" prefix to "judge:<judge-id>".
+// With criteria it is a multi-metric grader: ONE model call → the overall Score (metric JUDGE_OVERALL_METRIC)
+// followed by one Score per criterion (metric "judge:<criterion-id>"). The judge runner rewrites the prefix to
+// "judge:<judge-id>".
+
+// The pre-stamp overall metric this grader emits — the judge runner keys its passThreshold rewrite on it, so
+// the name is exported once instead of duplicated as a literal across the package boundary.
+export const JUDGE_OVERALL_METRIC = "judge";
 // A case's milestones merge in as additional criteria (withCaseMilestones) — per-case, at grade time.
 export class JudgeGrader implements Grader {
   readonly id: string;
@@ -182,7 +187,7 @@ export class JudgeGrader implements Grader {
     const verdict = await this.judge.judge(input);
     const overall: Score = {
       graderId: this.id,
-      metric: "judge",
+      metric: JUDGE_OVERALL_METRIC,
       value: verdict.score,
       pass: verdict.pass,
       detail: verdict.reason,

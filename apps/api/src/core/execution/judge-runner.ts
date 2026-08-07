@@ -16,7 +16,14 @@ import type {
 } from "@everdict/contracts";
 import { toScores } from "@everdict/contracts";
 import { modelApiKeySecretName, normalizeModelBinding } from "@everdict/domain";
-import { type JudgeCompletion, JudgeGrader, harnessComplete, modelJudge, transportComplete } from "@everdict/graders";
+import {
+  JUDGE_OVERALL_METRIC,
+  type JudgeCompletion,
+  JudgeGrader,
+  harnessComplete,
+  modelJudge,
+  transportComplete,
+} from "@everdict/graders";
 import { transportFor } from "@everdict/llm";
 import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
 import { resolveJudgeArtifacts } from "./resolve-judge-artifacts.js";
@@ -384,7 +391,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         // judge's identity so multiple selected judges stay distinct: judge:<id> / judge:<id>:<criterion>.
         // spec.passThreshold re-decides pass for the OVERALL score only (criteria carry their own passThreshold).
         return graded.map((score) => {
-          const isOverall = score.metric === "judge";
+          const isOverall = score.metric === JUDGE_OVERALL_METRIC; // the graders-exported name, not a re-typed literal
           const pass = isOverall && threshold != null ? score.value >= threshold : score.pass;
           return {
             ...score,

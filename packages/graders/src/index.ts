@@ -12,6 +12,7 @@ export {
   type JudgeInput,
   type JudgeVerdict,
   type CriterionVerdict,
+  JUDGE_OVERALL_METRIC,
   JudgeGrader,
   assembleJudgeInput,
   withCaseMilestones,

@@ -881,7 +881,7 @@ export class ScorecardService {
     tenant: string,
     opts: {
       datasetId: string;
-      metric: string;
+      metric?: string; // absent = resolved from the data (preferredMetric)
       harnessId?: string;
       from?: string;
       to?: string;
@@ -896,7 +896,7 @@ export class ScorecardService {
     tenant: string,
     opts: {
       datasetId: string;
-      metric: string;
+      metric?: string; // absent = resolved from the data (preferredMetric)
       harnessId?: string;
       model?: string;
       judgeModel?: string;

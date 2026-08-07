@@ -29,12 +29,13 @@ export function TrendPicker({
   const { workspace } = useParams<{ workspace: string }>()
   const t = useTranslations('trendScorecards')
   const [d, setD] = useState(dataset ?? datasets[0]?.id ?? '')
-  const [m, setM] = useState(metric ?? 'judge')
+  const [m, setM] = useState(metric ?? '') // empty = the server resolves the highest-authority metric present
   const [b, setB] = useState(baseline ?? 'first')
 
   function go() {
     if (!d) return
-    const q = new URLSearchParams({ dataset: d, metric: m || 'judge', baseline: b || 'first' })
+    const q = new URLSearchParams({ dataset: d, baseline: b || 'first' })
+    if (m) q.set('metric', m) // absent = server-resolved (preferredMetric)
     router.push(`/${workspace}/scorecards/trend?${q.toString()}`)
   }
 

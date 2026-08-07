@@ -19,6 +19,7 @@ import {
   diffTrials,
   leaderboard,
   ownedByVisibleTeam,
+  preferredMetric,
   scorecardModels,
   trendSeries,
 } from "@everdict/domain";
@@ -84,7 +85,7 @@ export class ScorecardAnalyticsService {
     tenant: string,
     opts: {
       datasetId: string;
-      metric: string;
+      metric?: string; // absent = preferredMetric over the dataset's cards (see leaderboard)
       harnessId?: string;
       from?: string;
       to?: string;
@@ -102,7 +103,8 @@ export class ScorecardAnalyticsService {
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
       ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
     });
-    return trendSeries(records, opts);
+    const metric = opts.metric ?? preferredMetric(records) ?? "tests_pass";
+    return trendSeries(records, { ...opts, metric });
   }
 
   // Per-benchmark (dataset) leaderboard — group a dataset's scorecards by (harness × model) and rank by metric.
@@ -111,7 +113,10 @@ export class ScorecardAnalyticsService {
     tenant: string,
     opts: {
       datasetId: string;
-      metric: string;
+      // Absent = resolved from the data (preferredMetric — the highest-authority pass-rate metric present).
+      // A literal default ("judge"/"tests_pass") gave a silently empty board to any workspace whose graders
+      // summarize under other names.
+      metric?: string;
       harnessId?: string;
       model?: string;
       judgeModel?: string;
@@ -129,7 +134,8 @@ export class ScorecardAnalyticsService {
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
       ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
     });
-    return leaderboard(records, opts);
+    const metric = opts.metric ?? preferredMetric(records) ?? "tests_pass"; // empty set: any name labels an empty board
+    return leaderboard(records, { ...opts, metric });
   }
 
   // Flexible analysis pivot (filter/group/pivot/measure) over the workspace's scorecards — the server-side twin of

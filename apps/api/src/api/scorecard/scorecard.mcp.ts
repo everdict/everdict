@@ -458,7 +458,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
           ok(
             await scorecards.leaderboard(ws, {
               datasetId: dataset,
-              metric: metric ?? "judge",
+              ...(metric ? { metric } : {}), // absent = preferredMetric over the data (BFF parity)
               ...(harness ? { harnessId: harness } : {}),
               ...(model ? { model } : {}),
               ...(judge_model ? { judgeModel: judge_model } : {}),
