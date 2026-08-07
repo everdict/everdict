@@ -5,11 +5,13 @@ import type {
   AgentSessionRecord,
   AgentSpec,
   AgentTrigger,
+  HandoffCheckpoint,
   SubscriptionRecord,
   TraceEvent,
 } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  type ActivationEnvelope,
   type ActivationEvent,
   AgentActivator,
   type TurnOutcome,
@@ -156,12 +158,17 @@ function activator(opts: {
     token: string,
     signal?: AbortSignal,
     permit?: PermissionHook,
+    envelope?: ActivationEnvelope,
   ) => Promise<TurnOutcome | undefined>;
   sessions?: ReturnType<typeof sessionsStub>;
   keyStore?: ReturnType<typeof keyStoreStub>;
   cooldownMs?: number;
   subscriptions?: SubscriptionRecord[];
   admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
+  publishCheckpoint?: (
+    agentToken: string,
+    checkpoint: Omit<HandoffCheckpoint, "id" | "createdAt" | "createdBy">,
+  ) => Promise<void>;
 }) {
   const sessions = opts.sessions ?? sessionsStub();
   const keyStore = opts.keyStore ?? keyStoreStub();
@@ -196,6 +203,7 @@ function activator(opts: {
       ? { subscriptions: { listEnabled: async () => opts.subscriptions ?? [] } }
       : {}),
     ...(opts.admitRun !== undefined ? { admitRun: opts.admitRun } : {}),
+    ...(opts.publishCheckpoint !== undefined ? { publishCheckpoint: opts.publishCheckpoint } : {}),
   });
   return { instance, sessions, keyStore, mailbox, runs, reports };
 }
@@ -750,5 +758,93 @@ describe("activation admission (§5.1 — every launch path asks the tenant budg
     await instance.idle();
     expect(asks).toEqual(["acme"]);
     expect(sessions.created).toHaveLength(1);
+  });
+});
+
+// O5/O6 (docs/architecture/ownership-protocol.md): a headless run is autonomous work, so it runs inside a
+// decision boundary — and when that boundary stops it, the stop leaves a handoff behind.
+
+describe("activation task envelopes", () => {
+  it("binds an envelope to the run — bounded, with halt_checkpoint as the only exhaustion vocabulary", async () => {
+    // Given a triggered agent …
+    const seen: Array<ActivationEnvelope | undefined> = [];
+    const { instance } = activator({
+      registry: registryOf(spec()),
+      runTurn: async (_sessionId, _token, _signal, _permit, envelope) => {
+        seen.push(envelope);
+        return undefined;
+      },
+    });
+    // When the trigger fires …
+    await instance.onEvent(event());
+    await instance.idle();
+    // Then the kernel receives a real envelope: a hard budget (an unbounded autonomous task has no decision
+    // boundary), and the two vocabularies that make stopping the only option the type offers.
+    const envelope = seen[0];
+    expect(envelope).toBeDefined();
+    expect(envelope?.budgets.tokens).toBeGreaterThan(0);
+    expect(envelope?.stop.onBudgetExhausted).toBe("halt_checkpoint");
+    expect(envelope?.escalation.onScopeExceeded).toBe("refuse_and_replan");
+    // The envelope is per-EXECUTION: its id is the run's, so two concurrent activations never share a boundary.
+    expect(envelope?.id).toBeTruthy();
+    // No role is claimed — an agent spec declares none, and stamping "executor" would be an unbacked claim.
+    expect(envelope?.role).toBeUndefined();
+  });
+
+  it("a budget halt publishes a handoff whose only FACT is one the host can point at", async () => {
+    // Given a run that halts on its envelope budget …
+    const published: Array<Omit<HandoffCheckpoint, "id" | "createdAt" | "createdBy">> = [];
+    const { instance } = activator({
+      registry: registryOf(spec()),
+      runTurn: async () => ({
+        stopReason: "budget_exhausted",
+        usage: { model: "m", inputTokens: 10, outputTokens: 5 },
+      }),
+      publishCheckpoint: async (_token, checkpoint) => {
+        published.push(checkpoint);
+      },
+    });
+    // When the trigger fires …
+    await instance.onEvent(event());
+    await instance.idle();
+    // Then a checkpoint is published, and every confirmed fact carries evidence the successor can resolve.
+    expect(published).toHaveLength(1);
+    const checkpoint = published[0];
+    expect(checkpoint?.confirmedFacts).toHaveLength(1);
+    expect(checkpoint?.confirmedFacts[0]?.refs[0]?.type).toBe("run");
+    expect(checkpoint?.confirmedFacts[0]?.refs[0]?.id).toBeTruthy();
+    // What the host did NOT read (the transcript) is stated as a hypothesis, never as a fact.
+    expect(checkpoint?.hypotheses.length).toBeGreaterThan(0);
+    // The machine identity of the producer — what the independence check keys on (O3).
+    expect(checkpoint?.by?.id).toBe("agent:sentinel");
+    expect(checkpoint?.validationPlan).toBeTruthy();
+  });
+
+  it("a run that ends normally publishes nothing — a handoff is what a HALT owes, not every run", async () => {
+    const published: unknown[] = [];
+    const { instance } = activator({
+      registry: registryOf(spec()),
+      runTurn: async () => ({ stopReason: "end_turn" }),
+      publishCheckpoint: async (_token, checkpoint) => {
+        published.push(checkpoint);
+      },
+    });
+    await instance.onEvent(event());
+    await instance.idle();
+    expect(published).toHaveLength(0);
+  });
+
+  it("a control plane that refuses the handoff does not turn a bounded stop into a failed run", async () => {
+    const { instance, reports } = activator({
+      registry: registryOf(spec()),
+      runTurn: async () => ({ stopReason: "budget_exhausted" }),
+      publishCheckpoint: async () => {
+        throw new Error("400 dangling evidence");
+      },
+    });
+    await instance.onEvent(event());
+    await instance.idle();
+    // The run still settles as completed — the halt is already a fact on the event log.
+    expect(reports.map((r) => r.kind)).toContain("agent.run.completed");
   });
 });

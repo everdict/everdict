@@ -22,6 +22,7 @@ import {
   type AgentWakeIntent,
   type AnalysisArtifactRecord,
   NotFoundError,
+  type TaskEnvelope,
   type TraceSpan,
   memberMemoryDirectory,
   memberMemorySlug,
@@ -599,6 +600,9 @@ export interface ChatResult {
   // this hands the SAME numbers to the ledger, so the turn's own run detail can state its cost instead of
   // leaving it to the invoice. Absent when the turn consumed nothing (an aborted turn before the first call).
   usage?: AgentTurnUsage;
+  // How the kernel loop ENDED. Carried out so a HOST that bound this turn to a task envelope can act on the
+  // envelope's own halt ("budget_exhausted") — the loop stops, and someone outside it owes the handoff.
+  stopReason?: string;
 }
 
 // What a turn that died still knows about itself: the spans it recorded up to the failure (sealed with the
@@ -636,6 +640,12 @@ export interface ChatHooks {
   // Human-in-the-loop approval for write (non-read-only) tool calls — the SSE handler supplies one that pauses the
   // loop, asks the web, and resolves allow/deny. Absent (buffered/API callers) → write tools auto-allow as before.
   permit?: PermissionHook;
+  // The task envelope this turn runs inside (ownership O5), minus its scope. The caller states the boundary it
+  // owns — goal, hard budgets, what exhaustion and scope-exceeding MEAN — and the scope is completed below from
+  // the resolved tool registry, because the agent's granted capabilities only exist as names once tools are
+  // built. Set by autonomous callers (the activation); deliberately UNSET for interactive chat, where a human
+  // is present and refusing a tool they just asked for would be the gate misfiring, not working.
+  envelope?: Omit<TaskEnvelope, "scope">;
   // Mid-run steering: pull any user messages the web queued (POST /input) since this turn started, so the running loop
   // absorbs them at the next turn boundary instead of the user having to Stop and resend. Absent → strict turn-based.
   drainInput?: () => ChatMessage[];
@@ -986,6 +996,9 @@ export async function runChat(
   // Declared out here because the model and its token counters live inside the turn block, while the result
   // this function returns is assembled after it.
   let turnUsage: ChatResult["usage"];
+  // How the loop ended, carried out of the try so the caller sees it. A host that bound this turn to a task
+  // envelope acts on "budget_exhausted": the kernel halts, and the handoff is owed by whoever set the boundary.
+  let turnStopReason: string | undefined;
   // Declared at TURN scope: the recorder is built once the model is resolved (inside the block below) and
   // sealed after the loop returns, so both halves need to see the same binding.
   let spanRecorder: TurnSpanRecorder | undefined;
@@ -1184,6 +1197,20 @@ export async function runChat(
           spanRecorder?.observe(e);
           hooks?.onEvent?.(e);
         },
+        // O5: the envelope's scope is completed HERE because this is where the agent's granted capabilities
+        // finally exist as tool names. Pinning them at task start is the point — a tool that attaches
+        // mid-run (a server connected later) is outside the scope this task was authorized under, not
+        // silently inside it. The kernel adds its own control tools (todo, read_result, plan, wait) on top
+        // and those are all read-only, so the gate — which governs WRITES — never sees them; a future
+        // write-capable kernel tool would need listing here deliberately, and the test says so.
+        ...(hooks?.envelope
+          ? {
+              envelope: {
+                ...hooks.envelope,
+                scope: { allowedCapabilities: registry.list().map((t) => t.name), forbidden: [] },
+              },
+            }
+          : {}),
         ...(hooks?.permit ? { permit: hooks.permit } : {}),
         ...(hooks?.drainInput ? { drainInput: hooks.drainInput } : {}),
         ...(hooks?.onInterruptReady ? { onInterruptReady: hooks.onInterruptReady } : {}),
@@ -1205,6 +1232,7 @@ export async function runChat(
       // second user message straight after the first and neither the member nor the model can tell what
       // happened. The partial answer itself was already committed by the kernel; this is the line after it.
       // Best-effort: a store write must not turn a clean cancellation into a failure.
+      turnStopReason = loopResult.stopReason;
       if (loopResult.stopReason === "aborted" || loopResult.stopReason === "interrupted") {
         try {
           await persist({ role: "assistant", content: INTERRUPTED_BY_USER });
@@ -1335,5 +1363,6 @@ export async function runChat(
     messages: [userRecord, ...producedRecords],
     ...(turnUsage ? { usage: turnUsage } : {}),
     ...(spans && spans.length > 0 ? { spans } : {}),
+    ...(turnStopReason !== undefined ? { stopReason: turnStopReason } : {}),
   };
 }

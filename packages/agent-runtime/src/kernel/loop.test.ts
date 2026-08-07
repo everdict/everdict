@@ -1646,6 +1646,31 @@ describe("runAgentLoop — task envelope (trust-kernel O5)", () => {
     expect(toolMsgs.some((m) => typeof m.content === "string" && m.content === "ok")).toBe(true);
   });
 
+  it("a sub-agent's inherited scope can only SHRINK — a parent's WRITE tool has no door into the child", async () => {
+    // Given a parent whose envelope ALLOWS edit_file, delegating to a sub-agent whose model calls exactly that …
+    const child = fakeTransport([toolCallResult("c1", "edit_file", "{}"), textResult("child done")]);
+    const parent = fakeTransport([
+      toolCallResult("p1", "spawn_agent", JSON.stringify({ task: "probe the thing" })),
+      textResult("done"),
+    ]);
+    await runAgentLoop({
+      transport: parent.transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([tool("edit_file", false), tool("read_file", true)]),
+      subagentModel: { transport: child.transport, model: "cm" },
+      envelope,
+    });
+    // Then the child never even HAD the write tool: the kernel builds a sub-agent's registry from the parent's
+    // read-only tools, so a child's effective scope is (inherited envelope) ∩ (read-only) — strictly smaller
+    // than its parent's. The envelope closes the forbidden-tool escape (the delegation test above); this closes
+    // the one it does not need to, because the write never reaches the child's hands at all.
+    const childSecond = child.requests[1];
+    const answer = childSecond?.messages.find((m) => m.role === "tool");
+    expect(typeof answer?.content === "string" && /unknown tool/i.test(answer.content)).toBe(true);
+  });
+
   it("token-budget exhaustion halts with stopReason budget_exhausted — never a silent death", async () => {
     // usage7 charges 7 tokens per turn; a 20-token budget exhausts after the 3rd turn's usage lands (21 >= 20)
     const tight = { ...envelope, budgets: { tokens: 20 } };

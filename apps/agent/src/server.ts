@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { ChatMessage, PermissionDecision, PermissionHook } from "@everdict/agent-runtime";
 import type { AgentRegistry, SubscriptionStore, TenantKeyStore } from "@everdict/application-control";
-import type { AgentSessionRecord } from "@everdict/contracts";
+import type { AgentSessionRecord, HandoffCheckpoint } from "@everdict/contracts";
 import {
   type AgentPermissionMode,
   AgentPermissionModeSchema,
@@ -50,6 +50,12 @@ export interface AgentServerDeps extends ChatDeps {
   subscriptions?: SubscriptionStore;
   // §5.1 activation admission — the CP tenant-budget ask every launch path passes (absent = unadmitted dev).
   admitRun?: (workspace: string) => Promise<{ admitted: boolean; reason?: string }>;
+  // Publish a halted activation's handoff checkpoint to the control plane (ownership O6). Absent = no
+  // handoff is written, which is the dev wiring; the halt itself is still a fact on the event log.
+  publishCheckpoint?: (
+    agentToken: string,
+    checkpoint: Omit<HandoffCheckpoint, "id" | "createdAt" | "createdBy">,
+  ) => Promise<void>;
   // Test seam: the activation run executor. Default = the teammate-turn machinery (one request-less loop turn).
   activationRunTurn?: (sessionId: string, agentToken: string, signal: AbortSignal) => Promise<TurnOutcome | undefined>;
   // (`reportRunEvent` — the agent.run.* lifecycle bridge — is declared on ChatDeps: every turn entry point
@@ -354,8 +360,21 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
           ...(deps.admitRun ? { admitRun: deps.admitRun } : {}),
           runTurn:
             deps.activationRunTurn ??
-            ((sessionId, agentToken, signal, permit) =>
-              runTeammateTurn(deps, deps.authenticate, mailbox, sessionId, agentToken, signal, permit)),
+            ((sessionId, agentToken, signal, permit, envelope) =>
+              // `ledger: false` — the activation already opened this run; the envelope rides through to the
+              // kernel, which is what turns spec-declared autonomy into an enforced boundary.
+              runTeammateTurn(
+                deps,
+                deps.authenticate,
+                mailbox,
+                sessionId,
+                agentToken,
+                signal,
+                permit,
+                false,
+                envelope,
+              )),
+          ...(deps.publishCheckpoint ? { publishCheckpoint: deps.publishCheckpoint } : {}),
           // Approval parking (A6): register the ask DURABLY on the control plane first (it survives our
           // restart and gives members the days-long window), then wait in-process — the CP decide path
           // delivers back via POST /internal/deliver-approval, and the legacy fleet channel (GET /pending →

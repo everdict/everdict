@@ -63,7 +63,14 @@ import {
 import { installProxyDispatcher } from "./proxy-dispatcher.js";
 import { buildServer } from "./server.js";
 import { EVERDICT_AGENT_SYSTEM_PROMPT } from "./system-prompt.js";
-import { admissionBridge, approvalBridge, approvalNoticeClearer, runEventReporter, usageReporter } from "./usage.js";
+import {
+  admissionBridge,
+  approvalBridge,
+  approvalNoticeClearer,
+  checkpointPublisher,
+  runEventReporter,
+  usageReporter,
+} from "./usage.js";
 
 function envModelFallback(config: AgentConfig): ModelResolver {
   if (config.AGENT_LLM_API_KEY === undefined || config.AGENT_LLM_MODEL === undefined) {
@@ -230,6 +237,9 @@ async function main(): Promise<void> {
       : {}),
     // agent.run.* lifecycle facts → the control plane's event log (fleet observability). Same token pair.
     ...(reportRunEvent ? { reportRunEvent } : {}),
+    // A halted activation's handoff (ownership O6) — written on the ORDINARY member surface with the run's own
+    // agt_ token, so it is attributed like every other write that run made (no internal token involved).
+    publishCheckpoint: checkpointPublisher(config.CONTROL_PLANE_URL),
     // Durable approvals (A6) — the park registers on the control plane so it survives our restart.
     ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
       ? { approvalBridge: approvalBridge(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }

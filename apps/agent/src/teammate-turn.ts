@@ -1,5 +1,5 @@
 import type { PermissionHook } from "@everdict/agent-runtime";
-import type { TurnOutcome } from "./agent-activation.js";
+import type { ActivationEnvelope, TurnOutcome } from "./agent-activation.js";
 import type { AgentMailbox } from "./agent-mailbox.js";
 import { withTurnRun } from "./chat-run.js";
 import { type ChatDeps, type ChatResult, type FailedTurnEvidence, contentToString, runChat } from "./chat.js";
@@ -23,9 +23,13 @@ export async function runTeammateTurn(
   // waking a teammate on a delivered message. The activation path leaves it off: it opened its run before
   // calling here (envelope, approval parking, event attribution), and a second one per turn would be a lie.
   ledger?: boolean,
+  // The task envelope this turn runs inside (ownership O5), minus its scope — runChat completes that from the
+  // resolved toolset, which is the only place the agent's granted capabilities actually exist as names.
+  // Absent for a plain teammate turn: its autonomy boundary was consent at spawn time, not a per-task envelope.
+  envelope?: ActivationEnvelope,
   // Returns what the turn spent on the model AND the spans it recorded live, so the caller can put both in the
-  // run's sealed evidence (O2 + N6). undefined = nothing ran (drained empty) or the turn died before its first
-  // model call.
+  // run's sealed evidence (O2 + N6), plus how the loop ENDED so a budget halt can be handed off. undefined =
+  // nothing ran (drained empty) or the turn died before its first model call.
 ): Promise<TurnOutcome | undefined> {
   const headers = { authorization: `Bearer ${agentToken}` };
   try {
@@ -46,6 +50,7 @@ export async function runTeammateTurn(
         // none (its autonomy boundary is consent at spawn time).
         ...(permit ? { permit } : {}),
         ...(collectFailure ? { onFailedTurn: collectFailure } : {}),
+        ...(envelope ? { envelope } : {}),
       });
     const result =
       ledger === true
@@ -61,6 +66,7 @@ export async function runTeammateTurn(
     return {
       ...(result.usage ? { usage: result.usage } : {}),
       ...(result.spans && result.spans.length > 0 ? { spans: result.spans } : {}),
+      ...(result.stopReason !== undefined ? { stopReason: result.stopReason } : {}),
     };
   } catch (err) {
     console.error(`[agent] teammate turn failed for ${sessionId}:`, err instanceof Error ? err.message : err);

@@ -67,7 +67,45 @@ without), and a fixed vocabulary for the two ways a task ends badly.
 
 The kernel (`packages/agent-runtime/src/kernel/loop.ts`) honors the envelope on every tool call and at every
 turn boundary, and passes it **verbatim to sub-agents** — without that line a scoped parent could
-`spawn_agent` its way out of its own scope.
+`spawn_agent` its way out of its own scope. A child's effective scope can therefore only shrink: it inherits
+the parent's envelope, and the kernel builds its registry from the parent's *read-only* tools, so a write the
+parent held has no door into the child at all.
+
+### Who actually gets one
+
+**Agent activations** (a platform event matching an enabled agent's trigger — `apps/agent/src/agent-activation.ts`).
+That is autonomous work by definition: nobody is watching, and the boundary is the whole safeguard. The
+envelope's id is the **run** id, because an envelope is per-execution and two concurrent activations must not
+share a boundary. `role` stays absent — an agent spec declares no ownership role, and stamping `executor` on
+it would be a claim the record cannot back.
+
+**Interactive chat does not.** A human is present and asked for the tool call; refusing it would be the gate
+misfiring, not working.
+
+Two seams are worth naming precisely:
+
+- **Scope is completed where the tools resolve.** The activation states the boundary it owns (goal, budgets,
+  vocabularies); `runChat` fills `scope.allowedCapabilities` from the built tool registry, because the agent's
+  granted capabilities only exist as *names* once tools are constructed. Pinning them there is the point — a
+  server connected mid-run is outside the scope the task was authorized under, not silently inside it.
+- **Budgets are the kernel's units, not dollars.** `spec.budgetUsd` is a different axis: the delegated slice
+  governing work an activation *causes* (runs it submits, refused with a 402 at the admission gate, priced on
+  the control plane). The loop measures tokens and wall-clock and knows nothing about money, so the envelope
+  carries generous token/time walls (`ACTIVATION_TOKEN_BUDGET` / `ACTIVATION_TIME_BUDGET_SEC`) rather than a
+  dollar figure nothing inside the loop could check.
+
+### The halt writes the handoff
+
+On `budget_exhausted` the **host** builds the checkpoint, not the agent — the agent is out of budget, and
+asking it for one more turn to summarize itself is asking past the boundary that just stopped it. The host
+states as *fact* only what it holds evidence for: the run, which is a resolvable reference on the ledger.
+What the work achieved lives in a transcript the host never read, so it goes in `hypotheses`, where a
+successor treats it as something to check rather than something to build on. Publication is best-effort by
+contract: a control plane that refuses the checkpoint must not turn a bounded stop into a failed run, and the
+halt is already a fact on the event log.
+
+A **scope refusal produces no checkpoint**, and that is not an omission: `refuse_and_replan` returns the
+refusal to the model as a tool result and the run continues. There is no halt to hand off from.
 
 ## The checkpoint
 

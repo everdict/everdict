@@ -1,6 +1,14 @@
 import type { PermissionDecision, PermissionHook, PermissionRequest } from "@everdict/agent-runtime";
 import type { AgentRegistry, AgentSessionStore, TenantKeyStore } from "@everdict/application-control";
-import type { AgentSpec, AgentTrigger, SubscriptionRecord, TraceEvent, TraceSpan } from "@everdict/contracts";
+import type {
+  AgentSpec,
+  AgentTrigger,
+  HandoffCheckpoint,
+  SubscriptionRecord,
+  TaskEnvelope,
+  TraceEvent,
+  TraceSpan,
+} from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import { eventSelectorMatches } from "@everdict/domain";
 import { isGuardedAction } from "./action-policy.js";
@@ -17,7 +25,25 @@ import type { AgentRunEventReport } from "./usage.js";
 export interface TurnOutcome {
   usage?: AgentTurnUsage;
   spans?: TraceSpan[];
+  // How the kernel loop ENDED. The activation only acts on one value — "budget_exhausted", the envelope's
+  // halt — because that is the reason the ownership protocol owes a handoff for (halt_checkpoint is the
+  // envelope's only exhaustion vocabulary, and a halt with nothing left behind is the failure it exists to
+  // prevent). Absent = the turn drained empty or died before the loop ran.
+  stopReason?: string;
 }
+
+// The envelope this activation runs inside, minus the one part the activation cannot know. `scope` is the
+// agent's RESOLVED toolset, and that set only exists once the turn has built its tool registry — so the
+// activation states the boundary it owns (goal, budgets, halt vocabulary) and the turn completes the scope.
+export type ActivationEnvelope = Omit<TaskEnvelope, "scope">;
+
+// A headless run's own hard bound, in the kernel's own units. Deliberately NOT derived from spec.budgetUsd:
+// that is the DELEGATED slice governing the work an activation CAUSES (runs it submits, refused at the
+// admission gate with a 402), priced on the control plane where prices live. The loop measures tokens and
+// wall-clock and knows nothing about money, so mapping dollars onto it would be a budget nothing checks.
+// These are the generous outer walls — a run reaching either has stopped making progress, not stopped early.
+const ACTIVATION_TOKEN_BUDGET = 2_000_000;
+const ACTIVATION_TIME_BUDGET_SEC = 3_600;
 
 export interface ActivationEvent {
   workspace: string;
@@ -76,6 +102,9 @@ export interface AgentActivatorDeps {
     agentToken: string,
     signal: AbortSignal,
     permit?: PermissionHook,
+    // The task envelope this run is bound by (ownership O5) — the turn completes its scope from the
+    // resolved toolset and hands it to the kernel, which halts the run when a budget is spent.
+    envelope?: ActivationEnvelope,
   ) => Promise<TurnOutcome | undefined>;
   // Park a mutation for member approval (agent-automation A6): the shared PermissionRegistry the fleet view
   // discovers via GET /pending and answers via POST /permission. Absent → headless mutations are DENIED under
@@ -102,6 +131,14 @@ export interface AgentActivatorDeps {
   // automation A5), carrying the P3 ledger correlation and the O2 transcript trace. Best-effort — an
   // unreachable control plane never affects the run. One shape, defined once in usage.ts.
   reportRunEvent?: (input: AgentRunEventReport) => Promise<void>;
+  // Publish the handoff a halted run owes its successor (ownership O6). Called with the run's own agt_ token,
+  // so the checkpoint is attributed like every other write this run made — and BEFORE the token is revoked.
+  // Best-effort by contract: a control plane that cannot take the checkpoint must not turn a budget halt into
+  // a failed run, and the halt itself is already on the event log either way.
+  publishCheckpoint?: (
+    agentToken: string,
+    checkpoint: Omit<HandoffCheckpoint, "id" | "createdAt" | "createdBy">,
+  ) => Promise<void>;
 }
 
 export class AgentActivator {
@@ -589,7 +626,15 @@ export class AgentActivator {
         });
       }
       const permit = this.buildPermit(event, agentId, sessionId, spec, controller.signal, runRef);
-      const outcome = await this.deps.runTurn(sessionId, token, controller.signal, permit);
+      // O5: a headless run is autonomous work, so it runs inside a decision boundary. This is the first
+      // production caller to hand the kernel an envelope — before it, `envelope` existed on the loop's
+      // options and no caller ever set it, which made every guard in there dead code.
+      const envelope = this.envelopeFor(runId, spec, event);
+      const outcome = await this.deps.runTurn(sessionId, token, controller.signal, permit, envelope);
+      // The halt owes a handoff. Published BEFORE the settle report and inside the try — the run's token is
+      // revoked in the finally, and a checkpoint nobody could write is the failure halt_checkpoint names.
+      if (outcome?.stopReason === "budget_exhausted")
+        await this.publishHalt(token, envelope, runId, agentId, sessionId, event, outcome);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
       await this.deps.sessions.setSessionStatus(event.workspace, sessionId, settled, this.deps.now());
       void this.report(
@@ -618,6 +663,83 @@ export class AgentActivator {
       this.controllers.delete(sessionId);
       this.stopped.delete(sessionId);
       await this.deps.keyStore.revoke(event.workspace, keyId, creator).catch(() => {});
+    }
+  }
+
+  // The decision boundary this activation runs inside (O5). The envelope's id is the RUN id: a task envelope
+  // is per-execution, and reusing the agent id would make two concurrent activations share one boundary.
+  // `role` stays absent — an agent spec declares no ownership role, and stamping "executor" on it would be a
+  // claim the record cannot back. Scope is completed by the turn, which is where the toolset resolves.
+  private envelopeFor(runId: string, spec: AgentSpec, event: ActivationEvent): ActivationEnvelope {
+    return {
+      id: runId,
+      goal: spec.task ?? `React to ${event.kind}: ${event.message}`,
+      budgets: { tokens: ACTIVATION_TOKEN_BUDGET, timeSec: ACTIVATION_TIME_BUDGET_SEC },
+      stop: { onBudgetExhausted: "halt_checkpoint" },
+      escalation: { onScopeExceeded: "refuse_and_replan" },
+      // Nothing declares a rollback requirement for an activation yet; claiming one would demand a rollback
+      // plan the host has no way to write. When agents carry ownership roles, the role decides this.
+      rollbackRequired: false,
+    };
+  }
+
+  // The handoff a halted run owes its successor (O6). The host writes this, not the agent: the agent is out
+  // of budget, and asking it for one more turn to summarize itself is asking past the boundary that just
+  // stopped it. What the host can state as FACT is exactly what it holds evidence for — the run itself, on
+  // the control plane's ledger, which is a resolvable reference. Everything about what the work ACHIEVED is
+  // the agent's transcript, which the host never read, so it goes in hypotheses where a successor will treat
+  // it as something to check rather than something to build on.
+  private async publishHalt(
+    agentToken: string,
+    envelope: ActivationEnvelope,
+    runId: string,
+    agentId: string,
+    sessionId: string,
+    event: ActivationEvent,
+    outcome: TurnOutcome,
+  ): Promise<void> {
+    const publish = this.deps.publishCheckpoint;
+    if (!publish) return;
+    const spent = outcome.usage ? outcome.usage.inputTokens + outcome.usage.outputTokens : undefined;
+    try {
+      await publish(agentToken, {
+        envelopeId: envelope.id,
+        goal: envelope.goal,
+        by: { id: `agent:${agentId}`, sessionId, runId },
+        currentState: `The run halted at its task envelope's budget before reporting completion. Its trajectory up to the halt is sealed on run ${runId}.`,
+        confirmedFacts: [
+          {
+            statement:
+              spent === undefined
+                ? `Run ${runId} halted on envelope budget exhaustion (woken by ${event.kind}).`
+                : `Run ${runId} halted on envelope budget exhaustion after ${spent} model tokens (woken by ${event.kind}).`,
+            refs: [{ type: "run", id: runId }],
+          },
+        ],
+        // The host did not read the transcript, so it claims nothing about the work — only that a run which
+        // stopped mid-task usually left something half-done, which is the thing a successor must check first.
+        hypotheses: [
+          {
+            statement: "Work may be partially applied — the halt was a budget boundary, not a completion.",
+            confidence: "medium",
+          },
+        ],
+        actionsTaken: [
+          { description: `Ran the agent's triggered task to the envelope budget.`, refs: [{ type: "run", id: runId }] },
+        ],
+        openDecisions: ["Whether to raise this agent's envelope budget or narrow the task before resuming."],
+        remainingTasks: [`Re-establish state from run ${runId}'s trajectory, then continue toward: ${envelope.goal}`],
+        requiredCapabilities: [],
+        risks: [],
+        validationPlan: `Read run ${runId}'s sealed trajectory to determine what was actually applied, then verify the goal independently before declaring it done.`,
+      });
+    } catch (err) {
+      // Best-effort by contract — the halt is already a fact on the event log; a checkpoint the control plane
+      // refused (or could not be reached for) must not turn a bounded stop into a failed run.
+      console.error(
+        `[agent] failed to publish halt checkpoint for ${agentId}:`,
+        err instanceof Error ? err.message : err,
+      );
     }
   }
 

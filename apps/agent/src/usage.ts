@@ -192,3 +192,23 @@ export function approvalBridge(
     },
   };
 }
+
+// Publish a halted run's handoff checkpoint (ownership O6). Unlike the internal-token bridges above this
+// calls the ORDINARY member surface with the run's own agt_ token: a checkpoint is a workspace record, and
+// writing it as the agent-acting-as-its-creator is what makes it attributed like every other write that run
+// made. The control plane refuses a checkpoint whose evidence does not resolve (400) — that refusal is the
+// point of the contract, so it is surfaced as an error rather than swallowed here; the CALLER decides that a
+// failed publish must not fail the run.
+export function checkpointPublisher(
+  controlPlaneUrl: string,
+): (agentToken: string, checkpoint: Record<string, unknown>) => Promise<void> {
+  const base = controlPlaneUrl.replace(/\/$/, "");
+  return async (agentToken, checkpoint) => {
+    const res = await fetch(`${base}/checkpoints`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${agentToken}` },
+      body: JSON.stringify(checkpoint),
+    });
+    if (!res.ok) throw new Error(`checkpoint publish failed: ${res.status}`);
+  };
+}
