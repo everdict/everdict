@@ -96,6 +96,11 @@ everywhere else (null discipline, error model, naming, layering) we keep the str
 2. **Quality is non-negotiable** — format/lint/typecheck/test/build all green.
 3. **Skills travel with the code** — a PR that changes a convention/invariant updates the matching skill reference *in the same PR* (mere implementation churn is not a doc trigger).
 4. **Reinterpret, don't copy** — proven idioms from prior codebases are adapted to TS, not transplanted verbatim; note the source idea when non-obvious.
+5. **New top-level domains pass the trust gate** — a new domain enters the spine only if it strengthens the
+   trust harness (execution→evidence→measurement→verdict→regression→reproduction) or the owner protocol;
+   otherwise it ships as an application/plugin on top. The agent runtime is a *reference owner runtime that
+   consumes the trust harness* — not the product identity; complexity budget is measured in invariant upkeep,
+   not feature count.
 
 ## Commits
 Conventional Commits, scoped: `feat(drivers): ...`, `fix(runner): ...`. Body explains the *why*.
