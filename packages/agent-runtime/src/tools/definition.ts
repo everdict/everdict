@@ -1,3 +1,4 @@
+import type { EffectContract } from "@everdict/contracts";
 import type { ZodTypeAny } from "zod";
 
 export interface ToolContext {
@@ -28,12 +29,21 @@ export interface PermissionRequest {
   name: string;
   isReadOnly: boolean;
   input: unknown;
+  // What the capability behind this tool DECLARED about its effects (blast radius, idempotency, rollback,
+  // data access). Carried so the host's gate can classify risk from the declaration instead of guessing from
+  // the tool's name — a capability that told us its blast radius should not be graded on its spelling.
+  // Absent for tools with no capability behind them (the kernel's own, the built-in control-plane surface).
+  effects?: EffectContract;
 }
 export type PermissionHook = (req: PermissionRequest) => PermissionDecision | Promise<PermissionDecision>;
 
 export interface ToolDefinition {
   name: string;
   description: string;
+  // The declared effect contract of the capability this tool came from (@everdict/contracts). Provenance
+  // travels WITH the tool rather than being looked up again at call time — the loop hands it to the
+  // permission gate, which is the only consumer that needed it.
+  effects?: EffectContract;
   // JSON Schema object handed verbatim to the OpenAI `tools[]` function.parameters.
   parametersJsonSchema: Record<string, unknown>;
   // Optional runtime validation of the parsed arguments before `call` (native tools use it; MCP-bridged tools

@@ -25,6 +25,8 @@ export {
   type ImageTags,
   type ImageVerify,
   type CodeToolExample,
+  type EffectContract,
+  type RollbackPlan,
   type CodeToolTryResult,
   type CapabilityVersions,
   type CapabilitySpecDiff,

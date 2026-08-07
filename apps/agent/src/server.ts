@@ -526,7 +526,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       const nextMode = body.data.permissionMode;
       if (nextMode === "bypass") permissions.resolveWhere(id, () => "allow");
       else if (nextMode === "auto")
-        permissions.resolveWhere(id, (name) => (name.length > 0 && !isGuardedAction(name) ? "allow" : undefined));
+        permissions.resolveWhere(id, (name, effects) =>
+          name.length > 0 && !isGuardedAction(name, effects) ? "allow" : undefined,
+        );
     }
     // Return the fresh persisted record — the single source of truth after the write(s).
     const fresh = await deps.sessions.getSession(principal.workspace, principal.subject, id);
@@ -765,7 +767,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     const permit: PermissionHook = withRules(async (request) => {
       const current = await liveMode();
       if (current === "bypass") return "allow";
-      if (current === "auto" && !isGuardedAction(request.name)) return "allow";
+      if (current === "auto" && !isGuardedAction(request.name, request.effects)) return "allow";
       return ask(request);
     });
     // Plan approval reuses the same park-and-await channel: emit a `plan` ask, resolve via POST /permission.

@@ -7,6 +7,7 @@ import {
   buildToolSearchTool,
   mcpToolToDefinition,
 } from "@everdict/agent-runtime";
+import type { EffectContract } from "@everdict/contracts";
 import { mcpBridgePrefix } from "@everdict/domain";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -54,9 +55,19 @@ export function isBaseToolReadOnly(name: string): boolean {
 // secrets already resolved. Two transports: `http` = a remote Streamable-HTTP endpoint (authSecret → verbatim
 // Authorization header); `stdio` = a container image the agent runs (`docker run --rm -i <image> [args]`) with the
 // bound secrets as env. write=true → all of its tools are bridged (mutating allowed); else read-only subset.
+// `effects` is the adopted capability's declared effect contract, carried so every tool this server exposes
+// reaches the permission gate with the author's own statement of blast radius instead of just a name.
 export type ResolvedMcpServer =
-  | { kind: "http"; name: string; url: string; authorization?: string; write: boolean }
-  | { kind: "stdio"; name: string; image: string; args: string[]; env: Record<string, string>; write: boolean };
+  | { kind: "http"; name: string; url: string; authorization?: string; write: boolean; effects?: EffectContract }
+  | {
+      kind: "stdio";
+      name: string;
+      image: string;
+      args: string[];
+      env: Record<string, string>;
+      write: boolean;
+      effects?: EffectContract;
+    };
 
 // `docker run --rm -i --init [--env NAME …] <image> [args]`. `--init` runs a tiny init as PID 1 so servers that spawn
 // children (e.g. Playwright → chromium) don't leak zombies over the session. Secrets pass through with `--env NAME`
@@ -297,7 +308,7 @@ export function mcpToolProvider(
                 inputSchema: t.inputSchema as Record<string, unknown> | undefined,
               },
               invoke,
-              { isReadOnly: !server.write },
+              { isReadOnly: !server.write, ...(server.effects ? { effects: server.effects } : {}) },
             ),
           );
         }

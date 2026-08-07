@@ -1,9 +1,15 @@
 import type { PermissionDecision } from "@everdict/agent-runtime";
+import type { EffectContract } from "@everdict/contracts";
 
 interface Pending {
   sessionId: string;
   name: string;
   input: unknown;
+  // The declared effect contract of the capability behind the parked tool, kept so a LATER classification —
+  // the member relaxing the session to "auto" while the ask is parked — reads the same declaration the gate
+  // read when it parked. Without it that path fell back to name-guessing and could auto-allow an external
+  // effect the original gate had stopped.
+  effects?: EffectContract;
   resolve: (decision: PermissionDecision) => void;
 }
 
@@ -25,7 +31,7 @@ export class PermissionRegistry {
     requestId: string,
     sessionId: string,
     signal?: AbortSignal,
-    request?: { name: string; input: unknown },
+    request?: { name: string; input: unknown; effects?: EffectContract },
     timeoutMs?: number,
   ): Promise<PermissionDecision> {
     return new Promise<PermissionDecision>((resolve) => {
@@ -43,6 +49,7 @@ export class PermissionRegistry {
         sessionId,
         name: request?.name ?? "",
         input: request?.input,
+        ...(request?.effects ? { effects: request.effects } : {}),
         resolve: finish,
       });
     });
@@ -67,11 +74,14 @@ export class PermissionRegistry {
   // Resolve every parked ask of the session that `decide` maps to a decision (undefined = leave parked). Used when
   // the session's permission mode is RELAXED mid-turn (→ bypass/auto): an ask parked under the old mode would
   // otherwise stay stuck even though the new mode would never have asked. Returns how many were resolved.
-  resolveWhere(sessionId: string, decide: (name: string) => PermissionDecision | undefined): number {
+  resolveWhere(
+    sessionId: string,
+    decide: (name: string, effects?: EffectContract) => PermissionDecision | undefined,
+  ): number {
     let resolved = 0;
     for (const [, p] of [...this.pending.entries()]) {
       if (p.sessionId !== sessionId) continue;
-      const decision = decide(p.name);
+      const decision = decide(p.name, p.effects);
       if (decision === undefined) continue;
       p.resolve(decision);
       resolved += 1;

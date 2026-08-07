@@ -1,3 +1,4 @@
+import type { EffectContract } from "@everdict/contracts";
 import type { ToolDefinition, ToolResult } from "../tools/definition.js";
 
 // A tool spec as returned by an MCP server's tools/list (name + description + JSON-schema input).
@@ -25,7 +26,10 @@ const MAX_DESCRIPTION_CHARS = 2048;
 export function mcpToolToDefinition(
   spec: McpToolSpec,
   invoke: McpInvoke,
-  opts?: { isReadOnly?: boolean },
+  // `effects` is the declared effect contract of the CAPABILITY this server came from, when there is one.
+  // Every tool a server exposes inherits it: the contract is a property of the adopted thing, and the server
+  // is what the workspace consented to. Absent for the built-in control-plane surface (ours, not declared).
+  opts?: { isReadOnly?: boolean; effects?: EffectContract },
 ): ToolDefinition {
   const params = spec.inputSchema ?? { type: "object", properties: {} };
   return {
@@ -34,6 +38,7 @@ export function mcpToolToDefinition(
     parametersJsonSchema: params,
     isMcp: true,
     isReadOnly: opts?.isReadOnly ?? true,
+    ...(opts?.effects ? { effects: opts.effects } : {}),
     call: (input) => invoke(spec.name, asArgs(input)),
   };
 }

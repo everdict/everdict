@@ -65,13 +65,40 @@ export type RequiredSecret = z.infer<typeof RequiredSecretSchema>;
 // say its blast radius, whether a retry is safe, how one invocation is undone, and what a partial success
 // leaves behind. The domain guard (assertCapabilityEffects) refuses registering a write-capable capability
 // without it: an undeclared side effect is not a smaller side effect.
+// How one invocation is undone. Prose was the v1 shape and still parses (wire compatibility — every stored
+// contract keeps working), but prose is only ever read by a human, and the invocation-time gate needs to
+// ACT on the answer. The tagged forms say the three things that actually differ:
+//   capability   — another capability undoes it, named. The one machine-actionable answer.
+//   compensation — a described procedure, not a single call. Honest about needing judgment.
+//   irreversible — it cannot be undone. `requiresApproval: true` is tautological by type, and that is the
+//                  point: an author declaring irreversibility must WRITE the consent requirement down, and
+//                  the gate reads it rather than inferring it from a verb in the tool's name.
+export const RollbackPlanSchema = z.union([
+  z.string().min(1).max(500),
+  z.object({ kind: z.literal("capability"), capability: z.string().min(1) }),
+  z.object({ kind: z.literal("compensation"), description: z.string().min(1).max(500) }),
+  z.object({ kind: z.literal("irreversible"), requiresApproval: z.literal(true) }),
+]);
+export type RollbackPlan = z.infer<typeof RollbackPlanSchema>;
+
+// Where the data goes — the axis `sideEffect` cannot express. A read tool has no side effect and can still be
+// the most sensitive thing an agent holds: reading the workspace and reaching an outside network are the two
+// halves of exfiltration, and "sideEffect: none" says nothing about either. Optional, because an author who
+// cannot honestly answer should not be made to guess — an invented declaration is worse than an absent one.
+export const DataAccessSchema = z.object({
+  reads: z.enum(["none", "workspace", "external"]).optional(), // what it can SEE
+  egress: z.enum(["none", "workspace", "external"]).optional(), // where what it saw can GO
+});
+export type DataAccess = z.infer<typeof DataAccessSchema>;
+
 export const EffectContractSchema = z.object({
   // none: pure computation/read · workspace: mutates everdict-owned state · external: reaches an outside
   // system (deploys, emails, third-party writes) — the highest blast radius.
   sideEffect: z.enum(["none", "workspace", "external"]),
   idempotent: z.boolean().optional(), // calling twice ≡ calling once. Absent = UNKNOWN — treated as NOT idempotent.
-  rollback: z.string().min(1).max(500).optional(), // how one invocation is undone (executable prose, not hope)
+  rollback: RollbackPlanSchema.optional(), // how one invocation is undone (see RollbackPlanSchema)
   partialFailure: z.string().min(1).max(500).optional(), // what a partial success leaves behind and how to tell
+  dataAccess: DataAccessSchema.optional(), // what it can see and where that can go (see DataAccessSchema)
 });
 export type EffectContract = z.infer<typeof EffectContractSchema>;
 

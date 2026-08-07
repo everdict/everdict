@@ -1,3 +1,6 @@
+import type { EffectContract } from "@everdict/contracts";
+import { effectsRequireConsent } from "@everdict/domain";
+
 // The conversational agent's base-surface policy — the WHOLE control-plane MCP catalog is bridged so the agent can
 // act on every everdict entity (create / run / update / delete / configure) as its authenticated principal. Three
 // enforcement layers stand in front of every mutation:
@@ -54,6 +57,19 @@ const GUARDED_NAMES = new Set<string>([
   "spawn_teammate",
 ]);
 
-export function isGuardedAction(name: string): boolean {
+// Guarded classification, in order of what we actually KNOW:
+//
+//   ① the capability's own EffectContract, when the tool came from one. This is the honest answer — the
+//      author declared the blast radius at save time (the domain guard refuses a write-capable capability
+//      that does not), and reading it beats guessing. `sync_inventory` looks benign and can bill a customer;
+//      `remove_label` looks alarming and undoes itself. Spelling was never the signal.
+//   ② the verb-prefix + exact-name lists below, for everything with no declaration behind it: the built-in
+//      control-plane surface and the kernel's own tools, which are ours and known rather than declared.
+//
+// A declared contract does NOT lose to the name list: a capability that says it is safe is trusted on its own
+// statement, because that statement is what the workspace signed up for when it adopted the thing. The name
+// lists stay authoritative only where nobody made a statement at all.
+export function isGuardedAction(name: string, effects?: EffectContract): boolean {
+  if (effects) return effectsRequireConsent(effects);
   return GUARDED_PREFIXES.some((p) => name.startsWith(p)) || GUARDED_NAMES.has(name);
 }

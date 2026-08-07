@@ -27,6 +27,7 @@ import {
   type CapabilitySpec,
   type CapabilityType,
   type CapabilityVisibility,
+  type EffectContract,
   type ProbeCapabilityMcpResult,
   type ValidateCapabilityResult,
 } from '@/entities/capability'
@@ -587,6 +588,13 @@ function CapabilityEditorDialog({
   const [imageArgs, setImageArgs] = useState((mcp?.args ?? []).join(' '))
   const [provides, setProvides] = useState((mcp?.provides ?? []).join(', '))
   const [mcpWrite, setMcpWrite] = useState(mcp?.write ?? false)
+  // 효과 계약(O4) — mcp/code 공용 한 벌. write 가능해질 때만 폼에 나오고, 저장 시에도 그때만 실린다:
+  // 읽기 전용 도구에 계약을 붙이는 건 허용되지만, 자동으로 만들어 붙이면 아무도 하지 않은 선언이 된다.
+  const [effects, setEffects] = useState<EffectContract>(
+    (capability?.spec.type === 'mcp' || capability?.spec.type === 'code'
+      ? capability.spec.effects
+      : undefined) ?? { sideEffect: 'workspace' }
+  )
   // mcp 연결 테스트(probe) — 테스트 전용 토큰(미저장) + 결과(도달성 + 발견 도구, provides 자동채움).
   const [probeToken, setProbeToken] = useState('')
   const [probing, setProbing] = useState(false)
@@ -649,6 +657,7 @@ function CapabilityEditorDialog({
           provides: splitCsv(provides),
           requiredSecrets: cleanSecrets,
           write: mcpWrite,
+          ...(mcpWrite ? { effects } : {}),
         }
       }
       if (!url.trim()) return { error: t('urlRequired') }
@@ -659,6 +668,7 @@ function CapabilityEditorDialog({
         provides: splitCsv(provides),
         requiredSecrets: cleanSecrets,
         write: mcpWrite,
+        ...(mcpWrite ? { effects } : {}),
       }
     }
     if (type === 'code') {
@@ -704,6 +714,7 @@ function CapabilityEditorDialog({
         isReadOnly,
         requiredSecrets: cleanSecrets,
         examples,
+        ...(isReadOnly ? {} : { effects }),
       }
     }
     if (type === 'environment') {
@@ -1052,6 +1063,7 @@ function CapabilityEditorDialog({
               />
               <span>{t('mcpWrite')}</span>
             </label>
+            {mcpWrite && <EffectContractEditor value={effects} onChange={setEffects} t={t} />}
           </>
         )}
 
@@ -1110,6 +1122,7 @@ function CapabilityEditorDialog({
               />
               <span>{t('isReadOnly')}</span>
             </label>
+            {!isReadOnly && <EffectContractEditor value={effects} onChange={setEffects} t={t} />}
             {/* 워크드 예제 — 이 도구가 무엇을 하는지 입력 형태로 보여준다(상세 표시·try·tool description 3중 용도) */}
             <div className="space-y-1.5">
               <Label>{t('examplesLabel')}</Label>
@@ -1431,6 +1444,156 @@ function CapabilityEditorDialog({
 }
 
 // 필요 시크릿 편집 — 이름 + 설명 행(추가/삭제). 채택자가 자기 시크릿으로 채운다(값 아님, 이름만).
+// 효과 계약(O4) 편집기 — write 가능한 도구에서만 보인다. 컨트롤플레인 도메인 가드가 write 도구에 선언을
+// 요구하므로(선언 없이 저장하면 400), 이 폼이 없으면 웹에서는 변경 도구를 아예 만들 수 없었다. 되돌리기는
+// 태그된 형태다: 문자열 산문은 사람만 읽지만, 호출 시점 권한 게이트는 답을 **판정**해야 한다.
+function EffectContractEditor({
+  value,
+  onChange,
+  t,
+}: {
+  value: EffectContract
+  onChange: (next: EffectContract) => void
+  t: (key: string) => string
+}) {
+  const rollbackKind =
+    value.rollback === undefined
+      ? 'none'
+      : typeof value.rollback === 'string'
+        ? 'prose'
+        : value.rollback.kind
+  const setRollbackKind = (kind: string) => {
+    if (kind === 'none') return onChange({ ...value, rollback: undefined })
+    if (kind === 'prose') return onChange({ ...value, rollback: '' })
+    if (kind === 'capability')
+      return onChange({ ...value, rollback: { kind: 'capability', capability: '' } })
+    if (kind === 'compensation')
+      return onChange({ ...value, rollback: { kind: 'compensation', description: '' } })
+    return onChange({ ...value, rollback: { kind: 'irreversible', requiresApproval: true } })
+  }
+  const rollbackText =
+    typeof value.rollback === 'string'
+      ? value.rollback
+      : value.rollback?.kind === 'capability'
+        ? value.rollback.capability
+        : value.rollback?.kind === 'compensation'
+          ? value.rollback.description
+          : ''
+  const setRollbackText = (text: string) => {
+    if (typeof value.rollback === 'string') return onChange({ ...value, rollback: text })
+    if (value.rollback?.kind === 'capability')
+      return onChange({ ...value, rollback: { kind: 'capability', capability: text } })
+    if (value.rollback?.kind === 'compensation')
+      return onChange({ ...value, rollback: { kind: 'compensation', description: text } })
+  }
+  const scope = (key: string) => (
+    <option key={key} value={key}>
+      {t(`effectScope_${key}`)}
+    </option>
+  )
+  return (
+    <div className="space-y-2.5 rounded-md border border-border p-2.5">
+      <div className="space-y-1">
+        <Label>{t('effectsLabel')}</Label>
+        <p className="text-[12px] text-muted-foreground">{t('effectsHint')}</p>
+      </div>
+      <div className="space-y-1">
+        <Label>{t('sideEffectLabel')}</Label>
+        <select
+          className="h-8 w-full rounded-md border border-border bg-background px-2 text-[13px]"
+          value={value.sideEffect}
+          onChange={(e) =>
+            onChange({ ...value, sideEffect: e.target.value as EffectContract['sideEffect'] })
+          }
+        >
+          {['none', 'workspace', 'external'].map(scope)}
+        </select>
+      </div>
+      <label className="flex items-center gap-2 text-[13px]">
+        <input
+          type="checkbox"
+          className="accent-primary"
+          checked={value.idempotent === true}
+          onChange={(e) => onChange({ ...value, idempotent: e.target.checked ? true : undefined })}
+        />
+        <span>{t('idempotentLabel')}</span>
+      </label>
+      <div className="space-y-1">
+        <Label>{t('rollbackLabel')}</Label>
+        <select
+          className="h-8 w-full rounded-md border border-border bg-background px-2 text-[13px]"
+          value={rollbackKind}
+          onChange={(e) => setRollbackKind(e.target.value)}
+        >
+          {['none', 'capability', 'compensation', 'irreversible', 'prose'].map((k) => (
+            <option key={k} value={k}>
+              {t(`rollbackKind_${k}`)}
+            </option>
+          ))}
+        </select>
+        {(rollbackKind === 'prose' ||
+          rollbackKind === 'capability' ||
+          rollbackKind === 'compensation') && (
+          <Input
+            value={rollbackText}
+            onChange={(e) => setRollbackText(e.target.value)}
+            placeholder={t(`rollbackPlaceholder_${rollbackKind}`)}
+          />
+        )}
+      </div>
+      <div className="space-y-1">
+        <Label>{t('partialFailureLabel')}</Label>
+        <Input
+          value={value.partialFailure ?? ''}
+          onChange={(e) => onChange({ ...value, partialFailure: e.target.value || undefined })}
+          placeholder={t('partialFailurePlaceholder')}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label>{t('readsLabel')}</Label>
+          <select
+            className="h-8 w-full rounded-md border border-border bg-background px-2 text-[13px]"
+            value={value.dataAccess?.reads ?? ''}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                dataAccess: {
+                  ...value.dataAccess,
+                  reads: (e.target.value || undefined) as EffectContract['sideEffect'] | undefined,
+                },
+              })
+            }
+          >
+            <option value="">{t('undeclared')}</option>
+            {['none', 'workspace', 'external'].map(scope)}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label>{t('egressLabel')}</Label>
+          <select
+            className="h-8 w-full rounded-md border border-border bg-background px-2 text-[13px]"
+            value={value.dataAccess?.egress ?? ''}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                dataAccess: {
+                  ...value.dataAccess,
+                  egress: (e.target.value || undefined) as EffectContract['sideEffect'] | undefined,
+                },
+              })
+            }
+          >
+            <option value="">{t('undeclared')}</option>
+            {['none', 'workspace', 'external'].map(scope)}
+          </select>
+        </div>
+      </div>
+      <p className="text-[12px] text-muted-foreground">{t('egressHint')}</p>
+    </div>
+  )
+}
+
 function RequiredSecretsEditor({
   secrets,
   onChange,

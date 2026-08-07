@@ -157,6 +157,9 @@ function shapeTool(
         args: spec.args,
         env,
         write: tool.writes,
+        // O4: the author's declared blast radius travels with the tool to the permission gate. Dropping it
+        // here is what left the gate guessing from tool names while the declaration sat unread in the spec.
+        ...(spec.effects ? { effects: spec.effects } : {}),
       });
       return;
     }
@@ -171,6 +174,7 @@ function shapeTool(
       url: spec.url,
       ...(authorization ? { authorization } : {}),
       write: tool.writes,
+      ...(spec.effects ? { effects: spec.effects } : {}),
     });
     return;
   }
@@ -193,6 +197,7 @@ function shapeTool(
     ...(spec.image !== undefined ? { image: spec.image } : {}),
     sandbox: !builtin && record.tenant !== workspace,
     examples: spec.examples,
+    ...(spec.effects ? { effects: spec.effects } : {}),
   });
 }
 

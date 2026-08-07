@@ -760,7 +760,7 @@ export class AgentActivator {
     const mode = spec.permissionMode ?? "default";
     if (mode === "bypass") return undefined;
     return async (request) => {
-      if (mode === "auto" && !isGuardedAction(request.name)) return "allow";
+      if (mode === "auto" && !isGuardedAction(request.name, request.effects)) return "allow";
       const wait = this.deps.waitApproval;
       if (!wait) return "deny";
       await this.deps.sessions

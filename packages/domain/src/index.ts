@@ -386,7 +386,7 @@ export {
 } from "./capability/member-selection.js";
 // capability — spec version diff (base ↔ candidate); shares the spec-diff engine with the harness/judge diffs
 export { diffCapabilitySpecs } from "./capability/capability-diff.js";
-export { assertCapabilityEffects } from "./capability/effect-contract.js";
+export { assertCapabilityEffects, effectsRequireConsent } from "./capability/effect-contract.js";
 // capability — the names a bridged tool wears in front of the model (the runtime registers them, the UI explains them)
 export { codeBridgedName, mcpBridgePrefix, mcpBridgedName } from "./capability/tool-naming.js";
 

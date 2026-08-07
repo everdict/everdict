@@ -1041,7 +1041,14 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       }
       if (tool.isReadOnly !== true && opts.permit) {
         // Write tool + a permission hook → gate it (read-only tools + no hook auto-allow).
-        const decision = await opts.permit({ name: tool.name, isReadOnly: false, input: parsed.value });
+        const decision = await opts.permit({
+          name: tool.name,
+          isReadOnly: false,
+          input: parsed.value,
+          // The capability's own declaration rides along, so the host classifies risk from what the author
+          // stated rather than from how the tool happens to be spelled.
+          ...(tool.effects ? { effects: tool.effects } : {}),
+        });
         emit({ type: "permission", name: tool.name, decision });
         if (decision === "deny")
           return {

@@ -67,3 +67,58 @@ describe("action policy (bridge-all surface)", () => {
       expect(isGuardedAction(name)).toBe(false);
   });
 });
+
+// O4: a capability that DECLARED its effects is classified by that declaration, not by its spelling.
+describe("action policy — declared effects beat the name list", () => {
+  it("guards a benign-sounding capability that declared an external, non-idempotent effect", () => {
+    // Given a tool whose name starts with a routine verb (pre-fix: unguarded, because "sync_" is on no list) …
+    expect(isGuardedAction("sync_inventory")).toBe(false);
+    // … and whose author declared that it reaches an outside system and is not safe to repeat.
+    expect(
+      isGuardedAction("sync_inventory", {
+        sideEffect: "external",
+        idempotent: false,
+        rollback: { kind: "compensation", description: "issue a reversing adjustment in the vendor console" },
+      }),
+    ).toBe(true); // the declaration is the signal; the name never was
+  });
+
+  it("guards a workspace mutation whose idempotency is UNKNOWN — unknown is not a smaller risk", () => {
+    expect(isGuardedAction("apply_thing", { sideEffect: "workspace" })).toBe(true);
+    expect(isGuardedAction("apply_thing", { sideEffect: "workspace", idempotent: true })).toBe(false);
+  });
+
+  it("guards a declared-irreversible capability — the author wrote the consent requirement down", () => {
+    expect(
+      isGuardedAction("compact_archive", {
+        sideEffect: "workspace",
+        idempotent: true,
+        rollback: { kind: "irreversible", requiresApproval: true },
+      }),
+    ).toBe(true);
+  });
+
+  it("guards a READ tool whose data can leave the boundary — sideEffect answers the wrong axis", () => {
+    expect(
+      isGuardedAction("summarize_docs", {
+        sideEffect: "none",
+        idempotent: true,
+        dataAccess: { reads: "workspace", egress: "external" },
+      }),
+    ).toBe(true);
+    // The same reader with nowhere to send it stays unguarded.
+    expect(
+      isGuardedAction("summarize_docs", {
+        sideEffect: "none",
+        idempotent: true,
+        dataAccess: { reads: "workspace", egress: "none" },
+      }),
+    ).toBe(false);
+  });
+
+  it("trusts a declaration that says the tool is safe — even when its NAME is on the destructive list", () => {
+    // A workspace adopted this thing on the strength of its declared contract; the verb it chose is not our rule.
+    expect(isGuardedAction("delete_draft")).toBe(true);
+    expect(isGuardedAction("delete_draft", { sideEffect: "workspace", idempotent: true })).toBe(false);
+  });
+});

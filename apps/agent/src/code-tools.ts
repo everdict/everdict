@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from "@everdict/agent-runtime";
+import type { EffectContract } from "@everdict/contracts";
 import type { CodeToolExample, ComputeHandle, ComputeSpec } from "@everdict/contracts";
 import { codeBridgedName } from "@everdict/domain";
 
@@ -18,6 +19,9 @@ export interface ResolvedCodeTool {
   image?: string; // dedicated sandbox image (else the runtime's default)
   sandbox: boolean; // true when adopted from ANOTHER workspace (source !== tenant) → requires an isolated runtime
   examples?: CodeToolExample[]; // worked examples — appended to the tool description so the model sees a real call shape
+  // The capability's declared effect contract — carried to the permission gate so a code tool is classified
+  // by what its author said it does, not by whether its name happens to start with a scary verb.
+  effects?: EffectContract;
 }
 
 // How a code tool gets its compute. `isolated` = the provisioned handle is a real sandbox (e.g. DockerDriver), not the
@@ -92,6 +96,7 @@ export function buildCodeTool(tool: ResolvedCodeTool, runtime: CodeToolRuntime):
     description: describeWithExamples(tool.description, tool.examples),
     parametersJsonSchema,
     isReadOnly: tool.isReadOnly,
+    ...(tool.effects ? { effects: tool.effects } : {}),
     call: async (input): Promise<ToolResult> => {
       let handle: ComputeHandle;
       try {

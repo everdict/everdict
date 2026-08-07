@@ -107,6 +107,41 @@ halt is already a fact on the event log.
 A **scope refusal produces no checkpoint**, and that is not an omission: `refuse_and_replan` returns the
 refusal to the model as a tool result and the run continues. There is no halt to hand off from.
 
+## Effect contracts, and the gate that reads them
+
+A capability's `EffectContract` (`packages/contracts/src/records/capability.ts`) says what invoking it does to
+the world outside the sandbox. `assertCapabilityEffects` has always refused to register a write-capable
+capability without one. What was missing is the other half: **nothing read it at invocation time.** The agent's
+permission gate classified risk by name prefix (`delete_` / `remove_` / `revoke_` / `unlink_`), which is a
+guess about a string — `sync_inventory` looks benign and can bill a customer; `remove_label` looks alarming and
+undoes itself.
+
+`effectsRequireConsent` (`@everdict/domain`) is what reading it means. Four independent reasons to keep asking
+a human even in auto mode, any one sufficient:
+
+1. `sideEffect: "external"` — the one everdict cannot undo on the caller's behalf.
+2. A workspace mutation whose `idempotent` was not **promised**. Absent is *unknown*, and unknown is not a
+   smaller risk than declared-unsafe.
+3. `rollback: { kind: "irreversible", requiresApproval: true }` — the author wrote the consent requirement
+   down, and the gate reads it instead of inferring it from a verb.
+4. `dataAccess.egress === "external"`. Orthogonal to `sideEffect` on purpose: a *read* tool that can reach an
+   outside network is exfiltration-shaped, and `sideEffect: "none"` is a true statement about the wrong axis.
+
+Provenance travels **with the tool**, not through a second lookup: the resolved capability stamps `effects` on
+its `ToolDefinition`, the kernel hands it to the permission hook on the `PermissionRequest`, and the hook
+classifies. The name lists remain authoritative only where nobody made a declaration at all — the built-in
+control-plane surface and the kernel's own tools, which are ours and known rather than declared. Conversely a
+declaration that says a tool is safe is **trusted over the name list**: that statement is what the workspace
+signed up for when it adopted the thing.
+
+Two deliberate non-additions:
+
+- **`dataAccess` is not required by the registration guard.** An MCP server's spec cannot honestly answer it
+  for a container it merely names, and demanding a declaration authors cannot make produces invented ones,
+  which is strictly worse than an absent field.
+- Prose `rollback` still parses. Every stored contract keeps working; the tagged forms are what a *machine*
+  can act on, and the guard treats both as declared.
+
 ## The checkpoint
 
 A successor decides its next action from evidence references, not from the predecessor's prose. So a

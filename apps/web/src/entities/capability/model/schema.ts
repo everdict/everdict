@@ -22,6 +22,33 @@ const requiredSecretSchema = z.object({ name: z.string(), description: z.string(
 
 // 판별자 spec — 한 capability 는 정확히 세 종류 중 하나.
 // mcp — 두 transport: 원격 HTTP(`url`) 또는 컨테이너 stdio(`image`, `docker run -i`). 정확히 하나(계약 저장 경계에서 강제).
+// 효과 계약(O4) — 이 도구를 호출하면 샌드박스 바깥 세계에 무슨 일이 일어나는가. write 가능한 도구는
+// 컨트롤플레인 도메인 가드가 선언을 요구하고(assertCapabilityEffects), 에이전트 권한 게이트는 이름이 아니라
+// 이 선언으로 위험도를 판정한다(effectsRequireConsent). 되돌리기는 문자열(구버전 호환)이거나 태그된 형태다.
+export const rollbackPlanSchema = z.union([
+  z.string(),
+  z.object({ kind: z.literal('capability'), capability: z.string() }),
+  z.object({ kind: z.literal('compensation'), description: z.string() }),
+  z.object({ kind: z.literal('irreversible'), requiresApproval: z.literal(true) }),
+])
+export type RollbackPlan = z.infer<typeof rollbackPlanSchema>
+
+export const effectContractSchema = z.object({
+  sideEffect: z.enum(['none', 'workspace', 'external']),
+  idempotent: z.boolean().optional(),
+  rollback: rollbackPlanSchema.optional(),
+  partialFailure: z.string().optional(),
+  // 본 것(reads)과 그것이 갈 수 있는 곳(egress) — sideEffect 로는 표현되지 않는 축. 읽기 전용 도구도
+  // 바깥으로 내보낼 수 있으면 민감하다.
+  dataAccess: z
+    .object({
+      reads: z.enum(['none', 'workspace', 'external']).optional(),
+      egress: z.enum(['none', 'workspace', 'external']).optional(),
+    })
+    .optional(),
+})
+export type EffectContract = z.infer<typeof effectContractSchema>
+
 const mcpToolSpecSchema = z.object({
   type: z.literal('mcp'),
   url: z.string().optional(),
@@ -30,6 +57,7 @@ const mcpToolSpecSchema = z.object({
   provides: z.array(z.string()),
   requiredSecrets: z.array(requiredSecretSchema),
   write: z.boolean(),
+  effects: effectContractSchema.optional(),
 })
 // code 도구의 워크드 예제 — 스토어 상세 표시·try 실행·에이전트 tool description 3중 용도(입력 형태를 실호출로 보여준다).
 export const codeToolExampleSchema = z.object({
@@ -49,6 +77,7 @@ const codeToolSpecSchema = z.object({
   timeoutSec: z.number().optional(),
   image: z.string().optional(),
   examples: z.array(codeToolExampleSchema),
+  effects: effectContractSchema.optional(),
 })
 const skillCapabilitySpecSchema = z.object({
   type: z.literal('skill'),
