@@ -27,6 +27,7 @@ describe("serveScorecard (P1g served derivations — the client mirrors are dele
   it("serves per-case verdict + casePass rollup + headline on a detail record", () => {
     const served = serveScorecard(
       record({
+        // A stale persisted snapshot — the detail read re-derives from the results, so this never serves.
         summary: [{ metric: "tests_pass", count: 3, mean: 2 / 3, passRate: 2 / 3 }],
         scorecard: {
           suiteId: "d@1.0.0",
@@ -45,7 +46,9 @@ describe("serveScorecard (P1g served derivations — the client mirrors are dele
     );
     expect(served.scorecard?.results.map((r) => r.verdict)).toEqual([true, false, undefined]);
     expect(served.casePass).toEqual({ pass: 1, total: 2 });
-    expect(served.headlinePassRate).toBeCloseTo(2 / 3);
+    // The headline comes from the RE-DERIVED summary (1 pass / 2 measured), not the stale persisted 2/3.
+    expect(served.headlinePassRate).toBeCloseTo(1 / 2);
+    expect(served.summary?.find((m) => m.metric === "tests_pass")).toMatchObject({ count: 2, passRate: 1 / 2 });
     // The verdict explains itself: which rung decided, from which measurements — b's ground truth overruled
     // its judge, and the basis says so.
     expect(served.scorecard?.results[1]?.verdictBasis).toEqual({
@@ -123,6 +126,41 @@ describe("serveScorecard (P1g served derivations — the client mirrors are dele
     );
     expect(served.headlinePassRate).toBe(0.6);
     expect(served.casePass).toBeUndefined(); // no per-case results on this record
+  });
+
+  it("a detail read normalizes a pre-gate persisted summary — a dead grader's mean:0 never serves again", () => {
+    // Given a record aggregated BEFORE the measurement gate existed: its persisted summary crowned a fully
+    // unmeasured metric with a literal zero (count:0 mean:0 passRate:0), and a diagnostic-only row leaked in.
+    const unmeasuredOnly: CaseResult = {
+      ...caseResult("a", []),
+      scores: [
+        {
+          graderId: "judge",
+          metric: "judge:q",
+          value: 0,
+          status: "unmeasured",
+          reason: "grader_error",
+          retryable: true,
+        },
+      ],
+    };
+    const served = serveScorecard(
+      record({
+        summary: [
+          { metric: "judge:q", count: 0, mean: 0, passRate: 0 },
+          { metric: "error", count: 0, mean: 0 },
+        ],
+        scorecard: { suiteId: "d@1.0.0", harness: "h@1.0.0", results: [unmeasuredOnly] },
+      }),
+    );
+    // Then the served summary is re-derived under the current semantics: the annihilated metric keeps its
+    // unmeasured tally but carries NO mean/passRate, the poisoned row is gone, and nothing headline-decides.
+    const judge = served.summary?.find((m) => m.metric === "judge:q");
+    expect(judge).toMatchObject({ count: 0, unmeasured: 1 });
+    expect(judge?.mean).toBeUndefined();
+    expect(judge?.passRate).toBeUndefined();
+    expect(served.summary?.find((m) => m.metric === "error")).toBeUndefined();
+    expect(served.headlinePassRate).toBeNull();
   });
 
   it("leaves a result-less record untouched apart from the headline", () => {

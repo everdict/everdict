@@ -7,6 +7,7 @@ import {
   resolveVerdictPolicy,
   retryableUnmeasured,
   scorecardOutcomes,
+  summarizeScorecard,
 } from "@everdict/domain";
 
 // Serve-time enrichment of a scorecard detail (re-architecture P1g): computed derivations ride the
@@ -21,8 +22,14 @@ export function serveScorecardListItem(record: ScorecardRecord): ScorecardRespon
 }
 
 export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
-  const headline = headlinePassRate(record);
-  if (!record.scorecard) return { ...record, headlinePassRate: headline };
+  if (!record.scorecard) return { ...record, headlinePassRate: headlinePassRate(record) };
+  // The persisted summary is a snapshot of the aggregation semantics at settle time — a record aggregated
+  // before the measurement gate can still carry a dead grader's mean:0 or a diagnostic's poisoned row. When
+  // the per-case results are in hand (detail reads), the summary is RE-DERIVED under the current semantics,
+  // so every historical detail is normalized at the same read-time boundary the verdicts are. List reads
+  // (no results) keep the persisted snapshot — they cannot recompute, and the headline ranking tolerates it.
+  const summary = summarizeScorecard(record.scorecard);
+  const headline = headlinePassRate({ ...record, summary });
   // Verdicts resolve under the batch's STAMPED policy (absent = the default ladder those records were judged
   // under) — evolving the policy never silently rewrites a historical verdict.
   const policy = resolveVerdictPolicy(record.verdictPolicy, record.manifest?.verdictPolicy);
@@ -42,6 +49,7 @@ export function serveScorecard(record: ScorecardRecord): ScorecardResponse {
   });
   return {
     ...record,
+    summary,
     scorecard: { ...record.scorecard, results },
     casePass: { pass, total },
     headlinePassRate: headline,
