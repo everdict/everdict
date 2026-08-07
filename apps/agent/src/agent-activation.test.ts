@@ -118,6 +118,12 @@ function sessionsStub() {
     async listExpiredWakeIntents() {
       return [];
     },
+    async listOrphanedRuns() {
+      return [];
+    },
+    async claimOrphanedRun() {
+      return false;
+    },
     async hasTriggerSession(_tenant: string, agentId: string, eventId: string) {
       return created.some((s) => s.origin?.agentId === agentId && s.origin?.eventId === eventId);
     },
@@ -508,6 +514,63 @@ describe("AgentActivator.resumeApproval — the A6 resume leg", () => {
         request: { name: "write_file" },
       }),
     ).toEqual({ resumed: false, reason: "not a resumable trigger run" });
+  });
+});
+
+describe("AgentActivator.resumeInterrupted — the P0 restart-recovery leg", () => {
+  const strandedSession = (): AgentSessionRecord =>
+    ({
+      id: "sess-9",
+      tenant: "acme",
+      owner: "alice",
+      title: "sentinel — scorecard.completed",
+      visibility: "workspace",
+      origin: {
+        type: "trigger",
+        agentId: "sentinel",
+        agentVersion: "1.0.0",
+        eventId: "ev-9",
+        eventKind: "scorecard.completed",
+      },
+      status: "failed", // the orphan sweep already claimed (settled) the row — the resume flips it back
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    }) as AgentSessionRecord;
+
+  it("continues the SAME session with a recovery notice instead of re-activating a duplicate", async () => {
+    const sessions = sessionsStub();
+    sessions.created.push(strandedSession());
+    const { instance, mailbox, runs } = activator({ registry: registryOf(spec()), sessions });
+
+    const res = await instance.resumeInterrupted({ workspace: "acme", sessionId: "sess-9" });
+    expect(res).toEqual({ resumed: true });
+    await instance.idle();
+
+    // One continuation turn ran on the ORIGINAL session — the transcript is the durable state.
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.sessionId).toBe("sess-9");
+    // The turn woke up to the recovery notice (verify-before-repeating discipline included).
+    const drained = mailbox.drain("acme", "sess-9");
+    expect(drained.some((m) => typeof m.content === "string" && m.content.includes("[restart recovery]"))).toBe(true);
+    // Recovery by resumption keeps the durable dedup honest: the (agent, event) pair still reads as handled,
+    // so a reconcile re-feed of the same event can never double-run it.
+    expect(await sessions.hasTriggerSession("acme", "sentinel", "ev-9")).toBe(true);
+    // The session went back through the real lifecycle: running → completed.
+    expect(sessions.statuses.map((x) => x.status)).toEqual(["running", "completed"]);
+  });
+
+  it("refuses what cannot resume, so the sweep's fail-closed settle stands", async () => {
+    const sessions = sessionsStub();
+    sessions.created.push({ ...strandedSession(), id: "chat-9", origin: undefined } as AgentSessionRecord);
+    const { instance } = activator({ registry: registryOf(spec()), sessions });
+    expect(await instance.resumeInterrupted({ workspace: "acme", sessionId: "ghost" })).toEqual({
+      resumed: false,
+      reason: "session not found",
+    });
+    expect(await instance.resumeInterrupted({ workspace: "acme", sessionId: "chat-9" })).toEqual({
+      resumed: false,
+      reason: "not a resumable trigger run",
+    });
   });
 });
 

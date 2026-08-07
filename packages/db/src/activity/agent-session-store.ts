@@ -131,6 +131,23 @@ export class InMemoryAgentSessionStore implements AgentSessionStore {
       .slice(0, opts?.limit ?? 50);
   }
 
+  async listOrphanedRuns(before: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
+    return this.sessions
+      .filter((s) => s.status === "running" && s.updatedAt < before)
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+      .slice(0, opts?.limit ?? 50);
+  }
+
+  async claimOrphanedRun(tenant: string, id: string, before: string, updatedAt: string): Promise<boolean> {
+    // Mirrors the Pg claim: only a row still "running" AND still stale can be settled, and the caller learns
+    // whether it won — a run that settled (or was claimed) in the meantime refuses the claim.
+    const s = this.sessions.find((r) => r.tenant === tenant && r.id === id);
+    if (!s || s.status !== "running" || !(s.updatedAt < before)) return false;
+    s.status = "failed";
+    s.updatedAt = updatedAt;
+    return true;
+  }
+
   async hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean> {
     return this.sessions.some(
       (s) => s.tenant === tenant && s.origin?.agentId === agentId && s.origin?.eventId === eventId,
@@ -406,6 +423,32 @@ export class PgAgentSessionStore implements AgentSessionStore {
       [now, opts?.limit ?? 50],
     );
     return res.rows.map(sessionRowToRecord);
+  }
+
+  async listOrphanedRuns(before: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]> {
+    // Cross-tenant on purpose (like listExpiredWakeIntents): the sweep is an operator-side reaper. Oldest
+    // first so a backlog drains in strand order; bounded so one pass never fans out unboundedly.
+    const res = await this.client.query<SessionRow>(
+      `SELECT ${SESSION_COLUMNS}
+       FROM everdict_agent_sessions
+       WHERE status = 'running' AND updated_at < $1
+       ORDER BY updated_at ASC
+       LIMIT $2`,
+      [before, opts?.limit ?? 50],
+    );
+    return res.rows.map(sessionRowToRecord);
+  }
+
+  async claimOrphanedRun(tenant: string, id: string, before: string, updatedAt: string): Promise<boolean> {
+    // The claim IS the WHERE clause (claimWakeIntent's shape): only a row still stranded can be settled, and
+    // RETURNING tells the caller whether it won — two sweepers racing the same orphan settle it exactly once.
+    const res = await this.client.query<{ id: string }>(
+      `UPDATE everdict_agent_sessions SET status = 'failed', updated_at = $4
+       WHERE tenant = $1 AND id = $2 AND status = 'running' AND updated_at < $3
+       RETURNING id`,
+      [tenant, id, before, updatedAt],
+    );
+    return res.rows.length > 0;
   }
 
   async hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean> {

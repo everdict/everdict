@@ -39,6 +39,27 @@ export function triggerMatches(trigger: AgentTrigger, event: ActivationEvent): b
   return eventSelectorMatches(trigger, event);
 }
 
+// What a restart-recovered run wakes up to (P0 crash reconcile). Mirrors the interrupt kernel's differentiated
+// synthetic results: the transcript is complete up to the death, but an in-flight tool call's OUTCOME may be
+// unknown — verify before repeating any mutation.
+const RESTART_RECOVERY_NOTICE =
+  "[restart recovery] This run was interrupted by an agent-service restart before it finished. The transcript above is everything that happened. Continue from where you left off. If your last tool call's outcome is not in the transcript, its effect is UNKNOWN — verify with a read tool before re-issuing any mutating call.";
+
+// One continuation turn on an EXISTING trigger session (approval decision / restart recovery) — what the two
+// resume legs hand the shared runner.
+interface ContinuationOpts {
+  workspace: string;
+  sessionId: string;
+  agentId: string;
+  spec: AgentSpec;
+  creator: string;
+  event: ActivationEvent; // the pseudo-event shell the permit/report plumbing rides (never trigger-matchable)
+  seeds: Array<{ sender: string; content: string }>; // mailbox messages the resumed turn wakes up to
+  wrapPermit?: (base: PermissionHook | undefined) => PermissionHook | undefined;
+  startedMessage: string;
+  settleLabel: string; // report phrasing: "resumed after approval" | "resumed after restart"
+}
+
 export interface AgentActivatorDeps {
   registry: AgentRegistry;
   keyStore: TenantKeyStore;
@@ -238,52 +259,118 @@ export class AgentActivator {
     request: { name: string; input?: unknown };
     decidedBy?: string;
   }): Promise<{ resumed: boolean; reason?: string }> {
-    // A live run means the wait is still in-process — the delivery path resolves it; resume only a dead park.
-    if (this.controllers.has(input.sessionId)) return { resumed: false, reason: "run is live (deliver instead)" };
-    // Headless runs are workspace-visible, so any subject passes the visibility lookup.
-    const session = await this.deps.sessions.getVisibleSession(input.workspace, "everdict", input.sessionId);
-    if (!session) return { resumed: false, reason: "session not found" };
-    const agentId = session.origin?.type === "trigger" ? session.origin.agentId : undefined;
-    const creator = session.owner;
-    if (!agentId || !creator) return { resumed: false, reason: "not a resumable trigger run" };
-    let spec: AgentSpec;
-    try {
-      spec = await this.deps.registry.get(input.workspace, agentId, session.origin?.agentVersion ?? "latest");
-    } catch {
-      return { resumed: false, reason: "agent spec unavailable" };
-    }
-    const agentKey = `${input.workspace}:${agentId}`;
-    const prev = this.chains.get(agentKey) ?? Promise.resolve();
-    const next = prev
-      .then(() => this.runResumeTurn(input, agentId, spec, creator))
-      .catch((err) => {
-        console.error(`[agent] approval resume failed for ${agentId}:`, err instanceof Error ? err.message : err);
-      });
-    this.chains.set(agentKey, next);
+    const prepared = await this.prepareContinuation(input.workspace, input.sessionId);
+    if ("reason" in prepared) return { resumed: false, reason: prepared.reason };
+    const verdict = input.decision === "allow" ? "APPROVED" : "DENIED";
+    const guidance =
+      input.decision === "allow"
+        ? "The next call to that tool is pre-approved — perform the action now, then continue the task from where you left off."
+        : "Do not perform that action. Adapt and continue (or conclude) the task from where you left off.";
+    let approvedOnce = input.decision === "allow" ? input.request.name : undefined;
+    this.enqueueContinuation({
+      workspace: input.workspace,
+      sessionId: input.sessionId,
+      ...prepared,
+      // The pseudo-event shell the permit/report plumbing rides — the resume is caused by the decision, not a
+      // platform event, so it is deliberately NOT trigger-matchable input (no eventId, no dedup interplay).
+      event: {
+        workspace: input.workspace,
+        kind: "approval.decided",
+        source: "approval",
+        message: `Approval decision for ${input.request.name}`,
+      },
+      seeds: [
+        {
+          sender: "approval",
+          content: `[approval decision] Your earlier request to run the tool "${input.request.name}" was ${verdict}${input.decidedBy ? ` by ${input.decidedBy}` : ""} while this run was suspended. ${guidance}`,
+        },
+      ],
+      wrapPermit: (base) =>
+        base
+          ? async (request) => {
+              if (approvedOnce !== undefined && request.name === approvedOnce) {
+                approvedOnce = undefined; // one shot — a second identical ask parks like any other mutation
+                return "allow";
+              }
+              return base(request);
+            }
+          : undefined,
+      startedMessage: `Agent ${prepared.agentId} resumed after an approval decision (${input.request.name}).`,
+      settleLabel: "resumed after approval",
+    });
     return { resumed: true };
   }
 
-  private async runResumeTurn(
-    input: {
-      workspace: string;
-      sessionId: string;
-      decision: PermissionDecision;
-      request: { name: string; input?: unknown };
-      decidedBy?: string;
-    },
-    agentId: string,
-    spec: AgentSpec,
-    creator: string,
-  ): Promise<void> {
-    const { workspace, sessionId } = input;
-    // The pseudo-event shell the permit/report plumbing rides — the resume is caused by the decision, not a
-    // platform event, so it is deliberately NOT trigger-matchable input (no eventId, no dedup interplay).
-    const event: ActivationEvent = {
-      workspace,
-      kind: "approval.decided",
-      source: "approval",
-      message: `Approval decision for ${input.request.name}`,
-    };
+  // P0 crash reconcile (LESSON 059): continue a run that a process death stranded mid-turn. The TRANSCRIPT is
+  // the durable state, so recovery is RESUMPTION of the same session — one continuation turn seeded with a
+  // recovery notice — never re-activation: the durable (agent, event) dedup keys on the session's existence,
+  // and it stays honest because the stranded session really is being handled. The orphan sweep claims
+  // (settles as failed) the row first; this turn flips it back to running and settles it for real.
+  async resumeInterrupted(input: {
+    workspace: string;
+    sessionId: string;
+  }): Promise<{ resumed: boolean; reason?: string }> {
+    const prepared = await this.prepareContinuation(input.workspace, input.sessionId);
+    if ("reason" in prepared) return { resumed: false, reason: prepared.reason };
+    this.enqueueContinuation({
+      workspace: input.workspace,
+      sessionId: input.sessionId,
+      ...prepared,
+      // Not trigger-matchable input: no eventId, so the recovery never interacts with the activation dedup.
+      event: {
+        workspace: input.workspace,
+        kind: "run.orphaned",
+        source: "restart",
+        message: "Recovered after an agent-service restart",
+      },
+      seeds: [{ sender: "restart", content: RESTART_RECOVERY_NOTICE }],
+      startedMessage: `Agent ${prepared.agentId} resumed after an agent-service restart.`,
+      settleLabel: "resumed after restart",
+    });
+    return { resumed: true };
+  }
+
+  // Shared validation for continuing an EXISTING run (approval decision / restart recovery): the run must not
+  // be live in this process, the session must exist, and only a trigger-origin session names the agent (and
+  // the creator) the continuation acts as.
+  private async prepareContinuation(
+    workspace: string,
+    sessionId: string,
+  ): Promise<{ agentId: string; spec: AgentSpec; creator: string } | { reason: string }> {
+    // A live run means the turn is still in-process — the delivery path handles it; resume only a dead one.
+    if (this.controllers.has(sessionId)) return { reason: "run is live (deliver instead)" };
+    // Headless runs are workspace-visible, so any subject passes the visibility lookup.
+    const session = await this.deps.sessions.getVisibleSession(workspace, "everdict", sessionId);
+    if (!session) return { reason: "session not found" };
+    const agentId = session.origin?.type === "trigger" ? session.origin.agentId : undefined;
+    const creator = session.owner;
+    if (!agentId || !creator) return { reason: "not a resumable trigger run" };
+    try {
+      const spec = await this.deps.registry.get(workspace, agentId, session.origin?.agentVersion ?? "latest");
+      return { agentId, spec, creator };
+    } catch {
+      return { reason: "agent spec unavailable" };
+    }
+  }
+
+  private enqueueContinuation(opts: ContinuationOpts): void {
+    const agentKey = `${opts.workspace}:${opts.agentId}`;
+    const prev = this.chains.get(agentKey) ?? Promise.resolve();
+    const next = prev
+      .then(() => this.runContinuationTurn(opts))
+      .catch((err) => {
+        console.error(
+          `[agent] continuation (${opts.settleLabel}) failed for ${opts.agentId}:`,
+          err instanceof Error ? err.message : err,
+        );
+      });
+    this.chains.set(agentKey, next);
+  }
+
+  // One more turn on an EXISTING trigger session — the same lifecycle shape as a fresh activation (new ledger
+  // run, mailbox seed, mode-derived permit, settle + report) minus session creation.
+  private async runContinuationTurn(opts: ContinuationOpts): Promise<void> {
+    const { workspace, sessionId, agentId, spec, creator, event } = opts;
     // P3: the continuation turn is a NEW run on the ledger (same session group as the interrupted one).
     const runId = this.deps.newId();
     const runRef = {
@@ -294,14 +381,7 @@ export class AgentActivator {
     };
     await this.deps.sessions.setSessionStatus(workspace, sessionId, "running", this.deps.now());
     await this.deps.sessions.setSessionRunId(workspace, sessionId, runId, this.deps.now()).catch(() => {});
-    void this.report(
-      "agent.run.started",
-      event,
-      agentId,
-      sessionId,
-      `Agent ${agentId} resumed after an approval decision (${input.request.name}).`,
-      runRef,
-    );
+    void this.report("agent.run.started", event, agentId, sessionId, opts.startedMessage, runRef);
     const { token, id: keyId } = await issueAgentToken(
       this.deps.keyStore,
       workspace,
@@ -314,27 +394,11 @@ export class AgentActivator {
     // O2 baseline: the session carries the interrupted run's history — this run's trajectory starts after it.
     const baseSeq = await this.lastSeq(workspace, sessionId);
     try {
-      const verdict = input.decision === "allow" ? "APPROVED" : "DENIED";
-      const guidance =
-        input.decision === "allow"
-          ? "The next call to that tool is pre-approved — perform the action now, then continue the task from where you left off."
-          : "Do not perform that action. Adapt and continue (or conclude) the task from where you left off.";
-      this.deps.mailbox.enqueue(workspace, sessionId, {
-        from: "event",
-        sender: "approval",
-        content: `[approval decision] Your earlier request to run the tool "${input.request.name}" was ${verdict}${input.decidedBy ? ` by ${input.decidedBy}` : ""} while this run was suspended. ${guidance}`,
-      });
+      for (const seed of opts.seeds) {
+        this.deps.mailbox.enqueue(workspace, sessionId, { from: "event", sender: seed.sender, content: seed.content });
+      }
       const base = this.buildPermit(event, agentId, sessionId, spec, controller.signal, runRef);
-      let approvedOnce = input.decision === "allow" ? input.request.name : undefined;
-      const permit: PermissionHook | undefined = base
-        ? async (request) => {
-            if (approvedOnce !== undefined && request.name === approvedOnce) {
-              approvedOnce = undefined; // one shot — a second identical ask parks like any other mutation
-              return "allow";
-            }
-            return base(request);
-          }
-        : undefined;
+      const permit = opts.wrapPermit ? opts.wrapPermit(base) : base;
       const outcome = await this.deps.runTurn(sessionId, token, controller.signal, permit);
       const settled = this.stopped.has(sessionId) ? "cancelled" : "completed";
       await this.deps.sessions.setSessionStatus(workspace, sessionId, settled, this.deps.now());
@@ -343,7 +407,7 @@ export class AgentActivator {
         event,
         agentId,
         sessionId,
-        `Agent ${agentId} run ${settled} (resumed after approval).`,
+        `Agent ${agentId} run ${settled} (${opts.settleLabel}).`,
         runRef,
         ...(await this.turnEvidence(workspace, sessionId, baseSeq, outcome)),
       );
@@ -355,7 +419,7 @@ export class AgentActivator {
         event,
         agentId,
         sessionId,
-        `Agent ${agentId} run ${settled} (resumed after approval)${err instanceof Error ? `: ${err.message}` : ""}.`,
+        `Agent ${agentId} run ${settled} (${opts.settleLabel})${err instanceof Error ? `: ${err.message}` : ""}.`,
         runRef,
         ...(await this.turnEvidence(workspace, sessionId, baseSeq)),
       );

@@ -52,6 +52,7 @@ import {
   registryModelByIdResolver,
   registryModelResolver,
 } from "./model.js";
+import { buildOrphanSweeper } from "./orphan-sweep.js";
 import { meAuthenticate, viewAccessChecker } from "./principal.js";
 import {
   type ProfileResolver,
@@ -188,6 +189,13 @@ async function main(): Promise<void> {
   // fallbacks, truncations, compactions, tool failures) into this registry; exposed below as GET /metrics.
   const metrics = new Metrics();
 
+  // agent.run.* lifecycle facts → the control plane's event log. Built once: the chat host reports through it,
+  // and the orphan sweep below states the terminal fact for runs it settles without resuming.
+  const reportRunEvent =
+    config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
+      ? runEventReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN)
+      : undefined;
+
   const app = buildServer({
     metrics,
     authenticate: meAuthenticate(config.CONTROL_PLANE_URL),
@@ -221,9 +229,7 @@ async function main(): Promise<void> {
       ? { reportUsage: usageReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
       : {}),
     // agent.run.* lifecycle facts → the control plane's event log (fleet observability). Same token pair.
-    ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
-      ? { reportRunEvent: runEventReporter(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
-      : {}),
+    ...(reportRunEvent ? { reportRunEvent } : {}),
     // Durable approvals (A6) — the park registers on the control plane so it survives our restart.
     ...(config.CONTROL_PLANE_INTERNAL_TOKEN !== undefined
       ? { approvalBridge: approvalBridge(config.CONTROL_PLANE_URL, config.CONTROL_PLANE_INTERNAL_TOKEN) }
@@ -304,6 +310,37 @@ async function main(): Promise<void> {
     setInterval(sweep, WAKE_SWEEP_INTERVAL_MS).unref();
     console.error("▶ everdict-agent: wake-intent sweep on (parked conversations resume on their deadline)");
   }
+
+  // Crash reconcile (P0/LESSON 059): runs stranded in "running" by a previous process death are claimed
+  // atomically, settled, and — when the trigger machinery is wired — resumed as one continuation turn on the
+  // same session. Without this, an orphaned session lies ("running") forever AND its (agent, event) can never
+  // activate again: the durable dedup sees the stranded session and reads the crash as "already handled".
+  // Boot-immediate like the wake sweep; the interval retries a boot pass that raced a briefly-unreachable DB.
+  const interruptedResumer = (
+    app as unknown as {
+      agentActivator?: {
+        resumeInterrupted: (input: { workspace: string; sessionId: string }) => Promise<{
+          resumed: boolean;
+          reason?: string;
+        }>;
+      };
+    }
+  ).agentActivator;
+  const orphanSweeper = buildOrphanSweeper({
+    sessions,
+    bootAt: new Date().toISOString(),
+    now: () => new Date().toISOString(),
+    ...(interruptedResumer ? { resume: (input) => interruptedResumer.resumeInterrupted(input) } : {}),
+    ...(reportRunEvent ? { reportRunEvent } : {}),
+  });
+  const orphanSweep = (): void => {
+    void orphanSweeper.sweep().catch((err: unknown) => {
+      console.error(`[agent] orphan sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  };
+  orphanSweep();
+  setInterval(orphanSweep, WAKE_SWEEP_INTERVAL_MS).unref();
+  console.error("▶ everdict-agent: orphan-run sweep on (runs stranded by a restart are settled or resumed)");
 
   // Prometheus scrape endpoint — registered here (process-level operator surface, like the control plane's:
   // unauthenticated by convention; deployments firewall the scrape path).

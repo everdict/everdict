@@ -154,3 +154,39 @@ describe("session running memory", () => {
     expect(s?.memoryThroughSeq).toBe(24);
   });
 });
+
+describe("orphaned-run reaping (LESSON 059 P0 crash reconcile)", () => {
+  const BOOT = "2026-08-07T12:00:00.000Z";
+  let store: InMemoryAgentSessionStore;
+  beforeEach(() => {
+    store = new InMemoryAgentSessionStore();
+  });
+
+  it("lists only runs stranded in 'running' from BEFORE the boot instant, oldest first", async () => {
+    await store.createSession(session({ id: "old", status: "running", updatedAt: "2026-08-07T11:00:00.000Z" }));
+    await store.createSession(session({ id: "older", status: "running", updatedAt: "2026-08-07T10:00:00.000Z" }));
+    // fresh = owned by the live process; parked = the durable approval path owns it; settled = already handled
+    await store.createSession(session({ id: "fresh", status: "running", updatedAt: "2026-08-07T12:30:00.000Z" }));
+    await store.createSession(
+      session({ id: "parked", status: "awaiting_approval", updatedAt: "2026-08-07T11:00:00.000Z" }),
+    );
+    await store.createSession(session({ id: "settled", status: "completed", updatedAt: "2026-08-07T11:00:00.000Z" }));
+
+    const orphans = await store.listOrphanedRuns(BOOT);
+    expect(orphans.map((s) => s.id)).toEqual(["older", "old"]);
+  });
+
+  it("claimOrphanedRun settles a stranded run exactly once and refuses fresh or already-settled runs", async () => {
+    await store.createSession(session({ id: "orphan", status: "running", updatedAt: "2026-08-07T11:00:00.000Z" }));
+    await store.createSession(session({ id: "fresh", status: "running", updatedAt: "2026-08-07T12:30:00.000Z" }));
+
+    // The first claim wins and settles the row as failed (the fail-closed baseline before any resume).
+    expect(await store.claimOrphanedRun("acme", "orphan", BOOT, "2026-08-07T12:00:01.000Z")).toBe(true);
+    expect((await store.getSession("acme", "alice", "orphan"))?.status).toBe("failed");
+    // A second claimer loses — concurrent sweepers settle it exactly once.
+    expect(await store.claimOrphanedRun("acme", "orphan", BOOT, "2026-08-07T12:00:02.000Z")).toBe(false);
+    // A run the live process owns (updatedAt after boot) can never be claimed.
+    expect(await store.claimOrphanedRun("acme", "fresh", BOOT, "2026-08-07T12:00:03.000Z")).toBe(false);
+    expect((await store.getSession("acme", "alice", "fresh"))?.status).toBe("running");
+  });
+});

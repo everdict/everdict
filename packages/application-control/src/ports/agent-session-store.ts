@@ -55,6 +55,20 @@ export interface AgentSessionStore {
   // Every waiting conversation across ALL workspaces whose deadline has passed at `now` — the restart-proof sweep
   // (W3): a job that dies without emitting a terminal fact must never strand its watcher.
   listExpiredWakeIntents(now: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]>;
+  // Crash reconcile (LESSON 059 P0): every headless run stranded in status "running" from BEFORE `before` —
+  // a previous process died mid-turn, so nothing in-process will ever settle them. `before` is the sweeping
+  // process's boot instant: anything newer is owned by a live in-process activation whose own try/catch
+  // settles it. Cross-tenant like listExpiredWakeIntents — an operator-side reaper, not a workspace read.
+  listOrphanedRuns(before: string, opts?: { limit?: number }): Promise<AgentSessionRecord[]>;
+  // Atomically CLAIM one stranded run: settle it as "failed" only while it is still "running" AND still stale
+  // (updatedAt < before), reporting whether this caller won — concurrent sweepers (or the run settling by
+  // itself) collapse to exactly one claim, the same one-shot shape as claimWakeIntent. The claimer then tries
+  // to RESUME the session (a continuation turn flips it back to running and settles it for real); an
+  // unresumable one stays "failed" — fail-closed: never left "running", never silently re-activated. Recovery
+  // works by resumption, NOT by re-activation, because the durable (agent, event) dedup keys on the session's
+  // existence: deduping on "did this start?" while recovering on "did this finish?" is what turned a crash
+  // into a permanently-blocked activation.
+  claimOrphanedRun(tenant: string, id: string, before: string, updatedAt: string): Promise<boolean>;
   // Durable activation dedup (agent-automation A3): has this crafted agent already run for this platform event?
   // At-least-once delivery (push + reconcile) collapses here, surviving agent-service restarts.
   hasTriggerSession(tenant: string, agentId: string, eventId: string): Promise<boolean>;
