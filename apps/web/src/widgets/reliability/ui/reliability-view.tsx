@@ -68,7 +68,7 @@ export async function ReliabilityView({ window }: { window?: { from?: string; to
         />
         <StatCard
           label={t('tiles.gates')}
-          value={`${audit.decisions.pass} / ${audit.decisions.block} / ${audit.decisions.notComparable}`}
+          value={`${audit.decisions.pass} / ${audit.decisions.block} / ${audit.decisions.blockedMissing} / ${audit.decisions.notComparable}`}
           hint={t('tiles.gatesHint')}
         />
       </div>

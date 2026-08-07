@@ -5803,8 +5803,8 @@
       "unmeasuredHint": "unmeasured / gradeable — the scoring plane's outage share",
       "traceComplete": "Trace seal rate",
       "traceCompleteHint": "evidence collected and sealed / executed",
-      "gates": "Gates (pass / block / n.c.)",
-      "gatesHint": "release-gate decisions in the window"
+      "gates": "Gates (pass / block / missing / n.c.)",
+      "gatesHint": "release-gate decisions in the window — missing = refused for lack of evidence, not a regression"
     },
     "caseOutcomes": {
       "title": "Case outcomes",

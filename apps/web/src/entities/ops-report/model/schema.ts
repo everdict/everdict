@@ -56,6 +56,8 @@ export const gateAuditSchema = z.object({
     total: z.number(),
     pass: z.number(),
     block: z.number(),
+    // counted apart from `block`: refused for lack of evidence, not for a regression
+    blockedMissing: z.number(),
     notComparable: z.number(),
   }),
   overrides: z.object({

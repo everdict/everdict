@@ -5803,8 +5803,8 @@
       "unmeasuredHint": "unmeasured / gradeable — 채점 평면의 장애 몫",
       "traceComplete": "트레이스 봉인율",
       "traceCompleteHint": "증거가 수집·봉인된 케이스 / executed",
-      "gates": "게이트 (통과 / 차단 / 비교불성립)",
-      "gatesHint": "기간 내 릴리스 게이트 결정"
+      "gates": "게이트 (통과 / 차단 / 증거누락 / 비교불성립)",
+      "gatesHint": "기간 내 릴리스 게이트 결정 — 증거누락은 회귀가 아니라 증거 부재로 거부된 것"
     },
     "caseOutcomes": {
       "title": "케이스 운명",
