@@ -2773,3 +2773,110 @@ describe("currentGroupAlloc (topology allocation currency)", () => {
     expect(currentGroupAlloc([other], SERVICE_GROUP_NAME)).toBeUndefined();
   });
 });
+
+// Elastic capacity — the session pool the orchestrator cannot see becomes the Scheduler's admission truth.
+// capacity() used to report a static {total: maxConcurrent ?? 8, used: 0}: a pool of 4 was over-admitted and
+// refused case by case, a pool of 32 crawled at 8, and backpressure never engaged because `used` never moved.
+describe("ServiceTopologyBackend — capacity() follows the live session pool", () => {
+  const POOLED: ServiceHarnessSpec = {
+    ...SPEC,
+    target: {
+      kind: "browser",
+      engine: "chromium",
+      lifecycle: "per-case-instance",
+      observe: ["dom"],
+      acquire: {
+        mode: "service",
+        service: "agent-server",
+        open: "POST /sessions",
+        coordinates: { session_id: "id" },
+        close: "DELETE /sessions/{session_id}",
+        capacity: { poll: "GET /health", total: "max_browsers", used: "active_browsers" },
+      },
+    },
+  };
+  const job: CaseJob = {
+    harness: { id: "browser-use-langgraph", version: "1.0.0" },
+    evalCase: {
+      id: "c1",
+      env: { kind: "browser", startUrl: "https://x" },
+      task: "go",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    },
+  };
+  const acquireRequest: AcquireRequestFn = async (method) => (method === "POST" ? { id: "sess-1" } : undefined);
+
+  function pooledBackend(overrides?: { poolBody?: () => unknown; maxConcurrent?: number }) {
+    const counts = { ensures: 0, polls: 0 };
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        counts.ensures += 1;
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        throw new Error("unused — service acquisition");
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => POOLED,
+      submit: async () => {},
+      acquireRequest,
+      newRunId: () => "fixed",
+      poolCacheTtlMs: 0,
+      getJson: async () => {
+        counts.polls += 1;
+        return overrides?.poolBody ? overrides.poolBody() : { max_browsers: 32, active_browsers: 21 };
+      },
+      ...(overrides?.maxConcurrent !== undefined ? { maxConcurrent: overrides.maxConcurrent } : {}),
+    });
+    return { backend, counts };
+  }
+
+  it("reports the live pool once a dispatch recorded it — a 32-session pool admits past the base 8, and a busy pool raises used", async () => {
+    const { backend, counts } = pooledBackend();
+    // Before anything is dispatched there is no pool to ask — the static default stands.
+    expect(await backend.capacity()).toEqual({ total: 8, used: 0 });
+    await backend.dispatch(job);
+    expect(await backend.capacity()).toEqual({ total: 32, used: 21 });
+    // The admission probe reads the coordinates recorded at dispatch — it never deploys.
+    expect(counts.ensures).toBe(1);
+  });
+
+  it("maxConcurrent clamps the pool-driven total (the operator ceiling over the live pool)", async () => {
+    const { backend } = pooledBackend({ maxConcurrent: 16 });
+    await backend.dispatch(job);
+    expect(await backend.capacity()).toEqual({ total: 16, used: 21 });
+  });
+
+  it("a saturated pool reports full — the Scheduler queues instead of over-admitting into case-by-case refusals", async () => {
+    const { backend } = pooledBackend({ poolBody: () => ({ max_browsers: 4, active_browsers: 4 }) });
+    await backend.dispatch(job);
+    expect(await backend.capacity()).toEqual({ total: 4, used: 4 });
+  });
+
+  it("a pool that stops answering drops out of the probe set — static fallback, no repeat probing of a dead coordinate", async () => {
+    let alive = true;
+    const { backend, counts } = pooledBackend({
+      poolBody: () => {
+        if (!alive) throw new Error("unreachable");
+        return { max_browsers: 4, active_browsers: 1 };
+      },
+    });
+    await backend.dispatch(job);
+    expect(await backend.capacity()).toEqual({ total: 4, used: 1 });
+    alive = false;
+    const before = counts.polls;
+    expect(await backend.capacity()).toEqual({ total: 8, used: 0 }); // swept/unreachable → the static cap stands
+    expect(await backend.capacity()).toEqual({ total: 8, used: 0 });
+    expect(counts.polls).toBe(before + 1); // the dead coordinate was dropped after ONE failed probe
+  });
+});

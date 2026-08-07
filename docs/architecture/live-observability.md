@@ -239,11 +239,16 @@ service reports itself (`target.acquire.capacity: {poll, total, used?}`) and `in
 `pool {total, used, endpoint}` through `GET /runs/:id/topology` / MCP / the run detail's topology panel, which flags
 saturation.
 
-Deliberately monitoring, not admission control: `Backend.capacity()` is keyed per backend, not per harness, so the
-Scheduler still admits a batch against a number unrelated to the pool. Live-drilled at both ends — a batch inside
-the pool runs clean with the pool visible (peak 3/4), and a batch wider than it saturates (4/4) and fails its
-overflow with `CAPACITY_EXCEEDED` rather than queueing. Making the Scheduler pool-aware needs a harness-keyed
-capacity signature across every backend; until then the read is what closes the diagnostic gap.
+No longer monitoring-only: the same declared read is now the Scheduler's admission truth. Each dispatch records
+the warm topology's pool coordinates, and `ServiceTopologyBackend.capacity()` aggregates the live pools from them
+(TTL-cached; never deploys — an unreachable pool drops out of the probe set until the next dispatch re-records
+it): `total` follows the pool, clamped by the runtime's declared `maxConcurrent`, and `used` counts every session
+in it, so a full pool queues in the Scheduler (backpressure and queue-depth signals engage) instead of failing its
+overflow case by case, and a pool wider than the old static cap admits that wide. The per-backend `capacity()`
+signature stays: pools aggregate across a backend's warm topologies (exact in the dominant one-harness-per-runtime
+case). Until a pool is visible — nothing dispatched yet, or no `acquire.capacity` declared — the static cap
+(`maxConcurrent ?? 8`) stands, so a first wave can still overshoot a smaller pool; its overflow fails fast and the
+batch retry re-queues against the now-truthful number.
 
 ### Failure evidence retention (`CaseFailure.placement`/`logTail`)
 

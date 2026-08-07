@@ -69,6 +69,11 @@ describe("buildTopologyBackend (topology RuntimeSpec → ServiceTopologyBackend)
     expect(isScreenCapturable(b)).toBe(true);
   });
 
+  it("threads the runtime's declared maxConcurrent into the topology lane's capacity (regression: the declared cap was dropped, so the lane sat at the base 8 no matter what the tenant registered)", async () => {
+    const b = buildTopologyBackend({ ...nomadSpec, maxConcurrent: 32 }, { harnesses: harnessesReturning("service") });
+    await expect(b.capacity()).resolves.toEqual({ total: 32, used: 0 });
+  });
+
   it("dispatch: if the harness isn't kind:service, BAD_REQUEST before cluster access (specFor rejects)", async () => {
     const b = buildTopologyBackend(nomadSpec, { harnesses: harnessesReturning("command") });
     // specFor is called at the very front of dispatch → rejected before ensureTopology (the cluster), so it can be verified without live infra.

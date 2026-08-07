@@ -24,7 +24,11 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
   default 20) + `memoryBudgetMb?` (cap on the SUM of in-flight harness-declared `resources.memoryMb`; heavy
   harnesses queue when the envelope is full even with slots free — harnesses that declare no memory are admitted
   outside it). The cluster's own scheduler still bin-packs nodes; the envelope keeps the control plane from
-  over-committing the cluster in the first place.
+  over-committing the cluster in the first place. On a **topology-capable** runtime (nomad/k8s + `traceSource`)
+  `maxConcurrent` is the operator ceiling over the topology lane (absent → backend default 8), and when the
+  harness declares a session pool (`target.acquire.capacity`) the lane's capacity follows the LIVE pool under
+  that ceiling — scale the session service out and the Scheduler admits wider on the next pass, no re-registration
+  (see `architecture/live-observability.md`).
 - **runtime-side placement binding (nomad/k8s) — GPU + node targeting.** Operator-owned hints the cluster's own
   scheduler uses to place a job onto a matching node; the harness stays infra-agnostic (it declares WHAT it needs,
   not WHERE — cluster specifics are runtime-owned, see `architecture/heterogeneous-topology-placement.md`).

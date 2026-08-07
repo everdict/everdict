@@ -318,8 +318,15 @@ seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`.
 - **`acquire.capacity` — the pool the orchestrator cannot see.** A session pool lives INSIDE a service container,
   so the thing that actually limits a batch is invisible to placement: the roster reports a healthy service while
   every case beyond the pool size is refused. Declaring `{poll, total, used?}` puts it on `TopologyStatus.pool`
-  (→ `GET /runs/:id/topology`, MCP, the web panel). This is a MONITORING read, not admission control —
-  `Backend.capacity()` is per-backend, not per-harness, so the Scheduler still cannot size a batch by it.
+  (→ `GET /runs/:id/topology`, MCP, the web panel) AND makes it the Scheduler's **admission truth**: each dispatch
+  records the warm topology's pool coordinates (`trackPool`), and `capacity()` aggregates the live pools from
+  those recorded coordinates (TTL-cached `poolCacheTtlMs`, default 3s; **never deploys** — an unreachable pool is
+  dropped from the probe set and re-recorded by the next dispatch). `total` follows the pool (scale the session
+  service out → the next pump admits wider, no re-registration), `used` counts every session in it (conversation-
+  lane sessions included), so a full pool queues in the Scheduler instead of over-admitting into case-by-case
+  refusals — queue depth / backpressure / autoscaler signals become real for the topology lane.
+  `RuntimeSpec.maxConcurrent` (threaded via `buildTopologyEnvironment`) clamps as the operator ceiling; until a
+  pool is visible (nothing dispatched yet / no `acquire.capacity`), the static cap (`maxConcurrent ?? 8`) stands.
 - **`acquire.cdpBase` — the session's watchable address.** A dot-path into the open response yielding a
   **control-plane-reachable** CDP base (NOT the agent-facing coordinate — that one is an internal alias). It fills
   `TargetEnvHandle.cdpBase`, which is the single switch behind the CDP environment recorder AND the live screen,

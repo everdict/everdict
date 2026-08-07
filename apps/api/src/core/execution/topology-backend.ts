@@ -106,6 +106,10 @@ export function buildTopologyEnvironment(
   return {
     runtime,
     traceSource,
+    // The runtime's declared slot cap (RuntimeSpec.maxConcurrent) — the topology lane used to drop it entirely,
+    // so a tenant-declared ceiling (or a wider-than-default cap) never reached the Scheduler and the lane sat at
+    // the backend's base 8 regardless. With a visible session pool it acts as the operator clamp over the pool.
+    ...(spec.maxConcurrent !== undefined ? { maxConcurrent: spec.maxConcurrent } : {}),
     ...(deps.trustZones ? { trustZones: deps.trustZones } : {}),
     ...(traceSourceFor ? { traceSourceFor } : {}),
     // Rendezvous for the callback completion model (if present) — issues {{callback_url}} + awaits inbound. The control-plane route delivers to the same instance.

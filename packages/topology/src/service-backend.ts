@@ -93,7 +93,11 @@ export interface ServiceTopologyBackendOptions {
   acquireRequest?: AcquireRequestFn; // the session open/close HTTP primitive for target.acquire=service (fetch if absent)
   frontDoorDriver?: FrontDoorDriver; // inject the whole driving (HOW) abstraction (HttpFrontDoorDriver if absent)
   newRunId?: () => string;
-  maxConcurrent?: number | (() => number); // cap on concurrent per-case browsers (a function lets the autoscaler adjust it dynamically)
+  maxConcurrent?: number | (() => number); // operator ceiling on concurrent cases (a function lets the autoscaler adjust it dynamically); clamps the pool-driven capacity when a session pool is visible
+  // TTL of the aggregated session-pool snapshot behind capacity() (ms). The Scheduler probes capacity once per
+  // pump and a settle-heavy batch pumps constantly — the TTL keeps that from turning into a live HTTP read of
+  // the tenant's session service per settle. 0 = probe fresh on every call (tests). Default 3000.
+  poolCacheTtlMs?: number;
   trustZones?: TrustZonePolicy; // per-tenant isolation — separate the warm pool per zone (no sharing)
   // Saved-profile injection (browser-profiles S5) — when spec.target.profile is set, seed that profile's captured
   // login (cookies) into the per-case browser BEFORE the agent connects, so the eval runs already authenticated. The
@@ -140,6 +144,14 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
   // namespace for a zoned tenant. In-memory + live-only, like the frame store the captured frames land in.
   private readonly liveTargets = new Map<string, string>();
 
+  // The session pools behind this backend's WARM topologies — coordinates recorded at dispatch time so a
+  // capacity() probe reads a pool it already knows how to reach and never deploys anything. Keyed by warm
+  // identity (spec id@effectiveVersion + zone) so image-pin variants and per-tenant zones count separately,
+  // exactly as their warm pools deploy separately.
+  private readonly trackedPools = new Map<string, { spec: ServiceHarnessSpec; endpoints: Record<string, string> }>();
+  // One aggregate pool snapshot cached across pump-driven capacity() probes (see poolCacheTtlMs).
+  private poolSnapshot: { at: number; value: { total: number; used: number } | undefined } | undefined;
+
   constructor(private readonly opts: ServiceTopologyBackendOptions) {}
 
   // Topology observability (TopologyInspectable): the live per-service health roster of this harness's warm
@@ -169,12 +181,25 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     spec: ServiceHarnessSpec,
     zone: TrustZone | undefined,
   ): Promise<TopologyStatus["pool"] | undefined> {
+    try {
+      const topo = await this.opts.runtime.ensureTopology(spec, zone);
+      return await this.readPoolAt(spec, topo.endpoints);
+    } catch {
+      return undefined; // best-effort — the roster is still worth serving without the pool line
+    }
+  }
+
+  // The coordinate-based core of the pool read — given already-known endpoints, never deploys. Shared by the
+  // roster read (readPool, ensure-based) and the admission read (liveSessionPools, dispatch-recorded coordinates).
+  private async readPoolAt(
+    spec: ServiceHarnessSpec,
+    endpoints: Record<string, string>,
+  ): Promise<TopologyStatus["pool"] | undefined> {
     const acquire = spec.target?.acquire;
     if (acquire?.mode !== "service" || !acquire.capacity) return undefined;
     const capacity = acquire.capacity;
     try {
-      const topo = await this.opts.runtime.ensureTopology(spec, zone);
-      const base = topo.endpoints[capacity.service ?? acquire.service];
+      const base = endpoints[capacity.service ?? acquire.service];
       if (!base) return undefined;
       const { path } = methodPath(capacity.poll);
       const url = joinUrl(base, path);
@@ -184,8 +209,50 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
       const used = capacity.used ? numberAt(body, capacity.used) : undefined;
       return { total, ...(used !== undefined ? { used } : {}), endpoint: url };
     } catch {
-      return undefined; // best-effort — the roster is still worth serving without the pool line
+      return undefined; // best-effort — an unreachable pool is reported as no pool, never as a failure
     }
+  }
+
+  // Remember where a warm topology's session pool can be asked (called on every dispatch, once the topology is
+  // up). Only session pools the harness declared sizable (acquire.capacity with a total) are worth probing.
+  private trackPool(spec: ServiceHarnessSpec, zone: TrustZone | undefined, endpoints: Record<string, string>): void {
+    const acquire = spec.target?.acquire;
+    if (acquire?.mode !== "service" || !acquire.capacity) return;
+    const key = `${spec.id}@${spec.version}|${zone?.id ?? ""}`;
+    // A NEW pool invalidates the cached aggregate so the next capacity() sees it immediately; re-recording a
+    // known pool must not (a batch dispatches per case, and invalidating per case would defeat the TTL).
+    if (!this.trackedPools.has(key)) this.poolSnapshot = undefined;
+    this.trackedPools.set(key, { spec, endpoints });
+  }
+
+  // Aggregate the live session pools across this backend's tracked warm topologies — the admission-plane read
+  // of the pool the orchestrator cannot see. undefined = no sizable pool visible (fall back to the static cap).
+  // TTL-cached (poolCacheTtlMs); a pool that stops answering is dropped from tracking (a swept warm topology
+  // leaves the probe set; the next dispatch that warms it re-records it).
+  private async liveSessionPools(): Promise<{ total: number; used: number } | undefined> {
+    if (this.trackedPools.size === 0) return undefined;
+    const now = Date.now();
+    const ttl = this.opts.poolCacheTtlMs ?? 3_000;
+    if (this.poolSnapshot && now - this.poolSnapshot.at < ttl) return this.poolSnapshot.value;
+    const pools = await Promise.all(
+      [...this.trackedPools.entries()].map(async ([key, tracked]) => {
+        const pool = await this.readPoolAt(tracked.spec, tracked.endpoints);
+        if (!pool) this.trackedPools.delete(key);
+        return pool;
+      }),
+    );
+    const live = pools.filter((p): p is NonNullable<TopologyStatus["pool"]> => p !== undefined);
+    const value =
+      live.length === 0
+        ? undefined
+        : {
+            total: live.reduce((sum, p) => sum + p.total, 0),
+            // A pool that does not report `used` contributes 0 — the Scheduler's own in-flight count (max'd
+            // against this) still covers the sessions this control plane placed there.
+            used: live.reduce((sum, p) => sum + (p.used ?? 0), 0),
+          };
+    this.poolSnapshot = { at: now, value };
+    return value;
   }
 
   // One deployed service's current log tail (TopologyInspectable) — the service-level twin of Backend.logs.
@@ -256,10 +323,20 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     );
   }
 
-  // Capacity: how many per-case browsers can run at once (warm services are a shared pool, so the per-case browser is the bottleneck).
+  // Capacity: what the Scheduler admits against. The declared session pool of a service-acquired target is the
+  // REAL limit — it lives inside a service container, invisible to any orchestrator read — so once a dispatch has
+  // recorded where to ask (trackPool), the live pool IS the capacity: total follows the pool (scale the session
+  // service out and the next pump admits wider, no re-registration), and used counts every session in it
+  // (conversation-lane sessions included), so the eval lane queues instead of over-admitting into a saturated
+  // pool and failing case by case. `maxConcurrent` clamps it as the operator ceiling. Until a pool is visible
+  // (nothing dispatched yet, or no acquire.capacity declared) the static cap stands — a first wave can overshoot
+  // a smaller pool; its overflow fails fast and the batch retry re-queues against the now-truthful number.
   async capacity(): Promise<BackendCapacity> {
     const mc = this.opts.maxConcurrent;
-    return { total: (typeof mc === "function" ? mc() : mc) ?? 8, used: 0 };
+    const declared = typeof mc === "function" ? mc() : mc;
+    const pool = await this.liveSessionPools();
+    if (!pool) return { total: declared ?? 8, used: 0 };
+    return { total: declared !== undefined ? Math.min(declared, pool.total) : pool.total, used: pool.used };
   }
 
   // Live browser frame (observability ⑦): rediscover this run's browser CDP endpoint (by runId) and capture a
@@ -321,6 +398,9 @@ export class ServiceTopologyBackend implements Backend, ScreenCapturable, Screen
     }
 
     const topo = await this.opts.runtime.ensureTopology(spec, zone);
+    // The topology is up — remember where its session pool can be asked, so capacity() (the Scheduler's
+    // admission probe) reads the live pool from here on instead of the static cap.
+    this.trackPool(spec, zone, topo.endpoints);
     mark(
       "topology_ready",
       `topology ${spec.id}@${spec.version} ready in ${Date.now() - t0}ms — services: ${spec.services.map((s) => s.name).join(", ")}${spec.dependencies.length > 0 ? `; stores: ${spec.dependencies.map((d) => d.store).join(", ")}` : ""}`,
