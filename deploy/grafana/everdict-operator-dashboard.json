@@ -2,10 +2,7 @@
   "title": "Everdict \u2014 Operator",
   "uid": "everdict-operator",
   "schemaVersion": 39,
-  "tags": [
-    "everdict",
-    "operator"
-  ],
+  "tags": ["everdict", "operator"],
   "time": {
     "from": "now-6h",
     "to": "now"
