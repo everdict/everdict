@@ -328,6 +328,9 @@ export const trialDiffSchema = z.object({
   candidate: z.string(),
   zThreshold: z.number(),
   minDelta: z.number(), // practical-significance floor — significant drops smaller than this stay out of the gate
+  // The Benjamini–Hochberg false-discovery level applied across these cases' tests. Absent = no correction ran,
+  // which is why a row's fdrSuppressed is only readable next to it: suppressed AT WHAT LEVEL is the question.
+  fdrAlpha: z.number().optional(),
   cases: z.array(trialCaseDeltaSchema),
   regressions: z.array(trialCaseDeltaSchema),
   improvements: z.array(trialCaseDeltaSchema),
