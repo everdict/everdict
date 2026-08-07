@@ -124,7 +124,9 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
   `Authorization`; langsmith → `x-api-key`); ② per-case failures are isolated into `cases[].error` (only
   wholesale auth/connect failures throw `UpstreamError`) — the pipeline records the outcome on
   `ScorecardRecord.export`, never fails the scorecard; ③ each case is **create** (no `externalId` — build the
-  trace, then attach scores) or **attach** (`externalId` — scores only, never duplicate the trace). Payload
+  trace, then attach scores) or **attach** (`externalId` — scores only, never duplicate the trace); the exported
+  scores are **measured only** (`measuredScores` — an unmeasured placeholder 0 published to the tenant's platform
+  is a dead grader masquerading there as a real failing measurement). Payload
   builders stay pure/injectable (`newId`/`now`/`fetchImpl`). Real-API facts pinned in adapters: MLflow
   assessments use `assessment_name` + `source_type`, StartTraceV3 **ignores `spans`** → spans go separately via
   OTLP/JSON `POST /v1/traces` + `x-mlflow-experiment-id` (server ≥3.12; **best-effort** — older servers degrade

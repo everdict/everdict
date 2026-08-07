@@ -1,5 +1,6 @@
 import type { CaseResult } from "@everdict/contracts";
 import type { ScorecardExport, TraceSink, TraceSinkCase, TraceSinkConfig } from "@everdict/contracts";
+import { measuredScores } from "@everdict/contracts";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
@@ -89,7 +90,15 @@ export class TraceSinkService {
       return {
         caseId: r.caseId,
         trace: r.trace,
-        scores: r.scores.map((sc) => ({
+        // MEASUREMENTS ONLY (the isMeasured gate). An unmeasured score — a grader that died, a judge that was
+        // skipped for a missing key — carries a PLACEHOLDER value of 0. Exported unfiltered it landed in the
+        // tenant's Langfuse/MLflow/Phoenix/LangSmith as a genuine scored 0, where nothing distinguishes it from
+        // a real failing measurement: a dead grader read as an agent that scored zero, on the platform their
+        // dashboards and alerts are built on. Everdict's own aggregates have always filtered here; the export
+        // is the same claim leaving the building, so it filters too. Unmeasured scores are omitted rather than
+        // annotated — the sink payload has no non-score slot (TraceSinkScore is name+value), and the batch's
+        // own record keeps the per-metric `unmeasured` tallies.
+        scores: measuredScores(r.scores).map((sc) => ({
           name: sc.metric,
           value: sc.value,
           ...(sc.pass !== undefined ? { pass: sc.pass } : {}),

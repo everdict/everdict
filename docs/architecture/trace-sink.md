@@ -54,8 +54,12 @@ integration that configures it and the pipeline step that drives it.
   (`succeeded | partial | failed` + message + per-case results); status/summary/diff/leaderboard
   are untouched. Same isolation discipline as notifications — but *not* fire-and-forget: the
   outcome is recorded and shown.
-- **Scores exported = all scores** (graders + `judge:<id>`), mapped to the platform's native
-  score/feedback/assessment concept. Score name = `Score.metric`.
+- **Scores exported = all MEASURED scores** (graders + `judge:<id>`), mapped to the platform's native
+  score/feedback/assessment concept. Score name = `Score.metric`. The export filters through the same
+  `measuredScores` gate every internal aggregate uses: an unmeasured score's `value` is a **placeholder**,
+  and publishing it would put a dead grader into the tenant's platform as a genuine scored 0 — indistinguishable
+  there from an agent that really failed. Unmeasured scores are omitted (the payload has no non-score slot;
+  the batch's own record keeps the per-metric `unmeasured` tallies).
 - **Credentials are SecretStore name-refs**, resolved at point of use (`authSecretName`), never
   stored in settings, never returned by a view. The secret **value** is what the platform's auth
   header expects (see per-platform table); the adapter owns the header *name*.

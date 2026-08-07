@@ -39,7 +39,10 @@ async function exportHarness(over: {
   });
   if (over.assignTo !== null) await sources.assignSink("acme", over.assignTo ?? "h", "mlf");
 
-  const captured: { cfg?: TraceSinkConfig; cases?: Array<{ caseId: string; externalId?: string }> } = {};
+  const captured: {
+    cfg?: TraceSinkConfig;
+    cases?: Array<{ caseId: string; externalId?: string; scores?: Array<{ name: string; value: number }> }>;
+  } = {};
   const svc = new TraceSinkService(store, {
     secretsFor: async () => over.secrets ?? {},
     buildSink: (cfg) => {
@@ -50,6 +53,7 @@ async function exportHarness(over: {
           captured.cases = cases.map((c) => ({
             caseId: c.caseId,
             ...(c.externalId ? { externalId: c.externalId } : {}),
+            scores: c.scores.map((s) => ({ name: s.name, value: s.value })),
           }));
           // the service calls per case (streaming) — the fixed sinkResult returns only this call's slice of cases.
           if (over.sinkResult)
@@ -117,6 +121,34 @@ describe("TraceSinkService.exportScorecard — resolving the per-harness export 
     const out = await svc.exportScorecard("acme", CTX, [RESULT]);
     expect(out?.status).toBe("failed");
     expect(out?.message).toContain("MISSING");
+  });
+
+  it("exports only MEASURED scores — an unmeasured grader never reaches the platform as a scored 0", async () => {
+    // Given a case whose judge produced a real measurement and whose tests-pass grader DIED (placeholder value 0)
+    const { svc, captured } = await exportHarness({});
+    const withDeadGrader: CaseResult = {
+      ...RESULT,
+      scores: [
+        { graderId: "judge", metric: "judge:q", value: 0.7, detail: "rationale" },
+        {
+          graderId: "tests-pass",
+          metric: "tests_pass",
+          value: 0,
+          status: "unmeasured",
+          reason: "grader_error",
+          retryable: true,
+        },
+        // The legacy pre-status shape (detail sentinel, no `pass`) must be filtered by the same gate.
+        { graderId: "cost", metric: "cost_usd", value: 0, detail: "[grader-error] transport hiccup" },
+      ],
+    };
+
+    // When it is exported to the workspace's platform
+    const out = await svc.exportScorecard("acme", CTX, [withDeadGrader]);
+
+    // Then only the measurement is published — the placeholders are omitted, never republished as real zeros.
+    expect(out?.status).toBe("succeeded");
+    expect(captured.cases?.[0]?.scores).toEqual([{ name: "judge:q", value: 0.7 }]);
   });
 
   it("attach passes externalId only when the source and sink platforms match; otherwise it falls back to create mode", async () => {
