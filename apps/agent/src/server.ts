@@ -258,6 +258,27 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     }
     return notified;
   };
+  // Task-ledger facts fan out ACTIONABLY (LESSON 059 P1 — the executor half of the delegation cycle): the fact's
+  // payload carries the task id, and a teammate woken by one needs the id to act. task.created additionally
+  // carries the work-pull recipe — claim, do, complete WITH output — because a bare "Task created: X" wakes the
+  // teammate with nothing to hold on to. Every other kind fans out as the fact's own message.
+  const taskFanContent = (kind: string, message: string, payload: Record<string, unknown> | undefined): string => {
+    if (!kind.startsWith("task.")) return message;
+    const id = payload?.id;
+    if (typeof id !== "string" || id.length === 0) return message;
+    if (kind === "task.created") {
+      const ownerValue = payload?.owner;
+      const assignment = typeof ownerValue === "string" ? `assigned to ${ownerValue}` : "unassigned";
+      return [
+        `${message} [task ${id}, ${assignment}].`,
+        "If this task is yours to do (assigned to you, or unassigned work in your remit): read it with get_task,",
+        "claim it (update_task status=in_progress — a 409 means someone else already claimed it; stand down), do",
+        "the work, then complete it with update_task status=completed and your results in `output`. Whoever",
+        "delegated it is woken by the completion and reads that output.",
+      ].join(" ");
+    }
+    return `${message} [task ${id}]`;
+  };
 
   // Registry-driven activation (agent-automation A3): the same events that wake teammates also match ENABLED
   // crafted agents' triggers workspace-wide, each match launching a headless trigger-origin run.
@@ -1049,7 +1070,10 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
       const { workspace, recipient, kind, source, message, payload } = parsed.data;
-      const notified = recipient !== undefined ? fanEvent(workspace, recipient, kind, source, message) : 0;
+      const notified =
+        recipient !== undefined
+          ? fanEvent(workspace, recipient, kind, source, taskFanContent(kind, message, payload))
+          : 0;
       const activated = activator ? await activator.onEvent({ workspace, ...eventOf(parsed.data) }) : 0;
       // Third consumer of the same fact: conversations that PARKED on it. Awaited like the activation so the caller's
       // 200 means "delivered everywhere", and failures inside are already contained per-session.
@@ -1073,7 +1097,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
       principal.subject,
       parsed.data.kind,
       parsed.data.source,
-      parsed.data.message,
+      taskFanContent(parsed.data.kind, parsed.data.message, parsed.data.payload),
     );
     // A member-driven event also matches the registry (the manual "fire this at my agent" path).
     const activated = activator

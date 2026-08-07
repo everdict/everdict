@@ -84,6 +84,45 @@ describe("TaskService", () => {
     expect(emitted[1]).toMatchObject({ kind: "task.completed" });
   });
 
+  it("a second claimer gets 409 with the current owner named — it must never silently work someone else's task", async () => {
+    // Given a task the first worker already claimed
+    const { tasks } = service();
+    const created = await tasks.create({ tenant: "acme", createdBy: "u-1", subject: "triage the dip" });
+    await tasks.update("acme", created.id, { status: "in_progress" }, { subject: "worker-a" });
+    // When a second worker races the same claim (pre-fix: it re-set in_progress and believed it owned the task)
+    await expect(tasks.update("acme", created.id, { status: "in_progress" }, { subject: "worker-b" })).rejects.toThrow(
+      /already claimed by worker-a/,
+    );
+    // An explicit owner reassignment is still allowed — that is a handoff, not a race
+    const reassigned = await tasks.update(
+      "acme",
+      created.id,
+      { status: "in_progress", owner: "worker-b" },
+      { subject: "worker-a" },
+    );
+    expect(reassigned.owner).toBe("worker-b");
+  });
+
+  it("completion carries the completer's output, and every lifecycle fact carries the task id in its PAYLOAD (wait filters match payload only)", async () => {
+    const { tasks, emitted } = service();
+    const created = await tasks.create({ tenant: "acme", createdBy: "u-1", subject: "run the baseline" });
+    // task.created already carries the id a waiting conversation filters on
+    expect(emitted[0]?.payload).toMatchObject({ id: created.id });
+    emitted.length = 0;
+    await tasks.update("acme", created.id, { status: "in_progress" }, { subject: "worker-a" });
+    const completed = await tasks.update(
+      "acme",
+      created.id,
+      { status: "completed", output: "Baseline pass rate 84% — two regressions, both in auth flows." },
+      { subject: "worker-a" },
+    );
+    // The output is ON the record for the woken requester's get_task read…
+    expect(completed.output).toContain("84%");
+    // …and both transition facts name the task by id in the payload, where eq-filters look
+    expect(emitted[0]).toMatchObject({ kind: "task.claimed", payload: { id: created.id } });
+    expect(emitted[1]).toMatchObject({ kind: "task.completed", payload: { id: created.id } });
+  });
+
   it("a same-status patch emits no fact (edits are not lifecycle news)", async () => {
     const { tasks, emitted } = service();
     const created = await tasks.create({ tenant: "acme", createdBy: "u-1", subject: "t" });

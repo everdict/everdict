@@ -51,6 +51,52 @@ describe("task ledger routes", () => {
     await app.close();
   });
 
+  it("completion carries output back to the waiting requester, and a rival claim maps to 409", async () => {
+    const { app } = build();
+    const task = (
+      await app.inject({ method: "POST", url: "/tasks", headers: H, payload: { subject: "run the baseline" } })
+    ).json();
+    // The assignee claims and completes WITH results
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url: `/tasks/${task.id}`,
+          headers: H,
+          payload: { status: "in_progress" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const done = await app.inject({
+      method: "PATCH",
+      url: `/tasks/${task.id}`,
+      headers: H,
+      payload: { status: "completed", output: "Pass rate 84% — two auth regressions." },
+    });
+    expect(done.statusCode).toBe(200);
+    // The requester woken by task.completed reads the report off the record
+    expect((await app.inject({ method: "GET", url: `/tasks/${task.id}`, headers: H })).json().output).toContain("84%");
+    // A rival claiming a task someone else holds gets 409 with the owner named
+    const rival = (
+      await app.inject({ method: "POST", url: "/tasks", headers: H, payload: { subject: "contended" } })
+    ).json();
+    await app.inject({
+      method: "PATCH",
+      url: `/tasks/${rival.id}`,
+      headers: { "x-everdict-tenant": "acme" },
+      payload: { status: "in_progress", owner: "worker-a" },
+    });
+    const lost = await app.inject({
+      method: "PATCH",
+      url: `/tasks/${rival.id}`,
+      headers: H,
+      payload: { status: "in_progress" },
+    });
+    expect(lost.statusCode).toBe(409);
+    expect(lost.json().message).toContain("worker-a");
+    await app.close();
+  });
+
   it("validates the body (400), scopes unknown ids to 404, and 404s without a composed service", async () => {
     const { app } = build();
     expect((await app.inject({ method: "POST", url: "/tasks", headers: H, payload: { subject: "" } })).statusCode).toBe(

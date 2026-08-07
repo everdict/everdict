@@ -21,6 +21,11 @@ export const AgentTaskRecordSchema = z.object({
   // Task ids that should complete first. INFORMATIONAL in v1: the ledger records the dependency, readers
   // (agents, the fleet view) decide ordering — the control plane does not block a claim on it.
   blockedBy: z.array(z.string()).default([]),
+  // What completing it PRODUCED — the completer's report back to whoever waits on the task (LESSON 059 P1:
+  // a task is a unit of delegated work, not just intent, so completion carries results). The requester that
+  // parked on task.completed reads it with get_task after the wake; completing without output hands back a
+  // bare "done".
+  output: z.string().optional(),
   createdBy: z.string(),
   // Agent attribution when a conversation created the task (the causedBy loop guard keys on it).
   origin: z

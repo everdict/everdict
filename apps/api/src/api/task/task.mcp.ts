@@ -23,7 +23,10 @@ export function registerTaskTools(server: McpServer, ctx: McpToolContext): void 
       description:
         "Add a unit of intended work to the workspace's shared TASK LEDGER — the cross-conversation, cross-agent " +
         "coordination substrate. Use it to hand work to teammates or to your future self: tasks outlive this " +
-        "conversation, and teammate agents subscribed to task.created wake when new work appears. blockedBy " +
+        "conversation, and teammate agents subscribed to task.created wake when new work appears. To DELEGATE " +
+        "and be resumed when it is done: create the task (set owner to the teammate so its wake names the " +
+        "assignee), then wait_for kinds [\"task.completed\"] with filter {field:'id', op:'eq', value:<this " +
+        "task's id>} — on wake, get_task and read its output (the completer's report). blockedBy " +
         "chains it behind other task ids (informational — readers decide ordering). subject is an imperative " +
         "title ('Run the baseline on web@2.2.0').",
       inputSchema: {
@@ -82,8 +85,10 @@ export function registerTaskTools(server: McpServer, ctx: McpToolContext): void 
     "update_task",
     {
       description:
-        "Patch a ledger task — CLAIM it (status=in_progress; you become the owner when none is set), COMPLETE it " +
-        "(status=completed — the task.completed fact tells agents waiting on it that the dependency cleared), " +
+        "Patch a ledger task — CLAIM it (status=in_progress; you become the owner when none is set — a task " +
+        "already claimed by someone else refuses with 409, stand down and pull other work), COMPLETE it " +
+        "(status=completed WITH your results in `output` — the task.completed fact wakes whoever parked on this " +
+        "task, and your output is the report they read; completing without output hands back a bare 'done'), " +
         "cancel it, or edit subject/description/owner/blockedBy. A same-status patch emits no fact.",
       inputSchema: {
         id: z.string(),
@@ -92,6 +97,11 @@ export function registerTaskTools(server: McpServer, ctx: McpToolContext): void 
         status: AgentTaskStatusSchema.optional(),
         owner: z.string().optional(),
         blockedBy: z.array(z.string()).max(20).optional(),
+        output: z
+          .string()
+          .max(50_000)
+          .optional()
+          .describe("your results, for whoever waits on this task — set it when completing"),
       },
     },
     ({ id, ...patch }) =>
@@ -106,6 +116,7 @@ export function registerTaskTools(server: McpServer, ctx: McpToolContext): void 
               ...(patch.status !== undefined ? { status: patch.status } : {}),
               ...(patch.owner !== undefined ? { owner: patch.owner } : {}),
               ...(patch.blockedBy !== undefined ? { blockedBy: patch.blockedBy } : {}),
+              ...(patch.output !== undefined ? { output: patch.output } : {}),
             },
             { subject: principal.subject, ...(agent ? { agent } : {}) },
           ),

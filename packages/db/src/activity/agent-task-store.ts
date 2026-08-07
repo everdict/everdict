@@ -45,6 +45,7 @@ interface TaskRow {
   status: string;
   owner: string | null;
   blocked_by: unknown;
+  output: string | null;
   created_by: string;
   origin: unknown;
   created_at: string | Date;
@@ -52,7 +53,7 @@ interface TaskRow {
 }
 
 const TASK_COLUMNS =
-  "id, tenant, subject, description, status, owner, blocked_by, created_by, origin, created_at, updated_at";
+  "id, tenant, subject, description, status, owner, blocked_by, output, created_by, origin, created_at, updated_at";
 
 function taskRowToRecord(row: TaskRow): AgentTaskRecord {
   return AgentTaskRecordSchema.parse({
@@ -63,6 +64,7 @@ function taskRowToRecord(row: TaskRow): AgentTaskRecord {
     status: row.status,
     ...(row.owner !== null ? { owner: row.owner } : {}),
     blockedBy: Array.isArray(row.blocked_by) ? row.blocked_by : [],
+    ...(row.output !== null ? { output: row.output } : {}),
     createdBy: row.created_by,
     ...(row.origin !== null && row.origin !== undefined ? { origin: row.origin } : {}),
     createdAt: new Date(row.created_at).toISOString(),
@@ -126,7 +128,7 @@ export class PgAgentTaskStore implements AgentTaskStore {
     const updated = { ...existing, ...patch };
     await this.client.query(
       `UPDATE everdict_agent_tasks
-       SET subject = $3, description = $4, status = $5, owner = $6, blocked_by = $7, updated_at = $8
+       SET subject = $3, description = $4, status = $5, owner = $6, blocked_by = $7, output = $8, updated_at = $9
        WHERE tenant = $1 AND id = $2`,
       [
         tenant,
@@ -136,6 +138,7 @@ export class PgAgentTaskStore implements AgentTaskStore {
         updated.status,
         updated.owner ?? null,
         JSON.stringify(updated.blockedBy),
+        updated.output ?? null,
         updated.updatedAt,
       ],
     );

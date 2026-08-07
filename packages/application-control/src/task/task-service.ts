@@ -2,6 +2,7 @@ import {
   type AgentTaskRecord,
   type AgentTaskStatus,
   BadRequestError,
+  ConflictError,
   ForbiddenError,
   NotFoundError,
 } from "@everdict/contracts";
@@ -37,6 +38,8 @@ export interface UpdateTaskInput {
   status?: AgentTaskStatus;
   owner?: string;
   blockedBy?: string[];
+  // The completer's report (LESSON 059 P1) — what doing the task produced, read by whoever waits on it.
+  output?: string;
 }
 
 export interface TaskServiceDeps {
@@ -95,7 +98,12 @@ export class TaskService {
       kind: "task.created",
       subject: { type: "task", id: record.id },
       actor: input.createdBy,
+      // `id` rides in the payload (not only the event subject) because trigger/wait filters match PAYLOAD
+      // fields only — it is what lets a conversation park on "MY task": wait_for task.completed with
+      // {field:"id", op:"eq", value:<taskId>} (LESSON 059 P1), and what tells a woken teammate WHICH task
+      // to claim.
       payload: {
+        id: record.id,
         subject: record.subject,
         ...(record.owner !== undefined ? { owner: record.owner } : {}),
         ...(blockedBy.length > 0 ? { blockedBy } : {}),
@@ -127,6 +135,23 @@ export class TaskService {
     if ((patch.blockedBy?.length ?? 0) > MAX_BLOCKED_BY)
       throw new BadRequestError("BAD_REQUEST", { max: MAX_BLOCKED_BY }, "Too many blockedBy dependencies.");
     const existing = await this.get(tenant, id);
+    // Claim race (LESSON 059 P1): two workers claiming the same unowned task must not BOTH believe they own
+    // it — the second claimer previously re-set in_progress while the first stayed owner, and silently worked
+    // a task that was not theirs. A claim of a task already in progress under someone else (with no explicit
+    // owner reassignment) is refused with the current owner named, so the loser stands down and pulls other
+    // work instead of double-running this one.
+    if (
+      patch.status === "in_progress" &&
+      existing.status === "in_progress" &&
+      patch.owner === undefined &&
+      existing.owner !== undefined &&
+      existing.owner !== actor.subject
+    )
+      throw new ConflictError(
+        "CONFLICT",
+        { id, owner: existing.owner },
+        `task '${id}' is already claimed by ${existing.owner}.`,
+      );
     // Claiming (→ in_progress) without naming an owner records the claimer as the owner.
     const nextOwner =
       patch.owner ?? (patch.status === "in_progress" && existing.owner === undefined ? actor.subject : undefined);
@@ -136,6 +161,7 @@ export class TaskService {
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(nextOwner !== undefined ? { owner: nextOwner } : {}),
       ...(patch.blockedBy !== undefined ? { blockedBy: patch.blockedBy } : {}),
+      ...(patch.output !== undefined ? { output: patch.output } : {}),
       updatedAt: this.now(),
     });
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `task '${id}' not found.`);
@@ -156,7 +182,9 @@ export class TaskService {
           kind,
           subject: { type: "task", id },
           actor: actor.subject,
+          // Same law as task.created: the id must be a payload field for wait/trigger filters to match it.
           payload: {
+            id,
             subject: updated.subject,
             ...(updated.owner !== undefined ? { owner: updated.owner } : {}),
           },

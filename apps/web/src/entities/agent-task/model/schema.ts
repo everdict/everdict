@@ -15,6 +15,7 @@ export const agentTaskSchema = z.object({
   status: agentTaskStatusSchema,
   owner: z.string().optional(),
   blockedBy: z.array(z.string()).default([]),
+  output: z.string().optional(),
   createdBy: z.string(),
   origin: z
     .object({ agentId: z.string().optional(), conversationId: z.string().optional() })

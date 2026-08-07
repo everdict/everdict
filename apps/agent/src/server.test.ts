@@ -514,6 +514,45 @@ describe("agent server", () => {
     await app.close();
   });
 
+  it("a task.created fan-out carries the task id and the work-pull recipe — the executor half of delegation (LESSON 059 P1)", async () => {
+    const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore() }));
+    const worker = (
+      await app.inject({
+        method: "POST",
+        url: "/agent/teammates",
+        headers: auth,
+        payload: { name: "worker", task: "carry out assigned ledger tasks", watch: ["task.created"] },
+      })
+    ).json();
+
+    const fanned = (
+      await app.inject({
+        method: "POST",
+        url: "/agent/events",
+        headers: auth,
+        payload: {
+          kind: "task.created",
+          source: "task t-42",
+          message: "Task created: run the baseline",
+          payload: { id: "t-42", subject: "run the baseline", owner: "worker" },
+        },
+      })
+    ).json();
+    expect(fanned.notified).toBe(1);
+
+    await new Promise((r) => setTimeout(r, 30));
+    const msgs = (
+      await app.inject({ method: "GET", url: `/agent/sessions/${worker.id}/messages`, headers: auth })
+    ).json().messages as { content: string }[];
+    // The woken worker holds the id it needs to act, and the claim→do→complete-with-output recipe —
+    // a bare "Task created: X" left it nothing to hold on to.
+    const woke = msgs.find((m) => m.content.includes("task t-42, assigned to worker"));
+    expect(woke).toBeDefined();
+    expect(woke?.content).toContain("update_task status=in_progress");
+    expect(woke?.content).toContain("results in `output`");
+    await app.close();
+  });
+
   it("fans an event via the internal control-plane path (x-internal-token) to a recipient's teammates (S4)", async () => {
     const app = buildServer(makeDeps({ keyStore: new InMemoryTenantKeyStore(), internalToken: "sekret" }));
     const watcher = (

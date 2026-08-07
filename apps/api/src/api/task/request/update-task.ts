@@ -8,6 +8,8 @@ export const UpdateTaskBodySchema = z
     status: AgentTaskStatusSchema.optional(),
     owner: z.string().min(1).max(200).optional(),
     blockedBy: z.array(z.string().min(1)).max(20).optional(),
+    // The completer's report back to whoever waits on the task (LESSON 059 P1).
+    output: z.string().max(50_000).optional(),
   })
   .refine(
     (b) =>
@@ -15,6 +17,7 @@ export const UpdateTaskBodySchema = z
       b.description !== undefined ||
       b.status !== undefined ||
       b.owner !== undefined ||
-      b.blockedBy !== undefined,
+      b.blockedBy !== undefined ||
+      b.output !== undefined,
     { message: "Nothing to update." },
   );

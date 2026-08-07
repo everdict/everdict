@@ -79,4 +79,27 @@ describe("task ledger MCP tools", () => {
     const listed = JSON.parse(textOf(await client.callTool({ name: "list_tasks", arguments: {} })));
     expect(listed).toHaveLength(1);
   });
+
+  it("completing with output hands the report to whoever waits, and the fact's payload names the task id (LESSON 059 P1)", async () => {
+    const { deps, emitted } = makeDeps();
+    const client = await connect(deps, { agentId: "worker", conversationId: "conv-2" });
+    const created = JSON.parse(
+      textOf(await client.callTool({ name: "create_task", arguments: { subject: "run the baseline" } })),
+    );
+    // The wait filter a delegating conversation parks with matches PAYLOAD fields — the id must be there.
+    expect(emitted[0]).toMatchObject({ kind: "task.created", payload: { id: created.id } });
+    const completed = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "update_task",
+          arguments: { id: created.id, status: "completed", output: "Pass rate 84% — two auth regressions." },
+        }),
+      ),
+    );
+    expect(completed.output).toContain("84%");
+    expect(emitted[1]).toMatchObject({ kind: "task.completed", payload: { id: created.id } });
+    // And the requester's post-wake read sees the report
+    const fetched = JSON.parse(textOf(await client.callTool({ name: "get_task", arguments: { id: created.id } })));
+    expect(fetched.output).toContain("84%");
+  });
 });
