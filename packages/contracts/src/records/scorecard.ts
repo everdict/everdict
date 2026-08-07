@@ -2,6 +2,7 @@ import { z } from "zod";
 import { JudgeRunConfigSchema } from "../execution/case-job.js";
 import { GraderSpecSchema, ScorecardSchema } from "../execution/eval-case.js";
 import { VerdictPolicyRefSchema, VerdictPolicySchema } from "../execution/verdict-policy.js";
+import { GateDecisionSchema } from "./gate.js";
 
 // Scorecard run lifecycle: accept a dataset×harness batch eval → run → success/failure.
 // superseded = a terminal state where a newer fire of the same (origin.repo, prNumber, harness, dataset) reclaimed (cancelled·replaced) this batch.
@@ -263,6 +264,9 @@ export const ScorecardRecordSchema = z.object({
   // the stamp existed — those were judged under the authority ladder the default policy encodes. mig 0125.
   verdictPolicy: VerdictPolicyRefSchema.optional(),
   manifest: ScorecardManifestSchema.optional(), // reproducibility digests, sealed at submit (mig 0126)
+  // Release-gate decisions recorded AGAINST this candidate (A1/B1) — append-only; the audit report scans
+  // these instead of a separate store (ledger-derivation principle). mig 0128.
+  gates: z.array(GateDecisionSchema).optional(),
   // The batch's ASK — cases × trials at submit (ingest: the trace count). The requested−executed gap is the
   // unlaunched/cancelled tally no per-result walk can recover once cases were skipped. mig 0127.
   requested: z.number().int().nonnegative().optional(),

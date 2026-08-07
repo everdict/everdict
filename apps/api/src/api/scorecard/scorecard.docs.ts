@@ -1,4 +1,5 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema } from "@everdict/application-control";
+import { GateDecisionSchema } from "@everdict/contracts";
 import { BackfillModelsResponseSchema } from "@everdict/contracts/wire";
 import { ScorecardAnalysisBundleResponseSchema, ScorecardAnalysisResponseSchema } from "@everdict/contracts/wire";
 import { DeleteScorecardResultSchema } from "@everdict/contracts/wire";
@@ -14,6 +15,7 @@ import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { teamMoveDocs } from "../team-move.js";
 import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
+import { GateScorecardsBodySchema, OverrideGateBodySchema } from "./request/gate-scorecards.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 
@@ -195,6 +197,35 @@ const docs = {
     response: {
       200: { description: "Cost/time estimate", ...toJsonSchema(ScorecardEstimateResponseSchema) },
       ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  gate: {
+    summary: "Release-gate a candidate against a baseline",
+    description:
+      "The CI-facing decision over a baseline↔candidate comparison: pass | block | not_comparable — " +
+      "`not_comparable` is a FIRST-CLASS decision (an incomparable pair never yields a false green light; " +
+      "policy mismatch and zero shared cases land here). When either batch ran trials, the Fisher-gated " +
+      "trials diff is the authoritative regression signal. The decision embeds its effective policy (+digest) " +
+      "and is RECORDED on the candidate's ledger row for the gate audit. Requires scorecards:run (member+).",
+    tags: ["scorecard"],
+    body: toJsonSchema(GateScorecardsBodySchema),
+    response: {
+      200: { description: "The recorded gate decision", ...toJsonSchema(GateDecisionSchema) },
+      ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  gateOverride: {
+    summary: "Override a blocking gate decision",
+    description:
+      "Force a BLOCK through — recorded, never silent: who and why ride the decision and the gate audit " +
+      "counts it (catalog R7). Only a blocking decision can be overridden (pass needs no force; " +
+      "not_comparable has nothing to force) — anything else is 409. Requires scorecards:run (member+).",
+    tags: ["scorecard"],
+    params: scorecardIdParams,
+    body: toJsonSchema(OverrideGateBodySchema),
+    response: {
+      200: { description: "The decision with its recorded override", ...toJsonSchema(GateDecisionSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
     },
   },
   diff: {

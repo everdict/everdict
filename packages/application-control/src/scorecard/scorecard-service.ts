@@ -5,6 +5,7 @@ import {
   type Dataset,
   EXPERIMENT_ADHOC_REF,
   ForbiddenError,
+  type GateDecision,
   type HarnessSpec,
   NotFoundError,
   type ScorecardOrigin,
@@ -26,6 +27,8 @@ import {
   can,
   composeVerdictPolicy,
   contentDigest,
+  evaluateGate,
+  gatePolicyDigest,
   retryableUnmeasured,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
@@ -999,6 +1002,108 @@ export class ScorecardService {
     opts: { from?: string; to?: string; visibleTeams?: string[] } = {},
   ): ReturnType<ScorecardAnalyticsService["opsReport"]> {
     return this.analytics.opsReport(tenant, opts);
+  }
+
+  // Release gate (A1) — the CI-facing decision over baseline↔candidate, RECORDED on the candidate's ledger
+  // row so governance can count it (B2). `not_comparable` is a first-class decision: an incomparable pair
+  // never yields a false green light. The effective policy is embedded (+digested) in the decision — a
+  // decision must be re-derivable without the caller's flags.
+  async gate(input: {
+    tenant: string;
+    baseline: string;
+    candidate: string;
+    policy?: { maxRegressions?: number };
+    decidedBy?: string;
+    visibleTeams?: string[];
+  }): Promise<GateDecision> {
+    const diff = await this.analytics.diff(input.tenant, input.baseline, input.candidate, {
+      ...(input.visibleTeams ? { visibleTeams: input.visibleTeams } : {}),
+    });
+    const policy = { maxRegressions: input.policy?.maxRegressions ?? 0 };
+    const evaluation = evaluateGate(diff, policy);
+    const decision: GateDecision = {
+      id: this.newId(),
+      baseline: input.baseline,
+      candidate: input.candidate,
+      ...evaluation,
+      policy,
+      policyDigest: gatePolicyDigest(policy),
+      ...(input.decidedBy !== undefined ? { decidedBy: input.decidedBy } : {}),
+      decidedAt: this.now(),
+    };
+    const record = await this.deps.store.get(input.candidate);
+    if (!record || record.tenant !== input.tenant)
+      throw new NotFoundError("NOT_FOUND", { scorecard: input.candidate }, "scorecard not found.");
+    const facts = stampFacts(
+      input.tenant,
+      [
+        {
+          kind: "scorecard.gate.decided",
+          subject: { type: "scorecard", id: input.candidate },
+          ...(input.decidedBy !== undefined ? { actor: input.decidedBy } : {}),
+          payload: { decision: decision.decision, baseline: input.baseline, gateId: decision.id },
+          message: `release gate: ${decision.decision} (${decision.evidence.regressions} regression(s), comparability ${decision.evidence.comparability})`,
+        },
+      ],
+      { newId: this.newId, now: this.now },
+    );
+    await this.deps.store.update(
+      input.candidate,
+      { gates: [...(record.gates ?? []), decision], updatedAt: this.now() },
+      facts.map((f) => f.record),
+    );
+    if (facts.length > 0) void this.deps.events?.pushPersisted?.(facts);
+    return decision;
+  }
+
+  // B1 — the recorded force: overriding a BLOCK ships anyway, with who and why. Only a block can be
+  // overridden (pass needs no force; not_comparable has nothing to force — rerun a comparable pair).
+  async overrideGate(input: {
+    tenant: string;
+    candidate: string;
+    decisionId: string;
+    reason: string;
+    by: string;
+  }): Promise<GateDecision> {
+    const record = await this.deps.store.get(input.candidate);
+    if (!record || record.tenant !== input.tenant)
+      throw new NotFoundError("NOT_FOUND", { scorecard: input.candidate }, "scorecard not found.");
+    const gates = record.gates ?? [];
+    const decision = gates.find((g) => g.id === input.decisionId);
+    if (!decision)
+      throw new NotFoundError("NOT_FOUND", { gate: input.decisionId }, "gate decision not found on this candidate.");
+    if (decision.decision !== "block")
+      throw new ConflictError(
+        "CONFLICT",
+        { gate: input.decisionId, decision: decision.decision },
+        "only a blocking decision can be overridden — pass needs no force, and not_comparable has nothing to force.",
+      );
+    if (decision.override !== undefined)
+      throw new ConflictError("CONFLICT", { gate: input.decisionId }, "this decision was already overridden.");
+    const overridden: GateDecision = {
+      ...decision,
+      override: { by: input.by, reason: input.reason, at: this.now() },
+    };
+    const facts = stampFacts(
+      input.tenant,
+      [
+        {
+          kind: "scorecard.gate.overridden",
+          subject: { type: "scorecard", id: input.candidate },
+          actor: input.by,
+          payload: { gateId: decision.id, baseline: decision.baseline, reason: input.reason },
+          message: `release gate OVERRIDDEN by ${input.by}: ${input.reason}`,
+        },
+      ],
+      { newId: this.newId, now: this.now },
+    );
+    await this.deps.store.update(
+      input.candidate,
+      { gates: gates.map((g) => (g.id === decision.id ? overridden : g)), updatedAt: this.now() },
+      facts.map((f) => f.record),
+    );
+    if (facts.length > 0) void this.deps.events?.pushPersisted?.(facts);
+    return overridden;
   }
 
   analysis(tenant: string, config: AnalysisConfig, visibleTeams?: string[]): Promise<AnalysisResult> {

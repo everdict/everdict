@@ -64,6 +64,8 @@ const ACTIVITY_AXIS_BY_KIND = {
   "scorecard.cancelled": "evaluation",
   "scorecard.scored": "evaluation",
   "scorecard.moved": "evaluation",
+  "scorecard.gate.decided": "evaluation",
+  "scorecard.gate.overridden": "evaluation",
   "report.completed": "evaluation",
   "harness.registered": "evaluation",
   "harness.moved": "evaluation",

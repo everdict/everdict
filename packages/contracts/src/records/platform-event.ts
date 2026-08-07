@@ -46,6 +46,8 @@ export const PLATFORM_EVENT_KINDS = [
   "judge.moved",
   // A result batch was re-filed under a different team — the same fact for the evidence a capability produced.
   "scorecard.moved",
+  "scorecard.gate.decided", // a release-gate decision was recorded against a candidate (payload: decision/baseline)
+  "scorecard.gate.overridden", // a blocking decision was forced through — who and why ride the payload
   // A workspace-filesystem write published an attributed revision — the revision ledger is the state, this is
   // its fact (emitted by the RevisionedWorkspaceFs choke point). Agent-authored publishes stamp
   // causedBy agent:<agentId>:<conversationId>, the loop guard's key.

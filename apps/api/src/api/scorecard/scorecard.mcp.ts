@@ -420,6 +420,62 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     );
 
     server.registerTool(
+      "gate_scorecards",
+      {
+        description:
+          "Release-gate a candidate scorecard against a baseline → {decision: pass|block|not_comparable, reasons, evidence}. `not_comparable` is a FIRST-CLASS decision (policy mismatch / zero shared cases) — never read it as pass. With trials, the Fisher-gated trials diff is the authoritative regression signal. The decision embeds its effective policy (+digest) and is RECORDED on the candidate for the gate audit. HTTP parity (POST /scorecards/gate).",
+        inputSchema: {
+          baseline: z.string(),
+          candidate: z.string(),
+          max_regressions: z
+            .number()
+            .int()
+            .nonnegative()
+            .optional()
+            .describe("regressions tolerated before block (default 0 — any regression blocks)"),
+        },
+      },
+      ({ baseline, candidate, max_regressions }) =>
+        run(principal, "scorecards:run", async () =>
+          ok(
+            await scorecards.gate({
+              tenant: ws,
+              baseline,
+              candidate,
+              ...(max_regressions !== undefined ? { policy: { maxRegressions: max_regressions } } : {}),
+              decidedBy: principal.subject,
+              ...(await teamCeiling(ctx.deps, principal)),
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
+      "override_scorecard_gate",
+      {
+        description:
+          "Force a BLOCKING gate decision through — recorded, never silent: who and why land on the decision and the gate audit counts it. Only a block can be overridden (409 otherwise). HTTP parity (POST /scorecards/:id/gate/override).",
+        inputSchema: {
+          candidate: z.string().describe("the candidate scorecard id the decision was recorded on"),
+          decision_id: z.string(),
+          reason: z.string().min(1).describe("why this ships anyway — required, it is the audit trail"),
+        },
+      },
+      ({ candidate, decision_id, reason }) =>
+        run(principal, "scorecards:run", async () =>
+          ok(
+            await scorecards.overrideGate({
+              tenant: ws,
+              candidate,
+              decisionId: decision_id,
+              reason,
+              by: principal.subject,
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
       "estimate_scorecard",
       {
         description:

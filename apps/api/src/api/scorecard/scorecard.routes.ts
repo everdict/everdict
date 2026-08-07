@@ -15,6 +15,7 @@ import {
 } from "../route-context.js";
 import { MoveToTeamBodySchema } from "../team-move.js";
 import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
+import { GateScorecardsBodySchema, OverrideGateBodySchema } from "./request/gate-scorecards.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 import { scorecardDocs } from "./scorecard.docs.js";
@@ -343,6 +344,59 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
             harness,
             ...(cases !== undefined ? { cases: Number(cases) } : {}),
             ...(concurrency !== undefined ? { concurrency: Number(concurrency) } : {}),
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // Release gate (A1) — the CI-facing decision, recorded on the candidate. Static path → before :id.
+  app.post("/scorecards/gate", { schema: scorecardDocs.gate }, async (req, reply) => {
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = GateScorecardsBodySchema.safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      gate(principal, "scorecards:run");
+      return reply.send(
+        await deps.scorecardService.gate({
+          tenant: principal.workspace,
+          baseline: body.data.baseline,
+          candidate: body.data.candidate,
+          ...(body.data.policy ? { policy: body.data.policy } : {}),
+          decidedBy: principal.subject,
+          ...(await teamCeiling(deps, principal)),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // B1 — the recorded force: override a BLOCK, who and why on the ledger.
+  app.post<{ Params: { id: string } }>(
+    "/scorecards/:id/gate/override",
+    { schema: scorecardDocs.gateOverride },
+    async (req, reply) => {
+      if (!deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const body = OverrideGateBodySchema.safeParse(req.body ?? {});
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        gate(principal, "scorecards:run");
+        return reply.send(
+          await deps.scorecardService.overrideGate({
+            tenant: principal.workspace,
+            candidate: req.params.id,
+            decisionId: body.data.decisionId,
+            reason: body.data.reason,
+            by: principal.subject,
           }),
         );
       } catch (err) {

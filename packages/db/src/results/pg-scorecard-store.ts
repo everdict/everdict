@@ -27,6 +27,7 @@ interface ScorecardRow {
   verdict_policy: unknown; // {id, version, digest} — which policy produced the verdicts (mig 0125)
   manifest: unknown; // reproducibility digests sealed at submit (mig 0126)
   requested: number | string | null; // the batch's ask — cases × trials at submit (mig 0127)
+  gates: unknown; // release-gate decisions recorded against this candidate (mig 0128)
   sink_export: unknown;
   error: unknown;
   steps: unknown;
@@ -69,6 +70,8 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     manifest: hasDetail ? (row.manifest ?? undefined) : undefined, // provenance detail (get only)
     // lightweight — the list's denominators need the ask as much as the detail does
     ...(row.requested !== null && row.requested !== undefined ? { requested: Number(row.requested) } : {}),
+    // lightweight — the gate audit scans the ledger for decisions; a handful of small artifacts per row
+    ...(row.gates !== null && row.gates !== undefined ? { gates: row.gates as ScorecardRecord["gates"] } : {}),
     export: hasDetail ? (row.sink_export ?? undefined) : undefined, // for detail (get only, like steps). Column name is sink_export (reserved-word avoidance)
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
@@ -195,6 +198,11 @@ export class PgScorecardStore implements ScorecardStore {
       sets.push(`requested = $${i++}`);
       vals.push(patch.requested);
     }
+    if (patch.gates !== undefined) {
+      // append-path (gate decide/override) — the service writes the whole array back (small artifacts).
+      sets.push(`gates = $${i++}`);
+      vals.push(JSON.stringify(patch.gates));
+    }
     if (patch.verdictPolicy !== undefined) {
       // stamped by the domain's terminal transition (judgedUnder) — dropping it would leave historical
       // verdicts undated and silently re-derived under whatever policy the code ships next.
@@ -304,7 +312,7 @@ export class PgScorecardStore implements ScorecardStore {
       conds.push(filter.kind === "experiment" ? "kind = 'experiment'" : "(kind IS NULL OR kind <> 'experiment')");
     }
     const res = await this.client.query<ScorecardRow>(
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

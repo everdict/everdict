@@ -5114,3 +5114,104 @@ describe("ScorecardService.opsReport — the workspace's own SLA evidence (C1)",
     expect(outside.batches.total).toBe(0);
   });
 });
+
+describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
+  const succeededRecord = (id: string, results: CaseResult[]): ScorecardRecord => ({
+    id,
+    tenant: "acme",
+    dataset: { id: "d", version: "1.0.0" },
+    harness: { id: "h", version: "1" },
+    status: "succeeded",
+    scorecard: { suiteId: "d@1.0.0", harness: "h@1", results },
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+  });
+  const scored = (caseId: string, pass: boolean): CaseResult => ({
+    caseId,
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "prompt", output: "done" },
+    scores: [{ graderId: "t", metric: "tests_pass", value: pass ? 1 : 0, pass }],
+  });
+  function build() {
+    const log = new InMemoryPlatformEventStore();
+    const store = new InMemoryScorecardStore(log);
+    const datasets = new InMemoryDatasetRegistry();
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: {
+        async dispatch() {
+          throw new Error("gate never dispatches");
+        },
+      },
+      store,
+      datasets,
+      newId: () => `g-${n++}`,
+    });
+    return { store, log, service };
+  }
+
+  it("records a BLOCK on the candidate with the regression named, and the fact rides the write", async () => {
+    const { store, log, service } = build();
+    await store.create(succeededRecord("base", [scored("a", true), scored("b", true)]));
+    await store.create(succeededRecord("cand", [scored("a", true), scored("b", false)]));
+
+    const decision = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand", decidedBy: "ci" });
+    expect(decision.decision).toBe("block");
+    expect(decision.reasons.find((r) => r.kind === "regression")?.caseId).toBe("b");
+    expect(decision.policy).toEqual({ maxRegressions: 0 });
+    expect(decision.policyDigest).toBeTruthy();
+
+    // Recorded on the candidate's ledger row — the audit scans these.
+    const rec = await store.get("cand");
+    expect(rec?.gates?.map((g) => g.id)).toEqual([decision.id]);
+    // The fact persisted in the same write (E0 outbox).
+    expect((await log.list("acme")).map((e) => e.kind)).toContain("scorecard.gate.decided");
+  });
+
+  it("override forces a BLOCK through with who and why — pass/not_comparable refuse (409)", async () => {
+    const { store, log, service } = build();
+    await store.create(succeededRecord("base", [scored("a", true)]));
+    await store.create(succeededRecord("cand", [scored("a", false)]));
+    const blocked = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand" });
+    expect(blocked.decision).toBe("block");
+
+    const forced = await service.overrideGate({
+      tenant: "acme",
+      candidate: "cand",
+      decisionId: blocked.id,
+      reason: "known flake, ships with issue EV-12",
+      by: "admin-user",
+    });
+    expect(forced.override).toMatchObject({ by: "admin-user", reason: "known flake, ships with issue EV-12" });
+    expect((await log.list("acme")).map((e) => e.kind)).toContain("scorecard.gate.overridden");
+
+    // A second override of the same decision refuses.
+    await expect(
+      service.overrideGate({ tenant: "acme", candidate: "cand", decisionId: blocked.id, reason: "again", by: "x" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    // A PASS decision has nothing to force.
+    await store.create(succeededRecord("cand2", [scored("a", true)]));
+    const passed = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand2" });
+    expect(passed.decision).toBe("pass");
+    await expect(
+      service.overrideGate({ tenant: "acme", candidate: "cand2", decisionId: passed.id, reason: "r", by: "x" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("cross-policy candidates gate as NOT_COMPARABLE — never a false pass", async () => {
+    const { store, service } = build();
+    await store.create({
+      ...succeededRecord("base", [scored("a", true)]),
+      verdictPolicy: { id: "p", version: "1", digest: "aaa" },
+    });
+    await store.create({
+      ...succeededRecord("cand", [scored("a", true)]),
+      verdictPolicy: { id: "p", version: "2", digest: "bbb" },
+    });
+    const decision = await service.gate({ tenant: "acme", baseline: "base", candidate: "cand" });
+    expect(decision.decision).toBe("not_comparable");
+    expect(decision.reasons[0]?.kind).toBe("policy_mismatch");
+  });
+});
