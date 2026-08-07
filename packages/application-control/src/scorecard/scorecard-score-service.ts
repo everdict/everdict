@@ -150,7 +150,8 @@ export class ScorecardScoreService {
     // alive next to fresh ones, compounding on every pass).
     const single: CaseResult = { ...result, scores: stripJudgeScores(result.scores, judges) };
     const dataset = await this.effectiveDataset(record, [single]);
-    await this.scoring.applyJudges(record.tenant, dataset, [single], judges, record.runtime, submittedBy);
+    const runIdOf = await this.childRunIdResolver(record);
+    await this.scoring.applyJudges(record.tenant, dataset, [single], judges, record.runtime, submittedBy, runIdOf);
     await this.writeBackScores(record, [single]);
     return { scored: true };
   }
@@ -179,7 +180,8 @@ export class ScorecardScoreService {
         scores: stripJudgeScores(r.scores, judges),
       }));
       const dataset = await this.effectiveDataset(record, results);
-      await this.scoring.applyJudges(record.tenant, dataset, results, judges, record.runtime, submittedBy);
+      const runIdOf = await this.childRunIdResolver(record);
+      await this.scoring.applyJudges(record.tenant, dataset, results, judges, record.runtime, submittedBy, runIdOf);
       await this.writeBackScores(record, results);
       await this.aggregate(record, scorecard, results, judges, submittedBy);
     } catch (err) {
@@ -257,6 +259,26 @@ export class ScorecardScoreService {
 
   // Reflect the re-scored results onto the child runs (phase 1's authoritative per-case record — get() hydrates
   // from them). No recording re-seal: phase 1 was not re-executed, so the sealed replay stays as it was.
+  // childKey→run-id resolver for a scoring pass — the same children read writeBackScores does, folded to ids, so
+  // the judge's own execution can seal as a judge:<id> plane on the child it judged. Best-effort: no run store /
+  // failed lookup = undefined (judges still run and meter; no evidence plane lands). Result-less children are
+  // excluded for the same shadowing reason writeBackScores excludes them.
+  private async childRunIdResolver(
+    record: ScorecardRecord,
+  ): Promise<((caseId: string, trial?: number) => string | undefined) | undefined> {
+    const store = this.deps.runStore;
+    if (!store || !record.runIds?.length) return undefined;
+    try {
+      const children = await store.list(record.tenant, { scorecardId: record.id });
+      const byKey = new Map(
+        children.filter((c) => c.result).map((c) => [childKey(c.caseId, c.result?.trial), c.id] as const),
+      );
+      return (caseId, trial) => byKey.get(childKey(caseId, trial));
+    } catch {
+      return undefined;
+    }
+  }
+
   private async writeBackScores(record: ScorecardRecord, results: CaseResult[]): Promise<void> {
     const store = this.deps.runStore;
     if (!store || !record.runIds?.length) return;

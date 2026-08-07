@@ -1,4 +1,4 @@
-import type { JudgeRunner } from "@everdict/application-control";
+import type { JudgeRunner, TrajectoryStore } from "@everdict/application-control";
 import type {
   CaseJob,
   CaseResult,
@@ -12,10 +12,12 @@ import type {
   ModelSpec,
   Placement,
   Score,
+  TraceEvent,
   UnmeasuredReason,
+  UsageCost,
 } from "@everdict/contracts";
 import { sanitizeScore, toScores } from "@everdict/contracts";
-import { modelApiKeySecretName, normalizeModelBinding } from "@everdict/domain";
+import { billingCharges, modelApiKeySecretName, normalizeModelBinding, priceUsd } from "@everdict/domain";
 import {
   JUDGE_OVERALL_METRIC,
   type JudgeCompletion,
@@ -24,6 +26,7 @@ import {
   modelJudge,
   transportComplete,
 } from "@everdict/graders";
+import type { LlmTransport, LlmUsage, StreamRequest, StreamResult } from "@everdict/llm";
 import { transportFor } from "@everdict/llm";
 import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
 import { resolveJudgeArtifacts } from "./resolve-judge-artifacts.js";
@@ -71,6 +74,127 @@ export interface DefaultJudgeRunnerDeps {
   fetchImpl?: typeof fetch;
   anthropicBaseUrl?: string;
   openaiBaseUrl?: string;
+  // Judge-execution evidence: seal the judge's own activity (the verdict's LLM call / the dispatched judge job's
+  // trace) as a `judge:<id>` plane on the judged case's child run trajectory. Best-effort — evidence, never
+  // lifecycle. Absent = no plane is written.
+  trajectories?: Pick<TrajectoryStore, "seal">;
+  // Judge-execution metering: one line per (billing tenant × model) of the judge's own LLM cost. The composition
+  // wires it to the usage meter under source "judge" + the enforcement budget (settle only — never blocks).
+  // Absent = judge cost is not metered.
+  meterJudgeCost?: (tenant: string, model: string, cost: UsageCost) => void;
+}
+
+// One completion the judge's transport made — recorded by the usage tee below so the judge's own execution can be
+// sealed as evidence and metered. Without the tee, transportComplete discarded the transport's token usage: a judge
+// verdict cost nothing and left nothing behind but its Score.detail.
+interface JudgeLlmCall {
+  t: number; // ms offset from the judge's start (the sealed plane's relative clock)
+  model: string;
+  usage?: LlmUsage;
+  latencyMs: number;
+  responseText?: string; // the raw verdict text — sealed as an assistant message beside the llm_call
+}
+
+// Wrap a transport so every completion (one for a single-verdict judge; the multi-criteria judge is also ONE call)
+// lands in `calls`. Failures record nothing — a thrown call reported no usage to record.
+function usageTeeTransport(inner: LlmTransport, startedAtMs: number, calls: JudgeLlmCall[]): LlmTransport {
+  const record = async (
+    req: StreamRequest,
+    run: (r: StreamRequest) => Promise<StreamResult>,
+  ): Promise<StreamResult> => {
+    const t = Math.max(0, Date.now() - startedAtMs);
+    const callStart = Date.now();
+    const result = await run(req);
+    calls.push({
+      t,
+      model: req.model,
+      ...(result.usage ? { usage: result.usage } : {}),
+      latencyMs: Date.now() - callStart,
+      ...(typeof result.content === "string" && result.content.length > 0 ? { responseText: result.content } : {}),
+    });
+    return result;
+  };
+  const innerComplete = inner.complete?.bind(inner);
+  return {
+    provider: inner.provider,
+    stream: (req) => record(req, (r) => inner.stream(r)),
+    ...(innerComplete ? { complete: (req: StreamRequest) => record(req, innerComplete) } : {}),
+  };
+}
+
+// A model judge's execution as trace events: one llm_call per completion — cost priced from the transport's token
+// usage (the judge is OUR call; unlike a harness there is no self-reported total_cost_usd to read) — plus the raw
+// verdict text as an assistant message, so the run detail shows WHY beside HOW MUCH.
+function modelJudgeEvents(calls: JudgeLlmCall[]): TraceEvent[] {
+  const events: TraceEvent[] = [];
+  for (const call of calls) {
+    events.push({
+      t: call.t,
+      kind: "llm_call",
+      model: call.model,
+      ...(call.usage
+        ? {
+            cost: {
+              inputTokens: call.usage.inputTokens,
+              outputTokens: call.usage.outputTokens,
+              usd: priceUsd(call.model, call.usage),
+            },
+          }
+        : {}),
+      latencyMs: call.latencyMs,
+    });
+    if (call.responseText !== undefined)
+      events.push({ t: call.t, kind: "message", role: "assistant", text: call.responseText });
+  }
+  return events;
+}
+
+// Meter + seal one judge execution. Metering: a dispatched judge (code/harness) reuses the SAME provenance policy a
+// case's own billing uses (billingCharges — managed → the tenant pays; a personal self-hosted run is own-pays unless
+// the model is workspace-billed), source rewritten to "judge" by the composition; a model judge is a control-plane
+// call on the workspace's key, so the tenant pays directly. A judge score is never a metered evaluation. Sealing:
+// the events land as a `judge:<id>` plane on the child run's trajectory — BESIDE the execution/infra planes, never
+// inside them, so the judged evidence stays clean (a judge must not read its own account) and billingCharges over
+// the case's trace cannot double-bill the judge's cost as harness cost. Best-effort by contract: evidence, never
+// lifecycle — a meter/seal failure never fails the verdict.
+async function reportJudgeExecution(
+  deps: DefaultJudgeRunnerDeps,
+  input: { spec: JudgeSpec; tenant: string; events: TraceEvent[]; t0: string; runId?: string; billing?: CaseResult },
+): Promise<void> {
+  if (input.events.length === 0) return;
+  try {
+    if (deps.meterJudgeCost) {
+      if (input.billing) {
+        for (const charge of billingCharges(input.billing, input.tenant)) {
+          // The empty-model line is billingCharges' evaluation counter — a judge adds cost, not an evaluation.
+          if (charge.model !== "") deps.meterJudgeCost(charge.tenant, charge.model, charge.cost);
+        }
+      } else {
+        for (const e of input.events) {
+          // A zero-usage call (a provider that reported nothing) is not a billing line — the evidence still seals.
+          if (e.kind === "llm_call" && e.cost && (e.cost.inputTokens + e.cost.outputTokens > 0 || e.cost.usd > 0))
+            deps.meterJudgeCost(input.tenant, e.model, {
+              usd: e.cost.usd,
+              tokens: e.cost.inputTokens + e.cost.outputTokens,
+            });
+        }
+      }
+    }
+  } catch {
+    // metering is best-effort — never fail the verdict over it
+  }
+  if (input.runId !== undefined && deps.trajectories) {
+    await deps.trajectories
+      .seal({
+        runId: input.runId,
+        tenant: input.tenant,
+        source: "run",
+        emitter: `judge:${input.spec.id}`,
+        events: input.events,
+        t0: input.t0,
+      })
+      .catch(() => {});
+  }
 }
 
 // The effective judging fields after rubric resolution — what actually reaches the JudgeGrader.
@@ -233,6 +357,7 @@ async function runCodeJudge(
   deps: DefaultJudgeRunnerDeps,
   placement?: Placement,
   submittedBy?: string,
+  runId?: string,
 ): Promise<Score[]> {
   if (!deps.dispatch) return skip(spec, "unsupported", "code judge dispatch not configured");
   const built = buildCodeJudgeJob(spec, ctx, placement);
@@ -246,8 +371,20 @@ async function runCodeJudge(
     ...(submittedBy ? { submittedBy } : {}),
     ...(built.judge ? { judge: built.judge } : {}),
   };
+  const startedAt = new Date().toISOString();
   try {
     const result = await deps.dispatch(job);
+    // The wrapper job's own account (placement plane + any script output) is this judge's execution evidence —
+    // sealed whether or not the job failed: a dead judge job's trace IS the diagnosis. Its llm_call cost (if the
+    // trace carries any) meters under source "judge" with the case-billing provenance policy.
+    await reportJudgeExecution(deps, {
+      spec,
+      tenant,
+      events: result.trace,
+      t0: startedAt,
+      ...(runId !== undefined ? { runId } : {}),
+      billing: result,
+    });
     if (result.failure) {
       return skip(
         spec,
@@ -266,7 +403,7 @@ async function runCodeJudge(
 // Default implementation: model calls the provider with the tenant secret key (anthropic/openai), harness spins up the referenced agent to judge.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
-    async run(spec, tenant, rawCtx, placement, submittedBy) {
+    async run(spec, tenant, rawCtx, placement, submittedBy, runId) {
       // Resolve artifact URLs → real data before ANY judge sees the context (offloaded/ingested/re-scored refs):
       // text artifacts (evidence {name} slots + dom that ARE urls) for every judge; the screenshot image only when a
       // model judge actually consumes it (avoids a large fetch a text-only judge would ignore). A no-op when the
@@ -274,7 +411,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       const wantsImage = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
       const ctx = await resolveJudgeArtifacts(rawCtx, deps.fetchImpl ?? fetch, { image: wantsImage });
       // code judge — its own dispatch path (no rubric/transport); see runCodeJudge above.
-      if (spec.kind === "code") return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy);
+      if (spec.kind === "code") return runCodeJudge(spec, tenant, ctx, deps, placement, submittedBy, runId);
       // 1) Resolve the rubric first (cheapest gate — no secret read / provider call when it can't resolve).
       //    Inline string = as-is; {id, version} ref = registry lookup; unresolved → visible skip.
       const rubricResolution = await resolveRubric(deps.rubrics, tenant, spec);
@@ -282,6 +419,12 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
       const { rubricText, criteria, promptTemplate } = rubricResolution.effective;
 
       // 2) Choose the transport. Skip (with a stated reason) if there's no key/dispatcher.
+      // Both transports record their execution for the report below: the model tee captures each completion's
+      // usage/verdict text, the harness closure captures the dispatched judge job's whole CaseResult.
+      const judgeStartedAt = new Date().toISOString();
+      const judgeStartMs = Date.now();
+      const modelCalls: JudgeLlmCall[] = [];
+      let dispatchedJudge: CaseResult | undefined;
       let complete: JudgeCompletion;
       if (spec.kind === "harness") {
         if (!deps.dispatch) return skip(spec, "unsupported", "harness judge dispatch not configured");
@@ -310,7 +453,9 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
               ...(submittedBy ? { submittedBy } : {}),
               ...(resolved.spec ? { harnessSpec: resolved.spec } : {}),
             };
-            return (await dispatch(job)).trace;
+            const result = await dispatch(job);
+            dispatchedJudge = result; // the judge agent's own run — this judge's execution evidence
+            return result.trace;
           },
         });
       } else {
@@ -374,7 +519,12 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           ...(baseUrl ? { baseUrl } : {}),
           ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
         });
-        complete = transportComplete(transport, { model, ...(maxTokens ? { maxTokens } : {}) });
+        // The tee records each completion's usage/verdict for the execution report — transportComplete alone
+        // discards the transport's usage, which is exactly how judge cost used to vanish.
+        complete = transportComplete(usageTeeTransport(transport, judgeStartMs, modelCalls), {
+          model,
+          ...(maxTokens ? { maxTokens } : {}),
+        });
       }
 
       // 3) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → judge:<id> score(s).
@@ -406,6 +556,18 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         });
       } catch (err) {
         return skip(spec, "grader_error", err instanceof Error ? err.message : String(err), true);
+      } finally {
+        // The execution happened whether or not the verdict parsed — a failed parse still spent the tokens, so the
+        // report (meter + judge:<id> evidence plane) runs on BOTH exits. Pre-transport skips never reach here.
+        const events = spec.kind === "harness" ? (dispatchedJudge?.trace ?? []) : modelJudgeEvents(modelCalls);
+        await reportJudgeExecution(deps, {
+          spec,
+          tenant,
+          events,
+          t0: judgeStartedAt,
+          ...(runId !== undefined ? { runId } : {}),
+          ...(dispatchedJudge !== undefined ? { billing: dispatchedJudge } : {}),
+        });
       }
     },
   };

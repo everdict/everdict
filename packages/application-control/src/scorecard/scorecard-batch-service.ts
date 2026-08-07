@@ -644,9 +644,11 @@ export class ScorecardBatchService {
             ...(result.traceT0 !== undefined ? { t0: result.traceT0 } : {}),
           }).catch(() => {});
       // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
+      // The child run id rides along so the judge's own execution seals as a judge:<id> plane on it (the case's
+      // execution plane sealed just above, so the judge plane joins an already-named trajectory).
       if (ctx.judges.length > 0) {
         await this.scoring
-          .applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges, undefined, ctx.owner)
+          .applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges, undefined, ctx.owner, () => child?.id)
           .catch(() => {});
       }
       if (runStore && child)
@@ -1280,7 +1282,11 @@ export class ScorecardBatchService {
       // judge streaming — fire a case's judge the moment it finishes, without waiting for the whole batch to complete
       // (case-axis parallel·bounded). Removes the barrier where the slowest case blocked judging of the rest.
       // docs/architecture/streaming-case-pipeline.md
-      const judgeStream = await this.scoring.createJudgeStream(tenant, dataset, judges, runtime, owner);
+      // The child-run resolver lets each case's judge seal its own execution as a judge:<id> plane on that child —
+      // caseToChild is filled at dispatch time, so it already holds the entry by the time onResult pushes the case.
+      const judgeStream = await this.scoring.createJudgeStream(tenant, dataset, judges, runtime, owner, (cid, trial) =>
+        caseToChild.get(childKey(cid, trial)),
+      );
       // sink-export streaming (D5) — if the harness selected a sink, export each case to the team platform the moment it completes (after judging)
       // (live visibility + whatever went out survives even if the batch dies midway). If not wired,
       // the success path below falls back to exportResults (batched) (no regression).

@@ -73,6 +73,40 @@ describe("ScoringService — scoring unit decoupled from execution", () => {
     expect(seenSubmittedBy).toBe("user-alice");
   });
 
+  it("applyJudges: resolves each case's child run id (trial-aware) and threads it to the runner", async () => {
+    // Regression: the runner seals the judge's own execution as a judge:<id> plane on the judged case's child run —
+    // without the runId the evidence has nowhere to land (metering still happens). The resolver is trial-aware
+    // because caseId alone is ambiguous under trials.
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", JUDGE("j"));
+    const seenRunIds: Array<string | undefined> = [];
+    const judgeRunner: JudgeRunner = {
+      async run(
+        _spec: JudgeSpec,
+        _tenant: string,
+        _ctx: GradeContext,
+        _placement?: Placement,
+        _submittedBy?: string,
+        runId?: string,
+      ): Promise<Score[]> {
+        seenRunIds.push(runId);
+        return [{ graderId: "j", metric: "judge:j", value: 1, pass: true }];
+      },
+    };
+    const scoring = new ScoringService({ judges, judgeRunner });
+    const results: CaseResult[] = [result(), { ...result(), trial: 1 }];
+    await scoring.applyJudges(
+      "acme",
+      DATASET,
+      results,
+      [{ id: "j", version: "latest" }],
+      undefined,
+      undefined,
+      (caseId, trial) => `run-${caseId}#${trial ?? 0}`,
+    );
+    expect(seenRunIds.sort()).toEqual(["run-c1#0", "run-c1#1"]);
+  });
+
   it("collectJudgeModels: distinct models of inline + registered model-judges (sorted)", async () => {
     const judges = new InMemoryJudgeRegistry();
     await judges.register("acme", {

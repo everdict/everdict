@@ -1,7 +1,10 @@
-import type { CaseResult, Dataset, Score, ScorecardRecord } from "@everdict/contracts";
+import type { CaseResult, Dataset, JudgeSpec, RunRecord, Score, ScorecardRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ScoringService } from "../execution/scoring-service.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
+import type { JudgeRegistry } from "../ports/judge-registry.js";
+import type { JudgeRunner } from "../ports/judge-runner.js";
+import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import { ScorecardScoreService } from "./scorecard-score-service.js";
 import type { ScorecardServiceDeps } from "./scorecard-shared.js";
@@ -176,5 +179,110 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
     const svc = serviceFor(recordWith([failed]));
     const out = await svc.scoreCase("sc-1", "c2#0", [{ id: "j", version: "1.0.0" }]);
     expect(out).toEqual({ scored: false, skipped: true });
+  });
+
+  it("threads the case's child run id to the judge runner — the judge's execution seals on the child it judged", async () => {
+    // Regression: the scoring pass resolves this scorecard's children (the same read writeBackScores does) and
+    // hands each case's child run id to JudgeRunner.run, so the runner can seal the judge's own execution as a
+    // judge:<id> plane on that child's trajectory. Without it a re-score judged in the dark.
+    const judgeSpec: JudgeSpec = {
+      kind: "model",
+      id: "j",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      rubric: "good?",
+      inputs: ["trace"],
+      tags: [],
+    };
+    const judges: JudgeRegistry = {
+      async register() {
+        throw new Error("unused");
+      },
+      async has() {
+        return true;
+      },
+      async get() {
+        return judgeSpec;
+      },
+      async versions() {
+        return ["1.0.0"];
+      },
+      async ownVersions() {
+        return ["1.0.0"];
+      },
+      async list() {
+        return [];
+      },
+      async moveToTeam() {
+        throw new Error("unused");
+      },
+      async creatorOfVersion() {
+        return undefined;
+      },
+      async softDelete() {
+        throw new Error("unused");
+      },
+      async setVersionTags() {
+        throw new Error("unused");
+      },
+      async versionTags() {
+        return {};
+      },
+    };
+    const child: RunRecord = {
+      id: "child-c1",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "succeeded",
+      result: result("c1", []),
+      createdAt: "2026-08-07T00:00:00.000Z",
+      updatedAt: "2026-08-07T00:00:00.000Z",
+    };
+    const runStore: RunStore = {
+      async create() {
+        throw new Error("unused");
+      },
+      async update() {
+        return undefined; // write-back target — accepting the patch is enough here
+      },
+      async get() {
+        return undefined;
+      },
+      async list() {
+        return [child];
+      },
+      async deleteByScorecard() {
+        return 0;
+      },
+      async countActiveByEnvelope() {
+        return 0;
+      },
+      async liveSessions() {
+        return [];
+      },
+    };
+    const seenRunIds: Array<string | undefined> = [];
+    const judgeRunner: JudgeRunner = {
+      async run(_spec, _tenant, _ctx, _placement, _submittedBy, runId) {
+        seenRunIds.push(runId);
+        return [measuredVerdict];
+      },
+    };
+    const record: ScorecardRecord = { ...recordWith([result("c1", [unmeasuredPlaceholder])]), runIds: ["child-c1"] };
+    const svc = new ScorecardScoreService(
+      { ...deps, runStore, judges, judgeRunner },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-07T00:00:00.000Z",
+        scoring: new ScoringService({ judges, judgeRunner }),
+        getRecord: async () => record,
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    const out = await svc.scoreCase("sc-1", "c1#0", [{ id: "j", version: "1.0.0" }]);
+    expect(out.scored).toBe(true);
+    expect(seenRunIds).toEqual(["child-c1"]);
   });
 });

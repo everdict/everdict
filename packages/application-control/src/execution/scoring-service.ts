@@ -88,6 +88,7 @@ export class ScoringService {
     result: CaseResult,
     runtime?: string, // the producing run's runtime (for co-locate). The ingest path has no producing run, so undefined.
     submittedBy?: string, // the producing run's submitter — code/harness judges need it to own a co-located self:<runnerId> dispatch.
+    runId?: string, // the case's child run id — the runner seals the judge's own execution as a judge:<id> plane on it.
   ): Promise<void> {
     const runner = this.deps.judgeRunner;
     if (!runner) return;
@@ -107,7 +108,7 @@ export class ScoringService {
       ...(result.evidence ? { evidence: result.evidence } : {}),
     };
     for (const spec of specs) {
-      result.scores.push(...(await runner.run(spec, tenant, ctx, runPlacement, submittedBy)));
+      result.scores.push(...(await runner.run(spec, tenant, ctx, runPlacement, submittedBy, runId)));
     }
   }
 
@@ -119,6 +120,10 @@ export class ScoringService {
     judges: Array<{ id: string; version: string }>,
     runtime?: string,
     submittedBy?: string,
+    // Resolve a result's child run id (trial-aware — caseId alone is ambiguous under trials). When it resolves,
+    // the runner seals the judge's own execution as a judge:<id> plane on that run's trajectory. Absent/undefined
+    // (ingest, recollect-before-children) = judges still run and are still metered; no evidence plane lands.
+    runIdOf?: (caseId: string, trial?: number) => string | undefined,
   ): Promise<JudgeStream> {
     const { specs, unresolved } = await this.resolveJudges(tenant, judges);
     if (specs.length === 0 && unresolved.length === 0) return NOOP_STREAM;
@@ -154,12 +159,13 @@ export class ScoringService {
         }
         stats.gradeable++;
         result.scores.push(...unresolvedScores());
-        const task = limit(() => this.applyJudgesToCase(tenant, evalCase, specs, result, runtime, submittedBy)).catch(
-          (err) => {
-            // Catch at fire time (prevents an unhandled rejection) — settle rethrows the first error.
-            firstError ??= err;
-          },
-        );
+        const runId = runIdOf?.(result.caseId, result.trial);
+        const task = limit(() =>
+          this.applyJudgesToCase(tenant, evalCase, specs, result, runtime, submittedBy, runId),
+        ).catch((err) => {
+          // Catch at fire time (prevents an unhandled rejection) — settle rethrows the first error.
+          firstError ??= err;
+        });
         tasks.push(task);
         return task; // signal for this case's judge completion (errors swallowed — chaining stages only await completion)
       },
@@ -180,8 +186,9 @@ export class ScoringService {
     judges: Array<{ id: string; version: string }>,
     runtime?: string,
     submittedBy?: string,
+    runIdOf?: (caseId: string, trial?: number) => string | undefined,
   ): Promise<void> {
-    const stream = await this.createJudgeStream(tenant, dataset, judges, runtime, submittedBy);
+    const stream = await this.createJudgeStream(tenant, dataset, judges, runtime, submittedBy, runIdOf);
     for (const result of results) stream.push(result);
     await stream.settle();
   }

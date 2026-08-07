@@ -1,3 +1,4 @@
+import type { SealInput } from "@everdict/application-control";
 import type { CaseJob, CaseResult, GradeContext, JudgeSpec } from "@everdict/contracts";
 import { RubricSpecSchema } from "@everdict/contracts";
 import { InMemoryModelRegistry, InMemoryRubricRegistry } from "@everdict/registry";
@@ -689,5 +690,171 @@ describe("defaultJudgeRunner", () => {
     expect(score?.detail).toContain("skipped");
     expect(score?.detail).toContain("rubric registry not configured");
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+// The judge's own execution used to vanish: transportComplete discarded the transport's usage and a dispatched
+// judge job's trace was dropped after verdict extraction — a verdict cost nothing and left nothing but its
+// Score.detail. Now every judge execution is METERED (the composition wires the hook to source "judge") and
+// SEALED as a `judge:<id>` plane on the judged case's child run trajectory.
+describe("judge execution evidence + metering", () => {
+  const captureDeps = () => {
+    const seals: SealInput[] = [];
+    const metered: Array<{ tenant: string; model: string; cost: { usd: number; tokens: number } }> = [];
+    return {
+      seals,
+      metered,
+      trajectories: {
+        seal: async (input: SealInput) => {
+          seals.push(input);
+          return {
+            runId: input.runId,
+            tenant: input.tenant,
+            source: input.source,
+            eventCount: input.events?.length ?? 0,
+            sealedAt: "sealed",
+            created: true,
+          };
+        },
+      },
+      meterJudgeCost: (tenant: string, model: string, cost: { usd: number; tokens: number }) => {
+        metered.push({ tenant, model, cost });
+      },
+    };
+  };
+
+  const verdictWithUsage = (text: string) =>
+    vi.fn((_u: string, _i?: RequestInit) =>
+      Promise.resolve(
+        new Response(JSON.stringify({ content: [{ text }], usage: { input_tokens: 1000, output_tokens: 50 } }), {
+          status: 200,
+        }),
+      ),
+    );
+
+  it("model judge: the verdict call's usage is metered and sealed as a judge:<id> plane on the child run", async () => {
+    const deps = captureDeps();
+    const fetchImpl = verdictWithUsage('{"pass":true,"score":0.8,"reason":"ok"}');
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: fetchImpl as typeof fetch,
+      ...deps,
+    });
+    const scores = await runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-1");
+    expect(scores[0]?.pass).toBe(true);
+    // metered: the transport's token usage priced into USD (opus tier: 1000×$15/1M + 50×$75/1M)
+    expect(deps.metered).toEqual([
+      { tenant: "acme", model: "claude-opus-4-8", cost: { usd: expect.closeTo(0.01875, 6), tokens: 1050 } },
+    ]);
+    // sealed: one llm_call (with cost) + the raw verdict text, as this judge's own plane on the judged case's run
+    expect(deps.seals).toHaveLength(1);
+    expect(deps.seals[0]).toMatchObject({
+      runId: "run-1",
+      tenant: "acme",
+      source: "run",
+      emitter: "judge:correctness",
+    });
+    const events = deps.seals[0]?.events ?? [];
+    expect(events.filter((e) => e.kind === "llm_call")).toHaveLength(1);
+    expect(events.find((e) => e.kind === "llm_call")).toMatchObject({
+      model: "claude-opus-4-8",
+      cost: { inputTokens: 1000, outputTokens: 50 },
+    });
+    expect(events.find((e) => e.kind === "message")).toMatchObject({
+      role: "assistant",
+      text: '{"pass":true,"score":0.8,"reason":"ok"}',
+    });
+  });
+
+  it("model judge without a child run id: still metered, no evidence plane (nowhere to land)", async () => {
+    const deps = captureDeps();
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: verdictWithUsage('{"pass":true,"score":0.7,"reason":"ok"}') as typeof fetch,
+      ...deps,
+    });
+    await runner.run(modelSpec, "acme", ctx);
+    expect(deps.metered).toHaveLength(1);
+    expect(deps.seals).toHaveLength(0);
+  });
+
+  it("a verdict that fails to parse still meters and seals — the tokens were spent", async () => {
+    const deps = captureDeps();
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }),
+      fetchImpl: verdictWithUsage("no json here at all") as typeof fetch,
+      ...deps,
+    });
+    const [score] = await runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-9");
+    expect(score?.status).toBe("unmeasured"); // the verdict is a visible grader_error skip…
+    expect(deps.metered).toHaveLength(1); // …but the provider call happened, so it is billed…
+    expect(deps.seals).toHaveLength(1); // …and its account is evidence
+    expect(deps.seals[0]?.emitter).toBe("judge:correctness");
+  });
+
+  it("harness judge: the dispatched agent's own trace seals as the judge plane and its llm_call cost meters", async () => {
+    const deps = captureDeps();
+    const judgeAgentResult: CaseResult = {
+      caseId: "judge",
+      harness: "claude-code@1",
+      trace: [
+        { t: 0, kind: "llm_call", model: "claude-sonnet-x", cost: { inputTokens: 10, outputTokens: 5, usd: 0.5 } },
+        { t: 1, kind: "message", role: "assistant", text: '{"pass":true,"score":0.9,"reason":"good"}' },
+      ],
+      snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+      scores: [],
+    };
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({}),
+      dispatch: async () => judgeAgentResult,
+      ...deps,
+    });
+    const [score] = await runner.run(harnessSpec, "acme", ctx, undefined, undefined, "run-2");
+    expect(score?.pass).toBe(true);
+    // metered through the SAME provenance policy a case's own billing uses (managed → the tenant pays)
+    expect(deps.metered).toEqual([{ tenant: "acme", model: "claude-sonnet-x", cost: { usd: 0.5, tokens: 15 } }]);
+    expect(deps.seals).toHaveLength(1);
+    expect(deps.seals[0]).toMatchObject({ runId: "run-2", emitter: "judge:reviewer" });
+    expect(deps.seals[0]?.events).toEqual(judgeAgentResult.trace);
+  });
+
+  it("code judge: a failed wrapper job still seals its trace — the dead job's account is the diagnosis", async () => {
+    const deps = captureDeps();
+    const codeSpec: JudgeSpec = {
+      kind: "code",
+      id: "e2e",
+      version: "1.0.0",
+      language: "node",
+      code: "x",
+      timeoutSec: 600,
+      tags: [],
+    };
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({}),
+      dispatch: async (job) => ({
+        caseId: job.evalCase.id,
+        harness: "judge",
+        trace: [{ t: 3, kind: "error", message: "exited 1" }],
+        snapshot: { kind: "prompt", output: "" },
+        scores: [],
+        failure: { stage: "grade", class: "config", code: "UPSTREAM_ERROR", message: "exited 1", retryable: false },
+      }),
+      ...deps,
+    });
+    const [score] = await runner.run(codeSpec, "acme", ctx, undefined, undefined, "run-3");
+    expect(String(score?.detail)).toContain("skipped");
+    expect(deps.seals).toHaveLength(1);
+    expect(deps.seals[0]).toMatchObject({ runId: "run-3", emitter: "judge:e2e" });
+    expect(deps.seals[0]?.events).toEqual([{ t: 3, kind: "error", message: "exited 1" }]);
+    expect(deps.metered).toHaveLength(0); // the wrapper's trace carried no llm_call cost
+  });
+
+  it("a pre-transport skip (missing key) reports nothing — no execution happened", async () => {
+    const deps = captureDeps();
+    const runner = defaultJudgeRunner({ secretsFor: async () => ({}), ...deps });
+    const [score] = await runner.run(modelSpec, "acme", ctx, undefined, undefined, "run-4");
+    expect(String(score?.detail)).toContain("skipped");
+    expect(deps.metered).toHaveLength(0);
+    expect(deps.seals).toHaveLength(0);
   });
 });

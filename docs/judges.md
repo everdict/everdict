@@ -197,6 +197,28 @@ the **same** `runtime → placement.target → RuntimeDispatcher` path the score
 This is slice 1 of `docs/architecture/judge-placement-locality.md` (pluggable observation delivery —
 `reference`/`sentinel`/`egress` — is the later topology work).
 
+### Judge executions leave evidence and are metered (never free, never invisible)
+A judge is an execution like any other, so it is **treated like one**:
+
+- **Evidence**: every judge execution seals as its own **`judge:<id>` plane** on the judged case's **child run
+  trajectory** (`TrajectoryStore.seal`, emitter `judge:<id>`) — a model judge's plane holds one `llm_call`
+  (model + token/priced-USD cost + latency) plus the raw verdict text as an assistant message; a code/harness
+  judge's plane holds the dispatched wrapper/agent job's whole trace (a FAILED judge job seals too — the dead
+  job's account is the diagnosis). The plane sits BESIDE the execution/infra planes, never inside them: the
+  judged evidence stays clean (a judge must not read its own account), `RunRecord.usage`/`billingCharges` over
+  the case's trace cannot conflate judge cost into harness cost, and `TrajectoryView` draws it as its own lane
+  on the run detail with no web change. The run id threads `ScoringService.applyJudges(..., runIdOf)` →
+  `JudgeRunner.run(..., runId)` from every scoring path that has children (batch per-case, in-process track,
+  re-score); ingest has no child run, so no plane lands there. Seals are idempotent by `(runId, emitter)` —
+  the FIRST execution's account is the one kept (the ledger's evidence-is-never-rewritten contract).
+- **Metering**: the same execution's LLM cost lands in the **usage meter under source `judge`** + the
+  enforcement budget (settle-only), per `docs/architecture/usage-metering.md` — a model judge's transport usage
+  is teed and priced (`priceUsd`); a dispatched judge reuses the case-billing `billingCharges` provenance
+  policy. A pre-transport skip (missing key/dispatcher) reports nothing — no execution happened.
+
+Regression tests: `apps/api/src/core/execution/judge-runner.test.ts` ("judge execution evidence + metering") +
+the runId-threading test in `scoring-service.test.ts`.
+
 `passThreshold` maps `score → pass` (model). The transport is injected at the service boundary (`JudgeRunner`),
 so the wiring is deterministically testable with a fake; real provider/agent calls run only when keys/dispatch
 are configured. See `docs/scorecards.md`, `packages/graders/src/{judge,model-judge}.ts`.

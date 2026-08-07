@@ -32,6 +32,14 @@ Every settle site (`ScorecardService` per case + `RunService` per single run) lo
 line, records it (meter, best-effort — `.catch(() => {})`, never blocks) **and** settles the enforcement budget — so
 the meter and the 402-cap always agree. `GET /usage` + `get_usage` (MCP) expose it (viewer+, reuses `scorecards:read`).
 
+**Source `judge` is produced by the judge runner** (`defaultJudgeRunner` `meterJudgeCost`, wired in
+`composition/run.ts`): a model judge's verdict call is teed at the transport (usage → USD via `priceUsd`, the same
+pricing the agent path uses) and metered to the tenant (the call runs on the workspace's key); a dispatched judge
+(code/harness) meters its result-trace `llm_call` cost through the SAME `billingCharges` provenance policy as a
+case, with the source rewritten to `judge`. A judge verdict is cost only — never a metered evaluation. Both also
+settle the enforcement budget. The same execution seals as a `judge:<id>` trajectory plane on the judged case's
+child run (see `docs/judges.md`).
+
 ## Durability — write-through + boot hydration (`@everdict/db` `UsageStore`)
 
 The meter is **in-memory for reads** (sync, single-process source of truth — same assumption as `BudgetTracker`),
@@ -76,9 +84,11 @@ metered over a small bridge:
   Acceptable for meter-only usage; upgrade to transactional settle if strict billing is required.
 
 ## Follow-ups
-- Judge-model cost capture: `JudgeCompletion` currently returns `Promise<string>` (discards token usage) — capturing
-  judge cost means threading usage through the grader transport (`anthropicComplete`/`openaiComplete` → `modelJudge`
-  → `judge-runner` → scoring). Deep/invasive; the harness dominates cost (judge = one call per case), so low priority.
+- ~~Judge-model cost capture~~ — shipped: the judge runner tees the transport's usage (no `JudgeCompletion`
+  signature change needed — the tee wraps the `LlmTransport` beneath it) and meters source `judge`; see above.
+  Remaining gap: a CODE judge's own in-sandbox LLM call (the script talking to the provider via the
+  `EVERDICT_JUDGE_MODEL` env channel) is invisible unless it lands in the wrapper job's trace — only the script
+  knows it happened.
 - The web billing view lives on Settings › Budget (`/[workspace]/settings/budget`; the old `/usage` route
   redirects there): metered usage first — month-to-date + all-time tiles, a **daily-spend stacked-column chart**
   (7/30/90-day range, grouped by activity or by model, fed by `daily`) and the all-time (source × model) breakdown

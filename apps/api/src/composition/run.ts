@@ -222,6 +222,14 @@ export function buildRun(deps: {
     harnesses: harnessInstanceRegistry,
     models: modelRegistry, // if judge.model is a registered model id, resolve provider/baseUrl/underlying-model (else a raw string)
     rubrics: rubricRegistry, // if judge.rubric is a {id, version} ref, resolve the registered rubric (text/criteria/template)
+    // Judge-execution evidence + metering: the judge's own activity seals as a judge:<id> plane on the judged
+    // case's child run, and its LLM cost lands in the SAME meter + enforcement budget every other execution uses,
+    // itemized under source "judge" (the vocabulary existed in the meter; this is its producer).
+    trajectories: deps.trajectories,
+    meterJudgeCost: (tenant, model, cost) => {
+      usageMeter.record(tenant, "judge", model, cost, 0); // a judge verdict adds cost, never a metered evaluation
+      budget.settle(tenant, cost); // enforcement budget sees it too (settle only — never blocks)
+    },
     ...(process.env.EVERDICT_JUDGE_OPENAI_BASE_URL
       ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL }
       : {}),

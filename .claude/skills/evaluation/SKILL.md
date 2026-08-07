@@ -119,7 +119,13 @@ plane builds the right transport from the spec + the tenant's SecretStore key/di
 resolve, missing key ⇒ explicit `skip` score, never silent). Score metric = `judge:<id>`.
 Custom prompts: `JudgeSpec.promptTemplate` (placeholders incl. mandatory `{verdict_instruction}`, schema-enforced);
 multi-criteria: `JudgeSpec.criteria[]` → ONE model call scores each criterion (`judge:<id>:<criterion>`) + the
-weighted overall (`judge:<id>`). See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
+weighted overall (`judge:<id>`). **A judge execution is never free or invisible**: the runner tees the
+transport's usage / keeps the dispatched job's trace, METERS it (usage source `judge` + budget settle,
+`meterJudgeCost` in composition) and SEALS it as a `judge:<id>` plane on the judged case's child run trajectory
+(`runIdOf` threads batch/track/re-score → `JudgeRunner.run(..., runId)`; ingest has no child, so meter-only) —
+beside the execution plane, never inside it, so judged evidence and harness billing stay clean. See
+`docs/judges.md` §"Judge executions leave evidence" + `docs/architecture/usage-metering.md`.
+See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
 
 ## Batch aggregation, regression & leaderboard
 - `diffScorecards(baseline, candidate)` (`packages/domain/src/scorecard/scorecard.ts`) — **comparability
