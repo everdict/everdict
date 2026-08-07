@@ -2,7 +2,7 @@ import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { teamCeiling, teamForNew, visibleTeamsFor } from "../../common/team-scope.js";
+import { teamCeiling, visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
 import { moveToolDescription } from "../team-move.js";
 import { AnalysisDimensionSchema } from "./request/analysis-query.js";
@@ -300,9 +300,10 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "list_scorecards",
       {
         description:
-          "This workspace's scorecards (summary only — excludes heavy per-case results). Narrow by dataset or " +
-          "harness to see what a capability has been evaluated on over time — that is the comparison to make " +
-          "before claiming something regressed.",
+          "This workspace's scorecards (summary only — excludes heavy per-case results). Each row carries the " +
+          "served `headlinePassRate` (authority-ranked) — read it instead of re-deriving a representative from " +
+          "summary order. Narrow by dataset or harness to see what a capability has been evaluated on over time " +
+          "— that is the comparison to make before claiming something regressed.",
         inputSchema: {
           judge: z.string().optional().describe("narrow to batches that applied this Agent Judge (any version)"),
           schedule: z.string().optional().describe("narrow to the runs a schedule fired (its run history)"),
@@ -336,8 +337,8 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "rescore_unmeasured_scores",
       {
         description:
-          "Re-score a scorecard's retryable-unmeasured judge scores in place (transient judge LLM/transport blips) — no case re-execution; judge versions come from the batch's own pins. Non-judge unmeasured scores need a case re-run (retry) and come back as `skipped`.",
-        inputSchema: { id: z.string() },
+          "Re-score a scorecard's retryable-unmeasured judge scores in place (transient judge LLM/transport blips) — no case re-execution; judge versions come from the batch's own pins. Non-judge unmeasured scores need a case re-run (retry) and come back as `skipped`. Returns {id, rescoredJudges, skipped}.",
+        inputSchema: { id: z.string().describe("the scorecard id whose retryable-unmeasured judge scores to recover") },
       },
       ({ id }) =>
         run(principal, "scorecards:run", async () =>
@@ -375,7 +376,8 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "get_scorecard",
       {
-        description: "A full scorecard (including per-case results). Other workspaces get NOT_FOUND",
+        description:
+          "A full scorecard (including per-case results). Served enrichments: `headlinePassRate` (authority-ranked), `casePass` {pass,total} (verdicted denominator — never divide by executed), `outcomes` (requested/executed/gradeable/verdicted + infraFailed/cancelled/unmeasured — an infra failure is recovery work, never a product FAIL), per-case `verdict`+`verdictBasis` (which rung decided) and `evidenceStatus`, `retryableUnmeasured` (rescore worklist size), `verdictPolicy` stamp + `manifest` digests. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string() },
       },
       ({ id }) =>
@@ -395,7 +397,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       "diff_scorecards",
       {
         description:
-          "Compare two scorecards (baseline vs candidate) → metric delta + per-case regression/improvement. Both must be completed in this workspace. When either ran trials, the result also carries a statistically-gated 'trials' diff (pass@k regression)",
+          "Compare two scorecards (baseline vs candidate). Read `comparability` FIRST: 'none' means the comparison does not hold (no shared cases/metrics, or `policyMismatch` — different verdict policies) — a different claim from 'no differences'. `missing` enumerates one-sided cases/metrics (never zero-filled), `incomparable` lists kind-changed metrics, and each metric delta carries `direction`+`reading` — never interpret a delta's sign alone. Then: per-case pass transitions → regressions/improvements. When either ran trials, a statistically-gated 'trials' diff (Fisher-exact small-n, minDelta practical floor) rides along.",
         inputSchema: {
           baseline: z.string(),
           candidate: z.string(),
@@ -454,10 +456,40 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     );
 
     server.registerTool(
+      "trend_scorecards",
+      {
+        description:
+          "Regression-over-time for one (dataset, metric): time-ordered points with score/deltaVsBaseline/regressed. Read `direction` (absent = unknown — never interpret a delta's sign alone) and `policyMixed`/per-point `policyDiffers` FIRST: cross-policy points never flag regressed. metric absent = the server resolves the highest-authority pass-rate metric present.",
+        inputSchema: {
+          dataset: z.string(),
+          metric: z.string().optional(),
+          harness: z.string().optional(),
+          from: z.string().optional().describe("ISO lower bound (createdAt)"),
+          to: z.string().optional().describe("ISO upper bound (createdAt)"),
+          baseline: z.string().optional().describe("baseline scorecard id (default: the first point)"),
+        },
+      },
+      ({ dataset, metric, harness, from, to, baseline }) =>
+        run(principal, "scorecards:read", async () =>
+          ok(
+            await scorecards.trend(ws, {
+              datasetId: dataset,
+              ...(metric ? { metric } : {}), // absent = preferredMetric over the data (BFF parity)
+              ...(harness ? { harnessId: harness } : {}),
+              ...(from ? { from } : {}),
+              ...(to ? { to } : {}),
+              ...(baseline ? { baseline } : {}),
+              ...(await teamCeiling(ctx.deps, principal)),
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
       "leaderboard_scorecards",
       {
         description:
-          "(harness × model) ranking for one dataset (benchmark) — descending by metric. window=latest(default)|best. Optional harness/model/judge_model filters (judge_model = fair comparison among the same grader).",
+          "(harness × model) ranking for one dataset (benchmark) — descending by metric. window=latest(default)|best. Optional harness/model/judge_model filters (judge_model = fair comparison among the same grader). `policyMixed` marks a ranking produced under different verdict policies — disclose it before comparing rows.",
         inputSchema: {
           dataset: z.string(),
           metric: z.string().optional(),
@@ -574,28 +606,32 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
           "Upload externally produced traces (TraceEvent[]) into a scorecard (harness not run). dataset/harness are OPTIONAL labels — omit both to evaluate the uploaded traces directly (each trace = one case, judges only). body=IngestScorecard JSON {dataset?,harness?,traces:[{caseId,trace}],judges?}",
         inputSchema: { body: z.string().describe("IngestScorecard JSON") },
       },
-      ({ body }) =>
-        run(principal, "scorecards:run", async () => {
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(body);
-          } catch {
-            return fail("BAD_REQUEST: not a valid IngestScorecard JSON.");
-          }
+      ({ body }) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          return fail("BAD_REQUEST: not a valid IngestScorecard JSON.");
+        }
+        // Owner resolved AND GATED like the HTTP twin (teamForNew + gate(owner.gate)) — resolving the team
+        // without authorizing against it let an agent file an ingested batch under a team its member is not
+        // on, a request the route 403s. runForTeam is the one helper both transports' semantics live in.
+        return runForTeam(ctx, "scorecards:run", teamIdIn(parsed), async (owner) => {
           const result = IngestScorecardBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          // Same owner rule as the HTTP twin: `teamId` may ride in the JSON (the body schema strips it, so it
-          // is read off the raw object), else the caller's team.
-          const owner = await teamForNew(principal, ctx.deps, teamIdIn(parsed));
           return ok(
             await scorecards.ingest({
               tenant: ws,
               submittedBy: principal.subject,
-              ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
+              ...(owner !== undefined ? { teamId: owner } : {}),
               ...result.data,
+              // Same trigger provenance the route stamps — without it, MCP-ingested batches fall out of the
+              // originSource filter dimension.
+              origin: { source: originSource(principal.via) },
             }),
           );
-        }),
+        });
+      },
     );
 
     server.registerTool(
@@ -605,26 +641,28 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
           "Pull per-runId traces from the tenant's observability platform (otel|mlflow|langfuse|langsmith|phoenix) into a scorecard (harness not run). dataset/harness are OPTIONAL labels — omit both to evaluate the pulled traces directly (each trace = one case, judges only). source is EITHER a registered workspace source by name {name} (register once in Settings › Observability, then pull by name) OR an inline config {kind,endpoint,authSecret?,project?[required for phoenix]}. body=PullIngest JSON {dataset?,harness?,source,runs:[{caseId,runId}],judges?}",
         inputSchema: { body: z.string().describe("PullIngest JSON") },
       },
-      ({ body }) =>
-        run(principal, "scorecards:run", async () => {
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(body);
-          } catch {
-            return fail("BAD_REQUEST: not a valid PullIngest JSON.");
-          }
+      ({ body }) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          return fail("BAD_REQUEST: not a valid PullIngest JSON.");
+        }
+        // Same gate as the HTTP twin — the named team is authorized against, never just resolved.
+        return runForTeam(ctx, "scorecards:run", teamIdIn(parsed), async (owner) => {
           const result = PullIngestBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          const owner = await teamForNew(principal, ctx.deps, teamIdIn(parsed));
           return ok(
             await scorecards.ingestPull({
               tenant: ws,
               submittedBy: principal.subject,
-              ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
+              ...(owner !== undefined ? { teamId: owner } : {}),
               ...result.data,
+              origin: { source: originSource(principal.via) },
             }),
           );
-        }),
+        });
+      },
     );
   }
 }

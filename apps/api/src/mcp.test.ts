@@ -681,6 +681,7 @@ describe("MCP tools", () => {
       "submit_run",
       "submit_sandbox_task",
       "touch_sandbox",
+      "trend_scorecards",
       "unlink_workspace_github_app_installation",
       "update_schedule",
       "update_skill",
@@ -1969,6 +1970,28 @@ describe("MCP tools", () => {
     const res = await client.callTool({ name: "diff_scorecards", arguments: { baseline: "x", candidate: "y" } });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain("NOT_FOUND");
+  });
+
+  it("ingest_scorecard: naming a team the caller is not on is FORBIDDEN — the MCP twin gates like the route", async () => {
+    // Regression: the tool resolved the named team (teamForNew) but never authorized AGAINST it, so an agent
+    // could file an ingested batch under another team while the identical HTTP request 403'd.
+    const client = await connect(harness(), ["member"]);
+    const body = JSON.stringify({
+      teamId: "team-not-mine",
+      traces: [{ caseId: "c1", trace: [{ t: 0, kind: "log", stream: "stdout", text: "x" }] }],
+    });
+    const res = await client.callTool({ name: "ingest_scorecard", arguments: { body } });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/FORBIDDEN|NOT_FOUND/); // refused (403) or the team ref refuses to resolve — never accepted
+  });
+
+  it("trend_scorecards: the trend surface has an MCP twin (policyMixed semantics reach agents)", async () => {
+    const client = await connect(harness(), ["member"]);
+    const res = await client.callTool({ name: "trend_scorecards", arguments: { dataset: "smoke" } });
+    expect(res.isError).toBeFalsy();
+    const trend = JSON.parse(text(res)) as { dataset: string; points: unknown[] };
+    expect(trend.dataset).toBe("smoke");
+    expect(Array.isArray(trend.points)).toBe(true);
   });
 
   it("ingest_scorecard: scorecard from uploaded traces (harness not run) → re-derive trace graders", async () => {

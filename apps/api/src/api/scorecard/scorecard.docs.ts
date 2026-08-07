@@ -3,6 +3,7 @@ import { BackfillModelsResponseSchema } from "@everdict/contracts/wire";
 import { ScorecardAnalysisBundleResponseSchema, ScorecardAnalysisResponseSchema } from "@everdict/contracts/wire";
 import { DeleteScorecardResultSchema } from "@everdict/contracts/wire";
 import { LeaderboardResponseSchema } from "@everdict/contracts/wire";
+import { RescoreUnmeasuredResultSchema } from "@everdict/contracts/wire";
 import { ScorecardDiffResponseSchema } from "@everdict/contracts/wire";
 import { ScorecardEstimateResponseSchema } from "@everdict/contracts/wire";
 import { ScorecardListResponseSchema } from "@everdict/contracts/wire";
@@ -69,11 +70,18 @@ const docs = {
       "(member+), workspace-scoped. 400 when the batch has no per-case results yet.",
     tags: ["scorecard"],
     params: scorecardIdParams,
+    response: {
+      200: {
+        description: "Recovery kicked off (rescoredJudges) + what a scoring pass cannot recover (skipped)",
+        ...toJsonSchema(RescoreUnmeasuredResultSchema),
+      },
+      ...errorResponses(400, 401, 403, 404),
+    },
   },
   rerun: {
     summary: "Re-run a scorecard (full re-run)",
     description:
-      "Creates a NEW scorecard that re-runs the ENTIRE case set of a terminal batch (전체 재실행), faithfully " +
+      "Creates a NEW scorecard that re-runs the ENTIRE case set of a terminal batch (full re-run), faithfully " +
       "reproducing the original submit (dataset+version, harness+ephemeral pins, grading plan, concurrency/" +
       "retries/trials, subset) so the two compare directly — while optionally adjusting the two run-config choices " +
       "made at submit time: the selected judges and the execution runtime (each unset field inherits the original). " +
@@ -158,10 +166,14 @@ const docs = {
         schedule: z.string().optional().describe("Narrow to the runs a schedule fired (its run history)"),
         dataset: z.string().optional().describe("Narrow to batches run on this dataset (any version)"),
         harness: z.string().optional().describe("Narrow to batches run with this harness (any version)"),
+        team: z.string().optional().describe('Narrow to one owning team (id or key, e.g. "ENG")'),
       }),
     ),
     response: {
-      200: { description: "Scorecard records", ...toJsonSchema(ScorecardListResponseSchema) },
+      200: {
+        description: "Scorecard records (each with the served headlinePassRate)",
+        ...toJsonSchema(ScorecardListResponseSchema),
+      },
       ...errorResponses(401, 403),
     },
   },
@@ -214,7 +226,10 @@ const docs = {
     querystring: toJsonSchema(
       z.object({
         dataset: z.string().describe("Dataset id (required)"),
-        metric: z.string().optional().describe('Metric name (default "judge")'),
+        metric: z
+          .string()
+          .optional()
+          .describe("Metric name (absent = the server resolves the highest-authority pass-rate metric present)"),
         harness: z.string().optional().describe("Restrict to one harness id"),
         from: z.string().optional().describe("ISO lower bound on createdAt"),
         to: z.string().optional().describe("ISO upper bound on createdAt"),
@@ -236,7 +251,10 @@ const docs = {
     querystring: toJsonSchema(
       z.object({
         dataset: z.string().describe("Dataset id (required)"),
-        metric: z.string().optional().describe('Metric name (default "judge")'),
+        metric: z
+          .string()
+          .optional()
+          .describe("Metric name (absent = the server resolves the highest-authority pass-rate metric present)"),
         harness: z.string().optional().describe("Restrict to one harness id"),
         model: z.string().optional().describe("Restrict to one model"),
         judgeModel: z.string().optional().describe("Restrict to runs scored by this judge model"),

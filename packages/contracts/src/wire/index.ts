@@ -143,6 +143,7 @@ export * from "./scorecard/backfill-models.js";
 export * from "./skill/generate-skill-result.js";
 export * from "./scorecard/delete-scorecard-result.js";
 export * from "./scorecard/leaderboard.js";
+export * from "./scorecard/rescore-unmeasured-result.js";
 export * from "./scorecard/scorecard-analysis.js";
 export * from "./scorecard/scorecard-diff.js";
 export * from "./scorecard/scorecard-estimate.js";
