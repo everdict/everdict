@@ -32,7 +32,11 @@ export function fmtScore(
 // sentinel on rows persisted before the field existed. Mirror of the contracts `isMeasured` gate — the web's
 // @everdict/contracts dependency is type-only, so the rule is restated locally. Non-measured rows must render
 // as "unmeasured", never as their placeholder value (a dead grader is not a $0.00).
-export function isUnmeasuredScore(s: { status?: string; pass?: boolean; detail?: unknown }): boolean {
+export function isUnmeasuredScore(s: {
+  status?: string
+  pass?: boolean
+  detail?: unknown
+}): boolean {
   if (s.status !== undefined) return s.status !== 'measured'
   // The sentinel branch ALSO requires `pass` to be absent (both legacy producers left it undefined) — a real
   // measurement whose prose detail merely opens with the same words must not be misclassified. Same rule as
@@ -329,6 +333,33 @@ export function fmtMetricValue(kind: MetricKind, value: number): string {
     default:
       return value.toFixed(2)
   }
+}
+
+// Per-case score badge tone — the judge/grader pass verdict (neutral when the score carries no pass).
+// Gated on measurement first: an unmeasured/invalid row is never a red or green claim, whatever its
+// placeholder `pass` says — the value cell already renders "unmeasured", the tone must agree.
+// Shared by the scorecard detail's case rows and the case-detail dialog (widgets/scorecard-cases).
+export function scoreTone(s: {
+  pass?: boolean
+  status?: string
+  detail?: unknown
+}): 'neutral' | 'success' | 'danger' {
+  if (isUnmeasuredScore(s)) return 'neutral'
+  return s.pass == null ? 'neutral' : s.pass ? 'success' : 'danger'
+}
+
+// The value shown on a per-case score badge: a categorical `label` verbatim (gold / correct / B); a bare 0/1 pass
+// flag as a check/cross (the tone already carries the color, so the raw number is noise); else the value in its
+// inferred unit ($ / s / % / count). Keeps a single case's score as legible as the aggregate summary.
+export function scoreBadgeValue(s: {
+  metric: string
+  value: number
+  pass?: boolean
+  label?: string
+}): string {
+  if (s.label !== undefined && s.label !== '') return s.label
+  if (s.pass !== undefined && (s.value === 0 || s.value === 1)) return s.pass ? '✓' : '✗'
+  return fmtMetricValue(classifyMetric({ metric: s.metric, mean: s.value }), s.value)
 }
 
 // Full rendering for title= (exact time on hover). locale/timeZone come from the caller (useLocale()/useTimeZone()

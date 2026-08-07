@@ -2,12 +2,19 @@ import { ChevronLeft, Download } from 'lucide-react'
 import { getLocale, getTimeZone, getTranslations } from 'next-intl/server'
 
 import { MentionInChatButton } from '@/widgets/infra-panel'
+import {
+  OpenCaseChip,
+  ScorecardCaseList,
+  ScorecardCasesProvider,
+  type ScorecardCaseView,
+} from '@/widgets/scorecard-cases'
 import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
 import { moveDestinationsFor, TeamOwnerControl } from '@/features/move-to-team'
 import { RerunScorecardButton } from '@/features/rerun-scorecard'
 import { RescoreScorecardButton } from '@/features/rescore-scorecard'
 import { StopScorecardButton } from '@/features/stop-scorecard'
+import { datasetSchema, type DatasetCase } from '@/entities/dataset'
 import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
 import { membersSchema } from '@/entities/member'
 import { runsSchema, type RunStatus } from '@/entities/run'
@@ -26,14 +33,12 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import {
   classifyMetric,
   fmtElapsed,
-  fmtMetricLabel,
   fmtMetricValue,
   fmtPct,
   fmtSubject,
   fmtTimeAgo,
   groupMetricRows,
   HEALTH_TEXT,
-  isUnmeasuredScore,
   rateHealth,
 } from '@/shared/lib/format'
 import { resolveTemporalUiBase } from '@/shared/lib/temporal-ui'
@@ -50,7 +55,6 @@ import { Link } from '@/shared/ui/link'
 import { CriterionBadge, MetricLabel } from '@/shared/ui/metric-label'
 import { OriginInline, OriginPins } from '@/shared/ui/origin'
 import { PageHeader } from '@/shared/ui/page-header'
-import { ScoreDetail } from '@/shared/ui/score-detail'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusPill } from '@/shared/ui/status-pill'
@@ -159,10 +163,13 @@ function ProportionBar({ value }: { value: number }) {
 }
 
 // The "value" cell of a metric-summary row — kind-aware so each metric reads in its own terms rather than a uniform
-// "0.50": a categorical metric shows its label distribution, a pass/fail metric a proportion bar, and a numeric
-// metric its mean with the right unit ($ / s / % / 1.2k). Shared by judge-overall rows and their criterion sub-rows.
-// A zero-measurement metric has NO mean — it renders the unmeasured label (passed in: this is a sync server
-// component without its own t), and its unmeasured tally rides the count cell so the outage stays visible.
+// "0.50": a categorical metric shows its label distribution, a pass/fail metric its proportion bar WITH the rate
+// beside it, and a numeric metric its mean with the right unit ($ / s / % / 1.2k). The former standalone
+// "pass rate" column is gone — it only meant something for pass/fail metrics and printed "—" for every numeric
+// one, so the rate now rides the value cell of exactly the metrics it describes. Shared by judge-overall rows
+// and their criterion sub-rows. A zero-measurement metric has NO mean — it renders the unmeasured label (passed
+// in: this is a sync server component without its own t), and its unmeasured tally rides the count cell so the
+// outage stays visible.
 function SummaryCells({ m, unmeasuredLabel }: { m: MetricSummary; unmeasuredLabel: string }) {
   const kind = classifyMetric(m)
   return (
@@ -171,7 +178,17 @@ function SummaryCells({ m, unmeasuredLabel }: { m: MetricSummary; unmeasuredLabe
         {kind === 'categorical' && m.distribution ? (
           <DistributionBar segments={m.distribution} mode={m.mode} />
         ) : kind === 'passfail' && m.passRate != null ? (
-          <ProportionBar value={m.passRate} />
+          <span className="flex items-center gap-2.5">
+            <ProportionBar value={m.passRate} />
+            <span
+              className={cn(
+                'shrink-0 font-mono text-[12px] tabular-nums',
+                HEALTH_TEXT[rateHealth(m.passRate)]
+              )}
+            >
+              {fmtPct(m.passRate)}
+            </span>
+          </span>
         ) : m.mean !== undefined ? (
           <span className="font-mono text-[12px] tabular-nums">{fmtMetricValue(kind, m.mean)}</span>
         ) : (
@@ -187,41 +204,8 @@ function SummaryCells({ m, unmeasuredLabel }: { m: MetricSummary; unmeasuredLabe
           </span>
         )}
       </TD>
-      <TD className="text-right font-mono text-[12px] tabular-nums">
-        {m.passRate == null ? (
-          <span className="text-faint">—</span>
-        ) : (
-          <span className={HEALTH_TEXT[rateHealth(m.passRate)]}>{fmtPct(m.passRate)}</span>
-        )}
-      </TD>
     </>
   )
-}
-
-// Per-case score badge tone — the judge/grader pass verdict (neutral when the score carries no pass).
-// Gated on measurement first: an unmeasured/invalid row is never a red or green claim, whatever its
-// placeholder `pass` says — the value cell already renders "unmeasured", the tone must agree.
-function scoreTone(s: {
-  pass?: boolean
-  status?: string
-  detail?: unknown
-}): 'neutral' | 'success' | 'danger' {
-  if (isUnmeasuredScore(s)) return 'neutral'
-  return s.pass == null ? 'neutral' : s.pass ? 'success' : 'danger'
-}
-
-// The value shown on a per-case score badge: a categorical `label` verbatim (gold / correct / B); a bare 0/1 pass
-// flag as a check/cross (the tone already carries the color, so the raw number is noise); else the value in its
-// inferred unit ($ / s / % / count). Keeps a single case's score as legible as the aggregate summary.
-function scoreBadgeValue(s: {
-  metric: string
-  value: number
-  pass?: boolean
-  label?: string
-}): string {
-  if (s.label !== undefined && s.label !== '') return s.label
-  if (s.pass !== undefined && (s.value === 0 || s.value === 1)) return s.pass ? '✓' : '✗'
-  return fmtMetricValue(classifyMetric({ metric: s.metric, mean: s.value }), s.value)
 }
 
 function BackLink({ workspace, label }: { workspace: string; label: string }) {
@@ -270,10 +254,10 @@ export default async function ScorecardDetailPage({
   searchParams,
 }: {
   params: Promise<{ workspace: string; id: string }>
-  searchParams: Promise<{ cases?: string }>
+  searchParams: Promise<{ cases?: string; case?: string }>
 }) {
   const { workspace, id } = await params
-  const { cases } = await searchParams
+  const { cases, case: caseParam } = await searchParams
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('scorecardsPage')
 
@@ -354,11 +338,19 @@ export default async function ScorecardDetailPage({
   // links), or when the progress timeline names cases (a terminal-failed batch can have case steps but no results —
   // the step's run link is then the only door to that case's execution detail).
   const childRunByCase = new Map<string, string>()
+  // 트라이얼 배치는 한 caseId 에 자식 run 이 여러 개다 — 디스패치 순서(createdAt asc)의 run id 목록을
+  // 케이스별로 들고, 아래에서 결과 행의 등장 순번(=트라이얼 순번)과 짝지어 각 행이 제 run 으로 간다.
+  const childRunsByCase = new Map<string, string[]>()
   let liveCases: { caseId: string; runId: string; status: RunStatus }[] = []
   if (results.length > 0 || live || steps.some((s) => s.caseId !== undefined)) {
     try {
       const children = runsSchema.parse(await controlPlane.listRuns(ctx, { scorecardId: id }))
       for (const c of children) childRunByCase.set(c.caseId, c.id)
+      for (const c of [...children].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+        const list = childRunsByCase.get(c.caseId)
+        if (list) list.push(c.id)
+        else childRunsByCase.set(c.caseId, [c.id])
+      }
       // 실행 중(queued/running)인 케이스 — 그 run 상세 페이지가 실행 중 화면·로그를 라이브로 스트리밍한다.
       liveCases = children
         .filter((c) => c.status === 'queued' || c.status === 'running')
@@ -424,6 +416,127 @@ export default async function ScorecardDetailPage({
   const timeZone = await getTimeZone()
   const runnerOnline = (lastSeenAt?: string) =>
     !!lastSeenAt && Date.now() - new Date(lastSeenAt).getTime() < 90_000
+
+  // "이 케이스가 무엇이었는가" — 케이스 상세 다이얼로그가 과제 본문(데이터셋 케이스 정의)으로 답한다.
+  // 보조 정보라 실패해도 상세는 그대로 선다(정체 섹션만 빠진다); 트레이스 평가는 데이터셋이 없다.
+  let datasetCaseById = new Map<string, DatasetCase>()
+  if (results.length > 0 && !isTraceEvaluation(record)) {
+    try {
+      const dataset = datasetSchema.parse(
+        await controlPlane.getDataset(ctx, record.dataset.id, record.dataset.version)
+      )
+      datasetCaseById = new Map(dataset.cases.map((c) => [c.id, c]))
+    } catch {
+      // dataset fetch failed → rows/dialog render without the case identity section
+    }
+  }
+
+  // self-hosted 러너 실패 힌트 — 로스터 조회·로케일은 서버의 일이므로 문장까지 만들어 뷰에 싣는다.
+  const runnerHintFor = (failure?: { runnerId?: string }): string | undefined => {
+    const rid = failure?.runnerId
+    if (!rid) return undefined
+    const meta = rid !== '*' ? runnerById.get(rid) : undefined
+    if (!meta) return t('failedOnRunnerHint')
+    if (runnerOnline(meta.lastSeenAt)) return t('failedOnRunnerOnline', { label: meta.label })
+    return t('failedOnRunnerOffline', {
+      label: meta.label,
+      ago: meta.lastSeenAt ? fmtTimeAgo(meta.lastSeenAt, locale, timeZone) : t('runnerNeverSeen'),
+    })
+  }
+
+  // 트라이얼 배치의 행 정체성 — 같은 caseId 가 결과에 여러 번(트라이얼마다 한 행) 등장하므로, 레코드의
+  // 원본 results 순서(=디스패치 순서) 기준 등장 순번이 그 행의 트라이얼 순번이자 유일 키의 재료다.
+  // 필터/정렬(shown)과 무관하게 원본 순서로 세므로 ?case= 딥링크가 필터를 바꿔도 같은 행을 가리킨다.
+  const occurrenceByResult = new Map<(typeof results)[number], number>()
+  const trialTotals = new Map<string, number>()
+  for (const r of results) {
+    const n = trialTotals.get(r.caseId) ?? 0
+    occurrenceByResult.set(r, n)
+    trialTotals.set(r.caseId, n + 1)
+  }
+
+  // 케이스 탐색기(컴팩트 행 + 상세 다이얼로그)에 넘길 직렬화된 케이스 뷰 — 정렬·필터가 끝난 shown 순서
+  // 그대로라 다이얼로그의 prev/next 가 목록과 같은 순서로 걷는다.
+  const caseViews: ScorecardCaseView[] = shown.map(({ r, verdict }) => {
+    const datasetCase = datasetCaseById.get(r.caseId)
+    const occurrence = occurrenceByResult.get(r) ?? 0
+    const trialTotal = trialTotals.get(r.caseId) ?? 1
+    // 트라이얼 순번과 자식 run 을 짝짓는다(디스패치 순서 정렬). 수가 안 맞으면(재시도 등) 마지막 run 으로
+    // 물러난다 — 이전의 caseId→마지막 run 단일 매핑과 같은 보수적 폴백.
+    const runList = childRunsByCase.get(r.caseId) ?? []
+    const runId = runList.length === trialTotal ? runList[occurrence] : runList[runList.length - 1]
+    const exportCase = exportByCase.get(r.caseId)
+    const screenshotSrc = osUseShotSrc(r.snapshot)
+    const runnerHint = runnerHintFor(r.failure)
+    return {
+      key: trialTotal > 1 ? `${r.caseId}#${occurrence + 1}` : r.caseId,
+      caseId: r.caseId,
+      ...(trialTotal > 1 ? { trial: occurrence + 1, occurrence } : { occurrence }),
+      ...(verdict !== undefined ? { verdict } : {}),
+      ...(r.verdictBasis !== undefined
+        ? {
+            verdictBasis: {
+              authority: r.verdictBasis.authority,
+              aggregation: r.verdictBasis.aggregation,
+              deciders: r.verdictBasis.deciders.map((d) => ({
+                metric: d.metric,
+                graderId: d.graderId,
+                pass: d.pass,
+              })),
+            },
+          }
+        : {}),
+      scores: r.scores.map((s) => ({
+        graderId: s.graderId,
+        metric: s.metric,
+        value: s.value,
+        ...(s.pass !== undefined ? { pass: s.pass } : {}),
+        ...(s.label !== undefined ? { label: s.label } : {}),
+        ...(s.detail !== undefined ? { detail: s.detail } : {}),
+        ...(s.status !== undefined ? { status: s.status } : {}),
+        ...(s.reason !== undefined ? { reason: s.reason } : {}),
+      })),
+      ...(runId !== undefined ? { runId } : {}),
+      ...(exportCase?.url !== undefined && record.export !== undefined
+        ? { exportUrl: exportCase.url, sinkKind: record.export.sink }
+        : {}),
+      ...(r.snapshot !== undefined
+        ? {
+            snapshot: {
+              kind: String(r.snapshot.kind),
+              ...(screenshotSrc !== undefined ? { screenshotSrc } : {}),
+              ...(r.snapshot.kind === 'browser' && r.snapshot.url !== undefined
+                ? { url: r.snapshot.url }
+                : {}),
+              // dev 인메모리 스토어의 memory:// ref 는 브라우저가 못 여니 http(s)만 싣는다 (기존 게이트 유지).
+              ...(r.snapshot.kind === 'browser' &&
+              r.snapshot.domRef !== undefined &&
+              /^https?:\/\//.test(r.snapshot.domRef)
+                ? { domRef: r.snapshot.domRef }
+                : {}),
+            },
+          }
+        : {}),
+      errors: (r.trace ?? [])
+        .filter(
+          (e): e is typeof e & { message: string } =>
+            e.kind === 'error' && typeof e.message === 'string'
+        )
+        .map((e) => e.message),
+      ...(runnerHint !== undefined ? { runnerHint } : {}),
+      hasTrace: (r.trace ?? []).length > 0,
+      ...(datasetCase !== undefined
+        ? {
+            task: datasetCase.task,
+            ...(datasetCase.env?.kind !== undefined ? { envKind: datasetCase.env.kind } : {}),
+            graderIds: datasetCase.graders.map((g) => g.id),
+            tags: datasetCase.tags,
+            ...(datasetCase.timeoutSec !== undefined ? { timeoutSec: datasetCase.timeoutSec } : {}),
+          }
+        : {}),
+    }
+  })
+  const caseViewIds = new Set(caseViews.map((c) => c.caseId))
 
   return (
     <div className="space-y-7">
@@ -848,360 +961,182 @@ export default async function ScorecardDetailPage({
         </Callout>
       )}
 
-      {(steps.length > 0 || live) && (
-        <section className="space-y-2.5">
-          <SectionHeader
-            title={t('stepsTitle')}
-            action={live ? <Badge tone="neutral">{t('liveRefreshing')}</Badge> : undefined}
-          />
-          {steps.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">{t('preparingRun')}</p>
-          ) : (
-            <Card className="divide-y divide-border">
-              {steps.map((s, i) => (
-                <div key={i} className="flex items-start gap-3 px-4 py-2.5">
-                  <span
-                    className={cn(
-                      'mt-[7px] size-1.5 shrink-0 rounded-full',
-                      s.status === 'failed'
-                        ? 'bg-destructive'
-                        : s.status === 'ok'
-                          ? 'bg-[var(--color-success)]'
-                          : s.status === 'started'
-                            ? 'animate-pulse bg-link'
-                            : 'bg-muted-foreground'
-                    )}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
-                      {s.phase}
-                    </span>
-                    {/* Per-case progress step (judge verdict etc.) → that case's child run detail — the execution
-                        environment behind the verdict. Same door the case card offers, reachable from the timeline. */}
-                    {s.caseId && childRunByCase.get(s.caseId) && (
-                      <Link
-                        href={`/${workspace}/run/${childRunByCase.get(s.caseId)}`}
-                        className="ml-2 font-mono text-[11px] text-link transition-colors hover:text-foreground"
-                      >
-                        → run
-                      </Link>
-                    )}
-                    {/* Long failure reasons (the whole error is carried now, not cut at 140) stay a few lines with an
-                        expand toggle so one erroring case doesn't blow up the timeline; short steps show no toggle. */}
-                    <ExpandableText
-                      text={s.message}
+      {/* 케이스를 여는 문(타임라인 스텝 칩 · 케이스 행)이 하나의 상세 다이얼로그를 공유한다 — ?case= 딥링크 포함. */}
+      <ScorecardCasesProvider
+        workspace={workspace}
+        scorecardId={record.id}
+        cases={caseViews}
+        initialCaseId={caseParam}
+      >
+        {(steps.length > 0 || live) && (
+          <section className="space-y-2.5">
+            <SectionHeader
+              title={t('stepsTitle')}
+              action={live ? <Badge tone="neutral">{t('liveRefreshing')}</Badge> : undefined}
+            />
+            {steps.length === 0 ? (
+              <p className="text-[13px] text-muted-foreground">{t('preparingRun')}</p>
+            ) : (
+              <Card className="divide-y divide-border">
+                {steps.map((s, i) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-2.5">
+                    <span
                       className={cn(
-                        'break-words text-[13px] leading-relaxed',
-                        s.status === 'failed' ? 'text-destructive' : 'text-foreground'
+                        'mt-[7px] size-1.5 shrink-0 rounded-full',
+                        s.status === 'failed'
+                          ? 'bg-destructive'
+                          : s.status === 'ok'
+                            ? 'bg-[var(--color-success)]'
+                            : s.status === 'started'
+                              ? 'animate-pulse bg-link'
+                              : 'bg-muted-foreground'
                       )}
                     />
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
+                        {s.phase}
+                      </span>
+                      {/* Per-case progress step (judge verdict etc.): a case WITH a result opens the case detail
+                        dialog in place (task + agent trace + judge evaluation on one screen); a case step with
+                        no result yet (terminal-failed batch) keeps the child-run link as its only door. */}
+                      {s.caseId &&
+                        (caseViewIds.has(s.caseId) ? (
+                          <OpenCaseChip caseId={s.caseId} />
+                        ) : (
+                          childRunByCase.get(s.caseId) && (
+                            <Link
+                              href={`/${workspace}/run/${childRunByCase.get(s.caseId)}`}
+                              className="ml-2 font-mono text-[11px] text-link transition-colors hover:text-foreground"
+                            >
+                              → run
+                            </Link>
+                          )
+                        ))}
+                      {/* Long failure reasons (the whole error is carried now, not cut at 140) stay a few lines with an
+                        expand toggle so one erroring case doesn't blow up the timeline; short steps show no toggle. */}
+                      <ExpandableText
+                        text={s.message}
+                        className={cn(
+                          'break-words text-[13px] leading-relaxed',
+                          s.status === 'failed' ? 'text-destructive' : 'text-foreground'
+                        )}
+                      />
+                    </div>
+                    <time className="shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-faint">
+                      {new Date(s.ts).toLocaleTimeString(undefined, { timeZone })}
+                    </time>
                   </div>
-                  <time className="shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-faint">
-                    {new Date(s.ts).toLocaleTimeString(undefined, { timeZone })}
-                  </time>
-                </div>
-              ))}
-            </Card>
+                ))}
+              </Card>
+            )}
+          </section>
+        )}
+
+        <section className="space-y-2.5">
+          <SectionHeader title={t('metricsSummaryTitle')} />
+          {summary.length === 0 ? (
+            <p className="text-[13px] text-muted-foreground">{t('noSummary')}</p>
+          ) : (
+            <Table>
+              <THead>
+                <tr>
+                  <TH>metric</TH>
+                  <TH>value</TH>
+                  <TH className="text-right">n</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {/* Multi-criteria judges: the overall row first, its criterion metrics indented beneath (stable order). Non-judge metrics unchanged. */}
+                {groupMetricRows(summary).flatMap((g) => [
+                  <TR key={g.row.metric}>
+                    <TD className="text-[12px] font-[510]">
+                      <MetricLabel metric={g.row.metric} siblings={summaryMetrics} />
+                    </TD>
+                    <SummaryCells m={g.row} unmeasuredLabel={t('scoreUnmeasured')} />
+                  </TR>,
+                  ...g.criteria.map((c) => (
+                    <TR key={c.row.metric}>
+                      <TD className="text-[12px]">
+                        <span
+                          title={c.row.metric}
+                          className="inline-flex min-w-0 items-center gap-1.5 pl-5"
+                        >
+                          <span className="text-faint">└</span>
+                          <CriterionBadge
+                            criterionId={
+                              c.parsed.kind === 'judge-criterion'
+                                ? c.parsed.criterionId
+                                : c.row.metric
+                            }
+                          />
+                        </span>
+                      </TD>
+                      <SummaryCells m={c.row} unmeasuredLabel={t('scoreUnmeasured')} />
+                    </TR>
+                  )),
+                ])}
+              </TBody>
+            </Table>
           )}
         </section>
-      )}
 
-      <section className="space-y-2.5">
-        <SectionHeader title={t('metricsSummaryTitle')} />
-        {summary.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">{t('noSummary')}</p>
-        ) : (
-          <Table>
-            <THead>
-              <tr>
-                <TH>metric</TH>
-                <TH>value</TH>
-                <TH className="text-right">n</TH>
-                <TH className="text-right">pass rate</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {/* Multi-criteria judges: the overall row first, its criterion metrics indented beneath (stable order). Non-judge metrics unchanged. */}
-              {groupMetricRows(summary).flatMap((g) => [
-                <TR key={g.row.metric}>
-                  <TD className="text-[12px] font-[510]">
-                    <MetricLabel metric={g.row.metric} siblings={summaryMetrics} />
-                  </TD>
-                  <SummaryCells m={g.row} unmeasuredLabel={t('scoreUnmeasured')} />
-                </TR>,
-                ...g.criteria.map((c) => (
-                  <TR key={c.row.metric}>
-                    <TD className="text-[12px]">
-                      <span
-                        title={c.row.metric}
-                        className="inline-flex min-w-0 items-center gap-1.5 pl-5"
-                      >
-                        <span className="text-faint">└</span>
-                        <CriterionBadge
-                          criterionId={
-                            c.parsed.kind === 'judge-criterion'
-                              ? c.parsed.criterionId
-                              : c.row.metric
-                          }
-                        />
-                      </span>
-                    </TD>
-                    <SummaryCells m={c.row} unmeasuredLabel={t('scoreUnmeasured')} />
-                  </TR>
-                )),
-              ])}
-            </TBody>
-          </Table>
-        )}
-      </section>
-
-      <section id="cases" className="scroll-mt-6 space-y-2.5">
-        <SectionHeader
-          title={t('casesTitle', { count: results.length })}
-          action={
-            failedCount > 0 ? (
-              <div className="inline-flex overflow-hidden rounded-md border">
-                <CaseFilterTab href={`${base}#cases`} active={filter === 'all'}>
-                  {t('filterAll', { n: results.length })}
-                </CaseFilterTab>
-                <CaseFilterTab
-                  href={`${base}?cases=failed#cases`}
-                  active={filter === 'failed'}
-                  danger
-                >
-                  {t('filterFailed', { n: failedCount })}
-                </CaseFilterTab>
-              </div>
-            ) : results.length > 0 ? (
-              <Badge tone="success">{t('allPassed')}</Badge>
-            ) : undefined
-          }
-        />
-        {/* Case-fate denominators — shown whenever the funnel is lossy (infra failures, unmeasured, cancelled,
+        <section id="cases" className="scroll-mt-6 space-y-2.5">
+          <SectionHeader
+            title={t('casesTitle', { count: results.length })}
+            action={
+              failedCount > 0 ? (
+                <div className="inline-flex overflow-hidden rounded-md border">
+                  <CaseFilterTab href={`${base}#cases`} active={filter === 'all'}>
+                    {t('filterAll', { n: results.length })}
+                  </CaseFilterTab>
+                  <CaseFilterTab
+                    href={`${base}?cases=failed#cases`}
+                    active={filter === 'failed'}
+                    danger
+                  >
+                    {t('filterFailed', { n: failedCount })}
+                  </CaseFilterTab>
+                </div>
+              ) : results.length > 0 ? (
+                <Badge tone="success">{t('allPassed')}</Badge>
+              ) : undefined
+            }
+          />
+          {/* Case-fate denominators — shown whenever the funnel is lossy (infra failures, unmeasured, cancelled,
             or unlaunched requested cases), so the pass count is never silently read against the wrong
             denominator (841/970 vs 841/1000 are different claims). */}
-        {record.outcomes &&
-          (record.outcomes.infraFailed > 0 ||
-            record.outcomes.unmeasured > 0 ||
-            record.outcomes.cancelled > 0 ||
-            (record.outcomes.requested ?? record.outcomes.executed) > record.outcomes.executed) && (
-            <p className="text-[12px] text-muted-foreground">
-              {t('caseOutcomesStrip', {
-                executed: record.outcomes.executed,
-                verdicted: record.outcomes.verdicted,
-                passed: record.outcomes.passed,
-                failed: record.outcomes.failed,
-                infraFailed: record.outcomes.infraFailed,
-                unmeasured: record.outcomes.unmeasured,
-              })}
+          {record.outcomes &&
+            (record.outcomes.infraFailed > 0 ||
+              record.outcomes.unmeasured > 0 ||
+              record.outcomes.cancelled > 0 ||
+              (record.outcomes.requested ?? record.outcomes.executed) >
+                record.outcomes.executed) && (
+              <p className="text-[12px] text-muted-foreground">
+                {t('caseOutcomesStrip', {
+                  executed: record.outcomes.executed,
+                  verdicted: record.outcomes.verdicted,
+                  passed: record.outcomes.passed,
+                  failed: record.outcomes.failed,
+                  infraFailed: record.outcomes.infraFailed,
+                  unmeasured: record.outcomes.unmeasured,
+                })}
+              </p>
+            )}
+          {results.length === 0 ? (
+            <p className="text-[13px] text-muted-foreground">
+              {record.status === 'failed'
+                ? t('noCasesFailed')
+                : record.status === 'running' || record.status === 'queued'
+                  ? t('noCasesRunning')
+                  : t('noCasesGeneric')}
             </p>
+          ) : (
+            // 한 케이스 = 한 줄 (판정 · id · 과제 한 줄 · overall 배지). 근거 전부(스크린샷·리즈닝·에러·criterion)는
+            // 클릭해 여는 케이스 상세 다이얼로그의 것 — 목록이 모든 케이스의 모든 근거를 펼치던 이전 카드의 교체.
+            <ScorecardCaseList />
           )}
-        {results.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">
-            {record.status === 'failed'
-              ? t('noCasesFailed')
-              : record.status === 'running' || record.status === 'queued'
-                ? t('noCasesRunning')
-                : t('noCasesGeneric')}
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {shown.map(({ r, verdict }) => {
-              // Sibling context of this case's score labels + judge grouping (criteria under their overall).
-              const caseMetrics = r.scores.map((s) => s.metric)
-              const scoreGroups = groupMetricRows(r.scores)
-              return (
-                <Card
-                  key={r.caseId}
-                  className={cn(
-                    'space-y-2 border-l-2 p-3.5',
-                    verdict === false
-                      ? 'border-l-destructive'
-                      : verdict == null
-                        ? 'border-l-border-strong'
-                        : 'border-l-[var(--color-success)]/60'
-                  )}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <span className="flex items-center gap-2">
-                      <Badge tone={verdict == null ? 'neutral' : verdict ? 'success' : 'danger'}>
-                        {verdict == null ? 'SKIP' : verdict ? 'PASS' : 'FAIL'}
-                      </Badge>
-                      <span className="font-mono text-[13px] font-[510]">{r.caseId}</span>
-                      {/* This case's child run (if any) — full trace/usage/provenance drilldown. */}
-                      {childRunByCase.get(r.caseId) && (
-                        <Link
-                          href={`/${workspace}/run/${childRunByCase.get(r.caseId)}`}
-                          className="font-mono text-[11px] text-link transition-colors hover:text-foreground"
-                        >
-                          → run
-                        </Link>
-                      )}
-                      {/* Trace sink deep link (if any) — jump to the original/exported trace on the observability platform. */}
-                      {exportByCase.get(r.caseId)?.url && (
-                        <a
-                          href={exportByCase.get(r.caseId)?.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-mono text-[11px] text-link transition-colors hover:text-foreground"
-                        >
-                          → {record.export?.sink} ↗
-                        </a>
-                      )}
-                    </span>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {r.snapshot?.kind && <Badge tone="neutral">{String(r.snapshot.kind)}</Badge>}
-                      {r.scores.length === 0 ? (
-                        <span className="text-[12px] text-muted-foreground">{t('noScores')}</span>
-                      ) : (
-                        // A multi-criteria judge's scores stay together: the overall badge boxed with its criterion badges (each with its own pass tone).
-                        scoreGroups.map((g) =>
-                          g.criteria.length === 0 ? (
-                            <Badge
-                              key={`${g.row.graderId}:${g.row.metric}`}
-                              title={g.row.metric}
-                              tone={scoreTone(g.row)}
-                            >
-                              {fmtMetricLabel(g.row.metric, caseMetrics)}{' '}
-                              {isUnmeasuredScore(g.row)
-                                ? t('scoreUnmeasured')
-                                : scoreBadgeValue(g.row)}
-                            </Badge>
-                          ) : (
-                            <span
-                              key={`${g.row.graderId}:${g.row.metric}`}
-                              className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border/60 bg-muted/20 p-0.5"
-                            >
-                              <Badge title={g.row.metric} tone={scoreTone(g.row)}>
-                                {fmtMetricLabel(g.row.metric, caseMetrics)}{' '}
-                                {isUnmeasuredScore(g.row)
-                                  ? t('scoreUnmeasured')
-                                  : scoreBadgeValue(g.row)}
-                              </Badge>
-                              {g.criteria.map((c) => (
-                                <Badge
-                                  key={c.row.metric}
-                                  title={c.row.metric}
-                                  tone={scoreTone(c.row)}
-                                >
-                                  ›{' '}
-                                  {c.parsed.kind === 'judge-criterion'
-                                    ? c.parsed.criterionId
-                                    : c.row.metric}{' '}
-                                  {isUnmeasuredScore(c.row)
-                                    ? t('scoreUnmeasured')
-                                    : scoreBadgeValue(c.row)}
-                                </Badge>
-                              ))}
-                            </span>
-                          )
-                        )
-                      )}
-                    </div>
-                  </div>
-                  {/* os-use screenshot — base64 embedded (dev) or object storage URL (offload). The very image the VLM scored. */}
-                  {osUseShotSrc(r.snapshot) && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={osUseShotSrc(r.snapshot)}
-                      alt={`${r.caseId} screenshot`}
-                      className="max-h-72 w-auto rounded-lg border"
-                    />
-                  )}
-                  {/* browser (service-topology: browser-use etc.) — the final URL the agent reached (+ DOM excerpt). */}
-                  {r.snapshot?.kind === 'browser' && r.snapshot.url && (
-                    <p className="break-all font-mono text-[12px] text-muted-foreground">
-                      <span className="font-[510] text-foreground">final url</span> ·{' '}
-                      {r.snapshot.url}
-                    </p>
-                  )}
-                  {/* Full page DOM offloaded to object storage — a presigned download URL (S3/MinIO). Hidden for the dev
-                      in-memory store's non-fetchable memory:// ref (same gate as the screenshot above). */}
-                  {r.snapshot?.kind === 'browser' &&
-                    r.snapshot.domRef &&
-                    /^https?:\/\//.test(r.snapshot.domRef) && (
-                      <a
-                        href={r.snapshot.domRef}
-                        target="_blank"
-                        rel="noreferrer"
-                        download
-                        className="inline-flex items-center gap-1.5 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
-                      >
-                        <Download className="size-3.5" />
-                        {t('downloadDom')}
-                      </a>
-                    )}
-                  {/* judge/grader verdict reasoning (VLM rubric reasoning etc.) — shows "why pass/fail" for os-use and the like.
-                    Grouped order (overall first, criteria indented beneath) so a multi-criteria judge's reasons read as one block.
-                    A structured verdict (code judge / store-state → { actual, expected }) renders as a collapsible JSON tree; prose stays inline. */}
-                  {scoreGroups
-                    .flatMap((g) => [{ row: g.row, parsed: g.parsed }, ...g.criteria])
-                    .map((e) => (
-                      <ScoreDetail
-                        key={`${e.row.graderId}:${e.row.metric}-detail`}
-                        detail={e.row.detail}
-                        indented={e.parsed.kind === 'judge-criterion'}
-                        header={
-                          <MetricLabel
-                            metric={e.row.metric}
-                            siblings={caseMetrics}
-                            className="mr-1 max-w-full align-middle font-[510] text-foreground"
-                          />
-                        }
-                      />
-                    ))}
-                  {/* error events from the run trace — how the case failed (harness crash/dispatch error). The full
-                      message is shown, clamped to a few lines with an expand toggle so a long stack trace stays readable. */}
-                  {(r.trace ?? [])
-                    .filter(
-                      (e): e is typeof e & { message: string } =>
-                        e.kind === 'error' && typeof e.message === 'string'
-                    )
-                    .map((e, i) => (
-                      <div
-                        key={`trace-error-${i}`}
-                        className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 font-mono text-[12px] leading-relaxed text-destructive"
-                      >
-                        <ExpandableText
-                          text={e.message}
-                          prefix={
-                            <>
-                              <span className="font-[560]">error</span> ·{' '}
-                            </>
-                          }
-                          className="whitespace-pre-wrap break-words"
-                        />
-                      </div>
-                    ))}
-                  {/* Self-hosted runner failure (no_runner/capability) — show the runner's live health when we can resolve
-                      it from the roster (online now / offline · last seen …), else a static hint, both pointing at the
-                      "Retry failed cases" recovery above. failure.runnerId is set only for self-hosted ("*" = the pool). */}
-                  {r.failure?.runnerId &&
-                    (() => {
-                      const rid = r.failure?.runnerId
-                      const meta = rid && rid !== '*' ? runnerById.get(rid) : undefined
-                      const text = !meta
-                        ? t('failedOnRunnerHint')
-                        : runnerOnline(meta.lastSeenAt)
-                          ? t('failedOnRunnerOnline', { label: meta.label })
-                          : t('failedOnRunnerOffline', {
-                              label: meta.label,
-                              ago: meta.lastSeenAt
-                                ? fmtTimeAgo(meta.lastSeenAt, locale, timeZone)
-                                : t('runnerNeverSeen'),
-                            })
-                      return (
-                        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400">
-                          {text}
-                        </p>
-                      )
-                    })()}
-                </Card>
-              )
-            })}
-          </div>
-        )}
-      </section>
+        </section>
+      </ScorecardCasesProvider>
 
       <CommentsSection
         workspace={workspace}
