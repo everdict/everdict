@@ -34,42 +34,15 @@ export function assertRoleProfile(profile: RoleProfile): void {
   }
 }
 
-// ── O5: the envelope's decisions ─────────────────────────────────────────────────────────────────────
-export type EnvelopeDecision =
-  | { allowed: true }
-  // Refusals are DATA the runtime acts on — refuse_and_replan (build a new plan + risk analysis and request
-  // approval / hand off), never a soft warning the loop can ignore.
-  | { allowed: false; reason: "forbidden" | "out_of_scope"; action: "refuse_and_replan" };
-
-export function envelopeAllows(envelope: TaskEnvelope, capabilityId: string): EnvelopeDecision {
-  // Deny precedence: forbidden beats allowed — when a capability appears on both lists, the safer reading wins.
-  if (envelope.scope.forbidden.includes(capabilityId))
-    return { allowed: false, reason: "forbidden", action: "refuse_and_replan" };
-  if (!envelope.scope.allowedCapabilities.includes(capabilityId))
-    return { allowed: false, reason: "out_of_scope", action: "refuse_and_replan" };
-  return { allowed: true };
-}
-
-export interface EnvelopeSpend {
-  timeSec?: number;
-  tokens?: number;
-  usd?: number;
-}
-
-export type BudgetDecision =
-  | { exhausted: false }
-  | { exhausted: true; budget: "timeSec" | "tokens" | "usd"; action: "halt_checkpoint" };
-
-export function budgetExhausted(envelope: TaskEnvelope, spent: EnvelopeSpend): BudgetDecision {
-  const b = envelope.budgets;
-  if (b.timeSec !== undefined && (spent.timeSec ?? 0) >= b.timeSec)
-    return { exhausted: true, budget: "timeSec", action: "halt_checkpoint" };
-  if (b.tokens !== undefined && (spent.tokens ?? 0) >= b.tokens)
-    return { exhausted: true, budget: "tokens", action: "halt_checkpoint" };
-  if (b.usd !== undefined && (spent.usd ?? 0) >= b.usd)
-    return { exhausted: true, budget: "usd", action: "halt_checkpoint" };
-  return { exhausted: false };
-}
+// ── O5: the envelope's decisions live IN CONTRACTS beside the schema (the isMeasured precedent) — the
+// agent runtime enforces them without a domain dependency. Re-exported here for domain consumers.
+export {
+  type BudgetDecision,
+  budgetExhausted,
+  type EnvelopeDecision,
+  type EnvelopeSpend,
+  envelopeAllows,
+} from "@everdict/contracts";
 
 export function assertTaskEnvelope(envelope: TaskEnvelope): void {
   const b = envelope.budgets;

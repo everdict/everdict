@@ -1464,3 +1464,82 @@ describe("runAgentLoop", () => {
     expect(result.turns).toBe(0);
   });
 });
+
+describe("runAgentLoop — task envelope (trust-kernel O5)", () => {
+  const envelope = {
+    id: "env-1",
+    goal: "fix the grader",
+    scope: { allowedCapabilities: ["read_file", "edit_file"], forbidden: ["deploy"] },
+    budgets: { tokens: 100 },
+    stop: { onBudgetExhausted: "halt_checkpoint" as const },
+    escalation: { onScopeExceeded: "refuse_and_replan" as const },
+    rollbackRequired: false,
+  };
+  const tool = (name: string, isReadOnly: boolean): ToolDefinition => ({
+    name,
+    description: name,
+    parametersJsonSchema: { type: "object" },
+    isReadOnly,
+    call: async () => ({ content: "ok", isError: false }),
+  });
+
+  it("a forbidden tool is refused with a REPLAN instruction — even a read-only one", async () => {
+    const { transport, requests } = fakeTransport([toolCallResult("c1", "deploy", "{}"), textResult("stopped")]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([tool("deploy", true)]),
+      envelope,
+    });
+    expect(result.stopReason).toBe("end_turn");
+    // The tool NEVER ran; the refusal instructs a replan, not a workaround
+    const second = requests[1];
+    const toolMsg = second?.messages.find((m) => m.role === "tool");
+    expect(typeof toolMsg?.content === "string" && toolMsg.content.includes("refuse_and_replan")).toBe(true);
+    expect(typeof toolMsg?.content === "string" && toolMsg.content.includes("forbidden")).toBe(true);
+  });
+
+  it("an out-of-scope WRITE is refused; an out-of-scope READ stays allowed (reads are the agent's senses)", async () => {
+    const { transport, requests } = fakeTransport([
+      toolCallsResult([
+        { id: "c1", name: "run_migration", args: "{}" },
+        { id: "c2", name: "list_runs", args: "{}" },
+      ]),
+      textResult("done"),
+    ]);
+    await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([tool("run_migration", false), tool("list_runs", true)]),
+      envelope,
+    });
+    const second = requests[1];
+    const toolMsgs = (second?.messages ?? []).filter((m) => m.role === "tool");
+    expect(toolMsgs.some((m) => typeof m.content === "string" && m.content.includes("out_of_scope"))).toBe(true);
+    expect(toolMsgs.some((m) => typeof m.content === "string" && m.content === "ok")).toBe(true);
+  });
+
+  it("token-budget exhaustion halts with stopReason budget_exhausted — never a silent death", async () => {
+    // usage7 charges 7 tokens per turn; a 20-token budget exhausts after the 3rd turn's usage lands (21 >= 20)
+    const tight = { ...envelope, budgets: { tokens: 20 } };
+    const { transport } = fakeTransport([
+      toolCallResult("c1", "list_runs", '{"page":1}'),
+      toolCallResult("c2", "list_runs", '{"page":2}'), // distinct args — the no-progress guard must not fire first
+      toolCallResult("c3", "list_runs", '{"page":3}'),
+      textResult("should never be reached"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "s",
+      history,
+      registry: new ToolRegistry([tool("list_runs", true)]),
+      envelope: tight,
+    });
+    expect(result.stopReason).toBe("budget_exhausted"); // the host checkpoints from here (halt_checkpoint)
+  });
+});

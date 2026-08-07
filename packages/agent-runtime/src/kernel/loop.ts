@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { UpstreamError } from "@everdict/contracts";
+import { type TaskEnvelope, budgetExhausted, envelopeAllows } from "@everdict/contracts";
 import type {
   LlmTransport,
   LlmUsage,
@@ -48,7 +49,11 @@ export type StopReason =
   | "no_progress"
   | "aborted"
   | "interrupted"
-  | "waiting";
+  | "waiting"
+  // The task envelope's hard budget (tokens/time) is exhausted — the run HALTS so the host can checkpoint
+  // (halt_checkpoint is the envelope's only exhaustion vocabulary; dying silently mid-task is the failure
+  // the envelope exists to prevent). Distinct from "token_budget" (the context-window budget).
+  | "budget_exhausted";
 
 // A specialized sub-agent type the model can select via spawn_agent(subagent_type). A type is a ROLE (an instruction
 // appended to the sub-task prompt) plus an optional model tier; its tools stay read-only (the isolation invariant).
@@ -139,6 +144,12 @@ export interface AgentLoopOptions {
   fallback?: { transport: LlmTransport; model: string };
   temperature?: number;
   signal?: AbortSignal;
+  // The task's DECISION BOUNDARY (trust-kernel O5). When set: forbidden capabilities are refused for EVERY
+  // tool call and out-of-scope ones for every WRITE call (reads are the agent's senses; effects are what the
+  // scope governs) — the refusal instructs the model to replan, never to work around. Hard budgets
+  // (tokens/timeSec) halt the run with stopReason "budget_exhausted" so the host can checkpoint. The usd
+  // budget is enforced by the host's meter (the loop reports tokens; only the host prices them).
+  envelope?: TaskEnvelope;
   // Rung-2 (LLM) compaction: digest the old span into a summary. Defaults to a summariser bound to this loop's own
   // model (buildSummarizer); the host can pass one bound to a cheaper "small/fast" model so a mechanical digest doesn't
   // burn the main model. Return "" to decline (loop falls through to structural).
@@ -626,6 +637,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   // mid-loop compaction can shrink below the input length (that would drop or misattribute produced turns).
   const produced: ChatMessage[] = [];
 
+  // Envelope spend tracking (O5): tokens summed from each model turn's usage; wall-clock from loop start.
+  const loopStartedMs = Date.now();
+  let envelopeSpentTokens = 0;
+
   const finish = (stopReason: StopReason, turns: number): AgentLoopResult => {
     emit({ type: "done", stopReason });
     return {
@@ -684,6 +699,16 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
   for (let turn = 1; turn <= maxTurns; turn++) {
     if (opts.signal?.aborted) return finish("aborted", turn - 1);
+
+    // The envelope's hard budgets — checked at every turn boundary. Exhaustion HALTS (the host checkpoints);
+    // the envelope's only exhaustion vocabulary is halt_checkpoint, so continuing is not an option here.
+    if (opts.envelope) {
+      const decision = budgetExhausted(opts.envelope, {
+        tokens: envelopeSpentTokens,
+        timeSec: (Date.now() - loopStartedMs) / 1000,
+      });
+      if (decision.exhausted) return finish("budget_exhausted", turn - 1);
+    }
 
     // Fold in any background sub-agent results that have completed since the last turn (overlap delivery).
     await injectBackgroundResults();
@@ -843,6 +868,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     // The same numbers also go out as an EVENT so an observer can attach them to the model call they belong
     // to — `onUsage` is the meter's aggregate channel, the event is the per-call record.
     if (result.usage) {
+      envelopeSpentTokens += result.usage.inputTokens + result.usage.outputTokens;
       opts.onUsage?.(result.usage);
       emit({
         type: "usage",
@@ -943,6 +969,22 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       const parsed = parseArgs(tc.arguments);
       if (!tool) return { content: `Unknown tool: ${tc.name}`, isError: true };
       if (!parsed.ok) return { content: `Invalid JSON arguments: ${parsed.error}`, isError: true };
+      // The envelope's scope gate (O5): forbidden refuses EVERY call; out-of-scope refuses WRITE calls
+      // (reads are the agent's senses — effects are what the scope governs). The refusal is an instruction
+      // to REPLAN, and working around it (another tool, a script) is exactly what the wording forbids.
+      if (opts.envelope) {
+        const decision = envelopeAllows(opts.envelope, tool.name);
+        if (!decision.allowed && (decision.reason === "forbidden" || tool.isReadOnly !== true)) {
+          return {
+            content: `Envelope refusal (${decision.reason}): the tool "${tool.name}" is ${
+              decision.reason === "forbidden"
+                ? "explicitly forbidden by this task's envelope."
+                : "outside this task's allowed capabilities."
+            } Do NOT work around this with another tool or a script. Stop this approach, present a revised plan naming the additional capability you need and its risks, and request approval (refuse_and_replan).`,
+            isError: true,
+          };
+        }
+      }
       if (tool.isReadOnly !== true && inPlanMode) {
         return {
           content: `In plan mode — the write tool "${tool.name}" is blocked until your plan is approved. Present a plan with present_plan first.`,
