@@ -20,10 +20,21 @@ export function readMigrations(dir?: string): Migration[] {
     .map((f) => ({ name: f, sql: readFileSync(`${path.replace(/\/$/, "")}/${f}`, "utf8") }));
 }
 
+// Two processes creating the tracking table at the same instant both pass the IF NOT EXISTS check and
+// race the catalog insert — Postgres surfaces the loser as 23505 (pg_type) or 42P07 (duplicate_table).
+// Either way the table exists, which is all this function promises. NOTE this tolerance covers only the
+// tracking table: concurrent FIRST-boot migration of an empty database is not supported — apply
+// migrations once (steady-state boots see ALREADY_APPLIED rows and run no DDL, so they are safe).
 async function ensureTracking(client: SqlClient): Promise<void> {
-  await client.query(
-    `CREATE TABLE IF NOT EXISTS ${TRACK} (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`,
-  );
+  try {
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS ${TRACK} (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`,
+    );
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "23505" || code === "42P07") return; // the concurrent creator won — the table exists
+    throw err;
+  }
 }
 
 async function isApplied(client: SqlClient, name: string): Promise<boolean> {

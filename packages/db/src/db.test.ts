@@ -640,6 +640,21 @@ describe("migrate", () => {
     expect(calls.some((c) => c.text.includes("CREATE TABLE IF NOT EXISTS everdict_schema_migrations"))).toBe(true);
   });
 
+  it("survives losing the tracking-table creation race — two booting processes, one catalog winner", async () => {
+    // CREATE TABLE IF NOT EXISTS races its own catalog insert under concurrency: both processes pass
+    // the existence check, the loser gets 23505 (pg_type) or 42P07. The table exists either way.
+    for (const code of ["23505", "42P07"]) {
+      const { client } = fakeClient((text) => {
+        if (text.includes("CREATE TABLE IF NOT EXISTS everdict_schema_migrations")) {
+          throw Object.assign(new Error("duplicate key value violates unique constraint"), { code });
+        }
+        return { rows: [] };
+      });
+      const res = await migrate(client, { migrations: [{ name: "0001_a.sql", sql: "CREATE TABLE a();" }] });
+      expect(res.applied).toEqual(["0001_a.sql"]); // the loser proceeds — the winner made the table
+    }
+  });
+
   it("preflight: un-applied OK_TO_APPLY / applied ALREADY_APPLIED", async () => {
     const { client } = fakeClient((text) => ({ rows: text.includes("SELECT name FROM") ? [] : [] }));
     expect(await preflight(client, "0001_create_runs.sql")).toBe("OK_TO_APPLY");
