@@ -178,38 +178,52 @@ describe("evaluateGate — a confounded pair cannot gate green", () => {
     expect(g.evidence.regressions).toBeUndefined(); // the numbers measure the apparatus — not computed
   });
 
-  it("an acknowledged confound proceeds WITH the acknowledgment recorded; unverified identity informs a pass", () => {
-    const acknowledged = evaluateGate(
-      gateInput({
-        experiment: {
-          held: [],
-          confounds: [{ axis: "dataset_content", detail: "dataset content differs" }],
-          unverified: [{ axis: "judge_set", reason: "unsealed", detail: "judge quality@1 carries no spec digest" }],
-        },
-      }),
-      { maxRegressions: 0, allowConfounds: ["dataset_content"] },
-    );
+  it("an acknowledged confound proceeds WITH the acknowledgment recorded — and each gap needs its own acknowledgment", () => {
+    const experiment = {
+      held: [],
+      confounds: [{ axis: "dataset_content" as const, detail: "dataset content differs" }],
+      unverified: [
+        { axis: "judge_set" as const, reason: "unsealed" as const, detail: "judge quality@1 carries no spec digest" },
+      ],
+    };
+    // Acknowledging the confound alone is not enough — the unverified axis still refuses.
+    const half = evaluateGate(gateInput({ experiment }), { maxRegressions: 0, allowConfounds: ["dataset_content"] });
+    expect(half.decision).toBe("not_comparable");
+    expect(half.reasons[0]?.kind).toBe("identity_unverified");
+    const acknowledged = evaluateGate(gateInput({ experiment }), {
+      maxRegressions: 0,
+      allowConfounds: ["dataset_content"],
+      allowUnverifiedIdentity: true,
+    });
     expect(acknowledged.decision).toBe("pass");
     expect(acknowledged.reasons.some((r) => r.kind === "confounded" && r.detail.includes("accepted"))).toBe(true);
-    expect(acknowledged.reasons.some((r) => r.kind === "identity_unverified")).toBe(true);
+    expect(acknowledged.reasons.some((r) => r.kind === "identity_unverified" && r.detail.includes("accepted"))).toBe(
+      true,
+    );
   });
 
-  it("an entirely unsealed pair informs and never refuses — history is downgraded, not rewritten", () => {
-    const g = evaluateGate(
-      gateInput({
-        experiment: {
-          held: [],
-          confounds: [],
-          unverified: [
-            { axis: "dataset_content", reason: "unsealed", detail: "both sides are unsealed" },
-            { axis: "grading_plan", reason: "unsealed", detail: "both sides are unsealed" },
-            { axis: "judge_set", reason: "unsealed", detail: "both sides are unsealed" },
-          ],
-        },
-      }),
-      { maxRegressions: 0 },
-    );
-    expect(g.decision).toBe("pass");
-    expect(g.reasons.filter((r) => r.kind === "identity_unverified")).toHaveLength(3);
+  it("an unverifiable identity cannot gate green by DEFAULT — analytics may say 'unknown', a gate may not say 'green'", () => {
+    // Regression: unverified axes used to inform and never refuse, so an unsealed-baseline vs sealed-candidate
+    // pair with 0 regressions gated PASS while nothing proved the same dataset/grading/judges ever ran. The
+    // gate now refuses like it refuses an unresolvable policy; the gap is acknowledgeable, and recorded.
+    const unsealedPair = gateInput({
+      experiment: {
+        held: [],
+        confounds: [],
+        unverified: [
+          { axis: "dataset_content", reason: "unsealed", detail: "both sides are unsealed" },
+          { axis: "grading_plan", reason: "unsealed", detail: "both sides are unsealed" },
+          { axis: "judge_set", reason: "unsealed", detail: "both sides are unsealed" },
+        ],
+      },
+    });
+    const refused = evaluateGate(unsealedPair, { maxRegressions: 0 });
+    expect(refused.decision).toBe("not_comparable");
+    expect(refused.reasons.filter((r) => r.kind === "identity_unverified")).toHaveLength(3);
+    expect(refused.evidence.regressions).toBeUndefined(); // no verdict numbers on a refusal
+
+    const acknowledged = evaluateGate(unsealedPair, { maxRegressions: 0, allowUnverifiedIdentity: true });
+    expect(acknowledged.decision).toBe("pass");
+    expect(acknowledged.reasons.filter((r) => r.kind === "identity_unverified")).toHaveLength(3);
   });
 });

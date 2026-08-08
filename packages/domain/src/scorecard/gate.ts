@@ -100,6 +100,21 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
       });
     return { decision: "not_comparable", reasons, evidence: { ...structural, comparability: "none" } };
   }
+  // UNVERIFIABLE identity refuses the GATE too — by default. Analytics may honestly show "unknown" beside
+  // the numbers, but a release gate issuing green on an identity nobody can verify is a guarantee standing
+  // on nothing: the trust kernel already refuses to derive verdicts from an unknown policy and refuses to
+  // treat an unknown egress as safe, and identity was the one unknown still waved through. The gap is
+  // acknowledgeable (allowUnverifiedIdentity, recorded on the decision like a force), and the informational
+  // reasons still ride whatever gets decided.
+  const unverifiedIdentity = diff.experiment?.unverified ?? [];
+  if (unverifiedIdentity.length > 0 && policy.allowUnverifiedIdentity !== true) {
+    for (const u of unverifiedIdentity)
+      reasons.push({
+        kind: "identity_unverified",
+        detail: `${u.detail} — a green light cannot stand on an unverifiable identity; acknowledge via allowUnverifiedIdentity to decide anyway`,
+      });
+    return { decision: "not_comparable", reasons, evidence: { ...structural, comparability: "none" } };
+  }
 
   if (diff.comparability === "none") {
     if (diff.policyMismatch !== undefined) {
@@ -117,11 +132,15 @@ export function evaluateGate(diff: GateInput, policy: GatePolicy): GateEvaluatio
   }
 
   // Past the refusals, the identity read still rides as RECORDED information on whatever gets decided:
-  // an acknowledged confound is accepted, not identical, and a green light standing on unverified identity
-  // (an unsealed side, a digest-era gap) must say so.
+  // an acknowledged confound is accepted, not identical, and an acknowledged identity gap is accepted, not
+  // verified — the decision must say which claim it stands on.
   for (const c of confounds)
     reasons.push({ kind: "confounded", detail: `${c.detail} — accepted by policy.allowConfounds (recorded)` });
-  for (const u of diff.experiment?.unverified ?? []) reasons.push({ kind: "identity_unverified", detail: u.detail });
+  for (const u of unverifiedIdentity)
+    reasons.push({
+      kind: "identity_unverified",
+      detail: `${u.detail} — accepted by policy.allowUnverifiedIdentity (recorded)`,
+    });
 
   // The regression unit is the CASE VERDICT — one case, one transition, judged by the authority ladder.
   // Metric-level pass flips (diff.regressions) are diagnosis: a diagnostic judge flip on a case whose

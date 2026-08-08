@@ -5272,6 +5272,14 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
     harness: { id: "h", version: "1" },
     status: "succeeded",
     scorecard: { suiteId: "d@1.0.0", harness: "h@1", results },
+    // Split-seal manifest so experiment identity verifies HELD — these tests exercise the OTHER knobs
+    // (regressions, missingness, trials, unmeasured evidence); the identity gate has its own suite.
+    manifest: {
+      dataset: { id: "d", version: "1.0.0", digest: "sha256:composite" },
+      cases: { a: "sha256:case-a", b: "sha256:case-b" },
+      grading: "sha256:grading",
+      harness: { id: "h", version: "1" },
+    },
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
   });
@@ -5592,6 +5600,13 @@ describe("ScorecardService — gate audit + manifest verification (B2/B3)", () =
       dataset: { id: "d", version: "1.0.0" },
       harness: { id: "h", version: "1" },
       status: "succeeded",
+      // Split-seal manifest so experiment identity verifies HELD — this test exercises the audit, not identity.
+      manifest: {
+        dataset: { id: "d", version: "1.0.0", digest: "sha256:composite" },
+        cases: { a: "sha256:case-a" },
+        grading: "sha256:grading",
+        harness: { id: "h", version: "1" },
+      },
       scorecard: {
         suiteId: "d@1.0.0",
         harness: "h@1",

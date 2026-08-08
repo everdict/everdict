@@ -35,9 +35,14 @@ export const GatePolicySchema = z.object({
   // Experiment-identity axes the caller ACCEPTS as different (recorded on the decision like a force): a
   // verified confound on any axis NOT listed here refuses the comparison as not_comparable — a dataset whose
   // content changed, a grading plan that differs, a judge document that was edited are a different
-  // experiment, not a treatment comparison. Unverifiable axes (unsealed sides) inform, never refuse, and
-  // are not acknowledgeable here.
+  // experiment, not a treatment comparison.
   allowConfounds: z.array(z.enum(["dataset_content", "grading_plan", "judge_set"])).optional(),
+  // UNVERIFIABLE identity (an unsealed side, a digest-era gap, a pre-split composite seal) also refuses the
+  // GATE by default: analytics may honestly say "unknown", but a release gate issuing green on an identity
+  // nobody can verify is a guarantee standing on nothing — the same reason an unresolvable policy refuses.
+  // Setting this acknowledges the gap EXPLICITLY (recorded on the decision); the informational reasons still
+  // ride whatever gets decided.
+  allowUnverifiedIdentity: z.boolean().optional(),
   // Share of the compared scores that may be non-measurements (dead graders / skipped judges). Enforced
   // INDEPENDENTLY of the comparability mode: unmeasured scores do not make a comparison `partial`, they
   // hollow it out from the inside, so a caller that sets this means it under either mode.
@@ -70,9 +75,10 @@ export const GateReasonSchema = z.object({
     // plan, judge set): the delta measures the drift of the apparatus, not the treatment — a different
     // experiment, not a regression. Refuses unless the policy acknowledges the axis via allowConfounds.
     "confounded",
-    // An identity axis could not be verified either way (an unsealed pre-manifest side, or seals from
-    // different digest eras). Information, never a refusal — a claim of sameness would be as unfounded as a
-    // claim of difference.
+    // An identity axis could not be verified either way (an unsealed side, a digest-era gap, a pre-split
+    // composite seal). On the GATE this refuses by default — a green light cannot stand on an identity
+    // nobody can verify — unless the policy acknowledges the gap (allowUnverifiedIdentity, recorded); on an
+    // acknowledged or non-gate read it rides as information.
     "identity_unverified",
     // A case the verdict policy declared CRITICAL either collapsed to a zero pass rate or is absent from the
     // candidate. This is the one place where product judgment precedes statistics: it blocks regardless of

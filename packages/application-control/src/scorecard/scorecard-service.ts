@@ -1167,6 +1167,7 @@ export class ScorecardService {
       ...(p?.maxMetricLossFraction !== undefined ? { maxMetricLossFraction: p.maxMetricLossFraction } : {}),
       ...(p?.allowMetricKindChange !== undefined ? { allowMetricKindChange: p.allowMetricKindChange } : {}),
       ...(p?.allowConfounds !== undefined ? { allowConfounds: p.allowConfounds } : {}),
+      ...(p?.allowUnverifiedIdentity !== undefined ? { allowUnverifiedIdentity: p.allowUnverifiedIdentity } : {}),
       ...(p?.zThreshold !== undefined ? { zThreshold: p.zThreshold } : {}),
       ...(p?.minDelta !== undefined ? { minDelta: p.minDelta } : {}),
       ...(p?.fdrAlpha !== undefined ? { fdrAlpha: p.fdrAlpha } : {}),

@@ -77,7 +77,9 @@ describe("POST /scorecards/gate — the metric-loss knob reaches the gate", () =
       payload: {
         baseline: "base",
         candidate: "cand",
-        policy: { comparability: "allow_partial", maxMetricLossFraction: 0 },
+        // These records are unsealed (no manifest) — the identity gap is acknowledged so the metric-loss
+        // knob under test is what decides.
+        policy: { comparability: "allow_partial", maxMetricLossFraction: 0, allowUnverifiedIdentity: true },
       },
     });
     expect(res.statusCode).toBe(200);
@@ -95,9 +97,27 @@ describe("POST /scorecards/gate — the metric-loss knob reaches the gate", () =
       method: "POST",
       url: "/scorecards/gate",
       headers: tenant,
-      payload: { baseline: "base", candidate: "cand", policy: { comparability: "allow_partial" } },
+      payload: {
+        baseline: "base",
+        candidate: "cand",
+        policy: { comparability: "allow_partial", allowUnverifiedIdentity: true },
+      },
     });
     expect(res.json().decision).toBe("pass");
+    await app.close();
+  });
+
+  it("unsealed records cannot gate green by default — the identity gap must be acknowledged over HTTP too", async () => {
+    const app = await build();
+    const refused = await app.inject({
+      method: "POST",
+      url: "/scorecards/gate",
+      headers: tenant,
+      payload: { baseline: "base", candidate: "cand", policy: { comparability: "allow_partial" } },
+    });
+    expect(refused.json().decision).toBe("not_comparable");
+    expect(refused.json().reasons[0].kind).toBe("identity_unverified");
+    expect(refused.json().policy.allowUnverifiedIdentity).toBeUndefined(); // nothing was acknowledged
     await app.close();
   });
 });

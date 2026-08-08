@@ -486,7 +486,13 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             .array(z.enum(["dataset_content", "grading_plan", "judge_set"]))
             .optional()
             .describe(
-              "experiment-identity axes accepted as DIFFERENT (recorded on the decision): the manifests seal the dataset content, grading plan and judge documents each batch actually evaluated, and a verified difference on an axis not listed here refuses the pair as not_comparable — a different experiment, not a treatment comparison. Unsealed/unverifiable axes inform and never refuse",
+              "experiment-identity axes accepted as DIFFERENT (recorded on the decision): the manifests seal the dataset content, grading plan and judge documents each batch actually evaluated, and a verified difference on an axis not listed here refuses the pair as not_comparable — a different experiment, not a treatment comparison",
+            ),
+          allow_unverified_identity: z
+            .boolean()
+            .optional()
+            .describe(
+              "accept UNVERIFIABLE experiment identity explicitly (an unsealed pre-manifest side, a digest-era gap, a pre-split composite seal): by default the gate refuses to issue green on an identity nobody can verify — analytics may say 'unknown', a release gate may not say 'green'. Recorded on the decision",
             ),
           z_threshold: z
             .number()
@@ -520,6 +526,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         max_metric_loss_fraction,
         allow_metric_kind_change,
         allow_confounds,
+        allow_unverified_identity,
         z_threshold,
         min_delta,
         fdr_alpha,
@@ -539,6 +546,9 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
                 ...(max_metric_loss_fraction !== undefined ? { maxMetricLossFraction: max_metric_loss_fraction } : {}),
                 ...(allow_metric_kind_change !== undefined ? { allowMetricKindChange: allow_metric_kind_change } : {}),
                 ...(allow_confounds !== undefined ? { allowConfounds: allow_confounds } : {}),
+                ...(allow_unverified_identity !== undefined
+                  ? { allowUnverifiedIdentity: allow_unverified_identity }
+                  : {}),
                 ...(z_threshold !== undefined ? { zThreshold: z_threshold } : {}),
                 ...(min_delta !== undefined ? { minDelta: min_delta } : {}),
                 ...(fdr_alpha !== undefined ? { fdrAlpha: fdr_alpha } : {}),
