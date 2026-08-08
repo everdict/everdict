@@ -179,15 +179,23 @@ See `docs/judges.md` + `docs/architecture/eval-domain-model.md`.
   p=0.1) and applies the `minDelta` practical floor — statistically-significant-but-negligible dips stay out;
   skipped cases ride `missing`. The diff also carries `coverage` (`measurementCoverage` per side: how many of
   its scores were actual measurements) — aggregates already drop unmeasured scores, so a hollowed-out batch
-  reads as healthy and the ratio has to travel WITH the comparison. Route `GET /scorecards/diff`.
+  reads as healthy and the ratio has to travel WITH the comparison — AND `metricCoverage` (per metric per
+  side: measured rows / outcome-bearing rows). The two see different failures: "the grader reported
+  unmeasured" is measurementCoverage's axis; "the grader silently never emitted a row" is metricCoverage's —
+  a metric measured on 100/100 baseline rows and 1/100 candidate rows is "present on both sides" to the
+  metric SETS, and a per-metric coverage asymmetry downgrades comparability to `partial`. Route
+  `GET /scorecards/diff`.
 - `evaluateGate(diff, policy)` (`packages/domain/src/scorecard/gate.ts`) — the CI decision, **fail-closed**:
   four outcomes `pass | block | blocked_missing | not_comparable`, and only the first is a green light.
   `not_comparable` = the comparison does not hold (`comparability: "none"`); `blocked_missing` = it held but
   not over enough. `GatePolicy.comparability` defaults to `require_full` **in the domain fn, never as a Zod
   default** (the policy embedded in a recorded decision must stay exactly what the caller sent, so old digests
-  survive schema growth); `allow_partial` + `maxMissingCases`/`maxMissingFraction` is how a caller decides on a
-  subset deliberately, and `maxUnmeasuredFraction` applies under either mode (unmeasured scores hollow a
-  comparison out without ever making it `partial`). `zThreshold`/`minDelta` on the policy are the trials diff's
+  survive schema growth). **"partial" names THREE losses, each with its own knob** under `allow_partial`:
+  CASE coverage (`maxMissingCases`/`maxMissingFraction`), METRIC coverage (`maxMetricLossFraction` — the
+  share of a metric's baseline measurement rate the candidate may lose; rows a grader silently never
+  emitted), and measurement quality (`maxUnmeasuredFraction`, which applies under either mode — unmeasured
+  scores hollow a comparison out without ever making it `partial`). Under `require_full` ANY per-metric
+  coverage loss blocks (`blocked_missing`, reason `missing_metrics` naming the per-metric drop). `zThreshold`/`minDelta` on the policy are the trials diff's
   bar — the gate computes the diff under its OWN statistical policy. Both blocking decisions are overridable
   (recorded, with who and why); `gateAudit` counts them separately.
   **Product judgment precedes statistics in exactly ONE place, by declaration**: `VerdictPolicy.criticalCases`

@@ -11,6 +11,8 @@ export {
   diffScorecards,
   type MeasurementCoverage,
   measurementCoverage,
+  type MetricCoverage,
+  metricCoverage,
   type MetricSummary,
   PRE_OUTCOME_STAGES,
   type RetryableUnmeasured,

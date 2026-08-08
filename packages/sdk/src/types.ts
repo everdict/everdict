@@ -128,6 +128,13 @@ export interface ScorecardDiff {
     candidate?: boolean;
     change: "broke" | "fixed" | "same" | "unmeasured";
   }>;
+  metricCoverage: Array<{
+    metric: string;
+    baselineCases: number;
+    baselineMeasured: number;
+    candidateCases: number;
+    candidateMeasured: number;
+  }>;
   trials?: {
     zThreshold: number;
     cases: TrialCaseDelta[];

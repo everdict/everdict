@@ -73,6 +73,19 @@ export const ScorecardDiffResponseSchema = z.object({
     .describe(
       "Case-verdict transitions over shared (case, trial) pairs, each side judged under its own stamped policy — the unit release gates decide in (same unit as the trials block)",
     ),
+  metricCoverage: z
+    .array(
+      z.object({
+        metric: z.string(),
+        baselineCases: z.number().int().nonnegative(),
+        baselineMeasured: z.number().int().nonnegative(),
+        candidateCases: z.number().int().nonnegative(),
+        candidateMeasured: z.number().int().nonnegative(),
+      }),
+    )
+    .describe(
+      "Per-metric measurement coverage of each side (measured rows / outcome-bearing rows) — a metric 'present on both sides' can survive on one row; a coverage drop downgrades comparability to partial and rows a grader silently never emitted become visible",
+    ),
   missing: z
     .object({
       casesOnlyInBaseline: z.array(z.string()),

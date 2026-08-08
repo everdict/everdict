@@ -152,6 +152,52 @@ export function measurementCoverage(sc: Pick<Scorecard, "results">): Measurement
   return { scores, unmeasured, ...(scores > 0 ? { unmeasuredFraction: unmeasured / scores } : {}) };
 }
 
+// PER-METRIC measurement coverage of a comparison — the primitive measurementCoverage cannot express and
+// the scorecard-level metric SETS hide: a metric measured on 100/100 baseline cases and 1/100 candidate
+// cases is "present on both sides" to a set comparison, and the 99 rows that were never emitted are in
+// nobody's denominator ("the grader reported unmeasured" and "the grader never emitted a row" are different
+// failures, and the second was invisible). Counted over outcome-bearing result rows (the same population
+// summarizeScorecard aggregates), per (case, trial) row, per side.
+export interface MetricCoverage {
+  metric: string;
+  baselineCases: number; // outcome-bearing result rows on the baseline side
+  baselineMeasured: number; // of those, rows carrying a MEASURED score for this metric
+  candidateCases: number;
+  candidateMeasured: number;
+}
+
+export function metricCoverage(
+  baseline: Pick<Scorecard, "results">,
+  candidate: Pick<Scorecard, "results">,
+): MetricCoverage[] {
+  const side = (sc: Pick<Scorecard, "results">): { cases: number; measuredBy: Map<string, number> } => {
+    let cases = 0;
+    const measuredBy = new Map<string, number>();
+    for (const result of sc.results) {
+      const f = result.failure;
+      if (f && (f.code === "CANCELLED" || PRE_OUTCOME_STAGES.has(f.stage))) continue;
+      cases++;
+      const seen = new Set<string>(); // one row measures a metric once, however many scores carry the name
+      for (const s of measuredScores(result.scores)) {
+        if (seen.has(s.metric)) continue;
+        seen.add(s.metric);
+        measuredBy.set(s.metric, (measuredBy.get(s.metric) ?? 0) + 1);
+      }
+    }
+    return { cases, measuredBy };
+  };
+  const b = side(baseline);
+  const c = side(candidate);
+  const metrics = new Set([...b.measuredBy.keys(), ...c.measuredBy.keys()]);
+  return [...metrics].sort().map((metric) => ({
+    metric,
+    baselineCases: b.cases,
+    baselineMeasured: b.measuredBy.get(metric) ?? 0,
+    candidateCases: c.cases,
+    candidateMeasured: c.measuredBy.get(metric) ?? 0,
+  }));
+}
+
 export interface CaseDelta {
   caseId: string;
   metric: string;
@@ -203,6 +249,10 @@ export interface ScorecardDiff {
   // Case-VERDICT transitions over shared (case, trial) pairs — the regression unit a gate decides in.
   // Same unit as diffTrials' per-case rates, so trials=1 and trials>1 gate on the same claim.
   caseTransitions: CaseTransition[];
+  // Per-metric measurement coverage of each side — how many outcome-bearing rows actually carried a
+  // measured score for the metric. The scorecard-level metric sets in `missing` cannot see a metric that
+  // survives on ONE row; a coverage drop between the sides downgrades comparability to partial.
+  metricCoverage: MetricCoverage[];
   missing: DiffMissing;
   // A metric present on both sides whose VALUE KIND changed (categorical on one side, numeric on the other —
   // same name, different meaning): its delta is not a number anyone should read. Excluded from `metrics`.
@@ -375,12 +425,26 @@ export function diffScorecards(
     metricsOnlyInCandidate: [...cMetricNames].filter((m) => !bMetricNames.has(m)),
   };
   const sharedCases = [...bCases].filter((id) => cCases.has(id)).length;
+  // Per-metric coverage asymmetry ALSO makes the comparison partial: a metric present on both sides but
+  // measured on a different share of each side's rows lost rows somewhere — silently-unemitted score rows
+  // are exactly the loss the scorecard-level metric sets above cannot see (100/100 → 1/100 read as "shared").
+  const coverage = metricCoverage(baseline, candidate);
+  const fractionOf = (measured: number, cases: number): number => (cases > 0 ? measured / cases : 0);
+  const COVERAGE_EPS = 1e-9;
+  const coverageAsymmetry = coverage.some(
+    (m) =>
+      m.baselineMeasured > 0 &&
+      m.candidateMeasured > 0 &&
+      Math.abs(fractionOf(m.baselineMeasured, m.baselineCases) - fractionOf(m.candidateMeasured, m.candidateCases)) >
+        COVERAGE_EPS,
+  );
   const anyMissing =
     missing.casesOnlyInBaseline.length > 0 ||
     missing.casesOnlyInCandidate.length > 0 ||
     missing.metricsOnlyInBaseline.length > 0 ||
     missing.metricsOnlyInCandidate.length > 0 ||
-    incomparable.length > 0;
+    incomparable.length > 0 ||
+    coverageAsymmetry;
   const comparability = sharedCases === 0 || shared.length === 0 ? "none" : anyMissing ? "partial" : "full";
   return {
     baseline: baseline.harness,
@@ -389,6 +453,7 @@ export function diffScorecards(
     regressions,
     improvements,
     caseTransitions: transitions,
+    metricCoverage: coverage,
     missing,
     incomparable,
     overlap: { sharedCases, baselineCases: bCases.size, candidateCases: cCases.size },

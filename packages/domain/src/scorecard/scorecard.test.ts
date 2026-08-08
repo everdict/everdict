@@ -5,6 +5,7 @@ import {
   caseVerdict,
   diffScorecards,
   measurementCoverage,
+  metricCoverage,
   retryableUnmeasured,
   scorecardPassRate,
   summarizeScorecard,
@@ -651,5 +652,42 @@ describe("caseVerdict (authority-based)", () => {
       ],
     };
     expect(scorecardPassRate(card)).toEqual({ pass: 2, total: 2, rate: 1 });
+  });
+});
+
+// C10 (review §6): "the grader reported unmeasured" and "the grader never emitted a row" are different
+// failures — the second was invisible to both the metric SETS (one surviving row keeps the metric "shared")
+// and measurementCoverage (an unemitted row is in no denominator).
+describe("metricCoverage — silent grader omission becomes visible", () => {
+  const rowOf = (caseId: string, metrics: string[]): CaseResult => ({
+    caseId,
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+    scores: metrics.map((m) => ({ graderId: m, metric: m, value: 1, pass: true })),
+  });
+  const cardOf = (results: CaseResult[]): Scorecard => ({ suiteId: "s", harness: "h@1", results });
+
+  it("counts measured rows per metric per side — 100/100 vs 1/100 is no longer 'present on both sides'", () => {
+    const ids = Array.from({ length: 3 }, (_, i) => `c${i}`);
+    const baseline = cardOf(ids.map((id) => rowOf(id, ["tests_pass"])));
+    // The candidate ran every case but the grader emitted a row on only ONE of them.
+    const candidate = cardOf(ids.map((id, i) => rowOf(id, i === 0 ? ["tests_pass"] : [])));
+    const coverage = metricCoverage(baseline, candidate);
+    expect(coverage).toEqual([
+      { metric: "tests_pass", baselineCases: 3, baselineMeasured: 3, candidateCases: 3, candidateMeasured: 1 },
+    ]);
+    // The diff carries it and downgrades comparability — no case is missing, yet the comparison is partial.
+    const diff = diffScorecards(baseline, candidate);
+    expect(diff.missing.casesOnlyInBaseline).toEqual([]);
+    expect(diff.missing.metricsOnlyInBaseline).toEqual([]); // the SET comparison still says "shared"
+    expect(diff.comparability).toBe("partial"); // …but the coverage asymmetry says otherwise
+  });
+
+  it("symmetric full coverage stays fully comparable — the check bites only on asymmetry", () => {
+    const baseline = cardOf([rowOf("a", ["tests_pass"]), rowOf("b", ["tests_pass"])]);
+    const diff = diffScorecards(baseline, baseline);
+    expect(diff.metricCoverage[0]).toMatchObject({ baselineMeasured: 2, candidateMeasured: 2 });
+    expect(diff.comparability).toBe("full");
   });
 });

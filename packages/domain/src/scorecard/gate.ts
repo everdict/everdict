@@ -217,6 +217,25 @@ function worstUnmeasuredFraction(coverage: GateInput["coverage"]): number | unde
   return sides.length > 0 ? Math.max(...sides) : undefined;
 }
 
+// Per-metric coverage LOSS on the candidate side: the metric was measured on both sides, and the candidate
+// measured a smaller share of its rows than the baseline did — rows the grader silently never emitted (a
+// reported-unmeasured row is measurementCoverage's axis; an unemitted row is this one's).
+function metricCoverageLosses(
+  diff: GateInput,
+): Array<{ metric: string; baselineFraction: number; candidateFraction: number; loss: number }> {
+  const fractionOf = (measured: number, cases: number): number => (cases > 0 ? measured / cases : 0);
+  return diff.metricCoverage
+    .filter((m) => m.baselineMeasured > 0 && m.candidateMeasured > 0)
+    .map((m) => {
+      const baselineFraction = fractionOf(m.baselineMeasured, m.baselineCases);
+      const candidateFraction = fractionOf(m.candidateMeasured, m.candidateCases);
+      // Loss relative to what the baseline measured — 100/100 → 1/100 is a 0.99 loss.
+      const loss = baselineFraction > 0 ? Math.max(0, 1 - candidateFraction / baselineFraction) : 0;
+      return { metric: m.metric, baselineFraction, candidateFraction, loss };
+    })
+    .filter((m) => m.loss > 1e-9);
+}
+
 // The reasons a comparison is too incomplete to decide on. Empty ⇒ the gate may read the arithmetic.
 function missingnessReasons(
   diff: GateInput,
@@ -230,6 +249,7 @@ function missingnessReasons(
   // both are causes of `partial`, so both are counted here.
   const missingMetrics =
     diff.missing.metricsOnlyInBaseline.length + diff.missing.metricsOnlyInCandidate.length + diff.incomparable.length;
+  const coverageLosses = metricCoverageLosses(diff);
 
   if (diff.comparability === "partial" && mode === "require_full") {
     if (missingCases > 0)
@@ -246,6 +266,21 @@ function missingnessReasons(
         detail:
           "metric(s) exist on one side only or changed value kind — the comparison lost columns, so a clean result over what remains is not a clean result",
       });
+    // Silent grader omission: the metric "exists on both sides" to a set comparison while most of its rows
+    // were never emitted. 99 vanished measurements out of 100 must not read as a green light.
+    if (coverageLosses.length > 0)
+      out.push({
+        kind: "missing_metrics",
+        count: coverageLosses.length,
+        detail: `metric(s) lost measurement coverage on the candidate side (${coverageLosses
+          .map(
+            (m) =>
+              `${m.metric}: ${(m.baselineFraction * 100).toFixed(0)}% → ${(m.candidateFraction * 100).toFixed(0)}% of rows`,
+          )
+          .join(
+            ", ",
+          )}) — rows the grader silently never emitted are not evidence, and a clean result over the surviving rows is not a clean result`,
+      });
   } else if (diff.comparability === "partial" && mode === "allow_partial") {
     // The caller accepted a subset — but only up to the limits it stated. An unstated limit is not a limit.
     const overCount = policy.maxMissingCases !== undefined && missingCases > policy.maxMissingCases;
@@ -261,6 +296,21 @@ function missingnessReasons(
         detail: overCount
           ? `${missingCases} one-sided case(s) exceeds the policy's maxMissingCases of ${policy.maxMissingCases}`
           : `${((measured.missingFraction ?? 0) * 100).toFixed(1)}% of the baseline's cases were not run by the candidate, over the policy's maxMissingFraction of ${policy.maxMissingFraction}`,
+      });
+    // allow_partial names THREE different losses now, each with its own stated limit: case coverage
+    // (maxMissingCases/maxMissingFraction above), METRIC coverage (here), and measurement quality
+    // (maxUnmeasuredFraction below). "partial" as one word used to cover all three with one case knob.
+    const overMetricLoss =
+      policy.maxMetricLossFraction !== undefined
+        ? coverageLosses.filter((m) => m.loss > (policy.maxMetricLossFraction ?? 1))
+        : [];
+    if (overMetricLoss.length > 0)
+      out.push({
+        kind: "missing_metrics",
+        count: overMetricLoss.length,
+        detail: `metric(s) lost more measurement coverage than the policy's maxMetricLossFraction of ${policy.maxMetricLossFraction} allows (${overMetricLoss
+          .map((m) => `${m.metric}: ${(m.loss * 100).toFixed(1)}% lost`)
+          .join(", ")})`,
       });
   }
 

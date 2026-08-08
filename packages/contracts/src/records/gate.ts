@@ -19,8 +19,14 @@ export const GatePolicySchema = z.object({
   // the caller sent, so an already-recorded `{maxRegressions: 0}` keeps its digest forever.
   comparability: z.enum(["require_full", "allow_partial"]).optional(),
   // Missingness tolerances — read only under "allow_partial" (under "require_full" any missingness blocks).
+  // "partial" names THREE different losses, each with its own knob: CASE coverage (the two below), METRIC
+  // coverage (maxMetricLossFraction — rows a grader silently never emitted), and measurement quality
+  // (maxUnmeasuredFraction — rows that exist but are hollow). One word used to hide all three behind one knob.
   maxMissingCases: z.number().int().nonnegative().optional(), // one-sided cases (both directions) tolerated
   maxMissingFraction: z.number().min(0).max(1).optional(), // share of the BASELINE's cases the candidate may skip
+  // Share of a metric's BASELINE measurement rate the candidate may lose (per metric measured on both
+  // sides) before the gate blocks — 100/100 → 1/100 is a 0.99 loss. Under require_full ANY loss blocks.
+  maxMetricLossFraction: z.number().min(0).max(1).optional(),
   // Share of the compared scores that may be non-measurements (dead graders / skipped judges). Enforced
   // INDEPENDENTLY of the comparability mode: unmeasured scores do not make a comparison `partial`, they
   // hollow it out from the inside, so a caller that sets this means it under either mode.

@@ -8,6 +8,7 @@ const base = (over: Partial<GateInput>): GateInput => ({
   regressions: [],
   improvements: [],
   caseTransitions: [],
+  metricCoverage: [],
   missing: { casesOnlyInBaseline: [], casesOnlyInCandidate: [], metricsOnlyInBaseline: [], metricsOnlyInCandidate: [] },
   incomparable: [],
   overlap: { sharedCases: 3, baselineCases: 3, candidateCases: 3 },
@@ -464,5 +465,60 @@ describe("evaluateGate — multiple-comparison correction evidence", () => {
   it("reports no suppression count at all when no correction ran — absence is not zero", () => {
     const g = evaluateGate(withTrials({}), { maxRegressions: 0 });
     expect(g.evidence.suppressedByFdr).toBeUndefined();
+  });
+});
+
+// C10 (review §6/§7): a metric "present on both sides" can survive on one row — rows a grader silently never
+// emitted are in nobody's denominator, and 99 vanished measurements out of 100 must not read as green.
+describe("evaluateGate — per-metric coverage loss (silent grader omission)", () => {
+  const lostCoverage = (over: Partial<GateInput> = {}): GateInput =>
+    base({
+      comparability: "partial",
+      metricCoverage: [
+        { metric: "tests_pass", baselineCases: 100, baselineMeasured: 100, candidateCases: 100, candidateMeasured: 1 },
+        {
+          metric: "judge:quality",
+          baselineCases: 100,
+          baselineMeasured: 100,
+          candidateCases: 100,
+          candidateMeasured: 100,
+        },
+      ],
+      overlap: { sharedCases: 100, baselineCases: 100, candidateCases: 100 },
+      ...over,
+    });
+
+  it("a require_full gate blocks a 100/100 → 1/100 metric — zero regressions among the surviving rows is not a green light", () => {
+    const g = evaluateGate(lostCoverage(), { maxRegressions: 0 });
+    expect(g.decision).toBe("blocked_missing");
+    const reason = g.reasons.find((r) => r.kind === "missing_metrics");
+    expect(reason?.detail).toContain("tests_pass");
+    expect(reason?.detail).toContain("100% → 1%");
+  });
+
+  it("allow_partial polices metric loss ONLY through its own stated limit — three losses, three knobs", () => {
+    // Under a stated limit the 0.99 loss blocks …
+    const strict = evaluateGate(lostCoverage(), {
+      maxRegressions: 0,
+      comparability: "allow_partial",
+      maxMetricLossFraction: 0.5,
+    });
+    expect(strict.decision).toBe("blocked_missing");
+    expect(strict.reasons.find((r) => r.kind === "missing_metrics")?.detail).toContain("maxMetricLossFraction");
+    // … and with no limit stated, allow_partial means what it says (the caller accepted a subset).
+    const lax = evaluateGate(lostCoverage(), { maxRegressions: 0, comparability: "allow_partial" });
+    expect(lax.decision).toBe("pass");
+  });
+
+  it("full symmetric coverage never trips the gate — the check bites only on loss", () => {
+    const g = evaluateGate(
+      base({
+        metricCoverage: [
+          { metric: "tests_pass", baselineCases: 10, baselineMeasured: 10, candidateCases: 10, candidateMeasured: 10 },
+        ],
+      }),
+      { maxRegressions: 0 },
+    );
+    expect(g.decision).toBe("pass");
   });
 });

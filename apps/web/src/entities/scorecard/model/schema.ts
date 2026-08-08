@@ -385,6 +385,17 @@ export const scorecardDiffSchema = z.object({
       change: z.enum(['broke', 'fixed', 'same', 'unmeasured']),
     })
   ),
+  // Per-metric measurement coverage of each side — measured rows / outcome-bearing rows. A coverage drop
+  // (rows a grader silently never emitted) downgrades comparability to partial.
+  metricCoverage: z.array(
+    z.object({
+      metric: z.string(),
+      baselineCases: z.number().int(),
+      baselineMeasured: z.number().int(),
+      candidateCases: z.number().int(),
+      candidateMeasured: z.number().int(),
+    })
+  ),
   // What could NOT be compared — a first-class output, never a silent skip.
   missing: z.object({
     casesOnlyInBaseline: z.array(z.string()),
