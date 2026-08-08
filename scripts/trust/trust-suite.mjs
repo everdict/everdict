@@ -87,7 +87,19 @@ for (const [name, entry] of byPackage) {
   console.log(`▶ ${name}`);
   const res = spawnSync(
     "pnpm",
-    ["exec", "vitest", "run", "--reporter=verbose", "--reporter=json", `--outputFile=${jsonPath}`, ...entry.files],
+    [
+      "exec",
+      "vitest",
+      "run",
+      // Trust files share one certification database and each opens it with migrate(); parallel test
+      // files race the first-boot migration DDL (CREATE TABLE IF NOT EXISTS collides in pg_type —
+      // 23505). Certification is about determinism, not speed: run files one at a time.
+      "--no-file-parallelism",
+      "--reporter=verbose",
+      "--reporter=json",
+      `--outputFile=${jsonPath}`,
+      ...entry.files,
+    ],
     { cwd: entry.dir, stdio: "inherit", env },
   );
   if (!existsSync(jsonPath)) {
