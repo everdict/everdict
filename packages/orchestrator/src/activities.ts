@@ -118,6 +118,23 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
     },
 
     // --- Score-on-Temporal (T-c) — the same internal bridge, for the detached phase-2 pass. ---
+    async prepareScore(input: {
+      groupId: string;
+      judges: Array<{ id: string; version: string }>;
+    }): Promise<{ stripped: number }> {
+      if (!schedule) throw new Error("Score activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const res = await fetch(
+        `${schedule.apiUrl.replace(/\/$/, "")}/internal/groups/${encodeURIComponent(input.groupId)}/score-prepare`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+          body: JSON.stringify({ judges: input.judges }),
+        },
+      );
+      if (!res.ok) throw new Error(`Score preparation failed: ${res.status} ${await res.text()}`);
+      const json = (await res.json()) as { stripped?: unknown };
+      return { stripped: typeof json.stripped === "number" ? json.stripped : 0 };
+    },
     async planScore(input: {
       groupId: string;
       judges: Array<{ id: string; version: string }>;

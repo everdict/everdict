@@ -289,6 +289,79 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
   });
 });
 
+describe("ScorecardScoreService prepareScore — strip-first makes the Temporal pass re-judge (arch-review 6, H4)", () => {
+  // The plan's measured predicate is id-only (the score plane cannot represent a judge VERSION): with
+  // quality@1's measured verdicts in place, a quality@2 pass planned an EMPTY worklist and went straight to
+  // finalize — advertising the new version's sealed closure over the old version's judgments. The strip-first
+  // step persists the cleared plane through the child-run write-back, so the id-only predicate afterwards
+  // means "judged in THIS pass".
+  it("clears the old version's verdicts so the new version's pass gets a full worklist (and re-strips as a no-op)", async () => {
+    const child: RunRecord = {
+      id: "child-c1",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c1",
+      status: "succeeded",
+      result: result("c1", [measuredVerdict]),
+      createdAt: "2026-08-07T00:00:00.000Z",
+      updatedAt: "2026-08-07T00:00:00.000Z",
+    };
+    const runStore: RunStore = {
+      async create() {
+        throw new Error("unused");
+      },
+      async update(_id, patch) {
+        // the write-back target — persist the stripped plane the way the real store would
+        if (patch.result) child.result = patch.result;
+        return child;
+      },
+      async get() {
+        return undefined;
+      },
+      async list() {
+        return [child];
+      },
+      async deleteByScorecard() {
+        return 0;
+      },
+      async countActiveByEnvelope() {
+        return 0;
+      },
+      async inFlightByTenant() {
+        return {};
+      },
+      async liveSessions() {
+        return [];
+      },
+    };
+    // getRecord HYDRATES from the child (what the production read does for runIds-backed groups) — the strip
+    // must round-trip through persistence, not through an in-memory alias.
+    const hydrated = (): ScorecardRecord => ({
+      ...recordWith(child.result ? [child.result] : []),
+      runIds: ["child-c1"],
+    });
+    const svc = new ScorecardScoreService(
+      { ...deps, runStore },
+      {
+        newId: () => "id-1",
+        now: () => "2026-08-08T00:00:00.000Z",
+        scoring: new ScoringService({}),
+        getRecord: async () => hydrated(),
+        pinJudges: async (_tenant, judgeRefs) => judgeRefs,
+      },
+    );
+    const v2 = [{ id: "j", version: "2.0.0" }];
+    // Pre-strip, the id-only predicate reads quality@1's verdict as "already judged" — the empty plan IS the defect
+    expect((await svc.planScore("sc-1", v2)).keys).toEqual([]);
+    // The strip-first step clears the selected judge's prior rows and persists them
+    expect(await svc.prepareScore("sc-1", v2)).toEqual({ stripped: 1 });
+    // Now the pass re-judges: the case is on the worklist
+    expect((await svc.planScore("sc-1", v2)).keys).toEqual(["c1#0"]);
+    // Idempotent for activity retries — a stripped plane strips to nothing
+    expect(await svc.prepareScore("sc-1", v2)).toEqual({ stripped: 0 });
+  });
+});
+
 describe("ScorecardScoreService aggregate — a re-score rewrites scoring identity (arch-review 6, H3)", () => {
   // Pre-fix, the aggregate patched only summary/judgeModels: the record kept certifying the SUBMIT-era
   // judges (manifest.judges / orchestration.judges) over a plane a different judge had since re-scored, and

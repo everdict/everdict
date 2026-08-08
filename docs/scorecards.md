@@ -286,10 +286,13 @@ unchanged (conceptually the same operation; convergence is a later refactor).
 
 **Score-on-Temporal (T-c)**: with `EVERDICT_TEMPORAL_ADDRESS` configured, a runIds-backed group's scoring
 pass runs as a durable `scoreGroupWorkflow` (`everdict-score-<groupId>`) over the same internal bridge the
-batch uses (`/internal/groups/:id/score-plan|score-case|score-finalize`): `planScore` is idempotent
-(unfinished child keys only — keyed `<caseId>#<trial>`), `scoreCase` judges ONE child and skips if already
-judged, `finalizeScore` re-aggregates. Kill the control plane mid-pass and the pass resumes with ZERO
-duplicate judging. The deterministic workflowId is the one-pass-per-group dedup (a second score → 409);
+batch uses (`/internal/groups/:id/score-prepare|score-plan|score-case|score-finalize`): `prepareScore` runs
+ONCE per pass (strip-first — clears the selected judges' prior rows through the child-run write-back, so the
+plan's id-only measured predicate means "judged in THIS pass"; without it a re-score at a NEW judge version
+planned an empty worklist and finalized over the old version's judgments; the `prepared` flag threads through
+continue-as-new), `planScore` is idempotent (unfinished child keys only — keyed `<caseId>#<trial>`),
+`scoreCase` judges ONE child and skips if already judged, `finalizeScore` re-aggregates. Kill the control
+plane mid-pass and the pass resumes with ZERO duplicate judging. The deterministic workflowId is the one-pass-per-group dedup (a second score → 409);
 start failure degrades to the in-process pass; embed-mode groups (no child runs to write back to) always
 take the in-process pass. See `docs/orchestration.md` (Tier-1 item 3).
 

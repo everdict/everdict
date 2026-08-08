@@ -130,8 +130,12 @@ export async function scorecardBatchWorkflow(input: {
 // Detached phase-2 scoring as a durable workflow (orchestration.md T-c, workflowId `everdict-score-<groupId>`).
 // The CP owns judging/aggregation (internal bridge); the workflow owns ONLY the pass's durability: kill the CP
 // mid-pass and the activities retry against the restarted CP; kill the worker and another replays the history.
-// Zero duplicate judging on resume comes from planScore's idempotence (unfinished-only) + scoreGroupCase's
-// skip-if-judged — the same two properties that make continue-as-new trivially correct here.
+// The pass STRIPS FIRST (prepareScore, once per pass): the plan's measured predicate is id-only — the score
+// plane cannot represent a judge VERSION — so with the old version's verdicts still in place a re-score at a
+// new version planned an empty worklist and finalized over judgments it never made. The `prepared` flag
+// threads through continue-as-new because a later execution re-running the strip would erase THIS pass's own
+// completed work. Zero duplicate judging on resume comes from planScore's idempotence (unfinished-only) +
+// scoreGroupCase's skip-if-judged — the same two properties that make continue-as-new trivially correct here.
 const SCORE_CONTINUE_EVERY = 500;
 const SCORE_ROTATE_AT = 20_000;
 const MAX_SCORE_LANES = 16; // judging is model calls, not sandboxes — a tighter lane cap than the batch
@@ -140,9 +144,11 @@ export async function scoreGroupWorkflow(input: {
   groupId: string;
   judges: Array<{ id: string; version: string }>;
   submittedBy?: string;
+  prepared?: boolean; // set by continue-as-new — the strip already ran for this pass
   continueEvery?: number;
   rotateAtHistoryLength?: number;
 }): Promise<void> {
+  if (!input.prepared) await batchActivities.prepareScore({ groupId: input.groupId, judges: input.judges });
   const plan = await batchActivities.planScore({ groupId: input.groupId, judges: input.judges });
   const limit = Math.max(1, input.continueEvery ?? SCORE_CONTINUE_EVERY);
   const rotateAt = Math.max(1, input.rotateAtHistoryLength ?? SCORE_ROTATE_AT);
@@ -170,7 +176,7 @@ export async function scoreGroupWorkflow(input: {
   const lanes = Math.max(1, Math.min(plan.concurrency, MAX_SCORE_LANES, keys.length || 1));
   await Promise.all(Array.from({ length: lanes }, () => lane()));
   if (rotatedEarly || plan.keys.length > limit) {
-    await continueAsNew<typeof scoreGroupWorkflow>(input);
+    await continueAsNew<typeof scoreGroupWorkflow>({ ...input, prepared: true });
     return;
   }
   await batchActivities.finalizeScore({

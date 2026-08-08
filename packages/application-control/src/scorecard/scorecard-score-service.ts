@@ -106,9 +106,40 @@ export class ScorecardScoreService {
   // ── Score-on-Temporal internal bridge (worker activities → these three; the same pattern as the batch
   // plan/case/finalize). The unit is the (caseId, trial) child key — caseId alone is ambiguous under trials. ──
 
+  // The Temporal pass's STRIP-FIRST step (arch-review 6, H4) — run ONCE per pass, before the first plan. The
+  // worklist predicate (hasMeasuredJudgeVerdict) is id-only because the score plane cannot represent a judge
+  // VERSION: with quality@1's measured verdicts in place, a quality@2 pass planned an EMPTY worklist and then
+  // finalized — advertising the new version's sealed closure over the old version's judgments, zero re-judging
+  // done. Stripping the selected judges' entire prior output first (persisted via the child-run write-back)
+  // makes the predicate mean "judged in THIS pass" — the exact alignment the in-process track() gets by
+  // stripping before it judges. Idempotent: re-stripping a stripped plane changes nothing, so an activity
+  // retry is safe; the ONCE-per-pass discipline is the workflow's (the `prepared` flag threads through
+  // continue-as-new — re-running this after cases were re-judged would erase this pass's own work). Only
+  // gradeable results strip — a classified failure's placeholder rows are starvation evidence, not judgment.
+  async prepareScore(id: string, judges: Array<{ id: string; version: string }>): Promise<{ stripped: number }> {
+    const record = await this.getRecord(id);
+    if (!record) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "Scorecard not found.");
+    if (!ScorecardBatch.from(record).canScore())
+      throw new ConflictError(
+        "CONFLICT",
+        { scorecard: id, status: record.status },
+        `only a succeeded group can be scored (status: ${record.status})`,
+      );
+    const results = record.scorecard?.results ?? [];
+    const changed: CaseResult[] = [];
+    for (const r of results) {
+      if (!judgeGradeable(r)) continue;
+      const scores = stripJudgeScores(r.scores, judges);
+      if (scores.length !== r.scores.length) changed.push({ ...r, scores });
+    }
+    if (changed.length > 0) await this.writeBackScores(record, changed);
+    return { stripped: changed.length };
+  }
+
   // Idempotent plan: the child keys still MISSING at least one of the selected judges' verdicts. A re-attached
   // (or continued-as-new) workflow gets exactly the remainder — this is what makes a CP kill mid-pass resume
-  // with zero duplicate judging.
+  // with zero duplicate judging. "Missing" is judged AFTER prepareScore cleared the selected judges' prior
+  // rows, so the id-only predicate reads as "judged in THIS pass" (see prepareScore).
   async planScore(
     id: string,
     judges: Array<{ id: string; version: string }>,

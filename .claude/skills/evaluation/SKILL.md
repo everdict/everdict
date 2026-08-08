@@ -39,7 +39,11 @@ Temporal `planScore`/`scoreCase` bridge) answer "already judged?" and "which row
 through ONE predicate set (`hasMeasuredJudgeVerdict`/`stripJudgeScores`/`isJudgeMetricOf` in
 scorecard-shared): a MEASURED `judge:<id>` verdict = done (an unmeasured placeholder is the state the pass
 exists to replace, never "done"), and the strip removes the whole `judge:<id>` prefix family (verdict +
-criterion children + placeholders) so a re-score replaces rather than accretes. An UNRESOLVABLE selected
+criterion children + placeholders) so a re-score replaces rather than accretes. On the Temporal pass the
+strip is a separate FIRST activity (`prepareScore`, once per pass — the `prepared` flag rides
+continue-as-new): the predicate is id-only (the plane cannot represent a judge VERSION), so without the
+up-front strip a re-score at a new version planned an empty worklist and finalized over the old version's
+judgments. An UNRESOLVABLE selected
 judge (deleted/bad version) is never silently dropped: `ScoringService.resolveJudges` returns it and the
 stream stamps a per-case `unmeasured{unsupported, retryable:false}` row — a batch never settles claiming a
 judge it did not run.

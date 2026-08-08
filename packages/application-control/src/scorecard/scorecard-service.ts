@@ -510,6 +510,10 @@ export class ScorecardService {
   }
 
   // Score-on-Temporal internal bridge (worker activities → these; orchestration.md T-c `score:<groupId>`).
+  async prepareScore(id: string, judges: Array<{ id: string; version: string }>): Promise<{ stripped: number }> {
+    return this.scoreService.prepareScore(id, judges);
+  }
+
   async planScore(
     id: string,
     judges: Array<{ id: string; version: string }>,

@@ -64,8 +64,10 @@ failed is listed in the anti-catalog so it cannot creep in later.
 **Running today (6):** `evalCaseWorkflow` · `suiteWorkflow` · `scorecardBatchWorkflow` (+ the
 workflow-owned retry batch) · `scheduledScorecardWorkflow` + `TemporalScheduleDriver` (the clock) ·
 `scoreGroupWorkflow` (`everdict-score-<groupId>` — Tier-1 item 3, SHIPPED in W2: the detached phase-2
-pass; planScore's unfinished-only idempotence + scoreGroupCase's skip-if-judged give restart-safe,
-zero-duplicate re-scoring; start failure degrades to the in-process pass) ·
+pass; prepareScore's once-per-pass strip-first [the `prepared` flag rides continue-as-new] makes the id-only
+measured predicate mean "judged in THIS pass", then planScore's unfinished-only idempotence +
+scoreGroupCase's skip-if-judged give restart-safe, zero-duplicate re-scoring; start failure degrades to the
+in-process pass) ·
 `approvalWorkflow` (`everdict-approval-<id>` — Tier-1 item 1, SHIPPED in W2: the durable approval WAIT;
 decision signal or days-long timer → deny-on-expiry via the internal bridge, idempotent against a settled
 record; the agent loop stays in the agent service — the workflow owns ONLY the wait).

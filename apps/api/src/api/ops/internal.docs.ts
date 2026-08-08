@@ -281,6 +281,26 @@ const internal = {
       ...errorResponses(403, 404),
     },
   },
+  scorePrepare: {
+    summary: "Strip-first preparation of a detached scoring pass (internal bridge)",
+    description:
+      "Score-on-Temporal bridge (score:<groupId>): strips the selected judges' ENTIRE prior output from every " +
+      "gradeable case (persisted via the child-run write-back) so the plan's id-only measured predicate means " +
+      "'judged in THIS pass' — without it, re-scoring a judge at a NEW version planned an empty worklist and " +
+      "finalized over the old version's judgments. Runs ONCE per pass (the workflow threads a `prepared` flag " +
+      "through continue-as-new); the strip itself is idempotent, so activity retries are safe. Guarded by " +
+      "x-internal-token.",
+    tags: ["internal"],
+    params: batchIdParams,
+    body: toJsonSchema(z.object({ judges: z.array(z.object({ id: z.string(), version: z.string() })).min(1) })),
+    response: {
+      200: {
+        description: "How many cases had prior selected-judge rows stripped",
+        ...toJsonSchema(z.object({ stripped: z.number() })),
+      },
+      ...errorResponses(400, 403, 404, 409),
+    },
+  },
   scorePlan: {
     summary: "Plan a detached scoring pass (internal bridge)",
     description:

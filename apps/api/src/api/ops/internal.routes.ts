@@ -403,6 +403,24 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
     submittedBy: z.string().optional(),
   });
   app.post<{ Params: { id: string } }>(
+    "/internal/groups/:id/score-prepare",
+    { schema: internalDocs.scorePrepare },
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
+      const body = scoreJudges.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+      try {
+        return reply.send(await deps.scorecardService.prepareScore(req.params.id, body.data.judges));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+  app.post<{ Params: { id: string } }>(
     "/internal/groups/:id/score-plan",
     { schema: internalDocs.scorePlan },
     async (req, reply) => {
