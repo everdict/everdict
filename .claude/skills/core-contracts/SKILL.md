@@ -6,8 +6,13 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 # Core contracts (the dependency root)
 
 `packages/contracts` is where every contract lives: pluggable-adapter **interfaces** + paired **Zod
-schemas** + the **AppError** hierarchy. Pure types only — no I/O, no SDK imports, no reverse deps.
-Re-exported flat from `packages/contracts/src/index.ts`.
+schemas** + the **AppError** hierarchy + **pure/total KERNEL functions that must cross dependency cones**
+(the `isMeasured` precedent: `sanitizeScore`, `authorizeToolInvocation`/`budgetExhausted`,
+`effectsRequireConsent`, `metricMatches`/`caseMatches`, `resolvePlacementOs`, `resolveHarnessInstance` —
+decisions a lower-cone consumer like `agent-runtime`/`job-runner` executes without a domain dep). No I/O,
+no SDK imports, no reverse deps. Admission test for a function here: no I/O, no registry/store access, no
+workspace policy, a pure TOTAL decision, AND a consumer beneath the domain cone — otherwise it belongs in
+`@everdict/domain`. Re-exported flat from `packages/contracts/src/index.ts`.
 
 ## Checklist
 1. New contract? Write the **Zod schema first** (SSOT), derive the type with `z.infer`. Export both.

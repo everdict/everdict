@@ -1,5 +1,12 @@
 # Conventions reference
 
+## One invariant, one owner, one decision function
+The module that DEFINES an invariant exports its decision function; every downstream layer EXECUTES that
+answer verbatim — it never re-reads the underlying state and re-derives the decision its own way. A local
+re-implementation is how an invariant silently narrows (the checkpoint service once re-coded independence as
+actor-id-only; the agent kernel once re-read the envelope scope as writes-only). If a caller needs a
+different answer, the decision function grows a parameter — the caller does not grow a fork.
+
 ## Naming
 - Files/dirs: lowercase-kebab, singular. Symbols: PascalCase types/classes, camelCase values, UPPER_SNAKE consts.
 - Role suffix signals kind: `*Driver`, `*Harness`, `*Grader`, `*Environment`, `*.routes.ts`, `*.schema.ts`, `*.service.ts`, `*.repo.ts`, `*.test.ts`, `*.scenario.test.ts`.

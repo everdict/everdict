@@ -42,7 +42,7 @@ TypeScript reinterpretation — no JPA dirty-checking exists, and stores persist
 mutation method **guards the transition and returns the store patch**:
 
 ```ts
-// core/run/run.ts — the domain model wraps the persistence record
+// packages/domain/src/run/run.ts — the domain model wraps the persistence record (moved from apps/api core/ in the re-architecture)
 export class Run {
   private constructor(private readonly record: RunRecord) {}
   static from(record: RunRecord): Run { return new Run(record); }
@@ -75,7 +75,7 @@ await store.update(id, run.succeed(result));
 
 ## Slices (green-gated, one commit each)
 
-1. **S1 — Run (pilot).** `core/run/run.ts` + unit tests; run-service's 5 sites rewire (submit assembly via
+1. **S1 — Run (pilot).** now `packages/domain/src/run/run.ts` (+ per-kind policy modules session-run/agent-run/command-run) + unit tests; run-service's 5 sites rewire (submit assembly via
    `newQueued`, resume adopt/redispatch via guards, track terminal writes read-guard-update). Regression: a
    late `fail` cannot overwrite `succeeded`.
 2. **S2 — ScorecardBatch (the beast).** `core/scorecard/scorecard-batch.ts` aggregate: lifecycle
