@@ -73,7 +73,11 @@ export interface ScorecardTrialSummary {
 }
 
 // Scorecard-level trial roll-up. Cases are weighted equally (not by trial count). `k` defaults to
-// maxTrials ("did any of k attempts pass"); pass@1 is always reported. `policy` is the batch's own — this
+// minTrials — the HONEST k ceiling: every case genuinely ran at least k attempts, so "pass@k" means the
+// same thing on every row it averages. Defaulting to maxTrials clamped k per-case underneath the label
+// (case A pass@10, case B pass@3, reported as one "pass@10"), which inflates the number for exactly the
+// batches whose trial counts came up short. A caller may still ask for any k explicitly; per-case clamping
+// remains (pass@k with k>n is pass@n — the estimator's own rule). `policy` is the batch's own — this
 // roll-up is derived on READ, so a stamped batch must hand in its resolved policy or its historical pass@1
 // silently moves with the ladder.
 export function summarizeTrials(
@@ -89,7 +93,7 @@ export function summarizeTrials(
     return { cases: 0, minTrials: 0, maxTrials: 0, passAt1: 0, k: k ?? 0, flakyCases: 0, flakeRate: 0, passAtK: 0 };
   const minTrials = Math.min(...stats.map((s) => s.trials));
   const maxTrials = Math.max(...stats.map((s) => s.trials));
-  const kk = k ?? maxTrials;
+  const kk = k ?? minTrials;
   const passAt1 = stats.reduce((a, s) => a + s.passRate, 0) / stats.length;
   const passAtKMean = stats.reduce((a, s) => a + passAtK(s.trials, s.passes, Math.min(kk, s.trials)), 0) / stats.length;
   const flakyCases = stats.filter((s) => s.flaky).length;

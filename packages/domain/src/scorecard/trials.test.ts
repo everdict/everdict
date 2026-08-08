@@ -101,12 +101,25 @@ describe("summarizeTrials", () => {
     expect(sum.maxTrials).toBe(9);
   });
 
-  it("defaults k to maxTrials and reports pass@k as the mean over cases", () => {
+  it("defaults k to minTrials — the honest ceiling — and reports pass@k as the mean over cases", () => {
     // Two cases, 5 trials each: a=3/5, b=0/5. pass@5 (any of 5): a→1, b→0 → mean 0.5.
     const sc = card("h@1", [...trials("a", 3, 5), ...trials("b", 0, 5)]);
     const sum = summarizeTrials(sc);
     expect(sum.k).toBe(5);
     expect(sum.passAtK).toBeCloseTo(0.5, 10);
+  });
+
+  it("uneven trial counts default k to the MINIMUM — every averaged row genuinely ran k attempts", () => {
+    // Regression (review §14): the default was maxTrials with k clamped per-case UNDER the label, so
+    // "pass@10" silently averaged pass@10, pass@3 and pass@5 — inflated for exactly the batches whose trial
+    // counts came up short. minTrials is what the code itself called "the honest k ceiling".
+    const sc = card("h@1", [...trials("a", 3, 10), ...trials("b", 1, 3), ...trials("c", 2, 5)]);
+    const sum = summarizeTrials(sc);
+    expect(sum.k).toBe(3);
+    expect(sum.minTrials).toBe(3);
+    expect(sum.maxTrials).toBe(10);
+    // An explicit k still wins (clamped per case by the estimator's own rule).
+    expect(summarizeTrials(sc, { k: 10 }).k).toBe(10);
   });
 
   it("counts flaky cases and reports the flake rate", () => {
