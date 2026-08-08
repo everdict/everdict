@@ -512,6 +512,23 @@ describe("diffScorecards — the case-verdict transition is the release-regressi
     expect(diff.caseTransitions.filter((t) => t.change === "broke")).toHaveLength(1); // one case broke — the WHAT
   });
 
+  it("a duplicated metric's diagnosis reads the verdict's unanimous algebra — never emission order", () => {
+    // The candidate emits tests_pass TWICE: fail then pass. The verdict combines unanimously (fail); the
+    // pre-fix diagnosis map kept the LAST row (pass), so the metric-level regressions list showed nothing
+    // while caseTransitions said the case broke — the diagnosis contradicted the verdict it explains.
+    const base = cardOf([withScores("a", [{ metric: "tests_pass", value: 1, pass: true }])]);
+    const cand = cardOf([
+      withScores("a", [
+        { metric: "tests_pass", value: 0, pass: false },
+        { metric: "tests_pass", value: 1, pass: true },
+      ]),
+    ]);
+    const diff = diffScorecards(base, cand);
+    expect(diff.caseTransitions).toEqual([{ caseId: "a", baseline: true, candidate: false, change: "broke" }]);
+    expect(diff.regressions.map((d) => d.metric)).toEqual(["tests_pass"]); // the WHY agrees with the WHAT
+    expect(diff.regressions[0]?.candidate).toBe(0); // …and carries the DECIDING (failing) row's value
+  });
+
   it("an unresolvable side produces NO transitions — unknown policy means unknown verdict, not a re-judgment", () => {
     // Given a pair whose case would read as "broke" under any ladder — but the baseline's stamped policy
     // could not be restored. Pre-fix, `?? policy` re-judged the baseline under the candidate's (or default)

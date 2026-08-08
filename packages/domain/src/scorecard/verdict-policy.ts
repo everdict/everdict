@@ -194,16 +194,22 @@ function combine(aggregation: VerdictAggregation, deciders: Array<{ pass: boolea
 
 // A duplicate metric (the same metric emitted twice in one case) previously hit a Map where the LAST score
 // silently won. Duplicates now combine explicitly — unanimous within the metric name — before the rung sees
-// one deciding value per metric.
+// one deciding value per metric. Attribution follows the DECISION: when the combination fails, the graderId
+// is the first FAILING grader's (the verdict basis must name the grader whose measurement decided it, not
+// whichever grader happened to emit first while another one failed the metric).
 function dedupeByMetric(scores: MeasuredScore[]): Array<{ metric: string; graderId: string; pass: boolean }> {
-  const byMetric = new Map<string, { metric: string; graderId: string; passes: boolean[] }>();
+  const byMetric = new Map<string, { metric: string; graderId: string; failedBy?: string; passes: boolean[] }>();
   for (const s of scores) {
     if (s.pass === undefined) continue;
     const entry = byMetric.get(s.metric) ?? { metric: s.metric, graderId: s.graderId, passes: [] };
     entry.passes.push(s.pass);
+    if (s.pass === false && entry.failedBy === undefined) entry.failedBy = s.graderId;
     byMetric.set(s.metric, entry);
   }
-  return [...byMetric.values()].map((e) => ({ metric: e.metric, graderId: e.graderId, pass: e.passes.every(Boolean) }));
+  return [...byMetric.values()].map((e) => {
+    const pass = e.passes.every(Boolean);
+    return { metric: e.metric, graderId: pass ? e.graderId : (e.failedBy ?? e.graderId), pass };
+  });
 }
 
 export function evaluateVerdict(

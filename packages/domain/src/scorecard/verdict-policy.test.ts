@@ -62,6 +62,21 @@ describe("evaluateVerdict — the verdict explains itself", () => {
     expect(evaluateVerdict({ scores: [s("tests_pass", true), s("tests_pass", false)] }).verdict).toBe(false);
   });
 
+  it("a failing combination is attributed to the grader that FAILED it — never whichever emitted first", () => {
+    // Two graders emit the same metric; the first passes, the second fails. The unanimous combination fails —
+    // and the basis must name the grader whose measurement decided that, not the passing one that happened to
+    // emit first (the pre-fix shape kept the FIRST graderId while combining passes across graders).
+    const { verdict, basis } = evaluateVerdict({
+      scores: [
+        { graderId: "grader-pass", metric: "tests_pass", value: 1, pass: true },
+        { graderId: "grader-fail", metric: "tests_pass", value: 0, pass: false },
+      ],
+    });
+    expect(verdict).toBe(false);
+    const decider = basis?.deciders.find((d) => d.metric === "tests_pass");
+    expect(decider?.graderId).toBe("grader-fail");
+  });
+
   it("the fallback basis names itself as fallback — an unranked verdict is visibly unranked", () => {
     const { verdict, basis } = evaluateVerdict({ scores: [s("custom_check", true)] });
     expect(verdict).toBe(true);

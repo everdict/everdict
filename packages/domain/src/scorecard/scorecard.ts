@@ -277,7 +277,24 @@ function scoreMap(sc: Scorecard): Map<string, { caseId: string; metrics: Map<str
     const key = `${result.caseId}#${result.trial ?? 0}`;
     const entry = m.get(key) ?? { caseId: result.caseId, metrics: new Map<string, MeasuredScore>() };
     // Measurements only — a diff between an unmeasured placeholder and a real value is not a delta.
-    for (const s of measuredScores(result.scores)) entry.metrics.set(s.metric, s);
+    // A DUPLICATE metric within one result combines the way the VERDICT reads it — unanimously (dedupeByMetric)
+    // — never last-wins: the diagnosis explains the verdict, so the two must not interpret one row set
+    // differently (a pass-then-fail duplicate read as "pass" here while the case verdict said fail). The
+    // representative row is the DECIDING one: the first failing score when the combination fails, else the first.
+    for (const s of measuredScores(result.scores)) {
+      const prev = entry.metrics.get(s.metric);
+      if (!prev) {
+        entry.metrics.set(s.metric, s);
+        continue;
+      }
+      const passes = [prev.pass, s.pass].filter((p): p is boolean => p !== undefined);
+      const combined = passes.length > 0 ? passes.every(Boolean) : undefined;
+      const decider = combined === false ? (prev.pass === false ? prev : s) : prev;
+      entry.metrics.set(s.metric, {
+        ...decider,
+        ...(combined !== undefined ? { pass: combined } : {}),
+      });
+    }
     m.set(key, entry);
   }
   return m;
