@@ -2,7 +2,8 @@ import { notFound } from 'next/navigation'
 import { getTranslations } from 'next-intl/server'
 
 import { productSchema, type Product } from '@/entities/product'
-import { ProductForm } from '@/features/manage-product'
+import { ProductForm, type RepoOption } from '@/features/manage-product'
+import { repoOptionsSchema } from '@/entities/product'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
@@ -38,10 +39,14 @@ export default async function EditProductPage({
       return []
     }
   }
-  const [datasetOptions, harnessOptions, judgeOptions] = await Promise.all([
+  const [datasetOptions, harnessOptions, judgeOptions, repoOptions] = await Promise.all([
     ids(controlPlane.listDatasets(ctx)),
     ids(controlPlane.listHarnesses(ctx)),
     ids(controlPlane.listJudges(ctx)),
+    controlPlane
+      .listProductRepoOptions(ctx)
+      .then((raw) => repoOptionsSchema.parse(raw))
+      .catch((): RepoOption[] => []),
   ])
 
   return (
@@ -53,6 +58,7 @@ export default async function EditProductPage({
           datasetOptions={datasetOptions}
           harnessOptions={harnessOptions}
           judgeOptions={judgeOptions}
+          repoOptions={repoOptions}
           initial={{
             id: product.id,
             name: product.name,
@@ -61,6 +67,7 @@ export default async function EditProductPage({
             services: product.services.map((service) => ({
               name: service.name,
               repository: service.repository,
+              ...(service.host !== undefined ? { host: service.host } : {}),
               source: service.source,
               ...(service.tagPrefix !== undefined ? { tagPrefix: service.tagPrefix } : {}),
             })),

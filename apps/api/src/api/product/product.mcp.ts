@@ -76,6 +76,32 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   );
 
   server.registerTool(
+    "list_product_repo_options",
+    {
+      description:
+        "The repositories a product's tracked service may point at — the workspace GitHub App's installation " +
+        "repos, exactly the set the version sync can reach. Empty = no App installed.",
+      inputSchema: {},
+    },
+    () =>
+      run(principal, "issues:write", async () => {
+        if (!deps.githubAppService) return ok([]);
+        try {
+          const repos = await deps.githubAppService.listRepos(ws);
+          return ok(
+            repos.map((repo) => ({
+              fullName: repo.fullName,
+              ...(repo.host !== undefined ? { host: repo.host } : {}),
+              private: repo.private,
+            })),
+          );
+        } catch {
+          return ok([]);
+        }
+      }),
+  );
+
+  server.registerTool(
     "list_product_versions",
     {
       description:

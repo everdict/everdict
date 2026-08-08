@@ -10,6 +10,7 @@ import { productHref, type ProductSeries, type ProductService } from '@/entities
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { Link } from '@/shared/ui/link'
 import { MultiSelect } from '@/shared/ui/multi-select'
 
 import { createProductAction, updateProductAction } from '../api/products'
@@ -17,6 +18,7 @@ import { createProductAction, updateProductAction } from '../api/products'
 interface ServiceRow {
   name: string
   repository: string
+  host: string
   source: 'releases' | 'tags'
   tagPrefix: string
 }
@@ -38,6 +40,16 @@ function slugOf(label: string): string {
     .slice(0, 64)
 }
 
+// GitHub App 이 고르게 해 주는 레포 하나 — value 인코딩은 `fullName` (GHE 는 `fullName@@host`).
+export interface RepoOption {
+  fullName: string
+  host?: string
+  private: boolean
+}
+
+const repoValueOf = (repo: { fullName: string; host?: string }): string =>
+  repo.host !== undefined ? `${repo.fullName}@@${repo.host}` : repo.fullName
+
 // 폼이 미리 채워 받는 기존 프로덕트 — 있으면 수정 모드다. 서비스의 sync 상태는 폼이 만지지 않는다
 // (애그리게이트가 소스 좌표가 같은 한 워터마크를 이어 준다).
 export interface ProductFormInitial {
@@ -45,7 +57,13 @@ export interface ProductFormInitial {
   name: string
   icon?: string
   description?: string
-  services: { name: string; repository: string; source: 'releases' | 'tags'; tagPrefix?: string }[]
+  services: {
+    name: string
+    repository: string
+    host?: string
+    source: 'releases' | 'tags'
+    tagPrefix?: string
+  }[]
   series: {
     key: string
     label: string
@@ -62,12 +80,15 @@ export function ProductForm({
   datasetOptions,
   harnessOptions,
   judgeOptions,
+  repoOptions,
   initial,
 }: {
   workspace: string
   datasetOptions: string[]
   harnessOptions: string[]
   judgeOptions: string[]
+  // GitHub App 설치 레포 — 싱크가 실제로 닿을 수 있는 집합. 비어 있으면 수동 입력으로 내려간다.
+  repoOptions: RepoOption[]
   initial?: ProductFormInitial
 }) {
   const t = useTranslations('productsPage')
@@ -79,6 +100,7 @@ export function ProductForm({
     (initial?.services ?? []).map((row) => ({
       name: row.name,
       repository: row.repository,
+      host: row.host ?? '',
       source: row.source,
       tagPrefix: row.tagPrefix ?? '',
     }))
@@ -109,6 +131,7 @@ export function ProductForm({
       .map((row) => ({
         name: row.name.trim(),
         repository: row.repository.trim(),
+        ...(row.host.trim().length > 0 ? { host: row.host.trim() } : {}),
         source: row.source,
         ...(row.tagPrefix.trim().length > 0 ? { tagPrefix: row.tagPrefix.trim() } : {}),
       }))
@@ -192,7 +215,7 @@ export function ProductForm({
             variant="outline"
             size="sm"
             onClick={() =>
-              setServices((rows) => [...rows, { name: '', repository: '', source: 'releases', tagPrefix: '' }])
+              setServices((rows) => [...rows, { name: '', repository: '', host: '', source: 'releases', tagPrefix: '' }])
             }
           >
             <Plus className="size-3.5" />
@@ -200,6 +223,14 @@ export function ProductForm({
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">{t('servicesHint')}</p>
+        {repoOptions.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            {t('noAppHint')}{' '}
+            <Link href={`/${workspace}/settings/integrations`} className="underline hover:text-foreground">
+              {t('noAppLink')}
+            </Link>
+          </p>
+        )}
         {services.map((row, index) => (
           // 이름이 정체성이지만 편집 중에는 비어 있을 수 있어 index 로 그린다(제출 시 빈 행은 걸러진다).
           <div key={index} className="grid gap-2 @md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_8rem_8rem_auto]">
@@ -209,12 +240,39 @@ export function ProductForm({
               placeholder={t('serviceName')}
               aria-label={t('serviceName')}
             />
-            <Input
-              value={row.repository}
-              onChange={(e) => patchService(index, { repository: e.target.value })}
-              placeholder="owner/repository"
-              aria-label={t('serviceRepository')}
-            />
+            {repoOptions.length > 0 ? (
+              // GitHub App 이 있으면 레포는 고르는 것이다 — 피커는 컨트롤 플레인이 받아 주는 것만 내놓는다
+              // (설치 밖 레포는 싱크가 토큰을 못 받아 어차피 실패한다). 이름이 비어 있으면 레포 꼬리로 채운다.
+              <Combobox
+                options={repoOptions.map((repo) => ({
+                  value: repoValueOf(repo),
+                  label: repo.host !== undefined ? `${repo.fullName} · ${repo.host}` : repo.fullName,
+                }))}
+                value={repoValueOf({
+                  fullName: row.repository,
+                  ...(row.host.length > 0 ? { host: row.host } : {}),
+                })}
+                onChange={(value) => {
+                  const [fullName = '', host = ''] = value.split('@@')
+                  const tail = fullName.split('/').at(-1) ?? ''
+                  patchService(index, {
+                    repository: fullName,
+                    host,
+                    ...(row.name.trim().length === 0 ? { name: tail } : {}),
+                  })
+                }}
+                searchable
+                placeholder={t('serviceRepositoryPick')}
+                aria-label={t('serviceRepository')}
+              />
+            ) : (
+              <Input
+                value={row.repository}
+                onChange={(e) => patchService(index, { repository: e.target.value })}
+                placeholder="owner/repository"
+                aria-label={t('serviceRepository')}
+              />
+            )}
             <Combobox
               options={[
                 { value: 'releases', label: t('sourceReleases') },

@@ -190,6 +190,15 @@ export const productTimelineSchema = z.object({
   ),
 })
 
+// GET /products/repo-options — GitHub App 설치 레포(= 싱크가 토큰을 받을 수 있는 집합).
+export const repoOptionsSchema = z.array(
+  z.object({
+    fullName: z.string(),
+    host: z.string().optional(),
+    private: z.boolean(),
+  })
+)
+
 export const productSyncResultSchema = z.object({
   services: z.array(
     z.object({

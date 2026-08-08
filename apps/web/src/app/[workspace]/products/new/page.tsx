@@ -1,6 +1,7 @@
 import { getTranslations } from 'next-intl/server'
 
-import { ProductForm } from '@/features/manage-product'
+import { ProductForm, type RepoOption } from '@/features/manage-product'
+import { repoOptionsSchema } from '@/entities/product'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
@@ -26,10 +27,15 @@ export default async function NewProductPage({ params }: { params: Promise<{ wor
       return []
     }
   }
-  const [datasetOptions, harnessOptions, judgeOptions] = await Promise.all([
+  const [datasetOptions, harnessOptions, judgeOptions, repoOptions] = await Promise.all([
     ids(controlPlane.listDatasets(ctx)),
     ids(controlPlane.listHarnesses(ctx)),
     ids(controlPlane.listJudges(ctx)),
+    // GitHub App 설치 레포 — 있으면 서비스 행이 피커가 되고, 없으면 수동 입력+연결 안내로 내려간다.
+    controlPlane
+      .listProductRepoOptions(ctx)
+      .then((raw) => repoOptionsSchema.parse(raw))
+      .catch((): RepoOption[] => []),
   ])
 
   return (
@@ -41,6 +47,7 @@ export default async function NewProductPage({ params }: { params: Promise<{ wor
           datasetOptions={datasetOptions}
           harnessOptions={harnessOptions}
           judgeOptions={judgeOptions}
+          repoOptions={repoOptions}
         />
       </Card>
     </div>

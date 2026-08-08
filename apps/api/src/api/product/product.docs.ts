@@ -24,6 +24,7 @@ export const productDocs: Record<
   | "create"
   | "list"
   | "get"
+  | "repoOptions"
   | "listVersions"
   | "timeline"
   | "update"
@@ -71,6 +72,21 @@ export const productDocs: Record<
     response: {
       200: { description: "The product detail", ...toJsonSchema(ProductDetailResponseSchema) },
       ...errorResponses(401, 403, 404),
+    },
+  },
+  repoOptions: {
+    summary: "The repositories a tracked service may point at",
+    description:
+      "The workspace GitHub App's installation repos — exactly the set the version sync can mint tokens " +
+      "for, so the wizard's picker offers what the control plane accepts. Empty = no App installed. " +
+      "Requires issues:write.",
+    tags: ["product"],
+    response: {
+      200: {
+        description: "The pickable repositories",
+        ...toJsonSchema(z.array(z.object({ fullName: z.string(), host: z.string().optional(), private: z.boolean() }))),
+      },
+      ...errorResponses(401, 403),
     },
   },
   listVersions: {

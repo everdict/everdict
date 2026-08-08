@@ -950,6 +950,9 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  // 추적 서비스가 가리킬 수 있는 레포들 — 워크스페이스 GitHub App 설치 레포(= 싱크가 토큰을 받을 수 있는
+  // 정확히 그 집합). 비어 있으면 App 미설치.
+  listProductRepoOptions: <T>(auth: AuthContext) => call<T>(auth, '/products/repo-options'),
   // 워크스페이스 전체 릴리즈(피커의 read) — ?product= 로 한 프로덕트로 좁힐 수 있다.
   listReleases: <T>(auth: AuthContext, product?: string) =>
     call<T>(auth, product ? `/releases?product=${encodeURIComponent(product)}` : '/releases'),

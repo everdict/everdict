@@ -1676,7 +1676,7 @@
   },
   "overviewPage": {
     "title": "현황",
-    "description": "이 워크스페이스가 지금 어떤 상태이고 어느 쪽으로 가고 있는지.",
+    "description": "프로덕트 타임라인 — 지난·계획된 릴리즈, 움직인 서비스 버전, 지켜보는 추이가 어떻게 버텼는지.",
     "connectError": "서버에 연결하지 못했어요: {error}",
     "connectErrorHint": "`CONTROL_PLANE_URL` 과 `everdict-api` 가동 여부를 확인하세요.",
     "tileOpenIssues": "열린 이슈",
@@ -1785,7 +1785,11 @@
       "fail": "실패"
     },
     "activityCarriedOver": "{count}건 이월",
-    "activityMore": "외 {count}건"
+    "activityMore": "외 {count}건",
+    "newProduct": "새 프로덕트",
+    "emptyTitle": "아직 프로덕트가 없습니다",
+    "emptyHint": "제품을 구성하는 서비스를 등록하면 릴리즈와 품질 추이가 이 타임라인에 놓입니다.",
+    "openProduct": "프로덕트 열기 →"
   },
   "palette": {
     "placeholder": "페이지로 이동하거나 작업 실행…",
@@ -5946,7 +5950,10 @@
     "editTitle": "{name} 편집",
     "editDescription": "리스트는 결과 집합으로 치환됩니다. 소스 좌표가 같은 서비스는 싱크 워터마크를 이어 갑니다.",
     "updateSubmit": "변경 저장",
-    "updateError": "프로덕트를 저장하지 못했습니다."
+    "updateError": "프로덕트를 저장하지 못했습니다.",
+    "noAppHint": "워크스페이스 GitHub App 을 연결하면 저장소를 입력하는 대신 골라 담을 수 있습니다.",
+    "noAppLink": "통합 설정 열기",
+    "serviceRepositoryPick": "저장소 선택…"
   },
   "productPage": {
     "servicesHeading": "추적 서비스",

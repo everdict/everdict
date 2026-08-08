@@ -60,6 +60,36 @@ export function registerProductRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
   });
 
+  // The repositories a tracked service may point at — the workspace GitHub App's installation repos, which
+  // are exactly the set the sync can mint tokens for. Member-gated on the action that CREATES products
+  // (issues:write), not on settings:read: picking a repo for a product is product authoring, not workspace
+  // administration. Empty = no App installed (the wizard says so and falls back to manual entry).
+  app.get("/products/repo-options", { schema: productDocs.repoOptions }, async (req, reply) => {
+    if (!deps.productService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "product service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    if (!deps.githubAppService) return reply.send([]);
+    try {
+      const repos = await deps.githubAppService.listRepos(principal.workspace);
+      return reply.send(
+        repos.map((repo) => ({
+          fullName: repo.fullName,
+          ...(repo.host !== undefined ? { host: repo.host } : {}),
+          private: repo.private,
+        })),
+      );
+    } catch {
+      // Best-effort: an unreachable GitHub degrades the wizard to manual entry, never a broken screen.
+      return reply.send([]);
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/products/:id", { schema: productDocs.get }, async (req, reply) => {
     if (!deps.productService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "product service not configured" });

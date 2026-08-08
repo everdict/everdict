@@ -19,6 +19,7 @@ export {
   releaseSchema,
   releaseSeriesStateSchema,
   releaseStatusSchema,
+  repoOptionsSchema,
   type Product,
   type ProductDetail,
   type ProductSeries,

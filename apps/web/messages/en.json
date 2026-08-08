@@ -1676,7 +1676,7 @@
   },
   "overviewPage": {
     "title": "Overview",
-    "description": "Where this workspace stands, and which way it is moving.",
+    "description": "The product timeline — releases past and planned, the service versions that moved, and how each watched trend held up.",
     "connectError": "Couldn't reach the server: {error}",
     "connectErrorHint": "Check that `CONTROL_PLANE_URL` is set and `everdict-api` is running.",
     "tileOpenIssues": "Open issues",
@@ -1785,7 +1785,11 @@
       "fail": "fail"
     },
     "activityCarriedOver": "{count} carried over",
-    "activityMore": "+{count} more"
+    "activityMore": "+{count} more",
+    "newProduct": "New product",
+    "emptyTitle": "No products yet",
+    "emptyHint": "Register the services that compose your product, and its releases and quality trends will live on this timeline.",
+    "openProduct": "Open product →"
   },
   "palette": {
     "placeholder": "Go to a page or run an action…",
@@ -5946,7 +5950,10 @@
     "editTitle": "Edit {name}",
     "editDescription": "Lists replace what is there; a re-declared service keeps its sync watermark unless its source coordinates changed.",
     "updateSubmit": "Save changes",
-    "updateError": "Failed to save the product."
+    "updateError": "Failed to save the product.",
+    "noAppHint": "Connect the workspace GitHub App to pick repositories instead of typing them.",
+    "noAppLink": "Open integrations",
+    "serviceRepositoryPick": "Pick a repository…"
   },
   "productPage": {
     "servicesHeading": "Tracked services",
