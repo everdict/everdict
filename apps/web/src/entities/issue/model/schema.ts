@@ -62,6 +62,10 @@ export const ISSUE_LINK_TYPES = [
   'run',
   'view',
   'issue',
+  // The product timeline (records/product.ts) — "this issue blocks the 2026.3 release" is a link, and the
+  // release gate counts its open linked issues through the same reverse query.
+  'product',
+  'release',
 ] as const
 export const issueLinkTypeSchema = z.enum(ISSUE_LINK_TYPES)
 
@@ -90,6 +94,9 @@ export const trackerHistoryEventSchema = z.enum([
   'github_push_failed',
   'completed',
   'cancelled',
+  // A release went out (records/product.ts) — its own word, because "released" is what a reader scans a
+  // product's history for, and a forced release must read as shipped-with-overrides, not done.
+  'released',
   // 팀 이동 — 식별자를 다시 찍는 유일한 전이라 별도 이벤트다.
   'moved',
   // 프로젝트 업데이트가 올라왔다 — 타임라인을 훑는 사람이 찾는 건 그 사이의 편집이 아니라 이것들이다.

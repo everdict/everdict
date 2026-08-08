@@ -134,6 +134,17 @@ export const PLATFORM_EVENT_KINDS = [
   // because the subject is what a listener filters on — "tell me when this goal slips" is not "tell me when any
   // of its projects did", and the goal's own update is the one a stakeholder reads.
   "initiative.update_posted",
+  // Product-timeline lifecycle facts (docs/architecture/product-timeline.md) — the "what we ship" axis
+  // announcing itself. Emitted by ProductService, the single choke point every transport calls. Same folding
+  // rule as the tracker: release status transitions are ONE kind with {from, to} in the payload, so "wake me
+  // when we ship" is a payload filter (to eq released), not another kind. `product.service_version_imported`
+  // is the axis's heartbeat — a tracked service's release/tag landed in the ledger (payload names the service,
+  // the version and the repository, all top-level so a selector can filter per service) — and the emit point
+  // is the sync's ledger write, which is idempotent by natural key, so one version can only ever be news once.
+  "product.created",
+  "product.service_version_imported",
+  "release.created",
+  "release.status_changed",
   // A handoff checkpoint was published (ownership protocol O6, docs/architecture/ownership-protocol.md) — an
   // autonomous task stopped at its envelope's boundary and left a resumable state transfer behind. The fact a
   // workspace needs: work that was running is now waiting for a successor, with the evidence it stands on.

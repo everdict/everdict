@@ -102,6 +102,14 @@ export type { IssueLabelStore } from "./ports/issue-label-store.js";
 export type { IssueNumberGrant, TeamListFilter, TeamStore } from "./ports/team-store.js";
 export type { ProjectListFilter, ProjectStore, ProjectUpdateStore } from "./ports/project-store.js";
 export type { InitiativeListFilter, InitiativeStore, InitiativeUpdateStore } from "./ports/initiative-store.js";
+export type {
+  ProductListFilter,
+  ProductStore,
+  ProductVersionListFilter,
+  ProductVersionStore,
+  ReleaseListFilter,
+  ReleaseStore,
+} from "./ports/product-store.js";
 export type { ViewStore } from "./ports/view-store.js";
 export type { HandoffCheckpointStore } from "./ports/handoff-checkpoint-store.js";
 export {

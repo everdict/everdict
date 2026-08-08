@@ -68,6 +68,14 @@ export const TRIGGERABLE_EVENT_KINDS = [
   // "The iteration closed — write the summary, and say what carried over." A cycle ends once, so this wakes
   // once; `cycle.created` stays observable-only (planning the next fortnight is not a signal to act on).
   "cycle.completed",
+  // Product timeline (docs/architecture/product-timeline.md): "a tracked service released — run the smoke
+  // checks", "a release was planned — prepare the checklist", "we shipped (to eq released) — write the notes".
+  // The version import is idempotent by natural key and the backfill never emits, so a sync can only wake an
+  // agent once per genuinely new version. `product.created` stays observable-only (registering a product is
+  // setup, not a signal to act on).
+  "product.service_version_imported",
+  "release.created",
+  "release.status_changed",
 ] as const;
 // Compile-time subset guarantee: every triggerable kind is a real platform-event kind.
 const _triggerableAreKinds: readonly PlatformEventKind[] = TRIGGERABLE_EVENT_KINDS;

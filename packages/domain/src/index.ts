@@ -199,6 +199,23 @@ export {
   type TeamTransition,
 } from "./tracker/team.js";
 
+// product — the product timeline's aggregates (Product ⊃ Release over the imported version ledger) + the
+// readiness arithmetic that gates a release (docs/architecture/product-timeline.md).
+export {
+  type NewProductInput,
+  Product,
+  type ProductEditInput,
+  type ProductTransition,
+} from "./product/product.js";
+export {
+  type NewReleaseInput,
+  Release,
+  type ReleaseEditInput,
+  type ReleaseStatusChangeInput,
+  type ReleaseTransition,
+} from "./product/release.js";
+export { releaseReadiness, type SeriesScorecardPoint, watchedSeries } from "./product/readiness.js";
+
 // ownership — the O-track kernel (roles/envelope/checkpoint invariants; trust-kernel O2/O5/O6)
 export {
   assertCheckpointForEnvelope,

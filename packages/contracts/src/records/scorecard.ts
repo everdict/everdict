@@ -115,6 +115,15 @@ export const ScorecardOriginSchema = z.object({
   prNumber: z.number().int().optional(),
   runUrl: z.string().optional(), // CI run link
   pinOverrides: z.record(z.string()).optional(), // submit-time ephemeral pins (slot→image) — records the PR image swap
+  // Product-timeline provenance (source === "product", records/product.ts): the product whose service version
+  // import fanned this batch out, the watch series it belongs to, and — when a planned release scoped the run —
+  // the release. `seriesKey` is the trend's x-axis key: "how did this series move" is a list filter over these
+  // stamps, so the fields live here rather than in a join table. `serviceVersion` is "<service>@<version>",
+  // the ledger row that caused the run — the timeline's link from a scorecard point back to what changed.
+  productId: z.string().optional(),
+  releaseId: z.string().optional(),
+  seriesKey: z.string().optional(),
+  serviceVersion: z.string().optional(),
   // Lineage of a retry-failed run — the source scorecard this record re-ran the failed cases of (passing results
   // carried over verbatim). The source record itself is never mutated. docs/architecture/batch-resilience.md
   retryOf: z.string().optional(),

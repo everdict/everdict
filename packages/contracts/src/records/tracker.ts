@@ -77,7 +77,19 @@ export type IssuePriority = z.infer<typeof IssuePrioritySchema>;
 // same reverse query a harness uses (`?linkType=issue&linkId=`). The id is the target's UUID, not its
 // identifier: a team move re-mints `ENG-12` into `PLT-3`, and a pointer that survives the move is worth more
 // than one that reads nicely in the raw record (the screen resolves it to the identifier anyway).
-export const ISSUE_LINK_TYPES = ["harness", "dataset", "judge", "scorecard", "run", "view", "issue"] as const;
+// `product`/`release` point into the product timeline (records/product.ts): "this issue blocks the 2026.3
+// release" is a link, and the release's gate counts its open linked issues through the same reverse query.
+export const ISSUE_LINK_TYPES = [
+  "harness",
+  "dataset",
+  "judge",
+  "scorecard",
+  "run",
+  "view",
+  "issue",
+  "product",
+  "release",
+] as const;
 export const IssueLinkTypeSchema = z.enum(ISSUE_LINK_TYPES);
 export type IssueLinkType = z.infer<typeof IssueLinkTypeSchema>;
 
@@ -147,6 +159,9 @@ export const TRACKER_HISTORY_EVENTS = [
   "github_push_failed",
   "completed",
   "cancelled",
+  // A release went out (records/product.ts). Its own word rather than `completed` because "released" is what a
+  // reader scans a product's history for — and a forced release must read as shipped-with-overrides, not done.
+  "released",
   // An issue changed hands between teams. It is its own event rather than an `updated` with a changed field
   // because it re-mints the issue's IDENTIFIER: the durable answer to "why is this issue called PLT-3 when every
   // link in the pull request says ENG-12" lives here, and nowhere else once the event log is swept.

@@ -14,6 +14,9 @@ const ROUTE: Record<IssueLinkType, string> = {
   // 한 이슈가 다른 이슈를 언급했을 때 — 링크가 들고 있는 건 UUID 이고, 상세 라우트가 그걸 정규 식별자
   // 주소로 넘겨 준다. 제목까지 아는 화면은 `issueHref` 로 슬러그 붙은 주소를 만든다.
   issue: 'issue',
+  // The product timeline — a link points at one product or one release (singular detail routes).
+  product: 'product',
+  release: 'release',
 }
 
 // 이슈 상세가 "연결된 자산"으로 보여주고 걸 수 있는 종류 — 이슈를 **검증하는 능력** 셋뿐이다.

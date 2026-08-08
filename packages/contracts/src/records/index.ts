@@ -21,6 +21,7 @@ export * from "./knowledge-entry.js";
 export * from "./notification.js";
 export * from "./oauth-state.js";
 export * from "./platform-event.js";
+export * from "./product.js";
 export * from "./run.js";
 export * from "./runner.js";
 export * from "./schedule.js";

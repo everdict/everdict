@@ -68,6 +68,11 @@ export const TRIGGERABLE_EVENT_KINDS = [
   'initiative.update_posted',
   // 이터레이션이 닫혔다 — 회고 요약을 쓰라는 신호. 사이클은 한 번 닫히므로 한 번만 깨운다.
   'cycle.completed',
+  // Product timeline (docs/architecture/product-timeline.md) — a tracked service released / a release was
+  // planned / we shipped (payload filter: to eq released). Same vocabulary as the server list.
+  'product.service_version_imported',
+  'release.created',
+  'release.status_changed',
 ] as const
 
 // 이벤트 payload 에 대한 선언적 필터 하나 — filters 는 AND 결합(예: passRate < 1 = 실패 케이스 있는 배치).

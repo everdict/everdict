@@ -51,6 +51,14 @@ const ACTIVITY_AXIS_BY_KIND = {
   "task.completed": "work",
   "task.cancelled": "work",
   "comment.created": "work",
+  // The product timeline — releases planned and shipped, and the service versions that moved under them.
+  // `work`, not `evaluation`: a version import is news that the PRODUCT moved; the scorecards it fans out
+  // into announce themselves on the evaluation axis already, and counting the cause with its effects would
+  // double-draw one motion.
+  "product.created": "work",
+  "product.service_version_imported": "work",
+  "release.created": "work",
+  "release.status_changed": "work",
   // Evaluation — what ran, what it scored, and the material it ran on.
   "run.submitted": "evaluation",
   "run.completed": "evaluation",
