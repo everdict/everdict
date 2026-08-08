@@ -416,7 +416,7 @@ describe("PgRunStore — which replica drives the row (multi-replica boot recove
 
     await new PgRunStore(client, "cp-abc").create(queued);
 
-    expect(calls[0]?.text).toMatch(/session, owner_replica, created_at/);
+    expect(calls[0]?.text).toMatch(/session, owner_replica, visibility, created_at/);
     expect(calls[0]?.params?.[25]).toBe("cp-abc");
   });
 
@@ -628,7 +628,10 @@ describe("RunStore — the audience filter (personal executions are their owner'
     expect(sql).toMatch(/COALESCE\(origin->>'actor', created_by\) = \$7/);
     // The background-agent pass rides IN the same clause: headless automation is workspace observability
     // (runAudience's class rule), so the SQL restatement must open it too — before the LIMIT like the rest.
-    expect(sql).toMatch(/OR \(kind = 'agent' AND class = 'background'\)/);
+    // The DECLARED visibility outranks the class inference; the class clause survives only for legacy
+    // (unstamped) rows — privacy stopped being a scheduling knob.
+    expect(sql).toMatch(/OR visibility = 'workspace'/);
+    expect(sql).toMatch(/OR \(visibility IS NULL AND kind = 'agent' AND class = 'background'\)/);
     // The filter sits in the WHERE, above the LIMIT — never applied to an already-limited page.
     expect(sql.indexOf("COALESCE(origin->>'actor', created_by) = $7")).toBeLessThan(sql.indexOf("LIMIT $5"));
     expect(calls[0]?.params?.[6]).toBe("alice");

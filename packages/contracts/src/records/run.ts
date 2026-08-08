@@ -172,6 +172,12 @@ export const RunRecordSchema = z.object({
   // ── The universal-run shape (execution-model.md P0, mig 0092) — additive; absent = legacy eval run. ──
   kind: RunKindSchema.optional(), // executable family; readers treat undefined as "eval"
   class: RunClassSchema.optional(), // scheduling class (interactive | background | batch)
+  // WHO may read this run — a CREATION-TIME FACT, not an inference. The class-based rule it supersedes was
+  // right for today's two cases (background activation = fleet observability, interactive turn = one
+  // member's conversation) but class is SCHEDULING semantics: a background personal assistant or an
+  // interactive team agent breaks the inference, and privacy must not be decided by a priority knob.
+  // Absent = legacy row → runAudience's class/kind fallback (conservative).
+  visibility: z.enum(["workspace", "member"]).optional(),
   lifetime: RunLifetimeSchema.optional(), // task (ends by itself) | session (held open)
   origin: RunOriginSchema.optional(), // structured WHY (supersedes the free-string trigger; both stamped)
   envelope: RunEnvelopeSchema.optional(), // the budget drawn from — stamped now, enforced at P4

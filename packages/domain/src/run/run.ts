@@ -71,7 +71,13 @@ export type RunAudience = { scope: "workspace" } | { scope: "member"; subject: s
 // tests assert the two impls agree.
 export const PERSONAL_RUN_KINDS: readonly RunRecord["kind"][] = ["agent", "sandbox"];
 
-export function runAudience(record: Pick<RunRecord, "kind" | "class" | "createdBy" | "origin">): RunAudience {
+export function runAudience(
+  record: Pick<RunRecord, "kind" | "class" | "visibility" | "createdBy" | "origin">,
+): RunAudience {
+  // The CREATION-TIME FACT outranks every inference (F9): class is scheduling semantics, and a future
+  // background personal assistant (or interactive team agent) must not have its privacy decided by a
+  // priority knob. Absent = legacy row → the class/kind fallback below, conservatively.
+  if (record.visibility === "workspace") return { scope: "workspace" };
   if (!PERSONAL_RUN_KINDS.includes(record.kind ?? "eval")) return { scope: "workspace" };
   // The agent kind holds TWO audiences and the record already says which: a BACKGROUND run is headless
   // automation — workspace fleet observability by design (its session is created `visibility: "workspace"`
@@ -79,7 +85,8 @@ export function runAudience(record: Pick<RunRecord, "kind" | "class" | "createdB
   // from the kind alone split one activation's evidence two ways — the transcript readable workspace-wide
   // through the session door, the run/trajectory/list entry locked to the creator. A legacy agent row with
   // no class stays personal: the conservative reading for rows that never declared themselves.
-  if (record.kind === "agent" && record.class === "background") return { scope: "workspace" };
+  if (record.visibility === undefined && record.kind === "agent" && record.class === "background")
+    return { scope: "workspace" };
   // `origin.actor` is the member the run acted FOR (an activation acts as its agent's creator); `createdBy`
   // is the same subject on every factory that stamps both, and the fallback for older rows.
   const owner = record.origin?.actor ?? record.createdBy;
@@ -109,7 +116,7 @@ export function runEvidenceIdentity(record: Pick<RunRecord, "kind" | "caseId" | 
 // May `viewer` (a member subject) read this run and its trajectory? Tenancy is checked separately and
 // first — this answers only the within-workspace question.
 export function canReadRun(
-  record: Pick<RunRecord, "kind" | "class" | "createdBy" | "origin">,
+  record: Pick<RunRecord, "kind" | "class" | "visibility" | "createdBy" | "origin">,
   viewer: string,
 ): boolean {
   const audience = runAudience(record);
@@ -227,6 +234,7 @@ export class Run {
       ...(input.createdBy ? { createdBy: input.createdBy } : {}),
       kind: "agent",
       class: "background", // agent-caused work must never starve a human's click (P0 vocabulary)
+      visibility: "workspace", // fleet observability, matching the session door — a FACT, not a class inference
       lifetime: "task",
       origin: {
         cause: "event",
@@ -272,6 +280,7 @@ export class Run {
       createdBy: input.actor,
       kind: "agent",
       class: "interactive",
+      visibility: "member", // one member's conversation — declared, not inferred from the scheduling class
       lifetime: "task",
       // The member asked (cause/actor/createdBy); the AGENT executed — recorded, same as the activation path.
       origin: { cause: "member", actor: input.actor, executor: `agent:${input.agentId}` },
@@ -364,6 +373,7 @@ export class Run {
       createdBy: input.createdBy,
       kind: "sandbox",
       class: "interactive",
+      visibility: "member", // whoever is at the browser — declared, not inferred
       lifetime: "session",
       origin: { cause: "member", actor: input.createdBy },
       ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
@@ -416,6 +426,7 @@ export class Run {
       createdBy: input.createdBy,
       kind: "sandbox",
       class: "interactive", // a person is at the shell
+      visibility: "member", // whoever is at the shell — declared, not inferred
       lifetime: "session", // held open until closed/expired — `running` means "alive", not "in progress"
       origin: input.origin ?? { cause: "member", actor: input.createdBy },
       ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),

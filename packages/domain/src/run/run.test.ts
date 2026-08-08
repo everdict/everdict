@@ -345,6 +345,38 @@ describe("runAudience — one rule for who may read an execution", () => {
     expect(canReadRun(record, "bob")).toBe(true);
   });
 
+  it("the DECLARED visibility outranks the class — privacy is not a scheduling knob", () => {
+    // A future background personal assistant stays its member's; a hypothetical workspace-declared sandbox
+    // opens. The factories stamp the fact; the class inference survives only for unstamped legacy rows.
+    expect(
+      runAudience({
+        kind: "agent",
+        class: "background",
+        visibility: "member",
+        createdBy: "alice",
+        origin: { cause: "event", actor: "alice" },
+      }),
+    ).toEqual({ scope: "member", subject: "alice" });
+    expect(runAudience({ kind: "sandbox", visibility: "workspace", createdBy: "alice" })).toEqual({
+      scope: "workspace",
+    });
+    // The factories declare: activation=workspace, chat turn=member.
+    expect(
+      Run.newAgentRun({
+        id: "r",
+        tenant: "t",
+        agentId: "watcher",
+        sessionId: "s",
+        eventKind: "issue.created",
+        createdBy: "alice",
+        now: "t0",
+      }).visibility,
+    ).toBe("workspace");
+    expect(
+      Run.newChatTurn({ id: "r", tenant: "t", agentId: "a", sessionId: "s", actor: "alice", now: "t0" }).visibility,
+    ).toBe("member");
+  });
+
   it("keeps a LEGACY classless agent row personal — rows that never declared themselves read conservatively", () => {
     const legacy = { kind: "agent" as const, createdBy: "alice", origin: { cause: "member" as const, actor: "alice" } };
     expect(runAudience(legacy)).toEqual({ scope: "member", subject: "alice" });

@@ -39,6 +39,7 @@ interface RunRow {
   outputs: unknown | null;
   session: unknown | null;
   owner_replica: string | null; // which control-plane replica drives this run (mig 0135)
+  visibility: string | null; // creation-time audience fact (mig 0143) — NULL = legacy class/kind inference
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -73,6 +74,7 @@ function rowToRecord(row: RunRow): RunRecord {
     ...(row.outputs ? { outputs: row.outputs } : {}),
     ...(row.session ? { session: row.session } : {}),
     ...(row.owner_replica ? { ownerReplica: row.owner_replica } : {}),
+    ...(row.visibility ? { visibility: row.visibility } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -80,9 +82,9 @@ function rowToRecord(row: RunRow): RunRecord {
 }
 
 const RUN_COLUMNS =
-  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, team_id, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, session, owner_replica, created_at, updated_at)";
+  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, team_id, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, session, owner_replica, visibility, created_at, updated_at)";
 const RUN_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)";
 
 function runInsertParams(r: RunRecord, replicaId?: string): unknown[] {
   return [
@@ -114,6 +116,7 @@ function runInsertParams(r: RunRecord, replicaId?: string): unknown[] {
     // The writer is the driver: whoever inserts the row is the process about to drive it, so ownership is
     // stamped HERE rather than threaded through every submit path (and cannot be forged by a caller).
     r.ownerReplica ?? replicaId ?? null,
+    r.visibility ?? null,
     r.createdAt,
     r.updatedAt,
   ];
@@ -244,7 +247,8 @@ export class PgRunStore implements RunStore {
          AND (
            $7::text IS NULL
            OR NOT (kind = ANY($8::text[]))
-           OR (kind = 'agent' AND class = 'background')
+           OR visibility = 'workspace'
+           OR (visibility IS NULL AND kind = 'agent' AND class = 'background')
            OR COALESCE(origin->>'actor', created_by) IS NULL
            OR COALESCE(origin->>'actor', created_by) = $7
          )
