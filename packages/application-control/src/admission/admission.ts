@@ -42,6 +42,10 @@ export async function admitCausedWork(
   tenant: string,
   causedByRunId: string,
   countRuns: number,
+  // The admission's identity for retry idempotency: a caller that retries after a lost response MUST reuse
+  // it, or the committed claim counts twice. Absent = a fresh identity per call (today's callers never
+  // retry an admission — a client-level resubmit is a NEW ask); threading a natural id is the upgrade path.
+  opts?: { requestId?: string },
 ): Promise<RunEnvelope | undefined> {
   const causer = await deps.runStore.get(causedByRunId);
   // A forged/foreign causer id is a bad request, never a silent pass — causation is an audited edge.
@@ -79,7 +83,10 @@ export async function admitCausedWork(
   if (!envelope) return undefined;
 
   // In-flight cap (429, O7's third knob): refusal is retryable by nature — slots free as caused runs
-  // settle — so it is a rate limit, never a budget verdict.
+  // settle — so it is a rate limit, never a budget verdict. DELIBERATELY a derived snapshot, not an atomic
+  // claim: the count comes from the run ledger (never a counter to reconcile — a tombstoned run frees its
+  // slot by being terminal), which means a same-instant burst can overshoot by its concurrency margin.
+  // For a generous runaway-flood BACKSTOP that trade is right; the HARD boundary is capRuns below.
   const maxInFlight = deps.maxInFlight ?? MAX_IN_FLIGHT;
   const inFlight = await deps.runStore.countActiveByEnvelope(tenant, envelope.id);
   if (inFlight + countRuns > maxInFlight)
@@ -108,19 +115,48 @@ export async function admitCausedWork(
       throw new PaymentRequiredError("BUDGET_EXCEEDED", detail, message);
     };
     const spend = await deps.envelopes.spend(envelope.id);
+    // capUsd is the METERED realized-cost stop (O7: meter + headroom, never a reservation) — settled cost
+    // past the cap refuses new work; concurrent in-flight work can overshoot by its margin, bounded by the
+    // in-flight cap above. That is the documented trade, not a hard reservation.
     if (caps.capUsd !== undefined && spend.usd >= caps.capUsd)
       refuse(
         `Agent envelope exhausted: $${spend.usd.toFixed(4)} of $${caps.capUsd} spent — the delegated budget refuses new work.`,
         { envelope: envelope.id, spentUsd: spend.usd, capUsd: caps.capUsd },
       );
-    if (caps.capRuns !== undefined && spend.runs + countRuns > caps.capRuns)
-      refuse(`Agent envelope run cap reached: ${spend.runs}+${countRuns} > ${caps.capRuns} caused runs.`, {
-        envelope: envelope.id,
-        admittedRuns: spend.runs,
-        countRuns,
-        capRuns: caps.capRuns,
-      });
-    await deps.envelopes.admit(envelope.id, tenant, countRuns);
+    // capRuns is the HARD autonomy boundary, and hard means ATOMIC: the read-compare-increment this
+    // replaces let two replicas at capRuns=1 both read 0, both pass, both increment. The claim's predicate
+    // re-evaluates on the latest row version under the row lock (the tenant-quota shape), and a retry with
+    // the same request id is the same right. The legacy sequence stays only for a store without the seam.
+    if (caps.capRuns !== undefined) {
+      if (deps.envelopes.tryAdmitRuns) {
+        const admitted = await deps.envelopes.tryAdmitRuns(
+          envelope.id,
+          tenant,
+          opts?.requestId ?? `adm_${crypto.randomUUID()}`,
+          countRuns,
+          caps.capRuns,
+        );
+        if (!admitted)
+          refuse(`Agent envelope run cap reached: ${spend.runs}+${countRuns} > ${caps.capRuns} caused runs.`, {
+            envelope: envelope.id,
+            admittedRuns: spend.runs,
+            countRuns,
+            capRuns: caps.capRuns,
+          });
+      } else {
+        if (spend.runs + countRuns > caps.capRuns)
+          refuse(`Agent envelope run cap reached: ${spend.runs}+${countRuns} > ${caps.capRuns} caused runs.`, {
+            envelope: envelope.id,
+            admittedRuns: spend.runs,
+            countRuns,
+            capRuns: caps.capRuns,
+          });
+        await deps.envelopes.admit(envelope.id, tenant, countRuns);
+      }
+    } else {
+      // usd-only envelope: keep metering admitted runs (observability), no cap to claim against.
+      await deps.envelopes.admit(envelope.id, tenant, countRuns);
+    }
   }
   return { id: envelope.id };
 }

@@ -35,7 +35,14 @@ describeTrust(
       envelopes = new PgEnvelopeStore(pg.client);
     });
     afterAll(async () => {
-      if (tenant) await pg.client.query("DELETE FROM everdict_runs WHERE tenant = $1", [tenant]);
+      if (tenant) {
+        await pg.client.query("DELETE FROM everdict_runs WHERE tenant = $1", [tenant]);
+        await pg.client.query(
+          "DELETE FROM everdict_envelope_admissions WHERE envelope_id IN (SELECT id FROM everdict_envelopes WHERE tenant = $1)",
+          [tenant],
+        );
+        await pg.client.query("DELETE FROM everdict_envelopes WHERE tenant = $1", [tenant]);
+      }
       await pg?.close();
     });
 
@@ -87,6 +94,37 @@ describeTrust(
       // spend lives in the database, not in whichever process happened to admit the earlier work.
       const otherReplica = { runStore: new PgRunStore(pg.client), envelopes: new PgEnvelopeStore(pg.client) };
       await expect(admitCausedWork(otherReplica, tenant, delegator, 1)).rejects.toBeInstanceOf(PaymentRequiredError);
+    });
+
+    it("TRUST-28: a same-instant burst on capRuns=1 admits EXACTLY ONE — the cap is an atomic claim, not a snapshot read", async () => {
+      // The pre-fix sequence was spend() SELECT → JS compare → admit() upsert: two replicas both read 0,
+      // both passed, both incremented — the exact count-then-act shape the tenant quota was rewritten to
+      // close, left open on the one budget that bounds a delegated agent's autonomy. Only real Postgres can
+      // certify the claim: the atomicity IS the predicate re-evaluating under the row lock.
+      const delegator = trustId("run-race");
+      await run({ id: delegator, envelope: { id: delegator, capRuns: 1 } });
+
+      const replicaA = { runStore: new PgRunStore(pg.client), envelopes: new PgEnvelopeStore(pg.client) };
+      const replicaB = { runStore: new PgRunStore(pg.client), envelopes: new PgEnvelopeStore(pg.client) };
+      const results = await Promise.allSettled([
+        admitCausedWork(replicaA, tenant, delegator, 1),
+        admitCausedWork(replicaB, tenant, delegator, 1),
+      ]);
+      const admitted = results.filter((r) => r.status === "fulfilled");
+      const refused = results.filter((r) => r.status === "rejected" && r.reason instanceof PaymentRequiredError);
+      expect(admitted).toHaveLength(1);
+      expect(refused).toHaveLength(1);
+      expect((await envelopes.spend(delegator)).runs).toBe(1); // conservation: exactly the cap, never 2
+    });
+
+    it("TRUST-28: a retry with the SAME request id is the same right — one increment, ever", async () => {
+      const delegator = trustId("run-retry");
+      await run({ id: delegator, envelope: { id: delegator, capRuns: 3 } });
+      const requestId = trustId("adm");
+      await admitCausedWork({ runStore, envelopes }, tenant, delegator, 2, { requestId });
+      // The lost-response shape: the caller re-asks with the identity it already holds.
+      await admitCausedWork({ runStore, envelopes }, tenant, delegator, 2, { requestId });
+      expect((await envelopes.spend(delegator)).runs).toBe(2); // held, never re-claimed
     });
 
     it("a runaway causal chain is refused on DEPTH before it is refused on money", async () => {
