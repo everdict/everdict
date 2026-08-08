@@ -162,6 +162,11 @@ It is the sibling of `provenance`, and the split is deliberate: **provenance is 
 makes about a run** (who ran it, on whose runner, which models the workspace paid for), **the execution
 manifest is a report the EXECUTION SITE makes about itself**. Mixing the two would make neither auditable —
 so the runner identity stays on `provenance.runner`, where it is stamped by the party that actually knows it.
+Provenance also carries the run's **trust class**: `provenance.attestation: "managed" | "self_reported"` —
+self-hosted runs stamp `self_reported` (a manifest from compute we do not operate is honest, but a
+self-report), while a managed run usually carries no provenance at all, which IS the platform's own
+observation. A surface must never merge a self-reported manifest into a strong claim ("verified on Windows
+2025") — the manifest says what the site reported; the attestation says whether anyone we operate saw it.
 
 **`osResolved` is the point of the field.** `placement.os` is optional, and every consumer used to default it
 to linux privately (`?? "linux"` in `runCase`, in the Nomad topology builders, in the capability derivation).

@@ -114,6 +114,13 @@ export const CaseProvenanceSchema = z.object({
   ranOn: z.string(), // e.g. "self-hosted"
   runner: z.string().optional(), // runner id (device)
   by: z.string().optional(), // the subject that ran it (principal.subject)
+  // The TRUST CLASS of this run's execution claims (review §16): "self_reported" = the ExecutionManifest and
+  // the result came from compute the control plane does not operate (a self-hosted runner) — honest, but a
+  // self-report; "managed" = the platform itself provisioned and observed the execution. A managed run
+  // usually carries NO provenance at all (absence = the platform's own dispatch), so this field mostly
+  // stamps the self-reported side. Consumers must not merge the two into one strong claim — "verified on
+  // Windows 2025" is a statement only a managed/verified execution supports.
+  attestation: z.enum(["managed", "self_reported"]).optional(),
   // Workspace-billed models used on this run — stamped by the control plane at dispatch when a harness model's API
   // key resolved from the WORKSPACE secret tier (the team pays for those tokens, not the user's own login). Lets the
   // meter attribute per-model cost even on an own-pays personal self-hosted run: trace llm_calls whose `model`

@@ -31,7 +31,12 @@ export class SelfHostedBackend implements Backend, Probeable {
     const { result, ranBy } = await this.hub.enqueue(this.key, job, opts?.onStarted);
     // Provenance is stamped by the control plane (not runner self-reported) — record in the result that this ran on an unmanaged personal host (D2).
     // runner = the runner that actually completed it (ranBy). For a pool (self:ws) job key.runnerId is "*" (the pool), so use ranBy to record the real runner.
-    return { ...result, provenance: { ranOn: "self-hosted", runner: ranBy, by: this.key.owner } };
+    // attestation "self_reported": the manifest/result came from compute we do not operate — a reader
+    // weighing "ran on Windows" must know whether the platform observed that or was told it (review §16).
+    return {
+      ...result,
+      provenance: { ranOn: "self-hosted", runner: ranBy, by: this.key.owner, attestation: "self_reported" },
+    };
   }
   // There's no way (as of Slice 3) to assert "is a runner attached" without a job — in the pull model, connection state only shows through lease polling.
   // Report only the number of waiting jobs (they drain quickly if a runner is attached). Precise presence/heartbeat is Slice 6.
