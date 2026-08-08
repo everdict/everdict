@@ -4,7 +4,7 @@ import { PgEnvelopeStore, PgRunStore } from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
 
-// Trust suite (docs/trust-certification.md) — TRUST-10.
+// Trust suite (docs/trust-certification.md) — TRUST-10 / TRUST-28 / TRUST-33.
 //
 // The invariant: DELEGATED WORK DRAWS FROM ITS DELEGATOR'S ENVELOPE, AND AN EXHAUSTED ENVELOPE REFUSES.
 // An agent that spawns work is spending someone's budget. If caused work rode free on the tenant pool, the
@@ -125,6 +125,49 @@ describeTrust(
       // The lost-response shape: the caller re-asks with the identity it already holds.
       await admitCausedWork({ runStore, envelopes }, tenant, delegator, 2, { requestId });
       expect((await envelopes.spend(delegator)).runs).toBe(2); // held, never re-claimed
+    });
+
+    it("TRUST-33: a same-instant burst with the SAME request id charges EXACTLY ONCE — the claim row, not a probe, serializes", async () => {
+      // The mig-0141 shape probed request existence in a CTE and wrote the row FROM the counter claim: every
+      // same-id racer saw the empty probe (one snapshot each) and every one of them incremented the counter —
+      // one right, charged N times, conservation broken. Claim-first makes the request row's unique index the
+      // serialization point; every racer must agree on the ONE answer and the counter moves once.
+      const delegator = trustId("run-same-req");
+      await run({ id: delegator, envelope: { id: delegator, capRuns: 10 } });
+      const requestId = trustId("adm-burst");
+      const results = await Promise.all(
+        Array.from({ length: 6 }, () => {
+          const replica = new PgEnvelopeStore(pg.client);
+          return replica.tryAdmitRuns?.(delegator, tenant, requestId, 3, 10);
+        }),
+      );
+      expect(results.every((r) => r === true)).toBe(true); // one right, re-answered to every racer
+      expect((await envelopes.spend(delegator)).runs).toBe(3); // charged ONCE — conservation
+    });
+
+    it("TRUST-33: a held request id re-presented with a DIFFERENT ask is refused loudly — a receipt is not transferable", async () => {
+      // Pre-fix, the held answer never re-checked the payload: claim 1 run under an id, then "retry" the
+      // same id asking 100 and the cap predicate never ran again — a bypass through one's own receipt.
+      const delegator = trustId("run-receipt");
+      await run({ id: delegator, envelope: { id: delegator, capRuns: 100 } });
+      const requestId = trustId("adm-receipt");
+      await admitCausedWork({ runStore, envelopes }, tenant, delegator, 1, { requestId });
+      await expect(admitCausedWork({ runStore, envelopes }, tenant, delegator, 50, { requestId })).rejects.toThrow(
+        /cannot name a different ask/,
+      );
+      expect((await envelopes.spend(delegator)).runs).toBe(1); // the mismatch charged nothing
+    });
+
+    it("TRUST-33: a refusal holds nothing — the same id may ask again, and the ledger stays conserved", async () => {
+      // A refused claim deletes its own row: refusal grants no right, so it must not squat on the id either
+      // (a lingering refused row would make a later legitimate ask read as 'held' without any charge behind it).
+      const delegator = trustId("run-refused");
+      await run({ id: delegator, envelope: { id: delegator, capRuns: 2 } });
+      const requestId = trustId("adm-refused");
+      expect(await envelopes.tryAdmitRuns?.(delegator, tenant, requestId, 3, 2)).toBe(false); // over cap
+      expect((await envelopes.spend(delegator)).runs).toBe(0); // the refusal charged nothing
+      expect(await envelopes.tryAdmitRuns?.(delegator, tenant, requestId, 2, 2)).toBe(true); // a fresh, admissible ask
+      expect((await envelopes.spend(delegator)).runs).toBe(2);
     });
 
     it("a runaway causal chain is refused on DEPTH before it is refused on money", async () => {
