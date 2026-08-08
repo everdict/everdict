@@ -32,6 +32,7 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "describe_driver_workflow",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Diagnose a durable driver workflow by LEDGER id (a scorecard/group id): lifecycle status, history " +
         "pressure, and each pending activity's retry state with its last failure — answers 'where is this " +
@@ -51,6 +52,7 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "cancel_driver_workflow",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Cooperatively cancel a durable driver workflow by LEDGER id — the record settles through the control " +
         "plane's own terminal guards. Destructive (admin-only), same posture as live-cluster runtime control.",
@@ -70,6 +72,7 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "terminate_driver_workflow",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Force-terminate a durable driver workflow by LEDGER id — for the workflow a cooperative cancel " +
         "cannot reach (a stuck handler, an unbounded-retry activity looping against a gone record). Never " +

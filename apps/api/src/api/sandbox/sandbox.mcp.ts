@@ -33,6 +33,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "create_sandbox",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Open a sandbox session: hand work to a DELEGATION PROFILE (profile:{id} + brief — a registered work " +
         "environment: its image, agent, model connection, env and standing instructions pinned once; always a " +
@@ -184,6 +185,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "snapshot_sandbox",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Publish a world session's filesystem as the world's next snapshot: commit the live container, push " +
         "it into the workspace's managed image namespace (next v<n> tag), and register a new " +
@@ -220,6 +222,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "sandbox_git_push",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Publish a session's work: push the checked-out branch to the repository it was cloned from, and " +
         "optionally open a pull request for it. COMMIT FIRST with sandbox_exec (git add/commit need no " +
@@ -266,6 +269,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "touch_sandbox",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Extend a live sandbox session's hard deadline to now+ttl (keep-alive; clamped to the max, never " +
         "shortens). Extends process memory, the run record, and the durable reaper's timer. Creator-or-admin.",
@@ -283,6 +287,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "list_sandboxes",
     {
+      annotations: { readOnlyHint: true },
       description:
         "List live sandbox sessions for this workspace (record + live meta: expiresAt, busy, booted harness, " +
         "task summaries) — the reattach surface. Settled sessions stay on the runs ledger.",
@@ -294,6 +299,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "get_sandbox",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Read one sandbox session: the ledger RunRecord (settled sessions included) plus live meta while this " +
         "control plane holds the container.",
@@ -305,6 +311,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "submit_sandbox_task",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Submit one ad-hoc test case into a live harness session (the playground): the session's harness runs " +
         "the task prompt in a fresh working directory of the warm container — no dataset, no graders. On a " +
@@ -336,6 +343,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "read_sandbox_task_trace",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Poll one test case's trace: events since a cursor into the task's append-only buffer (omit = full " +
         "replay). Live while the task runs — a streaming harness shows tool calls before the case finishes; " +
@@ -353,6 +361,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "sandbox_exec",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Run one shell command (`sh -c`) inside a live sandbox session and get stdout/stderr/exitCode. " +
         "Creator-or-admin only — checked before the command runs. The exec is appended to the session's trajectory.",
@@ -371,6 +380,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "close_sandbox",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Close a sandbox session: tears the container down, seals the session trajectory, settles the run as " +
         "succeeded with session.closedReason. A world session with hibernate on snapshots BEFORE the container " +

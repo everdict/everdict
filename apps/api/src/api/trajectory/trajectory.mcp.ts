@@ -13,6 +13,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "list_trajectories",
     {
+      annotations: { readOnlyHint: true },
       description:
         "List the workspace's SEALED trajectories (the owned evidence ledger, newest first, cursor-paginated). " +
         "Each meta says how the evidence arrived (source: run | otlp | import), WHAT it is (kind: eval | " +
@@ -40,6 +41,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "get_trajectory",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Open ONE sealed trajectory from the owned ledger: its meta plus every normalized TraceEvent (the " +
         "same evidence a judge reads). Keyed by the id it was sealed under (TrajectoryMeta.runId from " +
@@ -69,6 +71,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "get_workspace_trace_thresholds",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The tenant-configured trace thresholds — evaluated over EVERY trajectory at seal time; a crossing " +
         "lands trace.threshold_crossed on the event log (the wake signal a triage agent subscribes to).",
@@ -80,6 +83,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "get_workspace_trace_ingestion",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The OTLP door's ingestion state (N3 admission lane): the effective events/hour bound (workspace " +
         "override > operator default > unlimited), the last hour's stored events, and the retention TTL when " +
@@ -105,6 +109,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "set_workspace_trace_ingestion",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Set (or clear with null) the workspace's OTLP-door quota override — events stored per rolling hour. " +
         "Admin (settings:write).",
@@ -122,6 +127,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "set_workspace_trace_thresholds",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Replace the workspace's trace thresholds (full replacement). metric: usd | total_tokens | llm_calls | " +
         "tool_calls | tool_failures | events | latency_ms_max; value is the exceeds-bound (strictly greater). " +

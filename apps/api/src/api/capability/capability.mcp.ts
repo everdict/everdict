@@ -15,6 +15,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "list_capabilities",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Capabilities visible to my workspace — own private (mine) + workspace + subset + subset shared to me (latest live version each). Excludes the global public catalog (use list_public_capabilities)",
       inputSchema: {},
@@ -25,6 +26,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "list_public_capabilities",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The public capability catalog — every capability published 'public' across all workspaces (latest live version each)",
       inputSchema: {},
@@ -35,6 +37,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "get_capability",
     {
+      annotations: { readOnlyHint: true },
       description:
         "A single capability (name + description + discriminated spec). The latest version, or an exact one via `version`. `source` reads a cross-tenant public/subset owner (defaults to my workspace). Not visible / missing → NOT_FOUND",
       inputSchema: { id: z.string(), version: z.string().optional(), source: z.string().optional() },
@@ -48,6 +51,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "list_capability_versions",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Live versions (ascending) + per-version tags for one capability id — my workspace by default, or a cross-tenant public/subset owner via `source`. Not visible / missing → NOT_FOUND. Requires capabilities:read.",
       inputSchema: { id: z.string(), source: z.string().optional() },
@@ -59,6 +63,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "diff_capability_versions",
     {
+      annotations: { readOnlyHint: true },
       description:
         'Structural diff between two versions of the same capability, over the immutable content (name/description/spec) — leaf field changes by path, typeChanged flag for a kind restructure (mcp ↔ code ↔ skill ↔ environment). Both refs accept "latest". `source` diffs a cross-tenant public/subset owner (defaults to my workspace). Requires capabilities:read. Reproducible by the immutable-version guarantee.',
       inputSchema: {
@@ -79,6 +84,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
     server.registerTool(
       "probe_capability_mcp",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Test-connect to an MCP server URL (Streamable HTTP) and list its tools — verify reachability and discover the tool names before authoring an mcp capability. A failure is a result (reachable:false + reason), never an error. `token` is a transient bearer for the test only (never stored). Requires capabilities:write.",
         inputSchema: { url: z.string(), token: z.string().optional() },
@@ -91,6 +97,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "validate_capability",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Dry-run a capability save WITHOUT writing: parse the spec and report whether it would create a new capability or a new version (and which), the existing live versions, and — for an environment kind — image pull-readiness warnings. Bad spec → { ok:false, errors }. Requires capabilities:write.",
       inputSchema: {
@@ -109,6 +116,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "save_capability",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Author (create or edit) a capability — version-free upsert (new id → 1.0.0; a content change → next patch version; unchanged → no-op). `visibility`/`sharedWith` apply only when creating; editing inherits the current reach (change it via set_capability_visibility). Omitted on create, `visibility` defaults BY KIND: an `environment` (the image a harness pins, used workspace-wide) → 'workspace', a tool kind → 'private'. Publishing a new capability as 'public' requires an admin. Requires capabilities:write.",
       inputSchema: {
@@ -139,6 +147,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "set_capability_visibility",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Change a capability's reach across every live version: private | workspace | subset (with `sharedWith` target workspace ids — your own) | public. Owner-or-admin; promoting to 'public' requires an admin. Requires capabilities:write.",
       inputSchema: {
@@ -156,6 +165,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "set_capability_version_tags",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Replace a capability version's full tag set (empty array = remove all) — free-form labels to tell versions apart, outside spec immutability (each ≤60 chars, ≤20 per version; replace semantics). Only the version's creator or a workspace admin. Requires capabilities:write.",
       inputSchema: {
@@ -171,6 +181,7 @@ export function registerCapabilityTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "delete_capability",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Soft-delete a single capability version (tombstone; content preserved). Only the version's creator or a workspace admin. Requires capabilities:write.",
       inputSchema: { id: z.string(), version: z.string() },

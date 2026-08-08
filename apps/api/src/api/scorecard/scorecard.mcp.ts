@@ -24,6 +24,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "run_scorecard",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Run a dataset against harness@version and aggregate a scorecard (async — returns a queued record, then poll with get_scorecard). If runtime is given, execute on that runtime.",
         inputSchema: {
@@ -198,6 +199,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "retry_scorecard",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Retry a finished batch's FAILED cases as a new scorecard — passing results are carried over verbatim (full comparable case set), origin.retryOf keeps the lineage. The source record is never mutated.",
         inputSchema: {
@@ -226,6 +228,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "rerun_scorecard",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Re-run a finished batch's ENTIRE case set as a new scorecard (전체 재실행), faithfully reproducing the original submit (dataset+version, harness+pins, grading plan, trials) so the two compare directly — while optionally overriding the run-config knobs: WHO runs it (judges, runtime) and HOW it is dispatched (concurrency, retries, subset via cases). Each unset field inherits the original; scoring is reproduced verbatim (never overridden). Async (poll with get_scorecard). Multi-trial IS supported here. Lineage via origin.retryOf; the source record is never mutated. For recovering only the FAILED cases (carry the passing ones over) use retry_scorecard instead.",
         inputSchema: {
@@ -287,6 +290,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "cancel_scorecard",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Stop a running/queued batch (user cancel): mark it cancelled (terminal, excluded from baseline/diff/leaderboard), stop firing the remaining cases, and force-free the runtime of the in-flight ones (managed backends killed; self-hosted lease jobs aborted on the runner's next heartbeat). Already-terminal → conflict; other workspace / missing → NOT_FOUND.",
         inputSchema: { id: z.string().describe("scorecard id to stop (must be queued/running)") },
@@ -308,6 +312,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "list_scorecards",
       {
+        annotations: { readOnlyHint: true },
         description:
           "This workspace's scorecards (summary only — excludes heavy per-case results). Each row carries the " +
           "served `headlinePassRate` (authority-ranked) — read it instead of re-deriving a representative from " +
@@ -345,6 +350,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "rescore_unmeasured_scores",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Re-score a scorecard's retryable-unmeasured judge scores in place (transient judge LLM/transport blips) — no case re-execution; judge versions come from the batch's own pins. Non-judge unmeasured scores need a case re-run (retry) and come back as `skipped`. Returns {id, rescoredJudges, skipped}.",
         inputSchema: { id: z.string().describe("the scorecard id whose retryable-unmeasured judge scores to recover") },
@@ -385,6 +391,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "get_scorecard",
       {
+        annotations: { readOnlyHint: true },
         description:
           "A full scorecard (including per-case results). Served enrichments: `headlinePassRate` (authority-ranked), `casePass` {pass,total} (verdicted denominator — never divide by executed), `outcomes` (requested/executed/gradeable/verdicted + infraFailed/cancelled/unmeasured — an infra failure is recovery work, never a product FAIL), per-case `verdict`+`verdictBasis` (which rung decided) and `evidenceStatus`, `retryableUnmeasured` (rescore worklist size), `verdictPolicy` stamp + `manifest` digests. `policyResolution` says whether that stamp could be RESTORED: 'unresolvable' means the stamped policy document is gone, so `verdict`/`casePass`/`outcomes` are ABSENT rather than re-derived under today's ladder — read the absence, never treat it as 0. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string() },
@@ -405,6 +412,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "diff_scorecards",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Compare two scorecards (baseline vs candidate). Read `comparability` FIRST: 'none' means the comparison does not hold (no shared cases/metrics, `policyMismatch` — different verdict policies — or `policyUnresolvable` — a side whose stamped policy could not be restored, so its verdicts cannot be re-derived at all) — a different claim from 'no differences'. `missing` enumerates one-sided cases/metrics (never zero-filled), `incomparable` lists kind-changed metrics, and each metric delta carries `direction`+`reading` — never interpret a delta's sign alone. Then: per-case pass transitions → regressions/improvements. When either ran trials, a statistically-gated 'trials' diff (Fisher-exact small-n, minDelta practical floor) rides along.",
         inputSchema: {
@@ -431,6 +439,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "gate_scorecards",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Release-gate a candidate scorecard against a baseline → {decision: pass|block|blocked_missing|not_comparable, reasons, evidence}. TWO decisions are neither pass nor a regression block, and neither may be read as a green light: `not_comparable` (policy mismatch / zero shared cases — the comparison does not hold) and `blocked_missing` (the comparison held, but not over enough — cases the candidate never ran, metrics that vanished or changed kind, or scores that were not measurements). The gate is FAIL-CLOSED: a partial comparison blocks unless you pass comparability=allow_partial and state your tolerance. With trials, the Fisher-gated trials diff is the authoritative regression signal (z_threshold/min_delta set its bar). The decision embeds its effective policy (+digest) and is RECORDED on the candidate for the gate audit. HTTP parity (POST /scorecards/gate).",
         inputSchema: {
@@ -563,6 +572,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "override_scorecard_gate",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Force a BLOCKING gate decision through — recorded, never silent: who and why land on the decision and the gate audit counts it. Only a blocking decision can be overridden — `block` and `blocked_missing` alike (409 otherwise: pass needs no force, not_comparable has nothing to force). HTTP parity (POST /scorecards/:id/gate/override).",
         inputSchema: {
@@ -588,6 +598,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "flake_scorecards",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Cross-batch flake index for a dataset: (case, harness@version, runtime) keys that produced BOTH pass and fail verdicts across succeeded batches — 'that test is just flaky' made refutable. Verdicts derive under each batch's OWN stamped policy; an unverdicted case (infra death) is no observation — an outage is not a flake. Advisory: nothing is auto-quarantined. HTTP parity (GET /scorecards/flake).",
         inputSchema: {
@@ -610,6 +621,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "verify_scorecard_manifest",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Verify a scorecard's reproducibility manifest against the CURRENT registry state — per-subject digest checks (dataset/harness/judges/verdict policy): match | drifted | missing | unverifiable. Each check runs under the stamp's own algorithm: `sha256:` stamps are collision-resistant, pre-sha256 bare-hex FNV stamps are identity against honest data and never tamper-evidence (the caveat rides the response and says which). HTTP parity (POST /scorecards/:id/verify-manifest).",
         inputSchema: { id: z.string() },
@@ -620,6 +632,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "estimate_scorecard",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Cost/time preflight for a dataset×harness batch — per-case usd/duration medians from the last few succeeded batches, projected to an estimate (usd, wall seconds). Honest empty when there is no history — HTTP parity (GET /scorecards/estimate).",
         inputSchema: {
@@ -656,6 +669,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "trend_scorecards",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Regression-over-time for one (dataset, metric): time-ordered points with score/deltaVsBaseline/regressed. Read `direction` (absent = unknown — never interpret a delta's sign alone) and `policyMixed`/per-point `policyDiffers` FIRST: cross-policy points never flag regressed. metric absent = the server resolves the highest-authority pass-rate metric present.",
         inputSchema: {
@@ -686,6 +700,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "leaderboard_scorecards",
       {
+        annotations: { readOnlyHint: true },
         description:
           "(harness × model) ranking for one dataset (benchmark) — descending by metric. window=latest(default)|best. Optional harness/model/judge_model filters (judge_model = fair comparison among the same grader). `policyMixed` marks a ranking produced under different verdict policies — disclose it before comparing rows.",
         inputSchema: {
@@ -716,6 +731,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "query_scorecards",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Flexible analysis pivot over the workspace's scorecards (the engine behind the analyze dashboard/Views): " +
           "filter, group by 0..2 dimensions, optional pivot column, measure passRate|mean|count|latest over a " +
@@ -775,6 +791,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "get_scorecard_analysis",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Get a scorecard's offloaded analysis bundle (analysisRef) as one JSON document: aggregate summary + " +
           "per-case verdicts/scores/failures — the case-level deep dive without reading every child run. 404 when " +
@@ -790,6 +807,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "backfill_scorecard_models",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Backfill the observed model from stored traces into past succeeded scorecards that lack models (idempotent). Use to include past runs on the leaderboard.",
         inputSchema: {},
@@ -800,6 +818,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "ingest_scorecard",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Upload externally produced traces (TraceEvent[]) into a scorecard (harness not run). dataset/harness are OPTIONAL labels — omit both to evaluate the uploaded traces directly (each trace = one case, judges only). body=IngestScorecard JSON {dataset?,harness?,traces:[{caseId,trace}],judges?}",
         inputSchema: { body: z.string().describe("IngestScorecard JSON") },
@@ -835,6 +854,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "pull_scorecard",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Pull per-runId traces from the tenant's observability platform (otel|mlflow|langfuse|langsmith|phoenix) into a scorecard (harness not run). dataset/harness are OPTIONAL labels — omit both to evaluate the pulled traces directly (each trace = one case, judges only). source is EITHER a registered workspace source by name {name} (register once in Settings › Observability, then pull by name) OR an inline config {kind,endpoint,authSecret?,project?[required for phoenix]}. body=PullIngest JSON {dataset?,harness?,source,runs:[{caseId,runId}],judges?}",
         inputSchema: { body: z.string().describe("PullIngest JSON") },

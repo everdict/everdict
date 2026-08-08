@@ -14,6 +14,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "list_workspace_trace_sources",
       {
+        annotations: { readOnlyHint: true },
         description:
           "This workspace's trace sources + per-harness selection state — {sources:[{name,kind,endpoint,correlate,…}], assignments:{harnessId→sourceName}} (not secret values).",
         inputSchema: {},
@@ -23,6 +24,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "set_workspace_trace_source",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register/update a trace source (admin, upsert by name). One pool: a harness uses it to PULL its trace from and/or to EXPORT judged results to (that direction is a per-harness choice). Put the auth token (value) in the SecretStore first and pass its name as authSecretName. `project` is required for mlflow (experiment) and phoenix; otel correlate:'tag' needs service.",
         inputSchema: {
@@ -55,6 +57,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "probe_workspace_trace_source",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Test a trace source connection (base URL + resolved secret) and list the platform's selectable scopes in one authed call — validates before registering. Returns {kind, reachable, detail, reason?('auth'|'unreachable'|'error'), scopeKind?('experiment'|'project'|'service'), scopes?:[{id,name}]}. mlflow→experiments, phoenix/langfuse/langsmith→projects, otel→jaeger services (OTLP-native collectors return reachable with no list). Put the auth value in the SecretStore first and pass its name.",
         inputSchema: {
@@ -72,6 +75,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "remove_workspace_trace_source",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Remove a trace source (admin, by name). Any per-harness selection pointing at it is cleaned up too.",
         inputSchema: { name: z.string().min(1).describe("name of the source to remove") },
@@ -85,6 +89,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "assign_harness_trace_source",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Per-harness PULL selection (member+) — which registered source everdict pulls this harness's case traces from. Omit source to clear the selection (fall back to inline / no pull).",
         inputSchema: {
@@ -100,6 +105,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "assign_harness_trace_sink",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Per-harness EXPORT selection (member+) — which registered source this harness's judged scorecards export to (the source used as an export target; a sink-capable kind, not otel). Same pool as the pull selection. Omit source to clear (export off).",
         inputSchema: {
@@ -119,6 +125,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "list_trace_source_traces",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Enumerate a registered trace source's recent traces + observability metrics (id, name, startedAt, durationMs, tokens, costUsd, status, tags) — the list the judge wizard samples from and the settings traces view. Returns one PAGE: `{ traces, nextCursor? }`; pass `nextCursor` back as `cursor` to fetch the next page (absent = no more). When a trace was produced by Everdict, each row carries `provenance` {runId, scorecardId, dataset, harness, caseId} — the origin to fetch related context (the scorecard/run/dataset/harness) before analyzing it. scope defaults to the source's configured scope (mlflow experiment / phoenix|langfuse|langsmith project / otel[jaeger] service).",
         inputSchema: {
@@ -150,6 +157,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "inspect_trace",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Inspect one trace by id — returns the events normalized with the SUPPLIED span-attribute mapping, plus (for span-based kinds otel/mlflow) the raw span attributes so a mapping can be authored against real keys. Native kinds (langfuse/langsmith/phoenix) ignore mapping and omit rawAttributes. When the trace was produced by Everdict it also carries `provenance` {runId, scorecardId, dataset, harness, caseId} — the origin to pull related context before acting on the analysis. Nothing is persisted.",
         inputSchema: {
@@ -171,6 +179,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "get_harness_span_attr_mapping",
       {
+        annotations: { readOnlyHint: true },
         description:
           "This harness's span-attribute mapping overlay — the mutable conversion layer between a harness and a judge. null = no overlay (the run-time resolver uses the harness spec's mapping / OTel GenAI defaults).",
         inputSchema: { harness: z.string().min(1).describe("harness id") },
@@ -181,6 +190,7 @@ export function registerTraceSourceTools(server: McpServer, ctx: McpToolContext)
     server.registerTool(
       "set_harness_span_attr_mapping",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Set/clear a harness's span-attribute mapping overlay (member+) — authored in the judge wizard against a real trace, applied at the trace-collection seams (overriding the harness spec's mapping). Omit mapping to clear.",
         inputSchema: {

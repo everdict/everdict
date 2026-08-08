@@ -11,12 +11,17 @@ export function registerCiLinkTools(server: McpServer, ctx: McpToolContext): voi
     const ci = deps.ciLinkService;
     server.registerTool(
       "list_ci_links",
-      { description: "This workspace's CI repo links (repo↔harness slot mapping = OIDC trust)", inputSchema: {} },
+      {
+        annotations: { readOnlyHint: true },
+        description: "This workspace's CI repo links (repo↔harness slot mapping = OIDC trust)",
+        inputSchema: {},
+      },
       () => run(principal, "harnesses:read", async () => ok({ links: await ci.list(ws) })),
     );
     server.registerTool(
       "link_ci_repository",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register/update a CI repo link (admin) — the link's existence trusts that repo's GitHub Actions OIDC token into this workspace (keyless CI).",
         inputSchema: {
@@ -67,6 +72,7 @@ export function registerCiLinkTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "unlink_ci_repository",
       {
+        annotations: { readOnlyHint: false },
         description: "Remove a CI repo link (admin) — that repo's OIDC trust is severed too.",
         inputSchema: {
           repository: z.string().describe('"owner/name"'),
@@ -79,6 +85,7 @@ export function registerCiLinkTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "list_github_app_repos",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Repos accessible to the workspace's GitHub App installation (picker) — only those chosen at install time. settings:read.",
         inputSchema: {},
@@ -88,6 +95,7 @@ export function registerCiLinkTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "open_ci_setup_pr",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Synthesize the Everdict eval workflow YAML in a linked repo and open a setup-PR (workspace GitHub App token). Merging it activates CI eval. The workflow always targets self-hosted runners — 400 if the self:ws pool has no shared runner (register one first via github_install_workspace_runner).",
         inputSchema: {

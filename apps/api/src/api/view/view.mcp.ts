@@ -13,6 +13,7 @@ export function registerViewTools(server: McpServer, ctx: McpToolContext): void 
     server.registerTool(
       "create_view",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Save a scorecard-analysis View — store a named analysis config in the workspace. visibility=private (just me) | workspace (shared). config is the web AnalysisConfig (opaque).",
         inputSchema: {
@@ -37,13 +38,18 @@ export function registerViewTools(server: McpServer, ctx: McpToolContext): void 
 
     server.registerTool(
       "list_views",
-      { description: "Analysis Views I can see (workspace-shared + my private)", inputSchema: {} },
+      {
+        annotations: { readOnlyHint: true },
+        description: "Analysis Views I can see (workspace-shared + my private)",
+        inputSchema: {},
+      },
       () => run(principal, "scorecards:read", async () => ok(await views.list(ws, principal.subject))),
     );
 
     server.registerTool(
       "get_view",
       {
+        annotations: { readOnlyHint: true },
         description: "Read one analysis View (others' private / missing → NOT_FOUND)",
         inputSchema: { id: z.string() },
       },
@@ -53,6 +59,7 @@ export function registerViewTools(server: McpServer, ctx: McpToolContext): void 
     server.registerTool(
       "update_view",
       {
+        annotations: { readOnlyHint: false },
         description: "Update an analysis View — change name/config/visibility. Owner or workspace admin only.",
         inputSchema: {
           id: z.string(),
@@ -79,6 +86,7 @@ export function registerViewTools(server: McpServer, ctx: McpToolContext): void 
     server.registerTool(
       "delete_view",
       {
+        annotations: { readOnlyHint: false },
         description: "Delete an analysis View — owner or workspace admin only (other workspaces get NOT_FOUND)",
         inputSchema: { id: z.string() },
       },
@@ -98,6 +106,7 @@ export function registerViewTools(server: McpServer, ctx: McpToolContext): void 
     server.registerTool(
       "capture_view_snapshot",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Capture a saved View onto the workspace filesystem — compute its analysis now and write it, with the " +
           "config that produced it, to views/<id>/<capturedAt>.json. A View re-runs live and remembers nothing; " +

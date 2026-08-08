@@ -11,6 +11,7 @@ export function registerEventTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "list_platform_events",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The workspace's recorded platform events (lifecycle facts: run/scorecard/comment/agent-run), newest " +
         "first — the same log that wakes trigger agents. Use it to inspect what happened or to pick a real event " +

@@ -10,6 +10,7 @@ export function registerSecretTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "list_secrets",
       {
+        annotations: { readOnlyHint: true },
         description:
           "List secret names (no values) — shared (workspace) + my personal (user) secrets, each tagged with scope. Values are never returned.",
         inputSchema: {},
@@ -19,6 +20,7 @@ export function registerSecretTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "set_secret",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Set/update a secret (encrypted at rest; the value can't be read back). name is env-style. scope: workspace (shared, default) | user (my personal).",
         inputSchema: {
@@ -40,6 +42,7 @@ export function registerSecretTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "set_offline_token",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register/replace an offline-token secret (kind=offline_token): a long-lived OAuth refresh token the control plane exchanges for a short-lived access token on demand. On registration it performs one refresh-token grant to validate the token + compute the first access-token expiry; thereafter any reference to this secret name resolves to a freshly-minted access token (the refresh token never leaves the control plane). name is env-style. scope: workspace (shared, default) | user (my personal).",
         inputSchema: {
@@ -78,6 +81,7 @@ export function registerSecretTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "delete_secret",
       {
+        annotations: { readOnlyHint: false },
         description: "Delete a secret. scope: workspace (shared, default) | user (my personal).",
         inputSchema: { name: z.string(), scope: z.enum(["user", "workspace"]).optional() },
       },
@@ -96,6 +100,7 @@ export function registerSecretTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "list_secret_usage",
       {
+        annotations: { readOnlyHint: true },
         description:
           "List workspace (shared) secrets, each with the live sites that reference it by name — harness env/trace, runtime auth, model api-key, and settings integrations. Computed fresh (a removed reference disappears); refs=[] means the secret is referenced nowhere (orphan). Admin-only (secrets:read). Values are never returned.",
         inputSchema: {},

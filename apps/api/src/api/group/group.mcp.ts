@@ -13,6 +13,7 @@ export function registerGroupTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "run_experiment",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Run an ungraded EXPERIMENT (phase 1 alone): drive a harness over a dataset (graders stripped) or a " +
         "one-off task prompt, N times via trials — no judges, no verdict; the child runs and their " +
@@ -73,6 +74,7 @@ export function registerGroupTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "score_group",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Score an existing group's runs with the selected judges (phase 2, detached): judge verdicts attach " +
         "to the child runs, the fresh aggregate to the group. Re-scoring a judge replaces its previous " +

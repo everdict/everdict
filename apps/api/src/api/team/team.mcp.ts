@@ -14,6 +14,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "list_teams",
     {
+      annotations: { readOnlyHint: true },
       description:
         "List the workspace's teams. A team owns issues and names them (ENG-12); one team is the default, " +
         "which is where an issue filed without a team lands. Each row carries a derived summary (roster size, " +
@@ -39,6 +40,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "get_team",
     {
+      annotations: { readOnlyHint: true },
       description: "Read one team plus its derived summary. A team in another workspace reads as not found.",
       inputSchema: { id: z.string() },
     },
@@ -52,6 +54,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "create_team",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Create a team with an immutable identifier prefix (the `key`, e.g. ENG → ENG-1, ENG-2). The first " +
         "team in a workspace is the default whatever you ask for, because an issue filed without a team has " +
@@ -85,6 +88,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "update_team",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Rename a team, edit its description, re-parent it, or set how it paces itself. The key cannot change " +
         "— it is baked into every identifier the team has already minted. Pass parentId null to detach it back " +
@@ -139,6 +143,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "set_default_team",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Hand the default flag to this team. The incumbent is demoted in the same call, so the workspace is " +
         "never left without a landing place for an unrouted issue. Requires admin.",
@@ -150,6 +155,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "delete_team",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Delete a team. Refused for the default team, for the last remaining team, and for a team that still " +
         "holds issues. Requires admin (or being the creator).",
@@ -165,6 +171,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "list_team_members",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The team's roster. Team membership is separate from workspace membership — belonging to a team is " +
         "what makes an issue land in your list.",
@@ -176,6 +183,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "add_team_member",
     {
+      annotations: { readOnlyHint: false },
       description: "Add a subject to a team's roster. Requires admin.",
       inputSchema: { id: z.string(), subject: z.string() },
     },
@@ -185,6 +193,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "join_team",
     {
+      annotations: { readOnlyHint: false },
       description:
         'Join a team YOURSELF (self-service — Linear\'s "Join teams"). Puts the caller on the roster, which ' +
         "is what makes that team's issues land in their list. Already being on the team is a conflict; a " +
@@ -197,6 +206,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "leave_team",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Leave a team YOURSELF — the mirror of join_team. Not being on the team reads as not found. Member+.",
       inputSchema: { id: z.string() },
@@ -211,6 +221,7 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "remove_team_member",
     {
+      annotations: { readOnlyHint: false },
       description: "Remove a subject from a team's roster. Requires admin.",
       inputSchema: { id: z.string(), subject: z.string() },
     },

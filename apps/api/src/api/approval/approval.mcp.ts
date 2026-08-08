@@ -13,6 +13,7 @@ export function registerApprovalTools(server: McpServer, ctx: McpToolContext): v
   server.registerTool(
     "list_approvals",
     {
+      annotations: { readOnlyHint: true },
       description:
         "List the workspace's parked agent mutations (durable approvals — an ask survives an agent-service " +
         "restart). status filters; the pending ones are what a member can still decide.",
@@ -35,6 +36,7 @@ export function registerApprovalTools(server: McpServer, ctx: McpToolContext): v
   server.registerTool(
     "decide_approval",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Approve or deny a parked agent mutation. Settles exactly once (deciding an already-settled ask is a " +
         "conflict); the decision is delivered to the agent's live wait — delivered:false means the loop is " +

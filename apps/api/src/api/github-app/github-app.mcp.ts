@@ -12,6 +12,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "list_workspace_github_app",
       {
+        annotations: { readOnlyHint: true },
         description:
           "This workspace's GitHub App integration — workspace-owned installations (host/installationId/account + allowed repos), the configured providers (github.com / GitHub Enterprise, both operator env), and the callbackUrl to register as the App Setup URL. No secret values.",
         inputSchema: {},
@@ -26,6 +27,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "start_workspace_github_app_install",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Start a GitHub App install (admin) → returns the GitHub installation-page URL (admin opens it and selects repos). host unset=github.com (env App), set=the GitHub Enterprise host (env App). Both providers are operator env — no per-workspace App registration.",
         inputSchema: {
@@ -40,6 +42,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "unlink_workspace_github_app_installation",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Unlink an installation (admin). The actual uninstall happens on GitHub — here we just forget the record (idempotent).",
         inputSchema: { installationId: z.number().int().describe("GitHub installation id") },
@@ -50,6 +53,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "list_github_issues",
       {
+        annotations: { readOnlyHint: true },
         description:
           "List issues and pull requests in a repository the workspace's GitHub App is installed on (most-recently-updated first): number, title, state, author, URL, and whether each is a PR. Use to triage or find an item to read.",
         inputSchema: {
@@ -74,6 +78,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "get_github_file",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Read a text file from a repository the workspace's GitHub App is installed on — returns its UTF-8 content, sha, and size. Use to inspect code or config referenced in a task.",
         inputSchema: {
@@ -89,6 +94,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "create_github_issue",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Create an issue in a repository the workspace's GitHub App is installed on — returns the new issue number and URL. Use to file a bug or task on the team's behalf. member+ (github:write).",
         inputSchema: {
@@ -106,6 +112,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "open_github_pr",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Open a pull request with file changes in a repository the workspace's GitHub App is installed on — creates " +
           "(or reuses) the branch off the default branch, commits each change (full new file content), and opens the " +
@@ -136,6 +143,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "comment_on_github_issue",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Add a comment to an issue or pull request (PRs are issues) in a repository the workspace's GitHub App is installed on — returns the comment URL. member+ (github:write).",
         inputSchema: {

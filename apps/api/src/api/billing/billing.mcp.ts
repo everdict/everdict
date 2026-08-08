@@ -11,6 +11,7 @@ export function registerBillingTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "get_usage",
       {
+        annotations: { readOnlyHint: true },
         description:
           "The workspace's metered billing usage — LLM cost (usd/tokens) + evaluations for orchestration + verdict (harness under test + eval/judge model + agent conversations), split by source, itemized per (source × model), AND as a per-UTC-day spend series (daily). Own-pays (personal self-hosted) runs are excluded (BYO compute) EXCEPT calls that used a workspace-designated model (the workspace's key pays). Meter-only — this never blocks a run.",
         inputSchema: {},
@@ -25,6 +26,7 @@ export function registerBillingTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "get_budget",
       {
+        annotations: { readOnlyHint: true },
         description:
           "The workspace's enforcement budget — committed usage (runs/usd/tokens) plus the per-tenant limit (a null dimension = unlimited). Distinct from get_usage (meter-only): this budget BLOCKS a run with 402 once a cap is hit. Readable by members; only admins change the limit (set_budget_limit).",
         inputSchema: {},
@@ -34,6 +36,7 @@ export function registerBillingTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "set_budget_limit",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Set this workspace's enforcement budget limit (admin). Each of usd/tokens/runs is optional; an omitted dimension is unlimited. Replaces the whole limit.",
         inputSchema: BudgetLimitInputSchema.shape,

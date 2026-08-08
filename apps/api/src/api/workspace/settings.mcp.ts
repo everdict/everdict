@@ -9,12 +9,17 @@ export function registerSettingsTools(server: McpServer, ctx: McpToolContext): v
     const settings = deps.settingsStore;
     server.registerTool(
       "get_workspace_settings",
-      { description: "This workspace's settings (metering policy, etc.). Empty object if unset.", inputSchema: {} },
+      {
+        annotations: { readOnlyHint: true },
+        description: "This workspace's settings (metering policy, etc.). Empty object if unset.",
+        inputSchema: {},
+      },
       () => run(principal, "settings:read", async () => ok((await settings.get(ws)) ?? {})),
     );
     server.registerTool(
       "set_workspace_settings",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Partially update (merge) workspace settings. meterUsage: turn usage metering for this workspace's runs on/off. judge: the workspace default model that scores inline judge graders (HTTP parity).",
         inputSchema: {

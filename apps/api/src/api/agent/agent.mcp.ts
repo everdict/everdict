@@ -22,6 +22,7 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "list_agents",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Agent configurations visible to this workspace (instructions + MCP servers + model; owned + _shared)",
         inputSchema: {},
@@ -32,6 +33,7 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "get_agent",
       {
+        annotations: { readOnlyHint: true },
         description:
           "A full AgentSpec (instructions + MCP tool servers + model). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
@@ -46,6 +48,7 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "validate_agent",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Dry-run validate an AgentSpec (JSON) — schema + this workspace's existing versions/conflict (does not register)",
         inputSchema: { agent: z.string().describe("AgentSpec JSON") },
@@ -78,6 +81,7 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "create_agent",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register an AgentSpec (JSON string) as owned by this workspace (instructions + MCP tool servers + model; immutable; CONFLICT on collision)",
         inputSchema: { agent: z.string().describe("AgentSpec JSON") },
@@ -133,6 +137,7 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "save_agent",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Save (upsert) a workspace agent configuration by id (the interactive edit path). A new id registers version 1.0.0; a changed spec auto patch-bumps to a NEW immutable version; an unchanged spec is an idempotent no-op (created:false). The version is assigned server-side, so `agent` JSON carries no id/version (instructions? + mcpServers? + model? + description? + tags?). Requires agents:write. create_agent remains the explicit-version programmatic path.",
         inputSchema: {

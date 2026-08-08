@@ -22,6 +22,11 @@ precedent: `authorizeToolInvocation`, `budgetExhausted`, `effectsRequireConsent`
 3. **readOnly ≠ safe-without-consent.** The permission hook fires for writes OR for a read whose declared
    `effects` require consent (`effectsRequireConsent` — external egress is exfiltration-shaped). Plain
    reads stay ungated (the senses). `PermissionRequest.isReadOnly` carries the REAL access kind.
+   **A base tool's access is DECLARED, not inferred**: every control-plane MCP handler gates on an Action
+   string, and registration surfaces it as `annotations.readOnlyHint` — the agent bridge consumes the
+   declaration first (`baseToolReadOnly`) and the name-prefix classifier is the compatibility FALLBACK only
+   (the minting-read blacklist is the standing proof names carry no authority). External workspace servers'
+   annotations are self-claims and are NOT trusted for gate-skipping.
    **An UNDECLARED remote MCP read is not a plain read**: the transport being an external endpoint is a
    structural fact, so the bridge synthesizes `{dataAccess: {egress: "external"}}` for a remote read-only
    server with no declaration (`bridgedEffectsFor`, apps/agent mcp-tools) — the author's own declaration

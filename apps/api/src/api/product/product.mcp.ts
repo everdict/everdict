@@ -23,6 +23,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "create_product",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Create a product on the timeline — the released thing several services compose. `services` name the " +
         "GitHub repositories whose releases/tags mark 'this component moved' (source: releases | tags, with an " +
@@ -58,6 +59,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "list_products",
     {
+      annotations: { readOnlyHint: true },
       description: "The workspace's products, newest activity first.",
       inputSchema: {},
     },
@@ -67,6 +69,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "get_product",
     {
+      annotations: { readOnlyHint: true },
       description:
         "One product with every release and the visible slice of its imported version ledger — the read that " +
         "answers 'what composes this product and what has moved lately'.",
@@ -78,6 +81,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "list_product_repo_options",
     {
+      annotations: { readOnlyHint: false },
       description:
         "The repositories a product's tracked service may point at — the workspace GitHub App's installation " +
         "repos, exactly the set the version sync can reach. Empty = no App installed.",
@@ -104,6 +108,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "list_product_versions",
     {
+      annotations: { readOnlyHint: true },
       description:
         "A product's imported service versions, newest published first (the remote's own clock). Filter by " +
         "service name.",
@@ -127,6 +132,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "get_product_timeline",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The product's time axis in one read: releases (past + planned), the windowed version ledger, each " +
         "watch series' scorecard points (oldest first, with pass rate and the triggering service version), " +
@@ -152,6 +158,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "update_product",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Edit a product's content (name, description, icon, services, series, autoEval). Lists replace what " +
         "is there. A re-declared service keeps its sync watermark unless its repository/source/prefix changed.",
@@ -171,6 +178,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "delete_product",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Delete a product (creator or workspace admin only). Its releases and version ledger cascade with it.",
       inputSchema: { id: z.string() },
@@ -188,6 +196,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "sync_product_versions",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Pull the tracked services' releases/tags from GitHub now (everdict is the client — no webhook). The " +
         "first sync of a service backfills the timeline's past silently; after that each genuinely new version " +
@@ -205,6 +214,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "create_release",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Plan a release — a checkpoint on the product's axis with a name, a target date, and which watch " +
         "series it is judged by (absent = every series). It starts `planned`; shipping goes through " +
@@ -236,6 +246,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "list_releases",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The workspace's releases across every product, newest plan first — what exists to attach an issue " +
         "to or to ask readiness of. Optionally narrowed to one product.",
@@ -247,6 +258,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "get_release",
     {
+      annotations: { readOnlyHint: true },
       description:
         "One release plus its readiness: open issues linked to the release, and every watched series' latest " +
         "scorecard against the baseline anchored at the previous ship. Unmeasured never reads as regressed. " +
@@ -259,6 +271,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "update_release",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Edit a release's content (name, description, target date, watched series). `seriesKeys: null` clears " +
         "the selection back to every series.",
@@ -277,6 +290,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "set_release_status",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Move a release between planned / released / cancelled. Releasing is a GATE: it refuses while issues " +
         "linked to the release are open or a watched series has regressed against the previous ship — unless " +
@@ -299,6 +313,7 @@ export function registerProductTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "delete_release",
     {
+      annotations: { readOnlyHint: false },
       description: "Delete a release (creator or workspace admin only).",
       inputSchema: { id: z.string() },
     },

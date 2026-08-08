@@ -20,6 +20,7 @@ export function registerCheckpointTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "publish_checkpoint",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Publish a handoff checkpoint — a resumable state transfer for work that is stopping (budget " +
         "exhausted, scope refused, or handing off deliberately). A successor decides its next action from " +
@@ -47,6 +48,7 @@ export function registerCheckpointTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "list_checkpoints",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Handoff checkpoints in this workspace, newest first. envelopeId narrows to one task's handoffs — " +
         "how that task stopped and what it left behind.",
@@ -69,6 +71,7 @@ export function registerCheckpointTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "get_checkpoint",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Read one handoff checkpoint in full — confirmed facts with their evidence, hypotheses, actions " +
         "taken, open decisions, remaining tasks, the validation plan and any rollback plan. This is what " +

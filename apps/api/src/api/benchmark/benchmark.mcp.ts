@@ -12,6 +12,7 @@ export function registerBenchmarkTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "search_hf_datasets",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Search HuggingFace Hub datasets — find candidates ({id,likes,gated}) by query when you don't know the exact id.",
         inputSchema: { query: z.string(), limit: z.number().int().positive().max(50).optional() },
@@ -22,6 +23,7 @@ export function registerBenchmarkTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "hf_dataset_splits",
       {
+        annotations: { readOnlyHint: true },
         description:
           "List the config/split combinations of a chosen HF dataset (to pick a split instead of typing it).",
         inputSchema: { dataset: z.string() },
@@ -32,6 +34,7 @@ export function registerBenchmarkTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "hf_dataset_files",
       {
+        annotations: { readOnlyHint: true },
         description:
           "List an HF repo's data files (csv/jsonl/json) — fallback to fetch files directly (source.file) for datasets not served by the viewer (datasets-server).",
         inputSchema: { dataset: z.string() },
@@ -42,6 +45,7 @@ export function registerBenchmarkTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "preview_benchmark_source",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Preview a benchmark source — N raw rows before mapping + detected fields (to check before mapping when you don't know the field names). body=preview JSON {source:{kind:'huggingface',dataset,config?,split?}|{kind:'jsonl'}, text?, limit?}",
         inputSchema: { body: z.string().describe("preview body JSON") },
@@ -62,6 +66,7 @@ export function registerBenchmarkTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "import_benchmark",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Import a benchmark as a dataset in this workspace (immutable; 409 on conflict) — one of spec (inline definition) · benchmark (catalog id) · recipe. body=import JSON {spec?|benchmark?|recipe?, id?, version?, limit?, text?}",
         inputSchema: { body: z.string().describe("import body JSON") },

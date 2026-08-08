@@ -12,6 +12,7 @@ export function registerScheduleTools(server: McpServer, ctx: McpToolContext): v
     server.registerTool(
       "create_schedule",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Create a scheduled (cron) scorecard. Three modes: (1) BATCH — periodically run dataset×harness (pass dataset_id+harness_id); (2) TRACE EVALUATION — periodically judge the recent traces of a registered observability source over a rolling window (pass pull_source, e.g. daily judge the last 24h of production traces), no harness run; (3) REPORT — periodically have the workspace agent analyze a saved View and pin a markdown report artifact to it (pass report_view, e.g. a Monday-morning pass-rate report). Provide EXACTLY ONE of dataset_id+harness_id / pull_source / report_view. Fired runs execute under my identity (budget→workspace). cron is 5 fields (min hour day month weekday).",
         inputSchema: {
@@ -108,19 +109,28 @@ export function registerScheduleTools(server: McpServer, ctx: McpToolContext): v
 
     server.registerTool(
       "list_schedules",
-      { description: "This workspace's scheduled scorecards", inputSchema: {} },
+      {
+        annotations: { readOnlyHint: true },
+        description: "This workspace's scheduled scorecards",
+        inputSchema: {},
+      },
       () => run(principal, "schedules:read", async () => ok(await schedules.list(ws))),
     );
 
     server.registerTool(
       "get_schedule",
-      { description: "Read one schedule (other workspaces get NOT_FOUND)", inputSchema: { id: z.string() } },
+      {
+        annotations: { readOnlyHint: true },
+        description: "Read one schedule (other workspaces get NOT_FOUND)",
+        inputSchema: { id: z.string() },
+      },
       ({ id }) => run(principal, "schedules:read", async () => ok(await schedules.get(ws, id))),
     );
 
     server.registerTool(
       "update_schedule",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Update a schedule — pause/resume (enabled), reschedule (cron/timezone), change name/overlap policy. Swap runTemplate (dataset·harness) via the BFF or by recreating.",
         inputSchema: {
@@ -151,7 +161,11 @@ export function registerScheduleTools(server: McpServer, ctx: McpToolContext): v
 
     server.registerTool(
       "delete_schedule",
-      { description: "Delete a schedule (other workspaces get NOT_FOUND)", inputSchema: { id: z.string() } },
+      {
+        annotations: { readOnlyHint: false },
+        description: "Delete a schedule (other workspaces get NOT_FOUND)",
+        inputSchema: { id: z.string() },
+      },
       ({ id }) =>
         run(principal, "schedules:write", async () => {
           await schedules.remove(ws, id);
@@ -162,6 +176,7 @@ export function registerScheduleTools(server: McpServer, ctx: McpToolContext): v
     server.registerTool(
       "fire_schedule",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Run a schedule NOW (manual one-off) — submit its run template immediately, the same fire path a cron tick uses (no Temporal poll-to-terminal finalize). Returns the submitted scorecard id (poll with get_scorecard).",
         inputSchema: { id: z.string() },

@@ -20,6 +20,7 @@ export function registerTaskTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "create_task",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Add a unit of intended work to the workspace's shared TASK LEDGER — the cross-conversation, cross-agent " +
         "coordination substrate. Use it to hand work to teammates or to your future self: tasks outlive this " +
@@ -55,6 +56,7 @@ export function registerTaskTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "list_tasks",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The workspace's task ledger, newest activity first — check it BEFORE starting substantial work (someone " +
         "may already own it) and to find work whose blockedBy dependencies have completed. Optional status filter " +
@@ -77,13 +79,18 @@ export function registerTaskTools(server: McpServer, ctx: McpToolContext): void 
 
   server.registerTool(
     "get_task",
-    { description: "Read one ledger task by id.", inputSchema: { id: z.string() } },
+    {
+      annotations: { readOnlyHint: true },
+      description: "Read one ledger task by id.",
+      inputSchema: { id: z.string() },
+    },
     ({ id }) => run(principal, "agents:read", async () => ok(await tasks.get(ws, id))),
   );
 
   server.registerTool(
     "update_task",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Patch a ledger task — CLAIM it (status=in_progress; you become the owner when none is set — a task " +
         "already claimed by someone else refuses with 409, stand down and pull other work), COMPLETE it " +
@@ -127,6 +134,7 @@ export function registerTaskTools(server: McpServer, ctx: McpToolContext): void 
   server.registerTool(
     "delete_task",
     {
+      annotations: { readOnlyHint: false },
       description: "Delete a ledger task — its creator or a workspace admin only (prefer cancelling over deleting).",
       inputSchema: { id: z.string() },
     },

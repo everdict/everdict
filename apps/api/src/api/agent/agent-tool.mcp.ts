@@ -16,6 +16,7 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "list_agent_tools",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The tools available to YOUR agent in this workspace, each with its scope (builtin | workspace | personal), " +
         "whether it is on for you (enabled), and what the workspace baseline is. Includes tools you have not switched " +
@@ -29,6 +30,7 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "set_agent_tool",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Turn one tool on or off FOR THE CALLING MEMBER (enabled true/false), or pass null to follow the workspace " +
         "default again. The workspace's agent configuration is untouched — this only changes the caller's own " +
@@ -42,6 +44,7 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "get_agent_tool",
     {
+      annotations: { readOnlyHint: true },
       description:
         "ONE tool of YOUR toolset in full: which channel put it there (builtin | capability | mcpServer), how it is " +
         "reached (remote MCP URL · stdio container · code script), the functions it contributes with the NAMESPACED " +
@@ -56,6 +59,7 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "probe_agent_tool",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Test-connect one MCP tool with the secret THIS member's agent would use and list what the server really " +
         "serves — the live answer to 'what functions does this tool have' and the first check when a tool misbehaves. " +
@@ -69,6 +73,7 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "bind_agent_tool_secrets",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Point one tool's declared secrets at real secret names in this workspace (names only — never values). This " +
         "edits the WORKSPACE agent configuration, since that is where the binding lives (an adopted capability's " +
@@ -89,6 +94,7 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "list_agent_skills",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The skills YOUR agent follows in this workspace — authored skills, adopted/published packages and the " +
         "built-ins — each with its scope, whether it is on for you, and the workspace baseline. The workspace " +
@@ -101,6 +107,7 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "set_agent_skill",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Turn one skill on or off FOR THE CALLING MEMBER (enabled true/false), or pass null to follow the workspace " +
         "default again. The workspace's skill library is untouched — this only changes which procedures the caller's " +

@@ -12,6 +12,7 @@ export function registerEnvironmentAdoptionTools(server: McpServer, ctx: McpTool
   server.registerTool(
     "list_adopted_environments",
     {
+      annotations: { readOnlyHint: true },
       description:
         "This workspace's adopted (imported) environment images — [{source,id,version,name,image,benchmark?,imageClass?,available,verify?}]. verify.pullable = whether this workspace can actually pull the image.",
       inputSchema: {},
@@ -23,6 +24,7 @@ export function registerEnvironmentAdoptionTools(server: McpServer, ctx: McpTool
   server.registerTool(
     "adopt_environment",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Import an environment image capability into this workspace (pins the version) and verify pull-usability (warn-not-block). Re-adopting the same (source,id) replaces the pin. Returns the adopted entry with its verify status.",
       inputSchema: {
@@ -37,6 +39,7 @@ export function registerEnvironmentAdoptionTools(server: McpServer, ctx: McpTool
   server.registerTool(
     "verify_adopted_environment",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Re-run the pull-usability check for one adopted environment and persist the fresh snapshot. Returns the updated entry.",
       inputSchema: { source: z.string().min(1), id: z.string().min(1) },
@@ -48,6 +51,7 @@ export function registerEnvironmentAdoptionTools(server: McpServer, ctx: McpTool
   server.registerTool(
     "unadopt_environment",
     {
+      annotations: { readOnlyHint: false },
       description: "Remove an environment image from this workspace's inventory (by source + id).",
       inputSchema: { source: z.string().min(1), id: z.string().min(1) },
     },

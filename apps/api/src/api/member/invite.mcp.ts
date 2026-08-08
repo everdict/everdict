@@ -11,6 +11,7 @@ export function registerInviteTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "list_invites",
       {
+        annotations: { readOnlyHint: false },
         description:
           "This workspace's active invite links (metadata only: id, role, prefix, expiry, acceptedCount = joins so " +
           "far). Tokens are stored hashed, so an existing invite's URL cannot be recovered — the full link exists " +
@@ -22,6 +23,7 @@ export function registerInviteTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "create_invite",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Issue a reusable invite link. The response carries inviteUrl — the FULL shareable link " +
           "(…/invite?token=…) — plus the raw token (inv_…); both are shown exactly ONCE (only a hash is stored). " +
@@ -42,6 +44,7 @@ export function registerInviteTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "revoke_invite",
       {
+        annotations: { readOnlyHint: false },
         description: "Revoke an invite link so it can no longer be used (id is the id from list_invites)",
         inputSchema: { id: z.string() },
       },

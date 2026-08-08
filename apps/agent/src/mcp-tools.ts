@@ -51,6 +51,15 @@ export function isBaseToolReadOnly(name: string): boolean {
   return isReadOnlyToolName(name) && !MINTING_READS.has(name);
 }
 
+// The server's own declaration OUTRANKS the name (F7): every base tool's handler gates on an Action string
+// ("x:read" / "x:write"), and registration surfaces it as annotations.readOnlyHint — the same fact the server
+// enforces, now carried on the wire. The name classifier stays as the FALLBACK for tools registered without
+// an annotation, which is all it ever deserved to be: the MINTING_READS blacklist above is the standing proof
+// that a name is not a semantic authority.
+export function baseToolReadOnly(tool: { name: string; annotations?: { readOnlyHint?: boolean } }): boolean {
+  return tool.annotations?.readOnlyHint ?? isBaseToolReadOnly(tool.name);
+}
+
 // A resolved MCP tool server the agent connects to (from the workspace's AgentSpec / an adopted capability), with its
 // secrets already resolved. Two transports: `http` = a remote Streamable-HTTP endpoint (authSecret → verbatim
 // Authorization header); `stdio` = a container image the agent runs (`docker run --rm -i <image> [args]`) with the
@@ -248,7 +257,12 @@ export function mcpToolProvider(
         const baseBox: McpClientBox = { current: baseClient };
         boxes.push(baseBox);
         // Auto-retry after a reconnect only for pure reads — a mutating call's first attempt may have landed.
-        const invoke = makeInvoke(baseBox, connectBase, (tool) => isBaseToolReadOnly(tool));
+        // Retry safety follows the DECLARED access when the server stated one (annotations.readOnlyHint),
+        // the name fallback otherwise — the same order the per-tool isReadOnly below uses.
+        const hints = new Map(
+          baseTools.map((t) => [t.name, (t.annotations as { readOnlyHint?: boolean } | undefined)?.readOnlyHint]),
+        );
+        const invoke = makeInvoke(baseBox, connectBase, (tool) => hints.get(tool) ?? isBaseToolReadOnly(tool));
         baseCall = invoke;
         for (const t of baseTools) {
           bridged.push(
@@ -259,7 +273,12 @@ export function mcpToolProvider(
                 inputSchema: t.inputSchema as Record<string, unknown> | undefined,
               },
               invoke,
-              { isReadOnly: isBaseToolReadOnly(t.name) },
+              {
+                isReadOnly: baseToolReadOnly({
+                  name: t.name,
+                  annotations: t.annotations as { readOnlyHint?: boolean } | undefined,
+                }),
+              },
             ),
           );
         }

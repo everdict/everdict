@@ -15,6 +15,7 @@ export function registerWorkspacePulseTools(server: McpServer, ctx: McpToolConte
   server.registerTool(
     "get_workspace_pulse",
     {
+      annotations: { readOnlyHint: true },
       description:
         "How the workspace is doing right now, plus its trend: open/in-progress/regressed issues, active cycles " +
         "and how much of what they committed to is done, goals and projects flagged at risk, unfinished agent " +

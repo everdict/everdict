@@ -23,6 +23,7 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
     server.registerTool(
       "list_harness_templates",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Harness templates this workspace sees (categories; owned + _shared). `team` narrows to one team's " +
           "own templates (id or key, ENG).",
@@ -40,6 +41,7 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
     server.registerTool(
       "get_harness_template",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Fetch one harness template (category) structure spec — for config view / new-version edit prefill",
         inputSchema: { id: z.string(), version: z.string().describe('template version or "latest"') },
@@ -54,6 +56,7 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
     server.registerTool(
       "register_harness_template",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register a harness template (category structure, JSON string) (immutable; CONFLICT on clash). No gate (viewer+)",
         inputSchema: {

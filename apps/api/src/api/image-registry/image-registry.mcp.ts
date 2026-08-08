@@ -13,6 +13,7 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
     server.registerTool(
       "list_workspace_image_registries",
       {
+        annotations: { readOnlyHint: true },
         description:
           "This workspace's image registries — [{name,host,namespace?,username?,secret-name reference,imagePrefix}] (not secret values). Classification/pull auth matches by host across all of them.",
         inputSchema: {},
@@ -22,6 +23,7 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
     server.registerTool(
       "set_workspace_image_registry",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register/update an image registry (admin, upsert by name — declarative full replace). Put the pull/push token (value) in the SecretStore first and pass its name. Warns via missingSecrets if a referenced secret is absent.",
         inputSchema: {
@@ -38,6 +40,7 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
     server.registerTool(
       "probe_workspace_image_registry",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Test a registry connection before registering (admin) — GET /v2/ against the host with the configured credential (prefers the push secret, else pull, else anonymous). Returns {reachable,detail,reason?,credential}. Nothing is stored.",
         inputSchema: {
@@ -53,6 +56,7 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
     server.registerTool(
       "remove_workspace_image_registry",
       {
+        annotations: { readOnlyHint: false },
         description: "Remove an image registry (admin, by name). Afterward its images are classified as external.",
         inputSchema: { name: z.string().min(1).describe("name of the registry to remove") },
       },
@@ -65,6 +69,7 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
     server.registerTool(
       "get_image_push_credentials",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Mint push credentials for a workspace registry (member+) — {name,host,namespace?,username?,password,imagePrefix}. Choose via registry (omittable if there's only one). Discard after docker tag+login+push (non-persistent).",
         inputSchema: {
@@ -77,6 +82,7 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
     server.registerTool(
       "list_image_tags",
       {
+        annotations: { readOnlyHint: true },
         description:
           "List the tags of a repository in a workspace image registry (Docker Registry v2). Use to see available versions of an image. Standard bearer/basic registries (GHCR, Harbor, Docker Hub, generic v2); AWS ECR is unsupported.",
         inputSchema: {
@@ -90,6 +96,7 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
     server.registerTool(
       "verify_image",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Can THIS workspace pull a full image ref? Resolves the matching registered registry's pull credential (anonymous for an unregistered host) and fetches the manifest → {pullable, reason: ok|auth|not-found|unreachable, digest?}. A failure is a result, never an error. Use it before registering an environment capability — and pin the returned digest instead of a mutable tag.",
         inputSchema: {
@@ -101,6 +108,7 @@ export function registerImageRegistryTools(server: McpServer, ctx: McpToolContex
     server.registerTool(
       "inspect_image",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Inspect a manifest (a tag or digest) of a repository in a workspace image registry — returns the digest, media type, and platforms (manifest list) or layer count (single image). Standard bearer/basic registries only.",
         inputSchema: {

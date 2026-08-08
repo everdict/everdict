@@ -19,6 +19,7 @@ export function registerIssueGithubTools(server: McpServer, ctx: McpToolContext)
   server.registerTool(
     "list_github_import_candidates",
     {
+      annotations: { readOnlyHint: false },
       description:
         "GitHub issues in a repo that this workspace has NOT imported yet (pull requests excluded). Call this " +
         "before import_github_issues to see what is available and to avoid asking for numbers that already exist " +
@@ -44,6 +45,7 @@ export function registerIssueGithubTools(server: McpServer, ctx: McpToolContext)
   server.registerTool(
     "import_github_issues",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Copy GitHub issues into the workspace tracker so their evaluation can be tracked here. Idempotent — a " +
         "number already imported is skipped, not duplicated. An open issue lands as `todo`; a closed one lands as " +
@@ -79,6 +81,7 @@ export function registerIssueGithubTools(server: McpServer, ctx: McpToolContext)
   server.registerTool(
     "pull_github_issues",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Refresh a repo's imported issues from GitHub in one incremental call. GitHub wins on title, description, " +
         "labels and comments; a remote close/reopen reconciles through the normal transitions, so it emits the " +
@@ -100,6 +103,7 @@ export function registerIssueGithubTools(server: McpServer, ctx: McpToolContext)
   server.registerTool(
     "sync_github_issue",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Refresh one imported issue from GitHub. A remote unchanged since the last pull is a no-op (the same " +
         "watermark that stops our own push from echoing back).",
@@ -111,6 +115,7 @@ export function registerIssueGithubTools(server: McpServer, ctx: McpToolContext)
   server.registerTool(
     "set_issue_github_sync",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Turn pull/push on or off for an imported issue. Enabling push means resolving or reopening the issue " +
         "here will close or reopen the GitHub issue and post an explanatory comment — a visible action in " +
@@ -126,6 +131,7 @@ export function registerIssueGithubTools(server: McpServer, ctx: McpToolContext)
   server.registerTool(
     "get_github_issue_attachment",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The image behind an attachment URL in an imported issue's description or comments. An imported body is " +
         "the remote's own markdown, so a screenshot in it is a GitHub URL that nothing outside GitHub can read — " +

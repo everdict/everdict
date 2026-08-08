@@ -18,6 +18,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_run_trajectory",
     {
+      annotations: { readOnlyHint: true },
       description:
         "A run's OWNED trajectory (the sealed copy every judgment stands on — P5): meta.source tells which " +
         "copy served (run | otlp | import | embed) plus the normalized TraceEvent[]. Falls back to the run " +
@@ -35,6 +36,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "list_runs",
     {
+      annotations: { readOnlyHint: true },
       description:
         "This workspace's run list (standalone activity). With scorecard_id, the case child-runs of that scorecard. " +
         'With scope="all", standalone runs AND scorecard child runs together (the "all executions" view). With runner, ' +
@@ -69,7 +71,11 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
 
   server.registerTool(
     "get_run",
-    { description: "Fetch one run (another workspace's is NOT_FOUND)", inputSchema: { id: z.string() } },
+    {
+      annotations: { readOnlyHint: true },
+      description: "Fetch one run (another workspace's is NOT_FOUND)",
+      inputSchema: { id: z.string() },
+    },
     ({ id }) =>
       run(principal, "runs:read", async () => {
         const record = await deps.service.getForDisplay(id, principal.subject); // BFF parity — openable refs + the same audience rule
@@ -81,6 +87,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "exec_in_run",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Run a one-shot shell command inside a run's live sandbox container (web-terminal exec). Creator-or-admin only; found=false = no live container",
       inputSchema: { id: z.string(), command: z.string() },
@@ -99,6 +106,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_run_logs",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Current raw output of a run's job (live progress — poll while running; sentinel-stripped). stream: stdout (default, the result stream) | stderr (harness progress logs). found=false = nothing to tail yet",
       inputSchema: { id: z.string(), stream: z.enum(["stdout", "stderr"]).optional() },
@@ -114,6 +122,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_run_live_trace",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The run's own TraceEvents accumulating while it runs (live trajectory — poll while running, each read " +
         "returns everything collected so far): dispatch placement marks, runner-pushed batches, and the managed " +
@@ -132,6 +141,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_run_screen",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The current screen of a run's environment as a PNG data URL — the browser the agent is driving or its " +
         "desktop, captured live (poll while running; a settled run has no screen). Use it to SEE what the agent is " +
@@ -157,6 +167,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_run_files",
     {
+      annotations: { readOnlyHint: true },
       description:
         "List the live repo file tree of a running case's sandbox (tracked + untracked files, each with its " +
         "working-tree status vs HEAD: modified | added | deleted). The explorer half of the run workbench — use " +
@@ -182,6 +193,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_run_file",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Read one file of a running case's live repo, with its working-tree diff vs HEAD riding along — the " +
         "editor half of the run workbench. Reads are capped (truncated=true past the cap); a binary file " +
@@ -215,6 +227,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_run_placement",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Where a run's case job stands INSIDE its runtime cluster (runtime debugging): phase " +
         "queued | blocked | starting | running | dead, the placed node/unit, the scheduler's capacity verdict when " +
@@ -234,6 +247,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_run_topology",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The live per-service health roster of the warm topology a service-harness run drives (runtime " +
         "debugging): per service the orchestrator state, readiness, restart churn, OOM verdicts, and the last " +
@@ -252,6 +266,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_topology_service_logs",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Current log tail of ONE deployed service of a run's warm topology — the service-level twin of " +
         "get_run_logs ('the stack is up but the case fails: what is the service saying'). found=false = no live " +
@@ -272,6 +287,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "get_run_recording",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The replay recording of a run — screen frames + logs + env/runtime tracks on one t0 clock, aligned with " +
         "the trace. A settled run answers its sealed recording; a still-running one answers the live tail so far " +
@@ -291,6 +307,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
   server.registerTool(
     "submit_run",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Submit an eval run (empty repo seed + default graders). harness is id@version (default latest). With runtime, run on that runtime.",
       inputSchema: {

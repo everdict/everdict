@@ -22,13 +22,18 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
     const models = deps.modelRegistry;
     server.registerTool(
       "list_models",
-      { description: "Models visible to this workspace (inference/judge models: owned + _shared)", inputSchema: {} },
+      {
+        annotations: { readOnlyHint: true },
+        description: "Models visible to this workspace (inference/judge models: owned + _shared)",
+        inputSchema: {},
+      },
       () => run(principal, "models:read", async () => ok(await keepVisible(ctx, await models.list(ws)))),
     );
 
     server.registerTool(
       "get_model",
       {
+        annotations: { readOnlyHint: true },
         description:
           "A full ModelSpec (provider + underlying model + baseUrl). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
@@ -43,6 +48,7 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "validate_model",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Dry-run validate a ModelSpec (JSON) — schema + this workspace's existing versions/conflict (does not register)",
         inputSchema: { model: z.string().describe("ModelSpec JSON") },
@@ -76,6 +82,7 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "create_model",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register a ModelSpec (JSON string) as owned by this workspace (provider + underlying model + baseUrl; immutable; CONFLICT on collision)",
         inputSchema: { model: z.string().describe("ModelSpec JSON") },
@@ -134,6 +141,7 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "test_model_connection",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Fire ONE minimal dummy completion against a model connection (JSON: provider + model + baseUrl? + apiKeySecret? + params?) to prove it is reachable and responding. Resolves apiKeySecret from the workspace/personal secret tiers. Requires models:write (makes a real billable call). Returns ok:true + a response-text preview, or ok:false + reason (missing key / upstream error) — a failed connection is a result, not an error.",
         inputSchema: {
@@ -157,6 +165,7 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "save_model",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Save (upsert) a model connection by id (the interactive edit path). A new id registers version 1.0.0; a changed connection auto patch-bumps to a NEW immutable version (so `latest` moves while past-pinned scorecards stay reproducible); an unchanged connection is an idempotent no-op (created:false). The version is assigned server-side, so `model` JSON carries no id/version (provider + model + baseUrl? + apiKeySecret? + params? + description? + tags?). Requires models:write. create_model remains the explicit-version programmatic path.",
         inputSchema: {

@@ -26,6 +26,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "list_harnesses",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Harness instances this workspace sees (grouped by template; owned + _shared). `team` narrows to one " +
           "team's own harnesses (id or key, ENG).",
@@ -50,6 +51,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "get_harness_instance",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Fetch one harness instance raw spec (template reference + pins) — for config view / new-version re-pin prefill",
         inputSchema: { id: z.string(), version: z.string().describe('instance version tag or "latest"') },
@@ -64,6 +66,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "diff_harness_versions",
       {
+        annotations: { readOnlyHint: true },
         description:
           'Structural config diff between two versions of the same harness id, on the resolved spec (template + pins applied) — leaf field changes by path (services keyed by name), e.g. services[backend].image / env.MODEL / command. Both refs accept "latest". Requires harnesses:read (viewer+). Reproducible by the immutable-version guarantee.',
         inputSchema: {
@@ -122,6 +125,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "register_harness",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register a harness instance (template reference + pins, JSON string) (immutable; error if the template is missing / pins are absent). No gate (viewer+). Optional description = this version's changelog (shown on the detail page)",
         inputSchema: {
@@ -186,6 +190,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "pin_harness_images",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Durable re-pin of a harness instance (headless re-pin) — merge into the base version's pins and register a new version. The path where CI (dev/main merge) swaps only its own service slots. Enforces digest pins (default), idempotent (identical pins → unchanged)",
         inputSchema: {

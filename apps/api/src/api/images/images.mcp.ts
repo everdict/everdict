@@ -20,6 +20,7 @@ export function registerImagesTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "mirror_image",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Copy an image into this workspace's namespace in everdict's managed registry, so later pulls stop " +
           "depending on the registry it came from staying up, staying free, or keeping the tag. Source is a " +
@@ -51,6 +52,7 @@ export function registerImagesTools(server: McpServer, ctx: McpToolContext): voi
   server.registerTool(
     "list_workspace_images",
     {
+      annotations: { readOnlyHint: true },
       description:
         "List the repositories this workspace has published to everdict's own managed image store, with the " +
         "endpoint and namespace their refs are built from. Use it to find an existing environment image before " +
@@ -67,6 +69,7 @@ export function registerImagesTools(server: McpServer, ctx: McpToolContext): voi
   server.registerTool(
     "list_managed_image_tags",
     {
+      annotations: { readOnlyHint: true },
       description:
         "List the tags of ONE repository in this workspace's managed namespace (everdict's own store, not a " +
         "registry you registered — for those use list_image_tags). A repository that does not exist reads as " +
@@ -85,6 +88,7 @@ export function registerImagesTools(server: McpServer, ctx: McpToolContext): voi
   server.registerTool(
     "inspect_managed_image",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Inspect a manifest (tag or digest) in this workspace's managed namespace — returns the digest, media " +
         "type, platforms, size, and (best-effort, from the OCI config blob) the build history the image was " +
@@ -102,6 +106,7 @@ export function registerImagesTools(server: McpServer, ctx: McpToolContext): voi
   server.registerTool(
     "push_image_grant",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Mint a short-lived authorization to push ONE repository into this workspace's managed namespace, plus " +
         "the prefix to assemble the target ref with. The grant is the docker PASSWORD (the username is fixed); " +
@@ -125,6 +130,7 @@ export function registerImagesTools(server: McpServer, ctx: McpToolContext): voi
   server.registerTool(
     "remove_workspace_image",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Unpublish a repository from this workspace's managed namespace and report how many manifests were " +
         "unlinked. Retracting an image is the inverse of publishing it, so it takes the same images:push right.",

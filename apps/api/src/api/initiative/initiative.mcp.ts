@@ -17,6 +17,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "create_initiative",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Create an initiative — a GOAL several projects work toward, the level at which 'where does this stand' " +
         "is asked. Use it for an outcome that several projects feed (a quality bar, a cost target, a migration); " +
@@ -63,6 +64,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "list_initiatives",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The workspace's initiatives, filterable by status (active | completed | cancelled). Rows carry the " +
         "latest reported health but no progress — that fans out over every project's issues, so call " +
@@ -86,6 +88,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "get_initiative",
     {
+      annotations: { readOnlyHint: true },
       description:
         "One initiative plus how far along the goal is: every project under it OR under any sub-initiative, " +
         "with that project's status, reported health, lead and issue rollup (`viaInitiativeId` names the " +
@@ -105,6 +108,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "update_initiative",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Edit an initiative's content (name, description, parent, lead, members, icon, resources, target " +
         "date). Status moves use " +
@@ -133,6 +137,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "post_initiative_update",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Report where the GOAL stands: `health` (on_track | at_risk | off_track) WITH the sentence that " +
         "explains it — the body is required, because a health flag with no sentence is a colour nobody can " +
@@ -154,6 +159,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "list_initiative_updates",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The initiative's posted updates, newest first. This is where the health colour is EXPLAINED — read it " +
         "before reporting on a goal, so the summary quotes what the lead actually said.",
@@ -165,6 +171,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "set_initiative_status",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Move an initiative through its lifecycle (planned → active → completed, or cancelled). Completing " +
         "it is a GATE: it reads live progress and is " +
@@ -194,6 +201,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "delete_initiative",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Delete an initiative. Refused while projects still sit under it — move them out first. Creator or " +
         "workspace admin only.",

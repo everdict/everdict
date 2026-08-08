@@ -37,6 +37,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "list_datasets",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Datasets this workspace sees (owned + _shared benchmarks). The workspace is the 'active workspace' fixed by your credential — confirm with the user which workspace you are working in first (you cannot change it via a parameter; a different workspace requires reconnecting with that workspace's credential/session). Each entry groups multiple immutable versions under one id (id → versions[]). Before creating a new dataset, first use this list to check whether the same id already exists. `team` narrows to one team's datasets (id or key, ENG) — what the team owns, not everything it can see.",
         inputSchema: { team: z.string().optional().describe('only this team\'s datasets — id or key ("ENG")') },
@@ -55,6 +56,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "get_dataset",
       {
+        annotations: { readOnlyHint: true },
         description:
           "One dataset in full (cases included). Since one id holds multiple immutable versions, pick a specific one via version (default latest). Active-workspace scoped — confirm with the user which workspace it is (another workspace's id is NOT_FOUND).",
         inputSchema: {
@@ -72,6 +74,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "diff_datasets",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Diff of two dataset versions — cases added/removed/changed (with the differing fields) + metadata changes. base/candidate may be 'latest'. Another workspace is NOT_FOUND",
         inputSchema: {
@@ -93,6 +96,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "validate_dataset",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Dry-run validate a Dataset (JSON) (does not register) — shows the schema result + this active workspace's existing versions/collision for the same id (existingVersions, versionExists). Use this before create_dataset to decide 'does the id already exist → bump to a new version' (do not duplicate the same dataset under a new id).",
         inputSchema: { dataset: z.string().describe("Dataset JSON (id·version·cases)") },
@@ -126,6 +130,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "create_dataset",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register a Dataset (JSON string) as owned by the active workspace (versions immutable; re-registering the same id@version with different content is CONFLICT). Before registering, always confirm in order: (1) workspace — confirm with the user which workspace (fixed by credential, not changeable via a parameter). (2) id — one id groups multiple versions. If you are adding/editing cases in the same dataset, reuse the existing id and bump to a new 'version' (e.g. 1.0.0 → 1.1.0). Do not flatten into a new id each time. (3) version — a new semver that doesn't collide with an existing one. First check existing ids/versions via list_datasets/validate_dataset.",
         inputSchema: {
@@ -177,6 +182,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "import_terminal_bench",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register a Terminal-Bench task set as a Dataset owned by the active workspace (standard task-format on-ramp). Each task → an EvalCase (prebuilt image env + instruction prompt + tests-pass grader). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable (re-registering the same id@version with different content is CONFLICT). Once registered it runs like any dataset (run_scorecard, trials/pass@k, diff, leaderboard).",
         inputSchema: {
@@ -224,6 +230,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "import_harbor",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register an Anthropic Harbor task set as a Dataset owned by the active workspace (standard task-format on-ramp, same as import_terminal_bench). Each task → an EvalCase (prebuilt image env + instruction prompt + tests-pass over the verifier command). A task needs a prebuilt image (task.image, or an image_template with {id}) — Everdict references images, it does not build them. Versions are immutable.",
         inputSchema: {

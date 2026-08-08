@@ -28,6 +28,7 @@ export function registerWorkspaceTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "get_workspace",
       {
+        annotations: { readOnlyHint: true },
         description: "The active workspace record (id/name/logoUrl/owner/createdAt). admin (settings:read).",
         inputSchema: {},
       },
@@ -36,6 +37,7 @@ export function registerWorkspaceTools(server: McpServer, ctx: McpToolContext): 
     server.registerTool(
       "update_workspace",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Update the workspace name/logo (admin, settings:write). The slug (URL) is immutable. Logo is an http(s) URL or data:image base64. Empty string removes the logo.",
         inputSchema: {

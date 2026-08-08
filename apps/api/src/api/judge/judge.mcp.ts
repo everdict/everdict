@@ -30,6 +30,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "list_judges",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Agent Judges visible to this workspace (owned + _shared default judges). `team` narrows to one " +
           "team's own judges (id or key, ENG).",
@@ -48,6 +49,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "get_judge",
       {
+        annotations: { readOnlyHint: true },
         description: "A full JudgeSpec (model | harness). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
@@ -61,6 +63,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "diff_judge_versions",
       {
+        annotations: { readOnlyHint: true },
         description:
           'Structural field-level diff between two versions of the same judge id — leaf changes by path (model/provider/rubric/inputs/passThreshold/criteria/…). Both refs accept "latest". Requires judges:read (viewer+). Reproducible by the immutable-version guarantee.',
         inputSchema: {
@@ -110,6 +113,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "validate_judge",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Dry-run validate a JudgeSpec (JSON) — schema + this workspace's existing versions/conflict (does not register)",
         inputSchema: { judge: z.string().describe("JudgeSpec JSON (kind: model | harness)") },
@@ -143,6 +147,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "create_judge",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register a JudgeSpec (JSON string) as owned by this workspace (model/harness; immutable; CONFLICT on collision)",
         inputSchema: {
@@ -196,6 +201,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "preview_judge",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Preview what a judge would see on a sample trace — renders the exact judging prompt + per-placeholder " +
           "evidence coverage (present/chars/truncated) + warnings, with NO model call. Verify a judge before " +
@@ -239,6 +245,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
     server.registerTool(
       "try_judge",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Dry-run a judge — ACTUALLY runs it (one case) over a pasted trace OR a prior run's re-scored trace " +
           "(pass runId). model/harness judges return the real scores + rendered prompt (a missing key/unresolved " +

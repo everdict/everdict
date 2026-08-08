@@ -23,6 +23,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "get_knowledge_node",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Get one knowledge-graph node by its content-addressed id (e.g. 'harness:acme:web-agent@1.0.0', 'scorecard:acme:<id>').",
       inputSchema: { id: z.string().min(1) },
@@ -33,6 +34,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "knowledge_related",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The 1-hop related facts of a node, ranked for display — {predicate, direction, nodeId, type, label, attrs}. Answers 'what did this scorecard use?' / 'which scorecards evaluate this harness?' (direction:'in').",
       inputSchema: {
@@ -61,6 +63,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "knowledge_subgraph",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Breadth-first subgraph from a node up to `depth` hops — {nodes, edges}. For impact analysis / neighbourhood exploration.",
       inputSchema: {
@@ -90,6 +93,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "get_knowledge_graph",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The whole workspace knowledge graph for an overview — {root, nodes, edges, stats:{totalNodes, totalEdges, nodesByType, edgesByPredicate}}. Rooted at the workspace hub node (no id needed). `depth` bounds the expansion: 1 = the star (workspace + all entities), 2 (default) also pulls in the inter-entity edges.",
       inputSchema: { depth: z.number().int().min(1).max(5).optional().describe("hops to expand (default 2)") },
@@ -103,6 +107,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "knowledge_notes",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The authored notes/observations attached to a node (newest first) — the read side of annotate_knowledge.",
       inputSchema: { id: z.string().min(1) },
@@ -113,6 +118,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "reindex_knowledge",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Rebuild this workspace's knowledge graph by harvesting its existing records + registry entities (scorecards/runs/schedules + datasets/judges/runtimes/models/rubrics/harnesses/agents). Idempotent. Admin only.",
       inputSchema: {},
@@ -125,6 +131,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "annotate_knowledge",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Attach a free-form note/observation to a node (e.g. 'this harness is flaky on network cases'). Author = me. The node is identified by {type, key, version?} — e.g. {type:'harness', key:'web-agent', version:'2.1.0'}.",
       inputSchema: {
@@ -142,6 +149,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "get_task_context",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Assemble workspace context for a task: for each anchor ({type, key, version?} — the entities the task concerns), the graph's related facts PLUS the workspace's knowledge entries (claims/decisions/conventions) and skill candidates ABOUT those anchors. The anchor's version IS the as-of coordinate: pass an old scorecard's harness@2.1.0 and the knowledge base is projected onto that point (unversioned anchors project onto the present). Each item carries its anchor relation — covers (confirmed at this coordinate) | earlier (about an earlier point; validity here unknown, not wrong) | later (from this coordinate's future, e.g. the eventual fix) | general (timeless family claim) — and a coverage state vs the present (current | behind | unverified). Call this BEFORE working on a harness/dataset/scorecard to inherit what the workspace already knows.",
       inputSchema: {
@@ -155,6 +163,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "relate_knowledge",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Assert a typed relationship between two nodes over the closed predicate vocabulary (e.g. subject scorecard —compared_to→ object scorecard). Author = me. Re-asserting the same fact is idempotent. Subject/object are {type, key, version?}.",
       inputSchema: {
@@ -187,6 +196,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "create_knowledge_entry",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Contribute a knowledge entry — a durable claim about the workspace's entities: a finding ('harness X is flaky on k8s login cases'), a decision (+ rationale), a convention, or background context. `refs` = the version-pinned entities it concerns; `evidence` = the scorecards/runs/comments backing it; `supersedes` = the entry it revises. Defaults to a private draft — pass visibility:'workspace' to share.",
       inputSchema: {
@@ -220,6 +230,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "list_knowledge_entries",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The workspace's knowledge entries the caller can see (shared + own drafts), each with a coverage state vs the entities' present (current | behind | unverified). `behind` means the claim is as-of an earlier point — still true ABOUT that point; whether it extends to the present is what verify records.",
       inputSchema: {},
@@ -230,6 +241,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "get_knowledge_entry",
     {
+      annotations: { readOnlyHint: true },
       description: "One knowledge entry by id (coverage-decorated).",
       inputSchema: { id: z.string().min(1) },
     },
@@ -239,6 +251,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "update_knowledge_entry",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Edit a knowledge entry — re-pin refs, revise the body, change status (deprecate / mark superseded) or visibility. Manage = creator-or-admin.",
       inputSchema: {
@@ -276,6 +289,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "delete_knowledge_entry",
     {
+      annotations: { readOnlyHint: false },
       description: "Delete a knowledge entry. Manage = creator-or-admin.",
       inputSchema: { id: z.string().min(1) },
     },
@@ -289,6 +303,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "verify_knowledge_entry",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Attest a knowledge entry still holds — EXTENDS each versioned pin's known-valid interval to the entity's current latest (verifiedVersion) plus the wall-clock verifiedAt, without counting as an edit. Use when a behind-flagged claim checks out at the present; if the claim no longer holds, create a superseding entry pinned at the version where it changed instead. Manage = creator-or-admin.",
       inputSchema: { id: z.string().min(1) },
@@ -302,6 +317,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "approve_knowledge_entry",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Approve a PROPOSED knowledge entry (an extraction candidate awaiting review): status proposed → active, and authorship transfers to you — you now assert the claim and own its management (the extraction provenance stays for audit). Only proposed entries can be approved (409 otherwise).",
       inputSchema: { id: z.string().min(1) },
@@ -315,6 +331,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "reject_knowledge_entry",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Reject a PROPOSED knowledge entry — deletes the candidate. Only proposed entries can be rejected (an active claim is removed via delete_knowledge_entry, creator-or-admin).",
       inputSchema: { id: z.string().min(1) },
@@ -332,6 +349,7 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
   server.registerTool(
     "extract_knowledge",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Mine a discussion thread for durable, evidence-backed conclusions and store them as PROPOSED knowledge entries awaiting review (the accumulation loop's extraction leg). `source.id` may be any comment in the thread; `model` is a registered workspace model (a real billable call). Returns the created proposals plus dedupe stats — re-running on the same thread skips already-proposed claims. Review with list_knowledge_entries (status 'proposed') → approve_knowledge_entry / reject_knowledge_entry.",
       inputSchema: {

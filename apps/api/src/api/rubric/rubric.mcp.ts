@@ -22,13 +22,18 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
     const rubrics = deps.rubricRegistry;
     server.registerTool(
       "list_rubrics",
-      { description: "Rubrics visible to this workspace (owned + _shared default rubrics)", inputSchema: {} },
+      {
+        annotations: { readOnlyHint: true },
+        description: "Rubrics visible to this workspace (owned + _shared default rubrics)",
+        inputSchema: {},
+      },
       () => run(principal, "judges:read", async () => ok(await keepVisible(ctx, await rubrics.list(ws)))),
     );
 
     server.registerTool(
       "get_rubric",
       {
+        annotations: { readOnlyHint: true },
         description:
           "A full RubricSpec (text and/or criteria + optional prompt template). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
@@ -58,6 +63,7 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "validate_rubric",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Dry-run validate a RubricSpec (JSON) — schema + this workspace's existing versions/conflict (does not register)",
         inputSchema: { rubric: z.string().describe("RubricSpec JSON (text and/or criteria/promptTemplate)") },
@@ -90,6 +96,7 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
     server.registerTool(
       "create_rubric",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register a RubricSpec (JSON string) as owned by this workspace (referenced by judges as rubric:{id,version}; immutable; CONFLICT on collision)",
         inputSchema: { rubric: z.string().describe("RubricSpec JSON") },

@@ -13,6 +13,7 @@ export function registerWorkspaceOpsReportTools(server: McpServer, ctx: McpToolC
   server.registerTool(
     "get_workspace_ops_report",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The workspace's execution health over a window: batch fates, case-fate sums (CaseOutcome vocabulary), " +
         "infra-failure/unmeasured/trace-seal rates, and evidence-plane tallies — the platform's failure share " +
@@ -40,6 +41,7 @@ export function registerWorkspaceOpsReportTools(server: McpServer, ctx: McpToolC
   server.registerTool(
     "get_workspace_gate_audit",
     {
+      annotations: { readOnlyHint: true },
       description:
         "Every recorded release-gate decision in a window, counted by outcome, plus every override with its " +
         "stated reason — the governance read over gate_scorecards decisions. `overrideRate` = overrides/blocks, " +

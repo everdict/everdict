@@ -18,6 +18,7 @@ export function registerProxyTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "register_proxy",
     {
+      annotations: { readOnlyHint: false },
       description: "Register or update a BYO egress proxy for a country (admin). authSecretName is a SecretStore key.",
       inputSchema: {
         name: z.string().min(1),
@@ -41,7 +42,11 @@ export function registerProxyTools(server: McpServer, ctx: McpToolContext): void
 
   server.registerTool(
     "remove_proxy",
-    { description: "Remove a workspace egress proxy by name (admin).", inputSchema: { name: z.string().min(1) } },
+    {
+      annotations: { readOnlyHint: false },
+      description: "Remove a workspace egress proxy by name (admin).",
+      inputSchema: { name: z.string().min(1) },
+    },
     ({ name }) =>
       run(principal, "settings:write", async () => {
         await proxies.remove(principal.workspace, name);

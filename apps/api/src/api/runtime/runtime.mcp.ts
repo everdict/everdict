@@ -21,13 +21,18 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
     const runtimes = deps.runtimeRegistry;
     server.registerTool(
       "list_runtimes",
-      { description: "Execution infra visible to this workspace (Runtime: owned + _shared)", inputSchema: {} },
+      {
+        annotations: { readOnlyHint: true },
+        description: "Execution infra visible to this workspace (Runtime: owned + _shared)",
+        inputSchema: {},
+      },
       () => run(principal, "runtimes:read", async () => ok(await keepVisible(ctx, await runtimes.list(ws)))),
     );
 
     server.registerTool(
       "get_runtime",
       {
+        annotations: { readOnlyHint: true },
         description:
           "A full RuntimeSpec (local | nomad | k8s). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
@@ -57,6 +62,7 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "validate_runtime",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Dry-run validate a RuntimeSpec (JSON) — schema + this workspace's existing versions/conflict (does not register)",
         inputSchema: { runtime: z.string().describe("RuntimeSpec JSON (kind: local | nomad | k8s)") },
@@ -90,6 +96,7 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "create_runtime",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register a RuntimeSpec (JSON string) as owned by this workspace (immutable; CONFLICT on collision). Credentials live in the SecretStore",
         inputSchema: { runtime: z.string().describe("RuntimeSpec JSON") },
@@ -117,6 +124,7 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "probe_runtime",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Connection test for a RuntimeSpec (JSON) — attaches to the real cluster with no job to check reachability/auth (excludes local). {kind,reachable,detail}",
         inputSchema: { runtime: z.string().describe("RuntimeSpec JSON (kind: local | nomad | k8s)") },
@@ -142,6 +150,7 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "inspect_runtime",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Live cluster view of a REGISTERED nomad/k8s runtime (by id) — nodes (readiness, CPU/memory/disk, OS/arch/kernel/runtime versions, IP), datacenters, concurrent capacity, the live workload (everdict units AND external role='other' services co-resident on the nodes), and pool shared stores. Read-only, no job. version defaults to latest. A local runtime (no cluster) reads as not-reachable; another workspace's runtime is NOT_FOUND. Gate: runtimes:read.",
         inputSchema: { id: z.string(), version: z.string().optional() },
@@ -161,6 +170,7 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "control_runtime",
       {
+        annotations: { readOnlyHint: false },
         description:
           "DESTRUCTIVE live-cluster control of a REGISTERED nomad/k8s runtime (admin, runtimes:control). action=stopWorkload{name,namespace?} force-stops one running unit — an everdict eval, or with its namespace an EXTERNAL unit (K8s deletes the pod's owning controller; Nomad deregisters the job; kube-system is refused); reclaimIdle{olderThanSeconds} bulk-stops non-store everdict units past that age (external untouched); purgeTerminal GCs dead/completed jobs; cordonNode{node,schedulable} cordons(false)/uncordons(true) a node (reversible); resizeWorkload{name,namespace?,cpu?,memoryMb?} changes a unit's resources in NATIVE units (Nomad MHz / K8s millicores; MiB) — replaces the unit (job resubmit / rolling update), unsupported targets are a clear error. Idempotent (resize is loud); re-inspect after. version defaults to latest; local/other-workspace → error.",
         inputSchema: {

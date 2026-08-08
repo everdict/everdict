@@ -18,6 +18,7 @@ export function registerWorkspaceRunnerTools(server: McpServer, ctx: McpToolCont
     server.registerTool(
       "list_workspace_runners",
       {
+        annotations: { readOnlyHint: true },
         description: "Roster of self-hosted runners paired in this workspace — metadata only (no tokens)",
         inputSchema: {},
       },
@@ -28,6 +29,7 @@ export function registerWorkspaceRunnerTools(server: McpServer, ctx: McpToolCont
     server.registerTool(
       "pair_workspace_runner",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Pair a workspace-shared runner (team build server/CI). Any member targets it as self:ws:<id>. The plaintext token (rnr_…) is shown once in the response. Admin only.",
         inputSchema: {
@@ -67,6 +69,7 @@ export function registerWorkspaceRunnerTools(server: McpServer, ctx: McpToolCont
     server.registerTool(
       "list_workspace_owned_runners",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Only shared runners owned by this workspace (owner=ws:<workspace>) — unlike the roster, excludes personal runners. Admin only.",
         inputSchema: {},
@@ -76,6 +79,7 @@ export function registerWorkspaceRunnerTools(server: McpServer, ctx: McpToolCont
     server.registerTool(
       "revoke_workspace_runner",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Unpair (delete) a workspace-shared runner. id is the id from list_workspace_owned_runners. Admin only.",
         inputSchema: { id: z.string() },
@@ -93,6 +97,7 @@ export function registerWorkspaceRunnerTools(server: McpServer, ctx: McpToolCont
       server.registerTool(
         "github_install_workspace_runner",
         {
+          annotations: { readOnlyHint: false },
           description:
             "Generate an install script that stands up a GitHub Actions self-hosted runner + an Everdict workspace-shared runner together on one build server (design §4). Pairs a new workspace-shared runner (rnr_ token once) + mints a registration token via the workspace GitHub App. Exactly one of repository (repo level) or org (org level) — the App must be installed on that org/repo. Run the returned script on the build server. Admin only.",
           inputSchema: {

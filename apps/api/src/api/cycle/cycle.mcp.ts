@@ -22,6 +22,7 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "create_cycle",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Plan a team's next iteration. Omit both dates to take the window proposed from the team's cadence " +
         "(the day after its latest cycle ends, for cycleDurationWeeks); pass both to name your own — one alone " +
@@ -53,6 +54,7 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "list_cycles",
     {
+      annotations: { readOnlyHint: true },
       description:
         "A workspace's cycles, newest iteration first. `team` narrows to one team's; `open: true` returns the " +
         "ones nobody has closed — which is the absence of an explicit close, NOT a passed end date, so a cycle " +
@@ -83,6 +85,7 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "get_cycle",
     {
+      annotations: { readOnlyHint: true },
       description:
         "One cycle plus its derived state (upcoming | active | completed) and what it holds: issue counts and " +
         "POINTS (scope / completedScope from the estimates). Counts count issues, points count estimates — an " +
@@ -104,6 +107,7 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "update_cycle",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Rename, re-describe or move a cycle's window. A CLOSED cycle refuses every edit — a finished iteration " +
         "is a record, not a plan. Pass null to clear the name/description.",
@@ -125,6 +129,7 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "complete_cycle",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Close an iteration. With `moveUnfinishedTo`, everything still open is carried into another OPEN cycle " +
         "of the SAME team in the same operation. This is NOT a gate — an iteration ending with unfinished work " +
@@ -150,6 +155,7 @@ export function registerCycleTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "delete_cycle",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Delete a cycle. Creator or workspace admin only, and a cycle that still holds issues is refused — move " +
         "them to another iteration first.",

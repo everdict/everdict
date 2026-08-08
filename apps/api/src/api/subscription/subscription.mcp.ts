@@ -18,6 +18,7 @@ export function registerSubscriptionTools(server: McpServer, ctx: McpToolContext
   server.registerTool(
     "create_subscription",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Create a subscription — turn a platform event into a reaction: selector (event kinds + payload filters) → reaction (agent: wake a crafted agent | webhook: signed POST of the fact | workflow: durable multi-step agent chain) under governance (enabled, cooldownSec).",
       inputSchema: {
@@ -44,13 +45,18 @@ export function registerSubscriptionTools(server: McpServer, ctx: McpToolContext
 
   server.registerTool(
     "list_subscriptions",
-    { description: "List the workspace's subscriptions (event → reaction rules)", inputSchema: {} },
+    {
+      annotations: { readOnlyHint: true },
+      description: "List the workspace's subscriptions (event → reaction rules)",
+      inputSchema: {},
+    },
     () => run(principal, "agents:read", async () => ok(await subscriptions.list(ws))),
   );
 
   server.registerTool(
     "update_subscription",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Update a subscription — change name/selector/reaction/governance (a present block replaces the stored one whole). Creator or workspace admin only.",
       inputSchema: {
@@ -80,6 +86,7 @@ export function registerSubscriptionTools(server: McpServer, ctx: McpToolContext
   server.registerTool(
     "import_agent_triggers",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Relocate agent-spec triggers into subscriptions — one rule per trigger (verbatim selector, reaction = wake that agent), then each spec's own triggers are cleared so exactly one source matches. Idempotent.",
       inputSchema: {},
@@ -91,6 +98,7 @@ export function registerSubscriptionTools(server: McpServer, ctx: McpToolContext
   server.registerTool(
     "delete_subscription",
     {
+      annotations: { readOnlyHint: false },
       description: "Delete a subscription — creator or workspace admin only (other workspaces get NOT_FOUND)",
       inputSchema: { id: z.string() },
     },

@@ -12,6 +12,7 @@ export function registerCommentTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "list_comments",
       {
+        annotations: { readOnlyHint: true },
         description: "Comments on a resource (dataset, etc.) — oldest→newest (timeline order).",
         inputSchema: {
           resource_type: z.enum(COMMENT_RESOURCE_TYPES),
@@ -26,6 +27,7 @@ export function registerCommentTools(server: McpServer, ctx: McpToolContext): vo
     server.registerTool(
       "create_comment",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Post a comment on a resource. Posted as Everdict when an agent holds this session, else as me (subject). " +
           "Reply via parent_id; @-mentioning member subjects via mentions notifies them. " +

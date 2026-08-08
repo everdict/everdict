@@ -15,6 +15,7 @@ export function registerIssueLabelTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "list_issue_labels",
     {
+      annotations: { readOnlyHint: true },
       description:
         "List the workspace's issue labels — the vocabulary an issue's labelIds point at. Read this BEFORE " +
         "setting labels on an issue: create_issue/update_issue take label IDS, not names.",
@@ -26,6 +27,7 @@ export function registerIssueLabelTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "create_issue_label",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Define a new issue label. Names are unique per workspace (case-insensitive) — creating one that " +
         "already exists fails, so list_issue_labels first and reuse the id. Colour is a fixed vocabulary.",
@@ -54,6 +56,7 @@ export function registerIssueLabelTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "update_issue_label",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Rename or recolour a label. One write that every issue wearing it sees at once — never edit issues " +
         "one by one to change what a label is called. description:null clears it.",
@@ -84,6 +87,7 @@ export function registerIssueLabelTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "delete_issue_label",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Delete a label AND strip it off every issue that carries it, in one transaction. Irreversible — call " +
         "issue_label_usage first to see how many issues it comes off.",
@@ -99,6 +103,7 @@ export function registerIssueLabelTools(server: McpServer, ctx: McpToolContext):
   server.registerTool(
     "issue_label_usage",
     {
+      annotations: { readOnlyHint: true },
       description: "How many issues currently carry a label — the number to check before deleting it.",
       inputSchema: { id: z.string().min(1) },
     },

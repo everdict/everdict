@@ -25,6 +25,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "create_project",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Create a project — the tracker's container for issues that share one target date, optionally under an " +
         "initiative. Use it when work spans several issues that ship together; a single issue needs no project. " +
@@ -69,6 +70,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "list_projects",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The workspace's projects. Filter by status (planned | in_progress | completed | cancelled), by the " +
         "initiative they sit under, or by the TEAM working them (a project names its teams, so this answers " +
@@ -99,6 +101,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "get_project",
     {
+      annotations: { readOnlyHint: true },
       description:
         "One project plus the live rollup of its issues: total, open, done, cancelled, and `evaluated` (done " +
         "AND closed with a scorecard — 'resolved' and 'resolved with evidence' are different claims). " +
@@ -118,6 +121,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "update_project",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Edit a project's content (name, description, teams, initiatives, target date). Status moves use " +
         "set_project_status instead. Pass null to clear description/targetDate; a LIST replaces what is there, " +
@@ -142,6 +146,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "post_project_update",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Post a project update — the one JUDGMENT the tracker records. `health` is on_track | at_risk | " +
         "off_track and the BODY is required: a health flag with no sentence is a colour nobody can explain. " +
@@ -162,6 +167,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "list_project_updates",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The project's posted updates, newest first. This is where the health colour is EXPLAINED — read it " +
         "before reporting on a project whose status you did not watch change.",
@@ -173,6 +179,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "add_project_milestone",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Add a checkpoint inside a project. Order is the meaning (milestones are steps toward a date), so a " +
         "new one goes at the end. A duplicate name is refused. Issues join a milestone through update_issue.",
@@ -193,6 +200,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "remove_project_milestone",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Remove a checkpoint. Every issue that pointed at it is DETACHED in the same operation, so no issue is " +
         "left naming a milestone that no longer exists.",
@@ -205,6 +213,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "set_project_status",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Move a project through its lifecycle. Completing it is a GATE: it is refused while any of the " +
         "project's issues are still open, and the refusal names the count. Pass force:true to complete anyway " +
@@ -232,6 +241,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
   server.registerTool(
     "delete_project",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Delete a project. Refused while it still holds issues — deleting the container would orphan them, so " +
         "move them to another project first. Creator or workspace admin only.",

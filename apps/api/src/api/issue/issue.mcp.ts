@@ -36,6 +36,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "create_issue",
     {
+      annotations: { readOnlyHint: false },
       description:
         "File an issue on the eval tracker — the record of WHAT problem is under evaluation and why. Link the " +
         "harnesses/datasets/judges that verify it so the issue accumulates its own evaluation history. Use this " +
@@ -110,6 +111,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "list_issues",
     {
+      annotations: { readOnlyHint: true },
       description:
         "One PAGE of the workspace's issues: `{ items, nextCursor? }` — pass `nextCursor` back as `cursor` for " +
         "the next page (absent = last page). Rows are SUMMARIES (identifier, title, status, labels, link count, " +
@@ -160,6 +162,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "count_issues",
     {
+      annotations: { readOnlyHint: true },
       description:
         "How many issues fall in each group under the same filter list_issues takes — 'how much unstarted work " +
         "does each member hold', 'how big is each status column'. `groupBy` is status | assignee | priority | " +
@@ -193,6 +196,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "get_issue",
     {
+      annotations: { readOnlyHint: true },
       description:
         "One issue in full — its links, how it was resolved (including the scorecard that proved it), its " +
         "GitHub copy, and the durable history of every move. Read this before re-investigating something the " +
@@ -211,6 +215,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "update_issue",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Edit an issue's content (title, description, labels, assignee, project, milestone, cycle, priority, " +
         "estimate, due date, parent). Status moves use set_issue_status instead, and team moves use " +
@@ -248,6 +253,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "move_issue",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Hand an issue to another team. Its identifier is RE-MINTED from the destination team's counter — the " +
         "prefix says whose list an issue is on — so the issue you moved comes back under a NEW name. Every " +
@@ -266,6 +272,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "set_issue_status",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Move an issue through the workflow — say where it should end up and the control plane picks the right " +
         "transition. Closing (status=done) REQUIRES saying how it was evaluated: pass resolution.scorecardId " +
@@ -297,6 +304,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "add_issue_link",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Attach a capability (harness/dataset/judge/scorecard/run/view) to an issue. Dataset and harness links " +
         "widen the issue's evaluation history to every batch that exercised them, which is how a regression " +
@@ -330,6 +338,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "remove_issue_link",
     {
+      annotations: { readOnlyHint: false },
       description: "Detach a capability from an issue.",
       inputSchema: { id: z.string(), type: IssueLinkTypeSchema, linkId: z.string() },
     },
@@ -339,6 +348,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "list_issue_scorecards",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The issue's evaluation history: the scorecards pinned to it as evidence UNION every batch its linked " +
         "datasets/harnesses ran, newest first. Compare the latest against the resolution scorecard to judge " +
@@ -351,6 +361,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "delete_issue",
     {
+      annotations: { readOnlyHint: false },
       description: "Delete an issue. Creator or workspace admin only.",
       inputSchema: { id: z.string() },
     },

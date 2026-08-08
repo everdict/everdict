@@ -15,6 +15,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "list_skills",
     {
+      annotations: { readOnlyHint: true },
       description: "Workspace skills visible to the caller — every workspace skill plus their own private drafts",
       inputSchema: {},
     },
@@ -24,6 +25,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "get_skill",
     {
+      annotations: { readOnlyHint: true },
       description:
         "A single skill (name + description + instructions + supporting files). A workspace skill is visible to any member; a private one only to its creator (else NOT_FOUND)",
       inputSchema: { id: z.string() },
@@ -34,6 +36,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "create_skill",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Author a workspace skill (a SKILL.md-style procedure the agent follows). Keep `instructions` (the SKILL.md body) lean; put long reference material into `files` [{path, content}] — each file is loaded on demand, never inlined. Pin the entities the skill documents in `refs` [{type, key, version?}] — the version pins are the staleness contract (a newer version flags the skill). Defaults to visibility 'private'; pass 'workspace' to share. Requires skills:write.",
       inputSchema: {
@@ -65,6 +68,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "update_skill",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Edit a skill or change its visibility (share = private→workspace). `files` replaces the whole supporting-file set when provided (fetch the current set via get_skill first for a file-level edit); omit it to keep files as-is. Only the creator or a workspace admin may manage it. Requires skills:write.",
       inputSchema: {
@@ -100,6 +104,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "import_skill",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Take a published skill from the store — an Everdict example or one another workspace published — into this workspace as a skill the members OWN (editable here, with its own version line). Browse candidates with list_public_capabilities and pass its `tenant` as `source`. Taking the same publication twice fails with CONFLICT; a non-skill capability is a validation error. Requires skills:write.",
       inputSchema: {
@@ -127,6 +132,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "stamp_skill_version",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Name the skill's CURRENT content as a version — do this after revising a skill with update_skill, when the member agrees the change is worth naming. `bump` (major|minor|patch, default patch) or an explicit `version` that must come after the current one. `note` is the changelog line. The stamped version is immutable, so an older one stays citable. Manage = creator-or-admin. Requires skills:write.",
       inputSchema: {
@@ -156,6 +162,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "list_skill_versions",
     {
+      annotations: { readOnlyHint: true },
       description: "A skill's stamped versions, newest first (version, note, who stamped it and when)",
       inputSchema: { id: z.string() },
     },
@@ -165,6 +172,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "get_skill_version",
     {
+      annotations: { readOnlyHint: true },
       description:
         "The frozen content of one stamped version — what the procedure said at that point. Use to compare the current body against an earlier version before stamping the next one",
       inputSchema: { id: z.string(), version: z.string() },
@@ -176,6 +184,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "verify_skill",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Attest a skill's procedure still matches reality — EXTENDS each versioned pin's known-valid interval to the entity's current latest (verifiedVersion) plus the wall-clock verifiedAt, without counting as an edit. Use after checking a behind-flagged skill against the current versions; if the procedure has drifted, update the skill (re-pinning refs) instead. Manage = creator-or-admin. Requires skills:write.",
       inputSchema: { id: z.string() },
@@ -186,6 +195,7 @@ export function registerSkillTools(server: McpServer, ctx: McpToolContext): void
   server.registerTool(
     "delete_skill",
     {
+      annotations: { readOnlyHint: false },
       description:
         "Delete a workspace skill. Only the creator or a workspace admin may delete it. Requires skills:write.",
       inputSchema: { id: z.string() },

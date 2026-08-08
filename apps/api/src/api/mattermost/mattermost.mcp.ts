@@ -12,6 +12,7 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
     server.registerTool(
       "get_workspace_mattermost",
       {
+        annotations: { readOnlyHint: true },
         description:
           "This workspace's Mattermost connections — host (operator-configured server URL, MATTERMOST_HOST env; absent = unavailable) + connections[] (name/botTokenSecretName/defaultChannelId, not secret values; empty = nothing registered). Completion/regression alerts go to every connection that has a channel.",
         inputSchema: {},
@@ -21,6 +22,7 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
     server.registerTool(
       "set_workspace_mattermost",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Register/update one Mattermost connection (admin, upsert by name — a workspace can register several, one bot+channel per team/purpose). The server URL is operator env (MATTERMOST_HOST), not passed here. Put the bot token (value) in the SecretStore first and pass its name as botTokenSecretName. The bot token (+ channel) is verified against the live server before saving (a failed connection is an error). defaultChannelId = the completion/regression alert channel of THIS connection.",
         inputSchema: {
@@ -55,6 +57,7 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
     server.registerTool(
       "probe_workspace_mattermost",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Test a Mattermost bot token (+ optional channel) against the operator server before registering (admin). Returns a classified result (reachable/reason). Put the bot token in the SecretStore first and pass its name.",
         inputSchema: {
@@ -70,6 +73,7 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
     server.registerTool(
       "remove_workspace_mattermost",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Remove one Mattermost connection by name (admin). Its channel stops receiving completion/regression alerts; the workspace's other connections are untouched.",
         inputSchema: { name: z.string().min(1).describe("name of the connection to remove") },
@@ -83,6 +87,7 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
     server.registerTool(
       "post_mattermost_message",
       {
+        annotations: { readOnlyHint: false },
         description:
           "Post a message to a workspace Mattermost channel (a connection's configured channel), as that connection's bot. Use this to notify the team — e.g. a scorecard regression summary or a run result. connection picks which registered connection to post through (omit for the first one; get the names from get_workspace_mattermost). Requires a registered bot + a channel on it (otherwise an error). member+ (mattermost:post). Returns the connection + channel id the message landed in.",
         inputSchema: {
@@ -96,6 +101,7 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
     server.registerTool(
       "list_mattermost_channels",
       {
+        annotations: { readOnlyHint: true },
         description:
           "List the Mattermost channels a workspace bot can access (across its teams): id, name, display name, team, type. Requires a registered bot; connection picks which one (omitted = the first). Use to find a channel id before reading it with get_mattermost_channel_posts.",
         inputSchema: {
@@ -107,6 +113,7 @@ export function registerMattermostTools(server: McpServer, ctx: McpToolContext):
     server.registerTool(
       "get_mattermost_channel_posts",
       {
+        annotations: { readOnlyHint: true },
         description:
           "Read recent posts in a Mattermost channel (newest first): author user id, message, timestamp. Requires a registered bot with access to the channel; connection picks which one (omitted = the first). Get the channel id from list_mattermost_channels.",
         inputSchema: {

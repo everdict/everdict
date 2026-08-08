@@ -3,6 +3,7 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   type McpClientBox,
+  baseToolReadOnly,
   bridgedEffectsFor,
   dockerRunArgs,
   imageAllowed,
@@ -110,6 +111,21 @@ describe("base tool default wiring", () => {
       "delete_all_files",
     ])
       expect(isBaseToolReadOnly(name)).toBe(false);
+  });
+});
+
+describe("baseToolReadOnly — the server's declaration outranks the name", () => {
+  it("prefers annotations.readOnlyHint over the name classifier, in both directions", () => {
+    // A get_-named tool the server declares WRITE (the minting-read shape) and a bare-named tool the server
+    // declares READ both follow the declaration — the name heuristic decided only when nothing was declared.
+    expect(baseToolReadOnly({ name: "get_something_that_mints", annotations: { readOnlyHint: false } })).toBe(false);
+    expect(baseToolReadOnly({ name: "unprefixed_pure_read", annotations: { readOnlyHint: true } })).toBe(true);
+  });
+
+  it("falls back to the name classifier for tools without an annotation — compatibility, not authority", () => {
+    expect(baseToolReadOnly({ name: "list_runs" })).toBe(true);
+    expect(baseToolReadOnly({ name: "delete_dataset" })).toBe(false);
+    expect(baseToolReadOnly({ name: "get_image_push_credentials" })).toBe(false); // the blacklist still guards the fallback
   });
 });
 
