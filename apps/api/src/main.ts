@@ -792,6 +792,10 @@ async function main(): Promise<void> {
     handoffCheckpointStore,
     runStore: store,
     scorecardStore,
+    // issue + file are everdict-HELD records — resolvable, so "unverifiable" stays reserved for what we
+    // genuinely cannot check (a tenant's git commit, a foreign platform's trace).
+    issueStore,
+    workspaceFs,
     events: platformEventService,
   });
   // Workspace task ledger (agent-teams): lifecycle facts (task.created/claimed/completed/cancelled) are

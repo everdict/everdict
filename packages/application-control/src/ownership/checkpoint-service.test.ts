@@ -1,4 +1,4 @@
-import type { HandoffCheckpoint } from "@everdict/contracts";
+import type { HandoffCheckpoint, HandoffCheckpointRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
@@ -8,11 +8,11 @@ import { type CheckpointRefResolvers, CheckpointService } from "./checkpoint-ser
 // admission rules the service exists to hold (docs/architecture/ownership-protocol.md).
 
 class FakeCheckpointStore implements HandoffCheckpointStore {
-  readonly records: Array<{ tenant: string; id: string }> = [];
+  readonly records: HandoffCheckpointRecord[] = [];
   readonly events: OutboxEvent[] = [];
 
-  async create(record: { tenant: string; id: string }, events?: OutboxEvent[]): Promise<void> {
-    this.records.push({ tenant: record.tenant, id: record.id });
+  async create(record: HandoffCheckpointRecord, events?: OutboxEvent[]): Promise<void> {
+    this.records.push(record);
     if (events) this.events.push(...events);
   }
   async get(): Promise<undefined> {
@@ -49,7 +49,8 @@ describe("handoff checkpoints — evidence admission", () => {
     // When a checkpoint citing it is published …
     const record = await service.create({ tenant: "acme", createdBy: "agent:fixer:conv-1", checkpoint: body() });
     // Then it persists, and the fact rides the same store call (the E0 outbox).
-    expect(store.records).toEqual([{ tenant: "acme", id: record.id }]);
+    expect(store.records).toHaveLength(1);
+    expect(store.records[0]).toMatchObject({ tenant: "acme", id: record.id });
     expect(store.events).toHaveLength(1);
     expect(store.events[0]?.kind).toBe("checkpoint.created");
     // Loop guard #1: an agent-authored handoff stamps its own cause, so it never wakes on its own halt.
@@ -75,50 +76,104 @@ describe("handoff checkpoints — evidence admission", () => {
     // Given no commit resolver (everdict does not host the tenant's git remote) …
     const store = new FakeCheckpointStore();
     const service = new CheckpointService({ store, resolvers: liveRuns("run-42") });
-    // When the checkpoint cites a commit / Then it is admitted rather than refused on a check nobody made.
-    await expect(
-      service.create({
-        tenant: "acme",
-        createdBy: "member-1",
-        checkpoint: body({
-          confirmedFacts: [{ statement: "the fix is drafted", refs: [{ type: "commit", id: "abc123" }] }],
-        }),
+    // When the checkpoint cites a commit / Then it is admitted rather than refused on a check nobody made —
+    // and the record SAYS the check was never made: "evidence-backed" and "evidence-verified" are different
+    // claims, and a successor reads which one each ref holds.
+    const record = await service.create({
+      tenant: "acme",
+      createdBy: "member-1",
+      checkpoint: body({
+        confirmedFacts: [{ statement: "the fix is drafted", refs: [{ type: "commit", id: "abc123" }] }],
       }),
-    ).resolves.toBeDefined();
+    });
+    expect(record.confirmedFacts[0]?.refs[0]?.resolution).toBe("unverified_external");
+  });
+
+  it("stamps resolver-backed refs as VERIFIED — the existence check that admitted them is on the record", async () => {
+    const store = new FakeCheckpointStore();
+    const service = new CheckpointService({ store, resolvers: liveRuns("run-42") });
+    const record = await service.create({
+      tenant: "acme",
+      createdBy: "member-1",
+      checkpoint: body({
+        confirmedFacts: [{ statement: "the suite ran", refs: [{ type: "run", id: "run-42" }] }],
+        actionsTaken: [{ description: "ran it", refs: [{ type: "run", id: "run-42" }] }],
+      }),
+    });
+    expect(record.confirmedFacts[0]?.refs[0]?.resolution).toBe("verified");
+    expect(record.actionsTaken[0]?.refs[0]?.resolution).toBe("verified");
+    expect(store.records[0]?.confirmedFacts[0]?.refs[0]?.resolution).toBe("verified"); // persisted, not just served
+  });
+
+  it("overwrites a producer-supplied resolution — only the checker claims what the checker checked", async () => {
+    const store = new FakeCheckpointStore();
+    const service = new CheckpointService({ store, resolvers: liveRuns("run-42") });
+    const record = await service.create({
+      tenant: "acme",
+      createdBy: "member-1",
+      checkpoint: body({
+        // A forged "verified" on an unresolvable type must not survive admission.
+        confirmedFacts: [{ statement: "trust me", refs: [{ type: "commit", id: "abc123", resolution: "verified" }] }],
+      }),
+    });
+    expect(record.confirmedFacts[0]?.refs[0]?.resolution).toBe("unverified_external");
   });
 });
 
 describe("handoff checkpoints — a verifier does not check its own work (O3)", () => {
-  const service = (creator: string | undefined) =>
+  const service = (executor: { id: string; sessionId?: string; runId?: string } | undefined) =>
     new CheckpointService({
       store: new FakeCheckpointStore(),
       resolvers: liveRuns("run-42"),
-      runCreator: async () => creator,
+      runActor: async () => executor,
     });
 
   it("refuses a verifier checkpoint about a run the same actor executed", async () => {
     await expect(
-      service("agent:fixer").create({
+      service({ id: "agent:fixer", runId: "run-42" }).create({
         tenant: "acme",
         createdBy: "agent:fixer:conv-1",
         checkpoint: body({ role: "verifier", by: { id: "agent:fixer" } }),
       }),
-    ).rejects.toThrow(/cannot file a verifier checkpoint/);
+    ).rejects.toThrow(/cannot verify its own work/);
+  });
+
+  it("refuses a verifier checkpoint filed from inside the EXECUTING SESSION — a different actor id is not independence", async () => {
+    // Regression (review §11): the service compared actor ids only — its own weaker re-implementation of the
+    // domain invariant — so a second agent id verifying from within the same conversation sailed through.
+    // The domain's assertIndependentVerification (actor AND run AND session) is now the one decision.
+    await expect(
+      service({ id: "agent:fixer", runId: "run-42", sessionId: "conv-1" }).create({
+        tenant: "acme",
+        createdBy: "agent:checker:conv-1",
+        checkpoint: body({ role: "verifier", by: { id: "agent:checker", sessionId: "conv-1" } }),
+      }),
+    ).rejects.toThrow(/inherits its reasoning/);
+  });
+
+  it("refuses a verifier checkpoint whose verification ran AS the executing run", async () => {
+    await expect(
+      service({ id: "agent:fixer", runId: "run-42" }).create({
+        tenant: "acme",
+        createdBy: "agent:checker:conv-2",
+        checkpoint: body({ role: "verifier", by: { id: "agent:checker", runId: "run-42" } }),
+      }),
+    ).rejects.toThrow(/not independent/);
   });
 
   it("admits the same checkpoint from an actor that did not execute the run", async () => {
     await expect(
-      service("agent:fixer").create({
+      service({ id: "agent:fixer", runId: "run-42", sessionId: "conv-1" }).create({
         tenant: "acme",
         createdBy: "agent:checker:conv-2",
-        checkpoint: body({ role: "verifier", by: { id: "agent:checker" } }),
+        checkpoint: body({ role: "verifier", by: { id: "agent:checker", sessionId: "conv-2", runId: "run-99" } }),
       }),
     ).resolves.toBeDefined();
   });
 
   it("abstains when the checkpoint claims no verdict — an executor's handoff is a claim, not a check", async () => {
     await expect(
-      service("agent:fixer").create({
+      service({ id: "agent:fixer", runId: "run-42" }).create({
         tenant: "acme",
         createdBy: "agent:fixer:conv-1",
         checkpoint: body({ role: "executor", by: { id: "agent:fixer" } }),
@@ -126,7 +181,7 @@ describe("handoff checkpoints — a verifier does not check its own work (O3)", 
     ).resolves.toBeDefined();
   });
 
-  it("abstains when the run's creator cannot be resolved — an invariant we can name beats one we made up", async () => {
+  it("abstains when the run's actor cannot be resolved — an invariant we can name beats one we made up", async () => {
     await expect(
       service(undefined).create({
         tenant: "acme",

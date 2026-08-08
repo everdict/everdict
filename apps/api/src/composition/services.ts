@@ -9,7 +9,7 @@ import type { ScorecardService } from "@everdict/application-control";
 import type { AgentRegistry } from "@everdict/application-control";
 import { SubscriptionService } from "@everdict/application-control";
 import { CheckpointService } from "@everdict/application-control";
-import type { HandoffCheckpointStore, PlatformEventEmitter } from "@everdict/application-control";
+import type { HandoffCheckpointStore, IssueStore, PlatformEventEmitter } from "@everdict/application-control";
 import { ViewService } from "@everdict/application-control";
 import { ViewSnapshotService } from "@everdict/application-control";
 import type { WorkspaceFs } from "@everdict/application-control";
@@ -237,25 +237,45 @@ export function buildSubscription(deps: {
 // Handoff checkpoints (ownership protocol O6). The evidence resolvers are bound here, and deliberately only
 // for the ref types everdict can actually answer for: a run and a scorecard are records we hold, a commit is
 // not — everdict does not host the tenant's git remote, and refusing a checkpoint for citing one would be
-// pretending to a check nobody made. `runCreator` is the independence linkage: it is what lets the service
-// refuse a verifier checkpoint filed by the actor that executed the run it claims to verify.
+// pretending to a check nobody made. `runActor` is the independence linkage: the executor assignment the
+// service hands the DOMAIN's assertIndependentVerification, so a verifier checkpoint filed by the same
+// actor — or from inside the same run or session — is refused by the one invariant owner.
 export function buildCheckpoint(deps: {
   handoffCheckpointStore: HandoffCheckpointStore;
   runStore: RunStore;
   scorecardStore: ScorecardStore;
+  issueStore?: IssueStore;
+  workspaceFs?: WorkspaceFs;
   events?: PlatformEventEmitter;
 }): CheckpointService {
   return new CheckpointService({
     store: deps.handoffCheckpointStore,
     // The tenant comparison is the resolver's own job: RunStore.get is keyed by id alone, and a checkpoint in
     // one workspace proving a "fact" with another workspace's run would be evidence its readers cannot see.
+    // Every everdict-HELD record type gets a resolver (run/scorecard/issue/file) — "unverifiable" is a claim
+    // reserved for what we genuinely cannot check (a tenant's git commit, a foreign platform's trace), never
+    // a shortcut past our own stores.
     resolvers: {
       run: async (tenant, id) => (await deps.runStore.get(id))?.tenant === tenant,
       scorecard: async (tenant, id) => (await deps.scorecardStore.get(id))?.tenant === tenant,
+      ...(deps.issueStore
+        ? { issue: async (tenant: string, id: string) => (await deps.issueStore?.get(tenant, id)) !== undefined }
+        : {}),
+      ...(deps.workspaceFs
+        ? { file: async (tenant: string, id: string) => (await deps.workspaceFs?.stat(tenant, id)) !== undefined }
+        : {}),
     },
-    runCreator: async (tenant, id) => {
+    // The independence linkage (O3): the ACTOR a referenced run executed as, with the context it ran in —
+    // runId always, sessionId when the run belongs to a session group (agent turns) — so the domain's full
+    // actor/run/session invariant applies, not an id-only comparison.
+    runActor: async (tenant, id) => {
       const record = await deps.runStore.get(id);
-      return record?.tenant === tenant ? record.createdBy : undefined;
+      if (record?.tenant !== tenant || record.createdBy === undefined) return undefined;
+      return {
+        id: record.createdBy,
+        runId: record.id,
+        ...(record.group?.id !== undefined ? { sessionId: record.group.id } : {}),
+      };
     },
     ...(deps.events ? { events: deps.events } : {}),
   });

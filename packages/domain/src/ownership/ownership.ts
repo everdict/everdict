@@ -44,11 +44,12 @@ export function assertRoleProfile(profile: RoleProfile): void {
 //
 // ENFORCEMENT BOUNDARY (stated, not implied): this is enforced wherever both identities are actually KNOWN.
 // Today that is (a) this function, called by whoever holds both assignments, and (b) the checkpoint service,
-// which resolves the referenced work's creator and refuses a verifier checkpoint filed by that same actor.
-// Everdict has no verifier RUNTIME yet — no path spawns an agent in the verifier role — so there is no third
-// site to bind, and inventing one would be a claim rather than a check. Context separation (a verifier gets
-// evidence only, never the executor's reasoning) is a documented PRINCIPLE awaiting that runtime; see
-// docs/architecture/ownership-protocol.md.
+// which resolves the referenced run's executor as an ActorRef (id + run + session context) and calls THIS
+// function — never a service-local re-implementation of the comparison, which is how the invariant once
+// silently narrowed to actor-id equality. Everdict has no verifier RUNTIME yet — no path spawns an agent in
+// the verifier role — so there is no third site to bind, and inventing one would be a claim rather than a
+// check. Context separation (a verifier gets evidence only, never the executor's reasoning) is a documented
+// PRINCIPLE awaiting that runtime; see docs/architecture/ownership-protocol.md.
 export function assertIndependentVerification(executor: RoleAssignment, verifier: RoleAssignment): void {
   // Only a verified verdict makes the claim that needs independence — a report or a change_set claims nothing
   // about someone else's work, so there is nothing to separate.

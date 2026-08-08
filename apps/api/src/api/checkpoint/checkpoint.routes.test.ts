@@ -32,9 +32,10 @@ async function build() {
     checkpointService: new CheckpointService({
       store: new InMemoryHandoffCheckpointStore(),
       resolvers: { run: async (tenant, id) => (await runStore.get(id))?.tenant === tenant },
-      runCreator: async (tenant, id) => {
+      runActor: async (tenant, id) => {
         const record = await runStore.get(id);
-        return record?.tenant === tenant ? record.createdBy : undefined;
+        if (record?.tenant !== tenant || record.createdBy === undefined) return undefined;
+        return { id: record.createdBy, runId: record.id };
       },
     }),
   });
@@ -106,7 +107,7 @@ describe("checkpoint routes", () => {
       payload: payload({ role: "verifier", by: { id: "agent:fixer" } }), // run-42's own executor
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().message).toMatch(/cannot file a verifier checkpoint/);
+    expect(res.json().message).toMatch(/cannot verify its own work/);
     await app.close();
   });
 

@@ -1,4 +1,5 @@
 import {
+  type ActorRef,
   BadRequestError,
   type CheckpointRef,
   type HandoffCheckpoint,
@@ -6,8 +7,9 @@ import {
   HandoffCheckpointSchema,
   NotFoundError,
   type PlatformFact,
+  type RoleProfile,
 } from "@everdict/contracts";
-import { danglingCheckpointRefs } from "@everdict/domain";
+import { assertIndependentVerification, danglingCheckpointRefs } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { HandoffCheckpointStore } from "../ports/handoff-checkpoint-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
@@ -33,13 +35,32 @@ export type CheckpointRefResolvers = Partial<
 export interface CheckpointServiceDeps {
   store: HandoffCheckpointStore;
   resolvers: CheckpointRefResolvers;
-  // The independence linkage (O3): who created a referenced run. Absent = the check ABSTAINS rather than
-  // guessing — an unenforced invariant we can name beats an enforced one we made up.
-  runCreator?: (tenant: string, runId: string) => Promise<string | undefined>;
+  // The independence linkage (O3): the ACTOR a referenced run executed as — id plus the run/session context
+  // it ran in, so the domain's full independence invariant (actor AND run AND session) can be applied, not a
+  // service-local weaker copy of it. Absent = the check ABSTAINS rather than guessing — an unenforced
+  // invariant we can name beats an enforced one we made up.
+  runActor?: (tenant: string, runId: string) => Promise<ActorRef | undefined>;
   events?: PlatformEventEmitter;
   newId?: () => string;
   now?: () => string;
 }
+
+// Synthesized assignments for the independence decision. The checkpoint names a role, not a full profile —
+// these carry exactly what assertIndependentVerification keys on (the verifier's completion claim), so the
+// DOMAIN function decides and this service only assembles its inputs. Re-implementing the comparison here is
+// how the actor/run/session invariant silently drifted to an actor-id-only check once already.
+const EXECUTOR_ASSIGNMENT_PROFILE: RoleProfile = {
+  role: "executor",
+  capabilities: { read: [], write: [] },
+  requiredEvidence: [],
+  completion: "change_set",
+};
+const VERIFIER_ASSIGNMENT_PROFILE: RoleProfile = {
+  role: "verifier",
+  capabilities: { read: [], write: [] },
+  requiredEvidence: [],
+  completion: "verified_verdict",
+};
 
 export interface CreateCheckpointInput {
   tenant: string;
@@ -79,8 +100,23 @@ export class CheckpointService {
     }
     await this.assertNotSelfVerification(input.tenant, record);
 
-    await this.persist(input.tenant, record);
-    return record;
+    // Stamp what admission actually CHECKED, per reference — "evidence-backed" and "evidence-VERIFIED" are
+    // different claims, and a successor weighing a confirmedFact reads which one it holds. A ref whose type
+    // has a resolver survived the dangling gate above, so it is verified; a type with none is carried as the
+    // unverified external pointer it is. Unconditional overwrite: a producer-supplied `resolution` is a
+    // claim about our own checking, which only the checker gets to make.
+    const stampResolution = (ref: CheckpointRef): CheckpointRef => ({
+      ...ref,
+      resolution: this.deps.resolvers[ref.type] ? "verified" : "unverified_external",
+    });
+    const stamped: HandoffCheckpointRecord = {
+      ...record,
+      confirmedFacts: record.confirmedFacts.map((f) => ({ ...f, refs: f.refs.map(stampResolution) })),
+      actionsTaken: record.actionsTaken.map((a) => ({ ...a, refs: a.refs.map(stampResolution) })),
+    };
+
+    await this.persist(input.tenant, stamped);
+    return stamped;
   }
 
   async get(tenant: string, id: string): Promise<HandoffCheckpointRecord> {
@@ -100,37 +136,27 @@ export class CheckpointService {
   }
 
   // O3 at the one site where both identities are actually knowable: the checkpoint says who produced it and
-  // in which role, and a referenced run says who created it. A verifier filing a verdict about a run it
-  // executed itself is the separation failure the whole protocol exists to catch — and here, uniquely, we can
-  // catch it. Every guard is conditional on the linkage being present; a missing piece abstains.
+  // in which role+context, and a referenced run says who executed it and in which context. The DECISION is
+  // the domain's (`assertIndependentVerification` — actor AND run AND session independence); this service
+  // only assembles the two assignments and executes the answer. The previous shape re-implemented the
+  // comparison locally and quietly narrowed the invariant to actor-id equality — a verifier checkpoint filed
+  // from inside the executing session by a different agent id sailed through. Every linkage piece is
+  // conditional; a missing piece abstains.
   private async assertNotSelfVerification(tenant: string, checkpoint: HandoffCheckpointRecord): Promise<void> {
-    const { runCreator } = this.deps;
+    const { runActor } = this.deps;
     const actor = checkpoint.by;
-    if (checkpoint.role !== "verifier" || !actor || !runCreator) return;
+    if (checkpoint.role !== "verifier" || !actor || !runActor) return;
+    const verifier = { profile: VERIFIER_ASSIGNMENT_PROFILE, actor };
     const runIds = new Set(
       [...checkpoint.confirmedFacts.flatMap((f) => f.refs), ...checkpoint.actionsTaken.flatMap((a) => a.refs)]
         .filter((ref) => ref.type === "run")
         .map((ref) => ref.id),
     );
     for (const runId of runIds) {
-      if (await this.executedBy(tenant, runId, actor.id, runCreator)) {
-        throw new BadRequestError(
-          "BAD_REQUEST",
-          { runId, actor: actor.id },
-          `actor '${actor.id}' cannot file a verifier checkpoint about run '${runId}' — it executed that run, and a verdict from the actor that did the work is a claim wearing a second hat.`,
-        );
-      }
+      const executorActor = await runActor(tenant, runId);
+      if (!executorActor) continue; // linkage missing — abstain, never guess
+      assertIndependentVerification({ profile: EXECUTOR_ASSIGNMENT_PROFILE, actor: executorActor }, verifier);
     }
-  }
-
-  private async executedBy(
-    tenant: string,
-    runId: string,
-    actorId: string,
-    runCreator: (tenant: string, runId: string) => Promise<string | undefined>,
-  ): Promise<boolean> {
-    const creator = await runCreator(tenant, runId);
-    return creator !== undefined && creator === actorId;
   }
 
   // Persist state + fact in ONE transaction, then nudge the live consumers. The ONE place a checkpoint becomes

@@ -143,6 +143,13 @@ export type TaskEnvelope = z.infer<typeof TaskEnvelopeSchema>;
 export const CheckpointRefSchema = z.object({
   type: z.enum(["run", "scorecard", "commit", "issue", "trace", "file"]),
   id: z.string().min(1),
+  // What admission actually CHECKED about this reference — stamped by the checkpoint service, never by the
+  // producer (a forged value is overwritten at admission). "verified" = a platform resolver confirmed the
+  // record exists; "unverified_external" = no resolver exists for this type (an outside git remote, a
+  // tenant-platform trace) and the ref is carried as the unverified pointer it is. The split keeps
+  // "evidence-backed" and "evidence-VERIFIED" distinct claims — a successor weighing a fact reads which one
+  // it holds. Absent = written before the stamp existed (the reader abstains, never guesses).
+  resolution: z.enum(["verified", "unverified_external"]).optional(),
 });
 export type CheckpointRef = z.infer<typeof CheckpointRefSchema>;
 

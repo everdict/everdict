@@ -68,9 +68,14 @@ describeTrust(
         store: new PgHandoffCheckpointStore(pg.client),
         // Bound to the real stores, exactly as the composition root binds them.
         resolvers: { run: async (t, id) => (await runs.get(id))?.tenant === t },
-        runCreator: async (t, id) => {
+        runActor: async (t, id) => {
           const run = await runs.get(id);
-          return run?.tenant === t ? run.createdBy : undefined;
+          if (run?.tenant !== t || run.createdBy === undefined) return undefined;
+          return {
+            id: run.createdBy,
+            runId: run.id,
+            ...(run.group?.id !== undefined ? { sessionId: run.group.id } : {}),
+          };
         },
         newId: () => trustId("cp"),
       });
@@ -95,7 +100,7 @@ describeTrust(
       // Then: refused. Every intra-role rule was satisfied — the only thing wrong is WHO is speaking, which is
       // precisely what makes a self-verified verdict worthless.
       await expect(filing).rejects.toBeInstanceOf(BadRequestError);
-      await expect(filing).rejects.toThrow(/cannot file a verifier checkpoint/);
+      await expect(filing).rejects.toThrow(/cannot verify its own work/);
     });
 
     it("an independent actor's verifier checkpoint is accepted and is durable", async () => {
