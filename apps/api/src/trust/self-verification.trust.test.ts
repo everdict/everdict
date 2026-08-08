@@ -111,6 +111,21 @@ describeTrust(
       await expect(filing).rejects.toThrow(/cannot verify its own work/);
     });
 
+    it("TRUST-23: the same agent from a LATER activation is still refused — identity outlives the session", async () => {
+      // A fresh activation means a new run and a new session, so the run/session legs both pass — only the
+      // recorded executor identity can catch this. Pre-fix, runActor resolved the actor from createdBy
+      // (member:kim), so agent:fixer verifying agent:fixer's work compared two namespaces that never collide.
+      const filing = service.create({
+        tenant,
+        createdBy: "member:kim",
+        checkpoint: checkpoint({
+          role: "verifier",
+          by: { id: EXECUTOR, sessionId: trustId("later-session"), runId: trustId("later-run") },
+        }),
+      });
+      await expect(filing).rejects.toThrow(/cannot verify its own work/);
+    });
+
     it("an independent actor's verifier checkpoint is accepted and is durable", async () => {
       // When: a different actor files the same verdict about the same run.
       const record = await service.create({
