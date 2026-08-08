@@ -328,21 +328,33 @@ export class PgRunStore implements RunStore {
         WHERE tenant = $1 AND (SELECT count(*) FROM reaped) > 0`,
       [tenant],
     );
-    const res = await this.client.query<{ admitted: string | number }>(
-      `WITH claimed AS (
+    // CONSERVATION: in_flight must always equal the tenant's live permit rows. The permit id is the unit of
+    // quota, so a RETRY of a claim whose commit outran its response (the scheduler reuses the entry's permit id)
+    // is the SAME right, not a second one: the `existing` arm answers "already held" as success, and the counter
+    // arm is guarded on NOT EXISTS so it can never increment twice for one permit. Without that guard the
+    // conflict-absorbed INSERT left a PERMANENT phantom (+1 the release path decremented only once and the reap
+    // — with no row left to reap — never recovered). Same-permit calls are sequential by construction (one
+    // scheduler entry retries after its previous attempt settled), so the statement-snapshot read of `existing`
+    // is never stale; concurrent DIFFERENT permits still serialize on the counter row's EvalPlanQual re-check.
+    const res = await this.client.query<{ held: string | number; admitted: string | number }>(
+      `WITH existing AS (
+         SELECT 1 FROM everdict_tenant_admissions WHERE permit_id = $2
+       ), claimed AS (
          UPDATE everdict_tenant_admission_counters
             SET in_flight = in_flight + 1, updated_at = now()
           WHERE tenant = $1 AND in_flight < $3
+            AND NOT EXISTS (SELECT 1 FROM existing)
           RETURNING tenant
        ), permit AS (
          INSERT INTO everdict_tenant_admissions (permit_id, tenant)
          SELECT $2, $1 FROM claimed
          ON CONFLICT (permit_id) DO NOTHING
        )
-       SELECT (SELECT count(*) FROM claimed) AS admitted`,
+       SELECT (SELECT count(*) FROM existing) AS held, (SELECT count(*) FROM claimed) AS admitted`,
       [tenant, permitId, quota],
     );
-    return Number(res.rows[0]?.admitted ?? 0) > 0;
+    const row = res.rows[0];
+    return Number(row?.held ?? 0) > 0 || Number(row?.admitted ?? 0) > 0;
   }
 
   // Idempotent by construction: a double release deletes no permit row, so it decrements nothing.

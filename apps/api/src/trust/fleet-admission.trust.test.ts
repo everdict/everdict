@@ -99,14 +99,17 @@ describeTrust("TRUST-07 — two scheduler replicas over one real run ledger hand
 
   let raceTenant: string;
 
+  let retryTenant: string;
+
   beforeAll(async () => {
     pg = await openTrustPg();
     tenant = trustId("trust-fleet");
     raceTenant = trustId("trust-race");
+    retryTenant = trustId("trust-retry");
     runs = new PgRunStore(pg.client);
   });
   afterAll(async () => {
-    for (const t of [tenant, raceTenant]) {
+    for (const t of [tenant, raceTenant, retryTenant]) {
       if (!t) continue;
       await pg.client.query("DELETE FROM everdict_runs WHERE tenant = $1", [t]);
       await pg.client.query("DELETE FROM everdict_tenant_admissions WHERE tenant = $1", [t]);
@@ -200,5 +203,40 @@ describeTrust("TRUST-07 — two scheduler replicas over one real run ledger hand
       return Number(res.rows[0]?.in_flight ?? 0);
     };
     await until("every admission permit to be returned", async () => (await counterOf()) === 0);
+  });
+
+  it("a lost-response retry claims the counter at most once — in_flight always equals the live permit rows", async () => {
+    // The retry shape: tryAdmit COMMITS, the response is lost, the scheduler re-asks with the SAME permit id
+    // (the entry keeps it — scheduler.ts `permitId ??=`). Pre-fix the claim's counter arm fired again while
+    // the permit INSERT was conflict-absorbed: in_flight reached 2 over one permit row, and the residue was
+    // PERMANENT — release decremented once and the reap, with no row left to reap, never recovered the
+    // phantom, silently shrinking the tenant's quota forever. The invariant certified here is CONSERVATION:
+    // at every step, in_flight == count(live permit rows).
+    const counters = async (): Promise<{ inFlight: number; permits: number }> => {
+      const c = await pg.client.query<{ in_flight: number }>(
+        "SELECT in_flight FROM everdict_tenant_admission_counters WHERE tenant = $1",
+        [retryTenant],
+      );
+      const p = await pg.client.query<{ n: string | number }>(
+        "SELECT count(*) AS n FROM everdict_tenant_admissions WHERE tenant = $1",
+        [retryTenant],
+      );
+      return { inFlight: Number(c.rows[0]?.in_flight ?? 0), permits: Number(p.rows[0]?.n ?? 0) };
+    };
+
+    const permitId = trustId("permit");
+    expect(await runs.tryAdmit(retryTenant, permitId, 2)).toBe(true);
+    expect(await runs.tryAdmit(retryTenant, permitId, 2)).toBe(true); // the same right, re-answered
+    expect(await counters()).toEqual({ inFlight: 1, permits: 1 });
+
+    await runs.releaseAdmission(permitId);
+    await runs.releaseAdmission(permitId); // double release is a no-op (deletes nothing → decrements nothing)
+    expect(await counters()).toEqual({ inFlight: 0, permits: 0 }); // no phantom residue
+
+    // And the freed quota is really free: two NEW permits fill it, a third is refused.
+    expect(await runs.tryAdmit(retryTenant, trustId("p"), 2)).toBe(true);
+    expect(await runs.tryAdmit(retryTenant, trustId("p"), 2)).toBe(true);
+    expect(await runs.tryAdmit(retryTenant, trustId("p"), 2)).toBe(false);
+    expect(await counters()).toEqual({ inFlight: 2, permits: 2 });
   });
 });

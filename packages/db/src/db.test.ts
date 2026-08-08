@@ -683,7 +683,7 @@ describe("PgCallbackStore", () => {
 describe("PgRunStore admission permits (AdmissionLedger.tryAdmit)", () => {
   it("claims with a single predicate-guarded counter UPDATE and reports the claim count", async () => {
     const { client, calls } = fakeClient((text) => {
-      if (text.includes("AS admitted")) return { rows: [{ admitted: 1 }] };
+      if (text.includes("AS admitted")) return { rows: [{ held: 0, admitted: 1 }] };
       return { rows: [] };
     });
     const store = new PgRunStore(client);
@@ -695,10 +695,24 @@ describe("PgRunStore admission permits (AdmissionLedger.tryAdmit)", () => {
     // permit row is written from the claim, so the two can never disagree.
     expect(claim?.text).toMatch(/UPDATE everdict_tenant_admission_counters/);
     expect(claim?.text).toMatch(/INSERT INTO everdict_tenant_admissions/);
+    // CONSERVATION: the counter arm is guarded on the permit's absence, so one permit id can never claim twice.
+    expect(claim?.text).toMatch(/NOT EXISTS \(SELECT 1 FROM existing\)/);
     expect(claim?.params).toEqual(["acme", "permit-1", 5]);
     // Self-heal precedes the claim: stale permits are reaped and the counter decremented by exactly that.
     const heal = calls.find((c) => c.text.includes("interval '6 hours'"));
     expect(heal?.text).toMatch(/greatest\(0, in_flight - \(SELECT count\(\*\) FROM reaped\)\)/);
+  });
+
+  it("a retry of an already-committed claim answers held — success without a second increment", async () => {
+    const { client } = fakeClient((text) => {
+      if (text.includes("AS admitted")) return { rows: [{ held: 1, admitted: 0 }] };
+      return { rows: [] };
+    });
+    const store = new PgRunStore(client);
+    // The lost-response retry: the permit row exists, the counter arm was NOT-EXISTS-guarded away — the
+    // same right is re-answered as success, never re-claimed. (The behavior itself is certified against
+    // real Postgres in fleet-admission.trust.test.ts; the fake pins the contract of the two arms.)
+    expect(await store.tryAdmit("acme", "permit-1", 5)).toBe(true);
   });
 
   it("a refused claim answers false without writing a permit", async () => {
@@ -732,5 +746,14 @@ describe("InMemoryRunStore admission permits — the single-process twin", () =>
     await store.releaseAdmission("p1"); // double release is a no-op
     expect(await store.tryAdmit("acme", "p4", 2)).toBe(true);
     expect(await store.tryAdmit("acme", "p5", 2)).toBe(false);
+  });
+
+  it("a retry with the permit id it already holds is the same right — true, even at quota", async () => {
+    const store = new InMemoryRunStore();
+    expect(await store.tryAdmit("acme", "p1", 1)).toBe(true);
+    // The lost-response retry: the entry re-asks with the id it was already granted. Counting the held
+    // permit against its own retry would refuse an at-quota entry its own admission forever.
+    expect(await store.tryAdmit("acme", "p1", 1)).toBe(true);
+    expect(await store.tryAdmit("acme", "p2", 1)).toBe(false); // a DIFFERENT permit still refused at quota
   });
 });

@@ -950,6 +950,32 @@ describe("Scheduler — hard tenant quota via the atomic admission permit", () =
     expect(ledger.permits.size).toBe(0); // every permit returned at settle
   });
 
+  it("dropping a queued entry returns the permit its lost-response claim left behind", async () => {
+    // The lost-response shape: the ledger COMMITS the claim but the scheduler sees a refusal (the failure lands
+    // between commit and response). The entry stays queued holding a REAL permit; a drop path that only refunds
+    // the budget would strand that tenant slot until the reap.
+    class LostResponseLedger extends PermitLedger {
+      override async tryAdmit(tenant: string, permitId: string, quota: number): Promise<boolean> {
+        await super.tryAdmit(tenant, permitId, quota);
+        return false; // the committed claim's answer never arrives
+      }
+    }
+    const ledger = new LostResponseLedger();
+    const b = new ControlledBackend("a", 100);
+    const sched = new Scheduler(new BackendRegistry().register("a", b), { tenantQuota: () => 3, ledger });
+    const p = sched.dispatch(tjob("acme", "x"));
+    await flush();
+    expect(b.dispatchedIds).toHaveLength(0); // refused → still queued…
+    expect(ledger.permits.size).toBe(1); // …but the claim committed
+
+    const entry = sched.queueEntries()[0];
+    expect(entry).toBeDefined();
+    expect(sched.cancelEntry(entry?.id ?? "")).toBe(true);
+    await expect(p).rejects.toMatchObject({ code: "CANCELLED" });
+    await flush();
+    expect(ledger.permits.size).toBe(0); // the drop returned the phantom permit
+  });
+
   it('a ledger error is FAIL-CLOSED for quota\'d work — admitting on "could not check" is not a guarantee', async () => {
     const failing: AdmissionLedger = {
       inFlightByTenant: async () => ({}),

@@ -259,6 +259,7 @@ export class Scheduler {
         const onAbort = (): void => {
           if (this.queue.remove(entry)) {
             this.releaseBudget(job); // admitted-then-cancelled while queued → give the reserved run back
+            this.releasePermit(entry);
             reject(dispatchAborted(job));
           }
         };
@@ -285,6 +286,7 @@ export class Scheduler {
       if (!predicate(entry.job)) continue;
       this.queue.remove(entry);
       this.releaseBudget(entry.job); // superseded/speculation-loser while queued → refund its admit reservation
+      this.releasePermit(entry);
       entry.reject(new InternalError("CANCELLED", { caseId: entry.job.evalCase.id }, "cancelled while queued."));
       cancelled += 1;
     }
@@ -519,6 +521,7 @@ export class Scheduler {
     this.queue.remove(entry);
     if (entry.onAbort && entry.signal) entry.signal.removeEventListener("abort", entry.onAbort);
     this.releaseBudget(entry.job);
+    this.releasePermit(entry);
     entry.reject(new InternalError("CANCELLED", { caseId: entry.job.evalCase.id }, "cancelled from the queue."));
     return true;
   }
@@ -539,6 +542,14 @@ export class Scheduler {
   // placement failure); a dispatched job that later fails still ran, so it is NOT released here.
   private releaseBudget(job: CaseJob): void {
     this.opts.budget?.release(tenantOf(job));
+  }
+
+  // Return an entry's fleet-wide permit when it leaves the queue WITHOUT being dispatched. A queued entry
+  // normally holds none — but a tryAdmit whose claim committed while the response was lost leaves a REAL permit
+  // behind the refusal the scheduler saw, and dropping the entry without this held that tenant slot until the
+  // reap. Releasing a never-admitted permit id is a ledger no-op, so this is safe on every drop path.
+  private releasePermit(entry: QueueEntry): void {
+    if (entry.permitId) void this.opts.ledger?.releaseAdmission?.(entry.permitId)?.catch?.(() => {});
   }
 
   private runOne(entry: QueueEntry, name: string, tenant: string, memNeedMb: number, cpuNeed: number): void {

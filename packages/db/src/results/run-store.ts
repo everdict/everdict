@@ -122,6 +122,9 @@ export class InMemoryRunStore implements RunStore {
   private readonly admissionPermits = new Map<string, string>(); // permitId → tenant
 
   async tryAdmit(tenant: string, permitId: string, quota: number): Promise<boolean> {
+    // A retry of an already-held permit is the SAME right (the Pg twin's `existing` arm) — answering false
+    // here would refuse an at-quota entry its own permit.
+    if (this.admissionPermits.has(permitId)) return true;
     let held = 0;
     for (const t of this.admissionPermits.values()) if (t === tenant) held++;
     if (held >= quota) return false;
