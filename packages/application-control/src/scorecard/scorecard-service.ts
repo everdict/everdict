@@ -8,6 +8,7 @@ import {
   type GateDecision,
   type GatePolicy,
   type HarnessSpec,
+  MANIFEST_IDENTITY_VERSION,
   type ManifestCheck,
   type ManifestVerification,
   NotFoundError,
@@ -322,6 +323,8 @@ export class ScorecardService {
       // Reproducibility manifest — content digests of exactly what this batch evaluates, sealed HERE because
       // submit is the only moment the resolved case bundle + resolved spec + grading plan are all in hand.
       manifest: {
+        // The declared seal era (I8) — absence downstream means LEGACY, never "empty facet".
+        identityVersion: MANIFEST_IDENTITY_VERSION,
         dataset: { id: dataset.id, version: dataset.version, digest: contentDigest(dataset.cases) },
         // The orthogonal axes (experimentIdentity's inputs): per-case SEMANTIC digests with the runtime-
         // replaced `graders` default stripped — so a shared case answers "same case?" alone — and the

@@ -1,4 +1,4 @@
-import type { ScorecardManifest } from "@everdict/contracts";
+import { MANIFEST_IDENTITY_VERSION, type ScorecardManifest } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { experimentIdentity } from "./experiment-identity.js";
 import { evaluateGate } from "./gate.js";
@@ -16,7 +16,10 @@ const manifest = (over: Partial<ScorecardManifest> = {}): ScorecardManifest => (
   ...over,
 });
 // A split-seal manifest — per-case semantic digests + the effective-grading seal (the orthogonal axes).
+// Declares its seal era (I8), exactly as production submit stamps it — an absent closure facet on this
+// shape is a CLAIM of emptiness, not a generation gap.
 const sealed = (over: Partial<ScorecardManifest> = {}): ScorecardManifest => ({
+  identityVersion: MANIFEST_IDENTITY_VERSION,
   dataset: { id: "bench", version: "7.0.0", digest: "sha256:composite-a" },
   cases: { login: "sha256:case-login-a", search: "sha256:case-search-a" },
   grading: "sha256:grading-a",
@@ -150,14 +153,17 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
     expect(id.unverified.map((u) => `${u.axis}:${u.reason}`)).toEqual([
       "dataset_content:composite",
       "grading_plan:composite",
+      "harness_model:unsealed", // a legacy pair's empty model closure is a generation gap, never a held claim (I8)
     ]);
     // …while EQUAL composites still verify held (identical everything), and a re-registered version label
-    // over the same content is the same experiment.
+    // over the same content is the same experiment. The harness MODEL closure stays unverified: neither
+    // legacy side declared its seal era, so "no binding" and "pre-closure seal" are indistinguishable.
     const relabeled = experimentIdentity(
       manifest(),
       manifest({ dataset: { id: "bench", version: "8.0.0", digest: "sha256:aaaa" } }),
     );
-    expect(relabeled.held).toEqual(["dataset_content", "grading_plan", "judge_set", "harness_model"]);
+    expect(relabeled.held).toEqual(["dataset_content", "grading_plan", "judge_set"]);
+    expect(relabeled.unverified.map((u) => `${u.axis}:${u.reason}`)).toEqual(["harness_model:unsealed"]);
   });
 
   it("one side running a grading-plan override while the other runs defaults is a confound (pre-split seals)", () => {
@@ -190,7 +196,7 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
       manifest({ judges: [j("quality", "1")] }),
       manifest({ judges: [j("quality", "1", "sha256:j1")] }),
     );
-    expect(unsealedJudge.unverified.map((u) => u.reason)).toEqual(["unsealed"]);
+    expect(unsealedJudge.unverified.filter((u) => u.axis === "judge_set").map((u) => u.reason)).toEqual(["unsealed"]);
   });
 
   it("the judge CLOSURE decides, not just the document — same specDigest, different resolved model is a confound", () => {
@@ -302,7 +308,8 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
     const unresolved = experimentIdentity(withModel("unresolved"), withModel("unresolved"));
     expect(unresolved.unverified.some((u) => u.axis === "harness_model")).toBe(true);
 
-    // Both sides sealing nothing is held — no binding to drift, or two pre-closure seals (compat precedent).
+    // Both sides sealing nothing is held ONLY because both DECLARE their seal era (I8) — absence on a
+    // stamped manifest is a claim of "no binding", not a generation gap.
     expect(experimentIdentity(withModel(undefined), withModel(undefined)).held).toContain("harness_model");
 
     // A service harness's closure is per service, and the confound names the one that moved.
@@ -326,8 +333,9 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
       manifest(),
     );
     expect(id.confounds).toEqual([]);
-    // Both composite axes are unverifiable across the era gap: content AND the per-case grading defaults.
-    expect(id.unverified.map((u) => u.reason)).toEqual(["digest_era", "digest_era"]);
+    // Both composite axes are unverifiable across the era gap: content AND the per-case grading defaults —
+    // and the legacy pair's empty harness model closure is a generation gap of its own (I8).
+    expect(id.unverified.map((u) => u.reason)).toEqual(["digest_era", "digest_era", "unsealed"]);
   });
 
   it("an unsealed side verifies nothing — every axis unverified, none confounded", () => {
@@ -423,5 +431,32 @@ describe("evaluateGate — a confounded pair cannot gate green", () => {
     const acknowledged = evaluateGate(unsealedPair, { maxRegressions: 0, allowUnverifiedIdentity: true });
     expect(acknowledged.decision).toBe("pass");
     expect(acknowledged.reasons.filter((r) => r.kind === "identity_unverified")).toHaveLength(3);
+  });
+});
+
+describe("experimentIdentity — the seal era is DECLARED, never inferred from absence (I8)", () => {
+  it("a legacy pair's empty closures read unverified — 'no binding' and 'pre-closure seal' are indistinguishable", () => {
+    // Pre-fix, two legacy manifests with empty model closures verified harness_model HELD ("same model
+    // executed") over a facet nobody ever sealed — the exact era-inference lie the declared version removes.
+    const id = experimentIdentity(manifest(), manifest());
+    expect(id.unverified.some((u) => u.axis === "harness_model" && u.reason === "unsealed")).toBe(true);
+    expect(id.held).not.toContain("harness_model");
+  });
+
+  it("a judge whose closure is absent on a LEGACY pair is unverified; on a declared-era pair it is a held claim", () => {
+    const judges = [{ id: "quality", version: "1", specDigest: "sha256:j1" }];
+    // Legacy pair: same document, but no side declared its era — the absent model closure is a generation gap.
+    const legacy = experimentIdentity(manifest({ judges }), manifest({ judges }));
+    expect(legacy.unverified.some((u) => u.axis === "judge_set" && u.reason === "unsealed")).toBe(true);
+    // Declared-era pair: the same absence is a claim (a delegating judge carries no binding) — verified held.
+    const declared = experimentIdentity(sealed({ judges }), sealed({ judges }));
+    expect(declared.held).toContain("judge_set");
+  });
+
+  it("mixed eras name the LEGACY side — the declared side's absence stays a claim", () => {
+    const id = experimentIdentity(manifest(), sealed());
+    const row = id.unverified.find((u) => u.axis === "harness_model");
+    expect(row?.reason).toBe("unsealed");
+    expect(row?.detail).toContain("the baseline");
   });
 });

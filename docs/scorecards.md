@@ -235,6 +235,16 @@ gate refuses the pair as `not_comparable`, reason `confounded`, with **no verdic
 unless the caller acknowledges the axis via `GatePolicy.allowConfounds`, recorded on the decision like a
 force), or `unverified` (an unsealed side, a digest-era gap, or a pre-split composite seal).
 
+**The seal era is DECLARED, never inferred (I8).** Every manifest stamps `identityVersion`
+(`MANIFEST_IDENTITY_VERSION`, contracts) at submit — which GENERATION of seals it carries. Before this,
+era was inferred from field absence, and absence is ambiguous: "sealed by an old generation" and "sealed
+by the current generation over a genuinely empty facet" read identically — two pre-closure manifests with
+empty model closures verified `harness_model` HELD ("same model executed") over a facet nobody ever
+sealed. Now a both-absent closure facet is `held` only when BOTH sides declare the era (absence there is a
+claim of emptiness); any legacy involvement reads `unverified` naming the unstamped side. A rescore's
+manifest rewrite spread-preserves the stamp — the record keeps declaring the generation that sealed it.
+Bump the constant whenever a new facet joins the seal.
+
 **The axes are ORTHOGONAL, and the seal keeps them so.** The manifest's split seal carries per-case
 SEMANTIC digests (`manifest.cases`, each case hashed with its runtime-replaced `graders` default stripped)
 and the EFFECTIVE grading seal (`sealGrading`, the ONE production builder: a plan run seals the plan digest

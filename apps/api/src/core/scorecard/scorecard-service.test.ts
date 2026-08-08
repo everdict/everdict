@@ -17,7 +17,7 @@ import {
   type TraceEvent,
   UpstreamError,
 } from "@everdict/contracts";
-import { measuredScores } from "@everdict/contracts";
+import { MANIFEST_IDENTITY_VERSION, measuredScores } from "@everdict/contracts";
 import {
   InMemoryEnvelopeStore,
   InMemoryPlatformEventStore,
@@ -492,6 +492,7 @@ describe("ScorecardService.diff", () => {
     const basePolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
     const candPolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "ground_truth" }]);
     const manifestFor = (p: typeof basePolicy) => ({
+      identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8)
       dataset: { id: "d", version: "1.0.0", digest: "dd" },
       harness: { id: "h", version: "1" },
       verdictPolicy: p,
@@ -5372,7 +5373,9 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
     scorecard: { suiteId: "d@1.0.0", harness: "h@1", results },
     // Split-seal manifest so experiment identity verifies HELD — these tests exercise the OTHER knobs
     // (regressions, missingness, trials, unmeasured evidence); the identity gate has its own suite.
+    // Declares its seal era (I8) like production submit — a legacy pair's empty closures read unverified.
     manifest: {
+      identityVersion: MANIFEST_IDENTITY_VERSION,
       dataset: { id: "d", version: "1.0.0", digest: "sha256:composite" },
       cases: { a: "sha256:case-a", b: "sha256:case-b" },
       grading: "sha256:grading",
@@ -5465,6 +5468,7 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
       ...succeededRecord(id, results),
       verdictPolicy: verdictPolicyRef(policy),
       manifest: {
+        identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8) — a legacy pair's empty closures refuse the gate
         dataset: { id: "d", version: "1.0.0", digest: "dd" },
         harness: { id: "h", version: "1" },
         verdictPolicy: policy,
@@ -5609,6 +5613,7 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
     const basePolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
     const candPolicy = composeVerdictPolicy([{ id: "schema_valid", authority: "ground_truth" }]);
     const manifestFor = (p: typeof basePolicy) => ({
+      identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8)
       dataset: { id: "d", version: "1.0.0", digest: "dd" },
       harness: { id: "h", version: "1" },
       verdictPolicy: p,
@@ -5638,6 +5643,7 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
     const policy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
     const stamp = verdictPolicyRef(policy);
     const manifest = {
+      identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8)
       dataset: { id: "d", version: "1.0.0", digest: "dd" },
       harness: { id: "h", version: "1" },
       verdictPolicy: policy,
@@ -5700,6 +5706,7 @@ describe("ScorecardService — gate audit + manifest verification (B2/B3)", () =
       status: "succeeded",
       // Split-seal manifest so experiment identity verifies HELD — this test exercises the audit, not identity.
       manifest: {
+        identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8)
         dataset: { id: "d", version: "1.0.0", digest: "sha256:composite" },
         cases: { a: "sha256:case-a" },
         grading: "sha256:grading",
@@ -6283,6 +6290,9 @@ describe("Per-revision immutable analysis artifacts (I7)", () => {
 
     // Then each revision's entry points at its OWN frozen artifact under the per-revision key
     expect(scored.scoring?.map((rev) => rev.revision)).toEqual([1, 2]);
+    // The manifest's declared seal era (I8) survives the rescore's manifest rewrite — the spread-patch
+    // preserves it without re-stamping (the record keeps declaring the generation that actually sealed it).
+    expect(scored.manifest?.identityVersion).toBe(MANIFEST_IDENTITY_VERSION);
     expect(scored.scoring?.[0]?.analysisRef).toContain(`analyses/${record.id}/scoring/1.json`);
     expect(scored.scoring?.[1]?.analysisRef).toContain(`analyses/${record.id}/scoring/2.json`);
     // …and revision 1's frozen bundle still shows the PRE-judge plane, while the current bundle shows the re-scored one.

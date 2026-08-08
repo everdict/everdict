@@ -44,7 +44,17 @@ export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 // since V1, bare 16-hex FNV on batches sealed before it (still verified under their own algorithm, so a
 // legacy stamp keeps its identity-only reading forever). mig 0126. Absent on pre-manifest batches.
 // trust-kernel contract ⑤.
+// The manifest's DECLARED identity era (I8): which generation of seals this manifest carries. Before this,
+// era was inferred from FIELD ABSENCE ("no `cases` map → pre-split seal", "judge entry without `model` →
+// pre-closure seal") — and absence is ambiguous: "sealed by an old generation" and "sealed by the current
+// generation over a facet that is genuinely empty" read identically. A manifest stamped with the current
+// constant claims EVERY current facet was sealed — absence on such a manifest is a claim of emptiness, not
+// a generation gap. Absent identityVersion = a legacy manifest (all pre-declaration generations); readers
+// keep inferring for those, honestly downgraded. Bump the constant whenever a new facet joins the seal.
+export const MANIFEST_IDENTITY_VERSION = 1;
+
 export const ScorecardManifestSchema = z.object({
+  identityVersion: z.number().int().positive().optional(), // declared seal era — absent = legacy (inferred)
   dataset: z.object({ id: z.string(), version: z.string(), digest: z.string() }), // digest over the resolved case bundle
   // ── The ORTHOGONAL identity axes (additive; the composite `dataset.digest` above hashes the post-subset,
   // post-grading-plan bundle and stays for verifyManifest + pre-split readers). `cases` maps caseId → a

@@ -1,6 +1,7 @@
 import { ScorecardService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { MANIFEST_IDENTITY_VERSION } from "@everdict/contracts";
 import type { CaseResult, ScorecardRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import {
@@ -126,6 +127,7 @@ describe("POST /scorecards/gate — experiment identity refuses a confounded pai
   const sealed = (id: string, datasetDigest: string): ScorecardRecord => ({
     ...record(id, [result("a", ["tests_pass"])]),
     manifest: {
+      identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8) — legacy pairs' empty closures refuse the gate
       dataset: { id: "smoke", version: id === "base" ? "1.0.0" : "2.0.0", digest: `sha256:composite-${id}` },
       // Split seals: the SHARED case's semantic digest differing is what makes this a VERIFIED confound.
       cases: { a: datasetDigest },

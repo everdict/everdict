@@ -50,6 +50,14 @@ export interface ExperimentIdentity {
 // strings even when the documents are identical, so a cross-era pair is unverifiable, never a confound.
 const era = (digest: string): "sha256" | "legacy" => (digest.startsWith("sha256:") ? "sha256" : "legacy");
 
+// The DECLARED seal era (I8, MANIFEST_IDENTITY_VERSION): a stamped manifest claims every current facet was
+// sealed, so an absent closure facet on it is a claim of emptiness. A legacy pair (either side unstamped)
+// keeps absence ambiguous — "old seal generation" and "genuinely empty" read identically — so a both-absent
+// closure there is UNVERIFIED, never a silent held.
+const eraDeclared = (m: ScorecardManifest): boolean => m.identityVersion !== undefined;
+const legacySide = (b: ScorecardManifest, c: ScorecardManifest): string =>
+  !eraDeclared(b) && !eraDeclared(c) ? "both sides" : eraDeclared(b) ? "the candidate" : "the baseline";
+
 type AxisReading =
   | { state: "held" }
   | { state: "confound"; detail: string }
@@ -225,8 +233,8 @@ function judgeSetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
   // The RUNTIME judge configuration compares first — it applies to inline judge graders too, so an empty
   // (or identical) registered-judge selection does not exempt it. It is comparable only across split-seal
   // generations (`cases` marks one): a pre-split side never sealed it, and absence there is not "none".
-  const bSplit = b.cases !== undefined;
-  const cSplit = c.cases !== undefined;
+  const bSplit = eraDeclared(b) || b.cases !== undefined;
+  const cSplit = eraDeclared(c) || c.cases !== undefined;
   if (bSplit && cSplit) {
     if (b.judgeRun?.model === "unresolved" || c.judgeRun?.model === "unresolved")
       return {
@@ -294,6 +302,14 @@ function judgeSetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
         detail: `judge ${name(bj)}'s resolved model is sealed on only one side — whether the same model judged cannot be verified`,
       };
     }
+    // Both sides absent: on a DECLARED-era pair that is a claim (no binding — a delegating judge); on a
+    // legacy pair it is indistinguishable from a pre-closure seal, so it reads unverified (I8).
+    if (bj.model === undefined && cj.model === undefined && !(eraDeclared(b) && eraDeclared(c)))
+      return {
+        state: "unverified",
+        reason: "unsealed",
+        detail: `judge ${name(bj)}'s model closure predates the declared identity era on ${legacySide(b, c)} — an absent seal cannot be told from an unsealed one`,
+      };
     // The REST of the closure (H8): a rubric REF and a delegated harness resolve at run time exactly like
     // the model binding, so byte-identical specs can judge under different rubric documents or delegate to
     // different agents. Held specDigests mean identical spec SHAPES — a one-sided seal can only be a
@@ -308,6 +324,12 @@ function judgeSetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
           state: "unverified",
           reason: "unsealed",
           detail: `judge ${name(bj)}'s ${what} could not be resolved at seal time — which ${what} judged is unverifiable`,
+        };
+      if (bv === undefined && cv === undefined && !(eraDeclared(b) && eraDeclared(c)))
+        return {
+          state: "unverified",
+          reason: "unsealed",
+          detail: `judge ${name(bj)}'s ${what} closure predates the declared identity era on ${legacySide(b, c)} — an absent seal cannot be told from an unsealed one`,
         };
       if (bv !== cv) {
         if (bv !== undefined && cv !== undefined)
@@ -347,7 +369,17 @@ function harnessModelAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReadi
   const cs = sealedOf(c);
   const bEmpty = Object.keys(bs).length === 0;
   const cEmpty = Object.keys(cs).length === 0;
-  if (bEmpty && cEmpty) return { state: "held" }; // no binding to drift — or two pre-closure seals (compat)
+  if (bEmpty && cEmpty) {
+    // A DECLARED-era pair sealing nothing genuinely has no binding to drift. A legacy pair reading the same
+    // way was the era-inference lie (I8): "two pre-closure seals" and "no binding" were indistinguishable,
+    // and the axis claimed HELD ("same model executed") over a facet nobody ever sealed.
+    if (eraDeclared(b) && eraDeclared(c)) return { state: "held" };
+    return {
+      state: "unverified",
+      reason: "unsealed",
+      detail: `the harness model closure predates the declared identity era on ${legacySide(b, c)} — an absent seal cannot be told from an unsealed one`,
+    };
+  }
   if (bEmpty || cEmpty)
     return {
       state: "unverified",
