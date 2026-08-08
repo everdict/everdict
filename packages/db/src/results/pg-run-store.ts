@@ -367,7 +367,7 @@ export class PgRunStore implements RunStore {
   // released (or reaped) permit updates no row — harmless by construction.
   async renewAdmissions(permitIds: string[]): Promise<void> {
     if (permitIds.length === 0) return;
-    await this.client.query(`UPDATE everdict_tenant_admissions SET renewed_at = now() WHERE permit_id = ANY($1)`, [
+    await this.client.query("UPDATE everdict_tenant_admissions SET renewed_at = now() WHERE permit_id = ANY($1)", [
       permitIds,
     ]);
   }
