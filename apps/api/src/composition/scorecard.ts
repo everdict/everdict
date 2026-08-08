@@ -16,6 +16,7 @@ import type {
   HarnessInstanceRegistry,
   JudgeRegistry,
   ModelRegistry,
+  RubricRegistry,
   RuntimeRegistry,
 } from "@everdict/registry";
 import type { S3ArtifactStore } from "@everdict/storage";
@@ -49,6 +50,7 @@ export function buildScorecard(deps: {
   datasetRegistry: DatasetRegistry;
   harnessInstanceRegistry: HarnessInstanceRegistry;
   judgeRegistry: JudgeRegistry;
+  rubricRegistry: RubricRegistry;
   modelRegistry: ModelRegistry;
   runtimeRegistry: RuntimeRegistry;
   judgeRunner: JudgeRunner;
@@ -80,6 +82,7 @@ export function buildScorecard(deps: {
     datasetRegistry,
     harnessInstanceRegistry,
     judgeRegistry,
+    rubricRegistry,
     modelRegistry,
     runtimeRegistry,
     judgeRunner,
@@ -220,6 +223,8 @@ export function buildScorecard(deps: {
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,
+    // Judge-closure seal (H8): a rubric REF resolves at run time, so the seal pins its latest-resolution.
+    rubrics: rubricRegistry,
     // The manifest's dependency-closure seal: a judge's `{ref}` binding resolves to its concrete version at
     // submit, so "same spec digest, different actual model" stops reading as an identical judge.
     resolveModelBinding: async (tenant, binding) => {

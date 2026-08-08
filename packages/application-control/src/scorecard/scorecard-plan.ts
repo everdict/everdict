@@ -45,34 +45,76 @@ export async function sealedModelIdentity(
   return await deps.resolveModelBinding(tenant, binding).catch(() => undefined);
 }
 
-// Which judge DOCUMENTS score a batch — id + version + spec digest + the sealed model closure. ONE sealer
-// shared by the submit seal (manifest.judges) and the re-score refresh (a later pass rewriting the same
-// identity), so "the judge closure" can never mean two different things on the same record. The spec digest
-// pins bytes; the sealed model pins what a nested `{ref}` binding RESOLVED to ("ref@version" | a raw binding
-// verbatim | the honest "unresolved" sentinel when no resolver could answer; absent = the judge carries no
-// binding, e.g. harness-delegating). Best-effort per judge: an unresolvable spec keeps its id/version bare
-// rather than failing the pass.
+// Which judge DOCUMENTS score a batch — id + version + spec digest + the sealed closure. ONE sealer shared
+// by the submit seal (manifest.judges) and the re-score refresh (a later pass rewriting the same identity),
+// so "the judge closure" can never mean two different things on the same record. The spec digest pins bytes;
+// the CLOSURE pins what the document's moving references RESOLVED to, because byte-identical specs can still
+// judge differently through three run-time resolutions:
+//   `model`   — the model binding ("ref@version" after latest-resolution | a raw binding verbatim |
+//               "unresolved"; absent = no binding, e.g. harness-delegating)
+//   `rubric`  — a rubric REF ("id@version": a latest ref pinned to the concrete version, an explicit pin
+//               verbatim since registry versions are immutable | "unresolved"; absent = inline text or no
+//               rubric — both already inside specDigest)
+//   `harness` — a harness judge's delegated agent, same vocabulary ("id@version" | "unresolved")
+// Best-effort per judge: an unresolvable spec keeps its id/version bare rather than failing the pass.
 export async function sealJudgeClosure(
-  deps: Pick<ScorecardServiceDeps, "judges" | "resolveModelBinding">,
+  deps: Pick<ScorecardServiceDeps, "judges" | "resolveModelBinding" | "rubrics" | "harnesses">,
   tenant: string,
   judges: Array<{ id: string; version: string }>,
-): Promise<Array<{ id: string; version: string; specDigest?: string; model?: string }>> {
-  const out: Array<{ id: string; version: string; specDigest?: string; model?: string }> = [];
+): Promise<
+  Array<{ id: string; version: string; specDigest?: string; model?: string; rubric?: string; harness?: string }>
+> {
+  const out: Array<{
+    id: string;
+    version: string;
+    specDigest?: string;
+    model?: string;
+    rubric?: string;
+    harness?: string;
+  }> = [];
   for (const j of judges) {
     try {
       const spec = await deps.judges?.get(tenant, j.id, j.version);
       const binding = spec !== undefined && "model" in spec ? spec.model : undefined;
       const model =
         binding === undefined ? undefined : ((await sealedModelIdentity(deps, tenant, binding)) ?? "unresolved");
+      const rubricRef =
+        spec !== undefined && "rubric" in spec && spec.rubric !== undefined && typeof spec.rubric !== "string"
+          ? spec.rubric
+          : undefined;
+      const rubric = rubricRef === undefined ? undefined : await sealVersionedRef(rubricRef, deps.rubrics, tenant);
+      const harnessRef = spec !== undefined && spec.kind === "harness" ? spec.harness : undefined;
+      const harness = harnessRef === undefined ? undefined : await sealVersionedRef(harnessRef, deps.harnesses, tenant);
       out.push({
         id: j.id,
         version: j.version,
         ...(spec ? { specDigest: contentDigest(spec) } : {}),
         ...(model ? { model } : {}),
+        ...(rubric ? { rubric } : {}),
+        ...(harness ? { harness } : {}),
       });
     } catch {
       out.push({ id: j.id, version: j.version });
     }
   }
   return out;
+}
+
+// Seal one versioned reference: an explicit pin is already concrete (registry versions are immutable — the
+// pin names one document forever); a "latest" ref resolves to the concrete version NOW, or seals the honest
+// "unresolved" sentinel when no registry (or no such entry) can answer.
+async function sealVersionedRef(
+  ref: { id: string; version?: string },
+  registry: { get(tenant: string, id: string, version: string): Promise<{ version: string }> } | undefined,
+  tenant: string,
+): Promise<string> {
+  const version = ref.version || "latest";
+  if (version !== "latest") return `${ref.id}@${version}`;
+  if (!registry) return "unresolved";
+  try {
+    const resolved = await registry.get(tenant, ref.id, version);
+    return `${ref.id}@${resolved.version}`;
+  } catch {
+    return "unresolved";
+  }
 }

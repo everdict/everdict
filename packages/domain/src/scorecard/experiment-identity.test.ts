@@ -216,6 +216,45 @@ describe("experimentIdentity — held / confound / unverified, never a guess", (
     expect(unresolved.unverified.map((u) => u.axis)).toEqual(["judge_set"]);
   });
 
+  it("the rubric and delegated-harness closures decide too — a latest ref resolving differently is a confound (H8)", () => {
+    // A judge spec whose rubric is a {ref} (or whose verdict delegates to a harness at latest) is a
+    // byte-identical document over TWO more moving targets — the model closure's exact shape, twice over.
+    const j = (over: Record<string, string | undefined> = {}) => [
+      { id: "quality", version: "3", specDigest: "sha256:same-doc", model: "m@1", ...over },
+    ];
+    const rubricMoved = experimentIdentity(
+      sealed({ judges: j({ rubric: "style@1.0.0" }) }),
+      sealed({ judges: j({ rubric: "style@2.0.0" }) }),
+    );
+    expect(rubricMoved.confounds.map((c) => c.axis)).toEqual(["judge_set"]);
+    expect(rubricMoved.confounds[0]?.detail).toContain("rubric closure differs");
+
+    const harnessMoved = experimentIdentity(
+      sealed({ judges: j({ harness: "grader-agent@1.0.0" }) }),
+      sealed({ judges: j({ harness: "grader-agent@2.0.0" }) }),
+    );
+    expect(harnessMoved.confounds[0]?.detail).toContain("delegated harness closure differs");
+
+    // An unresolved seal is honest ignorance — unverifiable, never a sameness claim.
+    const unresolved = experimentIdentity(
+      sealed({ judges: j({ rubric: "unresolved" }) }),
+      sealed({ judges: j({ rubric: "unresolved" }) }),
+    );
+    expect(unresolved.unverified.map((u) => u.axis)).toEqual(["judge_set"]);
+
+    // A pre-H8 side never sealed the closure — a seal-generation gap, not a shape difference (specDigests held).
+    const crossGen = experimentIdentity(sealed({ judges: j({ rubric: "style@1.0.0" }) }), sealed({ judges: j() }));
+    expect(crossGen.confounds).toEqual([]);
+    expect(crossGen.unverified.some((u) => u.axis === "judge_set" && u.reason === "unsealed")).toBe(true);
+
+    // The whole closure held ⇒ the axis holds.
+    const held = experimentIdentity(
+      sealed({ judges: j({ rubric: "style@1.0.0", harness: "grader-agent@1.0.0" }) }),
+      sealed({ judges: j({ rubric: "style@1.0.0", harness: "grader-agent@1.0.0" }) }),
+    );
+    expect(held.held).toContain("judge_set");
+  });
+
   it("the RUNTIME judge configuration is identity too — an inline judge under a different model confounds an identical judge list", () => {
     const differs = experimentIdentity(
       sealed({ judgeRun: { model: "claude-opus-4-8" } }),

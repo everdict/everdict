@@ -123,8 +123,10 @@ meaning what it meant when it was written.
 
 ## Reproducibility manifest + content digests (sha256, dual-read)
 Every batch seals a `manifest` at submit — content digests of exactly what it evaluated: the resolved dataset
-case bundle, the resolved harness spec, the run-time grading plan, each selected judge's spec, and the
-composed verdict policy in full. `POST /scorecards/:id/verify-manifest` (+ MCP `verify_scorecard_manifest`)
+case bundle, the resolved harness spec, the run-time grading plan, each selected judge's spec **plus its
+closure** (`sealJudgeClosure`: the resolved model binding, a rubric REF's latest-resolution, a harness
+judge's delegated agent — each "id@version" or the honest "unresolved"; a byte-identical spec over a moving
+reference is not the same judge), and the composed verdict policy in full. `POST /scorecards/:id/verify-manifest` (+ MCP `verify_scorecard_manifest`)
 re-checks each stamp against the CURRENT registry state: `match` · `drifted` (the registry document is no
 longer what this batch evaluated) · `missing` · `unverifiable` (a subset/grading-plan bundle is a selection
 the record cannot replay).

@@ -19,6 +19,7 @@ import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { JudgeRegistry } from "../ports/judge-registry.js";
+import type { RubricRegistry } from "../ports/rubric-registry.js";
 import type { JudgeRunner } from "../ports/judge-runner.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { RecordingStore } from "../ports/recording-store.js";
@@ -46,6 +47,10 @@ export interface ScorecardServiceDeps {
   datasets: DatasetRegistry; // dataset resolution (owner/_shared fallback) + case loading
   harnesses?: HarnessInstanceRegistry; // instance resolution (template+pins→resolved HarnessSpec). Built-ins fall back.
   judges?: JudgeRegistry; // judge resolution (owner/_shared fallback)
+  // Rubric resolution for the judge-closure seal (H8): a judge whose rubric is a `{id, version?}` REF is
+  // judged under whatever that ref resolves to at RUN time — the seal pins the latest-resolution at
+  // submit/re-score so identity can compare it. Absent = latest rubric refs seal "unresolved" (honest).
+  rubrics?: RubricRegistry;
   judgeRunner?: JudgeRunner; // trace-based judge execution (model call / skip)
   // Workspace default judge model (for inline judge-grader scoring). A per-request override (RunScorecardInput.judge) takes precedence.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
@@ -254,5 +259,7 @@ export type ScorecardScoringDeps = Pick<
   | "now"
   | "judges"
   | "resolveModelBinding"
+  | "rubrics"
+  | "harnesses"
   | "artifacts"
 >;

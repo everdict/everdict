@@ -718,6 +718,7 @@ async function main(): Promise<void> {
     datasetRegistry,
     harnessInstanceRegistry,
     judgeRegistry,
+    rubricRegistry,
     runtimeRegistry,
     judgeRunner,
     budget,

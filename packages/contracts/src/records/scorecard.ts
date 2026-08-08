@@ -71,6 +71,12 @@ export const ScorecardManifestSchema = z.object({
   // spec digest pins a DOCUMENT; a nested `{ref}` with no version pins a moving target, so two batches with
   // byte-identical judge specs can be judged by different models — the closure, not the top document, is the
   // identity. Absent model = the judge carries no binding (harness-delegating judge).
+  // `rubric`/`harness` (H8) close the rest of the closure the same way: a rubric REF and a delegated
+  // harness resolve at RUN time (latest allowed), so byte-identical specs can judge under different rubric
+  // documents or delegate to different agents. Sealed as "id@version" (a latest ref pinned to the concrete
+  // version at seal time; an explicit pin verbatim — registry versions are immutable) or the honest
+  // "unresolved" sentinel. Absent rubric = inline text or none (both live inside specDigest); absent
+  // harness = not a harness-delegating judge.
   judges: z
     .array(
       z.object({
@@ -78,6 +84,8 @@ export const ScorecardManifestSchema = z.object({
         version: z.string(),
         specDigest: z.string().optional(),
         model: z.string().optional(),
+        rubric: z.string().optional(),
+        harness: z.string().optional(),
       }),
     )
     .optional(),
@@ -110,6 +118,8 @@ export const ScoringRevisionSchema = z.object({
       version: z.string(),
       specDigest: z.string().optional(), // the judge DOCUMENT this pass ran (same seal as manifest.judges)
       model: z.string().optional(), // the sealed model closure ("ref@version" | raw | "unresolved")
+      rubric: z.string().optional(), // the sealed rubric-ref closure ("id@version" | "unresolved"; absent = inline/none)
+      harness: z.string().optional(), // the sealed delegated-harness closure ("id@version" | "unresolved")
     }),
   ),
   // The runtime judge configuration in effect for the pass — rides the INITIAL pass only (it governs inline

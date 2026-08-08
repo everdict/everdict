@@ -288,6 +288,34 @@ function judgeSetAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading {
         detail: `judge ${name(bj)}'s resolved model is sealed on only one side — whether the same model judged cannot be verified`,
       };
     }
+    // The REST of the closure (H8): a rubric REF and a delegated harness resolve at run time exactly like
+    // the model binding, so byte-identical specs can judge under different rubric documents or delegate to
+    // different agents. Held specDigests mean identical spec SHAPES — a one-sided seal can only be a
+    // seal-generation gap, never a shape difference, so it reads unverified rather than confounded.
+    const closures: Array<[string, string | undefined, string | undefined]> = [
+      ["rubric", bj.rubric, cj.rubric],
+      ["delegated harness", bj.harness, cj.harness],
+    ];
+    for (const [what, bv, cv] of closures) {
+      if (bv === "unresolved" || cv === "unresolved")
+        return {
+          state: "unverified",
+          reason: "unsealed",
+          detail: `judge ${name(bj)}'s ${what} could not be resolved at seal time — which ${what} judged is unverifiable`,
+        };
+      if (bv !== cv) {
+        if (bv !== undefined && cv !== undefined)
+          return {
+            state: "confound",
+            detail: `judge ${name(bj)}'s ${what} closure differs (${bv} → ${cv}) — same document, different judging apparatus`,
+          };
+        return {
+          state: "unverified",
+          reason: "unsealed",
+          detail: `judge ${name(bj)}'s ${what} is sealed on only one side — whether the same ${what} judged cannot be verified`,
+        };
+      }
+    }
   }
   return { state: "held" };
 }

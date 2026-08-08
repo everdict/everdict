@@ -1,7 +1,11 @@
-import type { CaseResult, Score } from "@everdict/contracts";
+import type { CaseResult, JudgeSpec, Score } from "@everdict/contracts";
 import { ScoreSchema } from "@everdict/contracts";
 import { caseReason, hasMeasuredJudgeVerdict, isJudgeMetricOf, stripJudgeScores } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
+import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
+import type { JudgeRegistry } from "../ports/judge-registry.js";
+import type { RubricRegistry } from "../ports/rubric-registry.js";
+import { sealJudgeClosure } from "./scorecard-plan.js";
 
 // A CaseResult that failed with a trace error carrying `message`.
 function erroredCase(message: string): CaseResult {
@@ -84,5 +88,74 @@ describe("judge-metric ownership (one predicate for both scoring paths)", () => 
     expect(isJudgeMetricOf("judge:j:accuracy", "j")).toBe(true);
     expect(isJudgeMetricOf("judge:jj", "j")).toBe(false); // judge "jj" is not judge "j"
     expect(isJudgeMetricOf("tests_pass", "j")).toBe(false);
+  });
+});
+
+describe("sealJudgeClosure — the whole closure, one sealer (H8)", () => {
+  const modelJudge = (rubric: string | { id: string; version: string }): JudgeSpec => ({
+    kind: "model",
+    id: "quality",
+    version: "3.0.0",
+    provider: "anthropic",
+    model: "claude-opus-4-8",
+    rubric,
+    inputs: ["trace"],
+    tags: [],
+  });
+  const judgesOf = (spec: JudgeSpec): JudgeRegistry => ({ get: async () => spec }) as unknown as JudgeRegistry;
+  const rubricsAt = (version: string, onHit?: () => void): RubricRegistry =>
+    ({
+      get: async () => {
+        onHit?.();
+        return { version };
+      },
+    }) as unknown as RubricRegistry;
+
+  it("pins a latest rubric ref to its concrete version; an explicit pin seals verbatim without a registry hit", async () => {
+    let hits = 0;
+    const rubrics = rubricsAt("2.0.0", () => hits++);
+    const latest = await sealJudgeClosure(
+      { judges: judgesOf(modelJudge({ id: "style", version: "latest" })), rubrics },
+      "acme",
+      [{ id: "quality", version: "3.0.0" }],
+    );
+    expect(latest[0]?.rubric).toBe("style@2.0.0");
+    expect(hits).toBe(1);
+    const pinned = await sealJudgeClosure(
+      { judges: judgesOf(modelJudge({ id: "style", version: "1.0.0" })), rubrics },
+      "acme",
+      [{ id: "quality", version: "3.0.0" }],
+    );
+    expect(pinned[0]?.rubric).toBe("style@1.0.0"); // registry versions are immutable — the pin IS the identity
+    expect(hits).toBe(1); // no second hit
+  });
+
+  it("seals the honest 'unresolved' sentinel when no registry can answer a latest ref — and nothing for inline text", async () => {
+    const unresolvable = await sealJudgeClosure(
+      { judges: judgesOf(modelJudge({ id: "style", version: "latest" })) },
+      "acme",
+      [{ id: "quality", version: "3.0.0" }],
+    );
+    expect(unresolvable[0]?.rubric).toBe("unresolved");
+    const inline = await sealJudgeClosure({ judges: judgesOf(modelJudge("is it good?")) }, "acme", [
+      { id: "quality", version: "3.0.0" },
+    ]);
+    expect(inline[0]?.rubric).toBeUndefined(); // inline text lives inside specDigest — nothing to resolve
+  });
+
+  it("pins a harness judge's delegated agent the same way", async () => {
+    const harnessJudge: JudgeSpec = {
+      kind: "harness",
+      id: "agent-judge",
+      version: "1.0.0",
+      harness: { id: "grader-agent", version: "latest" },
+      tags: [],
+    };
+    const harnesses = { get: async () => ({ version: "4.0.0" }) } as unknown as HarnessInstanceRegistry;
+    const sealed = await sealJudgeClosure({ judges: judgesOf(harnessJudge), harnesses }, "acme", [
+      { id: "agent-judge", version: "1.0.0" },
+    ]);
+    expect(sealed[0]?.harness).toBe("grader-agent@4.0.0");
+    expect(sealed[0]?.model).toBeUndefined(); // no binding — the delegate judges
   });
 });
