@@ -57,6 +57,19 @@ failure mode the suite exists to catch, so the runner is held to it too.
 | TRUST-22 | **A refusal carries no verdict numbers**: a not_comparable decision (confound / unresolvable stamp) presents structure only — no regression counts nobody had the right to derive, and no transitions minted upstream either | `packages/domain/src/scorecard/experiment-confound.trust.test.ts` |
 | TRUST-23 | **Executor identity outlives the session**: the same agent verifying its own run from a LATER activation (new run, new session) is still refused — the recorded `origin.executor`, never attribution, is what the independence check reads | `apps/api/src/trust/self-verification.trust.test.ts` |
 | TRUST-24 | **One activation, one audience**: a headless (background) agent run is workspace-visible through the run ledger exactly as its session door declares — the Pg list SQL and the domain's `runAudience` agree, filtered before the LIMIT | `apps/api/src/trust/run-audience.trust.test.ts` |
+| TRUST-25 | **A grading-only change claims exactly one axis**: the split seal keeps the experiment axes orthogonal — the composite digest used to claim the dataset changed too | `packages/domain/src/scorecard/experiment-confound.trust.test.ts` |
+| TRUST-26 | **A subset is coverage loss, never a dataset confound**: the shared cases verify identical, and the pair reaches the coverage machinery (allow_partial's own knobs) instead of being refused as "a different experiment" | `packages/domain/src/scorecard/experiment-confound.trust.test.ts` |
+| TRUST-27 | **Unverifiable identity cannot gate green**: an unsealed side refuses the GATE by default (analytics may say "unknown"; a release gate may not say "green") — the acknowledgment (`allowUnverifiedIdentity`) is explicit and recorded | `packages/domain/src/scorecard/experiment-confound.trust.test.ts` |
+| TRUST-28 | **The causal budget admits atomically**: a same-instant burst on capRuns=1 admits exactly one across replicas, and a same-request retry is the same right — one increment, ever (real Postgres) | `apps/api/src/trust/envelope-budget.trust.test.ts` |
+| TRUST-29 | **Cancellation racing the permit claim never dispatches and never strands a permit** — queue removal is the dispatch commit point, and the late-committed permit is returned | `packages/backends/src/scheduling/admission-race.trust.test.ts` |
+| TRUST-30 | **The judge closure is identity**: the same judge document resolving a nested latest to different concrete models is recorded on the manifest and confounds; an unresolved seal stays unverifiable | `packages/domain/src/scorecard/experiment-confound.trust.test.ts` |
+| TRUST-32 | **A role requiring evidence cannot complete without it** (`assertCompletionForRole`, wired at checkpoint admission; the vocabulary mapping is explicit) | `packages/domain/src/ownership/completion-evidence.trust.test.ts` |
+
+TRUST-31 — *a role-bound verifier activation keeps its evidence-only scope down to the kernel and cannot
+acquire write capability* — awaits the verifier RUNTIME (no path spawns one; see
+`docs/architecture/ownership-protocol.md`). The decisions that spawn must call are already certified:
+`assertEnvelopeForRole` bounds the scope, TRUST-14 certifies the kernel honors it, TRUST-32 certifies the
+completion side. The number is reserved so the claim lands under its own name when the runtime does.
 
 Plus the pre-existing live scenario test the nightly can now satisfy:
 

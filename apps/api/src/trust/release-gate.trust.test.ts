@@ -68,6 +68,14 @@ describeTrust(
         harness: { id: "h", version: "1" },
         status: "succeeded",
         scorecard: { suiteId: "d@1.0.0", harness: "h@1", results },
+        // Split-seal manifest so experiment IDENTITY verifies held — this scenario certifies the COVERAGE
+        // refusal, and an unsealed pair now refuses on identity first (TRUST-27's claim, not this one's).
+        manifest: {
+          dataset: { id: "d", version: "1.0.0", digest: "sha256:composite" },
+          cases: Object.fromEntries(["a", "b", "c", "d", "e"].map((c) => [c, `sha256:case-${c}`])),
+          grading: "sha256:grading",
+          harness: { id: "h", version: "1" },
+        },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         ...over,
